@@ -287,6 +287,18 @@ All `#[cfg(test)]` modules test `to_human_string()` and JSON serialisation. No t
 `serde_yaml_ng` is a non-workspace dependency, a regression in its output format (e.g. changed
 quoting rules, key ordering) would not be caught until a user reports it.
 
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **CLI error-handling tests cover 401, 429, and 500 status codes with message assertions.** `tests/command_execution.rs:298-374` — Three tests verify HTTP error status codes translate correctly.
+
+##### Issues
+
+**[SEVERITY: Medium]** `tests/command_execution.rs:110-423` — All 14 CLI integration tests use bare `#[tokio::test]`
+
+These tests communicate with `MockApiServer` over HTTP. Per `testing.md`, `start_paused = true` is required.
+
 ---
 
 ## High Availability
@@ -410,3 +422,9 @@ a TOCTOU window: if the task is deleted or renamed between the list and the trig
 silently reports `triggered: false`. A dedicated `POST /api/v1/scheduler/version-check/trigger`
 endpoint would eliminate the two-hop lookup. This is an API design note for the server, not
 something fixable solely in the CLI.
+
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **`OutputFormat` explicitly documents its intentional omission of `#[non_exhaustive]`.** `src/output.rs:7-17` — Detailed doc comment explains why. Same documentation approach should be applied elsewhere.

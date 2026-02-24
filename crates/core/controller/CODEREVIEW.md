@@ -92,6 +92,20 @@ An independent version here risks subtle encoding differences if the workspace-
 transitive version and the explicitly declared version diverge. Add to
 `[workspace.dependencies]`.
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `crates/core/controller/src/db/config.rs:13,23,42-45,48,53,58` — Non-additive feature flag pattern: 6 `#[cfg(not(feature))]` usages in database configuration
+
+Uses `#[cfg(not(feature = "..."))]` to provide error messages when a database URL scheme does not match an enabled feature. Violates the additivity principle. The 2 `#[cfg_attr(not(feature), allow(...))]` usages compound the violation with prohibited `#[allow()]` attributes.
+
+**[SEVERITY: Medium]** `crates/core/controller/src/cli.rs:120-122` — Non-additive feature flag: `#[cfg(not(feature = "embed-frontend"))]` conditionally removes a CLI argument
+
+When `embed-frontend` is enabled, the `--static-dir` CLI argument disappears. The additive alternative is to always declare the field but validate at runtime.
+
+**[SEVERITY: Low]** `crates/core/controller/src/startup.rs:584-585,907` — Non-additive feature flag: `#[cfg(not(feature = "embed-frontend"))]` on startup logic
+
+Two additional usages compile out the `resolve_static_dir` function when the frontend is embedded.
+
 ---
 
 ## Security & Safety
@@ -179,6 +193,12 @@ there is no assertion or documented invariant enforcing this. The function shoul
 `panic!` (or return an error) for lengths >= 0x10000, and an inline comment
 should document the `max = 65535` constraint.
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `crates/core/controller/src/main.rs:137-139` — Registration token logged in plaintext to structured logging
+
+The one-time registration token is emitted via `tracing::info!`. In production with centralized log aggregation, the token will be captured and accessible to log viewers. Should use `eprintln!` or write to a temporary file with 0o600 permissions.
+
 ---
 
 ## Code Quality
@@ -211,6 +231,10 @@ should document the `max = 65535` constraint.
   fingerprint determinism, SAN extraction, AIA/CDP extension embedding, and the
   `validate_ca_pki_addr` matrix (four cases: addr set / extensions present,
   addr set / no extensions, no addr / extensions present, neither set).
+
+#### 2026-02-24 Review
+
+- **All domain-significant durations centralized in `durations.rs` with doc-comments.** Every timing constant is in a single file with documentation, eliminating magic numbers.
 
 ### Issues
 
@@ -281,6 +305,12 @@ let result = tokio::time::timeout(TASK_EXECUTION_TIMEOUT, executor.execute(&task
 Adding a second `tokio::select!` branch on `token.cancelled()` inside the loop
 would also allow cooperative shutdown mid-cycle.
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Low]** `crates/core/controller/src/pki.rs:543` — `bundle_from_pem` takes `String` parameters where `&str` would suffice for key parsing
+
+Ownership is eventually needed for the struct, but the parameter naming could clarify this.
+
 ---
 
 ## Tests
@@ -309,6 +339,10 @@ would also allow cooperative shutdown mid-cycle.
   incremented), `find_due_tasks` filtering, `release_all_claims` scoped to
   controller, and `trigger_immediate`. All use an in-memory SQLite DB with no
   inter-test leakage.
+
+#### 2026-02-24 Review
+
+- **`reconcile_setting` tests cover all five branches.** Five tests systematically cover: no DB + no CLI = default, no DB + CLI = CLI value, DB exists + no CLI = DB value, DB exists + CLI differs + no force = DB wins, DB exists + CLI differs + force = CLI wins. Each verifies both return value and persisted DB state.
 
 ### Issues
 
@@ -341,6 +375,16 @@ cache. This is fragile on slow or loaded hosts where Nginx may not be ready with
 retry loop polling a `/healthz` endpoint (or the test port directly) with a
 short sleep between attempts and a total timeout, which is more robust and equally
 readable.
+
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `crates/core/controller/src/reconcile.rs:157,182,206,237,268` — Five `reconcile_setting` tests use `#[tokio::test]` without `start_paused = true`
+
+Per `testing.md`, all async tests require `start_paused = true`.
+
+**[SEVERITY: Medium]** `crates/core/controller/src/scheduler/claim.rs:253,272,285,309,332,342,354,374` — Eight scheduler claim tests use `#[tokio::test]` without `start_paused = true`
+
+Notably, `recover_stale_claims_only_old_enough` tests time-dependent logic but uses `OffsetDateTime::now_utc()` with manual arithmetic rather than virtual time.
 
 **[SEVERITY: Low]** `crates/core/controller/tests/reverse_proxy/nginx_ocsp.rs:424` — TOCTOU port reservation race
 
@@ -394,6 +438,11 @@ and has no correctness impact.
   rebuilds the CRL manager and TLS config without a restart. This keeps all
   controller instances in the fleet in sync without inter-process communication.
 
+#### 2026-02-24 Review
+
+- **CRL manager uses version-gated polling with local Notify.** `src/crl_manager.rs:234-282` — Combines 60-second periodic poll with instant local rebuilds via `Notify`.
+- **All HA-critical timing constants are centralised with documentation.** `src/durations.rs:1-34` — Makes HA tuning auditable from a single location.
+
 ### Issues
 
 **[SEVERITY: High]** `crates/core/controller/src/tasks.rs:254-256` — CRL manager abort may corrupt TLS config on disk
@@ -415,6 +464,16 @@ the next restart.
 See Code Quality section. The 5-second uniform timeout for all background tasks is
 too short for the scheduler's `release_all_claims` DB write under transient DB
 pressure.
+
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `crates/core/controller/src/db/mod.rs:20-25` — Database connection pool hardcoded at max_connections=10 with no runtime configurability
+
+All timeouts (8 seconds) and pool sizes are hardcoded literals. Under connection exhaustion, cascading failures affect all subsystems simultaneously. These should be configurable.
+
+**[SEVERITY: Low]** `crates/core/controller/src/crl_manager.rs:202-223` — CRL manager `reload_tls_config` acquires two RwLock read guards sequentially without documented ordering
+
+Creates a consistency window during concurrent CA rotation + server cert renewal. The single-threaded invariant is not documented.
 
 ---
 
@@ -488,6 +547,10 @@ from `string_uniq` is sufficient. The same pattern appears for `users.email`.
   This is the correct location; the binary owns subscriber initialisation, unlike
   the shared `service-sdk` crate which incorrectly performs this in a library.
 
+#### 2026-02-24 Review
+
+- **All domain-significant duration constants are centralized with documentation.** `src/durations.rs` — No magic numeric literals for time values.
+
 ### Issues
 
 **[SEVERITY: Medium]** `crates/core/controller/Cargo.toml:45,50-51` — `sea-orm-migration`, `cron`, and `chrono` not in `[workspace.dependencies]`
@@ -506,6 +569,12 @@ a workspace-pinned constraint.
 `scheduler/mod.rs` without documentation. It should be moved to `durations.rs` as
 `pub(crate) const SCHEDULER_POLL_INTERVAL: Duration` for consistency and
 discoverability.
+
+#### 2026-02-24 Review
+
+**[SEVERITY: Low]** `crates/core/controller/src/db/config.rs:23,48,53,58` — Four `#[cfg(not(feature = "db-*"))]` blocks are defensive guards with no documentation
+
+These are necessary for clear error messages but the pattern contradicts the "features are additive only" principle. Each should carry a justification comment.
 
 ---
 
@@ -530,6 +599,10 @@ discoverability.
   straightforward to add a new PKI-related field without changing the function
   signature of `init_pki_runtime`.
 
+#### 2026-02-24 Review
+
+- **`TaskExecutor` trait is minimal and correctly object-safe.** `src/scheduler/executor.rs:9` — Single method, `Send + Sync`, works with `Box<dyn TaskExecutor>`.
+
 ### Issues
 
 **[SEVERITY: Medium]** `crates/core/controller/src/scheduler/mod.rs:48` — `executors` field is `HashMap<ScheduledTaskType, Box<dyn TaskExecutor>>`; no check for duplicate registration
@@ -540,6 +613,12 @@ previously registered executor for a given task type with no warning. If two
 (for example after a refactor), the second silently shadows the first. The method
 should either `debug_assert!` that the key is not already present, or return
 `Option<Box<dyn TaskExecutor>>` to expose the displacement to the caller.
+
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `crates/core/controller/src/scheduler/executor.rs:9` — `TaskExecutor` trait has no registration or discovery mechanism for new task types
+
+Adding a new scheduled task requires creating a new executor, adding a match arm, and registering manually. Unlike the `register_providers!` macro, there is no compile-time check ensuring all `ScheduledTaskType` variants have executors.
 
 **[SEVERITY: Low]** `crates/core/controller/src/scheduler/claim.rs:160-164` — `find_due_tasks` is scoped to a single `tenant_id`
 

@@ -417,6 +417,18 @@ removed.
   spec-conformance tests will fail if one is updated without the other, keeping
   the two representations in sync.
 
+#### 2026-02-24 Review
+
+#### Strengths
+
+- **`DisconnectReason` is `#[non_exhaustive]` with documented variants.** `src/lib.rs:637-641` — Correctly omits `Other(String)` because the service controls what it sends.
+
+#### Issues
+
+**[SEVERITY: Low]** `src/lib.rs:160-177` — `HookCommand` enum is not `#[non_exhaustive]`
+
+Nested within `ExecuteUpdatePayload`, which crosses the wire boundary. Older agents would fail to deserialize new hook types.
+
 ### Issues
 
 **[SEVERITY: Medium]** `src/lib.rs:524`, `src/lib.rs:588`, `src/lib.rs:806` —

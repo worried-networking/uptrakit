@@ -82,6 +82,26 @@ These two calls appear in a `#[test]` function (`expand_tilde_works_without_home
 
 - **Typed errors throughout `uptrakit-shared-types`.** Every domain type with a `FromStr` implementation pairs it with a dedicated error type (e.g., `ParseProviderTypeError`, `ParseHookShellError`, `ParseServiceTypeError`). No `FromStr` implementation returns `String` as its error type. This is correct Rust idiom and enables callers to match on specific failure cases.
 
+#### 2026-02-24 Review
+
+#### Strengths
+
+- **Typed `FromStr` error types for all domain enums.** Every `FromStr` implementation pairs with a dedicated error type. No `FromStr` returns `String` as error.
+
+#### Issues
+
+**[SEVERITY: Medium]** `crates/shared/command/src/command.rs:211` — `unimplemented!()` in production code path for unsupported HookShell variants
+
+Will panic at runtime if a new `HookShell` variant is added. Should use `bail!` with an error return.
+
+**[SEVERITY: Low]** `crates/shared/command/src/executor.rs:126` — Unnecessary `clone()` in `CommandSpec::resolve()` for Exec mode
+
+Could take ownership or return references.
+
+**[SEVERITY: Low]** `crates/shared/openapi-client/src/mock.rs:232,259` — `unwrap()` on `serde_json::to_string` in mock helper methods outside test code
+
+Should use `expect()` with infallibility reason.
+
 ### Issues
 
 **[SEVERITY: High]** `crates/shared/types/src/provider_types.rs:34-36` — `supports_discovery()` is a hardcoded capability mirror that splits the source of truth
@@ -115,6 +135,22 @@ Both `LocalCommandExecutor::execute` (lines 176-183) and `LocalCommandExecutor::
 - **`uptrakit-shared-types` serialization tests.** `provider_types.rs` carries 11 tests covering serialization round-trips for all four `ProviderType` variants, `Display`, `FromStr` (valid and invalid), `as_str` / `Display` consistency, `supports_discovery` values, and optional field omission for `ReleaseAsset`/`ReleaseInfo`. All are deterministic and have no external dependencies.
 
 - **`uptrakit-build-info` output stability test.** `render_human_uses_stable_keys_and_order` constructs a `BuildInfo` with fixed values and asserts the exact multi-line string output. This is a contract test that will catch any future field reordering or format change.
+
+#### 2026-02-24 Review
+
+#### Issues
+
+**[SEVERITY: Medium]** `crates/shared/service-sdk/src/ca.rs` and `identity.rs` — 21 service-sdk tests use bare `#[tokio::test]`
+
+6 in `ca.rs`, 15 in `identity.rs`. Per `testing.md`, the annotation is required regardless of time-dependence.
+
+**[SEVERITY: Medium]** `crates/shared/agent-core/src/version_check.rs` and `update.rs` — Eight `agent-core` tests use bare `#[tokio::test]`
+
+The `update.rs` module uses `tokio::time::timeout` in production code, creating a maintenance hazard.
+
+**[SEVERITY: Medium]** `crates/shared/command/src/command.rs` and `executor.rs` — 21 `uptrakit-command` tests use bare `#[tokio::test]`
+
+Only 2 of 5 executor tests use `start_paused`. The module uses `tokio::time::timeout` in production code.
 
 ### Issues
 
@@ -182,6 +218,23 @@ No database-specific issues are unique to these shared crates beyond the `sea-or
 
 - **No `publish = false` inconsistency in `uptrakit-web-api-types`.** The crate omits `publish = false`, which is appropriate given its `description` field suggests it is intended to be consumable externally. All other internal crates (`uptrakit-crypto`, `uptrakit-agent-core`, etc.) correctly carry `publish = false`.
 
+#### 2026-02-24 Review
+
+#### Strengths
+
+- **`Validate` trait is well-designed with consistent implementation pattern.** Structured field-level error reporting via `ValidationError { field, message }`. Seven implementations follow the same pattern.
+- **All `FromStr` implementations follow the standard pattern with typed error types.** Every domain type pairs `FromStr` with a dedicated `Parse{TypeName}Error`.
+
+#### Issues
+
+**[SEVERITY: Medium]** `crates/shared/web-api-types/src/api_tokens.rs:8` — `CreateApiTokenRequest` and 5 other request types accept user input without `Validate` implementation
+
+Missing validation: `CreateApiTokenRequest`, `CreateMqttClientRequest`, `UpdateMqttClientRequest`, `CreateAutodiscoveryIgnoreRequest`, `UpdateOidcProviderRequest`, `TriggerUpdateRequest`.
+
+**[SEVERITY: Low]** `crates/shared/types/src/software_discovery_state.rs:23` and 4 others — Five public domain enums lack `#[non_exhaustive]`
+
+`SoftwareDiscoveryState`, `DeviceAuthStatus`, `ServiceStatus`, `OutputStreamType`, `MqttClientConnectionStatus` could plausibly gain new variants.
+
 ### Issues
 
 **[SEVERITY: Low]** `crates/shared/openapi-client/src/mock.rs:221,276` — `StatusCode::NO_CONTENT.as_u16()` and `StatusCode::TOO_MANY_REQUESTS.as_u16()` used outside approved serialization sites
@@ -201,6 +254,22 @@ AGENTS.md restricts `as_u16()` to documented serialization sites only. Both call
 - **`uptrakit-build-info` is trivially extensible.** Adding a new field to `BuildInfo` is a single-struct change; `render_human` output format is tested with an exact-match string test, which will fail immediately if a new field is added without updating the renderer. The test acts as a change-detection mechanism, not just a correctness check.
 
 - **`uptrakit-shared-macros` closure arm enables non-trivial error wrapping.** The second macro arm (`$source:ty => $target:ident, $closure:expr`) allows callers to express complex conversions like `|e| ControllerError::WebSocket(Box::new(e))` without writing a full `impl ReportConversion` block. This covers cases where the source error must be heap-allocated (e.g., because the target variant holds a `Box<dyn Error>`), keeping boilerplate to a minimum.
+
+#### 2026-02-24 Review
+
+#### Issues
+
+**[SEVERITY: Medium]** `crates/shared/types/src/service_type.rs:11,61-66` — `ServiceType` has `#[non_exhaustive]` but no `Other(String)` forward-compatibility variant
+
+Unlike `Capability` which uses `Other(String)`, `ServiceType` fails deserialization on unknown strings. Adding `Other(String)` would make the pattern consistent.
+
+**[SEVERITY: Low]** `crates/shared/web-api-types/src/permissions.rs:9` and others — Several public API-facing enums lack `#[non_exhaustive]` unlike wire-protocol enums
+
+`Permission`, `UpdateStatus`, `AlertSeverity`, `TriggerUpdateStatus`, `RegistrationMode` should follow the same convention as wire types.
+
+**[SEVERITY: Low]** `crates/shared/types/src/` — Six shared-types domain enums lack `#[non_exhaustive]` despite being cross-crate types
+
+Inconsistent: `ProviderType`, `ServiceType`, `HookShell` have it, but `SoftwareDiscoveryState`, `MqttTransport`, `MqttClientConnectionStatus`, `DeviceAuthStatus`, `OutputStreamType`, `ServiceStatus` do not.
 
 ### Issues
 

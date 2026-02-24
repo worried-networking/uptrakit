@@ -170,6 +170,14 @@ first_component.contains('.') || first_component.contains(':') || first_componen
 
 If the heuristic needs to change (for example, to support numeric IPv4 addresses without a port), it must be updated in both places. A private helper `fn is_registry_hostname(s: &str) -> bool` would remove the duplication.
 
+#### 2026-02-24 Review
+
+##### Issues
+
+**[SEVERITY: Low]** `docker-registry/src/auth.rs:43,130,142` — `Mutex::lock().unwrap()` on `cached_token` uses `std::sync::Mutex` in an async context
+
+Risks blocking the Tokio runtime thread if contended. `tokio::sync::Mutex` would be idiomatic.
+
 ---
 
 ## Tests
@@ -211,6 +219,14 @@ The tests `homebrew_provider_detect_installed_version_empty_identifier_fails` an
 **[SEVERITY: Low]** `crates/providers/registry/src/registry.rs:243` — Tests use `LocalCommandExecutor` directly, not a mock executor
 
 All registry tests construct providers with `LocalCommandExecutor`. This is acceptable for construction and config tests since providers are not invoked. However, any future test of `create_provider_for_discovery` discovery behaviour would need a mock executor. Introducing a `MockCommandExecutor` (already present elsewhere in the codebase for scheduler tests) would enable more thorough registry-level tests.
+
+#### 2026-02-24 Review
+
+##### Issues
+
+**[SEVERITY: Medium]** `core/src/traits.rs:142-252`, `docker-registry/src/provider.rs`, `github/src/provider.rs`, `homebrew/src/provider.rs`, `proxmox-helper-scripts/src/provider.rs` — All 21 provider crate async tests use bare `#[tokio::test]`
+
+None use `start_paused = true`. Per `testing.md`, required for all async tests.
 
 ---
 
@@ -349,6 +365,18 @@ The comment states that `service_type` will eventually be inferred from capabili
 **[SEVERITY: Low]** `crates/providers/proxmox-helper-scripts/src/config.rs:67-74` — No shared abstraction for "config valid for discovery but not update"
 
 `ProxmoxHelperScriptsConfig` uses an empty-string default for `script_url` to enable discovery with a minimal config. There is no shared trait or type that expresses "this config is valid for discovery but not for update execution". A future provider with a similar split between discovery-config and full-config validity will face the same design challenge and may solve it differently, leading to an inconsistent pattern across providers.
+
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **`refresh_package_index` method with default error enables incremental capability adoption.** `core/src/traits.rs:92-97` — Existing providers compile without changes; only supporting providers override.
+
+##### Issues
+
+**[SEVERITY: Low]** `core/src/types.rs:18-25` — `ProviderCapability` has `#[non_exhaustive]` but no `Other(String)` variant unlike its wire counterpart
+
+New capabilities require synchronized recompilation of all agents.
 
 ---
 

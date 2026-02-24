@@ -309,3 +309,9 @@ changes in three separate locations: the `ProviderType` enum, the
 blocks discovery for the new provider at the controller routing layer, with no
 compile-time feedback.  This extensibility gap surfaces at the agent boundary
 whenever `DiscoverSoftware` messages are dispatched.
+
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **SSH agent correctly reuses `CommandExecutor` abstraction for remote operations.** `crates/shared/command/src/executor.rs:142-156` — The `CommandExecutor` trait accommodates future SSH-based or container-based executors. All four providers receive `Arc<dyn CommandExecutor>`.

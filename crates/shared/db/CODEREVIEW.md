@@ -128,6 +128,14 @@ findings) is owned by `uptrakit-crypto`, not this crate; it is cross-referenced 
 
 ### Issues
 
+#### 2026-02-24 Review
+
+#### Issues
+
+**[SEVERITY: Low]** `crates/ui/web-api/src/queries/provider_configs.rs:155-158` — Second instance of string-based unique violation detection duplicated from autodiscovery.rs
+
+Two independent copies of the same fragile detection logic. Should be consolidated into `uptrakit-shared-db` using backend-specific error codes.
+
 **[SEVERITY: Medium]** `crates/shared/db/src/entity/oidc_provider.rs:89` — Soft-delete column
 named `deleted_at` instead of `deactivated_at`.
 
@@ -293,6 +301,31 @@ for O(1) membership testing per item.
   pending account links, and pending token exchanges all have indexes on `expires_at`,
   enabling efficient TTL cleanup.
 
+#### 2026-02-24 Review
+
+#### Strengths
+
+- **Migration `down()` drops all 28 tables in correct reverse FK dependency order.** `m20260209_000001_initial.rs:1999-2050`.
+- **Unique index `uq_host_software_items_active` prevents duplicate assignments.** `m20260209_000001_initial.rs:1093-1101`.
+
+#### Issues
+
+**[SEVERITY: Medium]** `m20260209_000001_initial.rs:1093-1101` — Missing index on `host_software_items(provider_config_id, package_identifier)` for autodiscovery lookup
+
+Phase 2 of `process_one_discovery` queries by this combination. Only `provider_config_id` is indexed alone.
+
+**[SEVERITY: Medium]** `m20260209_000001_initial.rs:862-893` — Missing index on `service_hosts(host_id)` for host-to-agent lookups
+
+Primary key is `(service_id, host_id)`. Queries filtering by `host_id` require a full scan.
+
+**[SEVERITY: Low]** `m20260209_000001_initial.rs:1399-1439` — Missing index on `update_history(host_id, software_item_id, status)` for pending-update lookups
+
+Frequent check requires index intersections without a composite index.
+
+**[SEVERITY: Low]** `m20260209_000001_initial.rs:309` — No partial unique index on `oidc_providers` for active names
+
+Unlike `provider_configs` and `software_items`, OIDC provider slugs cannot be reused after soft-deletion.
+
 ### Issues
 
 **[SEVERITY: Medium]** `crates/shared/db/src/entity/oidc_provider.rs:89` — Soft-delete
@@ -446,6 +479,14 @@ a utility function so it is co-located with the entity definitions.
 - **`TenantScoped` is open for extension.** The trait is defined in this crate and
   implemented for entities here; any new tenant-scoped entity just requires an additional
   `impl TenantScoped for NewEntity::Entity` block.
+
+#### 2026-02-24 Review
+
+#### Issues
+
+**[SEVERITY: Low]** `crates/shared/db/src/entity/provider_config.rs:14` — `provider_config.provider_type` stored as `String` in DB
+
+Provides forward compatibility at storage level but typos in manual edits produce runtime errors rather than constraint violations.
 
 ### Issues
 

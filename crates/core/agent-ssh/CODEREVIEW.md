@@ -253,6 +253,14 @@ Extracting `fn make_version_check_errors(assignments, msg)` (and equivalents for
 the other payloads) would reduce noise and make future changes (e.g., adding
 structured error codes) apply once.
 
+#### 2026-02-24 Review
+
+##### Issues
+
+**[SEVERITY: Medium]** `src/main.rs:83-84` — `expect()` in `on_message` handler for `local_db` access is not an approved exception
+
+Will panic if `on_message` is ever called before `on_connected`. Should return `Err(LoopError::Other("local_db not initialized".into()))`.
+
 ---
 
 ## Tests
@@ -323,6 +331,14 @@ tested — doing so would require a mock SSH target. Adding a trait seam for
 `connect_and_authenticate` (analogous to how `CommandExecutor` is injected in
 the daemon handlers) would make the orchestration testable without a live SSH
 server.
+
+#### 2026-02-24 Review
+
+##### Issues
+
+**[SEVERITY: Medium]** `src/ssh_transport.rs:457,480,502,525,540,559,575,595,619,630` and `host_ops.rs:237-509` and `db/mod.rs:28,44` — All 24 agent-ssh async tests use `#[tokio::test]` without `start_paused = true`
+
+24 tests across three modules, none use `start_paused`. Several `ssh_transport.rs` tests exercise timeout and connection logic.
 
 ---
 
@@ -479,6 +495,14 @@ scale (tens to hundreds of hosts per agent) this is acceptable, but an index on
 particularly relevant given that every `CheckVersions` and `ExecuteUpdate`
 message triggers this query.
 
+#### 2026-02-24 Review
+
+##### Issues
+
+**[SEVERITY: Low]** `src/db/migration/m20260222_000002_add_machine_id.rs:17-19` — `machine_id` column added with empty string default
+
+No CHECK constraint prevents the empty string from being used as a lookup key. Could collide with other unconnected hosts.
+
 ---
 
 ## Coding Standards
@@ -575,3 +599,9 @@ authenticates. For deployments with many hosts receiving frequent version checks
 this is measurably more expensive than reusing sessions. A
 `SshSessionFactory` trait (with a real implementation and a test double) would
 enable future connection reuse without changing the handler interfaces.
+
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **SSH agent reuses Provider and CommandExecutor abstractions.** `src/client.rs:10` — Any new provider registered in `register_providers!` is automatically available for SSH-managed hosts.

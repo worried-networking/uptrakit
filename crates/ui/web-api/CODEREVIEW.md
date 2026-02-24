@@ -37,6 +37,20 @@ The crate demonstrates several architectural strengths: a well-designed builder 
 
 `AGENTS.md` documents `rust-version = "1.91"` but no crate declares it. If this crate uses edition 2024 features, build failures on older toolchains have no documented expectation.
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `src/routes/settings_auth.rs:96-102` — Non-additive feature flag: `#[cfg(not(feature = "oidc"))]` provides a semantic guard
+
+When OIDC is disabled, this block prevents disabling password auth. Refactor so the default path rejects and the positive `#[cfg(feature = "oidc")]` path conditionally allows.
+
+**[SEVERITY: Low]** `src/middleware/rate_limit.rs:228-236` — Non-additive feature flag: `#[cfg(not(feature = "oidc"))]` in test expectations
+
+Should use `let mut expected = vec![...]` and extend conditionally inside `#[cfg(feature = "oidc")]`.
+
+**[SEVERITY: Low]** `src/lib.rs:941-944` — Non-additive feature flag: `#[cfg(not(feature = "swagger-ui"))]` for fallback OpenAPI JSON route
+
+The plain JSON route should be registered unconditionally; Swagger UI should be an additive overlay.
+
 ---
 
 ## Security & Safety
@@ -108,6 +122,16 @@ generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string())
 
 Found at lines 388, 535, 584, 1221. UUID v4 has 122 bits of entropy versus the intended 256 bits of `generate_secure_token`. A CSPRNG failure is extremely unlikely but should propagate as an error rather than silently downgrade to weaker randomness for security tokens (exchange codes, registration codes, link tokens).
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `src/settings_store.rs:313-354` — JWT signing key stored in database without at-rest encryption
+
+Stored as plain base64 JSON, bypassing the `EncryptedString` layer used for CA keys and OIDC secrets. A database dump exposes the key, allowing JWT forgery.
+
+**[SEVERITY: Low]** `src/middleware/resolve_proxy_headers.rs:256-258` — CA CN comparison uses non-constant-time string equality
+
+The `==` operator short-circuits, but the compared values (CA CNs) are not confidential, making exploitability very low.
+
 ---
 
 ## Code Quality
@@ -123,6 +147,10 @@ Found at lines 388, 535, 584, 1221. UUID v4 has 122 bits of entropy versus the i
 - **`APPROVAL_POLL_INTERVAL` named constant** — `src/routes/agent_ws.rs:635`. Agent enrolled-loop poll interval is explicit and documented.
 - **`MAX_UPDATE_OUTPUT_BYTES` named constant** — `src/routes/agent_ws.rs:48`. Output cap is named and the cap-enforcement logic (conditional `UPDATE` + `rows_affected == 0` guard) is well-documented.
 - **`model_to_config` isolation in lease coordinator** — `src/mqtt_lease_coordinator.rs:687-712`. The conversion from DB model to wire type is a single private function, not repeated inline across all callers.
+
+#### 2026-02-24 Review
+
+- **`CaKeyStore` `Debug` redaction with dedicated test verification.** `src/lib.rs:98-112` — Manually redacts every key field to `"[REDACTED]"` with a verification test at `src/lib.rs:1284-1303`.
 
 ### Issues
 
@@ -189,6 +217,32 @@ let discovery_types: &[ProviderType] = &[
 
 This is a second source of truth that diverges from `ProviderType::supports_discovery()` in `shared/types`. When a new discovery-capable provider is added, this slice must also be updated manually. A missed update silently prevents discovery for the new provider type.
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `src/notification_service.rs:121` — `unreachable!()` macro on `ServiceType` wildcard arm will panic on new variants
+
+`ServiceType` is `#[non_exhaustive]`. New variants will cause runtime panic. Should log a warning and skip delivery instead.
+
+**[SEVERITY: Medium]** `src/queries/provider_configs.rs:155-158` — Duplicated `is_unique_name_violation` uses brittle string matching
+
+Same `msg.contains("unique") || msg.contains("duplicate")` pattern as `autodiscovery.rs:673-676`. Should be consolidated into `uptrakit-shared-db` using backend-specific error codes.
+
+**[SEVERITY: Medium]** `src/settings.rs:53` — `unwrap()` on socket address parsing in `Default` impl
+
+`DEFAULT_HTTPS_ADDR.parse().unwrap()` is not an approved exception per AGENTS.md. Should use `expect()` with a reason or parse at compile time.
+
+**[SEVERITY: Low]** `src/notification_service.rs:46-63` — `msg.clone()` on every `send()` and `broadcast()` call
+
+The outbox write only needs serialized JSON, which could be computed first, avoiding a full message clone.
+
+**[SEVERITY: Low]** `src/notification_service.rs:153` — `event.message_json.clone()` during backlog delivery
+
+`from_value` takes ownership; since the event is consumed, destructuring would eliminate the clone.
+
+**[SEVERITY: Low]** `src/queries/provider_configs.rs:151-152` — `unreachable!()` in `unwrap_or_else` creates a hidden panic path
+
+Relies on an invariant not enforced by the type system. Should return a proper error.
+
 ---
 
 ## Tests
@@ -205,6 +259,14 @@ This is a second source of truth that diverges from `ProviderType::supports_disc
 - **`base_url_from_headers` unit tests** — `src/routes/oidc_auth.rs:1261-1289`. Three cases: Origin preferred over Host, Host fallback, missing both returns None.
 - **Router integration tests** — `src/lib.rs:1140-1281`. Tower `oneshot` tests verify healthz, CA cert response, 404 handling, `ConnectInfo<SocketAddr>` injection for both main and PKI routers, and trusted proxy IP resolution.
 - **Security-sensitive paths tested** — JWT wrong secret, denylist revocation, OIDC state one-time-use, device-flow consume, session double-approve, rate-limit window reset.
+
+#### 2026-02-24 Review
+
+- **`is_mqtt_tenant_message` test comprehensively covers credential-bearing variant filtering.** `src/notification_service.rs:273-314` — Exercises all three credential-bearing variants.
+- **Backlog delivery test exercises both positive and negative filtering.** `src/notification_service.rs:316-399` — Validates eligible messages are delivered and ineligible types are filtered.
+- **`skips_non_matching_service_type_backlog` verifies cross-service-type filtering.** `src/notification_service.rs:401-440` — Confirms SQL condition correctly filters by service type.
+- **Lease coordinator tests cover all three outcome branches with DB verification.** `src/mqtt_lease_coordinator.rs:782-890`.
+- **Rate limiter test suite covers seven distinct scenarios.** `src/auth/rate_limit.rs:174-362` — Including window expiry and key isolation.
 
 ### Issues
 
@@ -232,6 +294,20 @@ All seven `OidcUserResolution` branches in `oidc_callback` are untested at the u
 
 `resolve_oidc_user` — the most complex function in the auth module with 7 distinct return paths — has no tests. The orphaned-link fallthrough, the `LinkViaOidcRequired` detection, and the deactivated-user short-circuit are entirely untested.
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `src/notification_service.rs:396,437` — `tokio::time::timeout(50ms)` in tests without `start_paused = true`
+
+Two backlog delivery tests use real wall-clock timeouts. Should use `start_paused = true` with `tokio::time::advance`.
+
+**[SEVERITY: Medium]** `src/mqtt_lease_coordinator.rs:724` and 16 other modules — `test_db()` / `setup_test_db()` helper duplicated across 17+ modules
+
+Beyond the documented `test_state(db)` duplication, the `test_db()` function is duplicated in 17+ modules. A shared `test_helpers` module would reduce duplication.
+
+**[SEVERITY: Low]** `src/notification_service.rs:261-271` — `server_restarting_is_local_only` test asserts only enum construction, not behavioral intent
+
+Should test that `svc.broadcast(msg)` does NOT write to the outbox, verifying the stated design intent.
+
 ---
 
 ## High Availability
@@ -244,6 +320,13 @@ All seven `OidcUserResolution` branches in `oidc_callback` are untested at the u
 - **`MqttLeaseCoordinator` uses `INSERT ON CONFLICT DO NOTHING`** — `src/mqtt_lease_coordinator.rs:141-161`. Concurrent assignment attempts are idempotent at the DB level; only one instance wins the lease.
 - **Enrolled-loop approval polling decoupled from ping frequency** — `src/routes/agent_ws.rs:635`, `669-670`. A dedicated `APPROVAL_POLL_INTERVAL` (5 seconds) drives DB polls for status changes, independent of whether the agent sends pings. A silent agent still receives timely approval/rejection.
 - **Cancellation token propagated to WebSocket connection loops** — Both `handle_agent_authenticated` and `run_agent_enrolled_loop` select on `cancel_token.cancelled()`, enabling a new connection for the same agent to supersede the old one immediately via `CloseReason::Superseded`.
+
+#### 2026-02-24 Review
+
+- **Settings distributed atomically via watch channel with write serialization.** `src/settings.rs:61-87` — Dual version counters enable efficient cross-instance invalidation polling.
+- **Service connection registry handles reconnection deduplication with CancellationToken.** `src/service_connections.rs:18-36` — Old connections are cancelled via `CloseReason::Superseded`.
+- **Credential-bearing MQTT messages excluded from outbox.** `src/notification_service.rs:40-52` — Prevents plaintext credential persistence.
+- **Event poller cursor advancement is strictly monotonic and failure-safe.** `src/event_poller.rs:102-183`.
 
 ### Issues
 
@@ -276,6 +359,24 @@ approval_poll.tick().await; // skip immediate first tick
 
 Consuming the first tick with `.await` suspends the enrolled loop before entering the main `tokio::select!`. During the initial 5-second wait, any push message (approval/rejection) sitting in `push_rx` is not processed. For a fast-approval scenario (API call arrives between enrollment and enrollment loop start), the agent waits the full poll interval. Prefer `approval_poll.set_missed_tick_behavior(MissedTickBehavior::Delay)` and move the first-tick skip inside the select arm.
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `src/event_poller.rs:59` — Fixed 1-second poll interval with no configurability or adaptive behavior
+
+Every controller instance polls `controller_events` once per second regardless of activity. Should be configurable or adaptive.
+
+**[SEVERITY: Medium]** `src/notification_service.rs:117-122` — `unreachable!` on unknown ServiceType variant will panic on new service types
+
+Should be replaced with a handled default that logs a warning.
+
+**[SEVERITY: Low]** `src/middleware/rate_limit.rs:114-152` — In-memory fallback rate limiter uses `std::sync::Mutex` with no poisoning recovery and no size bound
+
+Use `.unwrap_or_else(|e| e.into_inner())` for poisoning recovery and add a hard cap on entries.
+
+**[SEVERITY: Low]** `src/notification_service.rs:107-177` — Backlog delivery replays up to 500 events sequentially with no timeout
+
+Should have a per-event timeout or overall backlog delivery budget.
+
 ---
 
 ## Database
@@ -288,6 +389,11 @@ Consuming the first tick with `.await` suspends the enrolled loop before enterin
 - **Soft-delete partial unique indexes** — `uq_provider_configs_active_name WHERE deactivated_at IS NULL`, `uq_software_items_active_name WHERE deactivated_at IS NULL`. Deactivated entities do not block name reuse.
 - **`lock_exclusive()` before mutation in `merge_service`** — Prevents concurrent merge operations on the same service record.
 - **`INSERT ON CONFLICT DO NOTHING` for lease deduplication** — `src/mqtt_lease_coordinator.rs:141-161`. Concurrent assignment is safe at the DB level.
+
+#### 2026-02-24 Review
+
+- **Batch provider config loading in `list_ignore_rules`.** `src/queries/autodiscovery.rs:103-117` — Collects IDs, single `is_in` query, HashMap for O(1) lookup.
+- **`load_provider_types` uses JOIN instead of N+1.** `src/queries/software_items.rs:94-124`.
 
 ### Issues
 
@@ -330,6 +436,48 @@ API tokens are valid indefinitely once issued. A compromised token that was neve
 **[SEVERITY: Low]** `sessions` table has no composite `(user_id, expires_at)` index
 
 "Find active sessions for user" is a common query path (user detail view, session revocation). A composite index on `(user_id, expires_at)` would serve this filter efficiently.
+
+#### 2026-02-24 Review
+
+**[SEVERITY: High]** `src/queries/software_items.rs:417-421` — N+1 in `list_software_items`: per-item `load_provider_types` and `count_linked_hosts`
+
+For N items, issues 2N extra queries. Should batch-load with GROUP BY.
+
+**[SEVERITY: High]** `src/queries/hosts.rs:104-108` — N+1 in `list_hosts`: per-host `load_host_agents` issues 2 queries per host
+
+For 20 hosts, 40 extra round-trips. Should batch-load with a single JOIN.
+
+**[SEVERITY: High]** `src/routes/provider_configs.rs:264-274` — Full cross-tenant `service_hosts` table scan in `discover_provider_config`
+
+Loads ALL `service_host` rows from all tenants. Both a performance and defense-in-depth concern. Should JOIN through `services` with tenant filter.
+
+**[SEVERITY: High]** `src/routes/software_items.rs:754-846` — N+1 in `check_all_versions_software_item`: 4 sequential queries per host
+
+For 50 hosts, 200 round-trips. All four lookups should be batch-loaded.
+
+**[SEVERITY: Medium]** `src/queries/services.rs:184-228` — Missing transaction in `deactivate_service` for multi-step mutation
+
+Three sequential mutations without a transaction. Certificate revocation failure is swallowed.
+
+**[SEVERITY: Medium]** `src/queries/autodiscovery.rs:36-75` — TOCTOU race in `create_or_ignore_ignore_rule`
+
+Check-then-insert without transaction. The unique violation handler should return `Ok(())`, not propagate the error.
+
+**[SEVERITY: Medium]** `src/queries/autodiscovery.rs:600-610` — Unbounded `host_software_items` scan in `process_one_discovery` Phase 2
+
+Missing index on `(provider_config_id, package_identifier)`.
+
+**[SEVERITY: Medium]** `src/queries/update_history.rs:148-150` — Output not loaded for list_update_history
+
+Returns empty output for records using the newer `update_output_lines` storage, unlike the detail endpoint which correctly falls back.
+
+**[SEVERITY: Low]** `src/queries/provider_configs.rs:87-94` — `find_raw_active_config` swallows DB errors via `.ok().flatten()`
+
+Transient DB issues are indistinguishable from "config does not exist".
+
+**[SEVERITY: Low]** `src/queries/software_items.rs:85-91` — `count_linked_hosts` swallows DB errors via `.unwrap_or(0)`
+
+DB outage causes items to report zero linked hosts silently.
 
 ---
 
@@ -375,6 +523,12 @@ When the ignore entry already exists, the endpoint returns `201 Created`. Standa
 
 The generated OpenAPI schema should declare `format: uuid`. Update all 43 path param annotations to `Uuid` type. This affects every endpoint with UUID path params and makes the generated client code produce UUID-typed parameters rather than raw strings.
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `src/routes/settings_auth.rs:96`, `src/lib.rs:941` — `#[cfg(not(feature))]` blocks undocumented
+
+These are pragmatic uses but each should carry an inline comment explaining why the pattern is necessary.
+
 ---
 
 ## Extensibility
@@ -387,6 +541,10 @@ The generated OpenAPI schema should declare `format: uuid`. Update all 43 path p
 - **`db-sqlite` / `db-postgres` / `db-mysql` feature gates** — `Cargo.toml:14-17`. DB backend is selected at compile time, not at runtime, enabling minimal binary sizes.
 - **`ServiceConnectionRegistry` type-erased service dispatch** — `broadcast_by_type`, `send`, `is_connected` work uniformly across agent, MQTT, and SSH-agent connection types. Adding a new service type requires only extending the registry's service-type routing.
 - **Event poller's `deliver_event` is forward-compatible** — Unknown `target_service_type` values produce a broadcast (safe default) rather than a hard error. New service types introduced by newer controller versions are handled gracefully by older peer instances.
+
+#### 2026-02-24 Review
+
+- **Sequence validation decoupled from full deserialization.** `src/routes/service_ws.rs:124-162` — Two-phase parse enables forward-compatible message handling for unknown message types.
 
 ### Issues
 
@@ -416,3 +574,21 @@ The role sync reconstruction only places values at the first dot-separated segme
 **[SEVERITY: Low]** `src/routes/oidc_auth.rs` — No mechanism to add custom OIDC scopes beyond the `scopes` column
 
 Additional claim retrieval (groups, department, cost center) requires custom scopes. The current implementation splits `provider.scopes` on whitespace and adds each as a separate `Scope`. This works but is the only extensibility point for claims enrichment. There is no documented path for operators to add custom claims processors without code changes.
+
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `src/routes/service_ws.rs:610-614,617-621` — Shutdown timeout and ping interval use hardcoded per-ServiceType match with wildcard fallback
+
+Adding a new `ServiceType` silently inherits defaults with no compile-time signal. Values should be in `durations.rs` and wildcards should log warnings.
+
+**[SEVERITY: Medium]** `src/routes/service_ws.rs:640-681,744-783,916-962` — Three `match service_type` dispatch blocks require manual extension for every new service type
+
+No compile-time forcing function guides developers to all three locations. A trait-based dispatch would reduce to a single registration point.
+
+**[SEVERITY: Medium]** `src/routes/service_ws.rs:853-896` — Enrollment dispatch triplication with near-identical 70-line functions
+
+Three `enroll_*` functions share near-identical structure. A generic `enroll_service` function would eliminate the duplication.
+
+**[SEVERITY: Medium]** `src/routes/service_ws.rs:168-178` — `controller_capabilities()` is a hardcoded array
+
+Missing a `Capability` variant means the controller silently disables it. Should auto-generate from all typed variants or carry an invariant comment.

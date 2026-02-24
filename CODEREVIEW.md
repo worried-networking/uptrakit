@@ -58,6 +58,28 @@ Only `uptrakit-internal-wire` declares `[lints.rust] warnings = "deny"` and `[li
 
 `serde_yaml_ng = "0.10"` appears inline in `uptrakit-cli` (production) and in `uptrakit-internal-wire` dev-dependencies. `rumqttc = { version = "0.25.1" }` appears inline in `uptrakit-mqtt`. As sole consumers, neither creates immediate drift risk, but the inconsistency with the otherwise comprehensive workspace dependency table makes auditing harder. Both should be promoted to `[workspace.dependencies]` for uniformity.
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** Multiple files across `crates/core/controller/` and `crates/ui/web-api/` — 11 `#[cfg(not(feature = "..."))]` usages across 5 files violate the additive feature flag rule
+
+AGENTS.md states that "Feature flags must be additive (no `#[cfg(not(feature = "..."))]`)." A workspace-wide search identifies 11 occurrences across 5 source files, plus 2 `#[cfg_attr(not(feature), allow(...))]` usages:
+
+| File | Lines | Feature | Purpose |
+|------|-------|---------|---------|
+| `crates/core/controller/src/db/config.rs` | 23, 48, 53, 58 | `db-sqlite`, `db-postgres`, `db-mysql` | Error bail for unsupported DB schemes |
+| `crates/core/controller/src/db/config.rs` | 13, 42-45 | `db-sqlite`, `db-*` | `#[cfg_attr(not(...), allow(...))]` |
+| `crates/core/controller/src/cli.rs` | 120 | `embed-frontend` | Remove `--static-dir` CLI arg |
+| `crates/core/controller/src/startup.rs` | 584, 907 | `embed-frontend` | Remove static-dir resolution |
+| `crates/ui/web-api/src/routes/settings_auth.rs` | 96 | `oidc` | Error when disabling password auth |
+| `crates/ui/web-api/src/middleware/rate_limit.rs` | 228 | `oidc` | Test expectation list |
+| `crates/ui/web-api/src/lib.rs` | 941 | `swagger-ui` | Fallback OpenAPI JSON route |
+
+All can be refactored to use positive `#[cfg(feature = "...")]` gates only.
+
+**[SEVERITY: Low]** `CODEREVIEW.md:23` vs `AGENTS.md` codebase layout — Workspace CODEREVIEW documents "binaries import from `shared/` and `ui/`" but AGENTS.md layout implies a stricter four-tier DAG
+
+The AGENTS.md should include explicit dependency direction statements to eliminate ambiguity about the permitted dependency directions between the four domains.
+
 ---
 
 ## Security & Safety
@@ -103,6 +125,12 @@ The denylist is per-process. A revoked token remains valid on all other running 
 
 Two `unsafe` blocks manipulate environment variables without a `Mutex` guard. `std::env::set_var` is not thread-safe when other threads concurrently call `std::env::var`. Under `cargo nextest` (which runs tests in parallel by default), this is a data race. Tests should either use a `Mutex<()>` guard or be marked `#[serial]`.
 
+#### 2026-02-24 Review
+
+**[SEVERITY: Medium]** `crates/ui/web-api/src/auth/jwt.rs:38-61` — Legacy file-based `JwtManager::load_or_generate` writes signing key to disk without at-rest encryption
+
+Although the controller has migrated to DB-based JWT key storage, the file-based method remains as a public API. After migration, the plaintext key persists on disk indefinitely. The file should be deleted after successful migration, and the method should be marked `#[deprecated]` or `pub(crate)`.
+
 ---
 
 ## Code Quality
@@ -141,6 +169,19 @@ Axum's extractor system supports `Path(id): Path<Uuid>` directly, returning a ty
 **[SEVERITY: Medium]** `crates/shared/service-sdk/src/main_helper.rs:37-38,42-43` — `expect()` calls in a shared library outside approved exception list
 
 `expect()` is used to unwrap results in `init_tracing()`. AGENTS.md lists approved `unwrap()` exceptions as `Mutex::lock()`, `RwLock::read()`, and `RwLock::write()` only. These `expect()` calls do not qualify. In addition, since `init_tracing()` must be removed from the library entirely (see Architecture issue above), this is a compound fix.
+
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **Zero `#[allow(dead_code)]` annotations across all 24 crates.** No crate uses `#[allow(dead_code)]` to suppress warnings. All unused code has been removed.
+- **Only one `#[allow(clippy::...)]` suppression in the entire workspace.** `#[allow(clippy::too_many_arguments)]` at `crates/ui/web-api/src/queries/autodiscovery.rs:554`. Already documented with a prescribed fix.
+
+##### Issues
+
+**[SEVERITY: Medium]** `crates/ui/web-api/src/routes/service_ws.rs:616-621`, `crates/ui/web-api/src/notification_service.rs:117-121` — Wildcard arms on `ServiceType` enum matches across multiple non-exhaustive enum consumers
+
+Beyond the already-documented wildcard issues, ping interval defaults and backlog delivery also use wildcards on `ServiceType`. The ping interval wildcard `_ => 300u32` silently assigns a 5-minute heartbeat to any future service type, and the notification service wildcard `_ => unreachable!()` will panic. Each new `ServiceType` variant requires manual updates in at least four files in `web-api`.
 
 ---
 
@@ -184,6 +225,18 @@ Eight backoff tests run with `start_paused = false` and assert only that operati
 
 The helper binds a port, reads the port number, drops the listener, then starts the OCSP responder on that port. Between the drop and the bind there is a window where another process can claim the port. The correct pattern is to keep the listener alive and pass the bound `TcpListener` directly to the responder if the API supports it, or to use socket activation.
 
+#### 2026-02-24 Review
+
+##### Issues
+
+**[SEVERITY: High]** Workspace-wide (273+ `#[tokio::test]` across 56 `.rs` files) — Systemic violation of `start_paused = true` invariant across nearly all async tests
+
+Of 295 total `#[tokio::test]` annotations, only 9 across 4 files use `start_paused = true`. The remaining 273+ tests run with real wall-clock time. Even tests that appear time-insensitive today become flaky when future refactors introduce timeouts. Fixing requires a bulk annotation pass, ideally enforced by a CI grep gate.
+
+**[SEVERITY: Medium]** Workspace-wide — No CI gate or lint enforces the `#[tokio::test(start_paused = true)]` invariant
+
+Without a CI check, the invariant is documentation-only and will continue to be violated by new code.
+
 ---
 
 ## High Availability
@@ -226,6 +279,13 @@ Unlike WebSocket reconnection (which uses the `backoff.rs` exponential backoff w
 **[SEVERITY: Medium]** `crates/shared/service-sdk/src/event_loop.rs:244-246` — `tick().await` inside `handle_service_settings` suspends the event loop
 
 A new `Interval` is created and its first tick immediately consumed with `.await`. This suspends the event loop while waiting, blocking incoming WebSocket frame reads and ping responses. The initialization should be restructured so the interval is returned to the outer event-loop driver without any intermediate `.await` in the settings handler.
+
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **User-level token revocation uses latest-timestamp guard.** `crates/ui/web-api/src/auth/token_denylist.rs:59-66` — `deny_user` uses `if until > *entry` to prevent concurrent revocation calls from narrowing the window.
+- **MQTT event delivery uses targeted routing via `mqtt_client_index`.** `crates/ui/web-api/src/event_poller.rs:262-305` — Routes tenant-specific messages to the specific MQTT service instance holding that client, avoiding unnecessary broadcasts.
 
 ---
 
@@ -277,6 +337,23 @@ All other 7 soft-deletable entities (`tenants`, `users`, `hosts`, `services`, `s
 
 API tokens have no expiry mechanism. A forgotten token remains valid indefinitely. At minimum, an optional `expires_at` column should be supported; for security-sensitive infrastructure access, a mandatory maximum TTL should be enforced.
 
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **CHECK constraint on sessions table enforces OIDC provider requirement at DB level.** `crates/core/controller/src/migration/m20260209_000001_initial.rs:474-478` — `CHECK(auth_method != 'oidc' OR oidc_provider_id IS NOT NULL)`.
+- **`TenantDb` extractor provides compile-time tenant filtering.** `crates/ui/web-api/src/tenant_db.rs:29-51` — Covers SELECT, UPDATE, and DELETE operations uniformly.
+
+##### Issues
+
+**[SEVERITY: Medium]** `crates/core/controller/src/migration/m20260209_000001_initial.rs:615-621` — Raw SQL in migration seed uses `CURRENT_TIMESTAMP` which behaves differently across backends
+
+The `settings_version` seed uses `execute_unprepared` with `CURRENT_TIMESTAMP`. Should be converted to use the query builder with `Expr::current_timestamp()` for backend-agnostic behavior.
+
+**[SEVERITY: Low]** `crates/core/controller/src/migration/m20260209_000001_initial.rs:1942-1994` — Scheduled task seeding uses loop without batch insert
+
+Issues N_tenants x 6 individual INSERT statements. Should use a single multi-row INSERT for consistency.
+
 ---
 
 ## Coding Standards
@@ -315,6 +392,23 @@ The idempotent upsert path returns `201` regardless of whether a new row was ins
 **[SEVERITY: Low]** All `#[utoipa::path]` annotations with UUID path parameters declare `String` type instead of `Uuid` — 43 occurrences
 
 The OpenAPI schema emitted by `utoipa` for these parameters will declare `type: string` without `format: uuid`. API clients and OpenAPI linters use `format: uuid` to enable UUID validation, code generation, and documentation accuracy. Each annotation should use `schema(value_type = Uuid)` or the equivalent `utoipa` attribute for the path parameter.
+
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **Zero `anyhow` usage and zero `Result<T, String>` in library boundaries.** All 24 crates use `rootcause`/`thiserror` consistently.
+- **All `Mutex::lock().unwrap()` usages comply with the approved exception.** 4 occurrences across 2 files, all on `Mutex::lock()`.
+
+##### Issues
+
+**[SEVERITY: Medium]** `crates/shared/web-api-types/src/permissions.rs:9` — `Permission` enum lacks `#[non_exhaustive]`
+
+The enum has 9 variants and will grow with new features. Adding `#[non_exhaustive]` now is non-breaking; deferring forces simultaneous downstream updates.
+
+**[SEVERITY: Low]** 7 public enums in `uptrakit-web-api-types` lack `#[non_exhaustive]`
+
+`AlertSeverity`, `TriggerUpdateStatus`, `UpdateStatus`, `RegistrationMode`, `SystemdAction`, `DockerComposeAction`, `PredefinedHook` are all public enums without `#[non_exhaustive]` that could gain variants.
 
 ---
 
@@ -359,3 +453,7 @@ MQTT-specific wire variants are deserializable on agent connections and vice ver
 **[SEVERITY: Low]** `crates/shared/wire/src/lib.rs:316-318` — `EnrollPayload.service_type` deprecation is undocumented in code
 
 The comment states service type will eventually be inferred from capabilities, but there is no `#[deprecated]` attribute, no tracking issue reference, and no compiler warning. Contributors adding new service types will not be guided toward the capability-based path. Adding `#[deprecated = "service_type will be inferred from capabilities; see EnrollPayload docs"]` with a tracking issue reference makes the migration intent visible at compile time.
+
+#### 2026-02-24 Review
+
+No workspace-level extensibility findings. All extensibility findings are in crate-specific files.

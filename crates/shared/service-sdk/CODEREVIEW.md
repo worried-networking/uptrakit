@@ -123,6 +123,18 @@ Confirmed across all source files in this crate.
 consumed (via `take()`) in `handle_certificate`, preventing it from persisting
 beyond the renewal handshake.
 
+#### 2026-02-24 Review
+
+#### Issues
+
+**[SEVERITY: High]** `src/identity.rs:32-36` and `:53-62` — Enrollment secret stored as plain `String`, not `SecretString`, with `Debug` derive exposing it
+
+Both `ServiceState` and `ServiceIdentityState` store enrollment_secret as plain `String` with derived `Debug`. Should use `SecretString` with manual `Debug` redaction.
+
+**[SEVERITY: Medium]** `src/ws.rs:416` — Enrollment secret placed into a non-zeroizing `String` via `format!`
+
+`format!("Bearer {enrollment_secret}")` allocates a heap `String` not wrapped in `Zeroizing<>`. Should use `Zeroizing::new(format!(...))`.
+
 ### Issues
 
 **[SEVERITY: Medium]** `tls.rs:234` — `BasicConstraints::Unconstrained` used
@@ -175,6 +187,14 @@ The `biased` keyword ensures service events are polled before the ping timer,
 which before controller messages, which before signals. This explicit priority
 ordering prevents starvation of higher-priority arms under load and is
 correctly documented in the adjacent comments.
+
+#### 2026-02-24 Review
+
+#### Issues
+
+**[SEVERITY: Low]** `src/event_loop.rs:105` — `expect()` on `ping_timer` inside `tokio::select!` arm is not an approved exception
+
+Guarded by `is_some()` check, so will never fire. Refactor to pattern match to eliminate the `expect()`.
 
 ### Issues
 
@@ -253,6 +273,22 @@ bound (base + 25% jitter) of each delay range.
 certificates. No file I/O or network calls are needed, and
 `install_crypto_provider()` is called explicitly in each test that requires it,
 making the tests safe to run in parallel.
+
+#### 2026-02-24 Review
+
+#### Issues
+
+**[SEVERITY: Medium]** `src/lifecycle.rs` (entire file) — `run_service_lifecycle` core function has zero unit test coverage
+
+The central bootstrap-enrollment-reconnect loop has no tests. The `ServiceHandler` trait is designed for mockability.
+
+**[SEVERITY: Medium]** `src/cert_handler.rs:293,312,324,345,436` — Five `CertificateRenewalHandler` tests use bare `#[tokio::test]`
+
+Same file has correctly-annotated tests at lines 385, 397, 411 — inconsistency within one file.
+
+**[SEVERITY: Low]** `src/signal.rs:104-108` — `signal_watcher_new` test asserts only `is_ok()` without exercising signal delivery
+
+Does not test signal dispatch path.
 
 ### Issues
 
@@ -410,6 +446,18 @@ in the SDK.
 **`LoopError::Other(String)` forward compatibility.**
 New transient error conditions can be reported through `Other` without
 requiring an SDK change, preserving backward compatibility.
+
+#### 2026-02-24 Review
+
+#### Strengths
+
+- **Event loop cleanly separates SDK-managed from service-delegated messages.** `src/event_loop.rs:54-208` — New `ControllerMessage` variants are automatically forwarded to handlers.
+
+#### Issues
+
+**[SEVERITY: Low]** `src/lifecycle.rs:76` — `ServiceHandler` requires `Send` but not `Sync`, inconsistent with `Provider` trait
+
+Current constraint is correct for single-owner pattern but warrants a design-note comment.
 
 ### Issues
 

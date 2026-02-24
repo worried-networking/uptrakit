@@ -134,6 +134,12 @@ This literal is the root cause of the HA issue described below. Extracting it to
 `SHUTDOWN_TIMEOUT` and easier to find when implementing backoff. A constant name also signals
 intent and makes the backoff issue visible in code review.
 
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **Consistent error handling with no `unwrap()` in production paths.** Zero `unwrap()` calls outside test code. The single Mutex `unwrap_or` pattern degrades gracefully.
+
 ---
 
 ## Tests
@@ -181,6 +187,14 @@ The config-change detection path (`tenant_manager.rs:96-100`) — skip update wh
 reload when hash differs — is only covered for the hash computation itself, not for the
 manager-level lifecycle behavior. This path manages MQTT connection churn; a test using a mock or
 in-process broker would catch regressions in the stop-then-restart sequencing.
+
+#### 2026-02-24 Review
+
+##### Issues
+
+**[SEVERITY: Medium]** `src/mqtt_client.rs:445` and `tenant_manager.rs:344,353,361,383` — Five mqtt crate tests use bare `#[tokio::test]`
+
+One sibling test correctly uses `start_paused = true` (`shutdown_task` at line 453), demonstrating inconsistency.
 
 ---
 
@@ -238,6 +252,18 @@ outage, not service shutdown correctness.
 Recommended fix: use the existing `uptrakit-service-sdk` `Backoff` struct (or a per-client
 equivalent) with exponential delay capped at 60 seconds and jitter. Reset the backoff counter on
 a successful `ConnAck`.
+
+#### 2026-02-24 Review
+
+##### Strengths
+
+- **Graceful shutdown notifies controller with active MQTT client list.** `src/main.rs:112-136` — Allows immediate client reassignment without waiting for heartbeat stale threshold.
+
+##### Issues
+
+**[SEVERITY: Low]** `src/main.rs:164` — Unbounded channel for MQTT status events has no backpressure mechanism
+
+`tokio::sync::mpsc::unbounded_channel()` can accumulate events without bound. A bounded channel would provide backpressure.
 
 ---
 
