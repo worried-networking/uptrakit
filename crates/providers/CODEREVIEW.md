@@ -4,7 +4,7 @@ Crates reviewed:
 - `uptrakit-provider-core` (`crates/providers/core/`)
 - `uptrakit-provider-registry` (`crates/providers/registry/`)
 - `uptrakit-provider-github` (`crates/providers/github/`)
-- `uptrakit-provider-docker-registry` (`crates/providers/docker-registry/`)
+- `uptrakit-provider-docker` (`crates/providers/docker/`) — renamed from `uptrakit-provider-docker-registry` (`crates/providers/docker-registry/`)
 - `uptrakit-provider-homebrew` (`crates/providers/homebrew/`)
 - `uptrakit-provider-proxmox-helper-scripts` (`crates/providers/proxmox-helper-scripts/`)
 
@@ -42,7 +42,7 @@ The remaining issues — a hardcoded `per_page=100` in GitHub pagination and a w
 `crates/providers/core/src/secrets.rs:9-17`. Providers with no secrets implement `SecretMasking` with a single empty `impl` (see `HomebrewConfig`). Providers with secrets override the two methods. The JSON round-trip pattern in `mask_secrets_for` and `restore_secrets_for` (registry.rs:17-39) means masking logic never diverges from the serialized representation.
 
 **`CommandExecutor` dependency injection.**
-All four local providers (`HomebrewProvider`, `ProxmoxHelperScriptsProvider`, `GitHubProvider`, `DockerRegistryProvider`) receive `Arc<dyn CommandExecutor>` at construction time. Integration and unit tests pass a `LocalCommandExecutor`; production code does the same. This makes all provider logic testable without real subprocesses.
+All four local providers (`HomebrewProvider`, `ProxmoxHelperScriptsProvider`, `GitHubProvider`, `DockerProvider`) receive `Arc<dyn CommandExecutor>` at construction time. Integration and unit tests pass a `LocalCommandExecutor`; production code does the same. This makes all provider logic testable without real subprocesses.
 
 **`ProviderCapability::Other(String)` forward compatibility.**
 Unknown capabilities from a newer peer are preserved and excluded from capability intersection checks. `#[non_exhaustive]` on `ProviderCapability` reinforces this. Capability gating at the event-loop level is correctly restricted to `is_known()` variants only.
@@ -98,8 +98,8 @@ Asset filter patterns are compiled once at construction time (`github/src/provid
 **`parse_installed_formulae`/`parse_installed_casks` skip rather than error on missing fields.**
 `homebrew/src/provider.rs:98-114`. Items missing a `name` or `version` field are silently skipped with `continue`. This is the correct behaviour for discovery output from a real system — a partially corrupt `brew info` output should not abort the entire scan.
 
-**`DockerRegistryConfig` exposes `page_size` as a user-configurable field.**
-`docker-registry/src/config.rs:69-70`. Unlike GitHub's hardcoded `per_page=100`, the Docker provider allows the operator to tune pagination. Default is 1000 which is appropriate for most registries.
+**`DockerConfig` exposes `page_size` as a user-configurable field.**
+`docker/src/config.rs`. Unlike GitHub's hardcoded `per_page=100`, the Docker provider allows the operator to tune pagination. Default is 1000 which is appropriate for most registries.
 
 **Rate limit awareness in `GitHubProvider`.**
 `github/src/provider.rs:163-185`. The provider reads `x-ratelimit-remaining` and `x-ratelimit-reset` headers, logs a warning when remaining < 10, and surfaces a clear error message with reset timestamp when the limit is fully exhausted.
@@ -112,39 +112,13 @@ Asset filter patterns are compiled once at construction time (`github/src/provid
 format!("{}/repos/{}/{}/releases?per_page=100", ...)
 ```
 
-The GitHub API returns at most 100 releases per page. For repositories with more than 100 releases the returned list is silently truncated. There is no `Link` header follow-through. Affected users will see stale or missing versions without any error. The `DockerRegistryConfig` pattern of a configurable `page_size` field shows the established solution in this codebase.
-
-**[SEVERITY: Low]** `crates/providers/docker-registry/src/config.rs:876-882` — Incorrect Docker Hub user-image URL in both implementation and test
-
-The `image_web_url` method builds Docker Hub URLs for user-owned images as:
-
-```
-https://hub.docker.com/_/myuser/myrepo/tags?name=latest
-```
-
-The `_/` path prefix is reserved by Docker Hub for official images (`library/` namespace). The correct URL for user-owned images is:
-
-```
-https://hub.docker.com/r/myuser/myrepo/tags?name=latest
-```
-
-The test at line 864-882 asserts the wrong URL, so the bug is invisible to the test suite. Both the implementation and the test need correcting.
-
-**[SEVERITY: Low]** `crates/providers/docker-registry/src/config.rs:219-252` — `infer_registry` and `resolve_repository` duplicate identical hostname-detection heuristic
-
-Both free functions independently implement the same three-condition check:
-
-```rust
-first_component.contains('.') || first_component.contains(':') || first_component == "localhost"
-```
-
-If the heuristic needs to change (for example, to support numeric IPv4 addresses without a port), it must be updated in both places. A private helper `fn is_registry_hostname(s: &str) -> bool` would remove the duplication.
+The GitHub API returns at most 100 releases per page. For repositories with more than 100 releases the returned list is silently truncated. There is no `Link` header follow-through. Affected users will see stale or missing versions without any error. The `DockerConfig` pattern of a configurable `page_size` field shows the established solution in this codebase.
 
 #### 2026-02-24 Review
 
 ##### Issues
 
-**[SEVERITY: Low]** `docker-registry/src/auth.rs:43,130,142` — `Mutex::lock().unwrap()` on `cached_token` uses `std::sync::Mutex` in an async context
+**[SEVERITY: Low]** `docker/src/auth.rs` — `Mutex::lock().unwrap()` on `cached_token` uses `std::sync::Mutex` in an async context
 
 Risks blocking the Tokio runtime thread if contended. `tokio::sync::Mutex` would be idiomatic.
 
@@ -163,8 +137,8 @@ Tests at lines 100-279 cover: all five default method returns, `has_capability` 
 **Registry tests cover the full dispatch table.**
 `registry/src/registry.rs:244-597`. Tests cover: config parsing for all four providers, valid/invalid configs for each, `create_provider` round-trip for all four, `mask_config_secrets` and `restore_config_secrets` for GitHub and ProxmoxHelperScripts (the two providers with secrets), capability verification on constructed providers, and string-type variants of all three `ProviderOps` methods.
 
-**`DockerRegistryConfig` test coverage.**
-`docker-registry/src/config.rs:255-920`. Covers validation, registry inference for all six image reference formats (official, user, GHCR, private, localhost, port), repository resolution, serialization round-trips, `DockerAuth` both variants including masking and secret restore, and the four `TrackingMode` permutations. 30+ test cases for a single config struct is thorough.
+**`DockerConfig` and `ImageRef` test coverage.**
+`docker/src/config.rs` and `docker/src/image_ref.rs`. Covers validation, image reference parsing for all six reference formats (official, user, GHCR, private, localhost, port), `ImageRef::web_url` and `server_address`, serialization round-trips, `DockerAuth` both variants including masking and secret restore, and the `TrackingMode` permutations. Image reference parsing logic is centralized in `ImageRef::from_str` (previously duplicated across `infer_registry` and `resolve_repository`). 30+ test cases across the two modules.
 
 **ProxmoxHelperScripts path-traversal tests.**
 `proxmox-helper-scripts/src/config.rs:249-276`. Explicit tests for `owner` containing `/`, `repo` containing `..`, covering both path-traversal vectors in `GitHubReleaseSource.validate()`.
@@ -178,10 +152,6 @@ Tests at lines 100-279 cover: all five default method returns, `has_capability` 
 
 `GitHubProvider::fetch_releases` is the primary controller-side operation for the GitHub provider. It is the only significant async operation in the crates with no test coverage. There is no mock HTTP server (e.g., `httpmock`) test exercising: a normal 200 response with releases, a 403 rate-limited response, a 404 not-found response, or an invalid JSON body. The existing `url_construction` test covers URL generation only. The rest of the codebase uses `MockApiServer` via `httpmock` for exactly this pattern (see CLI integration tests); it should be used here.
 
-**[SEVERITY: Medium]** `crates/providers/docker-registry/src/config.rs:864-882` — Test asserts incorrect Docker Hub user-image URL
-
-The test `image_web_url_docker_hub_user` asserts `hub.docker.com/_/myuser/myrepo/tags?name=latest`. This URL is incorrect (see Code Quality issue above). Because the test asserts the wrong value, it passes while the implementation is wrong. The test must be corrected alongside the implementation.
-
 **[SEVERITY: Low]** `crates/providers/homebrew/src/provider.rs:708-722` — `detect_installed_version` and `fetch_releases` tested only for the empty-identifier guard
 
 The tests `homebrew_provider_detect_installed_version_empty_identifier_fails` and `homebrew_provider_fetch_releases_empty_identifier_fails` only verify the early-return guard. There are no tests for the JSON parsing code path inside `detect_installed_version` or `fetch_releases` using the sample JSON fixtures that are already defined in the test module. The existing `parse_installed_version` and `parse_latest_version` unit tests verify the parsing helpers directly, but the full async method path (including the `is_cask()` branch and the `Version::new` wrapping) is not exercised through mocked executor output.
@@ -194,7 +164,7 @@ All registry tests construct providers with `LocalCommandExecutor`. This is acce
 
 ##### Issues
 
-**[SEVERITY: Medium]** `core/src/traits.rs:142-252`, `docker-registry/src/provider.rs`, `github/src/provider.rs`, `homebrew/src/provider.rs`, `proxmox-helper-scripts/src/provider.rs` — All 21 provider crate async tests use bare `#[tokio::test]`
+**[SEVERITY: Medium]** `core/src/traits.rs:142-252`, `docker/src/provider.rs`, `github/src/provider.rs`, `homebrew/src/provider.rs`, `proxmox-helper-scripts/src/provider.rs` — All 21 provider crate async tests use bare `#[tokio::test]`
 
 None use `start_paused = true`. Per `testing.md`, required for all async tests.
 
@@ -234,13 +204,13 @@ The provider crates themselves contain no database access. All persistence is ha
 ### Strengths
 
 **Consistent use of `bail!` and `report!` throughout all provider crates.**
-No `Result<T, String>`, no `Report::new()`, no raw `Err(...)` construction. All errors use the `rootcause` prelude. Error types are crate-specific enums (`GitHubError`, `DockerRegistryError`, `RegistryError`) with `thiserror`-derived `Display`.
+No `Result<T, String>`, no `Report::new()`, no raw `Err(...)` construction. All errors use the `rootcause` prelude. Error types are crate-specific enums (`GitHubError`, `DockerError`, `RegistryError`) with `thiserror`-derived `Display`.
 
 **`#[serde(rename_all = "snake_case")]` consistently applied.**
 All public enums and structs in provider configs use `snake_case` serialization, matching the `ProviderType::as_str()` convention. `DockerAuth` uses `#[serde(tag = "type")]` correctly. `TrackingMode` and `HomebrewPackageType` both use `rename_all = "snake_case"`.
 
 **`skip_serializing_if = "Option::is_none"` on all optional config fields.**
-Optional fields such as `DockerRegistryConfig.registry`, `DockerRegistryConfig.auth`, `DockerRegistryConfig.tracked_tag`, `ProxmoxHelperScriptsConfig.github`, and `GitHubReleaseSource.auth_token` all use `skip_serializing_if`. API responses do not include null fields for unset options.
+Optional fields such as `DockerConfig.auth`, `DockerConfig.tracked_tag`, `ProxmoxHelperScriptsConfig.github`, and `GitHubReleaseSource.auth_token` all use `skip_serializing_if`. API responses do not include null fields for unset options.
 
 **Provider crate `lib.rs` files use selective re-exports.**
 Each provider crate re-exports only its public surface (`Config`, `Provider`, `Error`). Internal helpers are not re-exported. `uptrakit-provider-registry/src/lib.rs` explicitly documents its re-export strategy and the purpose of each public type.

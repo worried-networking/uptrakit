@@ -15,7 +15,7 @@ The provider registry crate (`uptrakit-provider-registry`) centralizes config va
 on `ProviderType`. Document provider behavior so the registry can continue to validate configs and mask secrets correctly.
 
 `ProviderType` implements `FromStr`, `Display`, and `as_str()` for string conversion. Use `s.parse::<ProviderType>()` to convert strings (returns
-`ParseProviderTypeError` on failure). The string representations are: `github_releases`, `proxmox_helper_scripts`, `docker_registry`, `homebrew`,
+`ParseProviderTypeError` on failure). The string representations are: `github_releases`, `proxmox_helper_scripts`, `docker`, `homebrew`,
 `apt`.
 
 ## Dependencies and re-exports
@@ -75,8 +75,8 @@ Provider crates:
 `uptrakit-command` | `crates/shared/command/` | Shell execution, `CommandExecutor` trait, `CommandSpec`, `LocalCommandExecutor`. | |
 `uptrakit-provider-core` |
 `crates/providers/core/` | Provider trait/abstractions; re-exports shared types and executor types. | | `uptrakit-provider-registry` |
-`crates/providers/registry/` | Centralized provider dispatch and validation; re-exports `ProviderType`. | | `uptrakit-provider-docker-registry` |
-`crates/providers/docker-registry/` | Docker/OCI Registry: tracks image tags. | | `uptrakit-provider-github` | `crates/providers/github/` | GitHub
+`crates/providers/registry/` | Centralized provider dispatch and validation; re-exports `ProviderType`. | | `uptrakit-provider-docker` |
+`crates/providers/docker/` | Docker/OCI image tracking and container discovery. | | `uptrakit-provider-github` | `crates/providers/github/` | GitHub
 Releases: fetches metadata; agent installs. | | `uptrakit-provider-homebrew` | `crates/providers/homebrew/` | Homebrew: agent-side version tracking
 and updates. | | `uptrakit-provider-proxmox-helper-scripts` | `crates/providers/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages
 helper scripts. |
@@ -87,7 +87,7 @@ all dispatch methods from a single declaration:
 ```rust
 register_providers! {
     GithubReleases => { config: GitHubConfig, provider: GitHubProvider },
-    DockerRegistry => { config: DockerRegistryConfig, provider: DockerRegistryProvider },
+    Docker => { config: DockerConfig, provider: DockerProvider },
     ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, provider: ProxmoxHelperScriptsProvider },
     Homebrew => { config: HomebrewConfig, provider: HomebrewProvider },
 }
@@ -176,7 +176,7 @@ pub trait SecretMasking: Serialize + DeserializeOwned {
 }
 ```
 
-Providers with no secrets (Homebrew) use the default no-op implementations. Providers with secrets (GitHub, Docker Registry, Proxmox Helper Scripts
+Providers with no secrets (Homebrew) use the default no-op implementations. Providers with secrets (GitHub, Docker, Proxmox Helper Scripts
 when GitHub config is present) override both methods with field-level masking logic.
 
 The registry uses generic helpers `mask_secrets_for::<T>()` and `restore_secrets_for::<T>()` that deserialize the JSON config, apply the trait
@@ -190,17 +190,17 @@ instantiation failures uniformly. The constructor should validate its configurat
 
 ### Bidirectional error conversion
 
-Every provider crate defines its own error enum (e.g., `DockerRegistryError`, `GitHubError`) and implements **bidirectional** `impl_report_conversion!`
+Every provider crate defines its own error enum (e.g., `DockerError`, `GitHubError`) and implements **bidirectional** `impl_report_conversion!`
 between the provider-specific error and the shared `ProviderError`:
 
 ```rust
 use uptrakit_shared_macros::impl_report_conversion;
 
 // Provider-specific → shared (for the registry to propagate errors)
-impl_report_conversion!(DockerRegistryError => ProviderError, |e| ProviderError::ProviderInternal(e.to_string()));
+impl_report_conversion!(DockerError => ProviderError, |e| ProviderError::ProviderInternal(e.to_string()));
 
 // Shared → provider-specific (for providers calling shared code that returns ProviderError)
-impl_report_conversion!(ProviderError => DockerRegistryError, |e| DockerRegistryError::Configuration(e.to_string()));
+impl_report_conversion!(ProviderError => DockerError, |e| DockerError::Configuration(e.to_string()));
 ```
 
 This bidirectional pattern allows:
@@ -261,22 +261,35 @@ shell command to execute after downloading the release asset. Supports `{version
 - 403/429 responses with `x-ratelimit-remaining: 0` return a rate-limit error
 - Asset filtering uses regex matching against asset names
 
-### Docker Registry provider (`uptrakit-provider-docker-registry`)
+### Docker provider (`uptrakit-provider-docker`)
 
-Tracks container image tags from OCI/Docker registries. Supports Docker Hub, GHCR, and any OCI Distribution Spec-compliant registry. Currently
-controller-side only; agent-side container discovery is not implemented.
+Tracks container image tags from OCI/Docker registries. Supports Docker Hub, GHCR, and any OCI
+Distribution Spec-compliant registry. Supports both controller-side upstream version resolution
+and agent-side container discovery.
 
-**Config fields (`DockerRegistryConfig`):**
+**No fields are required.** An empty config `{}` is valid (suitable for discovery and digest
+tracking of images whose reference is stored on the software item).
 
-| Field | Type | Required | Default | Description | | :-------------------- | :------------------- | :------- | :-------------------- |
-:--------------------------------------------------------- | | `image` | String | Yes | -- | Full image reference (e.g. `nginx`,
-`ghcr.io/owner/repo`). | | `registry` | `Option<String>` | No | inferred from `image` | Override registry hostname. | | `auth` | `Option<DockerAuth>`
-| No | `null` | Authentication credentials. | | `tracking_mode` | TrackingMode | No | `semver_tags` | `semver_tags` or `digest_tracking`. | |
-`tag_patterns` | `Vec<String>` | No | `[]` | Regex patterns to filter tags (semver mode, OR logic). | | `tag_strip_prefix` | String | No | `"v"` |
-Prefix to strip before semver parsing. | | `include_prereleases` | bool | No | `false` | Include pre-release versions. | | `tracked_tag` |
-`Option<String>` | No | `"latest"` | Tag to track (digest mode). | | `page_size` | u32 | No | `1000` | Max tags per API request. | | `restart_command`
-| `Option<String>` | No | `null` | Custom shell command to run after pulling the image (e.g. `docker compose up -d`). Supports `{image}`, `{tag}`,
-`{version}` placeholders (shell-escaped). |
+The `package_identifier` on the software item is the image reference (e.g. `nginx`,
+`ghcr.io/owner/app`). Image reference parsing follows the standard Docker format: missing registry
+defaults to Docker Hub, missing tag defaults to `latest`, single-segment names have `library/`
+prepended for Docker Hub.
+
+**Config struct: `DockerConfig`**
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `docker_host` | `Option<String>` | `null` | Docker daemon endpoint override |
+| `auth` | `Option<DockerAuth>` | `null` | Registry authentication credentials |
+| `tracking_mode` | `TrackingMode` | `semver_tags` | `semver_tags` or `digest_tracking` |
+| `tag_patterns` | `Vec<String>` | `[]` | Regex filters for tags (OR logic; empty = all) |
+| `tag_strip_prefix` | String | `"v"` | Prefix to strip before semver parsing |
+| `include_prereleases` | bool | `false` | Include pre-release versions |
+| `tracked_tag` | `Option<String>` | `"latest"` | Tag to track in digest mode |
+| `page_size` | u32 | `1000` | Max tags per registry API request |
+| `compose_restart` | `Option<ComposeRestartConfig>` | `null` | Run `docker compose up -d` after pull |
+| `post_pull_command` | `Option<String>` | `null` | Custom shell command after pull |
+| `ssh_key_path` | `Option<String>` | `null` | SSH key path for SSH docker connections (injected by agent-ssh) |
 
 **DockerAuth** (tagged enum with `#[serde(tag = "type")]`):
 
@@ -286,37 +299,52 @@ Prefix to strip before semver parsing. | | `include_prereleases` | bool | No | `
 **Tracking modes:**
 
 - **SemverTags** (default): Lists tags from the registry, filters by `tag_patterns` (OR logic, empty = all), strips `tag_strip_prefix`, parses as
-  semver (non-semver tags excluded), filters pre-releases unless `include_prereleases`, sorts descending by version. Each tag becomes an
-  `UpstreamRelease` (no `release_notes`, no `published_at`, no `assets`).
+  semver (non-semver tags excluded), filters pre-releases unless `include_prereleases`, sorts descending by version. `detect_installed_version`
+  always returns `None` in this mode.
 - **DigestTracking**: Gets the manifest digest for `tracked_tag` (default `"latest"`). Returns a single `UpstreamRelease` with the digest as the
-  version string. Useful for detecting when a mutable tag has been updated.
+  version string. `detect_installed_version` calls bollard `inspect_image` to read the local image digest from `RepoDigests`.
+
+**Capabilities: `[DiscoverLocalSoftware]`**
+
+Discovery calls bollard `list_containers(all=true)` then `inspect_image` per image. Bare SHA image
+refs and locally built images (no `RepoDigests`) are skipped.
 
 **Image pulling via bollard (`execute_update`):**
 
 The `execute_update` step pulls the image directly through the Docker daemon API using the
 [bollard](https://github.com/fussybeaver/bollard) crate — no `docker` CLI binary is required. The daemon
-is reached via its Unix socket (or Windows named pipe), using `bollard::Docker::connect_with_defaults()`
-which respects the `DOCKER_HOST` environment variable and falls back to the platform default.
+is reached via the configured `docker_host` (or defaults).
 
 Progress events from the daemon are streamed to the caller via `output_tx`. Errors surfaced in the daemon
-response (the `error_detail` field of `CreateImageInfo`) are converted to `DockerRegistryError::PullFailed`
-and fail the update immediately.
+response are converted to `DockerError::PullFailed` and fail the update immediately.
 
-The internal `DockerPuller` trait abstracts image pulling so that tests can inject a `MockDockerPuller`
-without a live Docker daemon:
+The internal `DockerClient` trait abstracts pull, inspect, and list\_containers so that tests can inject a
+`MockDockerClient` without a live Docker daemon:
 
 ```rust
-// Production: BollardDockerPuller (created by DockerRegistryProvider::new)
-// Tests:      MockDockerPuller (injected via DockerRegistryProvider::new_for_test)
+// Production: BollardDockerClient (created by DockerProvider::new)
+// Tests:      MockDockerClient (injected via DockerProvider::new_for_test)
 ```
 
 Auth credentials from `DockerAuth` are forwarded to bollard's `DockerCredentials`:
 
 - `basic` auth → `DockerCredentials { username, password, serveraddress }` (serveraddress inferred from
-  the image reference).
+  the image reference via `ImageRef::server_address()`).
 - `bearer` auth → `DockerCredentials { registrytoken }`.
 
-After a successful pull, `restart_command` (if configured) is executed via the injected `CommandExecutor`.
+After a successful pull, `compose_restart` (if set) runs `docker compose up -d`, then
+`post_pull_command` (if set) is executed via the injected `CommandExecutor`.
+
+**ConnectionContext injection (SSH agent):**
+
+`agent-ssh` constructs a `ConnectionContext` with `docker_host_override = "ssh://user@host:port"`
+and passes it to every `handle_*` call in `agent-core`. The context is applied to the provider
+config before deserialization via `ConnectionContext::apply_to_config()`. This means the Docker
+provider automatically reaches the remote daemon over SSH when invoked by `agent-ssh`, with no
+manual `docker_host` configuration required.
+
+See [Autodiscovery](../end-user/providers/docker.md#remote-docker-via-ssh) for end-user
+documentation on remote Docker.
 
 ### Proxmox Helper Scripts provider (`uptrakit-provider-proxmox-helper-scripts`)
 

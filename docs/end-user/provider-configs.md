@@ -15,7 +15,7 @@ Uptrakit ships with five built-in provider types:
 | Provider type | Description | Autodiscovery |
 | --- | --- | --- |
 | `github_releases` | Tracks releases published on GitHub. Resolves the latest release tag and optionally filters by asset or pre-release status. | No |
-| `docker_registry` | Tracks image tags in a Docker/OCI registry. Resolves the latest tag according to a configurable tag pattern. | No |
+| `docker` | Tracks image tags or SHA digests in a Docker/OCI registry. Can pull images via the local or remote Docker daemon, and discovers running/stopped containers. | Yes |
 | `homebrew` | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host. | Yes |
 | `proxmox_helper_scripts` | Tracks applications managed by Proxmox VE community helper scripts. Installed and latest versions are resolved locally by the agent. | Yes |
 | `apt` | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh. | Yes |
@@ -29,13 +29,20 @@ Uptrakit ships with five built-in provider types:
 | `asset_pattern` | No | Regex pattern to match a release asset name |
 | `include_prereleases` | No | Include pre-release tags when resolving latest (default: `false`) |
 
-### `docker_registry` configuration fields
+### `docker` configuration fields
+
+The `docker` provider requires no mandatory fields — an empty config `{}` is valid. For the full
+field reference, see [Docker Provider](providers/docker.md).
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `image` | Yes | Image name, e.g. `nginx` or `ghcr.io/example/myapp` |
-| `registry` | No | Registry URL override (defaults to Docker Hub) |
-| `tag_pattern` | No | Regex pattern to filter tags when resolving latest |
+| `tracking_mode` | No | `"semver_tags"` (default) or `"digest_tracking"` |
+| `tag_patterns` | No | Regex patterns to filter tags in semver mode |
+| `tracked_tag` | No | Tag to track in digest mode (default: `"latest"`) |
+| `auth` | No | Registry credentials (`basic` or `bearer`) |
+| `docker_host` | No | Docker daemon endpoint override |
+| `compose_restart` | No | Run `docker compose up -d` after pulling |
+| `post_pull_command` | No | Custom shell command after pulling |
 
 ### `homebrew` configuration fields
 
@@ -102,11 +109,11 @@ uptrakit provider-configs create \
   --type github_releases \
   --config '{"owner":"example","repo":"my-app"}'
 
-# Create a Docker Registry provider config
+# Create a Docker provider config (semver tags)
 uptrakit provider-configs create \
   --name "my-image Docker" \
-  --type docker_registry \
-  --config '{"image":"example/my-image","tag_pattern":"^[0-9]+\\.[0-9]+\\.[0-9]+$"}'
+  --type docker \
+  --config '{"tracking_mode":"semver_tags","tag_patterns":["^[0-9]+\\.[0-9]+\\.[0-9]+$"]}'
 
 # Create a Homebrew formula provider config
 uptrakit provider-configs create \
@@ -127,13 +134,14 @@ uptrakit provider-configs delete <PROVIDER_CONFIG_ID>
 
 ## Autodiscovery
 
-The `homebrew`, `proxmox_helper_scripts`, and `apt` provider types support
-**autodiscovery**: the agent queries the local package manager and reports installed
+The `docker`, `homebrew`, `proxmox_helper_scripts`, and `apt` provider types support
+**autodiscovery**: the agent queries the local runtime (Docker daemon or package manager) and reports installed
 packages back to the controller, which creates pending software items for your review.
 
 If no provider config exists for a discovery-capable type when a host registers, Uptrakit
 automatically creates one. Auto-created configs are named:
 
+- `Docker`
 - `Homebrew (Formulae)`
 - `Homebrew (Casks)`
 - `Proxmox Helper Scripts`

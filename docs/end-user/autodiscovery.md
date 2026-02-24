@@ -24,13 +24,29 @@ Discovery-capable providers currently supported:
 
 | Provider | What it discovers |
 | --- | --- |
+| Docker | Running and stopped containers on the host, grouped by image reference |
 | Homebrew (Formulae) | Homebrew formula packages installed on the host |
 | Homebrew (Casks) | Homebrew cask packages installed on the host |
 | Proxmox Helper Scripts | Applications managed by community Proxmox VE helper scripts |
 
 If no provider config exists for a discovery-capable provider when a host registers, Uptrakit
-creates one automatically (for example, "Homebrew (Formulae)" or "Proxmox Helper Scripts"). This
-means the feature works out of the box on supported hosts with no manual configuration required.
+creates one automatically (for example, `"Docker"`, `"Homebrew (Formulae)"`, or
+`"Proxmox Helper Scripts"`). This means the feature works out of the box on supported hosts with
+no manual configuration required.
+
+### Docker discovery
+
+The Docker provider discovers containers by querying the local Docker daemon for all containers
+(running and stopped). For each container image that is not a bare SHA digest:
+
+- Images with no registry provenance (locally built, no `RepoDigests`) are skipped.
+- Container names are stored as extra metadata.
+- The `package_identifier` for discovered items is the full image reference including tag.
+
+Auto-created config name: **`"Docker"`** (one shared config per tenant; no per-host split).
+
+See [Docker Provider](providers/docker.md#autodiscovery) for the full discovery behaviour and name
+derivation rules.
 
 ## Software Item States
 
