@@ -13,11 +13,7 @@ database migrations, a 10-phase startup sequence, full PKI lifecycle management
 (CA generation, CRL signing, OCSP support), a DB-backed HA scheduler, and a suite
 of background tasks. The overall design is solid: startup phases are typed structs,
 the scheduler uses TOCTOU-free optimistic locking, and the PKI layer is well-covered
-by unit tests. Two issues require immediate attention: (1) the mTLS verifier allows
-unauthenticated clients at the TLS layer, delegating all trust enforcement to
-application-layer checks; and (2) the CRL manager is registered with `track_abort`
-rather than `track`, meaning a shutdown abort may corrupt the TLS configuration file
-on disk.
+by unit tests. One issue requires immediate attention: the CRL manager was previously registered with `track_abort` rather than `track` (now fixed). The mTLS verifier uses `.allow_unauthenticated()` intentionally for reverse-proxy deployments, documented in `pki.rs` and `mtls_acceptor.rs`.
 
 ---
 
@@ -138,26 +134,6 @@ Two additional usages compile out the `resolve_static_dir` function when the fro
 
 ### Issues
 
-**[SEVERITY: High]** `crates/core/controller/src/pki.rs:1167-1172` — mTLS verifier uses `.allow_unauthenticated()`
-
-```rust
-let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
-    .with_crls(crls)
-    .allow_unauthenticated()      // <-- clients without a cert are accepted
-    .only_check_end_entity_revocation()
-    .build()
-    …
-```
-
-Clients that present no certificate establish a full TLS session. All agent
-WebSocket trust then depends entirely on application-layer identity checks
-(`machine_id` validation, JWT, etc.). A bug in any one of those checks allows an
-unauthenticated client to reach the WebSocket handler. Removing
-`.allow_unauthenticated()` would enforce mutual authentication at the transport
-layer, providing defense in depth. Reverse-proxy deployments that forward
-pre-validated certificates should remain an opt-out path documented at the
-configuration level, not the default.
-
 **[SEVERITY: Medium]** `crates/core/controller/src/pki.rs:69-77` — `encode_der_length` silently truncates lengths >= 65,536 bytes
 
 ```rust
@@ -223,25 +199,6 @@ The one-time registration token is emitted via `tracing::info!`. In production w
 - **All domain-significant durations centralized in `durations.rs` with doc-comments.** Every timing constant is in a single file with documentation, eliminating magic numbers.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/core/controller/src/tasks.rs:254-256` — CRL manager registered with `track_abort` instead of `track`
-
-```rust
-// main.rs:254-256
-let crl_handle = tokio::spawn(Arc::clone(&crl_manager).run(Some(bg.child_token())));
-bg.track_abort("crl-manager", crl_handle);
-```
-
-The CRL manager's `run` method accepts an `Option<CancellationToken>` and is
-passed `Some(bg.child_token())`, so it can respond to cancellation. However, by
-registering it with `track_abort` instead of `track`, `BackgroundTasks::shutdown`
-calls `handle.abort()` on it directly — before the token is cancelled — without
-waiting for a clean exit. If the CRL manager is mid-write to the on-disk TLS
-configuration (`server.crt`, `server.key`) when aborted, the write is torn,
-producing a corrupted or zero-length file. On the next startup the controller
-will fail to load the server certificate. The fix is to change
-`bg.track_abort("crl-manager", crl_handle)` to `bg.track("crl-manager", crl_handle)`,
-relying on the already-wired `CancellationToken` path.
 
 **[SEVERITY: Medium]** `crates/core/controller/src/tasks.rs:98-104` — 5-second shutdown timeout may be too short for `release_all_claims`
 
@@ -430,13 +387,6 @@ and has no correctness impact.
 - **All HA-critical timing constants are centralised with documentation.** `src/durations.rs:1-34` — Makes HA tuning auditable from a single location.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/core/controller/src/tasks.rs:254-256` — CRL manager abort may corrupt TLS config on disk
-
-See Code Quality section. This is also an HA concern: a corrupted `server.crt` or
-`server.key` on disk causes every subsequent startup attempt to fail until an
-operator manually removes the file, creating extended downtime even though the
-controller binary itself is healthy.
 
 **[SEVERITY: Medium]** `crates/core/controller/src/scheduler/mod.rs:153` — Scheduler task execution blocks shutdown
 

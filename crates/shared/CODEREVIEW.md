@@ -6,7 +6,7 @@
 
 ## Summary
 
-These nine crates form the foundational layer that every other crate in the workspace builds upon. The overall quality is high: cryptographic primitives are correctly implemented, type safety is enforced throughout, and the abstractions are clean and well-documented. The most serious systemic issue is an architectural layering violation in `uptrakit-crypto` where an unconditional `sea-orm` dependency couples a foundational primitive to the ORM. Two high-severity operational issues also require attention: orphaned child processes after command timeout in `uptrakit-command`, and a split source-of-truth for provider capability knowledge in `uptrakit-shared-types`. These issues are documented and understood by the team but have not yet been resolved.
+These nine crates form the foundational layer that every other crate in the workspace builds upon. The overall quality is high: cryptographic primitives are correctly implemented, type safety is enforced throughout, and the abstractions are clean and well-documented. The most serious systemic issue is an architectural layering violation in `uptrakit-crypto` where an unconditional `sea-orm` dependency couples a foundational primitive to the ORM.
 
 ---
 
@@ -104,18 +104,6 @@ Should use `expect()` with infallibility reason.
 
 ### Issues
 
-**[SEVERITY: High]** `crates/shared/types/src/provider_types.rs:34-36` — `supports_discovery()` is a hardcoded capability mirror that splits the source of truth
-
-```rust
-pub fn supports_discovery(&self) -> bool {
-    matches!(self, Self::Homebrew | Self::ProxmoxHelperScripts)
-}
-```
-
-The authoritative list of capabilities for each provider lives in `Provider::capabilities()` inside the respective provider crate. This method duplicates that knowledge at compile time in `uptrakit-shared-types`, which is on the opposite side of the crate dependency graph. Adding a new discovery-capable provider requires changes in three places: the provider crate (`Provider::capabilities()`), `register_providers!` macro invocation, and this `matches!` arm. If the `matches!` arm is forgotten, the new provider silently never receives discovery assignments from the server. Furthermore, `ProviderType` is `#[non_exhaustive]` but this method uses a closed `matches!` pattern with no wildcard — new variants added to the enum will compile cleanly but will silently return `false`, defeating the purpose of `#[non_exhaustive]` as a forward-compatibility tool.
-
-The fundamental design tension is that the server needs this information at runtime without instantiating a `Provider` object. The preferred resolution is to drive capability metadata through a `ProviderType::capabilities() -> &'static [ProviderCapability]` method on the enum itself (mirroring the structure of `Provider::capabilities()`), making `supports_discovery()` a derived query rather than a hardcoded list.
-
 **[SEVERITY: Medium]** `crates/shared/command/src/executor.rs` — `execute` and `execute_quiet` share identical timeout logic across two methods
 
 Both `LocalCommandExecutor::execute` (lines 176-183) and `LocalCommandExecutor::execute_quiet` (lines 192-199) contain the exact same `tokio::time::timeout` / `report!(CommandError::TimedOut)` block. The only difference between the two methods is whether `output_tx` is passed to `run_command_exec_impl`. This duplication means any future change to timeout behavior (e.g., exposing a `cancelled` token, killing the child process) must be applied in two places. Fix: extract a private `run_with_optional_timeout(fut, timeout) -> crate::Result<(String, i32)>` helper.
@@ -132,7 +120,7 @@ Both `LocalCommandExecutor::execute` (lines 176-183) and `LocalCommandExecutor::
 
 - **`uptrakit-openapi-client` retry tests verify call counts.** The retry-exhaustion tests (`retry_exhausted_on_repeated_503`, `retry_exhausted_on_repeated_429`) use `mock.assert_calls(3)` to verify the exact number of HTTP requests made, confirming that the retry loop iterates the expected number of times. The no-retry tests (`no_retry_on_400`, `no_retry_on_401`) confirm that `mock.assert_calls(1)` holds for non-retriable status codes.
 
-- **`uptrakit-shared-types` serialization tests.** `provider_types.rs` carries 11 tests covering serialization round-trips for all four `ProviderType` variants, `Display`, `FromStr` (valid and invalid), `as_str` / `Display` consistency, `supports_discovery` values, and optional field omission for `ReleaseAsset`/`ReleaseInfo`. All are deterministic and have no external dependencies.
+- **`uptrakit-shared-types` serialization tests.** `provider_types.rs` carries 11 tests covering serialization round-trips for all `ProviderType` variants (including `Other(String)`), `Display`, `FromStr` (valid and invalid), `as_str` / `Display` consistency, and optional field omission for `ReleaseAsset`/`ReleaseInfo`. All are deterministic and have no external dependencies.
 
 - **`uptrakit-build-info` output stability test.** `render_human_uses_stable_keys_and_order` constructs a `BuildInfo` with fixed values and asserts the exact multi-line string output. This is a contract test that will catch any future field reordering or format change.
 
@@ -175,16 +163,6 @@ Tests such as `expand_tilde_user_syntax_unchanged` and `validate_path_name_*` co
 - **`uptrakit-openapi-client` `Retry-After` header is respected.** The 429 path parses the `Retry-After` header as numeric seconds and uses it as the delay, falling back to `initial_delay` only when the header is absent or unparseable. The value is additionally clamped to `max_delay`, preventing a server from forcing an arbitrarily long client pause.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/shared/command/src/executor.rs:108-112` — Orphaned child processes on command timeout
-
-The `with_timeout` doc-comment explicitly identifies this gap:
-
-> The child process's stdio pipes are closed, but the orphaned process is not killed; a follow-up task can add `child.start_kill()` once the executor is restructured to retain the child handle outside the completion future.
-
-When `tokio::time::timeout` fires, the `run_command_exec_impl` future is dropped. Dropping the future closes the stdio pipe handles, but the underlying OS process continues running. For package manager commands that hold advisory locks (`apt`, `brew`, `dnf`), the orphaned process retains the lock indefinitely. Subsequent update attempts on the same host will time out waiting for the lock, which will also orphan their processes, eventually exhausting available process table entries or disk space for lock files.
-
-The remediation requires restructuring `run_command_exec_impl` to return the `tokio::process::Child` handle separately from the output-collection future, then calling `child.start_kill()` in the timeout branch. This is a known, documented gap that should be tracked as a work item.
 
 **[SEVERITY: Low]** `crates/shared/openapi-client/src/lib.rs` — `Retry-After` parsing only handles numeric seconds, not HTTP-date format
 
@@ -272,18 +250,6 @@ Unlike `Capability` which uses `Other(String)`, `ServiceType` fails deserializat
 Inconsistent: `ProviderType`, `ServiceType`, `HookShell` have it, but `SoftwareDiscoveryState`, `MqttTransport`, `MqttClientConnectionStatus`, `DeviceAuthStatus`, `OutputStreamType`, `ServiceStatus` do not.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/shared/types/src/provider_types.rs:11,34-36` — `#[non_exhaustive]` on `ProviderType` is undermined by `supports_discovery()`
-
-`ProviderType` is correctly marked `#[non_exhaustive]`, which signals to downstream crates that new variants may be added. However, `supports_discovery()` uses a closed `matches!` pattern:
-
-```rust
-matches!(self, Self::Homebrew | Self::ProxmoxHelperScripts)
-```
-
-A new variant added to `ProviderType` will not trigger any compile error or warning in this method. The Rust compiler would require a wildcard only if the match were exhaustive (using `match`), but `matches!` always implicitly includes an else-false branch. The method will silently return `false` for any new variant, which means the server will never schedule discovery assignments for that provider. The bug manifests at runtime, not at compile time, and only in the discovery workflow — meaning it may not be caught until an operator notices the provider never discovers software.
-
-This issue is distinct from but related to the code quality finding above. The code quality issue is about the split source of truth; this extensibility issue is specifically about the silent compile-time regression risk when adding new variants. Fix: if the `matches!`-based approach is retained in the short term, add an exhaustive `match` in a `#[cfg(test)]` block that explicitly handles every variant and fails to compile when a new one is added without a conscious `supports_discovery` decision.
 
 **[SEVERITY: Medium]** `crates/shared/agent-core/Cargo.toml:22` — `uptrakit-agent-core` links all providers unconditionally
 

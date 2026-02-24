@@ -19,13 +19,13 @@ consistently to `Capability` and `CloseReason`. Tests cover every message
 variant, the full sequence-counter state machine, all serde edge cases, and
 spec-conformance against `asyncapi.yaml`.
 
-Three issues require attention before the next protocol version increment:
-`ProviderType` lacks the `Other` forward-compatibility pattern used by
-`Capability` and `CloseReason`, creating a hard parse failure on unknown
-provider types; `ServiceMessage` and `ControllerMessage` mix agent and MQTT
+Two issues require attention before the next protocol version increment:
+`ServiceMessage` and `ControllerMessage` mix agent and MQTT
 concerns in a single enum without documented segregation guidance for
 `ServiceHandler` implementors; and `EnrollPayload.service_type` deprecation is
-documented in a comment but not enforced by the compiler.
+documented in a comment but not enforced by the compiler. `ProviderType` now
+correctly uses `Other(String)` for forward-compatibility, matching the pattern
+established by `Capability` and `CloseReason`.
 
 ---
 
@@ -290,32 +290,6 @@ mentioning this scope boundary in a comment at the top of the
   `ErrorCode::BadRequest` response rather than panicking or silently
   ignoring them.
 
-### Issues
-
-**[SEVERITY: Medium]** `src/lib.rs:524` — `VersionCheckAssignment.provider_type`
-uses `ProviderType`, which has no `Other` forward-compatibility variant
-
-`ProviderType` is defined in `uptrakit-shared-types` and uses a strict `FromStr`
-that returns `ParseProviderTypeError` for unknown strings. If a controller
-running a newer build sends a `CheckVersions` or `ExecuteUpdate` message
-containing a `provider_type` that an older agent does not recognise, the entire
-`ControllerMessage` fails to deserialise. The agent receives no actionable
-error — the frame is dropped at the serde layer, the sequence counter advances
-on the agent side but not the controller side, and the connection is closed with
-`ErrorCode::SequenceError` on the next valid message.
-
-The same gap applies to `DiscoveryProviderAssignment.provider_type`
-(`lib.rs:806`) and `ExecuteUpdatePayload.provider_type` (`lib.rs:588`).
-
-The fix is to add `Other(String)` to `ProviderType` in `uptrakit-shared-types`
-following the same pattern used for `Capability`, with `is_known()` excluding
-`Other` from execution. Until that is done, a controller with a new provider
-type cannot safely send assignments to agents that predate that provider type —
-the assignment silently fails rather than being skipped gracefully.
-
-This is the most significant extensibility gap in the wire protocol.
-(`src/lib.rs:524`, `src/lib.rs:588`, `src/lib.rs:806`)
-
 ---
 
 ## Database
@@ -430,38 +404,6 @@ removed.
 Nested within `ExecuteUpdatePayload`, which crosses the wire boundary. Older agents would fail to deserialize new hook types.
 
 ### Issues
-
-**[SEVERITY: Medium]** `src/lib.rs:524`, `src/lib.rs:588`, `src/lib.rs:806` —
-`ProviderType` does not use the `Other` forward-compatibility pattern, causing
-hard parse failures on unknown provider types in wire messages
-
-`Capability` and `CloseReason` both handle unknown strings via
-`Other(String)`/`Unknown(String)`. `ProviderType`, re-exported from
-`uptrakit-shared-types`, does not. It is used in three wire message fields:
-`VersionCheckAssignment.provider_type`, `ExecuteUpdatePayload.provider_type`,
-and `DiscoveryProviderAssignment.provider_type`.
-
-When a controller adds a new provider type and sends a `CheckVersions` or
-`ExecuteUpdate` message containing that type, agents that predate the addition
-cannot deserialise the containing `ControllerMessage`. The entire message is
-dropped at the serde layer. The agent's sequence counter does not advance (it
-never saw the message), while the controller's sequence counter did advance
-(it sent the message). The next valid message the controller sends will be
-rejected by `IncomingSeq::validate` with a sequence error, closing the
-connection.
-
-The cascading effect is that adding a new provider type to the controller
-breaks connections with older agents that have no matching variant — not
-gracefully with a typed error, but silently with a parse failure followed by
-a sequence mismatch close.
-
-The fix belongs in `uptrakit-shared-types`, not here, but the impact is felt
-at this crate's boundary: add `ProviderType::Other(String)` with an `is_known()`
-guard, and update the agent-side handlers to skip assignments whose
-`provider_type.is_known()` returns `false` rather than rejecting them.
-
-This issue was flagged in Phase 1 findings (Extensibility section: "Wire
-Protocol Forward Compatibility — Gap").
 
 **[SEVERITY: Medium]** `src/lib.rs:214–262` — `ServiceMessage` and
 `ControllerMessage` mix agent and MQTT concerns without structural separation,

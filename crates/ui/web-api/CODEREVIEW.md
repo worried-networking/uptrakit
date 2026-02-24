@@ -4,7 +4,7 @@
 
 `uptrakit-web-api` is the largest and most complex crate in the workspace (~98 `.rs` source files, approximately 1.2 MB of Rust). It implements the full HTTP/WebSocket API server: route handlers (80+ REST endpoints), WebSocket lifecycle management for agents, MQTT services, and SSH agents, OIDC authentication flows, JWT/session management, PKI operations, MQTT lease coordination, cross-controller event delivery, and database query helpers. It is a library crate consumed exclusively by `uptrakit-controller`.
 
-The crate demonstrates several architectural strengths: a well-designed builder pattern for `AppState`, strong security primitives throughout the auth subsystem, consistent use of typed permission extractors, and a clean `CaPublicSnapshot`/`CaKeyStore` split that keeps private key material isolated. The primary concerns are concentrated in three areas: a cluster of High-severity security gaps in the authentication flow (unverified OIDC email, missing JWT audience claim, in-memory-only token revocation), critical database query performance issues (multiple N+1 patterns and full-table scans that will not scale), and code quality issues in the largest route handlers where complexity has grown well beyond maintainable bounds.
+The crate demonstrates several architectural strengths: a well-designed builder pattern for `AppState`, strong security primitives throughout the auth subsystem, consistent use of typed permission extractors, and a clean `CaPublicSnapshot`/`CaKeyStore` split that keeps private key material isolated. The primary concerns are concentrated in two areas: a cluster of High-severity security gaps in the authentication flow (unverified OIDC email, missing JWT audience claim, in-memory-only token revocation), and code quality issues in the largest route handlers where complexity has grown well beyond maintainable bounds. The previously identified N+1 query patterns in `list_update_history`, `load_item_hosts`, and the autodiscovery ignore-list loop have been resolved using batch loading with subqueries and `HashMap` lookups.
 
 ---
 
@@ -70,10 +70,6 @@ The plain JSON route should be registered unconditionally; Swagger UI should be 
 - **`SecretString` at all API input boundaries** — OIDC tokens, device-flow codes, API token responses use `SecretString`; raw bytes are not retained after the response is serialized.
 
 ### Issues
-
-**[SEVERITY: High]** `src/routes/server_cert.rs:199` — mTLS uses `.allow_unauthenticated()`
-
-`WebPkiClientVerifier::builder(...).allow_unauthenticated()` permits TLS connections from clients that present no certificate at all. The agent WebSocket trust boundary then relies entirely on application-layer bearer-secret or service-ID checks rather than transport-layer PKI enforcement. A network-adjacent attacker can establish a TLS session and probe the anonymous enrollment path without any certificate. Correct production posture is `.build()` (unauthenticated clients rejected at TLS handshake).
 
 **[SEVERITY: Medium]** `src/auth/jwt.rs:101` — JWT validation uses `Validation::default()` with no audience check
 

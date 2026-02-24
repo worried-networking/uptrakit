@@ -21,7 +21,7 @@ The discovery-codepath split has been resolved: `ProviderType::supports_discover
 
 A secondary concern is that platform-specific providers (Homebrew for macOS, ProxmoxHelperScripts for Proxmox VE) are compiled unconditionally into all agent binaries, causing Linux agents to accept configuration for `HomebrewProvider` and fail only at runtime when the `brew` binary is absent.
 
-The remaining issues — a hardcoded `per_page=100` in GitHub pagination, a wrong Docker Hub user-image URL in both implementation and test, and a silent serialization-error swallow in `mask_secrets_for` — are lower severity but should be corrected before the next release.
+The remaining issues — a hardcoded `per_page=100` in GitHub pagination and a wrong Docker Hub user-image URL in both implementation and test — are lower severity but should be corrected before the next release.
 
 ---
 
@@ -50,14 +50,6 @@ Unknown capabilities from a newer peer are preserved and excluded from capabilit
 **`ProxmoxHelperScriptsConfig` two-context design.**
 `crates/providers/proxmox-helper-scripts/src/config.rs:61-118`. The `script_url` field defaults to an empty string at deserialization time (`#[serde(default)]`). `validate()` rejects an empty URL for version-check or update contexts. The comment at lines 63-66 clearly documents that `validate()` must not be called during discovery. This is an explicit and documented design choice, not a hidden special case.
 
-### Issues
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/software_items.rs:329-332` — Package identifier validation uses a raw string literal, not the `ProviderType` enum
-
-The autodiscovery processing code compares `config.provider_type == "homebrew"` as a raw string to apply Homebrew-specific package identifier constraints. This check is in the query layer, disconnected from the `Provider` trait hierarchy. When a new provider with its own identifier constraints is added, the developer must know to add a branch in this query file. There is no trait method that provider authors are guided toward, and no compile-time signal when it is missed.
-
-The correct fix is a `fn validate_package_identifier(&self, value: &str) -> Result<()>` method on the `Provider` trait (with a permissive default), called from the query helper through the registry.
-
 ---
 
 ## Security & Safety
@@ -83,16 +75,6 @@ The discriminant is a fixed set of known variants. No free-form string dispatch.
 Providers that have no secrets implement an empty `impl SecretMasking for HomebrewConfig {}` and take the default no-op. The masking path can never panic by design.
 
 ### Issues
-
-**[SEVERITY: Medium]** `crates/providers/registry/src/registry.rs:21` — `mask_secrets_for` silently swallows serialization errors
-
-```rust
-serde_json::to_value(cfg.with_secrets_masked()).unwrap_or_else(|_| config.clone())
-```
-
-If `to_value` fails (for example because the masked config contains a `SecretString` that serializes differently than expected), the function returns the original unmasked config to the API caller. There is no log, no metric, and no error propagation. The caller receives a response that may contain live credentials with no indication that masking failed.
-
-This should either propagate the error (`Result<serde_json::Value>`) or at minimum emit a `tracing::error!` before falling back, so that misconfigured serialization is visible in production logs rather than silently exposing secrets.
 
 **[SEVERITY: Low]** `crates/providers/github/src/provider.rs:52` — Bearer token is materialized as a plain `String` in memory
 
@@ -233,10 +215,6 @@ If `create_provider` succeeds, the returned `Box<dyn Provider>` is guaranteed to
 
 ### Issues
 
-**[SEVERITY: Medium]** All provider crates inherit the orphaned-child-process issue from `uptrakit-command`
-
-`crates/shared/command/src/executor.rs:108-112`. When a command times out, the child process is not killed. For Homebrew (`brew upgrade`), apt, and ProxmoxHelperScripts (shell script execution), this means a timed-out update command may continue holding package manager locks, blocking all subsequent updates on the same host until the process is manually killed or the system is restarted. This is documented in the `CommandExecutor` public API docs and acknowledged as a known gap. The fix belongs in `uptrakit-command` but affects all four local providers.
-
 **[SEVERITY: Low]** `crates/providers/github/src/provider.rs` — No retry on transient HTTP failure
 
 `fetch_releases` wraps `self.client.get(&url).send().await` with a direct `.map_err` that immediately propagates any network error. A DNS resolution failure, a TCP RST, or a 5xx response during a transient GitHub outage will abort the version check entirely. The calling agent will mark the check as failed and wait for the next scheduled interval. The `uptrakit-service-sdk` backoff utilities exist in the workspace; a simple exponential retry (max 3 attempts) on `reqwest::Error::is_connect()` or `is_timeout()` would reduce noise from transient failures.
@@ -248,12 +226,6 @@ If `create_provider` succeeds, the returned `Box<dyn Provider>` is guaranteed to
 ### Strengths
 
 The provider crates themselves contain no database access. All persistence is handled by `uptrakit-web-api` query helpers. The provider configuration is stored as `serde_json::Value` in the `provider_configs` table, deserialized on demand by `ProviderRegistry`. This design means database schema changes for provider configs require only migration changes, not provider crate changes.
-
-### Issues
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/software_items.rs:329-332` — Provider-type string comparison in query layer (cross-cutting with Extensibility)
-
-The `validate_assignment` query helper contains `config.provider_type == "homebrew"` as a raw string comparison. While this is a query-layer issue rather than a provider-crate issue, it is architecturally driven by the absence of a `validate_package_identifier` method on the `Provider` trait. The provider crates are the correct place for this knowledge. See Extensibility Issues for the full analysis.
 
 ---
 
@@ -306,25 +278,11 @@ Both wire enums use the same `Unknown`/`Other` string-preserving variant. New pr
 
 ### Issues
 
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/software_items.rs:329-332` — Provider-specific validation rule encoded as raw string in query layer
-
-```rust
-if config.provider_type == "homebrew" {
-    // Homebrew-specific package_identifier validation
-}
-```
-
-This is provider-specific knowledge embedded in the query layer. It is not reachable from the provider's own `validate()` method, is not enforced via a trait, and is not visible to provider authors. The `Provider` trait should be extended with `fn validate_package_identifier(&self, value: &str) -> Result<()>`, defaulting to `Ok(())`. Provider authors implementing Homebrew-specific constraints would override this method, and the query helper would call it via the registry.
-
 **[SEVERITY: Medium]** `crates/providers/registry/src/registry.rs:151-156` — No feature-flag gating for platform-specific providers
 
 `HomebrewProvider` is macOS-specific. `ProxmoxHelperScriptsProvider` is Proxmox VE-specific. Both are compiled unconditionally into all agent binaries, including Linux agents where `brew` is absent. A Linux agent will accept a valid `HomebrewProvider` configuration (since `validate()` does not check for `brew` presence), construct the provider successfully, and fail only when `detect_installed_version` or `discover_software` is called.
 
 The correct fix for `HomebrewProvider` is conditional compilation with `#[cfg(target_os = "macos")]` or a `homebrew` Cargo feature. For `ProxmoxHelperScriptsProvider`, a `proxmox` Cargo feature would allow operators to build agents for Proxmox environments specifically.
-
-**[SEVERITY: Medium]** `crates/shared/types/src/provider_types.rs:11` — `ProviderType` is `#[non_exhaustive]` but does not use an `Other(String)` variant for wire compatibility
-
-`ProviderCapability` correctly uses `Other(String)` to preserve unknown capability values from newer peers. `ProviderType` does not. A `VersionCheckAssignment` message containing an unknown `provider_type` string (from a controller running a newer version) will fail to deserialize the entire message on an older agent. The agent will drop the entire assignment rather than skipping just the unknown-type item. Adding `Other(String)` to `ProviderType` and handling it as a no-op in capability dispatch would make provider type additions backward-compatible.
 
 **[SEVERITY: Medium]** `crates/shared/wire/src/lib.rs:214-234` — `ServiceMessage` and `ControllerMessage` mix agent and MQTT concerns
 
@@ -365,9 +323,6 @@ When adding a new provider, the following steps are required. Steps marked (clea
 | New variant in `ProviderType` | `shared/types/src/provider_types.rs` | Clean |
 | `as_str()`, `FromStr`, `Display` for new variant | `shared/types/src/provider_types.rs` | Clean |
 | **If discovery-capable:** include `ProviderCapability::DiscoverLocalSoftware` in `capabilities()` | provider crate | Clean |
-| **If special identifier rules:** add branch in `validate_assignment` | `software_items.rs` | Manual |
+| **If special identifier rules:** implement `validate_package_identifier` | provider crate | Clean |
 
-The single remaining "Manual" step is package-identifier validation in the query layer. The three previously "Manual"
-discovery steps (`supports_discovery()`, hardcoded slice, `create_provider_for_discovery`) have all been eliminated —
-discovery support is now fully auto-derived from the `register_providers!` macro and the provider's `capabilities()`
-method.
+All previously "Manual" steps have been eliminated — discovery support is now fully auto-derived from the `register_providers!` macro and the provider's `capabilities()` method. Package-identifier validation is now handled through `ProviderRegistry::validate_package_identifier`.

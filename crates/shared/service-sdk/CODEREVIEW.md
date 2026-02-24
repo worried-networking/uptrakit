@@ -123,18 +123,6 @@ Confirmed across all source files in this crate.
 consumed (via `take()`) in `handle_certificate`, preventing it from persisting
 beyond the renewal handshake.
 
-#### 2026-02-24 Review
-
-#### Issues
-
-**[SEVERITY: High]** `src/identity.rs:32-36` and `:53-62` — Enrollment secret stored as plain `String`, not `SecretString`, with `Debug` derive exposing it
-
-Both `ServiceState` and `ServiceIdentityState` store enrollment_secret as plain `String` with derived `Debug`. Should use `SecretString` with manual `Debug` redaction.
-
-**[SEVERITY: Medium]** `src/ws.rs:416` — Enrollment secret placed into a non-zeroizing `String` via `format!`
-
-`format!("Bearer {enrollment_secret}")` allocates a heap `String` not wrapped in `Zeroizing<>`. Should use `Zeroizing::new(format!(...))`.
-
 ### Issues
 
 **[SEVERITY: Medium]** `tls.rs:234` — `BasicConstraints::Unconstrained` used

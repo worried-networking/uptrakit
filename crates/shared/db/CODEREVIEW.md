@@ -15,14 +15,7 @@ web-api, and related crates. The foundation is solid: UUID v7 primary keys, a co
 `TenantScoped` trait, typed enums for state columns, and well-declared referential integrity.
 These are meaningful architectural wins that prevent entire classes of runtime errors.
 
-However, four High-severity N+1 / full-table-scan query patterns in the web-api query layer
-surface directly because of how this crate's entities are used, and several Medium-severity
-schema decisions (soft-delete naming inconsistency, dual output storage, nullable version,
-missing indexes, duplicate indexes) require remediation before the system scales. One
-architectural concern — `uptrakit-crypto` unconditionally depending on `sea-orm` — is
-inherited through this crate's dependency on `uptrakit-crypto`.
-
-**Issue count:** 4 High, 8 Medium, 5 Low.
+Several Medium-severity schema decisions (soft-delete naming inconsistency, dual output storage, nullable version, missing indexes, duplicate indexes) require remediation before the system scales. One architectural concern — `uptrakit-crypto` unconditionally depending on `sea-orm` — is inherited through this crate's dependency on `uptrakit-crypto`.
 
 ---
 
@@ -229,46 +222,6 @@ both kinds of records and asserts the correct output is returned in each case.
 
 - **Append-only tables for audit data.** `update_history` and `controller_events` have no
   `deactivated_at` or soft-delete column, correctly modelling them as immutable audit logs.
-
-### Issues
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/update_history.rs:78-83` — Full host
-table scan for tenant scoping in `tenant_host_ids()`.
-
-This is a query pattern issue rooted in how `update_history` entities are fetched. The helper
-loads ALL host rows for a tenant into memory and then passes the resulting Vec of IDs as
-an `IN (...)` clause. Because `update_history` has no direct `tenant_id` column (it FK-links
-to `host_id`), the query helper works around this by doing a host table scan first. For
-tenants with thousands of hosts this is a full in-memory load plus a potentially driver-limited
-`IN` clause. The correct fix is a JOIN between `update_history` and `hosts` on `host_id`
-with a `WHERE hosts.tenant_id = $1` predicate, eliminating both the in-memory load and the
-parameter-count risk.
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/software_items.rs:126-178` — N+1 in
-`load_item_hosts`.
-
-For N hosts assigned to a software item: 1 query loads all `host_software_item` links, then
-N individual `find_by_id(host_id)` calls and N individual `find_by_id(provider_config_id)`
-calls are issued — 1 + 2N round-trips total. This function is called from `get_software_item`,
-`assign_hosts`, and `update_host_assignment`. It should be a single JOIN across
-`host_software_items`, `hosts`, and `provider_configs`.
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/update_history.rs:146-151` — N+1 in
-`list_update_history`.
-
-For each record in a page of 20 history entries, two individual name-resolution queries are
-issued: `resolve_host_name(host_id)` and `resolve_software_item_name(software_item_id)`.
-This produces up to 40 extra round-trips per page. The fix is to batch both lookups using
-`is_in(host_ids)` and `is_in(software_item_ids)` before the page loop, then index the
-results into a HashMap for O(1) lookup.
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/autodiscovery.rs:567-580` — Per-item
-ignore-list query inside the discovery loop.
-
-`process_one_discovery` issues a `COUNT(*)` query against the `autodiscovery_ignore` table
-for each discovered package item. 200 packages = 200 sequential DB queries. The ignore list
-should be bulk-loaded once before the loop and stored in a `HashSet<(provider_type, identifier)>`
-for O(1) membership testing per item.
 
 ---
 

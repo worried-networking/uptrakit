@@ -207,16 +207,6 @@ platform availability.
 
 ### Issues
 
-**[SEVERITY: High]** Inherited — `crates/shared/command/src/executor.rs:108-112` —
-Orphaned child processes on command timeout
-
-When an update command exceeds its timeout, the child process is not killed.  For
-update commands that hold system-level package manager locks (`apt`, `brew`), the
-orphaned process blocks all subsequent updates on that host until it is manually
-terminated.  This issue originates in `uptrakit-command` and is exercised through
-every `handle_execute_update` call in this crate.  There is no mitigation at the
-agent layer.
-
 **[SEVERITY: Low]** Inherited — `crates/shared/service-sdk/src/lifecycle.rs:263-275`
 — Enrollment retry does not catch transient network errors
 
@@ -295,20 +285,6 @@ explicit rather than silent.
   `uptrakit-agent-core`.  A future agent variant (e.g., one using a sandboxed or
   remote executor) can substitute the executor without modifying `main.rs` or the
   `AgentHandler` dispatch logic.
-
-### Issues
-
-**[SEVERITY: Medium]** Inherited — `crates/shared/types/src/provider_types.rs:34-36`
-— `supports_discovery()` is a hardcoded capability mirror
-
-The set of providers that support software discovery is encoded in
-`ProviderType::supports_discovery()` independently from `Provider::capabilities()`
-in each provider implementation.  Adding a new discovery-capable provider requires
-changes in three separate locations: the `ProviderType` enum, the
-`register_providers!` macro, and `supports_discovery()`.  A missed update silently
-blocks discovery for the new provider at the controller routing layer, with no
-compile-time feedback.  This extensibility gap surfaces at the agent boundary
-whenever `DiscoverSoftware` messages are dispatched.
 
 #### 2026-02-24 Review
 

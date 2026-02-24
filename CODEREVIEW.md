@@ -6,9 +6,9 @@ The Uptrakit backend is a well-structured Rust workspace of 24 crates spanning f
 
 The primary architectural concern at workspace level is that `uptrakit-crypto`, a foundational crate that any agent-side consumer will eventually need, unconditionally pulls in `sea-orm`. This couples a cryptographic primitive to the ORM layer and contradicts the clean split that `uptrakit-shared-types` already achieves through its `sea-orm` feature flag. A related concern is that `sea-orm-migration` is declared inline in two crates at an RC version, creating version-drift risk between it and the workspace-pinned `sea-orm` during the RC series. Beyond dependency hygiene, the workspace has no `[workspace.lints]` table, so only one of the 24 crates (`uptrakit-internal-wire`) actually enforces `warnings = "deny"` and `clippy::all = "deny"` — the remaining 23 rely solely on CI configuration.
 
-Several high-severity operational issues span the workspace. The `AGENTS.md` invariant document references a `crates/shared/core/` (`uptrakit-core`) crate that does not exist, which misleads any agent or developer reading the canonical layout map. The child-process orphan problem in `uptrakit-command` is a documented gap that affects every binary that runs updates — orphaned `apt`, `brew`, or custom script processes hold system locks until manually killed. And the mTLS configuration in `uptrakit-controller` uses `.allow_unauthenticated()`, so the transport-layer PKI boundary that mTLS is meant to provide is not actually enforced; agent trust rests entirely on application-layer checks.
+Several high-severity operational issues span the workspace. The `AGENTS.md` invariant document references a `crates/shared/core/` (`uptrakit-core`) crate that does not exist, which misleads any agent or developer reading the canonical layout map. The mTLS configuration in `uptrakit-controller` uses `.allow_unauthenticated()`, which is intentional for reverse-proxy deployments — this is documented in `pki.rs` and `mtls_acceptor.rs`.
 
-The extensibility seam for providers is well-designed at the `Provider` trait and `register_providers!` macro level. Discovery-capable provider support is now fully registry-driven — `discovery_provider_types()` is auto-generated from the macro, and `create_provider_for_discovery` is macro-generated too; no manual sync is needed. The remaining extensibility concern is that package-identifier validation is split between the provider `validate()` method and raw string comparisons in a query helper (`software_items.rs`). Addressing this remaining cross-cutting concern would complete the provider extensibility story.
+The extensibility seam for providers is well-designed at the `Provider` trait and `register_providers!` macro level. Discovery-capable provider support is now fully registry-driven — `discovery_provider_types()` is auto-generated from the macro, and `create_provider_for_discovery` is macro-generated too; no manual sync is needed. Package-identifier validation is handled through `ProviderRegistry::validate_package_identifier`, completing the provider extensibility story.
 
 ---
 
@@ -96,10 +96,6 @@ The AGENTS.md should include explicit dependency direction statements to elimina
 - Zero `unsafe` blocks in production code across all 24 crates.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/core/controller/src/pki.rs:1169` and `crates/ui/web-api/src/routes/server_cert.rs:199` — mTLS configured with `.allow_unauthenticated()`
-
-`WebPkiClientVerifier::builder(...).allow_unauthenticated()` permits TLS sessions from clients that present no certificate. The agent-controller security model documented in AGENTS.md depends on mTLS as the transport-layer trust anchor; the architecture invariant "agents authenticate via client certificates issued by the controller CA" is not enforced at the TLS layer. Application-layer checks (machine-ID validation, enrollment state) remain intact, but transport-layer PKI enforcement is absent. The correct builder terminal for requiring client certificates is `.build()` without `.allow_unauthenticated()`. This is a cross-workspace concern because it affects the security guarantee described in `docs/security/pki-certificates.md` and `docs/security/tofu-tls.md`.
 
 **[SEVERITY: Medium]** `crates/shared/crypto/src/lib.rs:244-251` — `EncryptedString::new` silently degrades to plaintext when master key is absent
 
@@ -235,10 +231,6 @@ Without a CI check, the invariant is documentation-only and will continue to be 
 **[SEVERITY: High]** `crates/core/controller/src/scheduler/mod.rs:153` — Scheduler executes tasks sequentially with no timeout and no cancellation-point between tasks
 
 `executor.execute(&task).await` is called with no timeout wrapper and no check of the `CancellationToken` during execution. A network-blocked `VersionCheckExecutor` or `ServiceCertCheckExecutor` will stall the entire scheduler poll cycle. Because the token is only checked in the outer `tokio::select!` between interval ticks, shutdown cannot interrupt a running task. The stale-claim recovery window (10 minutes) means a hung task blocks the entire scheduler for up to 10 minutes. Each task execution should be wrapped in `tokio::time::timeout` with a per-task budget, and the cancellation token should be passed into the executor so long-running tasks can cooperate with shutdown.
-
-**[SEVERITY: High]** `crates/core/controller/src/tasks.rs:254-256` — CRL manager task registered with `track_abort` instead of `track`
-
-`track_abort` unconditionally aborts the task handle without first cancelling the token and waiting for clean exit. If the CRL manager is mid-write to the TLS configuration file when aborted, the file is left partially written. A partially written TLS config causes a startup failure on the next process start. The CRL manager should be registered with `track` so it receives the cancellation signal and can complete or roll back its current write before exiting.
 
 **[SEVERITY: High]** `crates/ui/web-api/src/mqtt_lease_coordinator.rs:533-576` — `reconcile_mqtt_clients` silently overwrites an active peer's MQTT lease
 
@@ -381,10 +373,6 @@ The enum has 9 variants and will grow with new features. Adding `#[non_exhaustiv
 - `crates/providers/core/src/secrets.rs:9-17`: `SecretMasking` trait with no-op defaults — providers that have no secrets do not need to implement masking.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/software_items.rs:329-332` — Package identifier validation uses raw string comparison against `"homebrew"`
-
-`config.provider_type == "homebrew"` bypasses the `ProviderType` enum entirely. This is provider-specific business logic placed in the query layer, not the provider layer. A new provider with custom identifier constraints must add a branch here and in `validate()`, with no compile-time guidance that the query layer needs updating. The fix is to add a `fn validate_package_identifier(&self, value: &str) -> Result<()>` method to the `Provider` trait, implement it per-provider, and call it through the registry from the query helper.
 
 **[SEVERITY: Medium]** `crates/providers/registry/src/registry.rs:151-156` — Platform-specific providers compiled unconditionally into all agent binaries
 
