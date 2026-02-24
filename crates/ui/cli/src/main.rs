@@ -36,7 +36,8 @@ struct Cli {
     #[arg(long, short, global = true, default_value_t, value_enum)]
     output: OutputFormat,
 
-    /// Increase log verbosity (-v for warn, -vv for info, -vvv for debug, -vvvv for trace).
+    /// Increase log verbosity (-v warn, -vv debug for CLI crate, -vvv debug for all uptrakit, -vvvv trace).
+    /// Use RUST_LOG to enable logging for other crates.
     /// Log output goes to stderr; command output stays on stdout.
     #[arg(short = 'v', long = "verbose", global = true, action = clap::ArgAction::Count)]
     verbose: u8,
@@ -856,17 +857,17 @@ async fn run(cli: Cli) -> error::Result<()> {
         );
     }
     if cli.verbose > 0 {
-        let level = match cli.verbose {
-            1 => "warn",
-            2 => "info",
-            3 => "debug",
-            _ => "trace",
+        let directive = match cli.verbose {
+            1 => "uptrakit_cli=warn",
+            2 => "uptrakit_cli=debug",
+            3 => "uptrakit=debug",
+            _ => "uptrakit=trace",
         };
         tracing_subscriber::fmt()
             .with_writer(std::io::stderr)
             .with_env_filter(
                 EnvFilter::from_default_env()
-                    .add_directive(level.parse().expect("valid level directive")),
+                    .add_directive(directive.parse().expect("valid directive")),
             )
             .init();
     }
