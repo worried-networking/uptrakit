@@ -33,8 +33,21 @@ to start accepting connections while the old process drains existing ones.
 | SIGUSR1 | Initiate graceful shutdown (used for takeover) |
 
 **Wire protocol:** The `ServerRestarting` message (`ControllerMessage::ServerRestarting(ServerRestartingPayload)`)
-notifies agents that the controller is restarting. Agents log the message and allow the connection to close naturally;
-their existing reconnect logic handles the rest.
+notifies services that the controller is restarting. On receipt, services initiate their own graceful shutdown: they
+drain any in-flight work (agents wait for a running update to complete), send a `Disconnecting` message with
+`reason: restart`, and exit the event loop with `LoopOutcome::Disconnected`. The service lifecycle then reconnects
+with backoff once the controller is available again.
+
+**Service shutdown cause mapping:**
+
+| Trigger | `DisconnectReason` sent | `LoopOutcome` returned |
+| --- | --- | --- |
+| `SIGHUP` | `restart` | `Restart` (exits lifecycle for external restart) |
+| `SIGINT` / `SIGTERM` | `shutdown` | `Shutdown` (exits lifecycle cleanly) |
+| `ServerRestarting` | `restart` | `Disconnected` (reconnects with backoff) |
+
+The mapping is implemented via the `ShutdownCause` enum in `uptrakit-service-sdk` and the `resolve_shutdown` helper
+in each service. See [Service Lifecycle](service-lifecycle.md) for the full reconnect flow.
 
 **Platform support:** `SO_REUSEPORT` is available on Linux, macOS, FreeBSD, and OpenBSD. Not available on Windows.
 
@@ -45,3 +58,8 @@ their existing reconnect logic handles the rest.
 | `crates/core/controller/src/tasks.rs` | `BackgroundTasks` struct with coordinated shutdown sequence |
 | `crates/core/controller/src/durations.rs` | `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` (5s), `RESTART_NOTIFICATION_SCATTER` (5s) |
 | `crates/core/controller/src/main.rs` | Signal handler setup (SIGTERM, SIGINT, SIGUSR1) and server event loop |
+| `crates/shared/service-sdk/src/lifecycle.rs` | `ShutdownCause` enum and `ServiceHandler::on_shutdown` trait method |
+| `crates/shared/service-sdk/src/event_loop.rs` | `ServerRestarting` handler — calls `on_shutdown` with `ShutdownCause::ServerRestarting` |
+| `crates/core/agent/src/main.rs` | `resolve_shutdown` helper and `AgentHandler::on_shutdown` implementation |
+| `crates/core/agent-ssh/src/main.rs` | `resolve_shutdown` helper and `SshAgentHandler::on_shutdown` implementation |
+| `crates/core/mqtt/src/main.rs` | `resolve_shutdown` helper and `MqttHandler::on_shutdown` implementation |

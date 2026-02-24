@@ -509,11 +509,17 @@ pub async fn get_widget(db: &DatabaseConnection, id: uuid::Uuid) -> Result<Widge
 ### Tracing initialization
 
 **Libraries must never configure the global tracing dispatcher.**
-Only binary `main()` functions may call `tracing_subscriber::fmt().init()` or any equivalent. Configuring the global subscriber from a library causes a panic if anything else in the process has already set it (e.g. test harness, another library).
+Only binary `main()` functions may call `tracing_subscriber::fmt().init()` or any equivalent. Configuring the global
+subscriber from a library causes a panic if anything else in the process has already set it (e.g. test harness,
+another library).
 
-**`uptrakit-service-sdk` does not provide `init_tracing()`.** Each binary (`uptrakit-agent`, `uptrakit-agent-ssh`, `uptrakit-mqtt`) owns its own `init_tracing()` helper in `src/main.rs`. `tracing-subscriber` must appear in each binary's `[dependencies]`, not in shared library crates.
+**`uptrakit-service-sdk` does not provide `init_tracing()`.** Each binary (`uptrakit-agent`, `uptrakit-agent-ssh`,
+`uptrakit-mqtt`) owns its own `init_tracing()` helper in `src/main.rs`. `tracing-subscriber` must appear in each
+binary's `[dependencies]`, not in shared library crates.
 
-**Pattern:** Use `EnvFilter::from_default_env().add_directive(...)` with an `if let Ok(d) = directive.parse()` fallback — do not use `.expect()` on the parse. This prevents a panic if the verbosity directive string is ever malformed.
+**Pattern:** Use `EnvFilter::from_default_env().add_directive(...)` with an `if let Ok(d) = directive.parse()`
+fallback — do not use `.expect()` on the parse. This prevents a panic if the verbosity directive string is ever
+malformed.
 
 ### Directory management
 

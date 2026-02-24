@@ -56,6 +56,29 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `service_settings`, `ca_bundle_updated`,
 `request_cert_renewal`, `server_restarting`
 
+#### `server_restarting` payload
+
+Sent by the controller to all connected services before it shuts down (SIGTERM / SIGINT / SIGUSR1 takeover).
+
+```json
+{
+  "seq": 1,
+  "type": "server_restarting",
+  "reason": "graceful restart"
+}
+```
+
+On receipt, services initiate their own graceful shutdown:
+
+1. Drain any in-flight work (agents wait for a running update to complete within the shutdown timeout).
+2. Send `disconnecting` with `reason: restart`.
+3. Exit the event loop with `LoopOutcome::Disconnected`.
+4. Reconnect with backoff once the controller is available again.
+
+This differs from an OS-signal shutdown (`SIGTERM`/`SIGINT`): a signal causes the service to exit its lifecycle
+entirely (`LoopOutcome::Shutdown`), while `server_restarting` causes it to reconnect automatically
+(`LoopOutcome::Disconnected`). See [Graceful Restart](../development/graceful-restart.md) for the full sequence.
+
 ### Agent-specific (controller -> service)
 
 `check_versions`, `execute_update`, `discover_software`

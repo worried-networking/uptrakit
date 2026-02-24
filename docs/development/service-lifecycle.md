@@ -197,7 +197,9 @@ The SDK provides shared initialization and error-handling functions to reduce bo
 | `print_build_info(name, version, features)` | Print build metadata for `--version`. |
 | `run_lifecycle_and_handle_errors(name, args, handler)` | Run the lifecycle and handle errors (log + exit code). |
 
-> **Note:** Tracing subscriber initialization (`tracing_subscriber::fmt().init()`) is intentionally **not** provided by the SDK. Libraries must never configure the global tracing dispatcher. Each binary is responsible for initializing tracing in its own `main()` before calling SDK functions.
+> **Note:** Tracing subscriber initialization (`tracing_subscriber::fmt().init()`) is intentionally **not** provided
+> by the SDK. Libraries must never configure the global tracing dispatcher. Each binary is responsible for
+> initializing tracing in its own `main()` before calling SDK functions.
 
 ## Example: minimal service
 
