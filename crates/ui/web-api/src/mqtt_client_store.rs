@@ -3,6 +3,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
     Set,
 };
+use sea_orm::sea_query::Expr;
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{mqtt_client, prelude::MqttClient};
@@ -231,7 +232,7 @@ pub async fn update_mqtt_client_status(
     Ok(())
 }
 
-/// Update the connection status for multiple MQTT clients.
+/// Update the connection status for multiple MQTT clients in a single bulk statement.
 pub async fn update_mqtt_clients_status(
     db: &DatabaseConnection,
     ids: &[Uuid],
@@ -240,24 +241,20 @@ pub async fn update_mqtt_clients_status(
     if ids.is_empty() {
         return Ok(());
     }
-
     let now = OffsetDateTime::now_utc();
-    let mut updated = 0usize;
+    let result = MqttClient::update_many()
+        .col_expr(
+            mqtt_client::Column::ConnectionStatus,
+            Expr::value(status),
+        )
+        .col_expr(mqtt_client::Column::StatusUpdatedAt, Expr::value(now))
+        .filter(mqtt_client::Column::Id.is_in(ids.to_vec()))
+        .exec(db)
+        .await
+        .context_to()?;
 
-    for id in ids {
-        let Some(existing) = MqttClient::find_by_id(*id).one(db).await.context_to()? else {
-            continue;
-        };
-        let mut model: mqtt_client::ActiveModel = existing.into();
-        model.connection_status = Set(status);
-        model.status_updated_at = Set(now);
-        model.update(db).await.context_to()?;
-        updated += 1;
-    }
-
-    if updated == 0 {
+    if result.rows_affected == 0 {
         bail!(MqttClientError::NotFound);
     }
-
     Ok(())
 }

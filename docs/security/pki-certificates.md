@@ -10,6 +10,22 @@ Uptrakit operates an internal PKI for agents and MQTT services.
 | Server HTTPS cert | 90 days | Renew 30 days before expiry |
 | Agent/MQTT client cert | 365 days (configurable) | Configurable via `renewal_window_hours` |
 
+## CA Basic Constraints and Path Length
+
+The controller CA is issued with `BasicConstraints: CA=true, pathLenConstraint=0`
+(`IsCa::Ca(BasicConstraints::Constrained(0))` in rcgen). This means:
+
+- The CA flag is set, so the certificate can sign leaf (end-entity) certificates.
+- `pathLenConstraint=0` **prevents any certificate signed by this CA from being used as an
+  intermediate CA** to issue further certificates. Even if an agent certificate were compromised,
+  it cannot be used to mint additional certificates.
+
+This is a defence-in-depth measure. The constraint is enforced by RFC 5280 §4.2.1.9 and is
+verified at TLS validation time by conforming clients. A unit test (`ca_basic_constraints_path_len_is_zero`)
+asserts this on every build.
+
+See also: [Secure Development](secure-development.md) for the general PKI security requirements.
+
 ## Certificate Issuance
 
 - Agents and MQTT services enroll using a UUIDv7 `service_id` and CSR.

@@ -12,11 +12,12 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, RelationTrait, Set};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
-    host, host_software_item, prelude::*, service, service_host, software_item, update_history,
+    host, host_software_item, prelude::*, provider_config, service, service_host, software_item,
+    update_history,
 };
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_web_api_types::validation::Validate;
@@ -770,60 +771,98 @@ pub async fn check_versions(
         );
     }
 
+    // Collect IDs for batch loads.
+    let host_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.host_id).collect();
+    let config_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.provider_config_id).collect();
+
+    // Batch query 1: Hosts (tenant-scoped).
+    let hosts: std::collections::HashMap<uuid::Uuid, host::Model> =
+        match tenant_db
+            .find::<host::Entity>()
+            .filter(host::Column::Id.is_in(host_ids.clone()))
+            .filter(host::Column::DeactivatedAt.is_null())
+            .all(tenant_db.db())
+            .await
+        {
+            Ok(hs) => hs.into_iter().map(|h| (h.id, h)).collect(),
+            Err(e) => {
+                tracing::error!("Failed to load hosts: {e}");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                );
+            }
+        };
+
+    // Batch query 2: service_host → service JOIN (tenant-scoped, approved services only).
+    // Uses find_via_tenant_join to enforce tenant isolation without a separate service query.
+    let service_hosts: std::collections::HashMap<uuid::Uuid, uuid::Uuid> =
+        match tenant_db
+            .find_via_tenant_join::<service_host::Entity, service::Entity>(
+                service_host::Relation::Service.def(),
+            )
+            .filter(service_host::Column::HostId.is_in(host_ids))
+            .filter(service::Column::DeactivatedAt.is_null())
+            .filter(service::Column::Status.eq(service::ServiceStatus::Approved))
+            .all(tenant_db.db())
+            .await
+        {
+            Ok(shs) => shs.into_iter().map(|sh| (sh.host_id, sh.service_id)).collect(),
+            Err(e) => {
+                tracing::error!("Failed to load service-host links: {e}");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                );
+            }
+        };
+
+    // Batch query 3: Provider configs (tenant-scoped).
+    let configs: std::collections::HashMap<uuid::Uuid, provider_config::Model> =
+        match tenant_db
+            .find::<provider_config::Entity>()
+            .filter(provider_config::Column::Id.is_in(config_ids))
+            .filter(provider_config::Column::DeactivatedAt.is_null())
+            .all(tenant_db.db())
+            .await
+        {
+            Ok(cs) => cs.into_iter().map(|c| (c.id, c)).collect(),
+            Err(e) => {
+                tracing::error!("Failed to load provider configs: {e}");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                );
+            }
+        };
+
     let mut agents_notified: u32 = 0;
-    // Deduplicate by (agent, host) — each pair gets exactly one CheckVersions message.
+    // Deduplicate by (service_id, host_id) — each pair gets exactly one CheckVersions message.
     let mut seen = std::collections::HashSet::new();
 
     for link in &links {
-        // Load the host to obtain its machine_id for routing.
-        let host_record = match Host::find_by_id(link.host_id)
-            .filter(host::Column::DeactivatedAt.is_null())
-            .one(tenant_db.db())
-            .await
-        {
-            Ok(Some(h)) => h,
-            _ => continue,
+        let Some(host_record) = hosts.get(&link.host_id) else {
+            continue;
         };
-
-        // Find agent linked to this host
-        let agent_link = match ServiceHost::find()
-            .filter(service_host::Column::HostId.eq(link.host_id))
-            .one(tenant_db.db())
-            .await
-        {
-            Ok(Some(l)) => l,
-            _ => continue,
+        let Some(&service_id) = service_hosts.get(&link.host_id) else {
+            continue;
         };
-
-        if !seen.insert((agent_link.service_id, link.host_id)) {
+        if !seen.insert((service_id, link.host_id)) {
             continue;
         }
-
-        // Verify agent exists and is approved
-        let agent = match Service::find_by_id(agent_link.service_id)
-            .filter(service::Column::DeactivatedAt.is_null())
-            .one(tenant_db.db())
-            .await
-        {
-            Ok(Some(a)) if a.status == service::ServiceStatus::Approved => a,
-            _ => continue,
-        };
-
-        // Load the per-host provider config
-        let provider_config = match find_raw_active_config(&tenant_db, link.provider_config_id).await {
-            Some(c) => c,
-            None => continue,
+        let Some(prov_config) = configs.get(&link.provider_config_id) else {
+            continue;
         };
 
         let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
-            serde_json::Value::String(provider_config.provider_type.clone()),
+            serde_json::Value::String(prov_config.provider_type.clone()),
         ) {
             Ok(pt) => pt,
             Err(_) => continue,
         };
 
         let config = crate::update_hooks::merge_config(
-            &provider_config.config,
+            &prov_config.config,
             link.config_override.as_ref(),
         );
 
@@ -841,7 +880,7 @@ pub async fn check_versions(
                 assignments: vec![assignment],
             },
         );
-        state.notification_service.send(&agent.id, msg).await;
+        state.notification_service.send(&service_id, msg).await;
         agents_notified += 1;
     }
 

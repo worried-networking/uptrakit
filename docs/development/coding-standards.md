@@ -208,6 +208,67 @@ pub async fn list_hosts(
 
 See also: [Authentication and Authorization](../security/auth-and-authorization.md).
 
+## Tenant-Safe Database Queries
+
+All database queries in route handlers and query helpers **must** enforce tenant isolation. Failure to do so can leak
+data across tenants (a high-severity security issue).
+
+### Rules
+
+**Rule 1 — Always use `TenantDb` helpers for `TenantScoped` entities.**
+
+Use `TenantDb.find::<E>()`, `.find_by_id::<E>(id)`, `.update_many::<E>()`, or `.delete_many::<E>()` for any entity
+that implements `TenantScoped`. These methods automatically inject `WHERE tenant_id = ?`.
+
+**Rule 2 — Use `find_via_tenant_join` for join-table entities without `tenant_id`.**
+
+Some entities (e.g. `service_host`) are join tables that have no `tenant_id` column of their own. Enforce tenant
+isolation by joining through a `TenantScoped` entity with `TenantDb.find_via_tenant_join::<Target, Scoped>(relation)`.
+
+```rust
+// service_host has no tenant_id — scope it via service (TenantScoped)
+tenant_db
+    .find_via_tenant_join::<service_host::Entity, service::Entity>(
+        service_host::Relation::Service.def(),
+    )
+    .filter(service::Column::DeactivatedAt.is_null())
+    .all(tenant_db.db())
+    .await?
+```
+
+**Rule 3 — Never call `Entity::find().all(tenant_db.db())` on a `TenantScoped` entity.**
+
+`tenant_db.db()` is the raw `DatabaseConnection`; it carries no tenant filter. Calling
+`Entity::find().all(tenant_db.db())` on a `TenantScoped` entity loads **all** rows from all tenants.
+
+**Rule 4 — Prefer batch queries over per-item query loops (N+1 prevention).**
+
+Always use `.is_in(ids)` to load multiple records in one round-trip, then join in memory via `HashMap`.
+
+```rust
+// Correct: 1 query for N hosts
+let hosts: HashMap<Uuid, host::Model> = tenant_db
+    .find::<host::Entity>()
+    .filter(host::Column::Id.is_in(host_ids))
+    .all(tenant_db.db()).await?
+    .into_iter().map(|h| (h.id, h)).collect();
+
+// Then look up in the loop — O(1) per access
+let Some(h) = hosts.get(&link.host_id) else { continue; };
+```
+
+### Anti-pattern table
+
+| Wrong | Right | Reason |
+| --- | --- | --- |
+| `Host::find().all(tenant_db.db())` | `tenant_db.find::<host::Entity>().all(tenant_db.db())` | No tenant filter applied |
+| `ServiceHost::find().all(tenant_db.db())` | `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(rel)` | Cross-tenant leak |
+| Per-item `Host::find_by_id(id).one(db)` inside a loop | Batch `find().filter(id.is_in(ids))` then in-memory lookup | N+1 queries |
+| `Entity::update_many().col_expr(...)` loop | `Entity::update_many().filter(id.is_in(ids)).col_expr(...).exec(db)` | N+1 updates |
+
+See also: [Architecture — Multi-Tenancy](../architecture/multi-tenancy.md) and
+[Security — Secure Development](../security/secure-development.md).
+
 ## HTTP Status Codes
 
 Always use `reqwest::StatusCode` (re-exported as `uptrakit_openapi_client::StatusCode` for CLI code) instead of raw `u16` for HTTP status codes.

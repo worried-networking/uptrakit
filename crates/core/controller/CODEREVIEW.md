@@ -13,12 +13,11 @@ database migrations, a 10-phase startup sequence, full PKI lifecycle management
 (CA generation, CRL signing, OCSP support), a DB-backed HA scheduler, and a suite
 of background tasks. The overall design is solid: startup phases are typed structs,
 the scheduler uses TOCTOU-free optimistic locking, and the PKI layer is well-covered
-by unit tests. Three issues require immediate attention: (1) the CA is issued with an
-unconstrained `BasicConstraints` path length, allowing intermediate CA creation;
-(2) the mTLS verifier allows unauthenticated clients at the TLS layer, delegating
-all trust enforcement to application-layer checks; and (3) the CRL manager is
-registered with `track_abort` rather than `track`, meaning a shutdown abort may
-corrupt the TLS configuration file on disk.
+by unit tests. Two issues require immediate attention: (1) the mTLS verifier allows
+unauthenticated clients at the TLS layer, delegating all trust enforcement to
+application-layer checks; and (2) the CRL manager is registered with `track_abort`
+rather than `track`, meaning a shutdown abort may corrupt the TLS configuration file
+on disk.
 
 ---
 
@@ -158,19 +157,6 @@ unauthenticated client to reach the WebSocket handler. Removing
 layer, providing defense in depth. Reverse-proxy deployments that forward
 pre-validated certificates should remain an opt-out path documented at the
 configuration level, not the default.
-
-**[SEVERITY: Medium]** `crates/core/controller/src/pki.rs:497` — CA generated with `BasicConstraints::Unconstrained`
-
-```rust
-params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-```
-
-`BasicConstraints::Unconstrained` permits the subject to act as an intermediate
-CA with no path-length restriction. A compromised agent certificate could
-theoretically be used to sign further CA certificates trusted by all other agents
-in the fleet. The correct value is `BasicConstraints::Constrained(0)`, which
-sets the `pathLenConstraint` to 0 and prevents intermediate CA issuance. The same
-issue appears in `cert_signer.rs:174` and `service-sdk/src/tls.rs:234`.
 
 **[SEVERITY: Medium]** `crates/core/controller/src/pki.rs:69-77` — `encode_der_length` silently truncates lengths >= 65,536 bytes
 

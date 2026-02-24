@@ -4,7 +4,8 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::response::IntoResponse;
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, DeleteMany, PrimaryKeyTrait, QueryFilter, Select, UpdateMany,
+    ColumnTrait, DatabaseConnection, DeleteMany, JoinType, PrimaryKeyTrait, QueryFilter, QuerySelect,
+    RelationDef, Select, UpdateMany,
 };
 use std::sync::Arc;
 use uptrakit_shared_db::entity::TenantScoped;
@@ -48,6 +49,35 @@ impl TenantDb {
     /// Return a `DELETE` query pre-filtered to the current tenant.
     pub fn delete_many<E: TenantScoped>(&self) -> DeleteMany<E> {
         E::delete_many().filter(E::tenant_id_column().eq(self.tenant_id))
+    }
+
+    /// Return a `SELECT` on `Target` joined to (and tenant-filtered through) a
+    /// `TenantScoped` intermediate entity.
+    ///
+    /// Use for entities that have no `tenant_id` of their own but can be
+    /// tenant-scoped by joining to a related `TenantScoped` entity.
+    ///
+    /// Example: `service_host` → `service` (TenantScoped):
+    /// ```ignore
+    /// tenant_db
+    ///     .find_via_tenant_join::<service_host::Entity, service::Entity>(
+    ///         service_host::Relation::Service.def(),
+    ///     )
+    ///     .filter(service::Column::DeactivatedAt.is_null())
+    ///     .all(tenant_db.db())
+    ///     .await?
+    /// ```
+    pub fn find_via_tenant_join<Target, Scoped>(
+        &self,
+        relation: RelationDef,
+    ) -> Select<Target>
+    where
+        Target: sea_orm::EntityTrait,
+        Scoped: TenantScoped,
+    {
+        Target::find()
+            .join(JoinType::InnerJoin, relation)
+            .filter(Scoped::tenant_id_column().eq(self.tenant_id))
     }
 
     /// Construct a `TenantDb` directly from its components, for use in unit tests

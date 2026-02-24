@@ -109,10 +109,6 @@ When `MASTER_KEY` is not initialised, `EncryptedString::new` logs `tracing::warn
 
 No `aud` claim is required during token validation. A JWT issued for one deployment environment will be accepted by another if the HMAC signing key is shared or accidentally reused. There is also no `iss` or `sub` format validation. This is a workspace-level concern because the JWT signing key file path and generation are handled in `uptrakit-service-sdk` and `uptrakit-directories` — the key lifecycle spans crates, so the validation policy must be defined and enforced consistently.
 
-**[SEVERITY: Medium]** `crates/core/controller/src/pki.rs:497` — CA certificate generated with `BasicConstraints::Unconstrained`
-
-The controller CA is issued without a path-length constraint, which permits a compromised agent certificate to be used as an intermediate CA to sign further certificates. The correct value is `BasicConstraints::Constrained(0)` (path length zero), preventing issuance of any subordinate CA. This constraint should also be verified in the test suite at `crates/core/controller/tests/`.
-
 **[SEVERITY: Medium]** `crates/ui/web-api/src/auth/token_denylist.rs:15` — In-memory JWT denylist provides no cross-instance revocation
 
 The denylist is per-process. A revoked token remains valid on all other running instances for up to the JWT TTL (15 minutes). The code comment at line 15 acknowledges this. For a system managing infrastructure access with potential privilege escalation via compromised tokens, a 15-minute window is operationally significant. A shared DB-backed denylist — consistent with the existing refresh token and rate-limit tables — would close this gap. This is a workspace-level HA and security intersection: the multi-instance architecture described in `docs/development/cross-controller-comm.md` is undermined by per-process revocation state.
@@ -239,10 +235,6 @@ Without a CI check, the invariant is documentation-only and will continue to be 
 **[SEVERITY: High]** `crates/core/controller/src/scheduler/mod.rs:153` — Scheduler executes tasks sequentially with no timeout and no cancellation-point between tasks
 
 `executor.execute(&task).await` is called with no timeout wrapper and no check of the `CancellationToken` during execution. A network-blocked `VersionCheckExecutor` or `ServiceCertCheckExecutor` will stall the entire scheduler poll cycle. Because the token is only checked in the outer `tokio::select!` between interval ticks, shutdown cannot interrupt a running task. The stale-claim recovery window (10 minutes) means a hung task blocks the entire scheduler for up to 10 minutes. Each task execution should be wrapped in `tokio::time::timeout` with a per-task budget, and the cancellation token should be passed into the executor so long-running tasks can cooperate with shutdown.
-
-**[SEVERITY: High]** `crates/ui/web-api/src/mqtt_client_store.rs:235-263` — `update_mqtt_clients_status` issues one `SELECT + UPDATE` per MQTT client in a serial loop without a wrapping transaction
-
-Partial failure (DB error mid-loop) leaves the `mqtt_clients` table in an inconsistent state — some clients marked Offline, others not. The `?` early return propagates the first error without processing remaining clients. This should be a single bulk `UPDATE ... WHERE id IN (...)` or wrapped in a transaction that either commits all status changes or none.
 
 **[SEVERITY: High]** `crates/core/controller/src/tasks.rs:254-256` — CRL manager task registered with `track_abort` instead of `track`
 

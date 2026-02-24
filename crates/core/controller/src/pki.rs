@@ -494,7 +494,7 @@ fn generate_ca(pki_addr: Option<&str>) -> Result<CaBundle> {
     params
         .distinguished_name
         .push(DnType::OrganizationName, "Uptrakit");
-    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
     params.not_before = OffsetDateTime::now_utc();
     params.not_after = OffsetDateTime::now_utc() + time::Duration::days(1825);
 
@@ -1408,7 +1408,7 @@ mod tests {
         params1
             .distinguished_name
             .push(DnType::CommonName, "Test CA 1");
-        params1.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        params1.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
         let _ca1_cert = params1.self_signed(&key1).unwrap();
         let issuer1 = Issuer::new(params1, key1);
 
@@ -1422,7 +1422,7 @@ mod tests {
         params2
             .distinguished_name
             .push(DnType::CommonName, "Test CA 2");
-        params2.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        params2.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
         let ca2_cert = params2.self_signed(&key2).unwrap();
         let ca2_pem = ca2_cert.pem();
 
@@ -1569,6 +1569,30 @@ mod tests {
     fn validate_ca_pki_addr_neither_set() {
         let ca = generate_ca(None).unwrap();
         assert!(validate_ca_pki_addr(&ca.cert_pem, None).is_ok());
+    }
+
+    #[test]
+    fn ca_basic_constraints_path_len_is_zero() {
+        use x509_parser::extensions::ParsedExtension;
+
+        let ca = generate_ca(None).unwrap();
+        let (_, pem_block) =
+            x509_parser::pem::parse_x509_pem(ca.cert_pem.as_bytes()).expect("parse PEM");
+        let cert = pem_block.parse_x509().expect("parse X.509");
+
+        let mut found = false;
+        for ext in cert.extensions() {
+            if let ParsedExtension::BasicConstraints(bc) = ext.parsed_extension() {
+                assert!(bc.ca, "CA flag must be set");
+                assert_eq!(
+                    bc.path_len_constraint,
+                    Some(0),
+                    "path_len must be 0 to prevent subordinate CA issuance"
+                );
+                found = true;
+            }
+        }
+        assert!(found, "BasicConstraints extension not present");
     }
 
     #[test]

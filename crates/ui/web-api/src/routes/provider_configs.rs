@@ -10,9 +10,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QuerySelect, RelationTrait,
+};
 use std::sync::Arc;
-use uptrakit_shared_db::entity::{prelude::*, provider_config, service_host};
+use uptrakit_shared_db::entity::{host, prelude::*, provider_config, service, service_host};
 use uptrakit_web_api_types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
 use uptrakit_web_api_types::validation::Validate;
 
@@ -261,55 +263,59 @@ pub async fn discover_provider_config(
         );
     }
 
-    // Find all agents with linked hosts for this tenant.
-    let all_links = match ServiceHost::find()
+    // Single JOIN query: service_host → service (tenant-scoped) → host
+    // This prevents cross-tenant data leaks and eliminates the N+1 pattern.
+    #[derive(FromQueryResult)]
+    struct AgentHostRow {
+        service_id: uuid::Uuid,
+        machine_id: String,
+    }
+
+    let rows: Vec<AgentHostRow> = match tenant_db
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
+        .join(JoinType::InnerJoin, service_host::Relation::Host.def())
+        .select_only()
+        .column(service_host::Column::ServiceId)
+        .column(host::Column::MachineId)
+        .filter(service::Column::DeactivatedAt.is_null())
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .into_model::<AgentHostRow>()
         .all(tenant_db.db())
         .await
     {
-        Ok(l) => l,
+        Ok(r) => r,
         Err(e) => {
             tracing::error!("Failed to query service-host links: {e}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    // Collect unique agent IDs.
-    let agent_ids: std::collections::HashSet<uuid::Uuid> =
-        all_links.into_iter().map(|l| l.service_id).collect();
+    // Group machine_ids by service_id.
+    let mut by_service: std::collections::HashMap<uuid::Uuid, Vec<String>> =
+        std::collections::HashMap::new();
+    for row in rows {
+        by_service.entry(row.service_id).or_default().push(row.machine_id);
+    }
 
-    let agents_notified = agent_ids.len() as u32;
+    let agents_notified = by_service.len() as u32;
 
-    // For each agent, send a DiscoverSoftware with just this specific config.
-    for agent_id in &agent_ids {
-        let hosts = match ServiceHost::find()
-            .filter(service_host::Column::ServiceId.eq(*agent_id))
-            .all(tenant_db.db())
-            .await
-        {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-
-        for link in &hosts {
-            // Look up the host's machine_id.
-            if let Ok(Some(h)) = uptrakit_shared_db::entity::host::Entity::find_by_id(link.host_id)
-                .filter(uptrakit_shared_db::entity::host::Column::TenantId.eq(tenant_db.tenant_id))
-                .filter(uptrakit_shared_db::entity::host::Column::DeactivatedAt.is_null())
-                .one(tenant_db.db())
-                .await
-            {
-                let msg = uptrakit_internal_wire::ControllerMessage::DiscoverSoftware(
-                    uptrakit_internal_wire::DiscoverSoftwarePayload {
-                        host_machine_id: h.machine_id,
-                        providers: vec![uptrakit_internal_wire::DiscoveryProviderAssignment {
-                            provider_config_id: Some(cfg.id),
-                            provider_type: provider_type.clone(),
-                            config: cfg.config.clone(),
-                        }],
-                    },
-                );
-                state.notification_service.send(agent_id, msg).await;
-            }
+    // One DiscoverSoftware message per (agent, host) pair.
+    for (agent_id, machine_ids) in &by_service {
+        for machine_id in machine_ids {
+            let msg = uptrakit_internal_wire::ControllerMessage::DiscoverSoftware(
+                uptrakit_internal_wire::DiscoverSoftwarePayload {
+                    host_machine_id: machine_id.clone(),
+                    providers: vec![uptrakit_internal_wire::DiscoveryProviderAssignment {
+                        provider_config_id: Some(cfg.id),
+                        provider_type: provider_type.clone(),
+                        config: cfg.config.clone(),
+                    }],
+                },
+            );
+            state.notification_service.send(agent_id, msg).await;
         }
     }
 

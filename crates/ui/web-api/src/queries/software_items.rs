@@ -250,51 +250,6 @@ fn validate_config_override(
         .map_err(|e| ConfigOverrideError::ProviderValidation(e.to_string()))
 }
 
-/// Validate a Homebrew package identifier.
-///
-/// Rejects empty values, leading/trailing whitespace, embedded whitespace, path-traversal
-/// segments (`..`, `.`), empty path segments (`//`), and any characters outside the
-/// allowed set `[A-Za-z0-9\-_.@+/]`.
-fn validate_homebrew_package_identifier(value: &str) -> Result<(), String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
-    }
-    if value != trimmed {
-        return Err(
-            "package_identifier must not include leading or trailing whitespace".to_string(),
-        );
-    }
-    if value.chars().any(char::is_whitespace) {
-        return Err("package_identifier must not contain whitespace".to_string());
-    }
-    if value.len() > 200 {
-        return Err("package_identifier is too long".to_string());
-    }
-
-    for ch in value.chars() {
-        let valid = ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '@' | '+' | '/');
-        if !valid {
-            return Err(format!(
-                "package_identifier contains invalid character: {ch}"
-            ));
-        }
-    }
-
-    if value.split('/').any(|segment| segment.is_empty()) {
-        return Err("package_identifier contains an empty segment".to_string());
-    }
-
-    if value
-        .split('/')
-        .any(|segment| segment == "." || segment == "..")
-    {
-        return Err("package_identifier contains invalid segment".to_string());
-    }
-
-    Ok(())
-}
-
 /// Resolve provider config from either an existing ID or an inline create request,
 /// within a transaction. Returns `(provider_config_id, provider_config::Model)`.
 async fn resolve_provider_config_txn(
@@ -354,8 +309,8 @@ fn validate_assignment(
     package_identifier: &str,
     config_override: Option<&serde_json::Value>,
 ) -> Result<(), SoftwareItemQueryError> {
-    if config.provider_type == "homebrew"
-        && let Err(e) = validate_homebrew_package_identifier(package_identifier)
+    if let Ok(pt) = config.provider_type.parse::<uptrakit_provider_registry::ProviderType>()
+        && let Err(e) = ProviderRegistry::validate_package_identifier(pt, package_identifier)
     {
         return Err(SoftwareItemQueryError::InvalidPackageIdentifier(e));
     }
@@ -951,6 +906,7 @@ mod tests {
 
     #[test]
     fn validate_homebrew_package_identifier_accepts_valid() {
+        use uptrakit_provider_registry::ProviderType;
         let cases = [
             "wget",
             "node@18",
@@ -963,7 +919,7 @@ mod tests {
 
         for case in cases {
             assert!(
-                validate_homebrew_package_identifier(case).is_ok(),
+                ProviderRegistry::validate_package_identifier(ProviderType::Homebrew, case).is_ok(),
                 "expected valid: {case}"
             );
         }
@@ -971,6 +927,7 @@ mod tests {
 
     #[test]
     fn validate_homebrew_package_identifier_rejects_invalid() {
+        use uptrakit_provider_registry::ProviderType;
         let cases = [
             "",
             " ",
@@ -985,7 +942,7 @@ mod tests {
 
         for case in cases {
             assert!(
-                validate_homebrew_package_identifier(case).is_err(),
+                ProviderRegistry::validate_package_identifier(ProviderType::Homebrew, case).is_err(),
                 "expected invalid: {case}"
             );
         }

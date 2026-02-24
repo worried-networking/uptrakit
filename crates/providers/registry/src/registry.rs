@@ -203,6 +203,20 @@ register_providers! {
 }
 
 impl ProviderRegistry {
+    /// Validate a package identifier for the given provider type.
+    ///
+    /// Returns `Ok(())` for provider types that have no identifier constraints.
+    /// Returns `Err(message)` when the identifier violates provider-specific rules.
+    pub fn validate_package_identifier(
+        provider_type: ProviderType,
+        value: &str,
+    ) -> std::result::Result<(), String> {
+        match provider_type {
+            ProviderType::Homebrew => uptrakit_provider_homebrew::validate_identifier(value),
+            _ => Ok(()),
+        }
+    }
+
     /// Validate provider configuration from string type.
     ///
     /// This is a convenience method that accepts a string provider type.

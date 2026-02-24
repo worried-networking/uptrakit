@@ -279,10 +279,6 @@ Should test that `svc.broadcast(msg)` does NOT write to the outbox, verifying th
 
 ### Issues
 
-**[SEVERITY: High]** `src/mqtt_client_store.rs:235-263` — N+1 sequential DB updates in `update_mqtt_clients_status`
-
-For each MQTT client ID in the list, a separate `SELECT + UPDATE` is issued serially. A batch of 20 MQTT clients produces 40 DB round-trips. Additionally, there is no wrapping transaction: a partial failure leaves some clients `Offline` and some in the previous state, creating permanent status inconsistency. Replace with a single `UPDATE mqtt_clients SET connection_status = ? WHERE id IN (...)`.
-
 **[SEVERITY: High]** `src/mqtt_lease_coordinator.rs:533-576` — `reconcile_mqtt_clients` silently takes over a live peer's lease without notification
 
 When `existing.instance_id != instance_id` (line 545-555), the function overwrites the `instance_id` and `heartbeat_at` without sending a `TenantRevoked` message to the prior holder or removing the prior holder from the in-memory registry. The result: two controller instances simultaneously believe they hold the same MQTT lease — duplicate MQTT connections, conflicting client-status messages, and broken QoS delivery. The prior holder must be notified and its registry entry cleaned up before the takeover is committed.
@@ -372,14 +368,6 @@ API tokens are valid indefinitely once issued. A compromised token that was neve
 
 #### 2026-02-24 Review
 
-**[SEVERITY: High]** `src/routes/provider_configs.rs:264-274` — Full cross-tenant `service_hosts` table scan in `discover_provider_config`
-
-Loads ALL `service_host` rows from all tenants. Both a performance and defense-in-depth concern. Should JOIN through `services` with tenant filter.
-
-**[SEVERITY: High]** `src/routes/software_items.rs:754-846` — N+1 in `check_all_versions_software_item`: 4 sequential queries per host
-
-For 50 hosts, 200 round-trips. All four lookups should be batch-loaded.
-
 **[SEVERITY: Medium]** `src/queries/services.rs:184-228` — Missing transaction in `deactivate_service` for multi-step mutation
 
 Three sequential mutations without a transaction. Certificate revocation failure is swallowed.
@@ -468,14 +456,6 @@ These are pragmatic uses but each should carry an inline comment explaining why 
 - **Sequence validation decoupled from full deserialization.** `src/routes/service_ws.rs:124-162` — Two-phase parse enables forward-compatible message handling for unknown message types.
 
 ### Issues
-
-**[SEVERITY: High]** `src/queries/software_items.rs:329-332` — Package identifier validation uses raw string comparison
-
-```rust
-if config.provider_type == "homebrew" {
-```
-
-Provider-specific identifier constraints are hardcoded as raw string matches in the query layer. This bypasses the `Provider` trait entirely and creates a new scattered location for provider-specific knowledge. New providers with identifier constraints must add branches here. Move validation logic to a `fn validate_package_identifier(&self, value: &str) -> Result<()>` method on the `Provider` trait, callable from the query layer through `ProviderOps`.
 
 **[SEVERITY: Medium]** `src/routes/oidc_auth.rs:873` — `fake_claims` reverse-role-mapping ignores nested claim paths
 

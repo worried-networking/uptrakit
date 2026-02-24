@@ -11,6 +11,47 @@ use uptrakit_provider_core::{
 
 use crate::config::{HomebrewConfig, HomebrewPackageType};
 
+/// Validate a Homebrew package identifier.
+///
+/// Rejects empty values, leading/trailing whitespace, embedded whitespace, path-traversal
+/// segments (`..`, `.`), empty path segments (`//`), and any characters outside the
+/// allowed set `[A-Za-z0-9\-_.@+/]`.
+pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("package_identifier must not be empty".to_string());
+    }
+    if value != trimmed {
+        return Err(
+            "package_identifier must not include leading or trailing whitespace".to_string(),
+        );
+    }
+    if value.chars().any(char::is_whitespace) {
+        return Err("package_identifier must not contain whitespace".to_string());
+    }
+    if value.len() > 200 {
+        return Err("package_identifier is too long".to_string());
+    }
+    for ch in value.chars() {
+        let valid = ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '@' | '+' | '/');
+        if !valid {
+            return Err(format!(
+                "package_identifier contains invalid character: {ch}"
+            ));
+        }
+    }
+    if value.split('/').any(|segment| segment.is_empty()) {
+        return Err("package_identifier contains an empty segment".to_string());
+    }
+    if value
+        .split('/')
+        .any(|segment| segment == "." || segment == "..")
+    {
+        return Err("package_identifier contains invalid segment".to_string());
+    }
+    Ok(())
+}
+
 /// Provider for Homebrew (macOS/Linux package manager).
 ///
 /// Supports both formulae and casks. The `package_identifier` in `SoftwareItem`

@@ -234,6 +234,17 @@ These are non-negotiable design constraints. Do not violate them.
    **Exception 2:** Tests that use SQLx/SeaORM database connections must NOT use `start_paused = true` — Tokio's
    auto-advance fires pool-internal timers prematurely, causing spurious `ConnectionAcquire(Timeout)` failures under
    stress (nextest `--stress-count`). See [Testing](docs/development/testing.md).
+1. **Use `TenantDb` helpers for all tenant-scoped queries.** Never call `Entity::find().all(tenant_db.db())` directly
+   on a `TenantScoped` entity — `tenant_db.db()` carries no tenant filter and loads all tenants' data. For entities
+   that implement `TenantScoped`, always use `tenant_db.find::<E>()`, `.find_by_id::<E>(id)`, `.update_many::<E>()`,
+   or `.delete_many::<E>()`. For join-table entities without `tenant_id` (e.g. `service_host`), use
+   `tenant_db.find_via_tenant_join::<Target, Scoped>(relation)` which enforces isolation by JOINing through a
+   `TenantScoped` parent entity. See [Coding Standards](docs/development/coding-standards.md) (section
+   "Tenant-Safe Database Queries").
+1. **Batch queries instead of per-item loops.** Never issue a SELECT (or UPDATE) per item inside a loop — this is an
+   N+1 anti-pattern. Load collections with `.is_in(ids)`, then join in memory with `HashMap`. For bulk updates, use
+   `Entity::update_many().filter(Column::Id.is_in(ids)).col_expr(...).exec(db)` in a single statement. See
+   [Coding Standards](docs/development/coding-standards.md) (section "Tenant-Safe Database Queries", Rule 4).
 
 ### Autodiscovery subsystem
 
@@ -264,7 +275,15 @@ for user review. Key invariants:
    provider types. This is derived automatically from each provider's `capabilities()` method via the registry —
    no static list is maintained separately. `ProviderType::supports_discovery()` has been removed.
 
-6. **Partial unique indexes.** `software_items` uses a partial unique index
+6. **Package identifier validation goes through `ProviderRegistry`.** Provider-specific constraints on the
+   `package_identifier` field (e.g. Homebrew's allowed character set) must be implemented in the provider crate as
+   `pub fn validate_identifier(value: &str) -> Result<(), String>` and wired through
+   `ProviderRegistry::validate_package_identifier(provider_type, value)`. Never add provider-specific validation logic
+   directly to web API query helpers or route handlers. The `ProviderOps` trait exposes this as
+   `validate_package_identifier_str(provider_type: &str, value: &str)` for trait-object dispatch. See
+   [Provider Guidelines](docs/development/provider-guidelines.md) for the full extension pattern.
+
+7. **Partial unique indexes.** `software_items` uses a partial unique index
    `(tenant_id, name) WHERE deactivated_at IS NULL` — prevents duplicate item names within a tenant while
    allowing re-creation after soft-delete. `host_software_items` uses a unique index
    `(host_id, provider_config_id, package_identifier)` — prevents tracking the same package twice on one host.

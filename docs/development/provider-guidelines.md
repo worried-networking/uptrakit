@@ -112,6 +112,54 @@ for all six methods automatically. If the provider supports discovery, implement
 (or `ProviderRegistry::discovery_provider_types()` statically) to get the current list of discovery-capable provider
 types. Do not maintain a separate static list or override method.
 
+### Package identifier validation
+
+Some providers impose format constraints on the `package_identifier` field of a `SoftwareItem`. For example, Homebrew
+identifiers must not contain whitespace, path-traversal segments (`..`, `.`), or characters outside `[A-Za-z0-9\-_.@+/]`.
+
+Provider-specific identifier validation is exposed through two APIs:
+
+**Static dispatch (preferred for internal use):**
+
+```rust
+ProviderRegistry::validate_package_identifier(ProviderType::Homebrew, value)?;
+```
+
+**Trait object dispatch (via `ProviderOps`):**
+
+```rust
+state.provider_ops.validate_package_identifier_str(&config.provider_type, value)?;
+```
+
+Returns `Ok(())` for unknown provider types (no constraints apply). Returns `Err(String)` with a human-readable message
+when the identifier is invalid.
+
+**When adding a new provider with identifier constraints:**
+
+1. Add a `pub fn validate_identifier(value: &str) -> Result<(), String>` to your provider crate
+   (e.g., `crates/providers/my-provider/src/provider.rs`) and re-export it from `lib.rs`.
+2. Add a match arm to `ProviderRegistry::validate_package_identifier` in
+   `crates/providers/registry/src/registry.rs`:
+
+   ```rust
+   pub fn validate_package_identifier(
+       provider_type: ProviderType,
+       value: &str,
+   ) -> std::result::Result<(), String> {
+       match provider_type {
+           ProviderType::Homebrew => uptrakit_provider_homebrew::validate_identifier(value),
+           ProviderType::MyProvider => uptrakit_provider_my_provider::validate_identifier(value),
+           _ => Ok(()),
+       }
+   }
+   ```
+
+3. Add unit tests in your provider crate covering valid identifiers, empty identifiers, and all
+   constraint violations.
+
+Do **not** add provider-specific identifier validation logic to the web API layer or query helpers. All identifier
+validation must go through `ProviderRegistry::validate_package_identifier`.
+
 ### Secret masking with the `SecretMasking` trait
 
 The `SecretMasking` trait (`crates/providers/core/src/secrets.rs`, re-exported from `uptrakit-provider-core`) provides a standard interface for

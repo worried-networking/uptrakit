@@ -86,6 +86,17 @@ pub trait ProviderOps: Send + Sync + 'static {
 
     /// Returns all provider types that have the `DiscoverLocalSoftware` capability.
     fn discovery_provider_types(&self) -> Vec<ProviderType>;
+
+    /// Validate a package identifier for the given string provider type.
+    ///
+    /// Returns `Ok(())` for unknown provider types (no constraints apply) and for
+    /// provider types that impose no identifier constraints. Returns `Err(message)`
+    /// when the identifier violates provider-specific rules.
+    fn validate_package_identifier_str(
+        &self,
+        provider_type: &str,
+        value: &str,
+    ) -> std::result::Result<(), String>;
 }
 
 impl ProviderOps for ProviderRegistry {
@@ -116,5 +127,16 @@ impl ProviderOps for ProviderRegistry {
 
     fn discovery_provider_types(&self) -> Vec<ProviderType> {
         ProviderRegistry::discovery_provider_types()
+    }
+
+    fn validate_package_identifier_str(
+        &self,
+        provider_type: &str,
+        value: &str,
+    ) -> std::result::Result<(), String> {
+        let Ok(pt) = provider_type.parse::<ProviderType>() else {
+            return Ok(());
+        };
+        ProviderRegistry::validate_package_identifier(pt, value)
     }
 }
