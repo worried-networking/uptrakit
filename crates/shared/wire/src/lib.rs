@@ -2181,12 +2181,12 @@ mod tests {
         let assignment = VersionCheckAssignment {
             software_item_id: TEST_UUID_1,
             name: "Docker Image".to_string(),
-            provider_type: ProviderType::DockerRegistry,
+            provider_type: ProviderType::Docker,
             package_identifier: "nginx:latest".to_string(),
             config: serde_json::json!({}),
         };
         let json = serde_json::to_string(&assignment).unwrap();
-        assert!(json.contains(r#""provider_type":"docker_registry""#));
+        assert!(json.contains(r#""provider_type":"docker""#));
         let deserialized: VersionCheckAssignment = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, assignment);
     }
@@ -2196,7 +2196,7 @@ mod tests {
         for (provider, expected) in [
             (ProviderType::GithubReleases, "github_releases"),
             (ProviderType::ProxmoxHelperScripts, "proxmox_helper_scripts"),
-            (ProviderType::DockerRegistry, "docker_registry"),
+            (ProviderType::Docker, "docker"),
         ] {
             let json = serde_json::to_string(&provider).unwrap();
             assert_eq!(json, format!(r#""{expected}""#));

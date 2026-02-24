@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-provider-docker-registry"
+name = "uptrakit-provider-docker"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
@@ -7,9 +7,13 @@ repository.workspace = true
 version.workspace = true
 publish = false
 
+[features]
+default = []
+ssh = ["bollard/ssh"]
+
 [dependencies]
 uptrakit-provider-core = { path = "../core" }
-bollard      = { workspace = true }
+bollard      = { workspace = true, features = ["ssl"] }
 futures-util = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -24,3 +28,4 @@ async-trait = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+uptrakit-command = { path = "../../shared/command" }

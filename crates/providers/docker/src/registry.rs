@@ -2,8 +2,8 @@ use rootcause::prelude::*;
 
 use crate::api_types::{RegistryErrorResponse, TagListResponse};
 use crate::auth::RegistryAuth;
-use crate::config::DockerRegistryConfig;
-use crate::error::{DockerRegistryError, Result};
+use crate::config::DockerAuth;
+use crate::error::{DockerError, Result};
 
 /// OCI Distribution Spec manifest media types to accept.
 const MANIFEST_ACCEPT: &str = concat!(
@@ -14,54 +14,48 @@ const MANIFEST_ACCEPT: &str = concat!(
 );
 
 /// Low-level HTTP client for OCI Distribution API operations.
+///
+/// Unlike the old implementation, `RegistryClient` does not bake in a specific
+/// registry hostname or repository at construction time. Instead, `registry`
+/// and `repository` are passed per-call — allowing a single client instance to
+/// serve multiple images with different registries.
 pub struct RegistryClient {
     client: reqwest::Client,
     auth: RegistryAuth,
-    base_url: String,
-    repository: String,
     page_size: u32,
 }
 
 impl RegistryClient {
-    /// Create a new registry client from provider configuration.
-    pub fn new(config: &DockerRegistryConfig) -> Result<Self> {
+    /// Create a new registry client with optional authentication and page size.
+    pub fn new(auth: Option<DockerAuth>, page_size: u32) -> Result<Self> {
         let client = reqwest::Client::builder()
             .user_agent(concat!(
-                "uptrakit-provider-docker-registry/",
+                "uptrakit-provider-docker/",
                 env!("CARGO_PKG_VERSION")
             ))
             .build()
             .map_err(|e| {
-                report!(DockerRegistryError::Request(format!(
+                report!(DockerError::Request(format!(
                     "failed to build HTTP client: {e}"
                 )))
             })?;
 
-        let registry = config.resolved_registry();
-        let base_url = format!("https://{registry}/v2");
-        let repository = config.resolved_repository();
-        let auth = RegistryAuth::new(config.auth.clone());
-
         Ok(Self {
             client,
-            auth,
-            base_url,
-            repository,
-            page_size: config.page_size,
+            auth: RegistryAuth::new(auth),
+            page_size,
         })
     }
 
-    /// List all tags for the configured repository.
-    pub async fn list_tags(&self) -> Result<Vec<String>> {
-        let url = format!(
-            "{}/{}/tags/list?n={}",
-            self.base_url, self.repository, self.page_size
-        );
+    /// List all tags for a repository on the given registry.
+    pub async fn list_tags(&self, registry: &str, repository: &str) -> Result<Vec<String>> {
+        let base_url = format!("https://{registry}/v2");
+        let url = format!("{base_url}/{repository}/tags/list?n={}", self.page_size);
         tracing::debug!(url = %url, "listing registry tags");
 
         let body = self.authenticated_get(&url).await?;
         let tag_list: TagListResponse = serde_json::from_str(&body).map_err(|e| {
-            report!(DockerRegistryError::ParseResponse(format!(
+            report!(DockerError::ParseResponse(format!(
                 "failed to parse tag list: {e}"
             )))
         })?;
@@ -72,9 +66,15 @@ impl RegistryClient {
 
     /// Get the manifest digest for a specific tag.
     ///
-    /// Uses HEAD request to get the `Docker-Content-Digest` header.
-    pub async fn get_manifest_digest(&self, tag: &str) -> Result<String> {
-        let url = format!("{}/{}/manifests/{}", self.base_url, self.repository, tag);
+    /// Uses a HEAD request to read the `Docker-Content-Digest` header.
+    pub async fn get_manifest_digest(
+        &self,
+        registry: &str,
+        repository: &str,
+        tag: &str,
+    ) -> Result<String> {
+        let base_url = format!("https://{registry}/v2");
+        let url = format!("{base_url}/{repository}/manifests/{tag}");
         tracing::debug!(url = %url, tag = %tag, "fetching manifest digest");
 
         let digest = self.authenticated_head(&url).await?;
@@ -84,7 +84,6 @@ impl RegistryClient {
 
     /// Perform an authenticated GET request with 401 retry.
     async fn authenticated_get(&self, url: &str) -> Result<String> {
-        // Try with cached token first
         if let Some(token) = self.auth.cached_bearer_token() {
             tracing::trace!("using cached registry auth token");
             let response = self
@@ -93,22 +92,20 @@ impl RegistryClient {
                 .bearer_auth(&token)
                 .send()
                 .await
-                .context_transform(|e| DockerRegistryError::Request(format!("GET failed: {e}")))?;
+                .context_transform(|e| DockerError::Request(format!("GET failed: {e}")))?;
 
             if response.status() != reqwest::StatusCode::UNAUTHORIZED {
                 return self.handle_response(response).await;
             }
-            // Token expired or invalid, fall through to re-auth
             self.auth.clear_cache();
         }
 
-        // First attempt without token (or after cache clear)
         let response = self
             .client
             .get(url)
             .send()
             .await
-            .context_transform(|e| DockerRegistryError::Request(format!("GET failed: {e}")))?;
+            .context_transform(|e| DockerError::Request(format!("GET failed: {e}")))?;
 
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www_auth = response
@@ -129,7 +126,7 @@ impl RegistryClient {
                 .send()
                 .await
                 .context_transform(|e| {
-                    DockerRegistryError::Request(format!("GET retry failed: {e}"))
+                    DockerError::Request(format!("GET retry failed: {e}"))
                 })?;
 
             return self.handle_response(retry_response).await;
@@ -141,7 +138,6 @@ impl RegistryClient {
     /// Perform an authenticated HEAD request with 401 retry.
     /// Returns the `Docker-Content-Digest` header value.
     async fn authenticated_head(&self, url: &str) -> Result<String> {
-        // Try with cached token first
         if let Some(token) = self.auth.cached_bearer_token() {
             let response = self
                 .client
@@ -150,7 +146,7 @@ impl RegistryClient {
                 .bearer_auth(&token)
                 .send()
                 .await
-                .context_transform(|e| DockerRegistryError::Request(format!("HEAD failed: {e}")))?;
+                .context_transform(|e| DockerError::Request(format!("HEAD failed: {e}")))?;
 
             if response.status() != reqwest::StatusCode::UNAUTHORIZED {
                 return self.extract_digest(response).await;
@@ -158,14 +154,13 @@ impl RegistryClient {
             self.auth.clear_cache();
         }
 
-        // First attempt without token
         let response = self
             .client
             .head(url)
             .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT)
             .send()
             .await
-            .context_transform(|e| DockerRegistryError::Request(format!("HEAD failed: {e}")))?;
+            .context_transform(|e| DockerError::Request(format!("HEAD failed: {e}")))?;
 
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www_auth = response
@@ -185,7 +180,7 @@ impl RegistryClient {
                 .send()
                 .await
                 .context_transform(|e| {
-                    DockerRegistryError::Request(format!("HEAD retry failed: {e}"))
+                    DockerError::Request(format!("HEAD retry failed: {e}"))
                 })?;
 
             return self.extract_digest(retry_response).await;
@@ -200,7 +195,7 @@ impl RegistryClient {
 
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             tracing::warn!("Docker registry rate limit encountered");
-            bail!(DockerRegistryError::RateLimited);
+            bail!(DockerError::RateLimited);
         }
 
         if !status.is_success() {
@@ -211,11 +206,11 @@ impl RegistryClient {
                 .map(|e| format!("{}: {}", e.code, e.message))
                 .unwrap_or(body);
 
-            bail!(DockerRegistryError::ApiError { status, message });
+            bail!(DockerError::ApiError { status, message });
         }
 
         response.text().await.map_err(|e| {
-            report!(DockerRegistryError::ParseResponse(format!(
+            report!(DockerError::ParseResponse(format!(
                 "failed to read response body: {e}"
             )))
         })
@@ -226,11 +221,11 @@ impl RegistryClient {
         let status = response.status();
 
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            bail!(DockerRegistryError::RateLimited);
+            bail!(DockerError::RateLimited);
         }
 
         if !status.is_success() {
-            bail!(DockerRegistryError::ApiError {
+            bail!(DockerError::ApiError {
                 status,
                 message: format!("manifest HEAD returned {status}"),
             });
@@ -242,7 +237,7 @@ impl RegistryClient {
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string())
             .ok_or_else(|| {
-                report!(DockerRegistryError::ParseResponse(
+                report!(DockerError::ParseResponse(
                     "missing Docker-Content-Digest header".to_string()
                 ))
             })
@@ -252,72 +247,9 @@ impl RegistryClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{DockerRegistryConfig, TrackingMode};
-
-    fn test_config() -> DockerRegistryConfig {
-        DockerRegistryConfig {
-            image: "nginx".to_string(),
-            registry: None,
-            auth: None,
-            tracking_mode: TrackingMode::SemverTags,
-            tag_patterns: vec![],
-            tag_strip_prefix: "v".to_string(),
-            include_prereleases: false,
-            tracked_tag: None,
-            page_size: 100,
-            restart_command: None,
-        }
-    }
 
     #[test]
     fn client_creation_succeeds() {
-        let config = test_config();
-        assert!(RegistryClient::new(&config).is_ok());
-    }
-
-    #[test]
-    fn client_base_url_docker_hub() {
-        let config = test_config();
-        let client = RegistryClient::new(&config).expect("valid config");
-        assert_eq!(client.base_url, "https://registry-1.docker.io/v2");
-        assert_eq!(client.repository, "library/nginx");
-    }
-
-    #[test]
-    fn client_base_url_ghcr() {
-        let config = DockerRegistryConfig {
-            image: "ghcr.io/owner/repo".to_string(),
-            registry: None,
-            auth: None,
-            tracking_mode: TrackingMode::SemverTags,
-            tag_patterns: vec![],
-            tag_strip_prefix: "v".to_string(),
-            include_prereleases: false,
-            tracked_tag: None,
-            page_size: 100,
-            restart_command: None,
-        };
-        let client = RegistryClient::new(&config).expect("valid config");
-        assert_eq!(client.base_url, "https://ghcr.io/v2");
-        assert_eq!(client.repository, "owner/repo");
-    }
-
-    #[test]
-    fn client_base_url_private() {
-        let config = DockerRegistryConfig {
-            image: "registry.example.com/myapp".to_string(),
-            registry: None,
-            auth: None,
-            tracking_mode: TrackingMode::SemverTags,
-            tag_patterns: vec![],
-            tag_strip_prefix: "v".to_string(),
-            include_prereleases: false,
-            tracked_tag: None,
-            page_size: 100,
-            restart_command: None,
-        };
-        let client = RegistryClient::new(&config).expect("valid config");
-        assert_eq!(client.base_url, "https://registry.example.com/v2");
-        assert_eq!(client.repository, "myapp");
+        assert!(RegistryClient::new(None, 100).is_ok());
     }
 }

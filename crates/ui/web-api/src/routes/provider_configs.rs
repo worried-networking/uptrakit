@@ -533,10 +533,8 @@ mod tests {
                 .is_ok()
         );
 
-        let docker_config = serde_json::json!({
-            "image": "nginx"
-        });
-        assert!(ProviderRegistry::validate_config_str("docker_registry", &docker_config).is_ok());
+        let docker_config = serde_json::json!({});
+        assert!(ProviderRegistry::validate_config_str("docker", &docker_config).is_ok());
 
         let homebrew_config = serde_json::json!({});
         assert!(ProviderRegistry::validate_config_str("homebrew", &homebrew_config).is_ok());
@@ -566,61 +564,53 @@ mod tests {
         assert_eq!(masked, config);
     }
 
-    // --- Docker Registry provider tests ---
+    // --- Docker provider tests ---
 
     #[test]
-    fn mask_docker_registry_basic_password() {
+    fn mask_docker_basic_password() {
         let config = serde_json::json!({
-            "image": "nginx",
             "auth": {
                 "type": "basic",
                 "username": "user",
                 "password": "secret123"
             }
         });
-        let masked = ProviderRegistry::mask_config_secrets_str("docker_registry", &config);
+        let masked = ProviderRegistry::mask_config_secrets_str("docker", &config);
         assert_eq!(masked["auth"]["password"], SECRET_MASK);
         assert_eq!(masked["auth"]["username"], "user");
     }
 
     #[test]
-    fn mask_docker_registry_bearer_token() {
+    fn mask_docker_bearer_token() {
         let config = serde_json::json!({
-            "image": "nginx",
             "auth": {
                 "type": "bearer",
                 "token": "ghcr_token_secret"
             }
         });
-        let masked = ProviderRegistry::mask_config_secrets_str("docker_registry", &config);
+        let masked = ProviderRegistry::mask_config_secrets_str("docker", &config);
         assert_eq!(masked["auth"]["token"], SECRET_MASK);
     }
 
     #[test]
-    fn mask_docker_registry_no_auth() {
-        let config = serde_json::json!({
-            "image": "nginx"
-        });
-        let masked = ProviderRegistry::mask_config_secrets_str("docker_registry", &config);
+    fn mask_docker_no_auth() {
+        let config = serde_json::json!({});
+        let masked = ProviderRegistry::mask_config_secrets_str("docker", &config);
         // None auth stays absent (serialized with skip_serializing_if)
         assert!(masked.get("auth").is_none());
     }
 
     #[test]
-    fn mask_docker_registry_null_auth() {
-        let config = serde_json::json!({
-            "image": "nginx",
-            "auth": null
-        });
-        let masked = ProviderRegistry::mask_config_secrets_str("docker_registry", &config);
+    fn mask_docker_null_auth() {
+        let config = serde_json::json!({ "auth": null });
+        let masked = ProviderRegistry::mask_config_secrets_str("docker", &config);
         // JSON null deserializes to None, which stays absent after masking
         assert!(masked.get("auth").is_none());
     }
 
     #[test]
-    fn restore_docker_registry_masked_password() {
+    fn restore_docker_masked_password() {
         let mut incoming = serde_json::json!({
-            "image": "nginx",
             "auth": {
                 "type": "basic",
                 "username": "user",
@@ -628,41 +618,37 @@ mod tests {
             }
         });
         let existing = serde_json::json!({
-            "image": "nginx",
             "auth": {
                 "type": "basic",
                 "username": "user",
                 "password": "real_password"
             }
         });
-        ProviderRegistry::restore_config_secrets_str("docker_registry", &mut incoming, &existing);
+        ProviderRegistry::restore_config_secrets_str("docker", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["password"], "real_password");
     }
 
     #[test]
-    fn restore_docker_registry_masked_token() {
+    fn restore_docker_masked_token() {
         let mut incoming = serde_json::json!({
-            "image": "nginx",
             "auth": {
                 "type": "bearer",
                 "token": "***"
             }
         });
         let existing = serde_json::json!({
-            "image": "nginx",
             "auth": {
                 "type": "bearer",
                 "token": "real_token"
             }
         });
-        ProviderRegistry::restore_config_secrets_str("docker_registry", &mut incoming, &existing);
+        ProviderRegistry::restore_config_secrets_str("docker", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["token"], "real_token");
     }
 
     #[test]
-    fn restore_docker_registry_new_password_not_masked() {
+    fn restore_docker_new_password_not_masked() {
         let mut incoming = serde_json::json!({
-            "image": "nginx",
             "auth": {
                 "type": "basic",
                 "username": "user",
@@ -670,30 +656,26 @@ mod tests {
             }
         });
         let existing = serde_json::json!({
-            "image": "nginx",
             "auth": {
                 "type": "basic",
                 "username": "user",
                 "password": "old_password"
             }
         });
-        ProviderRegistry::restore_config_secrets_str("docker_registry", &mut incoming, &existing);
+        ProviderRegistry::restore_config_secrets_str("docker", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["password"], "new_password");
     }
 
     #[test]
-    fn validate_valid_docker_registry_config() {
-        let config = serde_json::json!({
-            "image": "nginx"
-        });
-        assert!(ProviderRegistry::validate_config_str("docker_registry", &config).is_ok());
+    fn validate_valid_docker_config() {
+        // Empty config is valid — no required fields
+        let config = serde_json::json!({});
+        assert!(ProviderRegistry::validate_config_str("docker", &config).is_ok());
     }
 
     #[test]
-    fn validate_docker_registry_config_full() {
+    fn validate_docker_config_with_auth() {
         let config = serde_json::json!({
-            "image": "ghcr.io/owner/repo",
-            "registry": "ghcr.io",
             "tracking_mode": "digest_tracking",
             "tracked_tag": "main",
             "auth": {
@@ -701,23 +683,20 @@ mod tests {
                 "token": "ghcr_token"
             }
         });
-        assert!(ProviderRegistry::validate_config_str("docker_registry", &config).is_ok());
+        assert!(ProviderRegistry::validate_config_str("docker", &config).is_ok());
     }
 
     #[test]
-    fn validate_invalid_docker_registry_config_empty_image() {
-        let config = serde_json::json!({
-            "image": ""
-        });
-        assert!(ProviderRegistry::validate_config_str("docker_registry", &config).is_err());
+    fn validate_invalid_docker_config_zero_page_size() {
+        let config = serde_json::json!({ "page_size": 0 });
+        assert!(ProviderRegistry::validate_config_str("docker", &config).is_err());
     }
 
     #[test]
-    fn validate_invalid_docker_registry_config_bad_regex() {
+    fn validate_invalid_docker_config_bad_regex() {
         let config = serde_json::json!({
-            "image": "nginx",
             "tag_patterns": ["[invalid"]
         });
-        assert!(ProviderRegistry::validate_config_str("docker_registry", &config).is_err());
+        assert!(ProviderRegistry::validate_config_str("docker", &config).is_err());
     }
 }

@@ -7,12 +7,16 @@ repository.workspace = true
 version.workspace = true
 publish = false
 
+[features]
+default = []
+ssh = ["uptrakit-provider-docker/ssh"]
+
 [dependencies]
 uptrakit-shared-types = { path = "../../shared/types" }
 uptrakit-command = { path = "../../shared/command" }
 uptrakit-provider-core = { path = "../core" }
 uptrakit-provider-github = { path = "../github" }
-uptrakit-provider-docker-registry = { path = "../docker-registry" }
+uptrakit-provider-docker = { path = "../docker" }
 uptrakit-provider-proxmox-helper-scripts = { path = "../proxmox-helper-scripts" }
 uptrakit-provider-homebrew = { path = "../homebrew" }
 uptrakit-provider-apt = { path = "../apt" }

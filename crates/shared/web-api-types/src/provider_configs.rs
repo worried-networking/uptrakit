@@ -155,8 +155,8 @@ mod tests {
         let resp = ProviderConfigResponse {
             id: sample_uuid(),
             name: "docker-hub".to_string(),
-            provider_type: ProviderType::DockerRegistry,
-            config: serde_json::json!({"registry": "docker.io"}),
+            provider_type: ProviderType::Docker,
+            config: serde_json::json!({}),
             enabled: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-06-01 00:00:00 UTC),
@@ -166,7 +166,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.id, sample_uuid());
         assert_eq!(de.name, "docker-hub");
-        assert_eq!(de.provider_type, ProviderType::DockerRegistry);
+        assert_eq!(de.provider_type, ProviderType::Docker);
         assert!(de.enabled);
     }
 }

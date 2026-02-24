@@ -5,7 +5,7 @@ use rootcause::prelude::*;
 
 use crate::api_types::TokenResponse;
 use crate::config::DockerAuth;
-use crate::error::{DockerRegistryError, Result};
+use crate::error::{DockerError, Result};
 
 /// Safety margin subtracted from token expiry to avoid using expired tokens.
 const EXPIRY_SAFETY_MARGIN_SECS: u64 = 30;
@@ -58,7 +58,7 @@ impl RegistryAuth {
         www_authenticate: &str,
     ) -> Result<String> {
         let realm = extract_quoted_param(www_authenticate, "realm").ok_or_else(|| {
-            report!(DockerRegistryError::AuthFailed(
+            report!(DockerError::AuthFailed(
                 "missing realm in WWW-Authenticate header".to_string()
             ))
         })?;
@@ -97,7 +97,7 @@ impl RegistryAuth {
         }
 
         let response = request.send().await.map_err(|e| {
-            report!(DockerRegistryError::AuthFailed(format!(
+            report!(DockerError::AuthFailed(format!(
                 "token request failed: {e}"
             )))
         })?;
@@ -105,13 +105,13 @@ impl RegistryAuth {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            bail!(DockerRegistryError::AuthFailed(format!(
+            bail!(DockerError::AuthFailed(format!(
                 "token endpoint returned {status}: {body}"
             )));
         }
 
         let token_resp: TokenResponse = response.json().await.map_err(|e| {
-            report!(DockerRegistryError::ParseResponse(format!(
+            report!(DockerError::ParseResponse(format!(
                 "failed to parse token response: {e}"
             )))
         })?;

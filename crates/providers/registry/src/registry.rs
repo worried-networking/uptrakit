@@ -5,7 +5,7 @@ use rootcause::prelude::*;
 use uptrakit_command::CommandExecutor;
 use uptrakit_provider_core::{Provider, ProviderType, SecretMasking};
 use uptrakit_provider_apt::{AptConfig, AptProvider};
-use uptrakit_provider_docker_registry::{DockerRegistryConfig, DockerRegistryProvider};
+use uptrakit_provider_docker::{DockerConfig, DockerProvider};
 use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
 use uptrakit_provider_homebrew::{HomebrewConfig, HomebrewProvider};
 use uptrakit_provider_proxmox_helper_scripts::{
@@ -212,11 +212,11 @@ macro_rules! register_providers {
 pub struct ProviderRegistry;
 
 register_providers! {
-    GithubReleases   => { config: GitHubConfig,                provider: GitHubProvider },
-    DockerRegistry   => { config: DockerRegistryConfig,        provider: DockerRegistryProvider },
-    ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, provider: ProxmoxHelperScriptsProvider },
-    Homebrew         => { config: HomebrewConfig,              provider: HomebrewProvider },
-    Apt              => { config: AptConfig,                   provider: AptProvider },
+    GithubReleases       => { config: GitHubConfig,                   provider: GitHubProvider },
+    Docker               => { config: DockerConfig,                   provider: DockerProvider },
+    ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig,     provider: ProxmoxHelperScriptsProvider },
+    Homebrew             => { config: HomebrewConfig,                 provider: HomebrewProvider },
+    Apt                  => { config: AptConfig,                      provider: AptProvider },
 }
 
 impl ProviderRegistry {
@@ -229,6 +229,7 @@ impl ProviderRegistry {
         value: &str,
     ) -> std::result::Result<(), String> {
         match provider_type {
+            ProviderType::Docker => uptrakit_provider_docker::validate_identifier(value),
             ProviderType::Homebrew => uptrakit_provider_homebrew::validate_identifier(value),
             ProviderType::Apt => uptrakit_provider_apt::validate_identifier(value),
             _ => Ok(()),
@@ -288,8 +289,8 @@ mod tests {
             Some(ProviderType::GithubReleases)
         );
         assert_eq!(
-            "docker_registry".parse::<ProviderType>().ok(),
-            Some(ProviderType::DockerRegistry)
+            "docker".parse::<ProviderType>().ok(),
+            Some(ProviderType::Docker)
         );
         assert_eq!(
             "proxmox_helper_scripts".parse::<ProviderType>().ok(),
@@ -304,6 +305,8 @@ mod tests {
             Some(ProviderType::Apt)
         );
         assert!("unknown".parse::<ProviderType>().is_err());
+        // Old wire string is no longer a known type
+        assert!("docker_registry".parse::<ProviderType>().is_err());
     }
 
     #[test]
@@ -325,19 +328,16 @@ mod tests {
     }
 
     #[test]
-    fn validate_valid_docker_registry_config() {
-        let config = serde_json::json!({
-            "image": "nginx"
-        });
-        assert!(ProviderRegistry::validate_config(ProviderType::DockerRegistry, &config).is_ok());
+    fn validate_valid_docker_config() {
+        // Empty config is valid for Docker (no required fields)
+        let config = serde_json::json!({});
+        assert!(ProviderRegistry::validate_config(ProviderType::Docker, &config).is_ok());
     }
 
     #[test]
-    fn validate_invalid_docker_registry_config() {
-        let config = serde_json::json!({
-            "image": ""
-        });
-        assert!(ProviderRegistry::validate_config(ProviderType::DockerRegistry, &config).is_err());
+    fn validate_invalid_docker_config_zero_page_size() {
+        let config = serde_json::json!({ "page_size": 0 });
+        assert!(ProviderRegistry::validate_config(ProviderType::Docker, &config).is_err());
     }
 
     #[test]
@@ -390,11 +390,21 @@ mod tests {
 
     #[test]
     fn create_provider_docker() {
-        let config = serde_json::json!({
-            "image": "nginx"
-        });
+        // Empty config is valid
+        let config = serde_json::json!({});
         let provider = ProviderRegistry::create_provider(
-            ProviderType::DockerRegistry,
+            ProviderType::Docker,
+            &config,
+            test_executor(),
+        );
+        assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn create_provider_for_discovery_docker() {
+        let config = serde_json::json!({});
+        let provider = ProviderRegistry::create_provider_for_discovery(
+            ProviderType::Docker,
             &config,
             test_executor(),
         );
@@ -544,6 +554,31 @@ mod tests {
     }
 
     #[test]
+    fn docker_provider_capabilities() {
+        let config = serde_json::json!({});
+        let provider =
+            ProviderRegistry::create_provider(ProviderType::Docker, &config, test_executor())
+                .unwrap();
+        assert!(
+            provider
+                .has_capability(uptrakit_provider_core::ProviderCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            !provider
+                .has_capability(uptrakit_provider_core::ProviderCapability::RefreshPackageIndex)
+        );
+    }
+
+    #[test]
+    fn discovery_provider_types_includes_docker() {
+        let types = ProviderRegistry::discovery_provider_types();
+        assert!(
+            types.contains(&ProviderType::Docker),
+            "Docker should be in discovery_provider_types()"
+        );
+    }
+
+    #[test]
     fn boxed_provider_preserves_type() {
         let github_config = serde_json::json!({"owner": "octocat", "repo": "hello-world"});
         let github = ProviderRegistry::create_provider(
@@ -554,14 +589,14 @@ mod tests {
         .expect("create github");
         assert_eq!(github.provider_type(), ProviderType::GithubReleases);
 
-        let docker_config = serde_json::json!({"image": "nginx"});
+        let docker_config = serde_json::json!({});
         let docker = ProviderRegistry::create_provider(
-            ProviderType::DockerRegistry,
+            ProviderType::Docker,
             &docker_config,
             test_executor(),
         )
         .expect("create docker");
-        assert_eq!(docker.provider_type(), ProviderType::DockerRegistry);
+        assert_eq!(docker.provider_type(), ProviderType::Docker);
 
         let proxmox_config = serde_json::json!({"script_url": "https://example.com/update.sh"});
         let proxmox = ProviderRegistry::create_provider(
@@ -740,7 +775,9 @@ mod tests {
         assert_eq!(result, config);
     }
 
-    /// `validate_package_identifier` for `Other` always returns `Ok(())`.
+    // ── validate_package_identifier ───────────────────────────────────────
+
+    /// `Other` always returns `Ok(())`.
     #[test]
     fn validate_package_identifier_other_is_permissive() {
         assert!(ProviderRegistry::validate_package_identifier(
@@ -748,5 +785,43 @@ mod tests {
             "org.example.App"
         )
         .is_ok());
+    }
+
+    #[test]
+    fn validate_package_identifier_docker_valid() {
+        assert!(ProviderRegistry::validate_package_identifier(
+            ProviderType::Docker,
+            "nginx"
+        )
+        .is_ok());
+        assert!(ProviderRegistry::validate_package_identifier(
+            ProviderType::Docker,
+            "ghcr.io/owner/app:latest"
+        )
+        .is_ok());
+        assert!(ProviderRegistry::validate_package_identifier(
+            ProviderType::Docker,
+            "myuser/app:v2"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn validate_package_identifier_docker_invalid() {
+        assert!(ProviderRegistry::validate_package_identifier(
+            ProviderType::Docker,
+            ""
+        )
+        .is_err());
+        assert!(ProviderRegistry::validate_package_identifier(
+            ProviderType::Docker,
+            "nginx latest"
+        )
+        .is_err());
+        assert!(ProviderRegistry::validate_package_identifier(
+            ProviderType::Docker,
+            "ghcr.io//app"
+        )
+        .is_err());
     }
 }
