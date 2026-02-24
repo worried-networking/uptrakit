@@ -2131,6 +2131,26 @@ mod tests {
         }
     }
 
+    /// A `VersionCheckAssignment` carrying an unknown provider type from a
+    /// newer server must deserialize without error.  The entire message is
+    /// preserved so the agent can log the skip reason instead of crashing.
+    #[test]
+    fn version_check_assignment_with_unknown_provider_type_deserializes() {
+        let json = serde_json::json!({
+            "software_item_id": "00000000-0000-0000-0000-000000000001",
+            "name": "My App",
+            "provider_type": "apt",
+            "package_identifier": "my-app",
+            "config": {}
+        });
+        let assignment: VersionCheckAssignment =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(
+            assignment.provider_type,
+            ProviderType::Other("apt".to_string())
+        );
+    }
+
     #[test]
     fn release_info_empty_assets_omitted() {
         let info = ReleaseInfo {
