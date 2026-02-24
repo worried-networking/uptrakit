@@ -182,6 +182,35 @@ impl NotificationService {
         delivered
     }
 
+    /// Load software states for a tenant and push to all locally connected MQTT services
+    /// (immediately) and to the outbox for cross-controller delivery.
+    pub async fn push_software_states_for_tenant(&self, tenant_id: uuid::Uuid) {
+        use uptrakit_shared_db::entity::service::ServiceType;
+        let payload = match crate::queries::mqtt_software_states::load_software_states_for_tenant(
+            &self.db,
+            tenant_id,
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    %tenant_id,
+                    "failed to load software states for MQTT push"
+                );
+                return;
+            }
+        };
+        let msg = ControllerMessage::SoftwareStates(payload);
+        // Deliver to locally connected MQTT services immediately.
+        self.registry
+            .broadcast_by_type(ServiceType::Mqtt, msg.clone())
+            .await;
+        // Write to outbox for cross-controller delivery (MQTT-only).
+        self.write_outbox_event(None, Some("mqtt"), &msg).await;
+    }
+
     /// Return the controller ID.
     pub fn controller_id(&self) -> Uuid {
         self.controller_id

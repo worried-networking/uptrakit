@@ -195,7 +195,7 @@ pub(crate) async fn handle_mqtt_authenticated(
     // Send initial tenant assignments.
     if !tenant_configs.is_empty() {
         let assignments_msg = ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
-            tenants: tenant_configs,
+            tenants: tenant_configs.clone(),
         });
         let Some(json) = serialize_controller_msg(out_seq, assignments_msg) else {
             state.service_connections.unregister(&service_id).await;
@@ -204,6 +204,19 @@ pub(crate) async fn handle_mqtt_authenticated(
         if sink.send(Message::Text(json.into())).await.is_err() {
             state.service_connections.unregister(&service_id).await;
             return;
+        }
+    }
+
+    // Push current software states to the MQTT service for each newly assigned tenant.
+    {
+        let mut seen_tenants = std::collections::HashSet::new();
+        for cfg in &tenant_configs {
+            if seen_tenants.insert(cfg.tenant_id) {
+                state
+                    .notification_service
+                    .push_software_states_for_tenant(cfg.tenant_id)
+                    .await;
+            }
         }
     }
 
@@ -303,6 +316,61 @@ pub(crate) async fn handle_mqtt_authenticated(
                                 .await
                                 {
                                     tracing::warn!(error = %e, "failed to update mqtt client status");
+                                }
+                            }
+                            ServiceMessage::MqttTriggerUpdate(payload) => {
+                                // Validate the tenant_id is one assigned to this MQTT service.
+                                if !tenant_configs.iter().any(|c| c.tenant_id == payload.tenant_id) {
+                                    let err_msg = ControllerMessage::Error(ErrorPayload {
+                                        code: ErrorCode::BadRequest,
+                                        message: "tenant not assigned to this MQTT service".to_string(),
+                                    });
+                                    if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                    }
+                                    continue;
+                                }
+
+                                match crate::queries::update_triggers::trigger_update_for_host(
+                                    state.db(),
+                                    &state.notification_service,
+                                    crate::queries::update_triggers::TriggerUpdateParams {
+                                        tenant_id: payload.tenant_id,
+                                        item_id: payload.software_item_id,
+                                        host_id: payload.host_id,
+                                        to_version: payload.to_version.clone(),
+                                        actor_type: "mqtt",
+                                        actor_id: &payload.mqtt_client_id.to_string(),
+                                        release_info: None,
+                                    },
+                                )
+                                .await
+                                {
+                                    Ok(result) => {
+                                        tracing::info!(
+                                            update_id = %result.update_history_id,
+                                            software_item_id = %payload.software_item_id,
+                                            host_id = %payload.host_id,
+                                            mqtt_client_id = %payload.mqtt_client_id,
+                                            agent_connected = result.agent_connected,
+                                            "MQTT-triggered update dispatched"
+                                        );
+                                    }
+                                    Err(err) => {
+                                        tracing::warn!(
+                                            error = %err,
+                                            software_item_id = %payload.software_item_id,
+                                            host_id = %payload.host_id,
+                                            "MQTT-triggered update failed"
+                                        );
+                                        let err_msg = ControllerMessage::Error(ErrorPayload {
+                                            code: ErrorCode::BadRequest,
+                                            message: err.to_string(),
+                                        });
+                                        if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
+                                            let _ = sink.send(Message::Text(json.into())).await;
+                                        }
+                                    }
                                 }
                             }
                             ServiceMessage::RenewCertificate(payload) => {

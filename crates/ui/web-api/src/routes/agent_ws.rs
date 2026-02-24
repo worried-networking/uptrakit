@@ -370,6 +370,18 @@ pub(crate) async fn handle_agent_authenticated(
                                         "failed to batch-update software_item last_checked_at"
                                     );
                                 }
+
+                                // Push updated software states to MQTT services for this tenant.
+                                if let Ok(Some(agent_svc)) =
+                                    uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
+                                        .one(state.db())
+                                        .await
+                                {
+                                    state
+                                        .notification_service
+                                        .push_software_states_for_tenant(agent_svc.tenant_id)
+                                        .await;
+                                }
                             }
                             ServiceMessage::UpdateStarted(payload) => {
                                 tracing::info!(
@@ -520,6 +532,18 @@ pub(crate) async fn handle_agent_authenticated(
                                     if let Err(e) = link_active.update(state.db()).await {
                                         tracing::warn!(error = %e, "failed to update host_software_item installed_version");
                                     }
+                                }
+
+                                // Push updated software states to MQTT services.
+                                if let Ok(Some(agent_svc)) =
+                                    uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
+                                        .one(state.db())
+                                        .await
+                                {
+                                    state
+                                        .notification_service
+                                        .push_software_states_for_tenant(agent_svc.tenant_id)
+                                        .await;
                                 }
                             }
                             ServiceMessage::DiscoveryResults(payload) => {
