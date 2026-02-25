@@ -264,9 +264,29 @@ impl Provider for GitHubProvider {
 
     async fn detect_installed_version(
         &self,
-        _package_identifier: &str,
+        package_identifier: &str,
     ) -> uptrakit_provider_core::Result<Option<Version>> {
-        Ok(None)
+        let Some(ref cmd_template) = self.config.detect_installed_version_command else {
+            return Ok(None);
+        };
+        let cmd = cmd_template
+            .replace("{package_identifier}", &shell_escape(package_identifier));
+        let output = self
+            .executor
+            .execute_quiet(&CommandSpec::shell(&cmd))
+            .await
+            .map_err(|e| {
+                report!(ProviderError::ProviderInternal(format!(
+                    "detect_installed_version_command failed: {e}"
+                )))
+            })?;
+        let version = output
+            .output
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .map(|l| Version::new(l.to_string()));
+        Ok(version)
     }
 
     async fn execute_update(
@@ -352,6 +372,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         }
     }
 
@@ -572,15 +593,71 @@ mod tests {
             tag_strip_prefix: config.tag_strip_prefix,
             asset_patterns: config.asset_patterns,
             install_command: config.install_command,
+            detect_installed_version_command: config.detect_installed_version_command,
         };
         assert!(GitHubProvider::new(config, test_executor()).is_err());
     }
 
     #[tokio::test]
-    async fn detect_installed_version_returns_none() {
+    async fn detect_installed_version_no_command_returns_none() {
+        // When detect_installed_version_command is absent, always returns Ok(None).
         let provider = test_provider();
         let result = provider.detect_installed_version("example").await.unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn detect_installed_version_command_returns_version() {
+        // Use `echo` to simulate a command that outputs a version string.
+        let mut config = test_config();
+        config.detect_installed_version_command =
+            Some("echo '3.14.1'".to_string());
+        let provider = GitHubProvider::new(config, test_executor()).expect("valid config");
+        let result = provider
+            .detect_installed_version("any-pkg")
+            .await
+            .expect("should succeed");
+        assert_eq!(result.as_ref().map(|v| v.as_str()), Some("3.14.1"));
+    }
+
+    #[tokio::test]
+    async fn detect_installed_version_command_placeholder_replaced() {
+        // The {package_identifier} placeholder must be expanded before execution.
+        let mut config = test_config();
+        config.detect_installed_version_command =
+            Some("echo '{package_identifier}'".to_string());
+        let provider = GitHubProvider::new(config, test_executor()).expect("valid config");
+        let result = provider
+            .detect_installed_version("booklore")
+            .await
+            .expect("should succeed");
+        // The placeholder is shell-escaped; the output is the identifier string.
+        assert!(result.is_some());
+        assert!(result.unwrap().as_str().contains("booklore"));
+    }
+
+    #[tokio::test]
+    async fn detect_installed_version_command_empty_output_returns_none() {
+        // An empty output (no non-whitespace lines) should yield None.
+        let mut config = test_config();
+        config.detect_installed_version_command = Some("true".to_string());
+        let provider = GitHubProvider::new(config, test_executor()).expect("valid config");
+        let result = provider
+            .detect_installed_version("pkg")
+            .await
+            .expect("should succeed");
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn detect_installed_version_command_failure_propagates_error() {
+        // A command that fails (non-zero exit) must propagate an error.
+        let mut config = test_config();
+        config.detect_installed_version_command =
+            Some("false".to_string());
+        let provider = GitHubProvider::new(config, test_executor()).expect("valid config");
+        let result = provider.detect_installed_version("pkg").await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

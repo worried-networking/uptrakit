@@ -40,6 +40,16 @@ pub struct GitHubConfig {
     /// If absent, no automated installation is performed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub install_command: Option<String>,
+    /// Shell command to detect the installed version on the agent host.
+    ///
+    /// Supports the `{package_identifier}` placeholder (shell-escaped at runtime).
+    /// The first non-empty trimmed line of stdout is used as the version string.
+    /// If absent, `detect_installed_version()` returns `None`.
+    ///
+    /// Example: `"cat -- \"${HOME}/.{package_identifier}\""` reads a PHS version file.
+    /// Example: `"myapp --version"` uses the application's built-in version output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detect_installed_version_command: Option<String>,
 }
 
 fn default_tag_strip_prefix() -> String {
@@ -168,6 +178,7 @@ mod tests {
         assert!(!config.include_prereleases);
         assert_eq!(config.tag_strip_prefix, "v");
         assert!(config.asset_patterns.is_empty());
+        assert!(config.detect_installed_version_command.is_none());
     }
 
     #[test]
@@ -181,6 +192,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         assert!(config.validate().is_ok());
     }
@@ -196,6 +208,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("owner"));
@@ -212,6 +225,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("repo"));
@@ -228,6 +242,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec!["[invalid".to_string()],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("invalid regex"));
@@ -244,6 +259,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let err = config.validate().err();
         assert!(err.is_some(), "expected validation error");
@@ -263,6 +279,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let err = config.validate().err();
         assert!(err.is_some(), "expected validation error");
@@ -282,6 +299,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         assert!(config.validate().is_err());
     }
@@ -297,6 +315,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         assert!(config.validate().is_err());
     }
@@ -312,6 +331,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![r".*\.tar\.gz$".to_string(), r".*-amd64\.deb$".to_string()],
             install_command: None,
+            detect_installed_version_command: None,
         };
         assert!(config.validate().is_ok());
     }
@@ -327,6 +347,7 @@ mod tests {
             tag_strip_prefix: "release-".to_string(),
             asset_patterns: vec![r".*\.deb$".to_string()],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let json = serde_json::to_string(&config).expect("serialize");
         let deserialized: GitHubConfig = serde_json::from_str(&json).expect("deserialize");
@@ -350,6 +371,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let masked = config.with_secrets_masked();
         assert_eq!(masked.auth_token.unwrap().expose_secret(), SECRET_MASK);
@@ -366,6 +388,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let masked = config.with_secrets_masked();
         assert_eq!(masked.auth_token.unwrap().expose_secret(), SECRET_MASK);
@@ -383,6 +406,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let mut incoming = existing.clone().with_secrets_masked();
         incoming.restore_secrets_from(&existing);
@@ -403,6 +427,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let mut incoming = GitHubConfig {
             owner: "o".to_string(),
@@ -413,6 +438,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         incoming.restore_secrets_from(&existing);
         assert_eq!(incoming.auth_token.unwrap().expose_secret(), "ghp_new");
@@ -429,6 +455,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         assert_eq!(config.api_base_url(), "https://api.github.com");
     }
@@ -444,6 +471,7 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         assert_eq!(config.api_base_url(), "https://ghe.example.com/api/v3");
     }
@@ -459,8 +487,49 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
             install_command: None,
+            detect_installed_version_command: None,
         };
         let json = serde_json::to_string(&config).expect("serialize");
         assert!(!json.contains("auth_token"));
+    }
+
+    #[test]
+    fn detect_installed_version_command_roundtrip() {
+        let cmd = r#"cat -- "${HOME}/.{package_identifier}""#;
+        let config = GitHubConfig {
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            auth_token: None,
+            api_base_url: None,
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+            install_command: None,
+            detect_installed_version_command: Some(cmd.to_string()),
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        assert!(json.contains("detect_installed_version_command"));
+        let deserialized: GitHubConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            deserialized.detect_installed_version_command.as_deref(),
+            Some(cmd)
+        );
+    }
+
+    #[test]
+    fn detect_installed_version_command_omitted_when_none() {
+        let config = GitHubConfig {
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            auth_token: None,
+            api_base_url: None,
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+            install_command: None,
+            detect_installed_version_command: None,
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        assert!(!json.contains("detect_installed_version_command"));
     }
 }
