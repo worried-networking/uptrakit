@@ -145,21 +145,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn check_version_proxmox_stub_returns_none() {
-        let config = serde_json::json!({
-            "script_url": "https://example.com/update.sh"
-        });
+    async fn check_version_proxmox_is_discovery_only() {
+        // PHS is discovery-only; `detect_installed_version` is not supported.
+        // Version detection is delegated to the synthesised GitHub/APT provider
+        // config that the controller creates from the PHS `extra` metadata.
+        let config = serde_json::json!({});
         let outcome = check_version(
             ProviderType::ProxmoxHelperScripts,
             &config,
-            "example",
+            "booklore",
             test_executor(),
             &no_ctx(),
         )
         .await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
-        assert!(outcome.error.is_none());
+        // The trait default returns an error for unsupported operations.
+        assert!(outcome.error.is_some());
     }
 
     #[tokio::test]

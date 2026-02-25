@@ -7,6 +7,21 @@
 //! - Processing incoming `DiscoveryResults` payloads (creating pending software
 //!   items and upserting host-software-item links)
 
+// ── PHS synthesis constants ───────────────────────────────────────────────────
+
+/// Shell command used to detect the installed version of a GitHub-managed PHS app.
+///
+/// `{package_identifier}` is the PHS slug, replaced shell-escaped at runtime by
+/// the GitHub provider's `detect_installed_version()` implementation.
+const PHS_DETECT_VERSION_CMD: &str = r#"cat -- "${HOME}/.{package_identifier}""#;
+
+/// Install command for PHS-managed apps.
+///
+/// Uses the unattended mode (`PHS_SILENT=1`) exactly as the official
+/// `update-apps.sh` PVE tool does via `pct exec`, so the update runs without
+/// interactive prompts and without requiring a network fetch of the script.
+const PHS_INSTALL_CMD: &str = "env PHS_SILENT=1 /usr/bin/update";
+
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
@@ -457,26 +472,7 @@ async fn process_provider_result(
             }
         }
         ProviderType::ProxmoxHelperScripts => {
-            let config_json = serde_json::json!({});
-            let pc_id = find_or_create_default_provider_config(
-                db,
-                tenant_id,
-                &provider_type_str,
-                &config_json,
-                "Proxmox Helper Scripts",
-            )
-            .await?;
-            let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
-            for item in &result.discoveries {
-                let args = ProcessDiscoveryArgs {
-                    package_identifier: &item.package_identifier,
-                    name: &item.name,
-                    installed_version: &item.installed_version,
-                    provider_type_str: &provider_type_str,
-                };
-                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now)
-                    .await?;
-            }
+            process_phs_results(db, tenant_id, host_id, now, result).await?;
         }
         ProviderType::Apt => {
             let config_json = serde_json::json!({});
@@ -505,6 +501,104 @@ async fn process_provider_result(
                 provider_type = %result.provider_type,
                 "received discovery results for a provider type that does not support auto-config creation; skipping"
             );
+        }
+    }
+
+    Ok(())
+}
+
+/// Process PHS discovery results by dispatching on the `extra` metadata set by
+/// the PHS provider.
+///
+/// Each discovered item carries one of:
+/// - `{ "github_owner": "…", "github_repo": "…" }` — GitHub-managed app.
+///   A `github_releases` provider config is found-or-created per `(owner, repo)`
+///   pair, pre-populated with the PHS detect-version command and install command.
+/// - `{ "apt_package": "…" }` — APT-managed app (direct or install-script fallback).
+///   A shared `apt` provider config (`{}`) is found-or-created for the tenant.
+/// - Neither — logged as a warning and skipped.
+async fn process_phs_results(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    now: OffsetDateTime,
+    result: &DiscoveryProviderResult,
+) -> Result<(), AutodiscoveryError> {
+    for item in &result.discoveries {
+        let github_owner = item
+            .extra
+            .as_ref()
+            .and_then(|e| e.get("github_owner"))
+            .and_then(|v| v.as_str());
+        let github_repo = item
+            .extra
+            .as_ref()
+            .and_then(|e| e.get("github_repo"))
+            .and_then(|v| v.as_str());
+        let apt_package = item
+            .extra
+            .as_ref()
+            .and_then(|e| e.get("apt_package"))
+            .and_then(|v| v.as_str());
+
+        match (github_owner, github_repo, apt_package) {
+            (Some(owner), Some(repo), _) => {
+                // GitHub-managed: synthesize a GithubReleases provider config.
+                let config_json = serde_json::json!({
+                    "owner": owner,
+                    "repo": repo,
+                    "tag_strip_prefix": "v",
+                    "include_prereleases": false,
+                    "asset_patterns": [],
+                    "detect_installed_version_command": PHS_DETECT_VERSION_CMD,
+                    "install_command": PHS_INSTALL_CMD,
+                });
+                let display_name = format!("{owner}/{repo}");
+                let pc_id = find_or_create_default_provider_config(
+                    db,
+                    tenant_id,
+                    "github_releases",
+                    &config_json,
+                    &display_name,
+                )
+                .await?;
+                let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
+                let args = ProcessDiscoveryArgs {
+                    package_identifier: &item.package_identifier,
+                    name: &item.name,
+                    installed_version: &item.installed_version,
+                    provider_type_str: "github_releases",
+                };
+                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now)
+                    .await?;
+            }
+            (_, _, Some(_apt_pkg)) => {
+                // APT-managed: find-or-create the shared default APT provider config.
+                let config_json = serde_json::json!({});
+                let pc_id = find_or_create_default_provider_config(
+                    db,
+                    tenant_id,
+                    "apt",
+                    &config_json,
+                    "APT (auto)",
+                )
+                .await?;
+                let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
+                let args = ProcessDiscoveryArgs {
+                    package_identifier: &item.package_identifier,
+                    name: &item.name,
+                    installed_version: &item.installed_version,
+                    provider_type_str: "apt",
+                };
+                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now)
+                    .await?;
+            }
+            _ => {
+                tracing::warn!(
+                    package_identifier = %item.package_identifier,
+                    "PHS item has no detectable upstream; skipping"
+                );
+            }
         }
     }
 
@@ -830,6 +924,30 @@ mod tests {
         .await
         .expect("create autodiscovery_ignores");
 
+        db.execute_unprepared(
+            "CREATE TABLE provider_configs (
+                id              TEXT    PRIMARY KEY,
+                tenant_id       TEXT    NOT NULL,
+                name            TEXT    NOT NULL,
+                provider_type   TEXT    NOT NULL,
+                config          TEXT    NOT NULL DEFAULT '{}',
+                enabled         INTEGER NOT NULL DEFAULT 1,
+                created_at      INTEGER NOT NULL,
+                updated_at      INTEGER NOT NULL,
+                deactivated_at  INTEGER
+            )",
+        )
+        .await
+        .expect("create provider_configs");
+        // Partial unique index (only for active/non-deactivated rows) — mirrors the real schema.
+        db.execute_unprepared(
+            "CREATE UNIQUE INDEX uq_provider_configs_active_name \
+             ON provider_configs (tenant_id, name) \
+             WHERE deactivated_at IS NULL",
+        )
+        .await
+        .expect("create provider_configs unique index");
+
         db
     }
 
@@ -1026,5 +1144,229 @@ mod tests {
             Some("2.0.0"),
             "installed_version must be updated to the new value"
         );
+    }
+
+    // ── PHS result processing ─────────────────────────────────────────────────
+
+    use uptrakit_internal_wire::{DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryProviderResult, ProviderType};
+
+    fn phs_result_with_github(pkg_id: &str, name: &str, version: &str, owner: &str, repo: &str) -> DiscoveryProviderResult {
+        DiscoveryProviderResult {
+            provider_type: ProviderType::ProxmoxHelperScripts,
+            provider_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: pkg_id.to_string(),
+                name: name.to_string(),
+                installed_version: version.to_string(),
+                extra: Some(serde_json::json!({
+                    "github_owner": owner,
+                    "github_repo": repo,
+                })),
+            }],
+        }
+    }
+
+    fn phs_result_with_apt(pkg_id: &str, name: &str, version: &str, apt_pkg: &str) -> DiscoveryProviderResult {
+        DiscoveryProviderResult {
+            provider_type: ProviderType::ProxmoxHelperScripts,
+            provider_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: pkg_id.to_string(),
+                name: name.to_string(),
+                installed_version: version.to_string(),
+                extra: Some(serde_json::json!({ "apt_package": apt_pkg })),
+            }],
+        }
+    }
+
+    fn phs_result_no_extra(pkg_id: &str) -> DiscoveryProviderResult {
+        DiscoveryProviderResult {
+            provider_type: ProviderType::ProxmoxHelperScripts,
+            provider_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: pkg_id.to_string(),
+                name: pkg_id.to_string(),
+                installed_version: "1.0.0".to_string(),
+                extra: None,
+            }],
+        }
+    }
+
+    /// A GitHub PHS item must create a `github_releases` provider config and link the item.
+    #[tokio::test]
+    async fn process_phs_results_github_creates_provider_config() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        let result = phs_result_with_github("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
+
+        process_phs_results(&db, tenant_id, host_id, now, &result)
+            .await
+            .expect("process_phs_results");
+
+        // A github_releases provider config must exist.
+        let configs = ProviderConfig::find()
+            .filter(provider_config::Column::TenantId.eq(tenant_id))
+            .filter(provider_config::Column::ProviderType.eq("github_releases"))
+            .all(&db)
+            .await
+            .expect("query configs");
+        assert_eq!(configs.len(), 1, "expected one github_releases config");
+        assert_eq!(configs[0].name, "BookLore/BookLore");
+
+        // The config JSON must carry the PHS constants.
+        let cfg_json = &configs[0].config;
+        assert_eq!(cfg_json["owner"], "BookLore");
+        assert_eq!(cfg_json["repo"], "BookLore");
+        assert_eq!(cfg_json["detect_installed_version_command"], PHS_DETECT_VERSION_CMD);
+        assert_eq!(cfg_json["install_command"], PHS_INSTALL_CMD);
+
+        // A host link must exist.
+        let links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::PackageIdentifier.eq("booklore"))
+            .all(&db)
+            .await
+            .expect("query links");
+        assert_eq!(links.len(), 1, "expected one host link");
+        assert_eq!(links[0].installed_version.as_deref(), Some("1.18.5"));
+    }
+
+    /// An APT PHS item must create/reuse a shared `apt` provider config.
+    #[tokio::test]
+    async fn process_phs_results_apt_creates_apt_provider_config() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        let result = phs_result_with_apt("grafana", "Grafana", "10.2.3", "grafana");
+
+        process_phs_results(&db, tenant_id, host_id, now, &result)
+            .await
+            .expect("process_phs_results");
+
+        let configs = ProviderConfig::find()
+            .filter(provider_config::Column::TenantId.eq(tenant_id))
+            .filter(provider_config::Column::ProviderType.eq("apt"))
+            .all(&db)
+            .await
+            .expect("query configs");
+        assert_eq!(configs.len(), 1, "expected one apt config");
+        assert_eq!(configs[0].name, "APT (auto)");
+
+        let links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::PackageIdentifier.eq("grafana"))
+            .all(&db)
+            .await
+            .expect("query links");
+        assert_eq!(links.len(), 1, "expected one host link");
+        assert_eq!(links[0].installed_version.as_deref(), Some("10.2.3"));
+    }
+
+    /// An install-script fallback APT item (e.g. `influxdb2`) must use the same
+    /// shared `apt` config path as a direct APT item.
+    #[tokio::test]
+    async fn process_phs_results_apt_install_fallback_uses_apt_config() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        // The PHS provider emits `apt_package: "influxdb2"` for install-script items too.
+        let result = phs_result_with_apt("influxdb2", "InfluxDB", "2.7.6", "influxdb2");
+
+        process_phs_results(&db, tenant_id, host_id, now, &result)
+            .await
+            .expect("process_phs_results");
+
+        let configs = ProviderConfig::find()
+            .filter(provider_config::Column::TenantId.eq(tenant_id))
+            .filter(provider_config::Column::ProviderType.eq("apt"))
+            .all(&db)
+            .await
+            .expect("query configs");
+        assert_eq!(configs.len(), 1, "expected shared apt config");
+
+        let links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::PackageIdentifier.eq("influxdb2"))
+            .all(&db)
+            .await
+            .expect("query links");
+        assert_eq!(links.len(), 1);
+    }
+
+    /// A PHS item with no detectable upstream (no `extra` fields) must be skipped.
+    #[tokio::test]
+    async fn process_phs_results_no_extra_skips_item() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        let result = phs_result_no_extra("n8n");
+
+        process_phs_results(&db, tenant_id, host_id, now, &result)
+            .await
+            .expect("process_phs_results");
+
+        let configs = ProviderConfig::find()
+            .filter(provider_config::Column::TenantId.eq(tenant_id))
+            .all(&db)
+            .await
+            .expect("query configs");
+        assert!(configs.is_empty(), "no config should be created for skipped item");
+
+        let items = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .all(&db)
+            .await
+            .expect("query items");
+        assert!(items.is_empty(), "no software item should be created");
+    }
+
+    /// Two hosts discovering the same GitHub PHS app must share one provider config.
+    #[tokio::test]
+    async fn process_phs_results_two_hosts_share_github_config() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host1 = Uuid::now_v7();
+        let host2 = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        let result1 = phs_result_with_github("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
+        let result2 = phs_result_with_github("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
+
+        process_phs_results(&db, tenant_id, host1, now, &result1)
+            .await
+            .expect("host1");
+        process_phs_results(&db, tenant_id, host2, now, &result2)
+            .await
+            .expect("host2");
+
+        // Still only one provider config.
+        let config_count = ProviderConfig::find()
+            .filter(provider_config::Column::TenantId.eq(tenant_id))
+            .filter(provider_config::Column::ProviderType.eq("github_releases"))
+            .count(&db)
+            .await
+            .expect("count configs");
+        assert_eq!(config_count, 1, "both hosts must share a single provider config");
+
+        // Each host has its own link.
+        let host1_links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host1))
+            .count(&db)
+            .await
+            .expect("host1 links");
+        let host2_links = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host2))
+            .count(&db)
+            .await
+            .expect("host2 links");
+        assert_eq!(host1_links, 1);
+        assert_eq!(host2_links, 1);
     }
 }
