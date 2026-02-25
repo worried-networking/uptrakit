@@ -17,7 +17,7 @@ Uptrakit ships with five built-in provider types:
 | `github_releases` | Tracks releases published on GitHub. Resolves the latest release tag and optionally filters by asset or pre-release status. | No |
 | `docker` | Tracks image tags or SHA digests in a Docker/OCI registry. Can pull images via the local or remote Docker daemon, and discovers running/stopped containers. | Yes |
 | `homebrew` | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host. | Yes |
-| `proxmox_helper_scripts` | Tracks applications managed by Proxmox VE community helper scripts. Installed and latest versions are resolved locally by the agent. | Yes |
+| `proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream `github_releases` or `apt` provider configs automatically. Does not perform version detection or updates directly. | Yes |
 | `apt` | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh. | Yes |
 
 ### `github_releases` configuration fields
@@ -28,6 +28,8 @@ Uptrakit ships with five built-in provider types:
 | `repo` | Yes | GitHub repository name |
 | `asset_pattern` | No | Regex pattern to match a release asset name |
 | `include_prereleases` | No | Include pre-release tags when resolving latest (default: `false`) |
+| `detect_installed_version_command` | No | Shell command run on the agent to detect the installed version. The first non-empty line of stdout is used. Supports `{package_identifier}` placeholder. Auto-set on PHS-synthesized configs. |
+| `install_command` | No | Shell command to execute after an update. Supports `{version}`, `{tag}`, `{asset_url}`, `{asset_name}` placeholders. Auto-set on PHS-synthesized configs. |
 
 ### `docker` configuration fields
 
@@ -54,9 +56,22 @@ field reference, see [Docker Provider](providers/docker.md).
 
 ### `proxmox_helper_scripts` configuration fields
 
-The `proxmox_helper_scripts` provider requires no explicit configuration fields. Uptrakit
-auto-creates a config named `"Proxmox Helper Scripts"` when the first supporting agent
-connects.
+The `proxmox_helper_scripts` provider requires no configuration fields — its config is always an
+empty object `{}`. Uptrakit auto-creates a config named `"Proxmox Helper Scripts"` when the first
+supporting agent connects.
+
+**Important:** The PHS provider is discovery-only. It does not track installed or upstream
+versions itself, and it does not execute updates. Instead, when a PHS container is discovered,
+the controller automatically creates one of the following provider configs for version tracking
+and update execution:
+
+- A `github_releases` config for each `(owner, repo)` pair found in the CT script — pre-configured
+  with the installed-version detection command and the unattended update command.
+- A shared `APT (auto)` config for containers whose scripts install software via APT (e.g.
+  Grafana, Plex).
+
+You may rename or adjust these synthesized configs as needed. Re-running discovery will reuse
+existing configs if they already exist.
 
 ### `apt` configuration fields
 
@@ -146,6 +161,11 @@ automatically creates one. Auto-created configs are named:
 - `Homebrew (Casks)`
 - `Proxmox Helper Scripts`
 - `APT`
+
+**PHS auto-created configs:** In addition to the `"Proxmox Helper Scripts"` config used as a
+discovery anchor, the PHS provider triggers creation of downstream `github_releases` and
+`APT (auto)` configs during discovery (see [PHS configuration](#proxmox_helper_scripts-configuration-fields)
+for details). These synthesized configs are what appear as parent configs on your approved PHS software items.
 
 ### Triggering discovery
 

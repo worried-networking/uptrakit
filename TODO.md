@@ -244,7 +244,7 @@ Main functionality that delivers the core value proposition.
 - [x] Controller `DiscoveryResults` handler with auto-creation of `ProviderConfig` records
 - [x] `ProviderType::supports_discovery()` capability check
 - [x] Homebrew: discover all (formulae + casks) when `package_type = None`; set `extra` metadata
-- [x] Proxmox Helper Scripts: allow discovery with empty `script_url`
+- [x] Proxmox Helper Scripts: refactor to discovery-only (script analysis, GitHub/APT upstream detection, controller-side config synthesis)
 - [x] REST API for autodiscovery
   - [x] `POST /api/v1/software-items/{id}/approve`
   - [x] `POST /api/v1/hosts/{id}/discover`

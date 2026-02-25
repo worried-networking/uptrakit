@@ -146,7 +146,7 @@ The macro generates six methods:
 - `ProviderRegistry::mask_config_secrets()` / `restore_config_secrets()` — handles secret masking for API responses
   (delegates to the `SecretMasking` trait implemented on each config struct).
 - `ProviderRegistry::create_provider_for_discovery()` — same as `create_provider` but without calling `validate()`,
-  so discovery works with empty or minimal configs (e.g., `ProxmoxHelperScriptsConfig` with no `script_url`).
+  so discovery works with empty or minimal configs (e.g., `ProxmoxHelperScriptsConfig` which is always `{}`).
 - `ProviderRegistry::discovery_provider_types()` — returns the list of `ProviderType` variants whose provider
   reports `ProviderCapability::DiscoverLocalSoftware` in `capabilities()`. Fully auto-derived from the macro —
   no manual list needed.
@@ -222,8 +222,8 @@ pub trait SecretMasking: Serialize + DeserializeOwned {
 }
 ```
 
-Providers with no secrets (Homebrew) use the default no-op implementations. Providers with secrets (GitHub, Docker, Proxmox Helper Scripts
-when GitHub config is present) override both methods with field-level masking logic.
+Providers with no secrets (Homebrew, Proxmox Helper Scripts) use the default no-op implementations. Providers with secrets (GitHub, Docker)
+override both methods with field-level masking logic.
 
 The registry uses generic helpers `mask_secrets_for::<T>()` and `restore_secrets_for::<T>()` that deserialize the JSON config, apply the trait
 methods, and re-serialize. This eliminates duplicated deserialize-method-serialize boilerplate per provider.
@@ -291,14 +291,29 @@ Fetches release metadata from the GitHub API and converts it into `UpstreamRelea
 
 **Config fields (`GitHubConfig`):**
 
-| Field | Type | Required | Default | Description | | :-------------------- | :------------ | :------- | :----------------------- |
-:----------------------------------------------------------- | | `owner` | String | Yes | — | GitHub repository owner. | | `repo` | String | Yes | — |
-GitHub repository name. | | `auth_token` | String | No | `null` | Personal access token (private repos or higher rate limits). | | `api_base_url` |
-String | No | `https://api.github.com` | API base URL (for GitHub Enterprise). | | `include_prereleases` | bool | No | `false` | Whether to include
-pre-release versions. | | `tag_strip_prefix` | String | No | `"v"` | Prefix to strip from tag names to extract version strings. | | `asset_patterns` |
-`Vec<String>` | No | `[]` | Regex patterns to filter release assets (empty means all). | | `install_command` | `Option<String>` | No | `null` | Custom
-shell command to execute after downloading the release asset. Supports `{version}`, `{tag}`, `{asset_url}`, `{asset_name}` placeholders
-(shell-escaped). |
+| Field | Type | Required | Default | Description |
+| :-------------------- | :------------ | :------- | :----------------------- | :----------------------------------------------------------- |
+| `owner` | String | Yes | — | GitHub repository owner. |
+| `repo` | String | Yes | — | GitHub repository name. |
+| `auth_token` | String | No | `null` | Personal access token (private repos or higher rate limits). |
+| `api_base_url` | String | No | `https://api.github.com` | API base URL (for GitHub Enterprise). |
+| `include_prereleases` | bool | No | `false` | Whether to include pre-release versions. |
+| `tag_strip_prefix` | String | No | `"v"` | Prefix to strip from tag names to extract version strings. |
+| `asset_patterns` | `Vec<String>` | No | `[]` | Regex patterns to filter release assets (empty means all). |
+| `install_command` | `Option<String>` | No | `null` | Custom shell command to execute after downloading the release asset. Supports `{version}`, `{tag}`, `{asset_url}`, `{asset_name}` placeholders (shell-escaped). |
+| `detect_installed_version_command` | `Option<String>` | No | `null` | Shell command to detect the installed version on the agent host. The first non-empty trimmed line of stdout is used. Supports `{package_identifier}` placeholder (shell-escaped). If absent, `detect_installed_version()` returns `None`. |
+
+**`detect_installed_version_command` examples:**
+
+```json
+"cat -- \"${HOME}/.{package_identifier}\""
+```
+Reads a PHS version file (`~/.booklore`, `~/.radarr`, etc.) — used by PHS-synthesized GitHub configs.
+
+```json
+"myapp --version"
+```
+Uses the application's own version output.
 
 **Behaviour:**
 
@@ -306,6 +321,7 @@ shell command to execute after downloading the release asset. Supports `{version
 - Rate limit headers are checked; warnings logged when remaining < 10
 - 403/429 responses with `x-ratelimit-remaining: 0` return a rate-limit error
 - Asset filtering uses regex matching against asset names
+- `detect_installed_version_command` runs via the injected `CommandExecutor` (local or SSH)
 
 ### Docker provider (`uptrakit-provider-docker`)
 
@@ -394,74 +410,65 @@ documentation on remote Docker.
 
 ### Proxmox Helper Scripts provider (`uptrakit-provider-proxmox-helper-scripts`)
 
-Manages software installed via [Proxmox VE community helper scripts](https://github.com/community-scripts/ProxmoxVE).
-Supports automatic discovery of PHS-managed software, installed version detection, and update execution via `curl | bash`.
+Discovery-only provider for software installed via [Proxmox VE community helper scripts](https://github.com/community-scripts/ProxmoxVE).
+Does **not** perform version detection, upstream release fetching, or update execution. Its sole responsibility
+is to discover which PHS-managed apps are present in a container and emit metadata for the controller to
+synthesize downstream provider configs.
 
-**Config fields (`ProxmoxHelperScriptsConfig`):**
+**Config (`ProxmoxHelperScriptsConfig`):**
 
-| Field | Type | Required | Default | Description | | :------------ | :-------------------------- | :------- | :------ |
-:-------------------------------------------------------- | | `script_url` | String | Yes | -- | URL of the helper script to execute for updates. | |
-`github` | `Option<GitHubReleaseSource>` | No | `null` | GitHub release source for upstream version detection (see below). |
+No fields — the config is always `{}`. `validate()` is a no-op. `SecretMasking` is a no-op.
 
-**Capabilities:** `DiscoverLocalSoftware`, conditionally `RefreshPackageIndex` (when `github` config is present)
+**Capabilities:** `DiscoverLocalSoftware` only.
 
 **Discovery (`discover_software()`):**
 
-PHS containers created by community-scripts have a well-known update script at `/usr/bin/update` containing
-`curl | bash` invocations pointing at the community-scripts GitHub repository. The provider:
+PHS containers have a well-known update script at `/usr/bin/update` containing `curl | bash` invocations
+pointing at the community-scripts GitHub repository. The provider:
 
-1. Reads `/usr/bin/update` via `cat`.
-2. Parses the file for URLs matching `https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/{slug}.sh`.
-3. Validates each slug (`[a-z0-9][a-z0-9-]*`), deduplicates by slug.
-4. For each slug, attempts to read the version file at `$HOME/.{slug}`.
-5. Returns `DiscoveredSoftware` entries with `package_identifier` set to the slug, a display name derived from the slug,
-   the installed version (if found), and the script URL as `extra` metadata.
+1. Reads `/usr/bin/update` via the executor. Returns an empty list without error if absent (not a PHS container).
+2. `parse_phs_scripts()` → `Vec<PhsScript>` (slug + script URL pairs).
+3. For each slug, fetches the CT script from `raw.githubusercontent.com` via `reqwest`.
+4. `analyze_phs_script(slug, body)` → `PhsScriptAnalysis`:
+   - Checks for `check_for_gh_release` / `fetch_and_deploy_gh_release` calls (slug-match priority, then any).
+   - Falls back to `GH_REPO="owner/repo"` variable assignment.
+   - Falls back to first `apt install <pkg>` line (if no GitHub patterns found).
+   - Slug matching is case-insensitive and hyphen-strip normalized (`"uptime-kuma"` ↔ `"uptimekuma"`).
+5. Dispatches on the analysis result:
+   - **GitHub** (`github_owner` + `github_repo` both present): reads `$HOME/.{slug}` for installed version.
+     Emits `DiscoveredSoftware { package_identifier: slug, extra: {"github_owner": ..., "github_repo": ...} }`.
+   - **APT direct** (`apt_package` present): runs `dpkg-query -W -f='${Version}' {pkg}` for installed version.
+     Emits `DiscoveredSoftware { package_identifier: pkg, extra: {"apt_package": pkg} }`.
+   - **Neither**: fetches the install script (`{slug}-install.sh`) and calls `extract_apt_package_candidates()`.
+     Runs `dpkg-query` for each candidate; only actually-installed packages are emitted, one item each.
+     If no candidate is installed, warns and skips.
 
-If `/usr/bin/update` does not exist (not a PHS container), discovery returns an empty list without error.
+**`extra` schema emitted per item:**
 
-**Version detection (`detect_installed_version()`):**
+| Case | `extra` content |
+| --- | --- |
+| GitHub-managed | `{"github_owner": "fosrl", "github_repo": "pangolin"}` |
+| APT-managed | `{"apt_package": "grafana"}` |
 
-PHS scripts store the installed version in `$HOME/.{app_lc}` (e.g. `~/.booklore` contains `1.18.5`).
-The provider reads this file for the given `package_identifier` (which must be a valid slug). If the file
-does not exist or is empty, returns `None`.
+The controller (`process_phs_results()` in `autodiscovery.rs`) consumes this `extra` field to find or
+create downstream `github_releases` or `apt` provider configs.
 
-The `package_identifier` is validated against `[a-z0-9][a-z0-9-]*` to prevent path traversal.
+**Script analysis helpers (`discovery.rs`):**
 
-**Update execution:**
+All analysis logic is pure (no I/O):
 
-- Runs `curl -fsSL -- "$script_url" | bash -s -- --update` with `set -euo pipefail`.
-- The `script_url` is passed as a positional argument to bash (not interpolated into the command string), preventing injection.
+- `analyze_phs_script(slug, content) -> PhsScriptAnalysis` — extracts GitHub owner/repo, APT package, app name.
+- `extract_apt_package_candidates(content) -> Vec<String>` — extracts APT candidates from install scripts,
+  filtered against `SYSTEM_APT_PACKAGES` blocklist.
+- `parse_phs_scripts(content) -> Vec<PhsScript>` — parses slug + URL pairs from `/usr/bin/update`.
+- `slug_to_display_name(slug)` — converts `"booklore"` → `"Booklore"`, `"uptimekuma"` → `"Uptimekuma"`, etc.
 
-**Upstream version detection via GitHub (`github` config):**
+**Discovery-only pattern:**
 
-Many PHS-installed applications are distributed via GitHub Releases (e.g., BookLore, Crafty Controller).
-When the optional `github` field is present in the config, the provider gains the `RefreshPackageIndex` capability
-and delegates `fetch_releases()` to an internal `GitHubProvider` instance. The `refresh_package_index()` method
-is a no-op since the GitHub API doesn't require a local index refresh.
+The PHS provider is an example of a discovery-only provider: it reports `DiscoverLocalSoftware` as its only
+capability and delegates all version tracking and update execution to synthesized downstream providers.
+When adding providers that follow this pattern, document the `extra` schema clearly so the controller-side
+dispatch (`process_provider_result()` → provider-specific handler) can consume it correctly.
 
-Since different PHS apps have different upstream GitHub repos, the `github` field is typically provided via
-per-item `config_override` (merged by the agent at runtime). Example `config_override`:
-
-```json
-{
-  "github": {
-    "owner": "BookLore",
-    "repo": "BookLore"
-  }
-}
-```
-
-| Field | Type | Required | Default | Description |
-| :-------------------- | :------------ | :------- | :------ | :-------------------------------------------------------- |
-| `owner` | String | Yes | -- | GitHub repository owner (user or organization). |
-| `repo` | String | Yes | -- | GitHub repository name. |
-| `auth_token` | String | No | `null` | Personal access token (private repos or higher rate limits). |
-| `tag_strip_prefix` | String | No | `"v"` | Prefix to strip from tag names to extract version strings. |
-| `include_prereleases` | bool | No | `false` | Whether to include pre-release versions. |
-
-Without the `github` field, `fetch_releases()` returns an error (upstream version checking is unavailable).
-
-**Security note:** The `curl | bash` pattern runs arbitrary remote code. The user must trust the script URL source.
-
-**Parsing is pure and testable:** All parsing logic (URL extraction, slug validation, version file parsing,
-display name generation) lives in the `discovery` module as pure functions with comprehensive unit tests.
+Cross-reference: [PHS end-user guide](../end-user/autodiscovery.md#proxmox-helper-scripts-discovery),
+[PHS API notes](../api/autodiscovery.md#phs-discovery-and-config-synthesis).

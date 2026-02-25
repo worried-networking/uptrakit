@@ -378,6 +378,21 @@ rediscovery, omit the `?ignore=true` parameter.
 
 ---
 
+## PHS Discovery and Config Synthesis
+
+When the PHS provider (`proxmox_helper_scripts`) returns discovery results, each item's `extra`
+field carries metadata that the controller uses to synthesize a downstream provider config:
+
+| `extra` field | Outcome |
+| --- | --- |
+| `"github_owner"` + `"github_repo"` | Controller finds or creates a `github_releases` config for `owner/repo` with PHS-specific `detect_installed_version_command` and `install_command`. Software item is linked to this GitHub config. |
+| `"apt_package"` | Controller finds or creates a shared `"APT (auto)"` config (`{}`). Software item's `package_identifier` is the Debian package name. |
+| Neither | Item is skipped (warned in agent log). |
+
+The PHS provider config itself is never directly linked to `host_software_items` — it is used only
+as the discovery trigger. All version tracking and update execution happen through the synthesized
+configs.
+
 ## Related Documentation
 
 - [Autodiscovery (End-user Guide)](../end-user/autodiscovery.md) — workflow overview and

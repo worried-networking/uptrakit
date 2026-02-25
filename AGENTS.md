@@ -64,7 +64,7 @@ uptrakit/
 │   │   ├── docker/                     # uptrakit-provider-docker               (lib)  — Docker/OCI provider: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; ssh feature gates bollard/ssh
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
 │   │   ├── homebrew/                   # uptrakit-provider-homebrew             (lib)  — Homebrew formulae/cask provider
-│   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider (discovery, version detection, updates, optional GitHub-based upstream version detection)
+│   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider (discovery-only: fetches CT scripts, analyzes for GitHub/APT upstream, emits extra metadata for controller-side config synthesis)
 │   │   ├── apt/                        # uptrakit-provider-apt                  (lib)  — APT (Debian/Ubuntu) provider (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install)
 │   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation; ssh feature propagates to uptrakit-provider-docker/ssh → bollard/ssh
 │   ├── shared/
@@ -272,7 +272,19 @@ for user review. Key invariants:
    the agent receives a default (empty-config) assignment. Results come back with `extra` metadata (e.g.
    `{"package_type":"formula"}` for Homebrew or `{"containers":["mycontainer"]}` for Docker).
    The controller auto-creates named configs: `"Docker"`, `"Homebrew (Formulae)"`,
-   `"Homebrew (Casks)"`, `"Proxmox Helper Scripts"`, `"APT"`.
+   `"Homebrew (Casks)"`, `"APT"`.
+
+   **PHS (Proxmox Helper Scripts) is a special case.** The PHS provider is discovery-only. During
+   discovery, it fetches each container's CT script from `raw.githubusercontent.com` and analyzes it:
+   - GitHub-managed apps emit `extra: {"github_owner": "...", "github_repo": "..."}`. The controller
+     auto-creates a `github_releases` provider config per `(owner, repo)` pair, pre-configured with
+     `detect_installed_version_command` (reads `$HOME/.{slug}`) and `install_command`
+     (`env PHS_SILENT=1 /usr/bin/update`). The `package_identifier` on the `SoftwareItem` is the PHS slug.
+   - APT-managed apps emit `extra: {"apt_package": "..."}`. The controller reuses (or creates) a shared
+     `"APT (auto)"` provider config. The `package_identifier` is the Debian package name.
+   - Apps whose scripts contain neither GitHub patterns nor a specific `apt install` line are skipped.
+   The PHS provider config itself (`proxmox_helper_scripts`, always `{}`) is retained as an anchor for
+   discovery runs but never linked directly to `SoftwareItem` host assignments.
 
 5. **Discovery capability is derived from the registry.** Call `state.provider_ops.discovery_provider_types()`
    (or `ProviderRegistry::discovery_provider_types()` statically) to get the current list of discovery-capable

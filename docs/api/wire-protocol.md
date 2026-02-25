@@ -135,6 +135,22 @@ Known `provider_type` values for discovery: `homebrew`, `proxmox_helper_scripts`
 }
 ```
 
+#### PHS discovery `extra` field
+
+When `provider_type` is `proxmox_helper_scripts`, the `extra` object on each `DiscoveredSoftware`
+item carries metadata used by the controller to synthesize downstream provider configs:
+
+| `extra` key | Type | Meaning |
+| --- | --- | --- |
+| `"github_owner"` | string | GitHub repository owner extracted from the CT script |
+| `"github_repo"` | string | GitHub repository name extracted from the CT script |
+| `"apt_package"` | string | Debian package name extracted from the CT script or install script |
+
+The controller dispatches on these fields in `process_phs_results()` to create the appropriate
+`github_releases` or `apt` provider config. Items with neither field are skipped.
+
+See [docs/api/autodiscovery.md](autodiscovery.md#phs-discovery-and-config-synthesis) for details.
+
 See [docs/api/autodiscovery.md](autodiscovery.md) for the full autodiscovery workflow.
 
 ### MQTT-specific (controller -> service)

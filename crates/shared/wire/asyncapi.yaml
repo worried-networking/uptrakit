@@ -2418,7 +2418,12 @@ components:
             - "1.21.4"
         extra:
           type: object
-          description: Optional provider-specific metadata (e.g. {"package_type":"formula"})
+          description: |
+            Optional provider-specific metadata. Content depends on the provider:
+            - Homebrew: {"package_type":"formula"} or {"package_type":"cask"}
+            - Docker: {"containers":["name1","name2"]}
+            - proxmox_helper_scripts (GitHub-managed app): {"github_owner":"fosrl","github_repo":"pangolin"}
+            - proxmox_helper_scripts (APT-managed app): {"apt_package":"grafana"}
           nullable: true
 
     discoveryProviderAssignment:

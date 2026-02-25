@@ -34,6 +34,29 @@ creates one automatically (for example, `"Docker"`, `"Homebrew (Formulae)"`, or
 `"Proxmox Helper Scripts"`). This means the feature works out of the box on supported hosts with
 no manual configuration required.
 
+### Proxmox Helper Scripts discovery
+
+PHS discovery works differently from other providers. Instead of creating software items linked
+to the PHS provider config, it analyses each container's CT script to identify the upstream source:
+
+- **GitHub-managed apps** (e.g. Booklore, Radarr, Sonarr, Pangolin, Uptime Kuma): Uptrakit
+  auto-creates a `github_releases` provider config for the upstream repository, pre-configured to
+  read the installed version from the PHS version file (`~/.{slug}`) and to run the unattended
+  update script (`env PHS_SILENT=1 /usr/bin/update`). The software item's provider config will be
+  the synthesized GitHub config, not the PHS config.
+
+- **APT-managed apps** (e.g. Grafana, Plex): Uptrakit finds or creates a shared `APT (auto)`
+  provider config. The software item's `package_identifier` is the Debian package name.
+
+- **Undetectable apps**: Apps whose scripts contain neither a GitHub release source nor a specific
+  `apt install` line are skipped. A warning is logged on the agent. Check agent logs
+  (`journalctl -u uptrakit-agent`) if you expect to see an app but it does not appear as pending.
+
+After approving PHS-discovered items, version checking and updates are handled by the synthesized
+`github_releases` or `APT` configs — not by the PHS provider itself.
+
+Auto-created config name for the PHS discovery anchor: **`"Proxmox Helper Scripts"`**.
+
 ### Docker discovery
 
 The Docker provider discovers containers by querying the local Docker daemon for all containers
