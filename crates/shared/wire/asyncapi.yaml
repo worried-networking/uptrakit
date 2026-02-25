@@ -1475,7 +1475,7 @@ components:
       required:
         - software_item_id
         - name
-        - provider_type
+        - plugin_type
         - package_identifier
         - config
       properties:
@@ -1490,9 +1490,9 @@ components:
           description: Human-readable name for logging
           examples:
             - Prometheus
-        provider_type:
+        plugin_type:
           type: string
-          description: Provider type identifier
+          description: Plugin type identifier
           examples:
             - github_releases
             - docker
@@ -1727,8 +1727,8 @@ components:
         - software_item_name
         - package_identifier
         - to_version
-        - provider_type
-        - provider_config
+        - plugin_type
+        - plugin_config
       properties:
         seq:
           type: integer
@@ -1774,11 +1774,11 @@ components:
           description: Target version to update to
           examples:
             - v20.0.0
-        provider_type:
+        plugin_type:
           $ref: "#/components/schemas/updateProviderType"
-        provider_config:
+        plugin_config:
           type: object
-          description: Merged provider configuration (base + override)
+          description: Merged plugin configuration (base + override)
         pre_update_hooks:
           type: array
           items:
@@ -2429,25 +2429,25 @@ components:
     discoveryProviderAssignment:
       type: object
       required:
-        - provider_type
+        - plugin_type
         - config
       properties:
-        provider_config_id:
+        plugin_config_id:
           type: string
           format: uuid
-          description: Pre-existing provider config ID, absent for default/auto runs
+          description: Pre-existing plugin config ID, absent for default/auto runs
           nullable: true
           examples:
             - 550e8400-e29b-41d4-a716-446655440000
-        provider_type:
+        plugin_type:
           type: string
-          description: Provider type identifier
+          description: Plugin type identifier
           examples:
             - homebrew
             - apt
         config:
           type: object
-          description: Provider-specific configuration ({} for default assignments)
+          description: Plugin-specific configuration ({} for default assignments)
 
     discoverSoftwarePayload:
       type: object
@@ -2480,18 +2480,18 @@ components:
     discoveryProviderResult:
       type: object
       required:
-        - provider_type
+        - plugin_type
       properties:
-        provider_config_id:
+        plugin_config_id:
           type: string
           format: uuid
-          description: Echoed provider config ID from the assignment, absent for default runs
+          description: Echoed plugin config ID from the assignment, absent for default runs
           nullable: true
           examples:
             - 550e8400-e29b-41d4-a716-446655440000
-        provider_type:
+        plugin_type:
           type: string
-          description: Provider type that produced these results
+          description: Plugin type that produced these results
           examples:
             - homebrew
             - apt

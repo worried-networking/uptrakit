@@ -328,9 +328,9 @@ pub async fn discover_provider_config(
             let msg = uptrakit_internal_wire::ControllerMessage::DiscoverSoftware(
                 uptrakit_internal_wire::DiscoverSoftwarePayload {
                     host_machine_id: machine_id.clone(),
-                    providers: vec![uptrakit_internal_wire::DiscoveryProviderAssignment {
-                        provider_config_id: Some(cfg.id),
-                        provider_type: provider_type.clone(),
+                    providers: vec![uptrakit_internal_wire::DiscoveryPluginAssignment {
+                        plugin_config_id: Some(cfg.id),
+                        plugin_type: provider_type.clone(),
                         config: cfg.config.clone(),
                     }],
                 },

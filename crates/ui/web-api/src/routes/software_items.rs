@@ -721,7 +721,7 @@ pub async fn check_versions(
         let assignment = uptrakit_internal_wire::VersionCheckAssignment {
             software_item_id: item_id,
             name: item.name.clone(),
-            provider_type,
+            plugin_type: provider_type,
             package_identifier: link.package_identifier.clone(),
             config,
         };
@@ -883,7 +883,7 @@ pub async fn check_versions_host(
     let assignment = uptrakit_internal_wire::VersionCheckAssignment {
         software_item_id: item_id,
         name: item.name.clone(),
-        provider_type,
+        plugin_type: provider_type,
         package_identifier: link.package_identifier.clone(),
         config,
     };

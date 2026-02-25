@@ -6,7 +6,7 @@ use uptrakit_agent_core::ConnectionContext;
 use uptrakit_command::{CommandExecutor, CommandSpec, SudoAwareCommandExecutor};
 
 use uptrakit_internal_wire::{
-    Capability, CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryProviderResult,
+    Capability, CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryPluginResult,
     DiscoveryResultsPayload, ExecuteUpdatePayload, HostInfo, ReportHostsPayload, ServiceMessage,
     UpdateFinalStatus, UpdateResultPayload, VersionCheckResult, VersionCheckResultsPayload,
 };
@@ -415,9 +415,9 @@ pub(crate) async fn handle_discover_software_ssh(
             let results = payload
                 .providers
                 .iter()
-                .map(|a| DiscoveryProviderResult {
-                    provider_config_id: a.provider_config_id,
-                    provider_type: a.provider_type.clone(),
+                .map(|a| DiscoveryPluginResult {
+                    plugin_config_id: a.plugin_config_id,
+                    plugin_type: a.plugin_type.clone(),
                     discoveries: vec![],
                     error: Some(format!(
                         "SSH host with machine_id '{}' not found",
@@ -441,9 +441,9 @@ pub(crate) async fn handle_discover_software_ssh(
             let results = payload
                 .providers
                 .iter()
-                .map(|a| DiscoveryProviderResult {
-                    provider_config_id: a.provider_config_id,
-                    provider_type: a.provider_type.clone(),
+                .map(|a| DiscoveryPluginResult {
+                    plugin_config_id: a.plugin_config_id,
+                    plugin_type: a.plugin_type.clone(),
                     discoveries: vec![],
                     error: Some(format!("DB error: {e}")),
                 })
@@ -468,9 +468,9 @@ pub(crate) async fn handle_discover_software_ssh(
             let results = payload
                 .providers
                 .iter()
-                .map(|a| DiscoveryProviderResult {
-                    provider_config_id: a.provider_config_id,
-                    provider_type: a.provider_type.clone(),
+                .map(|a| DiscoveryPluginResult {
+                    plugin_config_id: a.plugin_config_id,
+                    plugin_type: a.plugin_type.clone(),
                     discoveries: vec![],
                     error: Some(format!("SSH connection failed: {e}")),
                 })

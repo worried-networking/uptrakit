@@ -7,7 +7,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
     ApprovedPayload, CertificatePayload, CloseReason, ControllerMessage, DiscoverSoftwarePayload,
-    DiscoveryProviderAssignment, ErrorCode, ErrorPayload, ExecuteUpdatePayload, IncomingSeq,
+    DiscoveryPluginAssignment, ErrorCode, ErrorPayload, ExecuteUpdatePayload, IncomingSeq,
     OutgoingSeq, PingPayload, PluginType, RejectedPayload, ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
@@ -1094,8 +1094,8 @@ async fn deliver_pending_updates(
             software_item_name: item.name.clone(),
             package_identifier: link.package_identifier.clone(),
             to_version: update_record.to_version.clone(),
-            provider_type,
-            provider_config: merged_config,
+            plugin_type: provider_type,
+            plugin_config: merged_config,
             pre_update_hooks: resolved_hooks.pre_update_hooks,
             post_update_hooks: resolved_hooks.post_update_hooks,
             release_info: None,
@@ -1268,7 +1268,7 @@ pub(crate) async fn trigger_discovery_for_agent_host(
 ) {
     let discovery_types = state.provider_ops.discovery_plugin_types();
 
-    let mut providers: Vec<DiscoveryProviderAssignment> = Vec::new();
+    let mut providers: Vec<DiscoveryPluginAssignment> = Vec::new();
 
     for provider_type in discovery_types {
         let type_str = provider_type.to_string();
@@ -1294,16 +1294,16 @@ pub(crate) async fn trigger_discovery_for_agent_host(
 
         if configs.is_empty() {
             // No configs for this type — send a default assignment.
-            providers.push(DiscoveryProviderAssignment {
-                provider_config_id: None,
-                provider_type: provider_type.clone(),
+            providers.push(DiscoveryPluginAssignment {
+                plugin_config_id: None,
+                plugin_type: provider_type.clone(),
                 config: serde_json::Value::Object(Default::default()),
             });
         } else {
             for cfg in configs {
-                providers.push(DiscoveryProviderAssignment {
-                    provider_config_id: Some(cfg.id),
-                    provider_type: provider_type.clone(),
+                providers.push(DiscoveryPluginAssignment {
+                    plugin_config_id: Some(cfg.id),
+                    plugin_type: provider_type.clone(),
                     config: cfg.config,
                 });
             }

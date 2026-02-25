@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
-    DisconnectReason, DisconnectingPayload, DiscoverSoftwarePayload, DiscoveryProviderResult,
+    DisconnectReason, DisconnectingPayload, DiscoverSoftwarePayload, DiscoveryPluginResult,
     DiscoveryResultsPayload, ServiceMessage, UpdateOutputPayload, UpdateResultPayload,
     UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
 };
@@ -153,29 +153,29 @@ pub async fn handle_check_versions(
         "received CheckVersions request"
     );
 
-    // Pre-refresh package indexes for provider types that support it.
-    // Deduplicate by provider type so we only refresh once per type.
+    // Pre-refresh package indexes for plugin types that support it.
+    // Deduplicate by plugin type so we only refresh once per type.
     {
         let mut refreshed_types = std::collections::HashSet::new();
         for assignment in &payload.assignments {
-            if refreshed_types.contains(&assignment.provider_type) {
+            if refreshed_types.contains(&assignment.plugin_type) {
                 continue;
             }
             let mut effective_config = assignment.config.clone();
-            ctx.apply_to_config(&assignment.provider_type, &mut effective_config);
+            ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
             if let Ok(provider) = uptrakit_plugin_registry::PluginRegistry::create_provider(
-                assignment.provider_type.clone(),
+                assignment.plugin_type.clone(),
                 &effective_config,
                 Arc::clone(&executor),
             ) && provider
                 .has_capability(uptrakit_plugin_registry::PluginCapability::RefreshPackageIndex)
             {
-                tracing::info!(provider_type = %assignment.provider_type, "refreshing package index");
+                tracing::info!(plugin_type = %assignment.plugin_type, "refreshing package index");
                 if let Err(e) = provider.refresh_package_index().await {
-                    tracing::warn!(provider_type = %assignment.provider_type, error = %e, "failed to refresh package index");
+                    tracing::warn!(plugin_type = %assignment.plugin_type, error = %e, "failed to refresh package index");
                 }
-                refreshed_types.insert(assignment.provider_type.clone());
+                refreshed_types.insert(assignment.plugin_type.clone());
             }
         }
     }
@@ -189,11 +189,11 @@ pub async fn handle_check_versions(
                 tracing::debug!(
                     software_item_id = %assignment.software_item_id,
                     name = %assignment.name,
-                    provider_type = %assignment.provider_type,
+                    plugin_type = %assignment.plugin_type,
                     "checking version"
                 );
                 let outcome = crate::version_check::check_version(
-                    assignment.provider_type,
+                    assignment.plugin_type,
                     &assignment.config,
                     &assignment.package_identifier,
                     executor,
@@ -261,11 +261,11 @@ pub async fn handle_execute_update(
         return;
     }
 
-    // Apply connection context to the provider config
+    // Apply connection context to the plugin config
     let mut effective_payload = payload.clone();
     ctx.apply_to_config(
-        &effective_payload.provider_type,
-        &mut effective_payload.provider_config,
+        &effective_payload.plugin_type,
+        &mut effective_payload.plugin_config,
     );
 
     // Create a channel for output streaming
@@ -325,29 +325,29 @@ pub async fn handle_discover_software(
 
     for assignment in payload.providers {
         tracing::debug!(
-            provider_type = %assignment.provider_type,
-            provider_config_id = ?assignment.provider_config_id,
-            "running discovery for provider"
+            plugin_type = %assignment.plugin_type,
+            plugin_config_id = ?assignment.plugin_config_id,
+            "running discovery for plugin"
         );
 
         let mut effective_config = assignment.config.clone();
-        ctx.apply_to_config(&assignment.provider_type, &mut effective_config);
+        ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
         let result =
             match uptrakit_plugin_registry::PluginRegistry::create_provider_for_discovery(
-                assignment.provider_type.clone(),
+                assignment.plugin_type.clone(),
                 &effective_config,
                 Arc::clone(&executor),
             ) {
                 Err(e) => {
                     tracing::warn!(
-                        provider_type = %assignment.provider_type,
+                        plugin_type = %assignment.plugin_type,
                         error = %e,
                         "failed to create provider for discovery"
                     );
-                    DiscoveryProviderResult {
-                        provider_config_id: assignment.provider_config_id,
-                        provider_type: assignment.provider_type,
+                    DiscoveryPluginResult {
+                        plugin_config_id: assignment.plugin_config_id,
+                        plugin_type: assignment.plugin_type,
                         discoveries: vec![],
                         error: Some(e.to_string()),
                     }
@@ -356,12 +356,12 @@ pub async fn handle_discover_software(
                     use uptrakit_plugin_registry::PluginCapability;
                     if !provider.has_capability(PluginCapability::DiscoverLocalSoftware) {
                         tracing::warn!(
-                            provider_type = %assignment.provider_type,
+                            plugin_type = %assignment.plugin_type,
                             "provider does not support DiscoverLocalSoftware; skipping"
                         );
-                        DiscoveryProviderResult {
-                            provider_config_id: assignment.provider_config_id,
-                            provider_type: assignment.provider_type,
+                        DiscoveryPluginResult {
+                            plugin_config_id: assignment.plugin_config_id,
+                            plugin_type: assignment.plugin_type,
                             discoveries: vec![],
                             error: Some("provider does not support software discovery".to_string()),
                         }
@@ -369,26 +369,26 @@ pub async fn handle_discover_software(
                         match provider.discover_software().await {
                             Ok(discoveries) => {
                                 tracing::info!(
-                                    provider_type = %assignment.provider_type,
+                                    plugin_type = %assignment.plugin_type,
                                     count = discoveries.len(),
                                     "discovery completed"
                                 );
-                                DiscoveryProviderResult {
-                                    provider_config_id: assignment.provider_config_id,
-                                    provider_type: assignment.provider_type,
+                                DiscoveryPluginResult {
+                                    plugin_config_id: assignment.plugin_config_id,
+                                    plugin_type: assignment.plugin_type,
                                     discoveries,
                                     error: None,
                                 }
                             }
                             Err(e) => {
                                 tracing::warn!(
-                                    provider_type = %assignment.provider_type,
+                                    plugin_type = %assignment.plugin_type,
                                     error = %e,
                                     "discovery failed"
                                 );
-                                DiscoveryProviderResult {
-                                    provider_config_id: assignment.provider_config_id,
-                                    provider_type: assignment.provider_type,
+                                DiscoveryPluginResult {
+                                    plugin_config_id: assignment.plugin_config_id,
+                                    plugin_type: assignment.plugin_type,
                                     discoveries: vec![],
                                     error: Some(e.to_string()),
                                 }

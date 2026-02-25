@@ -44,7 +44,7 @@ struct AssignmentRow {
     host_machine_id: String,
     software_item_id: Uuid,
     name: String,
-    provider_type: String,
+    plugin_type: String,
     package_identifier: String,
     config: serde_json::Value,
     config_override: Option<serde_json::Value>,
@@ -66,10 +66,10 @@ impl TaskExecutor for VersionCheckExecutor {
         let mut by_agent_host: HashMap<(Uuid, String), Vec<VersionCheckAssignment>> =
             HashMap::new();
         for row in rows {
-            let provider_type = PluginType::from_str(&row.provider_type).map_err(|_| {
+            let provider_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
                 report!(SchedulerError::Execution(format!(
                     "unknown provider type: {}",
-                    row.provider_type
+                    row.plugin_type
                 )))
             })?;
             let config = match row.config_override {
@@ -82,7 +82,7 @@ impl TaskExecutor for VersionCheckExecutor {
                 .push(VersionCheckAssignment {
                     software_item_id: row.software_item_id,
                     name: row.name,
-                    provider_type,
+                    plugin_type: provider_type,
                     package_identifier: row.package_identifier,
                     config,
                 });
@@ -127,7 +127,7 @@ impl VersionCheckExecutor {
             host_machine_id: String,
             software_item_id: Uuid,
             name: String,
-            provider_type: String,
+            plugin_type: String,
             package_identifier: String,
             config: serde_json::Value,
             config_override: Option<serde_json::Value>,
@@ -145,7 +145,7 @@ impl VersionCheckExecutor {
             .column_as(host::Column::MachineId, "host_machine_id")
             .column_as(software_item::Column::Id, "software_item_id")
             .column_as(software_item::Column::Name, "name")
-            .column_as(provider_config::Column::PluginType, "provider_type")
+            .column_as(provider_config::Column::PluginType, "plugin_type")
             .column_as(
                 host_software_item::Column::PackageIdentifier,
                 "package_identifier",
@@ -196,7 +196,7 @@ impl VersionCheckExecutor {
                 host_machine_id: r.host_machine_id,
                 software_item_id: r.software_item_id,
                 name: r.name,
-                provider_type: r.provider_type,
+                plugin_type: r.plugin_type,
                 package_identifier: r.package_identifier,
                 config: r.config,
                 config_override: r.config_override,

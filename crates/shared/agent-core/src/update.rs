@@ -254,11 +254,11 @@ async fn detect_current_version(
     payload: &ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
 ) -> Option<String> {
-    // The connection context has already been merged into payload.provider_config
+    // The connection context has already been merged into payload.plugin_config
     // by the caller before the update task was spawned.
     let outcome = crate::version_check::check_version(
-        payload.provider_type.clone(),
-        &payload.provider_config,
+        payload.plugin_type.clone(),
+        &payload.plugin_config,
         &payload.package_identifier,
         executor,
         &crate::connection_context::ConnectionContext::default(),
@@ -289,8 +289,8 @@ async fn execute_plugin_update(
     executor: Arc<dyn CommandExecutor>,
 ) -> UpdateResult<String> {
     let plugin = PluginRegistry::create_provider(
-        payload.provider_type.clone(),
-        &payload.provider_config,
+        payload.plugin_type.clone(),
+        &payload.plugin_config,
         executor,
     )
     .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
@@ -450,8 +450,8 @@ mod tests {
             software_item_name: "Test App".to_string(),
             package_identifier: "test-app".to_string(),
             to_version: "2.0.0".to_string(),
-            provider_type: PluginType::GithubReleases,
-            provider_config: serde_json::json!({}),
+            plugin_type: PluginType::GithubReleases,
+            plugin_config: serde_json::json!({}),
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
             release_info: None,
@@ -508,7 +508,7 @@ mod tests {
             shell: HookShell::Bash,
         }];
         payload.release_info = None;
-        payload.provider_config = serde_json::json!({});
+        payload.plugin_config = serde_json::json!({});
 
         let result = execute_update(payload, test_executor(), tx).await;
 

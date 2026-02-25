@@ -28,7 +28,7 @@ use sea_orm::{
 };
 use std::collections::HashSet;
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{DiscoveryProviderResult, DiscoveryResultsPayload, PluginType};
+use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload, PluginType};
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
     autodiscovery_ignore, host_software_item, plugin_config as provider_config, prelude::*,
@@ -386,9 +386,9 @@ pub async fn process_discovery_results(
         if let Some(ref err) = result.error {
             tracing::warn!(
                 %agent_id,
-                provider_type = %result.provider_type,
+                plugin_type = %result.plugin_type,
                 error = %err,
-                "discovery provider reported an error, skipping"
+                "discovery plugin reported an error, skipping"
             );
             continue;
         }
@@ -396,8 +396,8 @@ pub async fn process_discovery_results(
         if result.discoveries.is_empty() {
             tracing::debug!(
                 %agent_id,
-                provider_type = %result.provider_type,
-                "discovery provider returned no items"
+                plugin_type = %result.plugin_type,
+                "discovery plugin returned no items"
             );
             continue;
         }
@@ -415,13 +415,13 @@ async fn process_provider_result(
     tenant_id: Uuid,
     host_id: Uuid,
     now: OffsetDateTime,
-    result: &DiscoveryProviderResult,
+    result: &DiscoveryPluginResult,
 ) -> Result<(), AutodiscoveryError> {
-    let provider_type_str = result.provider_type.to_string();
+    let provider_type_str = result.plugin_type.to_string();
 
-    // If the assignment already had a provider_config_id, use it directly for
+    // If the assignment already had a plugin_config_id, use it directly for
     // all discoveries in this result. Otherwise, group by config key.
-    if let Some(existing_pc_id) = result.provider_config_id {
+    if let Some(existing_pc_id) = result.plugin_config_id {
         let ignore_set = load_ignore_set(db, tenant_id, existing_pc_id).await?;
         for item in &result.discoveries {
             let args = ProcessDiscoveryArgs {
@@ -446,7 +446,7 @@ async fn process_provider_result(
 
     // Default/auto assignment (no pre-existing config) — group by config key
     // derived from the `extra` metadata on each discovery item.
-    match result.provider_type {
+    match result.plugin_type {
         PluginType::Homebrew => {
             process_homebrew_default(db, tenant_id, host_id, now, result).await?;
         }
@@ -499,8 +499,8 @@ async fn process_provider_result(
         }
         _ => {
             tracing::warn!(
-                provider_type = %result.provider_type,
-                "received discovery results for a provider type that does not support auto-config creation; skipping"
+                plugin_type = %result.plugin_type,
+                "received discovery results for a plugin type that does not support auto-config creation; skipping"
             );
         }
     }
@@ -523,7 +523,7 @@ async fn process_phs_results(
     tenant_id: Uuid,
     host_id: Uuid,
     now: OffsetDateTime,
-    result: &DiscoveryProviderResult,
+    result: &DiscoveryPluginResult,
 ) -> Result<(), AutodiscoveryError> {
     for item in &result.discoveries {
         let github_owner = item
@@ -611,9 +611,9 @@ async fn process_homebrew_default(
     tenant_id: Uuid,
     host_id: Uuid,
     now: OffsetDateTime,
-    result: &DiscoveryProviderResult,
+    result: &DiscoveryPluginResult,
 ) -> Result<(), AutodiscoveryError> {
-    let provider_type_str = result.provider_type.to_string();
+    let provider_type_str = result.plugin_type.to_string();
 
     // Split items by package_type from their extra metadata.
     let mut formulae = Vec::new();
@@ -1146,12 +1146,12 @@ mod tests {
 
     // ── PHS result processing ─────────────────────────────────────────────────
 
-    use uptrakit_internal_wire::{DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryProviderResult, PluginType};
+    use uptrakit_internal_wire::{DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, PluginType};
 
-    fn phs_result_with_github(pkg_id: &str, name: &str, version: &str, owner: &str, repo: &str) -> DiscoveryProviderResult {
-        DiscoveryProviderResult {
-            provider_type: PluginType::ProxmoxHelperScripts,
-            provider_config_id: None,
+    fn phs_result_with_github(pkg_id: &str, name: &str, version: &str, owner: &str, repo: &str) -> DiscoveryPluginResult {
+        DiscoveryPluginResult {
+            plugin_type: PluginType::ProxmoxHelperScripts,
+            plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
                 package_identifier: pkg_id.to_string(),
@@ -1165,10 +1165,10 @@ mod tests {
         }
     }
 
-    fn phs_result_with_apt(pkg_id: &str, name: &str, version: &str, apt_pkg: &str) -> DiscoveryProviderResult {
-        DiscoveryProviderResult {
-            provider_type: PluginType::ProxmoxHelperScripts,
-            provider_config_id: None,
+    fn phs_result_with_apt(pkg_id: &str, name: &str, version: &str, apt_pkg: &str) -> DiscoveryPluginResult {
+        DiscoveryPluginResult {
+            plugin_type: PluginType::ProxmoxHelperScripts,
+            plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
                 package_identifier: pkg_id.to_string(),
@@ -1179,10 +1179,10 @@ mod tests {
         }
     }
 
-    fn phs_result_no_extra(pkg_id: &str) -> DiscoveryProviderResult {
-        DiscoveryProviderResult {
-            provider_type: PluginType::ProxmoxHelperScripts,
-            provider_config_id: None,
+    fn phs_result_no_extra(pkg_id: &str) -> DiscoveryPluginResult {
+        DiscoveryPluginResult {
+            plugin_type: PluginType::ProxmoxHelperScripts,
+            plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
                 package_identifier: pkg_id.to_string(),
