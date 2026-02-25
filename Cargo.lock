@@ -6309,7 +6309,6 @@ dependencies = [
  "rust-embed",
  "rustls",
  "sea-orm",
- "sea-orm-migration",
  "serde",
  "serde_json",
  "sha1 0.10.6",
@@ -6591,6 +6590,7 @@ version = "0.0.1"
 dependencies = [
  "rootcause",
  "sea-orm",
+ "sea-orm-migration",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

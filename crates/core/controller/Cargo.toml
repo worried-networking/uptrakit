@@ -11,14 +11,14 @@ default = ["db-sqlite", "oidc"]
 oidc = ["uptrakit-web-api/oidc"]
 swagger-ui = ["uptrakit-web-api/swagger-ui"]
 db-all = ["db-sqlite", "db-postgres", "db-mysql", "uptrakit-web-api/db-all"]
-db-sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite", "uptrakit-web-api/db-sqlite"]
-db-postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres", "uptrakit-web-api/db-postgres"]
-db-mysql = ["sea-orm/sqlx-mysql", "sea-orm-migration/sqlx-mysql", "uptrakit-web-api/db-mysql"]
+db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite", "uptrakit-web-api/db-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptrakit-web-api/db-postgres"]
+db-mysql = ["sea-orm/sqlx-mysql", "uptrakit-shared-db/db-mysql", "uptrakit-web-api/db-mysql"]
 embed-frontend = ["dep:rust-embed"]
 
 [dependencies]
 uptrakit-internal-wire = { path = "../../shared/wire" }
-uptrakit-shared-db = { path = "../../shared/db" }
+uptrakit-shared-db = { path = "../../shared/db", features = ["migration"] }
 uptrakit-web-api = { path = "../../ui/web-api", default-features = false }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-shared-types = { workspace = true }
@@ -42,7 +42,6 @@ time = { workspace = true }
 tower = { workspace = true }
 tower-http = { version = "0.6", features = ["trace", "fs"] }
 sea-orm = { workspace = true }
-sea-orm-migration = { version = "2.0.0-rc.34", default-features = false, features = ["runtime-tokio-rustls"] }
 uuid = { workspace = true, features = ["v7", "serde"] }
 sha2 = { workspace = true }
 serde_json = { workspace = true }

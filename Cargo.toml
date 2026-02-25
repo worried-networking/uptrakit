@@ -33,6 +33,7 @@ http = "1"
 time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde-well-known"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 sea-orm = { version = "2.0.0-rc.32", default-features = false, features = ["runtime-tokio-rustls", "macros", "with-time", "with-uuid", "with-json"] }
+sea-orm-migration = { version = "2.0.0-rc.34", default-features = false, features = ["runtime-tokio-rustls"] }
 url = "2"
 uuid = { version = "1.20" }
 rand = "0.9"

@@ -7,9 +7,17 @@ repository.workspace = true
 version.workspace = true
 publish = false
 
+[features]
+default = []
+migration   = ["dep:sea-orm-migration"]
+db-sqlite   = ["sea-orm/sqlx-sqlite",   "sea-orm-migration?/sqlx-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration?/sqlx-postgres"]
+db-mysql    = ["sea-orm/sqlx-mysql",    "sea-orm-migration?/sqlx-mysql"]
+
 [dependencies]
 rootcause = { workspace = true }
 sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
