@@ -896,30 +896,30 @@ impl MigrationTrait for Migration {
         // 8. Providers & software items
         // ============================================================
 
-        // --- provider_configs ---
+        // --- plugin_configs ---
         manager
             .create_table(
                 Table::create()
-                    .table(ProviderConfigs::Table)
+                    .table(PluginConfigs::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(ProviderConfigs::Id)
+                        ColumnDef::new(PluginConfigs::Id)
                             .uuid()
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(ProviderConfigs::TenantId).uuid().not_null())
-                    .col(string(ProviderConfigs::Name))
-                    .col(string(ProviderConfigs::ProviderType))
-                    .col(json(ProviderConfigs::Config))
-                    .col(boolean(ProviderConfigs::Enabled).default(true))
-                    .col(timestamp(ProviderConfigs::CreatedAt))
-                    .col(timestamp(ProviderConfigs::UpdatedAt))
-                    .col(timestamp_null(ProviderConfigs::DeactivatedAt))
+                    .col(ColumnDef::new(PluginConfigs::TenantId).uuid().not_null())
+                    .col(string(PluginConfigs::Name))
+                    .col(string(PluginConfigs::PluginType))
+                    .col(json(PluginConfigs::Config))
+                    .col(boolean(PluginConfigs::Enabled).default(true))
+                    .col(timestamp(PluginConfigs::CreatedAt))
+                    .col(timestamp(PluginConfigs::UpdatedAt))
+                    .col(timestamp_null(PluginConfigs::DeactivatedAt))
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_provider_configs_tenant")
-                            .from(ProviderConfigs::Table, ProviderConfigs::TenantId)
+                            .name("fk_plugin_configs_tenant")
+                            .from(PluginConfigs::Table, PluginConfigs::TenantId)
                             .to(Tenants::Table, Tenants::Id)
                             .on_delete(ForeignKeyAction::Restrict),
                     )
@@ -930,9 +930,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_provider_configs_tenant_id")
-                    .table(ProviderConfigs::Table)
-                    .col(ProviderConfigs::TenantId)
+                    .name("idx_plugin_configs_tenant_id")
+                    .table(PluginConfigs::Table)
+                    .col(PluginConfigs::TenantId)
                     .to_owned(),
             )
             .await?;
@@ -940,9 +940,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_provider_configs_provider_type")
-                    .table(ProviderConfigs::Table)
-                    .col(ProviderConfigs::ProviderType)
+                    .name("idx_plugin_configs_plugin_type")
+                    .table(PluginConfigs::Table)
+                    .col(PluginConfigs::PluginType)
                     .to_owned(),
             )
             .await?;
@@ -950,20 +950,20 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_provider_configs_deactivated_at")
-                    .table(ProviderConfigs::Table)
-                    .col(ProviderConfigs::DeactivatedAt)
+                    .name("idx_plugin_configs_deactivated_at")
+                    .table(PluginConfigs::Table)
+                    .col(PluginConfigs::DeactivatedAt)
                     .to_owned(),
             )
             .await?;
 
-        // Unique active provider config name per tenant (partial: only non-deactivated rows).
+        // Unique active plugin config name per tenant (partial: only non-deactivated rows).
         // Prevents duplicate names for active configs and makes find-or-create idempotent.
         manager
             .get_connection()
             .execute_unprepared(
-                "CREATE UNIQUE INDEX uq_provider_configs_active_name \
-                 ON provider_configs(tenant_id, name) \
+                "CREATE UNIQUE INDEX uq_plugin_configs_active_name \
+                 ON plugin_configs(tenant_id, name) \
                  WHERE deactivated_at IS NULL",
             )
             .await?;
@@ -1086,7 +1086,7 @@ impl MigrationTrait for Migration {
                                 HostSoftwareItems::Table,
                                 HostSoftwareItems::ProviderConfigId,
                             )
-                            .to(ProviderConfigs::Table, ProviderConfigs::Id)
+                            .to(PluginConfigs::Table, PluginConfigs::Id)
                             .on_delete(ForeignKeyAction::Restrict),
                     )
                     .to_owned(),
@@ -1151,7 +1151,7 @@ impl MigrationTrait for Migration {
                                 AutodiscoveryIgnores::Table,
                                 AutodiscoveryIgnores::ProviderConfigId,
                             )
-                            .to(ProviderConfigs::Table, ProviderConfigs::Id)
+                            .to(PluginConfigs::Table, PluginConfigs::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
@@ -1264,6 +1264,18 @@ impl MigrationTrait for Migration {
                     .col(timestamp(MqttClients::CreatedAt))
                     .col(timestamp(MqttClients::UpdatedAt))
                     .col(ColumnDef::new(MqttClients::CaCertPem).text())
+                    .col(
+                        ColumnDef::new(MqttClients::HaDiscovery)
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
+                    .col(
+                        ColumnDef::new(MqttClients::HaDiscoveryPrefix)
+                            .string()
+                            .not_null()
+                            .default("homeassistant"),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_mqtt_clients_tenant")
@@ -1383,7 +1395,18 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(0),
                     )
-                    .col(string(UpdateHistory::InitiatedBy))
+                    .col(
+                        ColumnDef::new(UpdateHistory::ActorType)
+                            .string()
+                            .not_null()
+                            .default("legacy"),
+                    )
+                    .col(
+                        ColumnDef::new(UpdateHistory::ActorId)
+                            .string()
+                            .not_null()
+                            .default(""),
+                    )
                     .col(timestamp(UpdateHistory::StartedAt))
                     .col(timestamp_null(UpdateHistory::CompletedAt))
                     .col(timestamp(UpdateHistory::CreatedAt))
@@ -2033,7 +2056,7 @@ impl MigrationTrait for Migration {
             AutodiscoveryIgnores::Table,
             HostSoftwareItems::Table,
             SoftwareItems::Table,
-            ProviderConfigs::Table,
+            PluginConfigs::Table,
             ServiceHosts::Table,
             Hosts::Table,
             ServiceCertificates::Table,
@@ -2423,12 +2446,12 @@ enum ServiceHosts {
 }
 
 #[derive(DeriveIden)]
-enum ProviderConfigs {
+enum PluginConfigs {
     Table,
     Id,
     TenantId,
     Name,
-    ProviderType,
+    PluginType,
     Config,
     Enabled,
     CreatedAt,
@@ -2505,6 +2528,8 @@ enum MqttClients {
     CreatedAt,
     UpdatedAt,
     CaCertPem,
+    HaDiscovery,
+    HaDiscoveryPrefix,
 }
 
 #[derive(DeriveIden)]
@@ -2529,7 +2554,8 @@ enum UpdateHistory {
     Status,
     Output,
     OutputBytes,
-    InitiatedBy,
+    ActorType,
+    ActorId,
     StartedAt,
     CompletedAt,
     CreatedAt,

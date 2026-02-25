@@ -11,8 +11,8 @@ use uptrakit_internal_wire::{
     OutgoingSeq, PingPayload, PluginType, RejectedPayload, ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
-    available_version, host, host_software_item, provider_config, service_host, software_item,
-    update_history,
+    available_version, host, host_software_item, plugin_config as provider_config, service_host,
+    software_item, update_history,
 };
 
 use rootcause::prelude::*;
@@ -1049,13 +1049,13 @@ async fn deliver_pending_updates(
         };
 
         let provider_type: PluginType = match serde_json::from_value(serde_json::Value::String(
-            provider_cfg.provider_type.clone(),
+            provider_cfg.plugin_type.clone(),
         )) {
             Ok(pt) => pt,
             Err(_) => {
                 tracing::warn!(
                     update_id = %update_record.id,
-                    provider_type = %provider_cfg.provider_type,
+                    plugin_type = %provider_cfg.plugin_type,
                     "unknown provider type, skipping pending update"
                 );
                 continue;
@@ -1275,7 +1275,7 @@ pub(crate) async fn trigger_discovery_for_agent_host(
 
         let configs = match provider_config::Entity::find()
             .filter(provider_config::Column::TenantId.eq(tenant_id))
-            .filter(provider_config::Column::ProviderType.eq(&type_str))
+            .filter(provider_config::Column::PluginType.eq(&type_str))
             .filter(provider_config::Column::Enabled.eq(true))
             .filter(provider_config::Column::DeactivatedAt.is_null())
             .all(state.db())

@@ -149,7 +149,7 @@ pub async fn trigger_update_for_host(
         link.provider_config_id,
     )
     .filter(
-        uptrakit_shared_db::entity::provider_config::Column::DeactivatedAt.is_null(),
+        uptrakit_shared_db::entity::plugin_config::Column::DeactivatedAt.is_null(),
     )
     .one(db)
     .await?
@@ -188,9 +188,9 @@ pub async fn trigger_update_for_host(
 
     // 11. Convert provider type.
     let provider_type: uptrakit_internal_wire::PluginType = serde_json::from_value(
-        serde_json::Value::String(provider_config.provider_type.clone()),
+        serde_json::Value::String(provider_config.plugin_type.clone()),
     )
-    .map_err(|_| TriggerUpdateError::UnknownProviderType(provider_config.provider_type.clone()))?;
+    .map_err(|_| TriggerUpdateError::UnknownProviderType(provider_config.plugin_type.clone()))?;
 
     // 12. Build ExecuteUpdatePayload and dispatch to the agent.
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {

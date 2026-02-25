@@ -14,7 +14,7 @@ use sea_orm::{
     ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QuerySelect, RelationTrait,
 };
 use std::sync::Arc;
-use uptrakit_shared_db::entity::{host, prelude::*, provider_config, service, service_host};
+use uptrakit_shared_db::entity::{host, plugin_config as provider_config, prelude::*, service, service_host};
 use uptrakit_web_api_types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
 use uptrakit_web_api_types::validation::Validate;
 
@@ -259,7 +259,7 @@ pub async fn discover_provider_config(
     };
 
     // Validate provider supports discovery.
-    let provider_type: uptrakit_internal_wire::PluginType = match cfg.provider_type.parse() {
+    let provider_type: uptrakit_internal_wire::PluginType = match cfg.plugin_type.parse() {
         Ok(pt) => pt,
         Err(_) => {
             return error_response(StatusCode::BAD_REQUEST, "Unknown provider type");
@@ -275,7 +275,7 @@ pub async fn discover_provider_config(
             StatusCode::BAD_REQUEST,
             format!(
                 "Provider type '{}' does not support autodiscovery",
-                cfg.provider_type
+                cfg.plugin_type
             ),
         );
     }

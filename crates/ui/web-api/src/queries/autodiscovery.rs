@@ -31,7 +31,8 @@ use time::OffsetDateTime;
 use uptrakit_internal_wire::{DiscoveryProviderResult, DiscoveryResultsPayload, PluginType};
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
-    autodiscovery_ignore, host_software_item, prelude::*, provider_config, software_item,
+    autodiscovery_ignore, host_software_item, plugin_config as provider_config, prelude::*,
+    software_item,
 };
 use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, DiscardDiscoveredResponse,
@@ -140,7 +141,7 @@ pub async fn list_ignore_rules(
                 id: r.id,
                 provider_config_id: r.provider_config_id,
                 provider_config_name: cfg.name.clone(),
-                provider_type: cfg.provider_type.clone(),
+                provider_type: cfg.plugin_type.clone(),
                 package_identifier: r.package_identifier,
                 created_at: r.created_at,
             })
@@ -321,7 +322,7 @@ pub async fn find_or_create_default_provider_config(
         id: Set(new_id),
         tenant_id: Set(tenant_id),
         name: Set(display_name.to_string()),
-        provider_type: Set(provider_type.to_string()),
+        plugin_type: Set(provider_type.to_string()),
         config: Set(config_json.clone()),
         enabled: Set(true),
         created_at: Set(now),
@@ -352,7 +353,7 @@ async fn find_matching_provider_config(
 ) -> Result<Option<Uuid>, AutodiscoveryError> {
     let configs = ProviderConfig::find()
         .filter(provider_config::Column::TenantId.eq(tenant_id))
-        .filter(provider_config::Column::ProviderType.eq(provider_type))
+        .filter(provider_config::Column::PluginType.eq(provider_type))
         .filter(provider_config::Column::DeactivatedAt.is_null())
         .all(db)
         .await?;
@@ -868,7 +869,7 @@ mod tests {
     use super::*;
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
     use uptrakit_shared_db::SoftwareDiscoveryState;
-    use uptrakit_shared_db::entity::{host, provider_config, tenant};
+    use uptrakit_shared_db::entity::{host, plugin_config as provider_config, tenant};
 
     async fn setup_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");
@@ -925,7 +926,7 @@ mod tests {
             id: Set(id),
             tenant_id: Set(tenant_id),
             name: Set(format!("Test Provider {id}")),
-            provider_type: Set("homebrew".to_string()),
+            plugin_type: Set("homebrew".to_string()),
             config: Set(serde_json::json!({})),
             enabled: Set(true),
             created_at: Set(now),
@@ -1212,7 +1213,7 @@ mod tests {
         // A github_releases provider config must exist.
         let configs = ProviderConfig::find()
             .filter(provider_config::Column::TenantId.eq(tenant_id))
-            .filter(provider_config::Column::ProviderType.eq("github_releases"))
+            .filter(provider_config::Column::PluginType.eq("github_releases"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1256,7 +1257,7 @@ mod tests {
 
         let configs = ProviderConfig::find()
             .filter(provider_config::Column::TenantId.eq(tenant_id))
-            .filter(provider_config::Column::ProviderType.eq("apt"))
+            .filter(provider_config::Column::PluginType.eq("apt"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1294,7 +1295,7 @@ mod tests {
 
         let configs = ProviderConfig::find()
             .filter(provider_config::Column::TenantId.eq(tenant_id))
-            .filter(provider_config::Column::ProviderType.eq("apt"))
+            .filter(provider_config::Column::PluginType.eq("apt"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1362,7 +1363,7 @@ mod tests {
         // Still only one provider config.
         let config_count = ProviderConfig::find()
             .filter(provider_config::Column::TenantId.eq(tenant_id))
-            .filter(provider_config::Column::ProviderType.eq("github_releases"))
+            .filter(provider_config::Column::PluginType.eq("github_releases"))
             .count(&db)
             .await
             .expect("count configs");

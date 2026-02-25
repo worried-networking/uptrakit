@@ -1,7 +1,7 @@
 use sea_orm::EntityTrait;
 
 use super::{
-    host, mqtt_client, oidc_provider, provider_config, scheduled_task, service, setting,
+    host, mqtt_client, oidc_provider, plugin_config, scheduled_task, service, setting,
     settings_version, software_item, user_role,
 };
 
@@ -44,9 +44,9 @@ impl TenantScoped for software_item::Entity {
     }
 }
 
-impl TenantScoped for provider_config::Entity {
+impl TenantScoped for plugin_config::Entity {
     fn tenant_id_column() -> Self::Column {
-        provider_config::Column::TenantId
+        plugin_config::Column::TenantId
     }
 }
 

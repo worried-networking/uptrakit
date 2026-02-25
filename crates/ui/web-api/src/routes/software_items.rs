@@ -16,7 +16,8 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
-    host, host_software_item, prelude::*, provider_config, service, service_host, software_item,
+    host, host_software_item, plugin_config as provider_config, prelude::*, service, service_host,
+    software_item,
 };
 use uptrakit_web_api_types::validation::Validate;
 
@@ -708,7 +709,7 @@ pub async fn check_versions(
         };
 
         let provider_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
-            serde_json::Value::String(prov_config.provider_type.clone()),
+            serde_json::Value::String(prov_config.plugin_type.clone()),
         ) {
             Ok(pt) => pt,
             Err(_) => continue,
@@ -867,11 +868,11 @@ pub async fn check_versions_host(
     };
 
     let provider_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
-        serde_json::Value::String(provider_config.provider_type.clone()),
+        serde_json::Value::String(provider_config.plugin_type.clone()),
     ) {
         Ok(pt) => pt,
         Err(_) => {
-            tracing::error!("Unknown provider type: {}", provider_config.provider_type);
+            tracing::error!("Unknown provider type: {}", provider_config.plugin_type);
             return error_response(StatusCode::BAD_REQUEST, "Unknown provider type");
         }
     };

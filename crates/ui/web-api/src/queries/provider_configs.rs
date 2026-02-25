@@ -4,7 +4,7 @@ use sea_orm::{
 };
 use time::OffsetDateTime;
 use uptrakit_plugin_registry::PluginOps;
-use uptrakit_shared_db::entity::provider_config;
+use uptrakit_shared_db::entity::plugin_config as provider_config;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::provider_configs::{
     CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
@@ -35,13 +35,13 @@ fn provider_config_to_response(
     ops: &dyn PluginOps,
     m: provider_config::Model,
 ) -> Option<ProviderConfigResponse> {
-    let provider_type: uptrakit_plugin_registry::PluginType = match m.provider_type.parse() {
+    let provider_type: uptrakit_plugin_registry::PluginType = match m.plugin_type.parse() {
         Ok(pt) => pt,
         Err(_) => {
             tracing::error!(
                 id = %m.id,
-                provider_type = %m.provider_type,
-                "provider config has invalid provider_type in database, skipping"
+                plugin_type = %m.plugin_type,
+                "provider config has invalid plugin_type in database, skipping"
             );
             return None;
         }
@@ -133,7 +133,7 @@ pub async fn create_provider_config(
         id: Set(generate_uuid()),
         tenant_id: Set(tenant_db.tenant_id),
         name: Set(req.name),
-        provider_type: Set(req.provider_type.to_string()),
+        plugin_type: Set(req.provider_type.to_string()),
         config: Set(req.config),
         enabled: Set(req.enabled),
         created_at: Set(now),
@@ -155,7 +155,7 @@ pub async fn create_provider_config(
 fn is_unique_name_violation(e: &sea_orm::DbErr) -> bool {
     let msg = e.to_string().to_lowercase();
     (msg.contains("unique") || msg.contains("duplicate"))
-        && (msg.contains("name") || msg.contains("uq_provider_configs_active_name"))
+        && (msg.contains("name") || msg.contains("uq_plugin_configs_active_name"))
 }
 
 pub async fn list_provider_configs(
@@ -212,7 +212,7 @@ pub async fn update_provider_config(
         None => return Err(UpdateProviderConfigError::NotFound),
     };
 
-    let provider_type = existing.provider_type.clone();
+    let provider_type = existing.plugin_type.clone();
 
     // Validate name if changing.
     if let Some(ref name) = req.name

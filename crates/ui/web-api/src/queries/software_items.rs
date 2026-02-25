@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use time::OffsetDateTime;
 use uptrakit_plugin_registry::PluginRegistry;
 use uptrakit_shared_db::entity::{
-    available_version, host, host_software_item, prelude::*, provider_config, software_item,
+    available_version, host, host_software_item, plugin_config as provider_config, prelude::*,
+    software_item,
 };
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::software_items::{
@@ -54,7 +55,7 @@ struct ItemHostCount {
 #[derive(Debug, FromQueryResult)]
 struct ItemProviderType {
     software_item_id: Uuid,
-    provider_type: String,
+    plugin_type: String,
 }
 
 // --- Private helpers ---
@@ -125,13 +126,13 @@ async fn count_linked_hosts(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> 
 async fn load_provider_types(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> Vec<String> {
     #[derive(Debug, FromQueryResult)]
     struct PcRow {
-        provider_type: String,
+        plugin_type: String,
     }
 
-    // Join host_software_items → provider_configs to collect distinct provider types.
+    // Join host_software_items → plugin_configs to collect distinct provider types.
     let rows: Vec<PcRow> = HostSoftwareItem::find()
         .select_only()
-        .column(provider_config::Column::ProviderType)
+        .column(provider_config::Column::PluginType)
         .join(
             sea_orm::JoinType::InnerJoin,
             host_software_item::Relation::ProviderConfig.def(),
@@ -144,8 +145,8 @@ async fn load_provider_types(db: &sea_orm::DatabaseConnection, item_id: Uuid) ->
 
     let mut seen = std::collections::HashSet::new();
     rows.into_iter()
-        .filter(|r| seen.insert(r.provider_type.clone()))
-        .map(|r| r.provider_type)
+        .filter(|r| seen.insert(r.plugin_type.clone()))
+        .map(|r| r.plugin_type)
         .collect()
 }
 
@@ -211,7 +212,7 @@ async fn load_item_hosts(
                 friendly_name: host.friendly_name.clone(),
                 provider_config_id: pc.id,
                 provider_config_name: pc.name.clone(),
-                provider_type: pc.provider_type.clone(),
+                provider_type: pc.plugin_type.clone(),
                 package_identifier: link.package_identifier,
                 config_override: link.config_override,
                 installed_version: link.installed_version,
@@ -309,7 +310,7 @@ async fn resolve_provider_config_txn(
                 id: Set(pcid),
                 tenant_id: Set(tenant_id),
                 name: Set(inline.name.clone()),
-                provider_type: Set(inline.provider_type.to_string()),
+                plugin_type: Set(inline.provider_type.to_string()),
                 config: Set(inline.config.clone()),
                 enabled: Set(inline.enabled),
                 created_at: Set(now),
@@ -333,7 +334,7 @@ fn validate_assignment(
     config_override: Option<&serde_json::Value>,
 ) -> Result<(), SoftwareItemQueryError> {
     if let Ok(pt) = config
-        .provider_type
+        .plugin_type
         .parse::<uptrakit_plugin_registry::PluginType>()
         && let Err(e) = PluginRegistry::validate_package_identifier(pt, package_identifier)
     {
@@ -342,7 +343,7 @@ fn validate_assignment(
 
     if let Some(override_val) = config_override {
         if let Err(e) =
-            validate_config_override(&config.provider_type, &config.config, override_val)
+            validate_config_override(&config.plugin_type, &config.config, override_val)
         {
             return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
         }
@@ -458,7 +459,7 @@ pub async fn list_software_items(
     let provider_type_rows: Vec<ItemProviderType> = HostSoftwareItem::find()
         .select_only()
         .column(host_software_item::Column::SoftwareItemId)
-        .column(provider_config::Column::ProviderType)
+        .column(provider_config::Column::PluginType)
         .join(
             sea_orm::JoinType::InnerJoin,
             host_software_item::Relation::ProviderConfig.def(),
@@ -472,8 +473,8 @@ pub async fn list_software_items(
     let mut provider_types_map: HashMap<Uuid, Vec<String>> = HashMap::new();
     for row in provider_type_rows {
         let entry = provider_types_map.entry(row.software_item_id).or_default();
-        if !entry.contains(&row.provider_type) {
-            entry.push(row.provider_type);
+        if !entry.contains(&row.plugin_type) {
+            entry.push(row.plugin_type);
         }
     }
 

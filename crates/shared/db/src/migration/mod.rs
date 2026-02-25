@@ -2,9 +2,6 @@ use sea_orm::DatabaseConnection;
 use sea_orm_migration::prelude::*;
 
 mod m20260209_000001_initial;
-mod m20260224_000001_mqtt_ha_discovery;
-mod m20260225_000001_rename_docker_provider;
-mod m20260225_000002_phs_discovery_only;
 
 pub struct Migrator;
 
@@ -13,9 +10,6 @@ impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         vec![
             Box::new(m20260209_000001_initial::Migration),
-            Box::new(m20260224_000001_mqtt_ha_discovery::Migration),
-            Box::new(m20260225_000001_rename_docker_provider::Migration),
-            Box::new(m20260225_000002_phs_discovery_only::Migration),
         ]
     }
 }
@@ -36,6 +30,9 @@ mod tests {
         let db = Database::connect(opt).await.unwrap();
         run_migrations(&db).await.unwrap();
         db.execute_unprepared("SELECT count(*) FROM software_items")
+            .await
+            .unwrap();
+        db.execute_unprepared("SELECT count(*) FROM plugin_configs")
             .await
             .unwrap();
     }

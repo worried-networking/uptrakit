@@ -92,7 +92,7 @@ pub async fn create_autodiscovery_ignore(
     Json(req): Json<CreateAutodiscoveryIgnoreRequest>,
 ) -> Response {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    use uptrakit_shared_db::entity::{prelude::*, provider_config};
+    use uptrakit_shared_db::entity::{plugin_config as provider_config, prelude::*};
 
     if req.package_identifier.trim().is_empty() {
         return error_response(
@@ -136,7 +136,7 @@ pub async fn create_autodiscovery_ignore(
         id: uuid::Uuid::nil(), // will be replaced below
         provider_config_id: cfg.id,
         provider_config_name: cfg.name.clone(),
-        provider_type: cfg.provider_type.clone(),
+        provider_type: cfg.plugin_type.clone(),
         package_identifier: req.package_identifier.clone(),
         created_at: time::OffsetDateTime::now_utc(),
     };
@@ -162,7 +162,7 @@ pub async fn create_autodiscovery_ignore(
             id: rule.id,
             provider_config_id: cfg.id,
             provider_config_name: cfg.name,
-            provider_type: cfg.provider_type,
+            provider_type: cfg.plugin_type,
             package_identifier: rule.package_identifier,
             created_at: rule.created_at,
         }),

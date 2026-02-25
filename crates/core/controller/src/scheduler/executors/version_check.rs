@@ -7,7 +7,8 @@ use sea_orm::{
 };
 use uptrakit_internal_wire::{CheckVersionsPayload, ControllerMessage, VersionCheckAssignment};
 use uptrakit_shared_db::entity::{
-    host, host_software_item, provider_config, scheduled_task, service, service_host, software_item,
+    host, host_software_item, plugin_config as provider_config, scheduled_task, service,
+    service_host, software_item,
 };
 use uptrakit_shared_types::PluginType;
 use uptrakit_web_api::notification_service::NotificationService;
@@ -144,7 +145,7 @@ impl VersionCheckExecutor {
             .column_as(host::Column::MachineId, "host_machine_id")
             .column_as(software_item::Column::Id, "software_item_id")
             .column_as(software_item::Column::Name, "name")
-            .column_as(provider_config::Column::ProviderType, "provider_type")
+            .column_as(provider_config::Column::PluginType, "provider_type")
             .column_as(
                 host_software_item::Column::PackageIdentifier,
                 "package_identifier",

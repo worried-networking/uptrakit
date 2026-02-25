@@ -33,9 +33,9 @@ pub enum Relation {
     )]
     SoftwareItem,
     #[sea_orm(
-        belongs_to = "super::provider_config::Entity",
+        belongs_to = "super::plugin_config::Entity",
         from = "Column::ProviderConfigId",
-        to = "super::provider_config::Column::Id"
+        to = "super::plugin_config::Column::Id"
     )]
     ProviderConfig,
 }
@@ -52,7 +52,7 @@ impl Related<super::software_item::Entity> for Entity {
     }
 }
 
-impl Related<super::provider_config::Entity> for Entity {
+impl Related<super::plugin_config::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ProviderConfig.def()
     }
