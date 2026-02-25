@@ -1,106 +1,71 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rootcause::prelude::*;
-use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output};
-use uptrakit_provider_core::mpsc;
+use uptrakit_provider_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_provider_core::{
-    DiscoveredSoftware, OutputStreamType, Provider, ProviderCapability, ProviderError,
-    ProviderType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
+    DiscoveredSoftware, Provider, ProviderCapability, ProviderType,
 };
-use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
 
 use crate::config::ProxmoxHelperScriptsConfig;
 use crate::discovery::{
-    UPDATE_SCRIPT_PATH, parse_phs_scripts, parse_version_file, slug_to_display_name,
-    validate_package_identifier,
+    PHS_INSTALL_URL_PREFIX, UPDATE_SCRIPT_PATH, analyze_phs_script, extract_apt_package_candidates,
+    parse_phs_scripts, parse_version_file, slug_to_display_name,
 };
 
-/// Capabilities when GitHub release source is configured.
-const CAPABILITIES_WITH_GITHUB: &[ProviderCapability] = &[
-    ProviderCapability::DiscoverLocalSoftware,
-    ProviderCapability::RefreshPackageIndex,
-];
+/// Capabilities: discovery only — no release-index refresh needed.
+const CAPABILITIES: &[ProviderCapability] = &[ProviderCapability::DiscoverLocalSoftware];
 
-/// Capabilities without GitHub release source.
-const CAPABILITIES_WITHOUT_GITHUB: &[ProviderCapability] =
-    &[ProviderCapability::DiscoverLocalSoftware];
-
-/// Provider for Proxmox Helper Scripts.
+/// Provider for Proxmox Helper Scripts (discovery-only).
 ///
-/// Discovers PHS-managed software by parsing `/usr/bin/update` for
-/// community-scripts references, detects installed versions from
-/// `$HOME/.{slug}` files, and executes updates via `curl | bash`.
+/// Discovers PHS-managed software by:
+/// 1. Reading `/usr/bin/update` and parsing CT script URLs from it.
+/// 2. Fetching each CT script from `raw.githubusercontent.com` and analysing it
+///    to determine whether the app is GitHub-managed or APT-managed.
+/// 3. Emitting `DiscoveredSoftware` items with `extra` metadata set to one of:
+///    - `{ "github_owner": "…", "github_repo": "…" }` — GitHub-managed
+///    - `{ "apt_package": "…" }` — APT-managed
 ///
-/// When a GitHub release source is configured, the provider also supports
-/// upstream version detection by delegating to an internal `GitHubProvider`.
+/// The controller synthesises the appropriate downstream provider config
+/// (`github_releases` or `apt`) automatically from the `extra` metadata.
 pub struct ProxmoxHelperScriptsProvider {
-    config: ProxmoxHelperScriptsConfig,
+    _config: ProxmoxHelperScriptsConfig,
     executor: Arc<dyn CommandExecutor>,
-    github: Option<GitHubProvider>,
+    client: reqwest::Client,
 }
 
 impl ProxmoxHelperScriptsProvider {
-    /// Create a new Proxmox Helper Scripts provider with the given configuration.
-    ///
-    /// When `config.github` is `Some`, an internal `GitHubProvider` is constructed
-    /// for upstream version detection. Returns an error if the GitHub provider
-    /// configuration is invalid.
+    /// Create a new Proxmox Helper Scripts provider.
     pub fn new(
         config: ProxmoxHelperScriptsConfig,
         executor: Arc<dyn CommandExecutor>,
-    ) -> Result<Self> {
-        let github = match config.github {
-            Some(ref gh) => {
-                let github_config = GitHubConfig {
-                    owner: gh.owner.clone(),
-                    repo: gh.repo.clone(),
-                    auth_token: gh.auth_token.clone(),
-                    api_base_url: None,
-                    include_prereleases: gh.include_prereleases,
-                    tag_strip_prefix: gh.tag_strip_prefix.clone(),
-                    asset_patterns: vec![],
-                    install_command: None,
-                };
-                let provider =
-                    GitHubProvider::new(github_config, Arc::clone(&executor)).map_err(|e| {
-                        report!(ProviderError::Configuration(format!(
-                            "failed to create GitHub provider for PHS: {e}"
-                        )))
-                    })?;
-                Some(provider)
-            }
-            None => None,
-        };
+    ) -> uptrakit_provider_core::Result<Self> {
+        let client = reqwest::Client::builder()
+            .user_agent(concat!(
+                "uptrakit-provider-proxmox-helper-scripts/",
+                env!("CARGO_PKG_VERSION")
+            ))
+            .build()
+            .map_err(|e| {
+                rootcause::report!(uptrakit_provider_core::ProviderError::ProviderInternal(
+                    format!("failed to build HTTP client: {e}")
+                ))
+            })?;
 
         Ok(Self {
-            config,
+            _config: config,
             executor,
-            github,
+            client,
         })
     }
 
-    /// Read the user's HOME directory via `printenv HOME`.
-    async fn resolve_home(&self) -> Result<String> {
-        tracing::trace!("resolving HOME directory via printenv");
-        let output = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("printenv", ["HOME".to_string()]))
-            .await
-            .map_err(|e| {
-                report!(ProviderError::ProviderInternal(format!(
-                    "failed to resolve HOME: {e}"
-                )))
-            })?;
-
-        let home = output.output.trim().to_string();
-        if home.is_empty() {
-            bail!(ProviderError::ProviderInternal(
-                "HOME environment variable is empty".to_string()
-            ));
+    /// Fetch the body of a URL as text, returning `None` on any error.
+    async fn fetch_text(&self, url: &str) -> Option<String> {
+        let response = self.client.get(url).send().await.ok()?;
+        if !response.status().is_success() {
+            tracing::warn!(url, status = %response.status(), "HTTP fetch failed");
+            return None;
         }
-        tracing::debug!(home = %home, "HOME directory resolved");
-        Ok(home)
+        response.text().await.ok()
     }
 
     /// Try to read a version file at the given path. Returns `None` if the
@@ -117,6 +82,25 @@ impl ProxmoxHelperScriptsProvider {
 
         parse_version_file(&output.output).map(String::from)
     }
+
+    /// Run `dpkg-query` to detect the installed version of a Debian package.
+    /// Returns `None` if the package is not installed or the command fails.
+    async fn dpkg_version(&self, apt_package: &str) -> Option<String> {
+        let output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "dpkg-query",
+                [
+                    "-W".to_string(),
+                    "-f=${Version}".to_string(),
+                    apt_package.to_string(),
+                ],
+            ))
+            .await
+            .ok()?;
+        let v = output.output.trim().to_string();
+        if v.is_empty() { None } else { Some(v) }
+    }
 }
 
 #[async_trait]
@@ -126,28 +110,12 @@ impl Provider for ProxmoxHelperScriptsProvider {
     }
 
     fn capabilities(&self) -> &'static [ProviderCapability] {
-        if self.github.is_some() {
-            CAPABILITIES_WITH_GITHUB
-        } else {
-            CAPABILITIES_WITHOUT_GITHUB
-        }
+        CAPABILITIES
     }
 
-    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
-        match self.github {
-            Some(ref gh) => gh.fetch_releases(package_identifier).await,
-            None => Err(report!(ProviderError::Configuration(
-                "fetch_releases not supported: no GitHub release source configured".to_string()
-            ))),
-        }
-    }
-
-    async fn refresh_package_index(&self) -> Result<()> {
-        // No-op: GitHub API doesn't need a local index refresh.
-        Ok(())
-    }
-
-    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
+    async fn discover_software(
+        &self,
+    ) -> uptrakit_provider_core::Result<Vec<DiscoveredSoftware>> {
         tracing::debug!("reading PHS update script from {UPDATE_SCRIPT_PATH}");
 
         let update_content = match self
@@ -171,99 +139,150 @@ impl Provider for ProxmoxHelperScriptsProvider {
             return Ok(vec![]);
         }
 
-        let home = self.resolve_home().await?;
-        let mut discovered = Vec::with_capacity(scripts.len());
+        // Resolve HOME lazily — only needed for the GitHub version-file path.
+        let mut home: Option<String> = None;
+        let mut discovered = Vec::new();
 
         for script in &scripts {
-            let version_path = format!("{home}/.{}", script.slug);
-            let Some(installed_version) = self.try_read_version_file(&version_path).await else {
-                // Skip items with no known installed version.
-                tracing::debug!(
-                    slug = %script.slug,
-                    "skipping PHS software with unknown version"
-                );
+            // Fetch CT script body.
+            let Some(body) = self.fetch_text(&script.script_url).await else {
+                tracing::warn!(slug = %script.slug, url = %script.script_url,
+                    "failed to fetch CT script; skipping");
                 continue;
             };
 
-            tracing::debug!(
-                slug = %script.slug,
-                version = %installed_version,
-                "discovered PHS software"
-            );
+            let analysis = analyze_phs_script(&script.slug, &body);
+            let display_name = analysis
+                .app_name
+                .clone()
+                .unwrap_or_else(|| slug_to_display_name(&script.slug));
 
-            discovered.push(DiscoveredSoftware {
-                package_identifier: script.slug.clone(),
-                name: slug_to_display_name(&script.slug),
-                installed_version,
-                extra: Some(serde_json::json!({
-                    "script_url": script.script_url,
-                })),
-            });
+            if let (Some(owner), Some(repo)) =
+                (&analysis.github_owner, &analysis.github_repo)
+            {
+                // GitHub-managed: read version from $HOME/.{slug}.
+                let home = match home {
+                    Some(ref h) => h.clone(),
+                    None => {
+                        let h = self
+                            .executor
+                            .execute_quiet(&CommandSpec::exec(
+                                "printenv",
+                                ["HOME".to_string()],
+                            ))
+                            .await
+                            .ok()
+                            .map(|o| o.output.trim().to_string())
+                            .filter(|s| !s.is_empty());
+
+                        let Some(h) = h else {
+                            tracing::warn!("HOME is not set; skipping GitHub PHS items");
+                            break;
+                        };
+                        home = Some(h.clone());
+                        h
+                    }
+                };
+
+                let version_path = format!("{home}/.{}", script.slug);
+                let Some(installed_version) =
+                    self.try_read_version_file(&version_path).await
+                else {
+                    tracing::debug!(slug = %script.slug,
+                        "PHS version file absent; skipping GitHub item");
+                    continue;
+                };
+
+                tracing::debug!(
+                    slug = %script.slug,
+                    version = %installed_version,
+                    owner = %owner,
+                    repo = %repo,
+                    "discovered GitHub-managed PHS software"
+                );
+
+                discovered.push(DiscoveredSoftware {
+                    package_identifier: script.slug.clone(),
+                    name: display_name,
+                    installed_version,
+                    extra: Some(serde_json::json!({
+                        "github_owner": owner,
+                        "github_repo": repo,
+                    })),
+                });
+            } else if let Some(ref apt_pkg) = analysis.apt_package {
+                // APT direct: verify installed via dpkg-query.
+                let Some(installed_version) = self.dpkg_version(apt_pkg).await else {
+                    tracing::debug!(slug = %script.slug, package = %apt_pkg,
+                        "APT package not installed; skipping");
+                    continue;
+                };
+
+                tracing::debug!(
+                    slug = %script.slug,
+                    package = %apt_pkg,
+                    version = %installed_version,
+                    "discovered APT-managed PHS software"
+                );
+
+                discovered.push(DiscoveredSoftware {
+                    package_identifier: apt_pkg.clone(),
+                    name: display_name,
+                    installed_version,
+                    extra: Some(serde_json::json!({ "apt_package": apt_pkg })),
+                });
+            } else {
+                // Neither — try install-script fallback.
+                let install_url =
+                    format!("{PHS_INSTALL_URL_PREFIX}{}-install.sh", script.slug);
+                let Some(install_body) = self.fetch_text(&install_url).await else {
+                    tracing::warn!(slug = %script.slug,
+                        "install-script fetch failed; skipping");
+                    continue;
+                };
+
+                let candidates = extract_apt_package_candidates(&install_body);
+                if candidates.is_empty() {
+                    tracing::warn!(
+                        slug = %script.slug,
+                        "no APT candidates from install script; skipping"
+                    );
+                    continue;
+                }
+
+                let mut found_any = false;
+                for candidate in &candidates {
+                    let Some(installed_version) = self.dpkg_version(candidate).await else {
+                        continue;
+                    };
+
+                    tracing::debug!(
+                        slug = %script.slug,
+                        package = %candidate,
+                        version = %installed_version,
+                        "discovered install-script fallback PHS software"
+                    );
+
+                    discovered.push(DiscoveredSoftware {
+                        package_identifier: candidate.clone(),
+                        name: display_name.clone(),
+                        installed_version,
+                        extra: Some(serde_json::json!({ "apt_package": candidate })),
+                    });
+                    found_any = true;
+                }
+
+                if !found_any {
+                    tracing::warn!(
+                        slug = %script.slug,
+                        candidates = ?candidates,
+                        "no install-script APT candidates are installed; skipping"
+                    );
+                }
+            }
         }
 
         Ok(discovered)
-    }
-
-    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
-        validate_package_identifier(package_identifier)?;
-        tracing::debug!(package = %package_identifier, "detecting PHS installed version");
-
-        let home = self.resolve_home().await?;
-        let version_path = format!("{home}/.{package_identifier}");
-
-        tracing::debug!(
-            path = %version_path,
-            "reading PHS version file"
-        );
-
-        let version = self
-            .try_read_version_file(&version_path)
-            .await
-            .map(Version::new);
-        tracing::debug!(version = ?version, "PHS version detection result");
-        Ok(version)
-    }
-
-    async fn execute_update(
-        &self,
-        _package_identifier: &str,
-        _to_version: &str,
-        _release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        let mut output = String::new();
-        let script_url = &self.config.script_url;
-
-        tracing::debug!(script_url = %script_url, "executing PHS update script");
-        send_output(
-            output_tx,
-            &format!("Running update script from {script_url}"),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        output.push_str(&format!("Running update script from {script_url}\n"));
-
-        // Run the helper script via bash, passing the URL as a positional argument
-        // (`$1`) to avoid shell interpretation of the URL string.
-        let cmd_output = self
-            .executor
-            .execute(
-                &CommandSpec::exec(
-                    "bash",
-                    [
-                        "-c".to_string(),
-                        "set -euo pipefail\ncurl -fsSL -- \"$1\" | bash -s -- --update".to_string(),
-                        "--".to_string(),
-                        script_url.to_string(),
-                    ],
-                ),
-                output_tx,
-            )
-            .await
-            .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output.output);
-
-        Ok(output)
     }
 }
 
@@ -276,126 +295,38 @@ mod tests {
         Arc::new(LocalCommandExecutor)
     }
 
-    fn test_config() -> ProxmoxHelperScriptsConfig {
-        ProxmoxHelperScriptsConfig {
-            script_url: "https://example.com/update.sh".to_string(),
-            github: None,
-        }
-    }
-
-    fn test_config_with_github() -> ProxmoxHelperScriptsConfig {
-        ProxmoxHelperScriptsConfig {
-            script_url: "https://example.com/update.sh".to_string(),
-            github: Some(crate::config::GitHubReleaseSource {
-                owner: "BookLore".to_string(),
-                repo: "BookLore".to_string(),
-                auth_token: None,
-                tag_strip_prefix: "v".to_string(),
-                include_prereleases: false,
-            }),
-        }
-    }
-
     #[test]
-    fn capabilities_without_github() {
-        let provider =
-            ProxmoxHelperScriptsProvider::new(test_config(), test_executor()).expect("create");
+    fn capabilities_discovery_only() {
+        let provider = ProxmoxHelperScriptsProvider::new(
+            ProxmoxHelperScriptsConfig::default(),
+            test_executor(),
+        )
+        .expect("create");
         assert!(provider.has_capability(ProviderCapability::DiscoverLocalSoftware));
         assert!(!provider.has_capability(ProviderCapability::RefreshPackageIndex));
         assert_eq!(provider.capabilities().len(), 1);
     }
 
     #[test]
-    fn capabilities_with_github() {
-        let provider =
-            ProxmoxHelperScriptsProvider::new(test_config_with_github(), test_executor())
-                .expect("create");
-        assert!(provider.has_capability(ProviderCapability::DiscoverLocalSoftware));
-        assert!(provider.has_capability(ProviderCapability::RefreshPackageIndex));
-        assert_eq!(provider.capabilities().len(), 2);
-    }
-
-    #[test]
     fn provider_type_is_proxmox_helper_scripts() {
-        let provider =
-            ProxmoxHelperScriptsProvider::new(test_config(), test_executor()).expect("create");
+        let provider = ProxmoxHelperScriptsProvider::new(
+            ProxmoxHelperScriptsConfig::default(),
+            test_executor(),
+        )
+        .expect("create");
         assert_eq!(provider.provider_type(), ProviderType::ProxmoxHelperScripts);
-    }
-
-    #[test]
-    fn creation_fails_with_invalid_github_config() {
-        let config = ProxmoxHelperScriptsConfig {
-            script_url: "https://example.com/update.sh".to_string(),
-            github: Some(crate::config::GitHubReleaseSource {
-                owner: String::new(),
-                repo: "repo".to_string(),
-                auth_token: None,
-                tag_strip_prefix: "v".to_string(),
-                include_prereleases: false,
-            }),
-        };
-        assert!(ProxmoxHelperScriptsProvider::new(config, test_executor()).is_err());
-    }
-
-    #[tokio::test]
-    async fn fetch_releases_without_github_returns_error() {
-        let provider =
-            ProxmoxHelperScriptsProvider::new(test_config(), test_executor()).expect("create");
-        let result = provider.fetch_releases("some-app").await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("no GitHub release source"));
-    }
-
-    #[tokio::test]
-    async fn refresh_package_index_returns_ok() {
-        let provider =
-            ProxmoxHelperScriptsProvider::new(test_config(), test_executor()).expect("create");
-        assert!(provider.refresh_package_index().await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn refresh_package_index_with_github_returns_ok() {
-        let provider =
-            ProxmoxHelperScriptsProvider::new(test_config_with_github(), test_executor())
-                .expect("create");
-        assert!(provider.refresh_package_index().await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_rejects_invalid_identifier() {
-        let provider =
-            ProxmoxHelperScriptsProvider::new(test_config(), test_executor()).expect("create");
-        let result = provider.detect_installed_version("").await;
-        assert!(result.is_err());
-
-        let result = provider.detect_installed_version("../etc/passwd").await;
-        assert!(result.is_err());
-
-        let result = provider.detect_installed_version("UPPER").await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_returns_none_for_missing_file() {
-        let provider =
-            ProxmoxHelperScriptsProvider::new(test_config(), test_executor()).expect("create");
-        // A slug that almost certainly has no version file
-        let result = provider
-            .detect_installed_version("nonexistent-phs-app-test")
-            .await;
-        assert!(result.is_ok());
-        assert!(result.expect("should succeed").is_none());
     }
 
     #[tokio::test]
     async fn discover_software_returns_empty_without_update_script() {
-        // On a non-PHS system, /usr/bin/update likely doesn't exist
-        let provider =
-            ProxmoxHelperScriptsProvider::new(test_config(), test_executor()).expect("create");
+        // On a non-PHS system /usr/bin/update likely does not exist.
+        let provider = ProxmoxHelperScriptsProvider::new(
+            ProxmoxHelperScriptsConfig::default(),
+            test_executor(),
+        )
+        .expect("create");
         let result = provider.discover_software().await;
         assert!(result.is_ok());
-        // It either returns empty (no update script) or parses whatever is there
-        // In either case, it should not error
+        // No error; result is empty or whatever is found on the test machine.
     }
 }

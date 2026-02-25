@@ -9,9 +9,9 @@ publish = false
 
 [dependencies]
 uptrakit-provider-core = { path = "../core" }
-uptrakit-provider-github = { path = "../github" }
 rootcause = { workspace = true }
 async-trait = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

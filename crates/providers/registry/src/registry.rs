@@ -150,9 +150,9 @@ macro_rules! register_providers {
 
             /// Create a provider instance for autodiscovery, bypassing `validate()`.
             ///
-            /// Discovery can proceed with an empty/minimal config — e.g. a
-            /// `ProxmoxHelperScriptsConfig` with `script_url = ""` can still
-            /// run `discover_software()` even though `validate()` would reject it.
+            /// Discovery can proceed with an empty/minimal config.  For providers
+            /// whose `validate()` is a no-op (e.g. `ProxmoxHelperScripts`) the two
+            /// construction paths are equivalent.
             pub fn create_provider_for_discovery(
                 provider_type: ProviderType,
                 config: &serde_json::Value,
@@ -368,17 +368,10 @@ mod tests {
 
     #[test]
     fn validate_proxmox_helper_scripts_config() {
-        let config = serde_json::json!({"script_url": "https://example.com/update.sh"});
+        // PHS config is always `{}`; validation always succeeds.
+        let config = serde_json::json!({});
         assert!(
             ProviderRegistry::validate_config(ProviderType::ProxmoxHelperScripts, &config).is_ok()
-        );
-    }
-
-    #[test]
-    fn validate_proxmox_helper_scripts_empty_url_fails() {
-        let config = serde_json::json!({"script_url": ""});
-        assert!(
-            ProviderRegistry::validate_config(ProviderType::ProxmoxHelperScripts, &config).is_err()
         );
     }
 
@@ -439,7 +432,8 @@ mod tests {
 
     #[test]
     fn create_provider_proxmox() {
-        let config = serde_json::json!({"script_url": "https://example.com/update.sh"});
+        // PHS config is always `{}`; extra fields are ignored during deserialization.
+        let config = serde_json::json!({});
         let provider = ProviderRegistry::create_provider(
             ProviderType::ProxmoxHelperScripts,
             &config,
@@ -449,84 +443,45 @@ mod tests {
     }
 
     #[test]
-    fn create_provider_proxmox_with_github() {
-        let config = serde_json::json!({
-            "script_url": "https://example.com/update.sh",
-            "github": {
-                "owner": "BookLore",
-                "repo": "BookLore"
-            }
-        });
+    fn proxmox_provider_capabilities() {
+        // PHS is discovery-only; RefreshPackageIndex capability must not be present.
+        let config = serde_json::json!({});
         let provider = ProviderRegistry::create_provider(
             ProviderType::ProxmoxHelperScripts,
             &config,
             test_executor(),
-        );
-        assert!(provider.is_ok());
-        let provider = provider.expect("create");
+        )
+        .expect("create");
         assert!(
             provider
+                .has_capability(uptrakit_provider_core::ProviderCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            !provider
                 .has_capability(uptrakit_provider_core::ProviderCapability::RefreshPackageIndex)
         );
     }
 
     #[test]
-    fn create_provider_proxmox_with_invalid_github_fails() {
-        let config = serde_json::json!({
-            "script_url": "https://example.com/update.sh",
-            "github": {
-                "owner": "",
-                "repo": "BookLore"
-            }
-        });
-        let result = ProviderRegistry::create_provider(
-            ProviderType::ProxmoxHelperScripts,
-            &config,
-            test_executor(),
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn mask_config_secrets_proxmox_with_github() {
-        let config = serde_json::json!({
-            "script_url": "https://example.com/update.sh",
-            "github": {
-                "owner": "owner",
-                "repo": "repo",
-                "auth_token": "ghp_secret"
-            }
-        });
+    fn mask_config_secrets_proxmox_is_noop() {
+        // PHS has no secret fields; masking returns an equivalent empty object.
+        let config = serde_json::json!({});
         let masked =
             ProviderRegistry::mask_config_secrets(ProviderType::ProxmoxHelperScripts, &config);
-        assert_eq!(masked["github"]["auth_token"], "***");
-        assert_eq!(masked["github"]["owner"], "owner");
+        assert_eq!(masked, serde_json::json!({}));
     }
 
     #[test]
-    fn restore_config_secrets_proxmox_with_github() {
-        let mut incoming = serde_json::json!({
-            "script_url": "https://example.com/update.sh",
-            "github": {
-                "owner": "owner",
-                "repo": "repo",
-                "auth_token": "***"
-            }
-        });
-        let existing = serde_json::json!({
-            "script_url": "https://example.com/update.sh",
-            "github": {
-                "owner": "owner",
-                "repo": "repo",
-                "auth_token": "ghp_real_token"
-            }
-        });
+    fn restore_config_secrets_proxmox_is_noop() {
+        // PHS has no secret fields; restoring is a no-op.
+        let mut incoming = serde_json::json!({});
+        let existing = serde_json::json!({});
         ProviderRegistry::restore_config_secrets(
             ProviderType::ProxmoxHelperScripts,
             &mut incoming,
             &existing,
         );
-        assert_eq!(incoming["github"]["auth_token"], "ghp_real_token");
+        assert_eq!(incoming, serde_json::json!({}));
     }
 
     #[test]
@@ -647,7 +602,7 @@ mod tests {
         .expect("create docker");
         assert_eq!(docker.provider_type(), ProviderType::Docker);
 
-        let proxmox_config = serde_json::json!({"script_url": "https://example.com/update.sh"});
+        let proxmox_config = serde_json::json!({});
         let proxmox = ProviderRegistry::create_provider(
             ProviderType::ProxmoxHelperScripts,
             &proxmox_config,
