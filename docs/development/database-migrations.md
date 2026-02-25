@@ -37,13 +37,13 @@ error into the controller's `DbError` type. **Do not add migration files to the 
 
 Migration filenames follow SeaORM's standard convention:
 
-```
+```text
 m{YYYYMMDD}_{6-digit-sequence}_{short_description}.rs
 ```
 
 Examples:
 
-```
+```text
 m20260209_000001_initial.rs
 m20260224_000001_mqtt_ha_discovery.rs
 m20260225_000001_rename_docker_provider.rs

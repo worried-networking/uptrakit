@@ -308,11 +308,13 @@ Fetches release metadata from the GitHub API and converts it into `UpstreamRelea
 ```json
 "cat -- \"${HOME}/.{package_identifier}\""
 ```
+
 Reads a PHS version file (`~/.booklore`, `~/.radarr`, etc.) — used by PHS-synthesized GitHub configs.
 
 ```json
 "myapp --version"
 ```
+
 Uses the application's own version output.
 
 **Behaviour:**
