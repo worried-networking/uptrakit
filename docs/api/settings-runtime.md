@@ -196,7 +196,7 @@ other controller instances. Each revocation site bumps `revocation_version` in t
 
 | File | Purpose |
 | --- | --- |
-| `crates/core/controller/src/migration/m20260209_000001_initial.rs` | Single consolidated migration (includes settings_version + revocation_version) |
+| `crates/shared/db/src/migration/m20260209_000001_initial.rs` | Single consolidated migration (includes settings_version + revocation_version) |
 | `crates/shared/db/src/entity/settings_version.rs` | SeaORM entity |
 | `crates/ui/web-api/src/settings_store.rs` | `bump_settings_version()`, `get_settings_versions()`, `bump_revocation_version()`, `get_revocation_version()` |
 | `crates/ui/web-api/src/settings.rs` | `reload_from_db()`, `check_version_and_reload()` |

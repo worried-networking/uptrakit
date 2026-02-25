@@ -48,4 +48,4 @@ pattern solves this: push messages are written to a `controller_events` DB table
 | `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — send + outbox write |
 | `crates/ui/web-api/src/event_poller.rs` | `EventPoller` — background polling + delivery |
 | `crates/shared/db/src/entity/controller_event.rs` | SeaORM entity |
-| `crates/core/controller/src/migration/m20260209_000001_initial.rs` | Single consolidated migration |
+| `crates/shared/db/src/migration/m20260209_000001_initial.rs` | Single consolidated migration |

@@ -40,7 +40,8 @@ details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [d
 - **Architecture docs** ([`docs/architecture/`](docs/architecture/)): entity-level design for multi-tenancy, hosts,
   software items, and update history.
 - **Development docs** (`docs/development/`): setup, testing, coding standards, PR process, dependency policy, provider
-  guidelines, and AI usage expectations.
+  guidelines, AI usage expectations, and database migration authoring
+  ([database-migrations.md](docs/development/database-migrations.md)).
 - **Deployment guides**: reverse proxy deployment and per-proxy guides live under
   [`docs/end-user/deployment/`](docs/end-user/deployment/). Reverse proxy security model is at
   [`docs/security/reverse-proxy-security.md`](docs/security/reverse-proxy-security.md). Human documentation must link
@@ -55,7 +56,7 @@ uptrakit/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
 │   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; version checks and updates over SSH; host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts
-│   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
+│   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server; migration runner delegates to `uptrakit_shared_db::migration`
 │   │   │   ├── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
@@ -72,7 +73,7 @@ uptrakit/
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption (EncryptedString, init_master_key)
-│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities & migrations; re-exports uptrakit-crypto
+│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities; `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`; re-exports uptrakit-crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types; feature-gated: sea-orm, openapi

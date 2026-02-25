@@ -61,6 +61,6 @@ Responses include denormalized `host_name` and `software_item_name` fields.
 | File | Purpose |
 | :----------------------------------------------------------------- | :--------------------------------------- |
 | `crates/shared/db/src/entity/update_history.rs` | SeaORM entity with `UpdateStatus` enum |
-| `crates/core/controller/src/migration/m20260209_000001_initial.rs` | DB migration |
+| `crates/shared/db/src/migration/m20260209_000001_initial.rs` | DB migration |
 | `crates/shared/web-api-types/src/update_history.rs` | API types (response, query, status enum) |
 | `crates/ui/web-api/src/routes/update_history.rs` | Route handlers + unit tests |

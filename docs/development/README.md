@@ -17,6 +17,7 @@ Uptrakit.
 | [AI Guidelines](ai-guidelines.md) | Policy for using AI tools in project development. |
 | [CLI Output](cli-output.md) | CLI output formatting conventions and standards. |
 | [Commit Messages](commit-messages.md) | Conventional Commits format and examples. |
+| [Database Migrations](database-migrations.md) | Migration authoring guide: naming, skeleton, registration, testing, and backend feature flags. |
 | [Cross-Controller Communication](cross-controller-comm.md) | HA controller-to-controller event propagation. |
 | [Graceful Restart](graceful-restart.md) | Zero-downtime restart and shutdown behavior. |
 | [Quality Gates](quality-gates.md) | CI quality gate requirements for all changes. |

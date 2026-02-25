@@ -397,7 +397,7 @@ This prevents bypass under database pressure. The check is in `service_ws()` in
   `LazyLock<HashMap>` endpoint config. Fails open on store errors.
 - **Entity**: `crates/shared/db/src/entity/api_rate_limit.rs` — SeaORM entity for the `api_rate_limits` table (columns:
   `key` TEXT PK, `request_count` INTEGER, `window_start` TIMESTAMP, `expires_at` TIMESTAMP).
-- **Migration**: `crates/core/controller/src/migration/m20260209_000001_initial.rs`.
+- **Migration**: `crates/shared/db/src/migration/m20260209_000001_initial.rs`.
 - **Cleanup**: expired entries are pruned every 5 minutes by the controller's periodic cleanup task.
 
 ### Response format
