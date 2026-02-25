@@ -5,7 +5,7 @@ use rootcause::prelude::*;
 use uptrakit_plugin_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_core::mpsc;
 use uptrakit_plugin_core::{
-    DiscoveredSoftware, OutputStreamType, Plugin, PluginCapability, PluginError,
+    DiscoveredSoftware, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
     PluginType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
 };
 
@@ -245,7 +245,26 @@ impl Plugin for HomebrewPlugin {
         &[
             PluginCapability::DiscoverLocalSoftware,
             PluginCapability::RefreshPackageIndex,
+            PluginCapability::DetectHostCompatibility,
         ]
+    }
+
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        let result = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("which", ["brew".to_string()]))
+            .await
+            .map_err(|e| {
+                report!(PluginError::ProviderInternal(format!(
+                    "which brew failed: {e}"
+                )))
+            })?;
+
+        if result.exit_code == 0 {
+            Ok(HostCompatibility::Compatible)
+        } else {
+            Ok(HostCompatibility::Incompatible("brew not found".to_string()))
+        }
     }
 
     async fn refresh_package_index(&self) -> Result<()> {
@@ -460,7 +479,7 @@ impl Plugin for HomebrewPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_core::LocalCommandExecutor;
+    use uptrakit_plugin_core::{CommandOutput, LocalCommandExecutor};
 
     // ── Sample `brew info --json=v2` output for a formula ───────────────
 
@@ -699,6 +718,42 @@ mod tests {
         assert!(packages.is_empty());
     }
 
+    // ── Mock executor ────────────────────────────────────────────────────
+
+    struct FixedExitCodeExecutor {
+        exit_code: i32,
+    }
+
+    impl FixedExitCodeExecutor {
+        fn with_exit_code(exit_code: i32) -> Arc<dyn CommandExecutor> {
+            Arc::new(Self { exit_code })
+        }
+    }
+
+    #[async_trait]
+    impl CommandExecutor for FixedExitCodeExecutor {
+        async fn execute(
+            &self,
+            _spec: &CommandSpec,
+            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput {
+                output: String::new(),
+                exit_code: self.exit_code,
+            })
+        }
+
+        async fn execute_quiet(
+            &self,
+            _spec: &CommandSpec,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput {
+                output: String::new(),
+                exit_code: self.exit_code,
+            })
+        }
+    }
+
     // ── Provider trait ──────────────────────────────────────────────────
 
     #[test]
@@ -707,7 +762,8 @@ mod tests {
             HomebrewPlugin::new(HomebrewConfig::default(), test_executor()).expect("create");
         assert!(provider.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(provider.has_capability(PluginCapability::RefreshPackageIndex));
-        assert_eq!(provider.capabilities().len(), 2);
+        assert!(provider.has_capability(PluginCapability::DetectHostCompatibility));
+        assert_eq!(provider.capabilities().len(), 3);
     }
 
     #[test]
@@ -756,5 +812,30 @@ mod tests {
             HomebrewPlugin::new(HomebrewConfig::default(), test_executor()).expect("create");
         let result = provider.fetch_releases("").await;
         assert!(result.is_err());
+    }
+
+    // ── detect_host_compatibility ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn detect_host_compatibility_compatible_when_which_exits_zero() {
+        let plugin =
+            HomebrewPlugin::new(HomebrewConfig::default(), FixedExitCodeExecutor::with_exit_code(0))
+                .expect("create");
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        assert_eq!(result, HostCompatibility::Compatible);
+    }
+
+    #[tokio::test]
+    async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
+        let plugin =
+            HomebrewPlugin::new(HomebrewConfig::default(), FixedExitCodeExecutor::with_exit_code(1))
+                .expect("create");
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        match result {
+            HostCompatibility::Incompatible(msg) => {
+                assert_eq!(msg, "brew not found");
+            }
+            HostCompatibility::Compatible => panic!("expected Incompatible"),
+        }
     }
 }

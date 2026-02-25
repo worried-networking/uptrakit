@@ -6196,6 +6196,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-directories",
  "uptrakit-internal-wire",
+ "uptrakit-plugin-core",
  "uptrakit-plugin-registry",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
@@ -6438,6 +6439,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uptrakit-command",
  "uptrakit-plugin-core",
  "uptrakit-shared-macros",
 ]
@@ -6511,6 +6513,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uptrakit-command",
  "uptrakit-plugin-core",
  "uptrakit-shared-macros",
 ]

@@ -9,8 +9,37 @@ use crate::types::{
 use crate::version::Version;
 use uptrakit_command::UpdateOutputLine;
 
-/// Empty capabilities slice for providers that have no special capabilities.
+/// Empty capabilities slice for plugins that have no special capabilities.
 const NO_CAPABILITIES: &[PluginCapability] = &[];
+
+/// Whether a plugin is applicable to the current host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostCompatibility {
+    /// Plugin is applicable.
+    Compatible,
+    /// Plugin is not applicable (e.g., APT on a non-Debian host).
+    Incompatible(String),
+}
+
+/// Contextual data passed to plugin lifecycle hooks.
+#[derive(Debug, Clone)]
+pub struct UpdateHookContext {
+    /// The package identifier being updated.
+    pub package_identifier: String,
+    /// The target version being installed.
+    pub to_version: String,
+    /// Optional release metadata from the upstream source.
+    pub release_info: Option<ReleaseInfo>,
+}
+
+/// Result of a pre-update hook.
+#[derive(Debug, Clone)]
+pub struct PreUpdateHookResult {
+    /// Whether the update should proceed.
+    pub should_proceed: bool,
+    /// Reason for aborting if `should_proceed` is false.
+    pub abort_reason: Option<String>,
+}
 
 /// Describes a single command that a provider needs to run with passwordless sudo.
 ///
@@ -120,14 +149,56 @@ pub trait Plugin: Send + Sync {
         )))
     }
 
-    /// Returns the list of commands this provider needs to run with passwordless sudo.
+    /// Detect whether this plugin is applicable to the current host.
+    ///
+    /// Used before running updates to determine whether the plugin makes sense
+    /// on the host (e.g., APT is incompatible on non-Debian systems). The
+    /// default implementation always returns [`HostCompatibility::Compatible`]
+    /// — plugins opt in to incompatibility detection by overriding this method
+    /// and declaring [`PluginCapability::DetectHostCompatibility`].
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        Ok(HostCompatibility::Compatible)
+    }
+
+    /// Run before an update is applied.
+    ///
+    /// The hook may abort the update by returning a result with
+    /// `should_proceed = false`. Plugins that implement this method must
+    /// declare [`PluginCapability::PreUpdateHook`]. The default implementation
+    /// always proceeds.
+    async fn pre_update_hook(
+        &self,
+        _ctx: &UpdateHookContext,
+        _output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<PreUpdateHookResult> {
+        Ok(PreUpdateHookResult {
+            should_proceed: true,
+            abort_reason: None,
+        })
+    }
+
+    /// Run after an update has been applied.
+    ///
+    /// Errors from this hook are logged at `WARN` level and do not fail the
+    /// update. Plugins that implement this method must declare
+    /// [`PluginCapability::PostUpdateHook`]. The default implementation is a
+    /// no-op.
+    async fn post_update_hook(
+        &self,
+        _ctx: &UpdateHookContext,
+        _output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Returns the list of commands this plugin needs to run with passwordless sudo.
     ///
     /// The bootstrap process and the `update-sudoers` CLI command use these
-    /// declarations to generate minimal, per-command sudoers entries. Providers
+    /// declarations to generate minimal, per-command sudoers entries. Plugins
     /// that never execute privileged commands should return an empty `Vec` (the
     /// default).
     ///
-    /// # Provider contract
+    /// # Plugin contract
     ///
     /// - Each [`SudoCommandEntry::command`] must be a **bare command name**,
     ///   not an absolute path. The agent resolves absolute paths at sudoers-
@@ -318,5 +389,63 @@ mod tests {
             format!("{}", err.current_context()).contains("refresh_package_index"),
             "refresh_package_index error should mention the operation"
         );
+    }
+
+    // ── New lifecycle hook default method tests ───────────────────────────
+
+    #[tokio::test]
+    async fn default_detect_host_compatibility_returns_compatible() {
+        let plugin = StubPlugin;
+        let result = plugin.detect_host_compatibility().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), HostCompatibility::Compatible);
+    }
+
+    #[tokio::test]
+    async fn default_pre_update_hook_returns_proceed() {
+        let plugin = StubPlugin;
+        let ctx = UpdateHookContext {
+            package_identifier: "test-pkg".to_string(),
+            to_version: "1.0.0".to_string(),
+            release_info: None,
+        };
+        let (tx, _rx) = mpsc::channel(10);
+        let result = plugin.pre_update_hook(&ctx, &tx).await;
+        assert!(result.is_ok());
+        let hook_result = result.unwrap();
+        assert!(hook_result.should_proceed);
+        assert!(hook_result.abort_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn default_post_update_hook_returns_ok() {
+        let plugin = StubPlugin;
+        let ctx = UpdateHookContext {
+            package_identifier: "test-pkg".to_string(),
+            to_version: "1.0.0".to_string(),
+            release_info: None,
+        };
+        let (tx, _rx) = mpsc::channel(10);
+        let result = plugin.post_update_hook(&ctx, &tx).await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn stub_plugin_lacks_lifecycle_capabilities() {
+        let plugin = StubPlugin;
+        assert!(!plugin.has_capability(PluginCapability::DetectHostCompatibility));
+        assert!(!plugin.has_capability(PluginCapability::PreUpdateHook));
+        assert!(!plugin.has_capability(PluginCapability::PostUpdateHook));
+    }
+
+    #[test]
+    fn host_compatibility_incompatible_carries_message() {
+        let compat = HostCompatibility::Incompatible("apt-get not found".to_string());
+        match compat {
+            HostCompatibility::Incompatible(msg) => {
+                assert_eq!(msg, "apt-get not found");
+            }
+            HostCompatibility::Compatible => panic!("expected Incompatible"),
+        }
     }
 }

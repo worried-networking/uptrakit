@@ -23,6 +23,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
 uptrakit-command = { path = "../command" }
 uptrakit-internal-wire = { path = "../wire" }
+uptrakit-plugin-core = { path = "../../plugins/core" }
 uptrakit-plugin-registry = { path = "../../plugins/registry" }
 uptrakit-service-sdk = { path = "../service-sdk" }
 uptrakit-directories = { path = "../directories" }

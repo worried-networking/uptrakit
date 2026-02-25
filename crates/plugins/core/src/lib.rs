@@ -8,7 +8,9 @@ pub mod version;
 
 pub use error::{PluginError, Result};
 pub use secrets::SecretMasking;
-pub use traits::{Plugin, SudoCommandEntry};
+pub use traits::{
+    HostCompatibility, Plugin, PreUpdateHookResult, SudoCommandEntry, UpdateHookContext,
+};
 pub use types::{
     DiscoveredSoftware, PluginCapability, PluginType, ReleaseAsset, ReleaseInfo,
     UpstreamRelease,

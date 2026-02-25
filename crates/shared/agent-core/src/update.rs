@@ -3,11 +3,13 @@
 //! Handles the complete update flow:
 //! 1. Receive `ExecuteUpdate` message
 //! 2. Detect current version (`from_version`)
-//! 3. Run pre-update commands sequentially, streaming output
-//! 4. Execute actual update (dispatched through Provider Registry), streaming output
-//! 5. Run post-update commands sequentially, streaming output
-//! 6. Detect to_version post-update
-//! 7. Return `UpdateExecutionResult` with final status and accumulated output
+//! 3. Run user shell pre-update hooks (from wire payload)
+//! 4. Run plugin's `pre_update_hook` — abort if `should_proceed` is false
+//! 5. Execute actual update (dispatched through Plugin Registry)
+//! 6. Run plugin's `post_update_hook` — errors logged, non-fatal
+//! 7. Run user shell post-update hooks (from wire payload)
+//! 8. Detect to_version post-update
+//! 9. Return `UpdateExecutionResult` with final status and accumulated output
 //!
 //! ## Shell Execution
 //!
@@ -24,6 +26,7 @@ use uptrakit_command::{CommandExecutor, UpdateOutputLine};
 use uptrakit_internal_wire::{
     ExecuteUpdatePayload, HookCommand, OutputStreamType, UpdateFinalStatus, UpdateResultPayload,
 };
+use uptrakit_plugin_core::UpdateHookContext;
 use uptrakit_plugin_registry::PluginRegistry;
 
 use crate::error::AgentCoreError;
@@ -135,7 +138,7 @@ pub async fn execute_update(
             }
         }
 
-        // Execute actual update based on provider type
+        // Execute actual update based on plugin type
         send_output(
             &output_tx,
             &format!(
@@ -146,10 +149,10 @@ pub async fn execute_update(
         )
         .await;
 
-        tracing::debug!("executing provider update");
-        match execute_provider_update(&payload, &output_tx, Arc::clone(&executor)).await {
+        tracing::debug!("executing plugin update");
+        match execute_plugin_update(&payload, &output_tx, Arc::clone(&executor)).await {
             Ok(output) => {
-                tracing::debug!("provider update returned");
+                tracing::debug!("plugin update returned");
                 append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
             }
             Err(e) => {
@@ -272,48 +275,100 @@ async fn detect_current_version(
     outcome.installed_version
 }
 
-/// Execute the provider-specific update logic by dispatching through the Provider Registry.
-async fn execute_provider_update(
+/// Execute the plugin-specific update logic, including pre/post lifecycle hooks.
+///
+/// Plugin-level hooks run adjacent to `execute_update`:
+/// ```text
+/// plugin.pre_update_hook(ctx, tx)   ← abort if !should_proceed
+/// plugin.execute_update(...)         ← the actual update
+/// plugin.post_update_hook(ctx, tx)   ← errors logged at WARN, non-fatal
+/// ```
+async fn execute_plugin_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
     executor: Arc<dyn CommandExecutor>,
 ) -> UpdateResult<String> {
-    let provider = PluginRegistry::create_provider(
+    let plugin = PluginRegistry::create_provider(
         payload.provider_type.clone(),
         &payload.provider_config,
         executor,
     )
     .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
 
-    // Bridge provider output (UpdateOutputLine) -> agent output (UpdateOutputMessage)
-    let (provider_tx, mut provider_rx) = mpsc::channel::<UpdateOutputLine>(100);
-    let bridge_output_tx = output_tx.clone();
-    let bridge_handle = tokio::spawn(async move {
-        while let Some(line) = provider_rx.recv().await {
-            let _ = bridge_output_tx
-                .send(UpdateOutputMessage {
-                    output: line.text,
-                    stream: line.stream,
-                })
-                .await;
-        }
-    });
+    let hook_ctx = UpdateHookContext {
+        package_identifier: payload.package_identifier.clone(),
+        to_version: payload.to_version.clone(),
+        release_info: payload.release_info.clone(),
+    };
 
-    let result = provider
+    // Bridge plugin output (UpdateOutputLine) -> agent output (UpdateOutputMessage)
+    let make_bridge = |output_tx: &mpsc::Sender<UpdateOutputMessage>| {
+        let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
+        let bridge_output_tx = output_tx.clone();
+        let bridge_handle = tokio::spawn(async move {
+            while let Some(line) = plugin_rx.recv().await {
+                let _ = bridge_output_tx
+                    .send(UpdateOutputMessage {
+                        output: line.text,
+                        stream: line.stream,
+                    })
+                    .await;
+            }
+        });
+        (plugin_tx, bridge_handle)
+    };
+
+    // --- Pre-update hook ---
+    {
+        let (plugin_tx, bridge_handle) = make_bridge(output_tx);
+        let pre_result = plugin
+            .pre_update_hook(&hook_ctx, &plugin_tx)
+            .await
+            .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())));
+        drop(plugin_tx);
+        let _ = bridge_handle.await;
+
+        let pre_result = pre_result?;
+        if !pre_result.should_proceed {
+            let reason = pre_result
+                .abort_reason
+                .unwrap_or_else(|| "plugin pre-update hook aborted the update".to_string());
+            tracing::warn!(reason, "plugin pre_update_hook aborted the update");
+            return Err(report!(UpdateError::InstallFailed(reason)));
+        }
+    }
+
+    // --- Execute update ---
+    let (plugin_tx, bridge_handle) = make_bridge(output_tx);
+    let update_result = plugin
         .execute_update(
             &payload.package_identifier,
             &payload.to_version,
             payload.release_info.as_ref(),
-            &provider_tx,
+            &plugin_tx,
         )
         .await
         .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())));
-
-    // Drop the sender so the bridge task finishes
-    drop(provider_tx);
+    drop(plugin_tx);
     let _ = bridge_handle.await;
+    let update_output = update_result?;
 
-    result
+    // --- Post-update hook ---
+    {
+        let (plugin_tx, bridge_handle) = make_bridge(output_tx);
+        let post_result = plugin.post_update_hook(&hook_ctx, &plugin_tx).await;
+        drop(plugin_tx);
+        let _ = bridge_handle.await;
+
+        if let Err(e) = post_result {
+            tracing::warn!(
+                error = %e,
+                "plugin post_update_hook failed (non-fatal); continuing"
+            );
+        }
+    }
+
+    Ok(update_output)
 }
 
 /// Execute a `HookCommand`, dispatching to shell or direct exec as appropriate.

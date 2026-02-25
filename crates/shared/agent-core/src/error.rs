@@ -13,6 +13,14 @@ pub enum AgentCoreError {
     #[error("Post-update hook failed: {0}")]
     PostUpdateHookFailed(String),
 
+    /// Plugin's `pre_update_hook` signalled that the update should not proceed.
+    #[error("plugin pre-update hook aborted the update: {0}")]
+    PluginPreUpdateHookAborted(String),
+
+    /// Plugin's `post_update_hook` failed (logged as warning; non-fatal).
+    #[error("plugin post-update hook failed (non-fatal): {0}")]
+    PluginPostUpdateHookFailed(String),
+
     // ── I/O ───────────────────────────────────────────────────────────
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

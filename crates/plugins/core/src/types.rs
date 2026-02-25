@@ -5,23 +5,29 @@ pub use uptrakit_shared_types::{DiscoveredSoftware, PluginType, ReleaseAsset, Re
 
 use crate::version::Version;
 
-/// Capabilities that a provider may support.
+/// Capabilities that a plugin may support.
 ///
 /// # Design note
 ///
 /// This is a closed, centralized enum rather than a trait-based capability system.
-/// All providers in this project are first-party and registered exclusively through
-/// `uptrakit-provider-registry` (see AGENTS.md: "adding a new provider only through
+/// All plugins in this project are first-party and registered exclusively through
+/// `uptrakit-plugin-registry` (see AGENTS.md: "adding a new plugin only through
 /// the registry is an acceptable tradeoff"). `#[non_exhaustive]` allows adding new
 /// variants in future releases without requiring downstream match-arm updates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum PluginCapability {
-    /// Provider can discover locally installed software.
+    /// Plugin can discover locally installed software.
     DiscoverLocalSoftware,
-    /// Provider can refresh/sync the local package index from remote sources.
+    /// Plugin can refresh/sync the local package index from remote sources.
     RefreshPackageIndex,
+    /// Plugin can determine whether it is applicable to the current host.
+    DetectHostCompatibility,
+    /// Plugin can run logic before an update is applied.
+    PreUpdateHook,
+    /// Plugin can run logic after an update is applied.
+    PostUpdateHook,
 }
 
 /// Metadata for an upstream software release.
@@ -49,6 +55,26 @@ pub struct UpstreamRelease {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plugin_capability_new_variants_exist() {
+        // Ensure the new variants compile and can be compared.
+        assert_eq!(
+            PluginCapability::DetectHostCompatibility,
+            PluginCapability::DetectHostCompatibility
+        );
+        assert_eq!(PluginCapability::PreUpdateHook, PluginCapability::PreUpdateHook);
+        assert_eq!(PluginCapability::PostUpdateHook, PluginCapability::PostUpdateHook);
+        // They should be distinct from the original two.
+        assert_ne!(
+            PluginCapability::DetectHostCompatibility,
+            PluginCapability::DiscoverLocalSoftware
+        );
+        assert_ne!(
+            PluginCapability::PreUpdateHook,
+            PluginCapability::RefreshPackageIndex
+        );
+    }
 
     #[test]
     fn upstream_release_serialization_roundtrip() {
