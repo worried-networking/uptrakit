@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
-use uptrakit_internal_wire::ProviderType;
-use uptrakit_provider_registry::{ProviderCapability, ProviderRegistry};
+use uptrakit_internal_wire::PluginType;
+use uptrakit_plugin_registry::{PluginCapability, PluginRegistry};
 
 use crate::connection_context::ConnectionContext;
 
@@ -28,7 +28,7 @@ pub struct VersionCheckOutcome {
 /// a remote Docker host for the SSH agent) into the provider config before
 /// instantiation.
 pub async fn check_version(
-    provider_type: ProviderType,
+    provider_type: PluginType,
     config: &serde_json::Value,
     package_identifier: &str,
     executor: Arc<dyn CommandExecutor>,
@@ -39,7 +39,7 @@ pub async fn check_version(
     let mut effective_config = config.clone();
     ctx.apply_to_config(&provider_type, &mut effective_config);
 
-    let provider = match ProviderRegistry::create_provider(provider_type, &effective_config, executor) {
+    let provider = match PluginRegistry::create_provider(provider_type, &effective_config, executor) {
         Ok(p) => p,
         Err(e) => {
             return VersionCheckOutcome {
@@ -71,7 +71,7 @@ pub async fn check_version(
 
     // For providers that can resolve latest versions locally (e.g., Homebrew),
     // also fetch the latest available version from the package index.
-    let latest_version = if provider.has_capability(ProviderCapability::RefreshPackageIndex) {
+    let latest_version = if provider.has_capability(PluginCapability::RefreshPackageIndex) {
         tracing::debug!("fetching releases from provider");
         match provider.fetch_releases(package_identifier).await {
             Ok(releases) => {
@@ -114,7 +114,7 @@ mod tests {
             "repo": "hello-world"
         });
         let outcome = check_version(
-            ProviderType::GithubReleases,
+            PluginType::GithubReleases,
             &config,
             "octocat/hello-world",
             test_executor(),
@@ -132,7 +132,7 @@ mod tests {
         // Empty config — valid for Docker
         let config = serde_json::json!({});
         let outcome = check_version(
-            ProviderType::Docker,
+            PluginType::Docker,
             &config,
             "nginx",
             test_executor(),
@@ -151,7 +151,7 @@ mod tests {
         // config that the controller creates from the PHS `extra` metadata.
         let config = serde_json::json!({});
         let outcome = check_version(
-            ProviderType::ProxmoxHelperScripts,
+            PluginType::ProxmoxHelperScripts,
             &config,
             "booklore",
             test_executor(),
@@ -170,7 +170,7 @@ mod tests {
             "invalid": "config"
         });
         let outcome = check_version(
-            ProviderType::GithubReleases,
+            PluginType::GithubReleases,
             &config,
             "octocat/hello-world",
             test_executor(),
@@ -185,7 +185,7 @@ mod tests {
     #[tokio::test]
     async fn check_version_homebrew_default_returns_none() {
         let config = serde_json::json!({});
-        let outcome = check_version(ProviderType::Homebrew, &config, "", test_executor(), &no_ctx()).await;
+        let outcome = check_version(PluginType::Homebrew, &config, "", test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_some());
@@ -202,7 +202,7 @@ mod tests {
         // injected host. The check itself will fail (no daemon) but that proves
         // the injection path runs without panicking.
         let outcome = check_version(
-            ProviderType::Docker,
+            PluginType::Docker,
             &config,
             "nginx",
             test_executor(),

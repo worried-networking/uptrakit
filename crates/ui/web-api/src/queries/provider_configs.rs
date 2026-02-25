@@ -3,7 +3,7 @@ use sea_orm::{
     QuerySelect, Set,
 };
 use time::OffsetDateTime;
-use uptrakit_provider_registry::ProviderOps;
+use uptrakit_plugin_registry::PluginOps;
 use uptrakit_shared_db::entity::provider_config;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::provider_configs::{
@@ -32,10 +32,10 @@ pub enum UpdateProviderConfigError {
 // --- Private helpers ---
 
 fn provider_config_to_response(
-    ops: &dyn ProviderOps,
+    ops: &dyn PluginOps,
     m: provider_config::Model,
 ) -> Option<ProviderConfigResponse> {
-    let provider_type: uptrakit_provider_registry::ProviderType = match m.provider_type.parse() {
+    let provider_type: uptrakit_plugin_registry::PluginType = match m.provider_type.parse() {
         Ok(pt) => pt,
         Err(_) => {
             tracing::error!(
@@ -124,7 +124,7 @@ pub enum CreateProviderConfigError {
 /// Create a new provider configuration and return the masked response.
 /// Validation (name, provider-specific config, hooks) is the caller's responsibility.
 pub async fn create_provider_config(
-    ops: &dyn ProviderOps,
+    ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     req: CreateProviderConfigRequest,
 ) -> Result<ProviderConfigResponse, CreateProviderConfigError> {
@@ -159,7 +159,7 @@ fn is_unique_name_violation(e: &sea_orm::DbErr) -> bool {
 }
 
 pub async fn list_provider_configs(
-    ops: &dyn ProviderOps,
+    ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     params: &PaginationParams,
 ) -> Result<PaginatedResponse<ProviderConfigResponse>, sea_orm::DbErr> {
@@ -188,7 +188,7 @@ pub async fn list_provider_configs(
 
 /// Returns `None` if the config is not found or is deactivated.
 pub async fn get_provider_config(
-    ops: &dyn ProviderOps,
+    ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     id: Uuid,
 ) -> Result<Option<ProviderConfigResponse>, sea_orm::DbErr> {
@@ -202,7 +202,7 @@ pub async fn get_provider_config(
 /// Partial update. Handles secret restoration and provider-specific validation internally.
 /// Returns the updated response, or an error describing what went wrong.
 pub async fn update_provider_config(
-    ops: &dyn ProviderOps,
+    ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     id: Uuid,
     req: UpdateProviderConfigRequest,

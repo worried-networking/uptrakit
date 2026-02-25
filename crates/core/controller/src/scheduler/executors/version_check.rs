@@ -9,7 +9,7 @@ use uptrakit_internal_wire::{CheckVersionsPayload, ControllerMessage, VersionChe
 use uptrakit_shared_db::entity::{
     host, host_software_item, provider_config, scheduled_task, service, service_host, software_item,
 };
-use uptrakit_shared_types::ProviderType;
+use uptrakit_shared_types::PluginType;
 use uptrakit_web_api::notification_service::NotificationService;
 use uuid::Uuid;
 
@@ -65,7 +65,7 @@ impl TaskExecutor for VersionCheckExecutor {
         let mut by_agent_host: HashMap<(Uuid, String), Vec<VersionCheckAssignment>> =
             HashMap::new();
         for row in rows {
-            let provider_type = ProviderType::from_str(&row.provider_type).map_err(|_| {
+            let provider_type = PluginType::from_str(&row.provider_type).map_err(|_| {
                 report!(SchedulerError::Execution(format!(
                     "unknown provider type: {}",
                     row.provider_type

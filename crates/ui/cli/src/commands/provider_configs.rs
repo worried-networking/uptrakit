@@ -13,7 +13,7 @@ use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationPa
 use uptrakit_openapi_client::types::provider_configs::{
     CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
 };
-use uptrakit_shared_types::ProviderType;
+use uptrakit_shared_types::PluginType;
 
 // ── Human output ────────────────────────────────────────────────────────────
 
@@ -76,7 +76,7 @@ pub struct ShowParams<'a> {
 
 pub struct CreateParams<'a> {
     pub name: String,
-    pub provider_type: ProviderType,
+    pub provider_type: PluginType,
     pub config: Value,
     pub enabled: Option<bool>,
     pub server: Option<&'a str>,
@@ -237,7 +237,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "GitHub Releases".to_string(),
-            provider_type: ProviderType::GithubReleases,
+            provider_type: PluginType::GithubReleases,
             config: serde_json::json!({"owner": "org", "repo": "app"}),
             enabled: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),

@@ -8,7 +8,7 @@ use std::time::Duration;
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use uptrakit_crypto::EncryptedString;
-use uptrakit_provider_registry::ProviderRegistry;
+use uptrakit_plugin_registry::PluginRegistry;
 
 use crate::commands::sudoers::{
     ResolvedSudoCommand, SudoersContent, detect_is_root, resolve_command_path, write_sudoers_file,
@@ -308,7 +308,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
 
     // Set up sudoers (specific commands per registered providers).
     println!("Configuring sudoers...");
-    let provider_sudo_cmds = ProviderRegistry::all_required_sudo_commands();
+    let provider_sudo_cmds = PluginRegistry::all_required_sudo_commands();
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
     for (_provider_type, entries) in &provider_sudo_cmds {

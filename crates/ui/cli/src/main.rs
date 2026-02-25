@@ -6,7 +6,7 @@ use tracing_subscriber::EnvFilter;
 use uptrakit_build_info::BuildInfo;
 use uptrakit_cli::output::OutputFormat;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_shared_types::ProviderType;
+use uptrakit_shared_types::PluginType;
 
 #[derive(Debug, Parser)]
 #[command(name = "uptrakit", about = "Uptrakit CLI")]
@@ -1846,7 +1846,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                 config,
                 enabled,
             } => {
-                let provider_type: ProviderType = provider_type.parse().map_err(|_| {
+                let provider_type: PluginType = provider_type.parse().map_err(|_| {
                     report!(error::CliError::Other(format!(
                         "unknown provider type: {provider_type}"
                     )))

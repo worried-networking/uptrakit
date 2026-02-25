@@ -408,7 +408,7 @@ mod tests {
                         software_item_name: "item".to_string(),
                         package_identifier: "pkg".to_string(),
                         to_version: "1.0".to_string(),
-                        provider_type: uptrakit_internal_wire::ProviderType::GithubReleases,
+                        provider_type: uptrakit_internal_wire::PluginType::GithubReleases,
                         provider_config: serde_json::json!({}),
                         pre_update_hooks: vec![],
                         post_update_hooks: vec![],

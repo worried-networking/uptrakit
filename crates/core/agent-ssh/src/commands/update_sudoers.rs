@@ -6,7 +6,7 @@
 
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
-use uptrakit_provider_registry::ProviderRegistry;
+use uptrakit_plugin_registry::PluginRegistry;
 
 use crate::commands::sudoers::{
     self, ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,
@@ -86,7 +86,7 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     let privileged = !is_root; // root needs no sudo prefix
 
     // 6. Collect provider commands + resolve paths.
-    let provider_sudo_cmds = ProviderRegistry::all_required_sudo_commands();
+    let provider_sudo_cmds = PluginRegistry::all_required_sudo_commands();
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
     for (_provider_type, entries) in &provider_sudo_cmds {

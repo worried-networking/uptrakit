@@ -6,7 +6,7 @@ mod masked_email;
 mod mqtt_connection_status;
 mod mqtt_transport;
 mod output_stream_type;
-mod provider_types;
+mod plugin_types;
 mod secret_string;
 mod service_status;
 mod service_type;
@@ -22,7 +22,7 @@ pub use mqtt_connection_status::{
 };
 pub use mqtt_transport::{MqttTransport, ParseMqttTransportError};
 pub use output_stream_type::{OutputStreamType, ParseOutputStreamTypeError};
-pub use provider_types::{ParseProviderTypeError, ProviderType, ReleaseAsset, ReleaseInfo};
+pub use plugin_types::{ParsePluginTypeError, PluginType, ReleaseAsset, ReleaseInfo};
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use service_type::{ParseServiceTypeError, ServiceType};

@@ -12,7 +12,7 @@ use uuid::Uuid;
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{
     DiscoveredSoftware, HookShell, MqttClientConnectionStatus, MqttTransport, OutputStreamType,
-    ProviderType, ReleaseAsset, ReleaseInfo, ServiceType,
+    PluginType, ReleaseAsset, ReleaseInfo, ServiceType,
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
@@ -523,7 +523,7 @@ pub struct VersionCheckAssignment {
     /// Human-readable name for logging.
     pub name: String,
     /// Provider type.
-    pub provider_type: ProviderType,
+    pub provider_type: PluginType,
     /// Package identifier for the provider.
     pub package_identifier: String,
     /// Provider-specific configuration.
@@ -587,7 +587,7 @@ pub struct ExecuteUpdatePayload {
     pub software_item_name: String,
     pub package_identifier: String,
     pub to_version: String,
-    pub provider_type: ProviderType,
+    pub provider_type: PluginType,
     /// Merged provider config (base + override).
     pub provider_config: serde_json::Value,
     /// Pre-update hook commands to execute before the update.
@@ -873,7 +873,7 @@ pub struct DiscoveryProviderAssignment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_config_id: Option<Uuid>,
     /// Provider type to use for discovery.
-    pub provider_type: ProviderType,
+    pub provider_type: PluginType,
     /// Provider-specific configuration (`{}` for default assignments).
     pub config: serde_json::Value,
 }
@@ -895,7 +895,7 @@ pub struct DiscoveryProviderResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_config_id: Option<Uuid>,
     /// Provider type that produced these results.
-    pub provider_type: ProviderType,
+    pub provider_type: PluginType,
     /// Discovered software items (empty on error).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discoveries: Vec<DiscoveredSoftware>,
@@ -1676,7 +1676,7 @@ mod tests {
             assignments: vec![VersionCheckAssignment {
                 software_item_id: TEST_UUID_1,
                 name: "Test Software".to_string(),
-                provider_type: ProviderType::GithubReleases,
+                provider_type: PluginType::GithubReleases,
                 package_identifier: "owner/repo".to_string(),
                 config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
             }],
@@ -1698,7 +1698,7 @@ mod tests {
             software_item_name: "Node.js".to_string(),
             package_identifier: "nodejs".to_string(),
             to_version: "20.10.0".to_string(),
-            provider_type: ProviderType::GithubReleases,
+            provider_type: PluginType::GithubReleases,
             provider_config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
             pre_update_hooks: vec![HookCommand::Exec {
                 program: "systemctl".to_string(),
@@ -1739,7 +1739,7 @@ mod tests {
             software_item_name: "Redis".to_string(),
             package_identifier: "redis-server".to_string(),
             to_version: "7.2.0".to_string(),
-            provider_type: ProviderType::ProxmoxHelperScripts,
+            provider_type: PluginType::ProxmoxHelperScripts,
             provider_config: serde_json::json!({}),
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
@@ -1787,7 +1787,7 @@ mod tests {
             software_item_name: "Test".to_string(),
             package_identifier: "test".to_string(),
             to_version: "1.0.0".to_string(),
-            provider_type: ProviderType::GithubReleases,
+            provider_type: PluginType::GithubReleases,
             provider_config: serde_json::json!({}),
             pre_update_hooks: vec![HookCommand::Shell {
                 command: "echo hello".to_string(),
@@ -2181,7 +2181,7 @@ mod tests {
         let assignment = VersionCheckAssignment {
             software_item_id: TEST_UUID_1,
             name: "Docker Image".to_string(),
-            provider_type: ProviderType::Docker,
+            provider_type: PluginType::Docker,
             package_identifier: "nginx:latest".to_string(),
             config: serde_json::json!({}),
         };
@@ -2194,13 +2194,13 @@ mod tests {
     #[test]
     fn provider_type_all_variants() {
         for (provider, expected) in [
-            (ProviderType::GithubReleases, "github_releases"),
-            (ProviderType::ProxmoxHelperScripts, "proxmox_helper_scripts"),
-            (ProviderType::Docker, "docker"),
+            (PluginType::GithubReleases, "github_releases"),
+            (PluginType::ProxmoxHelperScripts, "proxmox_helper_scripts"),
+            (PluginType::Docker, "docker"),
         ] {
             let json = serde_json::to_string(&provider).unwrap();
             assert_eq!(json, format!(r#""{expected}""#));
-            let deserialized: ProviderType = serde_json::from_str(&json).unwrap();
+            let deserialized: PluginType = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, provider);
         }
     }
@@ -2221,7 +2221,7 @@ mod tests {
             serde_json::from_value(json).expect("should deserialize");
         assert_eq!(
             assignment.provider_type,
-            ProviderType::Other("winget".to_string())
+            PluginType::Other("winget".to_string())
         );
     }
 
@@ -2237,7 +2237,7 @@ mod tests {
         });
         let assignment: VersionCheckAssignment =
             serde_json::from_value(json).expect("should deserialize");
-        assert_eq!(assignment.provider_type, ProviderType::Apt);
+        assert_eq!(assignment.provider_type, PluginType::Apt);
     }
 
     #[test]
@@ -2902,7 +2902,7 @@ mod tests {
                 assignments: vec![VersionCheckAssignment {
                     software_item_id: TEST_UUID_1,
                     name: "Test Software".to_string(),
-                    provider_type: ProviderType::GithubReleases,
+                    provider_type: PluginType::GithubReleases,
                     package_identifier: "owner/repo".to_string(),
                     config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
                 }],
@@ -2921,7 +2921,7 @@ mod tests {
                 software_item_name: "Node.js".to_string(),
                 package_identifier: "nodejs".to_string(),
                 to_version: "20.10.0".to_string(),
-                provider_type: ProviderType::GithubReleases,
+                provider_type: PluginType::GithubReleases,
                 provider_config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
                 pre_update_hooks: vec![],
                 post_update_hooks: vec![],
@@ -3027,12 +3027,12 @@ mod tests {
             providers: vec![
                 DiscoveryProviderAssignment {
                     provider_config_id: Some(TEST_UUID_1),
-                    provider_type: ProviderType::Homebrew,
+                    provider_type: PluginType::Homebrew,
                     config: serde_json::json!({"package_type": "formula"}),
                 },
                 DiscoveryProviderAssignment {
                     provider_config_id: None,
-                    provider_type: ProviderType::ProxmoxHelperScripts,
+                    provider_type: PluginType::ProxmoxHelperScripts,
                     config: serde_json::Value::Object(Default::default()),
                 },
             ],
@@ -3059,7 +3059,7 @@ mod tests {
             results: vec![
                 DiscoveryProviderResult {
                     provider_config_id: Some(TEST_UUID_1),
-                    provider_type: ProviderType::Homebrew,
+                    provider_type: PluginType::Homebrew,
                     discoveries: vec![DiscoveredSoftware {
                         package_identifier: "wget".to_string(),
                         name: "Wget".to_string(),
@@ -3070,7 +3070,7 @@ mod tests {
                 },
                 DiscoveryProviderResult {
                     provider_config_id: None,
-                    provider_type: ProviderType::ProxmoxHelperScripts,
+                    provider_type: PluginType::ProxmoxHelperScripts,
                     discoveries: vec![],
                     error: Some("no update script found".to_string()),
                 },
@@ -3095,7 +3095,7 @@ mod tests {
     fn discovery_provider_assignment_none_config_id_omitted() {
         let assignment = DiscoveryProviderAssignment {
             provider_config_id: None,
-            provider_type: ProviderType::Homebrew,
+            provider_type: PluginType::Homebrew,
             config: serde_json::Value::Object(Default::default()),
         };
         let json = serde_json::to_value(&assignment).unwrap();
@@ -3110,7 +3110,7 @@ mod tests {
                 host_machine_id: "machine-abc".to_string(),
                 providers: vec![DiscoveryProviderAssignment {
                     provider_config_id: Some(TEST_UUID_1),
-                    provider_type: ProviderType::Homebrew,
+                    provider_type: PluginType::Homebrew,
                     config: serde_json::json!({"package_type": "formula"}),
                 }],
             },
@@ -3126,7 +3126,7 @@ mod tests {
                 host_machine_id: "machine-abc".to_string(),
                 results: vec![DiscoveryProviderResult {
                     provider_config_id: Some(TEST_UUID_1),
-                    provider_type: ProviderType::Homebrew,
+                    provider_type: PluginType::Homebrew,
                     discoveries: vec![DiscoveredSoftware {
                         package_identifier: "wget".to_string(),
                         name: "Wget".to_string(),

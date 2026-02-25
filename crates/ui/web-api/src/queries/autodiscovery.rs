@@ -28,7 +28,7 @@ use sea_orm::{
 };
 use std::collections::HashSet;
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{DiscoveryProviderResult, DiscoveryResultsPayload, ProviderType};
+use uptrakit_internal_wire::{DiscoveryProviderResult, DiscoveryResultsPayload, PluginType};
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
     autodiscovery_ignore, host_software_item, prelude::*, provider_config, software_item,
@@ -446,10 +446,10 @@ async fn process_provider_result(
     // Default/auto assignment (no pre-existing config) — group by config key
     // derived from the `extra` metadata on each discovery item.
     match result.provider_type {
-        ProviderType::Homebrew => {
+        PluginType::Homebrew => {
             process_homebrew_default(db, tenant_id, host_id, now, result).await?;
         }
-        ProviderType::Docker => {
+        PluginType::Docker => {
             let config_json = serde_json::json!({});
             let pc_id = find_or_create_default_provider_config(
                 db,
@@ -471,10 +471,10 @@ async fn process_provider_result(
                     .await?;
             }
         }
-        ProviderType::ProxmoxHelperScripts => {
+        PluginType::ProxmoxHelperScripts => {
             process_phs_results(db, tenant_id, host_id, now, result).await?;
         }
-        ProviderType::Apt => {
+        PluginType::Apt => {
             let config_json = serde_json::json!({});
             let pc_id = find_or_create_default_provider_config(
                 db,
@@ -1145,11 +1145,11 @@ mod tests {
 
     // ── PHS result processing ─────────────────────────────────────────────────
 
-    use uptrakit_internal_wire::{DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryProviderResult, ProviderType};
+    use uptrakit_internal_wire::{DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryProviderResult, PluginType};
 
     fn phs_result_with_github(pkg_id: &str, name: &str, version: &str, owner: &str, repo: &str) -> DiscoveryProviderResult {
         DiscoveryProviderResult {
-            provider_type: ProviderType::ProxmoxHelperScripts,
+            provider_type: PluginType::ProxmoxHelperScripts,
             provider_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -1166,7 +1166,7 @@ mod tests {
 
     fn phs_result_with_apt(pkg_id: &str, name: &str, version: &str, apt_pkg: &str) -> DiscoveryProviderResult {
         DiscoveryProviderResult {
-            provider_type: ProviderType::ProxmoxHelperScripts,
+            provider_type: PluginType::ProxmoxHelperScripts,
             provider_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -1180,7 +1180,7 @@ mod tests {
 
     fn phs_result_no_extra(pkg_id: &str) -> DiscoveryProviderResult {
         DiscoveryProviderResult {
-            provider_type: ProviderType::ProxmoxHelperScripts,
+            provider_type: PluginType::ProxmoxHelperScripts,
             provider_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {

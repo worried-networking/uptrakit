@@ -164,12 +164,12 @@ pub async fn handle_check_versions(
             let mut effective_config = assignment.config.clone();
             ctx.apply_to_config(&assignment.provider_type, &mut effective_config);
 
-            if let Ok(provider) = uptrakit_provider_registry::ProviderRegistry::create_provider(
+            if let Ok(provider) = uptrakit_plugin_registry::PluginRegistry::create_provider(
                 assignment.provider_type.clone(),
                 &effective_config,
                 Arc::clone(&executor),
             ) && provider
-                .has_capability(uptrakit_provider_registry::ProviderCapability::RefreshPackageIndex)
+                .has_capability(uptrakit_plugin_registry::PluginCapability::RefreshPackageIndex)
             {
                 tracing::info!(provider_type = %assignment.provider_type, "refreshing package index");
                 if let Err(e) = provider.refresh_package_index().await {
@@ -334,7 +334,7 @@ pub async fn handle_discover_software(
         ctx.apply_to_config(&assignment.provider_type, &mut effective_config);
 
         let result =
-            match uptrakit_provider_registry::ProviderRegistry::create_provider_for_discovery(
+            match uptrakit_plugin_registry::PluginRegistry::create_provider_for_discovery(
                 assignment.provider_type.clone(),
                 &effective_config,
                 Arc::clone(&executor),
@@ -353,8 +353,8 @@ pub async fn handle_discover_software(
                     }
                 }
                 Ok(provider) => {
-                    use uptrakit_provider_registry::ProviderCapability;
-                    if !provider.has_capability(ProviderCapability::DiscoverLocalSoftware) {
+                    use uptrakit_plugin_registry::PluginCapability;
+                    if !provider.has_capability(PluginCapability::DiscoverLocalSoftware) {
                         tracing::warn!(
                             provider_type = %assignment.provider_type,
                             "provider does not support DiscoverLocalSoftware; skipping"

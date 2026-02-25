@@ -24,7 +24,7 @@ use uptrakit_command::{CommandExecutor, UpdateOutputLine};
 use uptrakit_internal_wire::{
     ExecuteUpdatePayload, HookCommand, OutputStreamType, UpdateFinalStatus, UpdateResultPayload,
 };
-use uptrakit_provider_registry::ProviderRegistry;
+use uptrakit_plugin_registry::PluginRegistry;
 
 use crate::error::AgentCoreError;
 
@@ -278,7 +278,7 @@ async fn execute_provider_update(
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
     executor: Arc<dyn CommandExecutor>,
 ) -> UpdateResult<String> {
-    let provider = ProviderRegistry::create_provider(
+    let provider = PluginRegistry::create_provider(
         payload.provider_type.clone(),
         &payload.provider_config,
         executor,
@@ -385,7 +385,7 @@ async fn send_output(
 mod tests {
     use super::*;
     use uptrakit_command::LocalCommandExecutor;
-    use uptrakit_internal_wire::{HookShell, ProviderType};
+    use uptrakit_internal_wire::{HookShell, PluginType};
 
     fn test_payload() -> ExecuteUpdatePayload {
         ExecuteUpdatePayload {
@@ -395,7 +395,7 @@ mod tests {
             software_item_name: "Test App".to_string(),
             package_identifier: "test-app".to_string(),
             to_version: "2.0.0".to_string(),
-            provider_type: ProviderType::GithubReleases,
+            provider_type: PluginType::GithubReleases,
             provider_config: serde_json::json!({}),
             pre_update_hooks: vec![],
             post_update_hooks: vec![],

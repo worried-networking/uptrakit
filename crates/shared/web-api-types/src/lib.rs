@@ -960,10 +960,10 @@ mod tests {
     #[test]
     fn create_provider_config_valid() {
         use crate::validation::Validate;
-        use uptrakit_shared_types::ProviderType;
+        use uptrakit_shared_types::PluginType;
         let req = CreateProviderConfigRequest {
             name: "GitHub Releases".to_string(),
-            provider_type: ProviderType::GithubReleases,
+            provider_type: PluginType::GithubReleases,
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -973,10 +973,10 @@ mod tests {
     #[test]
     fn create_provider_config_empty_name() {
         use crate::validation::Validate;
-        use uptrakit_shared_types::ProviderType;
+        use uptrakit_shared_types::PluginType;
         let req = CreateProviderConfigRequest {
             name: "".to_string(),
-            provider_type: ProviderType::GithubReleases,
+            provider_type: PluginType::GithubReleases,
             config: serde_json::json!({}),
             enabled: true,
         };

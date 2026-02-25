@@ -707,7 +707,7 @@ pub async fn check_versions(
             continue;
         };
 
-        let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
+        let provider_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
             serde_json::Value::String(prov_config.provider_type.clone()),
         ) {
             Ok(pt) => pt,
@@ -866,7 +866,7 @@ pub async fn check_versions_host(
         }
     };
 
-    let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
+    let provider_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
         serde_json::Value::String(provider_config.provider_type.clone()),
     ) {
         Ok(pt) => pt,

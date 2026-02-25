@@ -65,7 +65,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_shared_types::ProviderType;
+    use uptrakit_shared_types::PluginType;
     use uptrakit_web_api_types::pagination::PaginationParams;
     use uptrakit_web_api_types::provider_configs::{
         CreateProviderConfigRequest, UpdateProviderConfigRequest,
@@ -75,7 +75,7 @@ mod tests {
     fn create_provider_config_request_serialization() {
         let req = CreateProviderConfigRequest {
             name: "GitHub Releases".to_string(),
-            provider_type: ProviderType::GithubReleases,
+            provider_type: PluginType::GithubReleases,
             config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
             enabled: true,
         };

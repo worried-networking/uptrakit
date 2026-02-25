@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn assign_hosts_request_round_trip() {
-        use uptrakit_shared_types::ProviderType;
+        use uptrakit_shared_types::PluginType;
         let req = AssignHostsRequest {
             host_assignments: vec![
                 HostSoftwareAssignment {
@@ -344,7 +344,7 @@ mod tests {
                     provider_config_id: None,
                     provider_config: Some(crate::provider_configs::CreateProviderConfigRequest {
                         name: "Homebrew Casks".to_string(),
-                        provider_type: ProviderType::Homebrew,
+                        provider_type: PluginType::Homebrew,
                         config: serde_json::json!({"package_type": "cask"}),
                         enabled: true,
                     }),

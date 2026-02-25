@@ -6196,7 +6196,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-provider-registry",
+ "uptrakit-plugin-registry",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
  "uuid",
@@ -6235,7 +6235,7 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-provider-registry",
+ "uptrakit-plugin-registry",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
@@ -6428,7 +6428,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "uptrakit-provider-apt"
+name = "uptrakit-plugin-apt"
 version = "0.0.1"
 dependencies = [
  "async-trait",
@@ -6438,12 +6438,12 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uptrakit-provider-core",
+ "uptrakit-plugin-core",
  "uptrakit-shared-macros",
 ]
 
 [[package]]
-name = "uptrakit-provider-core"
+name = "uptrakit-plugin-core"
 version = "0.0.1"
 dependencies = [
  "async-trait",
@@ -6461,7 +6461,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "uptrakit-provider-docker"
+name = "uptrakit-plugin-docker"
 version = "0.0.1"
 dependencies = [
  "async-trait",
@@ -6477,12 +6477,12 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
- "uptrakit-provider-core",
+ "uptrakit-plugin-core",
  "uptrakit-shared-macros",
 ]
 
 [[package]]
-name = "uptrakit-provider-github"
+name = "uptrakit-plugin-github"
 version = "0.0.1"
 dependencies = [
  "async-trait",
@@ -6495,13 +6495,13 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "uptrakit-provider-core",
+ "uptrakit-plugin-core",
  "uptrakit-shared-macros",
  "url",
 ]
 
 [[package]]
-name = "uptrakit-provider-homebrew"
+name = "uptrakit-plugin-homebrew"
 version = "0.0.1"
 dependencies = [
  "async-trait",
@@ -6511,12 +6511,12 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uptrakit-provider-core",
+ "uptrakit-plugin-core",
  "uptrakit-shared-macros",
 ]
 
 [[package]]
-name = "uptrakit-provider-proxmox-helper-scripts"
+name = "uptrakit-plugin-proxmox-helper-scripts"
 version = "0.0.1"
 dependencies = [
  "async-trait",
@@ -6526,11 +6526,11 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "uptrakit-provider-core",
+ "uptrakit-plugin-core",
 ]
 
 [[package]]
-name = "uptrakit-provider-registry"
+name = "uptrakit-plugin-registry"
 version = "0.0.1"
 dependencies = [
  "rootcause",
@@ -6539,12 +6539,12 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
- "uptrakit-provider-apt",
- "uptrakit-provider-core",
- "uptrakit-provider-docker",
- "uptrakit-provider-github",
- "uptrakit-provider-homebrew",
- "uptrakit-provider-proxmox-helper-scripts",
+ "uptrakit-plugin-apt",
+ "uptrakit-plugin-core",
+ "uptrakit-plugin-docker",
+ "uptrakit-plugin-github",
+ "uptrakit-plugin-homebrew",
+ "uptrakit-plugin-proxmox-helper-scripts",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
 ]
@@ -6666,7 +6666,7 @@ dependencies = [
  "tracing",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-provider-registry",
+ "uptrakit-plugin-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-web-api-types",

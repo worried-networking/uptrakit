@@ -187,7 +187,7 @@ pub async fn trigger_update_for_host(
         crate::update_hooks::merge_config(&provider_config.config, link.config_override.as_ref());
 
     // 11. Convert provider type.
-    let provider_type: uptrakit_internal_wire::ProviderType = serde_json::from_value(
+    let provider_type: uptrakit_internal_wire::PluginType = serde_json::from_value(
         serde_json::Value::String(provider_config.provider_type.clone()),
     )
     .map_err(|_| TriggerUpdateError::UnknownProviderType(provider_config.provider_type.clone()))?;

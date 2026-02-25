@@ -4,7 +4,7 @@ use sea_orm::{
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
-use uptrakit_provider_registry::ProviderRegistry;
+use uptrakit_plugin_registry::PluginRegistry;
 use uptrakit_shared_db::entity::{
     available_version, host, host_software_item, prelude::*, provider_config, software_item,
 };
@@ -266,7 +266,7 @@ fn validate_config_override(
         return Err(ConfigOverrideError::NotAnObject);
     }
 
-    ProviderRegistry::validate_config_str(provider_type, &merged)
+    PluginRegistry::validate_config_str(provider_type, &merged)
         .map_err(|e| ConfigOverrideError::ProviderValidation(e.to_string()))
 }
 
@@ -292,7 +292,7 @@ async fn resolve_provider_config_txn(
                 ));
             }
             if let Err(e) =
-                ProviderRegistry::validate_config_str(inline.provider_type.as_str(), &inline.config)
+                PluginRegistry::validate_config_str(inline.provider_type.as_str(), &inline.config)
             {
                 return Err(SoftwareItemQueryError::InvalidInlineProviderConfig(
                     e.to_string(),
@@ -334,8 +334,8 @@ fn validate_assignment(
 ) -> Result<(), SoftwareItemQueryError> {
     if let Ok(pt) = config
         .provider_type
-        .parse::<uptrakit_provider_registry::ProviderType>()
-        && let Err(e) = ProviderRegistry::validate_package_identifier(pt, package_identifier)
+        .parse::<uptrakit_plugin_registry::PluginType>()
+        && let Err(e) = PluginRegistry::validate_package_identifier(pt, package_identifier)
     {
         return Err(SoftwareItemQueryError::InvalidPackageIdentifier(e));
     }
@@ -1132,7 +1132,7 @@ mod tests {
 
     #[test]
     fn validate_homebrew_package_identifier_accepts_valid() {
-        use uptrakit_provider_registry::ProviderType;
+        use uptrakit_plugin_registry::PluginType;
         let cases = [
             "wget",
             "node@18",
@@ -1145,7 +1145,7 @@ mod tests {
 
         for case in cases {
             assert!(
-                ProviderRegistry::validate_package_identifier(ProviderType::Homebrew, case).is_ok(),
+                PluginRegistry::validate_package_identifier(PluginType::Homebrew, case).is_ok(),
                 "expected valid: {case}"
             );
         }
@@ -1153,7 +1153,7 @@ mod tests {
 
     #[test]
     fn validate_homebrew_package_identifier_rejects_invalid() {
-        use uptrakit_provider_registry::ProviderType;
+        use uptrakit_plugin_registry::PluginType;
         let cases = [
             "",
             " ",
@@ -1168,7 +1168,7 @@ mod tests {
 
         for case in cases {
             assert!(
-                ProviderRegistry::validate_package_identifier(ProviderType::Homebrew, case)
+                PluginRegistry::validate_package_identifier(PluginType::Homebrew, case)
                     .is_err(),
                 "expected invalid: {case}"
             );

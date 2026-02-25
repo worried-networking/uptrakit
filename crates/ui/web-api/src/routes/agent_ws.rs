@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
     ApprovedPayload, CertificatePayload, CloseReason, ControllerMessage, DiscoverSoftwarePayload,
     DiscoveryProviderAssignment, ErrorCode, ErrorPayload, ExecuteUpdatePayload, IncomingSeq,
-    OutgoingSeq, PingPayload, ProviderType, RejectedPayload, ServiceMessage, UpdateFinalStatus,
+    OutgoingSeq, PingPayload, PluginType, RejectedPayload, ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
     available_version, host, host_software_item, provider_config, service_host, software_item,
@@ -1048,7 +1048,7 @@ async fn deliver_pending_updates(
             }
         };
 
-        let provider_type: ProviderType = match serde_json::from_value(serde_json::Value::String(
+        let provider_type: PluginType = match serde_json::from_value(serde_json::Value::String(
             provider_cfg.provider_type.clone(),
         )) {
             Ok(pt) => pt,
@@ -1266,7 +1266,7 @@ pub(crate) async fn trigger_discovery_for_agent_host(
     tenant_id: uuid::Uuid,
     host_machine_id: &str,
 ) {
-    let discovery_types = state.provider_ops.discovery_provider_types();
+    let discovery_types = state.provider_ops.discovery_plugin_types();
 
     let mut providers: Vec<DiscoveryProviderAssignment> = Vec::new();
 

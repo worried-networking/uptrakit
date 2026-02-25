@@ -1,0 +1,30 @@
+[package]
+name = "uptrakit-plugin-registry"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[features]
+default = []
+ssh = ["uptrakit-plugin-docker/ssh"]
+
+[dependencies]
+uptrakit-shared-types = { path = "../../shared/types" }
+uptrakit-command = { path = "../../shared/command" }
+uptrakit-plugin-core = { path = "../core" }
+uptrakit-plugin-github = { path = "../github" }
+uptrakit-plugin-docker = { path = "../docker" }
+uptrakit-plugin-proxmox-helper-scripts = { path = "../proxmox-helper-scripts" }
+uptrakit-plugin-homebrew = { path = "../homebrew" }
+uptrakit-plugin-apt = { path = "../apt" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+rootcause = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uptrakit_shared_types::ProviderType;
+use uptrakit_shared_types::PluginType;
 use uuid::Uuid;
 
 use crate::validation::{Validate, ValidationError};
@@ -10,7 +10,7 @@ use crate::validation::{Validate, ValidationError};
 pub struct CreateProviderConfigRequest {
     pub name: String,
     /// Provider type identifier (e.g. `github_releases`, `proxmox_helper_scripts`).
-    pub provider_type: ProviderType,
+    pub provider_type: PluginType,
     /// Provider-specific configuration blob.
     pub config: serde_json::Value,
     /// Whether the config is enabled. Defaults to true.
@@ -31,7 +31,7 @@ pub struct UpdateProviderConfigRequest {
 pub struct ProviderConfigResponse {
     pub id: Uuid,
     pub name: String,
-    pub provider_type: ProviderType,
+    pub provider_type: PluginType,
     /// Provider-specific configuration with secrets masked.
     pub config: serde_json::Value,
     pub enabled: bool,
@@ -71,7 +71,7 @@ mod tests {
     fn create_request_round_trip() {
         let req = CreateProviderConfigRequest {
             name: "my-github".to_string(),
-            provider_type: ProviderType::GithubReleases,
+            provider_type: PluginType::GithubReleases,
             config: serde_json::json!({"owner": "org", "repo": "app"}),
             enabled: true,
         };
@@ -79,7 +79,7 @@ mod tests {
         let de: CreateProviderConfigRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.name, "my-github");
-        assert_eq!(de.provider_type, ProviderType::GithubReleases);
+        assert_eq!(de.provider_type, PluginType::GithubReleases);
         assert!(de.enabled);
     }
 
@@ -95,7 +95,7 @@ mod tests {
     fn create_request_validate_rejects_empty_name() {
         let req = CreateProviderConfigRequest {
             name: "   ".to_string(),
-            provider_type: ProviderType::GithubReleases,
+            provider_type: PluginType::GithubReleases,
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -109,7 +109,7 @@ mod tests {
     fn create_request_validate_accepts_valid() {
         let req = CreateProviderConfigRequest {
             name: "my-provider".to_string(),
-            provider_type: ProviderType::GithubReleases,
+            provider_type: PluginType::GithubReleases,
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -155,7 +155,7 @@ mod tests {
         let resp = ProviderConfigResponse {
             id: sample_uuid(),
             name: "docker-hub".to_string(),
-            provider_type: ProviderType::Docker,
+            provider_type: PluginType::Docker,
             config: serde_json::json!({}),
             enabled: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -166,7 +166,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.id, sample_uuid());
         assert_eq!(de.name, "docker-hub");
-        assert_eq!(de.provider_type, ProviderType::Docker);
+        assert_eq!(de.provider_type, PluginType::Docker);
         assert!(de.enabled);
     }
 }
