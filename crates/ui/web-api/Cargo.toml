@@ -71,3 +71,4 @@ tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 tower = { workspace = true }
 http-body-util = "0.1"
 strum = { workspace = true }
+uptrakit-shared-db = { path = "../../shared/db", features = ["migration", "db-sqlite"] }

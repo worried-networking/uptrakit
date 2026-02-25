@@ -241,50 +241,54 @@ pub async fn deactivate_host(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
-    use uptrakit_shared_db::entity::{service, service_host};
-
-    async fn test_db() -> DatabaseConnection {
-        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
-        Database::connect(opt).await.expect("test db")
-    }
+    use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+    use uptrakit_shared_db::entity::{host, service, service_host, tenant};
 
     async fn setup_test_db() -> DatabaseConnection {
-        let db = test_db().await;
-
-        db.execute_unprepared(
-            "CREATE TABLE services (
-                id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
-                service_type TEXT NOT NULL,
-                hostname TEXT NOT NULL,
-                friendly_name TEXT NOT NULL,
-                ip_address TEXT,
-                status TEXT NOT NULL,
-                enrollment_secret_hash TEXT NOT NULL,
-                client_version TEXT,
-                last_seen_at INTEGER,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                deactivated_at INTEGER,
-                ping_interval_seconds INTEGER
-            )",
-        )
-        .await
-        .unwrap();
-
-        db.execute_unprepared(
-            "CREATE TABLE service_hosts (
-                service_id TEXT NOT NULL,
-                host_id TEXT NOT NULL,
-                linked_at INTEGER NOT NULL,
-                PRIMARY KEY (service_id, host_id)
-            )",
-        )
-        .await
-        .unwrap();
-
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.expect("test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
         db
+    }
+
+    async fn insert_tenant(db: &DatabaseConnection, id: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(id),
+            name: Set("Test Tenant".to_string()),
+            slug: Set(id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert tenant");
+    }
+
+    async fn insert_host_record(db: &DatabaseConnection, id: Uuid, tenant_id: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        host::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(id.to_string()),
+            hostname: Set("test-host".to_string()),
+            friendly_name: Set("Test Host".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host");
     }
 
     #[tokio::test]
@@ -294,6 +298,10 @@ mod tests {
         let host_id = uuid::Uuid::now_v7();
         let tenant_a = uuid::Uuid::now_v7();
         let tenant_b = uuid::Uuid::now_v7();
+
+        insert_tenant(&db, tenant_a).await;
+        insert_tenant(&db, tenant_b).await;
+        insert_host_record(&db, host_id, tenant_a).await;
 
         let service_a = service::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),

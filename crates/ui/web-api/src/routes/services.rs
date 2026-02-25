@@ -557,69 +557,36 @@ mod tests {
     use axum::Json;
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
-    use sea_orm::{
-        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
-        EntityTrait, Set,
-    };
+    use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set};
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{
         prelude::{AuthMethod, Service},
-        service,
+        service, tenant,
     };
 
-    async fn test_db() -> DatabaseConnection {
-        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
-        Database::connect(opt).await.expect("test db")
+    async fn setup_test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.expect("test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
+        db
     }
 
-    async fn setup_test_db() -> DatabaseConnection {
-        let db = test_db().await;
-
-        db.execute_unprepared(
-            "CREATE TABLE services (
-                id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
-                service_type TEXT NOT NULL,
-                hostname TEXT NOT NULL,
-                friendly_name TEXT NOT NULL,
-                ip_address TEXT,
-                status TEXT NOT NULL,
-                enrollment_secret_hash TEXT NOT NULL UNIQUE,
-                client_version TEXT,
-                last_seen_at INTEGER,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                deactivated_at INTEGER,
-                ping_interval_seconds INTEGER
-            )",
-        )
+    async fn insert_tenant(db: &DatabaseConnection, id: uuid::Uuid) {
+        let now = OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(id),
+            name: Set("Test Tenant".to_string()),
+            slug: Set(id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
         .await
-        .unwrap();
-
-        db.execute_unprepared(
-            "CREATE TABLE service_hosts (
-                service_id TEXT NOT NULL,
-                host_id TEXT NOT NULL,
-                linked_at INTEGER NOT NULL,
-                PRIMARY KEY (service_id, host_id)
-            )",
-        )
-        .await
-        .unwrap();
-
-        db.execute_unprepared(
-            "CREATE TABLE settings_version (
-                tenant_id TEXT PRIMARY KEY,
-                version INTEGER NOT NULL,
-                global_version INTEGER NOT NULL,
-                revocation_version INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            )",
-        )
-        .await
-        .unwrap();
-
-        db
+        .expect("insert tenant");
     }
 
     async fn test_state(db: DatabaseConnection, tenant_id: uuid::Uuid) -> Arc<AppState> {
@@ -735,12 +702,11 @@ mod tests {
         })
     }
 
-    #[tokio::test]
-    async fn merge_service_rolls_back_on_failure() {
-        let db = setup_test_db().await;
-        let tenant_id = uuid::Uuid::now_v7();
-        let state = test_state(db.clone(), tenant_id).await;
-
+    /// Helper: insert a pair of test services (approved target + pending source).
+    async fn insert_target_and_source(
+        db: &DatabaseConnection,
+        tenant_id: uuid::Uuid,
+    ) -> (service::Model, service::Model) {
         let now = OffsetDateTime::now_utc();
         let target = service::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
@@ -758,7 +724,7 @@ mod tests {
             deactivated_at: Set(None),
             ping_interval_seconds: Set(None),
         };
-        let target = target.insert(&db).await.unwrap();
+        let target = target.insert(db).await.unwrap();
 
         let source = service::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
@@ -776,14 +742,29 @@ mod tests {
             deactivated_at: Set(None),
             ping_interval_seconds: Set(None),
         };
-        let source = source.insert(&db).await.unwrap();
+        let source = source.insert(db).await.unwrap();
+
+        (target, source)
+    }
+
+    /// When the target agent is currently connected the merge must be rejected
+    /// with 409 CONFLICT and leave the source service completely unmodified.
+    #[tokio::test]
+    async fn merge_service_target_connected_returns_conflict() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let (target, source) = insert_target_and_source(&db, tenant_id).await;
+
+        // Register the target as connected — merge must be rejected before any DB changes.
+        let (_rx, _token) = state.service_connections.register_agent(target.id).await;
 
         let auth_user = AuthenticatedUser {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ManageAgents],
         };
-
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
         let response = merge_service(
@@ -797,8 +778,9 @@ mod tests {
         )
         .await;
 
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(response.status(), StatusCode::CONFLICT);
 
+        // Source must not have been touched.
         let source_after = Service::find_by_id(source.id)
             .one(&db)
             .await
@@ -806,5 +788,61 @@ mod tests {
             .unwrap();
         assert!(source_after.deactivated_at.is_none());
         assert_eq!(source_after.enrollment_secret_hash, "source-hash");
+    }
+
+    /// A merge of a valid pending source into an approved target must succeed:
+    /// the source is deactivated (with its hash invalidated) and the target
+    /// adopts the source's identity fields.
+    #[tokio::test]
+    async fn merge_service_succeeds_and_deactivates_source() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let (target, source) = insert_target_and_source(&db, tenant_id).await;
+
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ManageAgents],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = merge_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanManageAgents::new(auth_user),
+            Path(target.id.to_string()),
+            Json(MergeAgentRequest {
+                source_id: source.id,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Source must be deactivated and its original hash must be invalidated.
+        let source_after = Service::find_by_id(source.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            source_after.deactivated_at.is_some(),
+            "source must be deactivated after merge"
+        );
+        assert_ne!(
+            source_after.enrollment_secret_hash, "source-hash",
+            "source hash must be invalidated after merge"
+        );
+
+        // Target must have adopted the source's identity.
+        let target_after = Service::find_by_id(target.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(target_after.hostname, "source-host");
+        assert_eq!(target_after.enrollment_secret_hash, "source-hash");
     }
 }

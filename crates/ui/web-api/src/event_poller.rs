@@ -360,24 +360,15 @@ impl EventPoller {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{
-        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Schema,
-        Set,
-    };
+    use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, Set};
     use uptrakit_shared_db::entity::controller_event;
 
-    async fn test_db() -> DatabaseConnection {
-        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
-        Database::connect(opt).await.expect("test db")
-    }
-
     async fn setup_test_db() -> DatabaseConnection {
-        let db = test_db().await;
-        let schema = Schema::new(db.get_database_backend());
-        let stmt = schema.create_table_from_entity(controller_event::Entity);
-        db.execute(&stmt)
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.expect("test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
             .await
-            .expect("create controller_events table");
+            .expect("migrations");
         db
     }
 

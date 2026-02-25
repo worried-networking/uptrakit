@@ -866,92 +866,78 @@ fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
+    use sea_orm::{ConnectOptions, Database, DatabaseConnection};
     use uptrakit_shared_db::SoftwareDiscoveryState;
+    use uptrakit_shared_db::entity::{host, provider_config, tenant};
 
-    /// Create a minimal in-memory SQLite database with the tables used by the
-    /// autodiscovery query helpers.
     async fn setup_db() -> DatabaseConnection {
-        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let opt = ConnectOptions::new("sqlite::memory:");
         let db = Database::connect(opt).await.expect("test db");
-
-        db.execute_unprepared(
-            "CREATE TABLE software_items (
-                id              TEXT    PRIMARY KEY,
-                tenant_id       TEXT    NOT NULL,
-                name            TEXT    NOT NULL,
-                enabled         INTEGER NOT NULL DEFAULT 1,
-                discovery_state TEXT,
-                last_checked_at INTEGER,
-                created_at      INTEGER NOT NULL,
-                updated_at      INTEGER NOT NULL,
-                deactivated_at  INTEGER
-            )",
-        )
-        .await
-        .expect("create software_items");
-
-        // Composite PK (host_id, software_item_id) + unique constraint that
-        // mirrors the real schema.
-        db.execute_unprepared(
-            "CREATE TABLE host_software_items (
-                host_id                      TEXT    NOT NULL,
-                software_item_id             TEXT    NOT NULL,
-                provider_config_id           TEXT    NOT NULL,
-                package_identifier           TEXT    NOT NULL DEFAULT '',
-                config_override              TEXT,
-                installed_version            TEXT,
-                installed_version_detected_at INTEGER,
-                last_updated_at              INTEGER,
-                linked_at                    INTEGER NOT NULL,
-                PRIMARY KEY (host_id, software_item_id),
-                UNIQUE (host_id, provider_config_id, package_identifier)
-            )",
-        )
-        .await
-        .expect("create host_software_items");
-
-        db.execute_unprepared(
-            "CREATE TABLE autodiscovery_ignores (
-                id                  TEXT    PRIMARY KEY,
-                tenant_id           TEXT    NOT NULL,
-                provider_config_id  TEXT    NOT NULL,
-                package_identifier  TEXT    NOT NULL,
-                created_at          INTEGER NOT NULL,
-                UNIQUE (tenant_id, provider_config_id, package_identifier)
-            )",
-        )
-        .await
-        .expect("create autodiscovery_ignores");
-
-        db.execute_unprepared(
-            "CREATE TABLE provider_configs (
-                id              TEXT    PRIMARY KEY,
-                tenant_id       TEXT    NOT NULL,
-                name            TEXT    NOT NULL,
-                provider_type   TEXT    NOT NULL,
-                config          TEXT    NOT NULL DEFAULT '{}',
-                enabled         INTEGER NOT NULL DEFAULT 1,
-                created_at      INTEGER NOT NULL,
-                updated_at      INTEGER NOT NULL,
-                deactivated_at  INTEGER
-            )",
-        )
-        .await
-        .expect("create provider_configs");
-        // Partial unique index (only for active/non-deactivated rows) — mirrors the real schema.
-        db.execute_unprepared(
-            "CREATE UNIQUE INDEX uq_provider_configs_active_name \
-             ON provider_configs (tenant_id, name) \
-             WHERE deactivated_at IS NULL",
-        )
-        .await
-        .expect("create provider_configs unique index");
-
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
         db
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // ── FK-setup helpers ──────────────────────────────────────────────────────
+
+    async fn insert_tenant(db: &DatabaseConnection, id: Uuid) {
+        let now = time::OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(id),
+            name: Set("Test Tenant".to_string()),
+            slug: Set(id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert tenant");
+    }
+
+    async fn insert_host(db: &DatabaseConnection, id: Uuid, tenant_id: Uuid) {
+        let now = time::OffsetDateTime::now_utc();
+        host::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(id.to_string()),
+            hostname: Set("test-host".to_string()),
+            friendly_name: Set("Test Host".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host");
+    }
+
+    async fn insert_provider_config(db: &DatabaseConnection, id: Uuid, tenant_id: Uuid) {
+        let now = time::OffsetDateTime::now_utc();
+        provider_config::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            name: Set(format!("Test Provider {id}")),
+            provider_type: Set("homebrew".to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert provider_config");
+    }
+
+    // ── query helpers ─────────────────────────────────────────────────────────
 
     async fn insert_software_item(
         db: &DatabaseConnection,
@@ -1010,6 +996,9 @@ mod tests {
         let item_id = Uuid::now_v7();
         let pc_id = Uuid::now_v7();
 
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_provider_config(&db, pc_id, tenant_id).await;
         insert_software_item(&db, item_id, tenant_id, "git", None).await;
         insert_host_link(&db, host_id, item_id, pc_id, "git").await;
 
@@ -1045,6 +1034,10 @@ mod tests {
         let pc_id = Uuid::now_v7();
         let old_item_id = Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_provider_config(&db, pc_id, tenant_id).await;
 
         // Insert a discarded (deactivated) software item and its orphaned link —
         // the state that existed before this fix.
@@ -1105,6 +1098,10 @@ mod tests {
         let pc_id = Uuid::now_v7();
         let item_id = Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_provider_config(&db, pc_id, tenant_id).await;
 
         // Active software item with an existing host link at version 1.0.0.
         insert_software_item(&db, item_id, tenant_id, "wget", None).await;
@@ -1202,6 +1199,10 @@ mod tests {
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
         let result = phs_result_with_github("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
 
         process_phs_results(&db, tenant_id, host_id, now, &result)
@@ -1243,6 +1244,10 @@ mod tests {
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
         let result = phs_result_with_apt("grafana", "Grafana", "10.2.3", "grafana");
 
         process_phs_results(&db, tenant_id, host_id, now, &result)
@@ -1276,6 +1281,10 @@ mod tests {
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
         // The PHS provider emits `apt_package: "influxdb2"` for install-script items too.
         let result = phs_result_with_apt("influxdb2", "InfluxDB", "2.7.6", "influxdb2");
 
@@ -1335,6 +1344,10 @@ mod tests {
         let host1 = Uuid::now_v7();
         let host2 = Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host1, tenant_id).await;
+        insert_host(&db, host2, tenant_id).await;
 
         let result1 = phs_result_with_github("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
         let result2 = phs_result_with_github("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");

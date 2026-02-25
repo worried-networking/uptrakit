@@ -132,44 +132,16 @@ impl ApiTokenService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectOptions, ConnectionTrait, Database};
+    use sea_orm::{ConnectOptions, Database};
     use uptrakit_shared_db::MaskedEmail;
     use uptrakit_shared_db::entity::user;
 
     async fn setup_test_db() -> DatabaseConnection {
-        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let opt = ConnectOptions::new("sqlite::memory:");
         let db = Database::connect(opt).await.expect("test db");
-
-        db.execute_unprepared(
-            "CREATE TABLE users (
-                id TEXT PRIMARY KEY,
-                email TEXT UNIQUE NOT NULL,
-                first_name TEXT NOT NULL,
-                last_name TEXT NOT NULL,
-                password_hash TEXT,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                deactivated_at INTEGER,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            )",
-        )
-        .await
-        .unwrap();
-
-        db.execute_unprepared(
-            "CREATE TABLE api_tokens (
-                id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                token_hash TEXT UNIQUE NOT NULL,
-                created_at INTEGER NOT NULL,
-                last_used_at INTEGER,
-                revoked_at INTEGER,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            )",
-        )
-        .await
-        .unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
 
         let now = OffsetDateTime::now_utc();
         let test_user = user::ActiveModel {

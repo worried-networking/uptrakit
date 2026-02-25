@@ -155,19 +155,14 @@ impl RateLimitStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{
-        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Schema,
-        Set,
-    };
+    use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, Set};
 
     async fn test_db() -> DatabaseConnection {
-        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let opt = ConnectOptions::new("sqlite::memory:");
         let db = Database::connect(opt).await.expect("test db");
-
-        let schema = Schema::new(db.get_database_backend());
-        let stmt = schema.create_table_from_entity(ApiRateLimit);
-        db.execute(&stmt).await.expect("create table");
-
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
         db
     }
 

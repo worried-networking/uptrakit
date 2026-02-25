@@ -231,55 +231,18 @@ impl SessionService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectOptions, ConnectionTrait, Database};
+    use sea_orm::{ConnectOptions, Database};
     use uptrakit_shared_db::MaskedEmail;
     use uptrakit_shared_db::entity::user;
 
-    async fn test_db() -> DatabaseConnection {
-        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
-        Database::connect(opt).await.expect("test db")
-    }
-
     async fn setup_test_db() -> DatabaseConnection {
-        let db = test_db().await;
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.expect("test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
 
-        // Create tables (using raw SQL for tests)
-        db.execute_unprepared(
-            "CREATE TABLE users (
-                id TEXT PRIMARY KEY,
-                email TEXT UNIQUE NOT NULL,
-                first_name TEXT NOT NULL,
-                last_name TEXT NOT NULL,
-                password_hash TEXT,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                deactivated_at INTEGER,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            )",
-        )
-        .await
-        .unwrap();
-
-        db.execute_unprepared(
-            "CREATE TABLE sessions (
-                id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                refresh_token_hash TEXT UNIQUE NOT NULL,
-                auth_method TEXT NOT NULL,
-                oidc_provider_id TEXT,
-                token_type TEXT NOT NULL DEFAULT 'refresh_token',
-                created_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL,
-                revoked_at INTEGER,
-                user_agent TEXT,
-                ip_address TEXT,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )",
-        )
-        .await
-        .unwrap();
-
-        // Insert test user using entity
+        // Insert test user
         let now = OffsetDateTime::now_utc();
         let test_user = user::ActiveModel {
             id: Set(generate_uuid()),
@@ -499,15 +462,15 @@ mod tests {
         assert!(result.is_err(), "rotating already-rotated token must fail");
     }
 
+    /// The schema enforces `CHECK(auth_method != 'oidc' OR oidc_provider_id IS NOT NULL)`.
+    /// Inserting a session with `auth_method = 'oidc'` and a NULL `oidc_provider_id` must be
+    /// rejected at the database level, guaranteeing that the application-level verification
+    /// code path for corrupted OIDC sessions is never reachable in practice.
     #[tokio::test]
-    async fn test_corrupted_oidc_session_rejected() {
+    async fn test_corrupted_oidc_session_rejected_at_db_level() {
         let db = setup_test_db().await;
-        let service = SessionService::new(db.clone());
 
         let user = User::find().one(&db).await.unwrap().unwrap();
-
-        // Manually insert a session with auth_method = "oidc" but
-        // oidc_provider_id = NULL (corrupted data).
         let token = generate_secure_token().unwrap();
         let token_hash = hash_token(&token);
         let now = OffsetDateTime::now_utc();
@@ -518,7 +481,7 @@ mod tests {
             user_id: Set(user.id),
             refresh_token_hash: Set(token_hash),
             auth_method: Set("oidc".to_string()),
-            oidc_provider_id: Set(None), // corrupted: OIDC session without provider
+            oidc_provider_id: Set(None), // violates CHECK constraint
             token_type: Set(SessionTokenType::RefreshToken),
             created_at: Set(now),
             expires_at: Set(expires_at),
@@ -526,49 +489,11 @@ mod tests {
             user_agent: Set(None),
             ip_address: Set(None),
         };
-        corrupted_session.insert(&db).await.unwrap();
 
-        // Verification must fail with InvalidSession, not silently downgrade
-        let result = service.verify_refresh_token(&token).await;
+        let result = corrupted_session.insert(&db).await;
         assert!(
             result.is_err(),
-            "corrupted OIDC session must be rejected, not silently downgraded to password"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_corrupted_oidc_session_rotation_rejected() {
-        let db = setup_test_db().await;
-        let service = SessionService::new(db.clone());
-
-        let user = User::find().one(&db).await.unwrap().unwrap();
-
-        // Manually insert a corrupted OIDC session
-        let token = generate_secure_token().unwrap();
-        let token_hash = hash_token(&token);
-        let now = OffsetDateTime::now_utc();
-        let expires_at = now + Duration::days(REFRESH_TOKEN_EXPIRY_DAYS);
-
-        let corrupted_session = session::ActiveModel {
-            id: Set(generate_uuid()),
-            user_id: Set(user.id),
-            refresh_token_hash: Set(token_hash),
-            auth_method: Set("oidc".to_string()),
-            oidc_provider_id: Set(None),
-            token_type: Set(SessionTokenType::RefreshToken),
-            created_at: Set(now),
-            expires_at: Set(expires_at),
-            revoked_at: Set(None),
-            user_agent: Set(None),
-            ip_address: Set(None),
-        };
-        corrupted_session.insert(&db).await.unwrap();
-
-        // Rotation must also fail for corrupted sessions
-        let result = service.rotate_refresh_token(&token).await;
-        assert!(
-            result.is_err(),
-            "corrupted OIDC session must be rejected during rotation"
+            "DB CHECK constraint must prevent inserting a corrupted OIDC session"
         );
     }
 }
