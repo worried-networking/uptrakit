@@ -244,7 +244,10 @@ Main functionality that delivers the core value proposition.
 - [x] Controller `DiscoveryResults` handler with auto-creation of `ProviderConfig` records
 - [x] `ProviderType::supports_discovery()` capability check
 - [x] Homebrew: discover all (formulae + casks) when `package_type = None`; set `extra` metadata
-- [x] Proxmox Helper Scripts: refactor to discovery-only (script analysis, GitHub/APT upstream detection, controller-side config synthesis)
+- [ ] Proxmox Helper Scripts: move synthesis responsibility into providers
+  - [ ] Provider discovery response must declare final tracking target (`provider_type`, config identity/selection key, package identifier)
+  - [ ] Web API autodiscovery consumer must rely on provider response contract instead of provider-specific synthesis logic
+  - [ ] Remove controller-side PHS-specific synthesis branching after provider contract is implemented
 - [x] REST API for autodiscovery
   - [x] `POST /api/v1/software-items/{id}/approve`
   - [x] `POST /api/v1/hosts/{id}/discover`
