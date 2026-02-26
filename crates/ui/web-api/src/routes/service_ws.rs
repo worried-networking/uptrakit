@@ -629,9 +629,7 @@ async fn handle_authenticated(
         return;
     }
 
-    // Dispatch to capability-specific authenticated handler.
-    let has_mqtt = capabilities.contains(&Capability::MqttBridge);
-    let has_ssh = capabilities.contains(&Capability::SshRemote);
+    // Dispatch to unified capability-gated authenticated handler.
     let ctx = AuthenticatedContext {
         service_id,
         cert: cert_id,
@@ -639,19 +637,13 @@ async fn handle_authenticated(
         out_seq,
         in_seq,
     };
-    if has_mqtt {
-        super::mqtt_ws::handle_mqtt_authenticated(&mut sink, &mut stream, &state, ctx).await;
-    } else if has_ssh {
-        super::ssh_agent_ws::handle_ssh_agent_authenticated(
-            &mut sink,
-            &mut stream,
-            &state,
-            ctx,
-        )
-        .await;
-    } else {
-        super::agent_ws::handle_agent_authenticated(&mut sink, &mut stream, &state, ctx).await;
-    }
+    super::service_handler::handle_authenticated_loop(
+        &mut sink,
+        &mut stream,
+        &state,
+        ctx,
+    )
+    .await;
 }
 
 // ---------------------------------------------------------------------------
@@ -714,42 +706,16 @@ async fn handle_enrolled(
         }
     }
 
-    // Dispatch to capability-specific enrolled loop.
-    use crate::service_profile::parse_capabilities;
-    let capabilities = parse_capabilities(&service.capabilities);
-    if capabilities.contains(&Capability::MqttBridge) {
-        super::mqtt_ws::handle_mqtt_enrolled(
-            &mut sink,
-            &mut stream,
-            &state,
-            service_id,
-            service.status == service_entity::ServiceStatus::Approved,
-            out_seq,
-            in_seq,
-        )
-        .await;
-    } else if capabilities.contains(&Capability::SshRemote) {
-        super::ssh_agent_ws::handle_ssh_agent_enrolled(
-            &mut sink,
-            &mut stream,
-            &state,
-            service_id,
-            service.status == service_entity::ServiceStatus::Approved,
-            out_seq,
-            in_seq,
-        )
-        .await;
-    } else {
-        super::agent_ws::handle_agent_enrolled(
-            &mut sink,
-            &mut stream,
-            &state,
-            service_id,
-            out_seq,
-            in_seq,
-        )
-        .await;
-    }
+    // Dispatch to unified enrolled loop.
+    super::service_handler::handle_enrolled_loop(
+        &mut sink,
+        &mut stream,
+        &state,
+        service_id,
+        out_seq,
+        in_seq,
+    )
+    .await;
 
     tracing::debug!(%service_id, "enrolled service disconnected");
 }
@@ -784,7 +750,7 @@ async fn handle_anonymous(
     let deadline = tokio::time::Instant::now() + ANONYMOUS_TIMEOUT;
 
     // Wait for first message -- must be Enroll.
-    let (service_id, enroll_capabilities, initial_approved) = loop {
+    let (service_id, _enroll_capabilities, _initial_approved) = loop {
         let msg = match tokio::time::timeout_at(deadline, stream.next()).await {
             Ok(Some(Ok(m))) => m,
             Ok(Some(Err(e))) => {
@@ -822,18 +788,8 @@ async fn handle_anonymous(
                 match service_msg {
                     ServiceMessage::Enroll(payload) => {
                         let caps = payload.capabilities.clone();
-                        let has_mqtt =
-                            caps.contains(&Capability::MqttBridge);
-                        let has_ssh =
-                            caps.contains(&Capability::SshRemote);
-
-                        let enrollment_result = if has_mqtt {
-                            enroll_mqtt(&state, &payload, client_ip, &mut sink, out_seq).await
-                        } else if has_ssh {
-                            enroll_ssh_agent(&state, &payload, client_ip, &mut sink, out_seq).await
-                        } else {
-                            enroll_agent(&state, &payload, client_ip, &mut sink, out_seq).await
-                        };
+                        let enrollment_result =
+                            enroll_service(&state, &payload, client_ip, &mut sink, out_seq).await;
 
                         match enrollment_result {
                             Some((id, approved)) => {
@@ -859,61 +815,30 @@ async fn handle_anonymous(
         }
     };
 
-    // Dispatch to capability-specific enrolled loop.
-    if enroll_capabilities.contains(&Capability::MqttBridge) {
-        super::mqtt_ws::handle_mqtt_enrolled(
-            &mut sink,
-            &mut stream,
-            &state,
-            service_id,
-            initial_approved,
-            out_seq,
-            in_seq,
-        )
-        .await;
-    } else if enroll_capabilities.contains(&Capability::SshRemote) {
-        super::ssh_agent_ws::handle_ssh_agent_enrolled(
-            &mut sink,
-            &mut stream,
-            &state,
-            service_id,
-            initial_approved,
-            out_seq,
-            in_seq,
-        )
-        .await;
-    } else {
-        // Register in connection registry.
-        let (mut push_rx, cancel_token) =
-            state
-                .service_connections
-                .register(service_id, enroll_capabilities.clone(), None, None)
-                .await;
-        super::agent_ws::run_agent_enrolled_loop(
-            &mut sink,
-            &mut stream,
-            (&mut push_rx, &cancel_token),
-            &state,
-            service_id,
-            out_seq,
-            in_seq,
-        )
-        .await;
-        if !cancel_token.is_cancelled() {
-            state.service_connections.unregister(&service_id).await;
-        }
-    }
+    // Dispatch to unified enrolled loop.
+    super::service_handler::handle_enrolled_loop(
+        &mut sink,
+        &mut stream,
+        &state,
+        service_id,
+        out_seq,
+        in_seq,
+    )
+    .await;
 
     tracing::debug!(%service_id, "anonymous->enrolled service disconnected");
 }
 
 // ---------------------------------------------------------------------------
-// Agent enrollment
+// Enrollment
 // ---------------------------------------------------------------------------
 
-/// Perform agent enrollment. Returns `(service_id, approved)` on success, or
+/// Perform service enrollment. Returns `(service_id, approved)` on success, or
 /// `None` if enrollment failed (error already sent to client).
-async fn enroll_agent(
+///
+/// Uses the unified `do_enroll` which stores whatever capabilities the service
+/// declares in its `EnrollPayload`.
+async fn enroll_service(
     state: &Arc<AppState>,
     payload: &uptrakit_internal_wire::EnrollPayload,
     client_ip: Option<std::net::IpAddr>,
@@ -956,7 +881,7 @@ async fn enroll_agent(
             tracing::info!(
                 %service_id,
                 ?wire_status,
-                "agent enrolled via WS"
+                "service enrolled via WS"
             );
 
             let approved = enroll_result.status == ServiceStatus::Approved;
@@ -983,155 +908,6 @@ async fn enroll_agent(
     }
 }
 
-// ---------------------------------------------------------------------------
-// MQTT enrollment
-// ---------------------------------------------------------------------------
-
-/// Perform MQTT service enrollment. Returns `(service_id, approved)` on
-/// success, or `None` if enrollment failed (error already sent to client).
-async fn enroll_mqtt(
-    state: &Arc<AppState>,
-    payload: &uptrakit_internal_wire::EnrollPayload,
-    client_ip: Option<IpAddr>,
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    out_seq: &mut OutgoingSeq,
-) -> Option<(uuid::Uuid, bool)> {
-    let result = super::mqtt_ws::do_mqtt_service_enroll(
-        state.db(),
-        &state.settings,
-        state.default_tenant_id,
-        &payload.hostname,
-        &payload.friendly_name,
-        payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
-        client_ip,
-    )
-    .await;
-
-    match result {
-        Ok(enroll_result) => {
-            let service_id = enroll_result.service.id;
-            let wire_status = match enroll_result.status {
-                service_entity::ServiceStatus::Approved => {
-                    uptrakit_internal_wire::EnrollmentStatus::Approved
-                }
-                _ => uptrakit_internal_wire::EnrollmentStatus::Pending,
-            };
-            let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
-                service_id,
-                enrollment_secret: uptrakit_internal_wire::SecretString::new(
-                    enroll_result.enrollment_secret,
-                ),
-                status: wire_status,
-            });
-            let json = serialize_controller_msg(out_seq, enrolled_msg)?;
-            if sink.send(Message::Text(json.into())).await.is_err() {
-                return None;
-            }
-
-            tracing::info!(
-                %service_id,
-                ?wire_status,
-                "MQTT service enrolled via WS"
-            );
-
-            let approved = enroll_result.status == service_entity::ServiceStatus::Approved;
-            if approved {
-                let approved_msg = ControllerMessage::Approved(ApprovedPayload { service_id });
-                let json = serialize_controller_msg(out_seq, approved_msg)?;
-                if sink.send(Message::Text(json.into())).await.is_err() {
-                    return None;
-                }
-            }
-
-            Some((service_id, approved))
-        }
-        Err(e) => {
-            let err = ControllerMessage::Error(ErrorPayload {
-                code: ErrorCode::EnrollmentFailed,
-                message: e.to_string(),
-            });
-            if let Some(json) = serialize_controller_msg(out_seq, err) {
-                let _ = sink.send(Message::Text(json.into())).await;
-            }
-            None
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SSH agent enrollment
-// ---------------------------------------------------------------------------
-
-/// Perform SSH agent service enrollment. Returns `(service_id, approved)` on
-/// success, or `None` if enrollment failed (error already sent to client).
-async fn enroll_ssh_agent(
-    state: &Arc<AppState>,
-    payload: &uptrakit_internal_wire::EnrollPayload,
-    client_ip: Option<IpAddr>,
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    out_seq: &mut OutgoingSeq,
-) -> Option<(uuid::Uuid, bool)> {
-    let result = super::ssh_agent_ws::do_ssh_agent_enroll(
-        state.db(),
-        &state.settings,
-        state.default_tenant_id,
-        &payload.hostname,
-        &payload.friendly_name,
-        payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
-        client_ip,
-    )
-    .await;
-
-    match result {
-        Ok(enroll_result) => {
-            let service_id = enroll_result.service.id;
-            let wire_status = match enroll_result.status {
-                service_entity::ServiceStatus::Approved => {
-                    uptrakit_internal_wire::EnrollmentStatus::Approved
-                }
-                _ => uptrakit_internal_wire::EnrollmentStatus::Pending,
-            };
-            let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
-                service_id,
-                enrollment_secret: uptrakit_internal_wire::SecretString::new(
-                    enroll_result.enrollment_secret,
-                ),
-                status: wire_status,
-            });
-            let json = serialize_controller_msg(out_seq, enrolled_msg)?;
-            if sink.send(Message::Text(json.into())).await.is_err() {
-                return None;
-            }
-
-            tracing::info!(
-                %service_id,
-                ?wire_status,
-                "SSH agent enrolled via WS"
-            );
-
-            let approved = enroll_result.status == service_entity::ServiceStatus::Approved;
-            if approved {
-                let approved_msg = ControllerMessage::Approved(ApprovedPayload { service_id });
-                let json = serialize_controller_msg(out_seq, approved_msg)?;
-                if sink.send(Message::Text(json.into())).await.is_err() {
-                    return None;
-                }
-            }
-
-            Some((service_id, approved))
-        }
-        Err(e) => {
-            let err = ControllerMessage::Error(ErrorPayload {
-                code: ErrorCode::EnrollmentFailed,
-                message: e.to_string(),
-            });
-            if let Some(json) = serialize_controller_msg(out_seq, err) {
-                let _ = sink.send(Message::Text(json.into())).await;
-            }
-            None
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

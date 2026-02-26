@@ -27,9 +27,7 @@ pub mod software_items;
 pub mod system_alerts;
 pub mod update_history;
 
-// Internal implementation modules for service-type-specific WebSocket handling.
-// These are used by `service_ws` and are not intended to be referenced directly
-// from the router.
-pub(crate) mod agent_ws;
-pub(crate) mod mqtt_ws;
-pub(crate) mod ssh_agent_ws;
+// Unified capability-gated WebSocket handler. Replaces the former per-service-type
+// modules (agent_ws, mqtt_ws, ssh_agent_ws) with a single module that dispatches
+// based on persisted capabilities.
+pub(crate) mod service_handler;
