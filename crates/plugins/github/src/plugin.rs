@@ -9,7 +9,7 @@ use uptrakit_plugin_core::mpsc;
 
 use uptrakit_plugin_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
 use uptrakit_plugin_core::{
-    OutputStreamType, Plugin, PluginError, PluginType, ReleaseAsset, ReleaseInfo,
+    OutputStreamType, Plugin, PluginCapability, PluginError, PluginType, ReleaseAsset, ReleaseInfo,
     UpdateOutputLine, UpstreamRelease, Version,
 };
 
@@ -189,6 +189,10 @@ impl GitHubPlugin {
 impl Plugin for GitHubPlugin {
     fn plugin_type(&self) -> PluginType {
         PluginType::GithubReleases
+    }
+
+    fn capabilities(&self) -> &'static [PluginCapability] {
+        &[PluginCapability::ControllerSideFetchReleases]
     }
 
     async fn fetch_releases(

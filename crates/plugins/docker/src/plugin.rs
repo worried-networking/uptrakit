@@ -119,7 +119,10 @@ impl Plugin for DockerPlugin {
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
-        &[PluginCapability::DiscoverLocalSoftware]
+        &[
+            PluginCapability::DiscoverLocalSoftware,
+            PluginCapability::ControllerSideFetchReleases,
+        ]
     }
 
     async fn fetch_releases(
