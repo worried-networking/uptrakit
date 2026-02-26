@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
-use uptrakit_internal_wire::PluginType;
-use uptrakit_plugin_registry::{PluginCapability, PluginRegistry};
+use uptrakit_internal_wire::PluginAssignment;
+use uptrakit_plugin_registry::PluginRegistry;
 
 use crate::connection_context::ConnectionContext;
 
@@ -18,79 +18,122 @@ pub struct VersionCheckOutcome {
 }
 
 /// Check the installed version (and optionally the latest version) for a
-/// software item.
+/// software item using role-based plugin assignments.
 ///
-/// If the plugin supports `RefreshPackageIndex`, the latest available version
-/// is also fetched via `fetch_releases()`. For plugins that resolve latest
-/// versions on the controller side, `latest_version` will be `None`.
+/// - `detect`: plugin assignment for detecting the installed version. If `None`,
+///   `installed_version` will be `None` in the outcome.
+/// - `fetch`: plugin assignment for fetching the latest available version from
+///   a local package index. If `None`, `latest_version` will be `None`.
 ///
 /// The `ctx` parameter is used to inject connection-specific overrides (e.g.
 /// a remote Docker host for the SSH agent) into the plugin config before
 /// instantiation.
 pub async fn check_version(
-    plugin_type: PluginType,
-    config: &serde_json::Value,
-    package_identifier: &str,
+    detect: Option<&PluginAssignment>,
+    fetch: Option<&PluginAssignment>,
     executor: Arc<dyn CommandExecutor>,
     ctx: &ConnectionContext,
 ) -> VersionCheckOutcome {
-    tracing::debug!(plugin_type = ?plugin_type, package_identifier, "checking version");
-
-    let mut effective_config = config.clone();
-    ctx.apply_to_config(&plugin_type, &mut effective_config);
-
-    let plugin = match PluginRegistry::create_plugin(plugin_type, &effective_config, executor) {
-        Ok(p) => p,
-        Err(e) => {
-            return VersionCheckOutcome {
-                installed_version: None,
-                latest_version: None,
-                error: Some(e.to_string()),
-            };
-        }
-    };
-
-    tracing::debug!("detecting installed version");
-    let installed_version = match plugin.detect_installed_version(package_identifier).await {
-        Ok(Some(version)) => {
-            tracing::debug!(version = %version, "installed version detected");
-            Some(version.to_string())
-        }
-        Ok(None) => {
-            tracing::debug!("no installed version detected");
-            None
-        }
-        Err(e) => {
-            return VersionCheckOutcome {
-                installed_version: None,
-                latest_version: None,
-                error: Some(format!("detection failed: {e}")),
-            };
-        }
-    };
-
-    // For plugins that can resolve latest versions locally (e.g., Homebrew),
-    // also fetch the latest available version from the package index.
-    let latest_version = if plugin.has_capability(PluginCapability::RefreshPackageIndex) {
-        tracing::debug!("fetching releases from plugin");
-        match plugin.fetch_releases(package_identifier).await {
-            Ok(releases) => {
-                tracing::debug!(count = releases.len(), "releases fetched");
-                releases.first().map(|r| r.version.to_string())
-            }
-            Err(e) => {
-                tracing::debug!(error = %e, "failed to fetch latest version from plugin");
-                None
-            }
-        }
+    let installed_version = if let Some(assignment) = detect {
+        detect_installed(assignment, Arc::clone(&executor), ctx).await
     } else {
-        None
+        Ok(None)
+    };
+
+    let (installed_version, detect_error) = match installed_version {
+        Ok(v) => (v, None),
+        Err(e) => (None, Some(e)),
+    };
+
+    let latest_version = if let Some(assignment) = fetch {
+        fetch_latest(assignment, Arc::clone(&executor), ctx).await
+    } else {
+        Ok(None)
+    };
+
+    let (latest_version, fetch_error) = match latest_version {
+        Ok(v) => (v, None),
+        Err(e) => (None, Some(e)),
+    };
+
+    // Combine errors if both roles failed.
+    let error = match (detect_error, fetch_error) {
+        (Some(d), Some(f)) => Some(format!("detect: {d}; fetch: {f}")),
+        (Some(d), None) => Some(d),
+        (None, Some(f)) => Some(f),
+        (None, None) => None,
     };
 
     VersionCheckOutcome {
         installed_version,
         latest_version,
-        error: None,
+        error,
+    }
+}
+
+/// Detect the installed version using a specific plugin assignment.
+async fn detect_installed(
+    assignment: &PluginAssignment,
+    executor: Arc<dyn CommandExecutor>,
+    ctx: &ConnectionContext,
+) -> Result<Option<String>, String> {
+    tracing::debug!(
+        plugin_type = ?assignment.plugin_type,
+        package = %assignment.package_identifier,
+        "detecting installed version"
+    );
+
+    let mut effective_config = assignment.config.clone();
+    ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
+
+    let plugin =
+        PluginRegistry::create_plugin(assignment.plugin_type.clone(), &effective_config, executor)
+            .map_err(|e| e.to_string())?;
+
+    match plugin
+        .detect_installed_version(&assignment.package_identifier)
+        .await
+    {
+        Ok(Some(version)) => {
+            tracing::debug!(version = %version, "installed version detected");
+            Ok(Some(version.to_string()))
+        }
+        Ok(None) => {
+            tracing::debug!("no installed version detected");
+            Ok(None)
+        }
+        Err(e) => Err(format!("detection failed: {e}")),
+    }
+}
+
+/// Fetch the latest available version using a specific plugin assignment.
+async fn fetch_latest(
+    assignment: &PluginAssignment,
+    executor: Arc<dyn CommandExecutor>,
+    ctx: &ConnectionContext,
+) -> Result<Option<String>, String> {
+    tracing::debug!(
+        plugin_type = ?assignment.plugin_type,
+        package = %assignment.package_identifier,
+        "fetching releases"
+    );
+
+    let mut effective_config = assignment.config.clone();
+    ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
+
+    let plugin =
+        PluginRegistry::create_plugin(assignment.plugin_type.clone(), &effective_config, executor)
+            .map_err(|e| e.to_string())?;
+
+    match plugin.fetch_releases(&assignment.package_identifier).await {
+        Ok(releases) => {
+            tracing::debug!(count = releases.len(), "releases fetched");
+            Ok(releases.first().map(|r| r.version.to_string()))
+        }
+        Err(e) => {
+            tracing::debug!(error = %e, "failed to fetch latest version from plugin");
+            Err(format!("fetch_releases failed: {e}"))
+        }
     }
 }
 
@@ -98,6 +141,7 @@ pub async fn check_version(
 mod tests {
     use super::*;
     use uptrakit_command::LocalCommandExecutor;
+    use uptrakit_internal_wire::PluginType;
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
@@ -107,20 +151,19 @@ mod tests {
         ConnectionContext::default()
     }
 
+    fn gh_assignment() -> PluginAssignment {
+        PluginAssignment {
+            plugin_type: PluginType::GithubReleases,
+            package_identifier: "octocat/hello-world".to_string(),
+            config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
+        }
+    }
+
     #[tokio::test]
     async fn check_version_github_stub_returns_none() {
-        let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
-        let outcome = check_version(
-            PluginType::GithubReleases,
-            &config,
-            "octocat/hello-world",
-            test_executor(),
-            &no_ctx(),
-        )
-        .await;
+        let assignment = gh_assignment();
+        let outcome =
+            check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         // Stub implementation returns None for installed_version
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
@@ -129,16 +172,13 @@ mod tests {
 
     #[tokio::test]
     async fn check_version_docker_stub_returns_none() {
-        // Empty config — valid for Docker
-        let config = serde_json::json!({});
-        let outcome = check_version(
-            PluginType::Docker,
-            &config,
-            "nginx",
-            test_executor(),
-            &no_ctx(),
-        )
-        .await;
+        let assignment = PluginAssignment {
+            plugin_type: PluginType::Docker,
+            package_identifier: "nginx".to_string(),
+            config: serde_json::json!({}),
+        };
+        let outcome =
+            check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_none());
@@ -147,17 +187,13 @@ mod tests {
     #[tokio::test]
     async fn check_version_proxmox_is_discovery_only() {
         // PHS is discovery-only; `detect_installed_version` is not supported.
-        // Version detection is delegated to the synthesised GitHub/APT plugin
-        // config that the controller creates from the PHS `extra` metadata.
-        let config = serde_json::json!({});
-        let outcome = check_version(
-            PluginType::ProxmoxHelperScripts,
-            &config,
-            "booklore",
-            test_executor(),
-            &no_ctx(),
-        )
-        .await;
+        let assignment = PluginAssignment {
+            plugin_type: PluginType::ProxmoxHelperScripts,
+            package_identifier: "booklore".to_string(),
+            config: serde_json::json!({}),
+        };
+        let outcome =
+            check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         // The trait default returns an error for unsupported operations.
@@ -166,17 +202,13 @@ mod tests {
 
     #[tokio::test]
     async fn check_version_github_invalid_config() {
-        let config = serde_json::json!({
-            "invalid": "config"
-        });
-        let outcome = check_version(
-            PluginType::GithubReleases,
-            &config,
-            "octocat/hello-world",
-            test_executor(),
-            &no_ctx(),
-        )
-        .await;
+        let assignment = PluginAssignment {
+            plugin_type: PluginType::GithubReleases,
+            package_identifier: "octocat/hello-world".to_string(),
+            config: serde_json::json!({"invalid": "config"}),
+        };
+        let outcome =
+            check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.error.is_some());
         assert!(outcome.error.unwrap().contains("failed to parse"));
@@ -184,8 +216,13 @@ mod tests {
 
     #[tokio::test]
     async fn check_version_homebrew_default_returns_none() {
-        let config = serde_json::json!({});
-        let outcome = check_version(PluginType::Homebrew, &config, "", test_executor(), &no_ctx()).await;
+        let assignment = PluginAssignment {
+            plugin_type: PluginType::Homebrew,
+            package_identifier: String::new(),
+            config: serde_json::json!({}),
+        };
+        let outcome =
+            check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_some());
@@ -193,7 +230,11 @@ mod tests {
 
     #[tokio::test]
     async fn check_version_docker_context_injects_docker_host() {
-        let config = serde_json::json!({});
+        let assignment = PluginAssignment {
+            plugin_type: PluginType::Docker,
+            package_identifier: "nginx".to_string(),
+            config: serde_json::json!({}),
+        };
         let ctx = ConnectionContext {
             docker_host_override: Some("ssh://user@host:2222".to_string()),
             ssh_key_path: None,
@@ -201,15 +242,17 @@ mod tests {
         // With a valid docker host override, the plugin is created with the
         // injected host. The check itself will fail (no daemon) but that proves
         // the injection path runs without panicking.
-        let outcome = check_version(
-            PluginType::Docker,
-            &config,
-            "nginx",
-            test_executor(),
-            &ctx,
-        )
-        .await;
-        // We don't assert success — just that it didn't crash with bad injection
+        let outcome =
+            check_version(Some(&assignment), None, test_executor(), &ctx).await;
         let _ = outcome;
+    }
+
+    #[tokio::test]
+    async fn check_version_no_assignments_returns_empty() {
+        let outcome =
+            check_version(None, None, test_executor(), &no_ctx()).await;
+        assert!(outcome.installed_version.is_none());
+        assert!(outcome.latest_version.is_none());
+        assert!(outcome.error.is_none());
     }
 }

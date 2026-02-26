@@ -155,27 +155,34 @@ pub async fn handle_check_versions(
 
     // Pre-refresh package indexes for plugin types that support it.
     // Deduplicate by plugin type so we only refresh once per type.
+    // Look at both detect_version and fetch_releases assignments.
     {
         let mut refreshed_types = std::collections::HashSet::new();
         for assignment in &payload.assignments {
-            if refreshed_types.contains(&assignment.plugin_type) {
-                continue;
-            }
-            let mut effective_config = assignment.config.clone();
-            ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
-
-            if let Ok(plugin) = uptrakit_plugin_registry::PluginRegistry::create_plugin(
-                assignment.plugin_type.clone(),
-                &effective_config,
-                Arc::clone(&executor),
-            ) && plugin
-                .has_capability(uptrakit_plugin_registry::PluginCapability::RefreshPackageIndex)
+            for plugin_assignment in assignment
+                .detect_version
+                .iter()
+                .chain(assignment.fetch_releases.iter())
             {
-                tracing::info!(plugin_type = %assignment.plugin_type, "refreshing package index");
-                if let Err(e) = plugin.refresh_package_index().await {
-                    tracing::warn!(plugin_type = %assignment.plugin_type, error = %e, "failed to refresh package index");
+                if refreshed_types.contains(&plugin_assignment.plugin_type) {
+                    continue;
                 }
-                refreshed_types.insert(assignment.plugin_type.clone());
+                let mut effective_config = plugin_assignment.config.clone();
+                ctx.apply_to_config(&plugin_assignment.plugin_type, &mut effective_config);
+
+                if let Ok(plugin) = uptrakit_plugin_registry::PluginRegistry::create_plugin(
+                    plugin_assignment.plugin_type.clone(),
+                    &effective_config,
+                    Arc::clone(&executor),
+                ) && plugin.has_capability(
+                    uptrakit_plugin_registry::PluginCapability::RefreshPackageIndex,
+                ) {
+                    tracing::info!(plugin_type = %plugin_assignment.plugin_type, "refreshing package index");
+                    if let Err(e) = plugin.refresh_package_index().await {
+                        tracing::warn!(plugin_type = %plugin_assignment.plugin_type, error = %e, "failed to refresh package index");
+                    }
+                    refreshed_types.insert(plugin_assignment.plugin_type.clone());
+                }
             }
         }
     }
@@ -189,13 +196,11 @@ pub async fn handle_check_versions(
                 tracing::debug!(
                     software_item_id = %assignment.software_item_id,
                     name = %assignment.name,
-                    plugin_type = %assignment.plugin_type,
                     "checking version"
                 );
                 let outcome = crate::version_check::check_version(
-                    assignment.plugin_type,
-                    &assignment.config,
-                    &assignment.package_identifier,
+                    assignment.detect_version.as_ref(),
+                    assignment.fetch_releases.as_ref(),
                     executor,
                     &ctx,
                 )
@@ -261,12 +266,15 @@ pub async fn handle_execute_update(
         return;
     }
 
-    // Apply connection context to the plugin config
+    // Apply connection context to the plugin configs
     let mut effective_payload = payload.clone();
     ctx.apply_to_config(
-        &effective_payload.plugin_type,
-        &mut effective_payload.plugin_config,
+        &effective_payload.execute_update_plugin.plugin_type,
+        &mut effective_payload.execute_update_plugin.config,
     );
+    if let Some(ref mut detect) = effective_payload.detect_version_plugin {
+        ctx.apply_to_config(&detect.plugin_type, &mut detect.config);
+    }
 
     // Create a channel for output streaming
     let (output_tx, output_rx) =

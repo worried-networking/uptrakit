@@ -250,16 +250,18 @@ pub async fn execute_update(
 }
 
 /// Detect the current version of a software item by delegating to the plugin registry.
+///
+/// Uses the `detect_version_plugin` from the payload if available.
 async fn detect_current_version(
     payload: &ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
 ) -> Option<String> {
-    // The connection context has already been merged into payload.plugin_config
+    // The connection context has already been merged into the plugin config
     // by the caller before the update task was spawned.
+    let detect_assignment = payload.detect_version_plugin.as_ref();
     let outcome = crate::version_check::check_version(
-        payload.plugin_type.clone(),
-        &payload.plugin_config,
-        &payload.package_identifier,
+        detect_assignment,
+        None,
         executor,
         &crate::connection_context::ConnectionContext::default(),
     )
@@ -288,15 +290,12 @@ async fn execute_plugin_update(
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
     executor: Arc<dyn CommandExecutor>,
 ) -> UpdateResult<String> {
-    let plugin = PluginRegistry::create_plugin(
-        payload.plugin_type.clone(),
-        &payload.plugin_config,
-        executor,
-    )
-    .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
+    let eu = &payload.execute_update_plugin;
+    let plugin = PluginRegistry::create_plugin(eu.plugin_type.clone(), &eu.config, executor)
+        .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
 
     let hook_ctx = UpdateHookContext {
-        package_identifier: payload.package_identifier.clone(),
+        package_identifier: eu.package_identifier.clone(),
         to_version: payload.to_version.clone(),
         release_info: payload.release_info.clone(),
     };
@@ -342,7 +341,7 @@ async fn execute_plugin_update(
     let (plugin_tx, bridge_handle) = make_bridge(output_tx);
     let update_result = plugin
         .execute_update(
-            &payload.package_identifier,
+            &eu.package_identifier,
             &payload.to_version,
             payload.release_info.as_ref(),
             &plugin_tx,
@@ -448,10 +447,13 @@ mod tests {
             update_history_id: uuid::Uuid::nil(),
             software_item_id: uuid::Uuid::nil(),
             software_item_name: "Test App".to_string(),
-            package_identifier: "test-app".to_string(),
             to_version: "2.0.0".to_string(),
-            plugin_type: PluginType::GithubReleases,
-            plugin_config: serde_json::json!({}),
+            detect_version_plugin: None,
+            execute_update_plugin: uptrakit_internal_wire::PluginAssignment {
+                plugin_type: PluginType::GithubReleases,
+                package_identifier: "test-app".to_string(),
+                config: serde_json::json!({}),
+            },
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
             release_info: None,
@@ -508,7 +510,7 @@ mod tests {
             shell: HookShell::Bash,
         }];
         payload.release_info = None;
-        payload.plugin_config = serde_json::json!({});
+        payload.execute_update_plugin.config = serde_json::json!({});
 
         let result = execute_update(payload, test_executor(), tx).await;
 
