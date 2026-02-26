@@ -232,7 +232,7 @@ impl GitHubPlugin {
 #[async_trait]
 impl Plugin for GitHubPlugin {
     fn plugin_type(&self) -> PluginType {
-        PluginType::GithubReleases
+        PluginType::ReleasesGithub
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {

@@ -1155,14 +1155,14 @@ mod tests {
 
         let resp = build_list_response(
             &item,
-            vec!["github_releases".to_string()],
+            vec!["releases_github".to_string()],
             3,
             Some("22.0.0".to_string()),
             true,
         );
 
         assert_eq!(resp.name, "Node.js");
-        assert_eq!(resp.plugins, vec!["github_releases"]);
+        assert_eq!(resp.plugins, vec!["releases_github"]);
         assert_eq!(resp.host_count, 3);
         assert!(resp.last_checked_at.is_some());
         assert_eq!(resp.latest_version.as_deref(), Some("22.0.0"));
@@ -1226,7 +1226,7 @@ mod tests {
                 role: PluginRole::FetchReleases,
                 plugin_config_id: uuid::Uuid::now_v7(),
                 plugin_config_name: "GitHub Releases".to_string(),
-                plugin_type: "github_releases".to_string(),
+                plugin_type: "releases_github".to_string(),
                 package_identifier: "redis/redis".to_string(),
                 config_override: Some(serde_json::json!({"asset_patterns": ["redis.*linux"]})),
                 execution_site: "auto".to_string(),
@@ -1242,7 +1242,7 @@ mod tests {
 
         let resp = build_detail_response(
             item,
-            vec!["github_releases".to_string()],
+            vec!["releases_github".to_string()],
             1,
             Some("7.4.0".to_string()),
             true,
@@ -1250,7 +1250,7 @@ mod tests {
         );
 
         assert_eq!(resp.name, "Redis");
-        assert_eq!(resp.plugins, vec!["github_releases"]);
+        assert_eq!(resp.plugins, vec!["releases_github"]);
         assert_eq!(resp.hosts.len(), 1);
         assert_eq!(resp.hosts[0].hostname, "web-01");
         assert_eq!(resp.hosts[0].plugins.len(), 1);
@@ -1296,9 +1296,9 @@ mod tests {
             "tag_strip_prefix": "release-"
         });
 
-        let result = validate_config_override("github_releases", &base, &override_val);
+        let result = validate_config_override("releases_github", &base, &override_val);
         assert!(result.is_ok());
-    }
+}
 
     #[test]
     fn validate_config_override_invalid_merge() {
@@ -1308,7 +1308,7 @@ mod tests {
             "api_base_url": "http://api.github.com"
         });
 
-        let result = validate_config_override("github_releases", &base, &override_val);
+        let result = validate_config_override("releases_github", &base, &override_val);
         assert!(result.is_err());
     }
 
@@ -1317,7 +1317,7 @@ mod tests {
         let base = serde_json::json!({});
         let override_val = serde_json::json!("not an object");
 
-        let result = validate_config_override("github_releases", &base, &override_val);
+        let result = validate_config_override("releases_github", &base, &override_val);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -1340,7 +1340,7 @@ mod tests {
 
         for case in cases {
             assert!(
-                PluginRegistry::validate_package_identifier(PluginType::Homebrew, case).is_ok(),
+                PluginRegistry::validate_package_identifier(PluginType::PackageManagerHomebrew, case).is_ok(),
                 "expected valid: {case}"
             );
         }
@@ -1363,7 +1363,7 @@ mod tests {
 
         for case in cases {
             assert!(
-                PluginRegistry::validate_package_identifier(PluginType::Homebrew, case)
+                PluginRegistry::validate_package_identifier(PluginType::PackageManagerHomebrew, case)
                     .is_err(),
                 "expected invalid: {case}"
             );

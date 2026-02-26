@@ -237,7 +237,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "GitHub Releases".to_string(),
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             config: serde_json::json!({"tag_strip_prefix": "v"}),
             enabled: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -250,7 +250,7 @@ mod tests {
         let c = sample_config();
         let s = c.to_human_string();
         assert!(s.contains("GitHub Releases"), "name missing");
-        assert!(s.contains("github_releases"), "type missing");
+        assert!(s.contains("releases_github"), "type missing");
     }
 
     #[test]

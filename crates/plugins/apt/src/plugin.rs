@@ -132,7 +132,7 @@ impl AptPlugin {
 #[async_trait]
 impl Plugin for AptPlugin {
     fn plugin_type(&self) -> PluginType {
-        PluginType::Apt
+        PluginType::PackageManagerApt
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {

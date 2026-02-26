@@ -3271,7 +3271,7 @@ mod tests {
             "--name",
             "My GitHub",
             "--plugin-type",
-            "github_releases",
+            "releases_github",
             "--config",
             r#"{"tag_strip_prefix":"v"}"#,
         ])
@@ -3286,7 +3286,7 @@ mod tests {
                     },
             }) => {
                 assert_eq!(name, "My GitHub");
-                assert_eq!(plugin_type, "github_releases");
+                assert_eq!(plugin_type, "releases_github");
             }
             _ => panic!("expected PluginConfigs Create"),
         }

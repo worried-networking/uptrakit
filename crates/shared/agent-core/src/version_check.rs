@@ -153,7 +153,7 @@ mod tests {
 
     fn gh_assignment() -> PluginAssignment {
         PluginAssignment {
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             package_identifier: "octocat/hello-world".to_string(),
             // GitHub plugin config no longer contains owner/repo — those are
             // expressed via package_identifier at the software item level.
@@ -176,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn check_version_docker_stub_returns_none() {
         let assignment = PluginAssignment {
-            plugin_type: PluginType::Docker,
+            plugin_type: PluginType::ReleasesDocker,
             package_identifier: "nginx".to_string(),
             config: serde_json::json!({}),
         };
@@ -191,7 +191,7 @@ mod tests {
     async fn check_version_proxmox_is_discovery_only() {
         // PHS is discovery-only; `detect_installed_version` is not supported.
         let assignment = PluginAssignment {
-            plugin_type: PluginType::ProxmoxHelperScripts,
+            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
             package_identifier: "booklore".to_string(),
             config: serde_json::json!({}),
         };
@@ -207,7 +207,7 @@ mod tests {
     async fn check_version_github_invalid_config() {
         // A non-https api_base_url fails GitHub config validation.
         let assignment = PluginAssignment {
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             package_identifier: "octocat/hello-world".to_string(),
             config: serde_json::json!({"api_base_url": "http://api.github.com"}),
         };
@@ -221,7 +221,7 @@ mod tests {
     #[tokio::test]
     async fn check_version_homebrew_default_returns_none() {
         let assignment = PluginAssignment {
-            plugin_type: PluginType::Homebrew,
+            plugin_type: PluginType::PackageManagerHomebrew,
             package_identifier: String::new(),
             config: serde_json::json!({}),
         };
@@ -235,7 +235,7 @@ mod tests {
     #[tokio::test]
     async fn check_version_docker_context_injects_docker_host() {
         let assignment = PluginAssignment {
-            plugin_type: PluginType::Docker,
+            plugin_type: PluginType::ReleasesDocker,
             package_identifier: "nginx".to_string(),
             config: serde_json::json!({}),
         };

@@ -18,7 +18,7 @@ use crate::plugin_types::PluginType;
 /// ```
 /// # use uptrakit_shared_types::{DiscoveryTarget, PluginType, PluginRole};
 /// let target = DiscoveryTarget {
-///     plugin_type: PluginType::GithubReleases,
+///     plugin_type: PluginType::ReleasesGithub,
 ///     plugin_config: serde_json::json!({
 ///         "tag_strip_prefix": "v",
 ///         "include_prereleases": false,
@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn serialization_roundtrip() {
         let target = DiscoveryTarget {
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             plugin_config: serde_json::json!({"tag_strip_prefix": "v"}),
             plugin_config_name: "GitHub Releases".to_string(),
             roles: vec![PluginRole::FetchReleases],
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn optional_fields_omitted_when_none() {
         let target = DiscoveryTarget {
-            plugin_type: PluginType::Apt,
+            plugin_type: PluginType::PackageManagerApt,
             plugin_config: serde_json::json!({}),
             plugin_config_name: "APT".to_string(),
             roles: all_roles(),
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn optional_fields_present_when_set() {
         let target = DiscoveryTarget {
-            plugin_type: PluginType::Apt,
+            plugin_type: PluginType::PackageManagerApt,
             plugin_config: serde_json::json!({}),
             plugin_config_name: "APT".to_string(),
             roles: vec![PluginRole::DetectVersion],
@@ -139,7 +139,7 @@ mod tests {
         // Represents a PHS-discovered GitHub-managed item: the GitHub plugin
         // covers FetchReleases only; `owner/repo` is the package_identifier override.
         let target = DiscoveryTarget {
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             plugin_config: serde_json::json!({"tag_strip_prefix": "v"}),
             plugin_config_name: "GitHub Releases".to_string(),
             roles: vec![PluginRole::FetchReleases],
@@ -149,7 +149,7 @@ mod tests {
         };
         let json = serde_json::to_string(&target).expect("serialize");
         let deserialized: DiscoveryTarget = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(deserialized.plugin_type, PluginType::GithubReleases);
+        assert_eq!(deserialized.plugin_type, PluginType::ReleasesGithub);
         assert_eq!(
             deserialized.package_identifier,
             Some("BookLore/BookLore".to_string())
@@ -159,13 +159,13 @@ mod tests {
     #[test]
     fn deserialize_with_missing_optional_fields() {
         let json = r#"{
-            "plugin_type": "apt",
+            "plugin_type": "package_manager_apt",
             "plugin_config": {},
             "plugin_config_name": "APT",
             "roles": ["detect_version", "fetch_releases", "execute_update"]
         }"#;
         let target: DiscoveryTarget = serde_json::from_str(json).expect("deserialize");
-        assert_eq!(target.plugin_type, PluginType::Apt);
+        assert_eq!(target.plugin_type, PluginType::PackageManagerApt);
         assert_eq!(target.package_identifier, None);
         assert_eq!(target.config_override, None);
         assert_eq!(target.execution_site, None);

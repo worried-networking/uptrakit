@@ -450,7 +450,7 @@ mod tests {
             to_version: "2.0.0".to_string(),
             detect_version_plugin: None,
             execute_update_plugin: uptrakit_internal_wire::PluginAssignment {
-                plugin_type: PluginType::GithubReleases,
+                plugin_type: PluginType::ReleasesGithub,
                 package_identifier: "test-app".to_string(),
                 config: serde_json::json!({}),
             },

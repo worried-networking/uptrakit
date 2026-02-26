@@ -415,7 +415,7 @@ mod tests {
                         to_version: "1.0".to_string(),
                         detect_version_plugin: None,
                         execute_update_plugin: uptrakit_internal_wire::PluginAssignment {
-                            plugin_type: uptrakit_internal_wire::PluginType::GithubReleases,
+                            plugin_type: uptrakit_internal_wire::PluginType::ReleasesGithub,
                             package_identifier: "pkg".to_string(),
                             config: serde_json::json!({}),
                         },

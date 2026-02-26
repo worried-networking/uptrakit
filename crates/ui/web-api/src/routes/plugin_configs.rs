@@ -422,7 +422,7 @@ mod tests {
         let config = serde_json::json!({
             "auth_token": "ghp_secret123"
         });
-        let masked = PluginRegistry::mask_config_secrets_str("github_releases", &config);
+        let masked = PluginRegistry::mask_config_secrets_str("releases_github", &config);
         assert_eq!(masked["auth_token"], SECRET_MASK);
     }
 
@@ -431,7 +431,7 @@ mod tests {
         let config = serde_json::json!({
             "auth_token": null
         });
-        let masked = PluginRegistry::mask_config_secrets_str("github_releases", &config);
+        let masked = PluginRegistry::mask_config_secrets_str("releases_github", &config);
         // with_secrets_masked always sets auth_token to "***"
         assert_eq!(masked["auth_token"], SECRET_MASK);
     }
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn mask_without_token_field_adds_masked() {
         let config = serde_json::json!({});
-        let masked = PluginRegistry::mask_config_secrets_str("github_releases", &config);
+        let masked = PluginRegistry::mask_config_secrets_str("releases_github", &config);
         // with_secrets_masked always adds auth_token as "***"
         assert_eq!(masked["auth_token"], SECRET_MASK);
     }
@@ -455,7 +455,7 @@ mod tests {
     fn restore_masked_token() {
         let mut incoming = serde_json::json!({"auth_token": "***"});
         let existing = serde_json::json!({"auth_token": "ghp_real_token"});
-        PluginRegistry::restore_config_secrets_str("github_releases", &mut incoming, &existing);
+        PluginRegistry::restore_config_secrets_str("releases_github", &mut incoming, &existing);
         assert_eq!(incoming["auth_token"], "ghp_real_token");
     }
 
@@ -463,21 +463,21 @@ mod tests {
     fn restore_new_token_not_masked() {
         let mut incoming = serde_json::json!({"auth_token": "ghp_new_token"});
         let existing = serde_json::json!({"auth_token": "ghp_old_token"});
-        PluginRegistry::restore_config_secrets_str("github_releases", &mut incoming, &existing);
+        PluginRegistry::restore_config_secrets_str("releases_github", &mut incoming, &existing);
         assert_eq!(incoming["auth_token"], "ghp_new_token");
     }
 
     #[test]
     fn validate_valid_github_config() {
         let config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("github_releases", &config).is_ok());
+        assert!(PluginRegistry::validate_config_str("releases_github", &config).is_ok());
     }
 
     #[test]
     fn validate_invalid_github_config() {
         // Non-https api_base_url fails validation.
         let config = serde_json::json!({"api_base_url": "http://api.github.com"});
-        assert!(PluginRegistry::validate_config_str("github_releases", &config).is_err());
+        assert!(PluginRegistry::validate_config_str("releases_github", &config).is_err());
     }
 
     #[test]
@@ -489,21 +489,21 @@ mod tests {
     #[test]
     fn parse_known_plugin_types() {
         let github_config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("github_releases", &github_config).is_ok());
+        assert!(PluginRegistry::validate_config_str("releases_github", &github_config).is_ok());
 
         let proxmox_config = serde_json::json!({
             "script_url": "https://example.com/update.sh"
         });
         assert!(
-            PluginRegistry::validate_config_str("proxmox_helper_scripts", &proxmox_config)
+            PluginRegistry::validate_config_str("discovery_proxmox_helper_scripts", &proxmox_config)
                 .is_ok()
         );
 
         let docker_config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("docker", &docker_config).is_ok());
+        assert!(PluginRegistry::validate_config_str("releases_docker", &docker_config).is_ok());
 
         let homebrew_config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("homebrew", &homebrew_config).is_ok());
+        assert!(PluginRegistry::validate_config_str("package_manager_homebrew", &homebrew_config).is_ok());
 
         assert!(PluginRegistry::validate_config_str("unknown", &homebrew_config).is_err());
     }
@@ -513,19 +513,19 @@ mod tests {
     #[test]
     fn validate_valid_homebrew_config() {
         let config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("homebrew", &config).is_ok());
+        assert!(PluginRegistry::validate_config_str("package_manager_homebrew", &config).is_ok());
     }
 
     #[test]
     fn validate_homebrew_config_with_cask() {
         let config = serde_json::json!({"package_type": "cask"});
-        assert!(PluginRegistry::validate_config_str("homebrew", &config).is_ok());
+        assert!(PluginRegistry::validate_config_str("package_manager_homebrew", &config).is_ok());
     }
 
     #[test]
     fn mask_homebrew_config_unchanged() {
         let config = serde_json::json!({"package_type": "formula"});
-        let masked = PluginRegistry::mask_config_secrets_str("homebrew", &config);
+        let masked = PluginRegistry::mask_config_secrets_str("package_manager_homebrew", &config);
         // No secrets to mask — config returned unchanged
         assert_eq!(masked, config);
     }
@@ -541,7 +541,7 @@ mod tests {
                 "password": "secret123"
             }
         });
-        let masked = PluginRegistry::mask_config_secrets_str("docker", &config);
+        let masked = PluginRegistry::mask_config_secrets_str("releases_docker", &config);
         assert_eq!(masked["auth"]["password"], SECRET_MASK);
         assert_eq!(masked["auth"]["username"], "user");
     }
@@ -554,14 +554,14 @@ mod tests {
                 "token": "ghcr_token_secret"
             }
         });
-        let masked = PluginRegistry::mask_config_secrets_str("docker", &config);
+        let masked = PluginRegistry::mask_config_secrets_str("releases_docker", &config);
         assert_eq!(masked["auth"]["token"], SECRET_MASK);
     }
 
     #[test]
     fn mask_docker_no_auth() {
         let config = serde_json::json!({});
-        let masked = PluginRegistry::mask_config_secrets_str("docker", &config);
+        let masked = PluginRegistry::mask_config_secrets_str("releases_docker", &config);
         // None auth stays absent (serialized with skip_serializing_if)
         assert!(masked.get("auth").is_none());
     }
@@ -569,7 +569,7 @@ mod tests {
     #[test]
     fn mask_docker_null_auth() {
         let config = serde_json::json!({ "auth": null });
-        let masked = PluginRegistry::mask_config_secrets_str("docker", &config);
+        let masked = PluginRegistry::mask_config_secrets_str("releases_docker", &config);
         // JSON null deserializes to None, which stays absent after masking
         assert!(masked.get("auth").is_none());
     }
@@ -590,7 +590,7 @@ mod tests {
                 "password": "real_password"
             }
         });
-        PluginRegistry::restore_config_secrets_str("docker", &mut incoming, &existing);
+        PluginRegistry::restore_config_secrets_str("releases_docker", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["password"], "real_password");
     }
 
@@ -608,7 +608,7 @@ mod tests {
                 "token": "real_token"
             }
         });
-        PluginRegistry::restore_config_secrets_str("docker", &mut incoming, &existing);
+        PluginRegistry::restore_config_secrets_str("releases_docker", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["token"], "real_token");
     }
 
@@ -628,7 +628,7 @@ mod tests {
                 "password": "old_password"
             }
         });
-        PluginRegistry::restore_config_secrets_str("docker", &mut incoming, &existing);
+        PluginRegistry::restore_config_secrets_str("releases_docker", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["password"], "new_password");
     }
 
@@ -636,7 +636,7 @@ mod tests {
     fn validate_valid_docker_config() {
         // Empty config is valid — no required fields
         let config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("docker", &config).is_ok());
+        assert!(PluginRegistry::validate_config_str("releases_docker", &config).is_ok());
     }
 
     #[test]
@@ -649,13 +649,13 @@ mod tests {
                 "token": "ghcr_token"
             }
         });
-        assert!(PluginRegistry::validate_config_str("docker", &config).is_ok());
+        assert!(PluginRegistry::validate_config_str("releases_docker", &config).is_ok());
     }
 
     #[test]
     fn validate_invalid_docker_config_zero_page_size() {
         let config = serde_json::json!({ "page_size": 0 });
-        assert!(PluginRegistry::validate_config_str("docker", &config).is_err());
+        assert!(PluginRegistry::validate_config_str("releases_docker", &config).is_err());
     }
 
     #[test]
@@ -663,6 +663,6 @@ mod tests {
         let config = serde_json::json!({
             "tag_patterns": ["[invalid"]
         });
-        assert!(PluginRegistry::validate_config_str("docker", &config).is_err());
+        assert!(PluginRegistry::validate_config_str("releases_docker", &config).is_err());
     }
 }

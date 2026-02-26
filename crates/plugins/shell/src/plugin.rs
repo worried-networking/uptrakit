@@ -38,7 +38,7 @@ impl ShellPlugin {
 #[async_trait]
 impl Plugin for ShellPlugin {
     fn plugin_type(&self) -> PluginType {
-        PluginType::Shell
+        PluginType::GenericShell
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {

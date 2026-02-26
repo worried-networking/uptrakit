@@ -14,12 +14,12 @@
 //!
 //! // Validate configuration (all fields optional — empty config is valid)
 //! let config = serde_json::json!({});
-//! PluginRegistry::validate_config(PluginType::GithubReleases, &config)?;
+//! PluginRegistry::validate_config(PluginType::ReleasesGithub, &config)?;
 //!
 //! // Create a plugin with a local executor
 //! let executor = Arc::new(LocalCommandExecutor);
 //! let plugin = PluginRegistry::create_plugin(
-//!     PluginType::GithubReleases,
+//!     PluginType::ReleasesGithub,
 //!     &config,
 //!     executor,
 //! )?;

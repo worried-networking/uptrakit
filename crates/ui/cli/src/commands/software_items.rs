@@ -456,7 +456,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "Node.js".to_string(),
-            plugins: vec!["github_releases".to_string()],
+            plugins: vec!["releases_github".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,
@@ -474,7 +474,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "Homebrew App".to_string(),
-            plugins: vec!["homebrew".to_string()],
+            plugins: vec!["package_manager_homebrew".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,
@@ -509,7 +509,7 @@ mod tests {
         };
         let s = resp.to_human_string();
         assert!(s.contains("Node.js"), "name missing");
-        assert!(s.contains("github_releases"), "plugin missing");
+        assert!(s.contains("releases_github"), "plugin missing");
         assert!(s.contains("UPDATE"), "UPDATE column header missing");
     }
 
@@ -533,7 +533,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "Node.js".to_string(),
-            plugins: vec!["github_releases".to_string()],
+            plugins: vec!["releases_github".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,
@@ -554,7 +554,7 @@ mod tests {
                         .parse::<Uuid>()
                         .unwrap(),
                     plugin_config_name: "Default Config".to_string(),
-                    plugin_type: "github_releases".to_string(),
+                    plugin_type: "releases_github".to_string(),
                     package_identifier: "nodejs/node".to_string(),
                     config_override: None,
                     execution_site: "auto".to_string(),
@@ -587,7 +587,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "Curl".to_string(),
-            plugins: vec!["homebrew".to_string()],
+            plugins: vec!["package_manager_homebrew".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,
@@ -608,7 +608,7 @@ mod tests {
                         .parse::<Uuid>()
                         .unwrap(),
                     plugin_config_name: "Homebrew".to_string(),
-                    plugin_type: "homebrew".to_string(),
+                    plugin_type: "package_manager_homebrew".to_string(),
                     package_identifier: "curl".to_string(),
                     config_override: None,
                     execution_site: "auto".to_string(),
@@ -637,7 +637,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "My App".to_string(),
-            plugins: vec!["homebrew".to_string()],
+            plugins: vec!["package_manager_homebrew".to_string()],
             enabled: true,
             discovery_state: Some(SoftwareDiscoveryState::Approved),
             last_checked_at: None,
@@ -649,7 +649,7 @@ mod tests {
         };
         let s = item.to_human_string();
         assert!(s.contains("My App"));
-        assert!(s.contains("homebrew"));
+        assert!(s.contains("package_manager_homebrew"));
         assert!(s.contains("approved"));
         assert!(s.contains("1.5.0"), "latest version should appear");
         assert!(s.contains("yes"), "update_available should show 'yes'");

@@ -50,7 +50,7 @@ impl ConnectionContext {
         plugin_type: &PluginType,
         config: &mut serde_json::Value,
     ) {
-        if !matches!(plugin_type, PluginType::Docker) {
+        if !matches!(plugin_type, PluginType::ReleasesDocker) {
             return;
         }
         let Some(obj) = config.as_object_mut() else {
@@ -93,7 +93,7 @@ mod tests {
         };
         let mut config = serde_json::json!({});
 
-        ctx.apply_to_config(&PluginType::Docker, &mut config);
+        ctx.apply_to_config(&PluginType::ReleasesDocker, &mut config);
 
         assert_eq!(config["docker_host"], "ssh://user@host:2222");
         assert_eq!(config["ssh_key_path"], "/home/user/.ssh/id_ed25519");
@@ -107,7 +107,7 @@ mod tests {
         };
         let mut config = serde_json::json!({ "docker_host": "unix:///custom.sock" });
 
-        ctx.apply_to_config(&PluginType::Docker, &mut config);
+        ctx.apply_to_config(&PluginType::ReleasesDocker, &mut config);
 
         // Existing value must be preserved
         assert_eq!(config["docker_host"], "unix:///custom.sock");
@@ -121,7 +121,7 @@ mod tests {
         };
         let mut config = serde_json::json!({});
 
-        ctx.apply_to_config(&PluginType::GithubReleases, &mut config);
+        ctx.apply_to_config(&PluginType::ReleasesGithub, &mut config);
 
         assert!(config.get("docker_host").is_none());
     }
@@ -132,7 +132,7 @@ mod tests {
         let original = serde_json::json!({ "tracking_mode": "semver_tags" });
         let mut config = original.clone();
 
-        ctx.apply_to_config(&PluginType::Docker, &mut config);
+        ctx.apply_to_config(&PluginType::ReleasesDocker, &mut config);
 
         assert_eq!(config, original);
     }

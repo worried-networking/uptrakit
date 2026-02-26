@@ -220,7 +220,7 @@ mod tests {
     #[async_trait]
     impl Plugin for StubPlugin {
         fn plugin_type(&self) -> PluginType {
-            PluginType::GithubReleases
+            PluginType::ReleasesGithub
         }
     }
 
@@ -230,7 +230,7 @@ mod tests {
     #[async_trait]
     impl Plugin for DiscoveryPlugin {
         fn plugin_type(&self) -> PluginType {
-            PluginType::GithubReleases
+            PluginType::ReleasesGithub
         }
 
         fn capabilities(&self) -> &'static [PluginCapability] {
@@ -244,7 +244,7 @@ mod tests {
     #[async_trait]
     impl Plugin for RefreshPlugin {
         fn plugin_type(&self) -> PluginType {
-            PluginType::GithubReleases
+            PluginType::ReleasesGithub
         }
 
         fn capabilities(&self) -> &'static [PluginCapability] {
@@ -335,7 +335,7 @@ mod tests {
     #[async_trait]
     impl Plugin for MultiCapabilityPlugin {
         fn plugin_type(&self) -> PluginType {
-            PluginType::GithubReleases
+            PluginType::ReleasesGithub
         }
 
         fn capabilities(&self) -> &'static [PluginCapability] {

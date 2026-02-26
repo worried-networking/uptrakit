@@ -400,7 +400,7 @@ mod tests {
                         plugin_config_id: None,
                         plugin_config: Some(crate::plugin_configs::CreatePluginConfigRequest {
                             name: "Homebrew Casks".to_string(),
-                            plugin_type: PluginType::Homebrew,
+                            plugin_type: PluginType::PackageManagerHomebrew,
                             config: serde_json::json!({"package_type": "cask"}),
                             enabled: true,
                         }),
@@ -465,7 +465,7 @@ mod tests {
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
             name: "1Password".to_string(),
-            plugins: vec!["homebrew".to_string(), "github_releases".to_string()],
+            plugins: vec!["package_manager_homebrew".to_string(), "releases_github".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
@@ -493,7 +493,7 @@ mod tests {
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
             name: "MyApp".to_string(),
-            plugins: vec!["github_releases".to_string()],
+            plugins: vec!["releases_github".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,

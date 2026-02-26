@@ -282,7 +282,7 @@ mod tests {
             "name": "Node.js",
             "plugin_config": {
                 "name": "GitHub Releases",
-                "plugin_type": "github_releases",
+                "plugin_type": "releases_github",
                 "config": {}
             }
         });
@@ -295,7 +295,7 @@ mod tests {
     fn create_plugin_config_request_default_enabled() {
         let json = serde_json::json!({
             "name": "GitHub Releases",
-            "plugin_type": "github_releases",
+            "plugin_type": "releases_github",
             "config": {}
         });
         let req: CreatePluginConfigRequest = serde_json::from_value(json).unwrap();
@@ -306,7 +306,7 @@ mod tests {
     fn create_plugin_config_request_explicit_enabled_false() {
         let json = serde_json::json!({
             "name": "GitHub Releases",
-            "plugin_type": "github_releases",
+            "plugin_type": "releases_github",
             "config": {},
             "enabled": false
         });
@@ -963,7 +963,7 @@ mod tests {
         use uptrakit_shared_types::PluginType;
         let req = CreatePluginConfigRequest {
             name: "GitHub Releases".to_string(),
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -976,7 +976,7 @@ mod tests {
         use uptrakit_shared_types::PluginType;
         let req = CreatePluginConfigRequest {
             name: "".to_string(),
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             config: serde_json::json!({}),
             enabled: true,
         };

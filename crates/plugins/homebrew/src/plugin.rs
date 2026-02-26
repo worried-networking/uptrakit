@@ -159,7 +159,7 @@ impl HomebrewPlugin {
 
                 let targets = if emit_targets {
                     vec![DiscoveryTarget {
-                        plugin_type: PluginType::Homebrew,
+                        plugin_type: PluginType::PackageManagerHomebrew,
                         plugin_config: serde_json::json!({"package_type": "formula"}),
                         plugin_config_name: "Homebrew (Formulae)".to_string(),
                         roles: vec![
@@ -220,7 +220,7 @@ impl HomebrewPlugin {
 
                 let targets = if emit_targets {
                     vec![DiscoveryTarget {
-                        plugin_type: PluginType::Homebrew,
+                        plugin_type: PluginType::PackageManagerHomebrew,
                         plugin_config: serde_json::json!({"package_type": "cask"}),
                         plugin_config_name: "Homebrew (Casks)".to_string(),
                         roles: vec![
@@ -270,7 +270,7 @@ impl HomebrewPlugin {
 #[async_trait]
 impl Plugin for HomebrewPlugin {
     fn plugin_type(&self) -> PluginType {
-        PluginType::Homebrew
+        PluginType::PackageManagerHomebrew
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
@@ -709,7 +709,7 @@ mod tests {
         let packages = HomebrewPlugin::parse_installed_formulae(&json, true);
         assert_eq!(packages.len(), 2);
         assert_eq!(packages[0].targets.len(), 1);
-        assert_eq!(packages[0].targets[0].plugin_type, PluginType::Homebrew);
+        assert_eq!(packages[0].targets[0].plugin_type, PluginType::PackageManagerHomebrew);
         assert_eq!(
             packages[0].targets[0].plugin_config,
             serde_json::json!({"package_type": "formula"})
@@ -738,7 +738,7 @@ mod tests {
         let packages = HomebrewPlugin::parse_installed_casks(&json, true);
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].targets.len(), 1);
-        assert_eq!(packages[0].targets[0].plugin_type, PluginType::Homebrew);
+        assert_eq!(packages[0].targets[0].plugin_type, PluginType::PackageManagerHomebrew);
         assert_eq!(
             packages[0].targets[0].plugin_config,
             serde_json::json!({"package_type": "cask"})

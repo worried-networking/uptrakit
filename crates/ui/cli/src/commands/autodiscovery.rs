@@ -155,7 +155,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             plugin_config_name: "My GitHub".to_string(),
-            plugin_type: "github_releases".to_string(),
+            plugin_type: "releases_github".to_string(),
             package_identifier: "org/my-app".to_string(),
             created_at: datetime!(2025-01-01 00:00:00 UTC),
         }

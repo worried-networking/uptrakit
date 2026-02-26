@@ -71,7 +71,7 @@ mod tests {
     fn create_request_round_trip() {
         let req = CreatePluginConfigRequest {
             name: "my-github".to_string(),
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             config: serde_json::json!({"tag_strip_prefix": "v"}),
             enabled: true,
         };
@@ -79,13 +79,13 @@ mod tests {
         let de: CreatePluginConfigRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.name, "my-github");
-        assert_eq!(de.plugin_type, PluginType::GithubReleases);
+        assert_eq!(de.plugin_type, PluginType::ReleasesGithub);
         assert!(de.enabled);
     }
 
     #[test]
     fn create_request_enabled_defaults_to_true() {
-        let json = r#"{"name":"test","plugin_type":"github_releases","config":{}}"#;
+        let json = r#"{"name":"test","plugin_type":"releases_github","config":{}}"#;
         let de: CreatePluginConfigRequest =
             serde_json::from_str(json).expect("deserialization should succeed");
         assert!(de.enabled, "enabled should default to true");
@@ -95,7 +95,7 @@ mod tests {
     fn create_request_validate_rejects_empty_name() {
         let req = CreatePluginConfigRequest {
             name: "   ".to_string(),
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -109,7 +109,7 @@ mod tests {
     fn create_request_validate_accepts_valid() {
         let req = CreatePluginConfigRequest {
             name: "my-plugin".to_string(),
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -155,7 +155,7 @@ mod tests {
         let resp = PluginConfigResponse {
             id: sample_uuid(),
             name: "docker-hub".to_string(),
-            plugin_type: PluginType::Docker,
+            plugin_type: PluginType::ReleasesDocker,
             config: serde_json::json!({}),
             enabled: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -166,7 +166,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.id, sample_uuid());
         assert_eq!(de.name, "docker-hub");
-        assert_eq!(de.plugin_type, PluginType::Docker);
+        assert_eq!(de.plugin_type, PluginType::ReleasesDocker);
         assert!(de.enabled);
     }
 }

@@ -125,7 +125,7 @@ impl ProxmoxHelperScriptsPlugin {
     /// a single plugin config instance across all tracked GitHub repos.
     fn github_fetch_target(owner: &str, repo: &str) -> DiscoveryTarget {
         DiscoveryTarget {
-            plugin_type: PluginType::GithubReleases,
+            plugin_type: PluginType::ReleasesGithub,
             plugin_config: serde_json::json!({
                 "tag_strip_prefix": "v",
                 "include_prereleases": false,
@@ -143,7 +143,7 @@ impl ProxmoxHelperScriptsPlugin {
     /// `DetectVersion` and `ExecuteUpdate` using PHS conventions.
     fn phs_shell_target() -> DiscoveryTarget {
         DiscoveryTarget {
-            plugin_type: PluginType::Shell,
+            plugin_type: PluginType::GenericShell,
             plugin_config: serde_json::json!({
                 "version_command": PHS_DETECT_VERSION_CMD,
                 "update_command": PHS_INSTALL_CMD,
@@ -159,7 +159,7 @@ impl ProxmoxHelperScriptsPlugin {
     /// Build a `DiscoveryTarget` for an APT-managed PHS app.
     fn apt_target() -> DiscoveryTarget {
         DiscoveryTarget {
-            plugin_type: PluginType::Apt,
+            plugin_type: PluginType::PackageManagerApt,
             plugin_config: serde_json::json!({}),
             plugin_config_name: "APT (auto)".to_string(),
             roles: vec![
@@ -177,7 +177,7 @@ impl ProxmoxHelperScriptsPlugin {
 #[async_trait]
 impl Plugin for ProxmoxHelperScriptsPlugin {
     fn plugin_type(&self) -> PluginType {
-        PluginType::ProxmoxHelperScripts
+        PluginType::DiscoveryProxmoxHelperScripts
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
@@ -389,7 +389,7 @@ mod tests {
             test_executor(),
         )
         .expect("create");
-        assert_eq!(plugin.plugin_type(), PluginType::ProxmoxHelperScripts);
+        assert_eq!(plugin.plugin_type(), PluginType::DiscoveryProxmoxHelperScripts);
     }
 
     #[tokio::test]
@@ -408,7 +408,7 @@ mod tests {
     #[test]
     fn github_fetch_target_structure() {
         let target = ProxmoxHelperScriptsPlugin::github_fetch_target("BookLore", "BookLore");
-        assert_eq!(target.plugin_type, PluginType::GithubReleases);
+        assert_eq!(target.plugin_type, PluginType::ReleasesGithub);
         assert_eq!(target.plugin_config_name, "GitHub Releases");
         // FetchReleases only — no agent-side roles.
         assert_eq!(target.roles.len(), 1);
@@ -426,7 +426,7 @@ mod tests {
     #[test]
     fn phs_shell_target_structure() {
         let target = ProxmoxHelperScriptsPlugin::phs_shell_target();
-        assert_eq!(target.plugin_type, PluginType::Shell);
+        assert_eq!(target.plugin_type, PluginType::GenericShell);
         assert_eq!(target.plugin_config_name, "PHS Shell");
         assert_eq!(target.roles.len(), 2);
         assert!(target.roles.contains(&PluginRole::DetectVersion));
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn apt_target_structure() {
         let target = ProxmoxHelperScriptsPlugin::apt_target();
-        assert_eq!(target.plugin_type, PluginType::Apt);
+        assert_eq!(target.plugin_type, PluginType::PackageManagerApt);
         assert_eq!(target.plugin_config_name, "APT (auto)");
         assert_eq!(target.roles.len(), 3);
         assert_eq!(target.plugin_config, serde_json::json!({}));

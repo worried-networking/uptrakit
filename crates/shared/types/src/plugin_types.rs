@@ -25,12 +25,12 @@ use thiserror::Error;
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[non_exhaustive]
 pub enum PluginType {
-    GithubReleases,
-    ProxmoxHelperScripts,
-    Docker,
-    Homebrew,
-    Apt,
-    Shell,
+    ReleasesGithub,
+    DiscoveryProxmoxHelperScripts,
+    ReleasesDocker,
+    PackageManagerHomebrew,
+    PackageManagerApt,
+    GenericShell,
     /// An unknown plugin type received from a newer peer.
     ///
     /// The inner string is the raw snake_case value as it appeared on the wire.
@@ -45,12 +45,12 @@ impl PluginType {
     /// For [`PluginType::Other`], returns the inner string as-is.
     pub fn as_str(&self) -> &str {
         match self {
-            Self::GithubReleases => "github_releases",
-            Self::ProxmoxHelperScripts => "proxmox_helper_scripts",
-            Self::Docker => "docker",
-            Self::Homebrew => "homebrew",
-            Self::Apt => "apt",
-            Self::Shell => "shell",
+            Self::ReleasesGithub => "releases_github",
+            Self::DiscoveryProxmoxHelperScripts => "discovery_proxmox_helper_scripts",
+            Self::ReleasesDocker => "releases_docker",
+            Self::PackageManagerHomebrew => "package_manager_homebrew",
+            Self::PackageManagerApt => "package_manager_apt",
+            Self::GenericShell => "generic_shell",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -76,12 +76,12 @@ impl FromStr for PluginType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "github_releases" => Ok(Self::GithubReleases),
-            "proxmox_helper_scripts" => Ok(Self::ProxmoxHelperScripts),
-            "docker" => Ok(Self::Docker),
-            "homebrew" => Ok(Self::Homebrew),
-            "apt" => Ok(Self::Apt),
-            "shell" => Ok(Self::Shell),
+            "releases_github" => Ok(Self::ReleasesGithub),
+            "discovery_proxmox_helper_scripts" => Ok(Self::DiscoveryProxmoxHelperScripts),
+            "releases_docker" => Ok(Self::ReleasesDocker),
+            "package_manager_homebrew" => Ok(Self::PackageManagerHomebrew),
+            "package_manager_apt" => Ok(Self::PackageManagerApt),
+            "generic_shell" => Ok(Self::GenericShell),
             _ => Err(ParsePluginTypeError::Invalid),
         }
     }
@@ -107,12 +107,12 @@ impl From<String> for PluginType {
     /// Unknown strings map to [`PluginType::Other`] rather than failing.
     fn from(s: String) -> Self {
         match s.as_str() {
-            "github_releases" => Self::GithubReleases,
-            "proxmox_helper_scripts" => Self::ProxmoxHelperScripts,
-            "docker" => Self::Docker,
-            "homebrew" => Self::Homebrew,
-            "apt" => Self::Apt,
-            "shell" => Self::Shell,
+            "releases_github" => Self::ReleasesGithub,
+            "discovery_proxmox_helper_scripts" => Self::DiscoveryProxmoxHelperScripts,
+            "releases_docker" => Self::ReleasesDocker,
+            "package_manager_homebrew" => Self::PackageManagerHomebrew,
+            "package_manager_apt" => Self::PackageManagerApt,
+            "generic_shell" => Self::GenericShell,
             _ => Self::Other(s),
         }
     }
@@ -121,12 +121,12 @@ impl From<String> for PluginType {
 impl From<PluginType> for String {
     fn from(pt: PluginType) -> String {
         match pt {
-            PluginType::GithubReleases => "github_releases".to_string(),
-            PluginType::ProxmoxHelperScripts => "proxmox_helper_scripts".to_string(),
-            PluginType::Docker => "docker".to_string(),
-            PluginType::Homebrew => "homebrew".to_string(),
-            PluginType::Apt => "apt".to_string(),
-            PluginType::Shell => "shell".to_string(),
+            PluginType::ReleasesGithub => "releases_github".to_string(),
+            PluginType::DiscoveryProxmoxHelperScripts => "discovery_proxmox_helper_scripts".to_string(),
+            PluginType::ReleasesDocker => "releases_docker".to_string(),
+            PluginType::PackageManagerHomebrew => "package_manager_homebrew".to_string(),
+            PluginType::PackageManagerApt => "package_manager_apt".to_string(),
+            PluginType::GenericShell => "generic_shell".to_string(),
             PluginType::Other(s) => s,
         }
     }
@@ -178,9 +178,9 @@ mod tests {
 
     #[test]
     fn plugin_type_serialization_roundtrip() {
-        let gh = PluginType::GithubReleases;
+        let gh = PluginType::ReleasesGithub;
         let json = serde_json::to_string(&gh).expect("serialize");
-        assert_eq!(json, r#""github_releases""#);
+        assert_eq!(json, r#""releases_github""#);
 
         let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, gh);
@@ -188,9 +188,9 @@ mod tests {
 
     #[test]
     fn plugin_type_proxmox_serialization() {
-        let phs = PluginType::ProxmoxHelperScripts;
+        let phs = PluginType::DiscoveryProxmoxHelperScripts;
         let json = serde_json::to_string(&phs).expect("serialize");
-        assert_eq!(json, r#""proxmox_helper_scripts""#);
+        assert_eq!(json, r#""discovery_proxmox_helper_scripts""#);
 
         let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, phs);
@@ -198,31 +198,19 @@ mod tests {
 
     #[test]
     fn plugin_type_docker_serialization() {
-        let dr = PluginType::Docker;
+        let dr = PluginType::ReleasesDocker;
         let json = serde_json::to_string(&dr).expect("serialize");
-        assert_eq!(json, r#""docker""#);
+        assert_eq!(json, r#""releases_docker""#);
 
         let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, dr);
     }
 
-    /// Old `"docker_registry"` wire strings from pre-migration data must
-    /// deserialize to `Other("docker_registry")` rather than failing.
-    #[test]
-    fn plugin_type_docker_registry_legacy_deserializes_to_other() {
-        let deserialized: PluginType =
-            serde_json::from_str(r#""docker_registry""#).expect("deserialize legacy");
-        assert_eq!(
-            deserialized,
-            PluginType::Other("docker_registry".to_string())
-        );
-    }
-
     #[test]
     fn plugin_type_homebrew_serialization() {
-        let hb = PluginType::Homebrew;
+        let hb = PluginType::PackageManagerHomebrew;
         let json = serde_json::to_string(&hb).expect("serialize");
-        assert_eq!(json, r#""homebrew""#);
+        assert_eq!(json, r#""package_manager_homebrew""#);
 
         let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, hb);
@@ -241,20 +229,20 @@ mod tests {
         assert_eq!(deserialized, PluginType::Other("flatpak".to_string()));
     }
 
-    /// `"apt"` deserializes to the known `Apt` variant, not `Other`.
+    /// `"package_manager_apt"` deserializes to the known `PackageManagerApt` variant, not `Other`.
     #[test]
     fn plugin_type_apt_deserializes_to_apt_variant() {
         let deserialized: PluginType =
-            serde_json::from_str(r#""apt""#).expect("deserialize apt");
-        assert_eq!(deserialized, PluginType::Apt);
+            serde_json::from_str(r#""package_manager_apt""#).expect("deserialize apt");
+        assert_eq!(deserialized, PluginType::PackageManagerApt);
     }
 
-    /// `PluginType::Apt` serializes to `"apt"`.
+    /// `PluginType::PackageManagerApt` serializes to `"package_manager_apt"`.
     #[test]
     fn plugin_type_apt_serialization() {
-        let apt = PluginType::Apt;
+        let apt = PluginType::PackageManagerApt;
         let json = serde_json::to_string(&apt).expect("serialize");
-        assert_eq!(json, r#""apt""#);
+        assert_eq!(json, r#""package_manager_apt""#);
 
         let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, apt);
@@ -262,9 +250,9 @@ mod tests {
 
     #[test]
     fn plugin_type_shell_serialization() {
-        let shell = PluginType::Shell;
+        let shell = PluginType::GenericShell;
         let json = serde_json::to_string(&shell).expect("serialize");
-        assert_eq!(json, r#""shell""#);
+        assert_eq!(json, r#""generic_shell""#);
 
         let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, shell);
@@ -294,43 +282,47 @@ mod tests {
     #[test]
     fn plugin_type_from_string() {
         assert_eq!(
-            PluginType::from("github_releases".to_string()),
-            PluginType::GithubReleases
+            PluginType::from("releases_github".to_string()),
+            PluginType::ReleasesGithub
         );
         assert_eq!(
-            PluginType::from("docker".to_string()),
-            PluginType::Docker
+            PluginType::from("releases_docker".to_string()),
+            PluginType::ReleasesDocker
         );
         assert_eq!(
-            PluginType::from("apt".to_string()),
-            PluginType::Apt
+            PluginType::from("package_manager_apt".to_string()),
+            PluginType::PackageManagerApt
         );
         assert_eq!(
-            PluginType::from("shell".to_string()),
-            PluginType::Shell
+            PluginType::from("generic_shell".to_string()),
+            PluginType::GenericShell
         );
         assert_eq!(
             PluginType::from("winget".to_string()),
             PluginType::Other("winget".to_string())
         );
-        // Old wire string maps to Other — not to Docker
+        // Old wire strings map to Other
         assert_eq!(
             PluginType::from("docker_registry".to_string()),
             PluginType::Other("docker_registry".to_string())
+        );
+        assert_eq!(
+            PluginType::from("github_releases".to_string()),
+            PluginType::Other("github_releases".to_string())
         );
     }
 
     #[test]
     fn plugin_type_display() {
-        assert_eq!(PluginType::GithubReleases.to_string(), "github_releases");
+        assert_eq!(PluginType::ReleasesGithub.to_string(), "releases_github");
         assert_eq!(
-            PluginType::ProxmoxHelperScripts.to_string(),
-            "proxmox_helper_scripts"
+            PluginType::DiscoveryProxmoxHelperScripts.to_string(),
+            "discovery_proxmox_helper_scripts"
         );
-        assert_eq!(PluginType::Docker.to_string(), "docker");
-        assert_eq!(PluginType::Homebrew.to_string(), "homebrew");
-        assert_eq!(PluginType::Apt.to_string(), "apt");
-        assert_eq!(PluginType::Shell.to_string(), "shell");
+        assert_eq!(PluginType::ReleasesDocker.to_string(), "releases_docker");
+        assert_eq!(PluginType::PackageManagerHomebrew.to_string(), "package_manager_homebrew");
+        assert_eq!(PluginType::PackageManagerApt.to_string(), "package_manager_apt");
+        assert_eq!(PluginType::GenericShell.to_string(), "generic_shell");
         assert_eq!(
             PluginType::Other("custom_type".to_string()).to_string(),
             "custom_type"
@@ -340,31 +332,33 @@ mod tests {
     #[test]
     fn plugin_type_from_str_valid() {
         assert_eq!(
-            "github_releases".parse::<PluginType>().ok(),
-            Some(PluginType::GithubReleases)
+            "releases_github".parse::<PluginType>().ok(),
+            Some(PluginType::ReleasesGithub)
         );
         assert_eq!(
-            "proxmox_helper_scripts".parse::<PluginType>().ok(),
-            Some(PluginType::ProxmoxHelperScripts)
+            "discovery_proxmox_helper_scripts".parse::<PluginType>().ok(),
+            Some(PluginType::DiscoveryProxmoxHelperScripts)
         );
         assert_eq!(
-            "docker".parse::<PluginType>().ok(),
-            Some(PluginType::Docker)
+            "releases_docker".parse::<PluginType>().ok(),
+            Some(PluginType::ReleasesDocker)
         );
         assert_eq!(
-            "homebrew".parse::<PluginType>().ok(),
-            Some(PluginType::Homebrew)
+            "package_manager_homebrew".parse::<PluginType>().ok(),
+            Some(PluginType::PackageManagerHomebrew)
         );
         assert_eq!(
-            "apt".parse::<PluginType>().ok(),
-            Some(PluginType::Apt)
+            "package_manager_apt".parse::<PluginType>().ok(),
+            Some(PluginType::PackageManagerApt)
         );
         assert_eq!(
-            "shell".parse::<PluginType>().ok(),
-            Some(PluginType::Shell)
+            "generic_shell".parse::<PluginType>().ok(),
+            Some(PluginType::GenericShell)
         );
-        // Old wire string must be rejected by FromStr (it becomes Other via serde)
+        // Old wire strings must be rejected by FromStr
         assert!("docker_registry".parse::<PluginType>().is_err());
+        assert!("github_releases".parse::<PluginType>().is_err());
+        assert!("docker".parse::<PluginType>().is_err());
     }
 
     /// `FromStr` still rejects unknown strings to preserve the registry's
@@ -373,8 +367,8 @@ mod tests {
     fn plugin_type_from_str_invalid_returns_err() {
         assert!("unknown".parse::<PluginType>().is_err());
         assert!("".parse::<PluginType>().is_err());
-        assert!("GITHUB_RELEASES".parse::<PluginType>().is_err());
-        assert!("GithubReleases".parse::<PluginType>().is_err());
+        assert!("RELEASES_GITHUB".parse::<PluginType>().is_err());
+        assert!("ReleasesGithub".parse::<PluginType>().is_err());
     }
 
     #[test]
@@ -387,12 +381,12 @@ mod tests {
     #[test]
     fn plugin_type_display_round_trips_through_from_str() {
         let variants = [
-            PluginType::GithubReleases,
-            PluginType::ProxmoxHelperScripts,
-            PluginType::Docker,
-            PluginType::Homebrew,
-            PluginType::Apt,
-            PluginType::Shell,
+            PluginType::ReleasesGithub,
+            PluginType::DiscoveryProxmoxHelperScripts,
+            PluginType::ReleasesDocker,
+            PluginType::PackageManagerHomebrew,
+            PluginType::PackageManagerApt,
+            PluginType::GenericShell,
         ];
         for pt in &variants {
             let s = pt.to_string();
@@ -406,12 +400,12 @@ mod tests {
     #[test]
     fn plugin_type_as_str_matches_display() {
         let variants = [
-            PluginType::GithubReleases,
-            PluginType::ProxmoxHelperScripts,
-            PluginType::Docker,
-            PluginType::Homebrew,
-            PluginType::Apt,
-            PluginType::Shell,
+            PluginType::ReleasesGithub,
+            PluginType::DiscoveryProxmoxHelperScripts,
+            PluginType::ReleasesDocker,
+            PluginType::PackageManagerHomebrew,
+            PluginType::PackageManagerApt,
+            PluginType::GenericShell,
             PluginType::Other("my_plugin".to_string()),
         ];
         for pt in &variants {

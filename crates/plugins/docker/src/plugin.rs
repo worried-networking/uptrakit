@@ -115,7 +115,7 @@ impl DockerPlugin {
 #[async_trait]
 impl Plugin for DockerPlugin {
     fn plugin_type(&self) -> PluginType {
-        PluginType::Docker
+        PluginType::ReleasesDocker
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {

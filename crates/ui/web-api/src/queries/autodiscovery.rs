@@ -854,7 +854,7 @@ mod tests {
             id: Set(id),
             tenant_id: Set(tenant_id),
             name: Set(format!("Test Plugin Config {id}")),
-            plugin_type: Set("homebrew".to_string()),
+            plugin_type: Set("package_manager_homebrew".to_string()),
             config: Set(serde_json::json!({})),
             enabled: Set(true),
             created_at: Set(now),
@@ -951,7 +951,7 @@ mod tests {
         repo: &str,
     ) -> DiscoveryPluginResult {
         DiscoveryPluginResult {
-            plugin_type: PluginType::ProxmoxHelperScripts,
+            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
             plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -959,7 +959,7 @@ mod tests {
                 name: name.to_string(),
                 installed_version: version.to_string(),
                 targets: vec![DiscoveryTarget {
-                    plugin_type: PluginType::GithubReleases,
+                    plugin_type: PluginType::ReleasesGithub,
                     plugin_config: serde_json::json!({
                         "owner": owner,
                         "repo": repo,
@@ -987,7 +987,7 @@ mod tests {
         version: &str,
     ) -> DiscoveryPluginResult {
         DiscoveryPluginResult {
-            plugin_type: PluginType::ProxmoxHelperScripts,
+            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
             plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -995,7 +995,7 @@ mod tests {
                 name: name.to_string(),
                 installed_version: version.to_string(),
                 targets: vec![DiscoveryTarget {
-                    plugin_type: PluginType::Apt,
+                    plugin_type: PluginType::PackageManagerApt,
                     plugin_config: serde_json::json!({}),
                     plugin_config_name: "APT (auto)".to_string(),
                     roles: all_roles(),
@@ -1010,7 +1010,7 @@ mod tests {
 
     fn phs_result_no_targets(pkg_id: &str) -> DiscoveryPluginResult {
         DiscoveryPluginResult {
-            plugin_type: PluginType::ProxmoxHelperScripts,
+            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
             plugin_config_id: None,
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -1192,7 +1192,7 @@ mod tests {
 
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("github_releases"))
+            .filter(plugin_config::Column::PluginType.eq("releases_github"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1239,7 +1239,7 @@ mod tests {
 
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("apt"))
+            .filter(plugin_config::Column::PluginType.eq("package_manager_apt"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1323,7 +1323,7 @@ mod tests {
 
         let config_count = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("github_releases"))
+            .filter(plugin_config::Column::PluginType.eq("releases_github"))
             .count(&db)
             .await
             .expect("count configs");
@@ -1358,7 +1358,7 @@ mod tests {
         insert_plugin_config(&db, pc_id, tenant_id).await;
 
         let result = DiscoveryPluginResult {
-            plugin_type: PluginType::Homebrew,
+            plugin_type: PluginType::PackageManagerHomebrew,
             plugin_config_id: Some(pc_id),
             error: None,
             discoveries: vec![WireDiscoveredSoftware {
@@ -1408,7 +1408,7 @@ mod tests {
         // Find the auto-created apt config.
         let apt_config = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("apt"))
+            .filter(plugin_config::Column::PluginType.eq("package_manager_apt"))
             .one(&db)
             .await
             .expect("query")
