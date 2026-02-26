@@ -744,7 +744,7 @@ mod tests {
         drop(tx);
 
         let mut found_any = false;
-        while let Some(_) = rx.recv().await {
+        while rx.recv().await.is_some() {
             found_any = true;
         }
         assert!(!found_any, "expected no output when reboot-required file is absent");
