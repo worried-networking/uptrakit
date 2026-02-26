@@ -249,7 +249,7 @@ pub async fn execute_update(
     UpdateExecutionResult { result }
 }
 
-/// Detect the current version of a software item by delegating to the provider registry.
+/// Detect the current version of a software item by delegating to the plugin registry.
 async fn detect_current_version(
     payload: &ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
@@ -288,7 +288,7 @@ async fn execute_plugin_update(
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
     executor: Arc<dyn CommandExecutor>,
 ) -> UpdateResult<String> {
-    let plugin = PluginRegistry::create_provider(
+    let plugin = PluginRegistry::create_plugin(
         payload.plugin_type.clone(),
         &payload.plugin_config,
         executor,
@@ -378,12 +378,12 @@ async fn run_hook_command(
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
 ) -> UpdateResult<(String, i32)> {
     tracing::debug!(hook = ?hook_cmd, "running update hook");
-    // Bridge provider output -> agent output
-    let (provider_tx, mut provider_rx) = mpsc::channel::<UpdateOutputLine>(100);
+    // Bridge plugin output -> agent output
+    let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
     let bridge_output_tx = output_tx.clone();
     let bridge_stream_type = stream_type;
     let bridge_handle = tokio::spawn(async move {
-        while let Some(line) = provider_rx.recv().await {
+        while let Some(line) = plugin_rx.recv().await {
             let stream = match line.stream {
                 OutputStreamType::Stdout => bridge_stream_type,
                 _ => OutputStreamType::Stderr,
@@ -399,20 +399,20 @@ async fn run_hook_command(
 
     let result = match hook_cmd {
         HookCommand::Shell { command, shell } => {
-            uptrakit_command::run_command_with_shell(command, *shell, &provider_tx).await
+            uptrakit_command::run_command_with_shell(command, *shell, &plugin_tx).await
         }
         HookCommand::Exec {
             program,
             args,
             working_dir,
         } => {
-            uptrakit_command::run_command_exec(program, args, working_dir.as_deref(), &provider_tx)
+            uptrakit_command::run_command_exec(program, args, working_dir.as_deref(), &plugin_tx)
                 .await
         }
     };
 
     // Drop the sender so the bridge task finishes
-    drop(provider_tx);
+    drop(plugin_tx);
     let _ = bridge_handle.await;
 
     let result = result.map_err(|e| report!(UpdateError::HookFailed(e.to_string())));

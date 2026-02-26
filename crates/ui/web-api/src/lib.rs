@@ -207,12 +207,12 @@ pub struct AppState {
     pub notification_service: NotificationService,
     /// In-memory denylist for immediate JWT access token revocation.
     pub token_denylist: Arc<auth::token_denylist::TokenDenylist>,
-    /// Provider operations abstraction used by provider-config route handlers.
+    /// Plugin operations abstraction used by plugin-config route handlers.
     ///
     /// Injected via `Arc<dyn PluginOps>` so that route handlers and query
     /// helpers are decoupled from the concrete [`uptrakit_plugin_registry::PluginRegistry`]
     /// and can be tested with a mock implementation.
-    pub provider_ops: Arc<dyn PluginOps>,
+    pub plugin_ops: Arc<dyn PluginOps>,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -258,7 +258,7 @@ pub struct AppStateBuilder {
     controller_id: Option<uuid::Uuid>,
     notification_service: Option<NotificationService>,
     token_denylist: Option<Arc<auth::token_denylist::TokenDenylist>>,
-    provider_ops: Option<Arc<dyn PluginOps>>,
+    plugin_ops: Option<Arc<dyn PluginOps>>,
 }
 
 impl AppStateBuilder {
@@ -290,7 +290,7 @@ impl AppStateBuilder {
             controller_id: None,
             notification_service: None,
             token_denylist: None,
-            provider_ops: None,
+            plugin_ops: None,
         }
     }
 
@@ -409,12 +409,12 @@ impl AppStateBuilder {
         self
     }
 
-    /// Override the provider operations implementation.
+    /// Override the plugin operations implementation.
     ///
     /// Defaults to [`uptrakit_plugin_registry::PluginRegistry`] when not set.
     /// Use this in tests to inject a mock implementation.
-    pub fn provider_ops(mut self, v: Arc<dyn PluginOps>) -> Self {
-        self.provider_ops = Some(v);
+    pub fn plugin_ops(mut self, v: Arc<dyn PluginOps>) -> Self {
+        self.plugin_ops = Some(v);
         self
     }
 
@@ -485,8 +485,8 @@ impl AppStateBuilder {
             token_denylist: self
                 .token_denylist
                 .ok_or(AppStateBuildError("token_denylist"))?,
-            provider_ops: self
-                .provider_ops
+            plugin_ops: self
+                .plugin_ops
                 .unwrap_or_else(|| Arc::new(uptrakit_plugin_registry::PluginRegistry)),
         })
     }
@@ -517,7 +517,7 @@ impl AppState {
         (name = "OIDC Providers", description = "OIDC provider configuration"),
         (name = "API Tokens", description = "Personal access token management"),
         (name = "Hosts", description = "Host machine management"),
-        (name = "Provider Configs", description = "Provider configuration management"),
+        (name = "Plugin Configs", description = "Plugin configuration management"),
         (name = "Software Items", description = "Software item tracking and host assignment"),
         (name = "Update History", description = "Software update history tracking"),
         (name = "Autodiscovery", description = "Automatic software discovery management")
@@ -1132,7 +1132,7 @@ mod tests {
             controller_id,
             notification_service,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
-            provider_ops: Arc::new(uptrakit_plugin_registry::PluginRegistry),
+            plugin_ops: Arc::new(uptrakit_plugin_registry::PluginRegistry),
             db,
         })
     }

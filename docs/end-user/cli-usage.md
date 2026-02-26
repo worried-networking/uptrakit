@@ -2,7 +2,7 @@
 
 The `uptrakit` binary provides a command-line interface for interacting with the Uptrakit controller. It
 supports authentication, resource inspection, version checks, update triggering, scheduler management,
-provider configuration, autodiscovery management, and server settings management.
+plugin configuration, autodiscovery management, and server settings management.
 
 ## Global Options
 
@@ -119,8 +119,8 @@ uptrakit hosts discover <HOST_ID>
 # Discard all pending discovered items for a host
 uptrakit hosts discard-discovered <HOST_ID>
 
-# Discard pending discovered items for a specific provider config on a host
-uptrakit hosts discard-discovered <HOST_ID> --provider-config <PROVIDER_CONFIG_ID>
+# Discard pending discovered items for a specific plugin config on a host
+uptrakit hosts discard-discovered <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID>
 ```
 
 See also: [Host Entity](../architecture/host-entity.md), [Autodiscovery](autodiscovery.md).
@@ -154,8 +154,8 @@ uptrakit software-items approve <ITEM_ID>
 
 # Assign a host to a software item
 uptrakit software-items assign <ITEM_ID> --host <HOST_ID>
-uptrakit software-items assign <ITEM_ID> --host <HOST_ID> --provider-config <PROVIDER_CONFIG_ID>
-uptrakit software-items assign <ITEM_ID> --host <HOST_ID> --provider-config <PROVIDER_CONFIG_ID> --package "my-package"
+uptrakit software-items assign <ITEM_ID> --host <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID>
+uptrakit software-items assign <ITEM_ID> --host <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID> --package "my-package"
 
 # Unassign a host from a software item
 uptrakit software-items unassign <ITEM_ID> --host <HOST_ID>
@@ -176,53 +176,53 @@ level, and `LATEST` / `STATUS` columns in the host table showing `up-to-date` or
 `update-available` per host. The `STATUS` column only has a value when both `installed_version`
 and `latest_version` are known.
 
-`latest_version` is populated for agent-side providers (Homebrew, PHS) immediately after a version
-check. For controller-side providers (GitHub Releases, Docker Registry), it is populated by the
+`latest_version` is populated for agent-side plugins (Homebrew, PHS) immediately after a version
+check. For controller-side plugins (GitHub Releases, Docker Registry), it is populated by the
 scheduled upstream resolver. Run `uptrakit check item <ITEM_ID>` to trigger a fresh check before
 using `update-latest`.
 
 See also: [Software Item Entity](../architecture/software-item-entity.md),
-[Autodiscovery](autodiscovery.md), [Provider Configurations](provider-configs.md).
+[Autodiscovery](autodiscovery.md), [Plugin Configurations](plugin-configs.md).
 
-## Provider Configurations
+## Plugin Configurations
 
-Manage provider configurations that define how software packages are tracked and where upstream
-versions are resolved. See [Provider Configurations](provider-configs.md) for a full explanation
-of provider types and their fields.
+Manage plugin configurations that define how software packages are tracked and where upstream
+versions are resolved. See [Plugin Configurations](plugin-configs.md) for a full explanation
+of plugin types and their fields.
 
 ```sh
-# List all provider configs (paginated)
-uptrakit provider-configs list
-uptrakit provider-configs list --page 1 --per-page 20
+# List all plugin configs (paginated)
+uptrakit plugin-configs list
+uptrakit plugin-configs list --page 1 --per-page 20
 
-# Show provider config details
-uptrakit provider-configs show <PROVIDER_CONFIG_ID>
+# Show plugin config details
+uptrakit plugin-configs show <PLUGIN_CONFIG_ID>
 
-# Create a new provider config
-uptrakit provider-configs create --name "My App Releases" --type github_releases \
+# Create a new plugin config
+uptrakit plugin-configs create --name "My App Releases" --type github_releases \
   --config '{"owner":"example","repo":"my-app"}'
 
-uptrakit provider-configs create --name "My Docker Image" --type docker_registry \
-  --config '{"image":"example/my-image"}'
+uptrakit plugin-configs create --name "My Docker Image" --type docker \
+  --config '{"tracking_mode":"semver_tags"}'
 
-uptrakit provider-configs create --name "My Formula" --type homebrew \
+uptrakit plugin-configs create --name "My Formula" --type homebrew \
   --config '{"package_type":"formula","formula":"my-formula"}'
 
-# Update a provider config
-uptrakit provider-configs update <PROVIDER_CONFIG_ID> --name "Updated Name"
-uptrakit provider-configs update <PROVIDER_CONFIG_ID> --config '{"owner":"example","repo":"new-repo"}'
+# Update a plugin config
+uptrakit plugin-configs update <PLUGIN_CONFIG_ID> --name "Updated Name"
+uptrakit plugin-configs update <PLUGIN_CONFIG_ID> --config '{"owner":"example","repo":"new-repo"}'
 
-# Delete a provider config
-uptrakit provider-configs delete <PROVIDER_CONFIG_ID>
+# Delete a plugin config
+uptrakit plugin-configs delete <PLUGIN_CONFIG_ID>
 
-# Trigger autodiscovery for a provider config (discovery-capable providers only)
-uptrakit provider-configs discover <PROVIDER_CONFIG_ID>
+# Trigger autodiscovery for a plugin config (discovery-capable plugins only)
+uptrakit plugin-configs discover <PLUGIN_CONFIG_ID>
 
-# Discard all pending discovered items for a provider config
-uptrakit provider-configs discard-discovered <PROVIDER_CONFIG_ID>
+# Discard all pending discovered items for a plugin config
+uptrakit plugin-configs discard-discovered <PLUGIN_CONFIG_ID>
 ```
 
-See also: [Provider Configurations](provider-configs.md), [Autodiscovery](autodiscovery.md).
+See also: [Plugin Configurations](plugin-configs.md), [Autodiscovery](autodiscovery.md).
 
 ## Autodiscovery
 
@@ -239,14 +239,14 @@ uptrakit autodiscovery ignores show <IGNORE_ID>
 
 # Create an ignore rule directly (pre-suppress a package before discovery)
 uptrakit autodiscovery ignores create \
-  --provider-config <PROVIDER_CONFIG_ID> \
+  --plugin-config <PLUGIN_CONFIG_ID> \
   --package "unwanted-package"
 
 # Delete an ignore rule (re-enables future discovery of that package)
 uptrakit autodiscovery ignores delete <IGNORE_ID>
 ```
 
-See also: [Autodiscovery](autodiscovery.md), [Provider Configurations](provider-configs.md).
+See also: [Autodiscovery](autodiscovery.md), [Plugin Configurations](plugin-configs.md).
 
 ## Version Checks
 

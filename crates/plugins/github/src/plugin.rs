@@ -18,7 +18,7 @@ use crate::config::GitHubConfig;
 use crate::error::{GitHubError, Result};
 use crate::tag::strip_tag_prefix;
 
-/// GitHub Releases provider implementation.
+/// GitHub Releases plugin implementation.
 ///
 /// Fetches release metadata from the GitHub API and converts it into
 /// `UpstreamRelease` values for the controller.
@@ -30,7 +30,7 @@ pub struct GitHubPlugin {
 }
 
 impl GitHubPlugin {
-    /// Create a new `GitHubProvider` from the given configuration.
+    /// Create a new `GitHubPlugin` from the given configuration.
     ///
     /// Validates the configuration and pre-compiles asset filter regexes.
     pub fn new(config: GitHubConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
@@ -276,7 +276,7 @@ impl Plugin for GitHubPlugin {
             .execute_quiet(&CommandSpec::shell(&cmd))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "detect_installed_version_command failed: {e}"
                 )))
             })?;
@@ -380,7 +380,7 @@ mod tests {
         Arc::new(LocalCommandExecutor)
     }
 
-    fn test_provider() -> GitHubPlugin {
+    fn test_plugin() -> GitHubPlugin {
         GitHubPlugin::new(test_config(), test_executor()).expect("valid config")
     }
 
@@ -399,9 +399,9 @@ mod tests {
 
     #[test]
     fn convert_normal_release() {
-        let provider = test_provider();
+        let plugin = test_plugin();
         let gh = make_release("v1.0.0", false, false);
-        let release = provider.convert_release(&gh).expect("should convert");
+        let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "1.0.0");
         assert_eq!(release.tag, "v1.0.0");
         assert!(!release.is_prerelease);
@@ -410,42 +410,42 @@ mod tests {
 
     #[test]
     fn skip_draft_release() {
-        let provider = test_provider();
+        let plugin = test_plugin();
         let gh = make_release("v1.0.0", true, false);
-        assert!(provider.convert_release(&gh).is_none());
+        assert!(plugin.convert_release(&gh).is_none());
     }
 
     #[test]
     fn skip_prerelease_by_default() {
-        let provider = test_provider();
+        let plugin = test_plugin();
         let gh = make_release("v1.0.0-beta.1", false, true);
-        assert!(provider.convert_release(&gh).is_none());
+        assert!(plugin.convert_release(&gh).is_none());
     }
 
     #[test]
     fn include_prerelease_when_configured() {
         let mut config = test_config();
         config.include_prereleases = true;
-        let provider = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
         let gh = make_release("v1.0.0-beta.1", false, true);
-        let release = provider.convert_release(&gh).expect("should convert");
+        let release = plugin.convert_release(&gh).expect("should convert");
         assert!(release.is_prerelease);
         assert_eq!(release.version.as_str(), "1.0.0-beta.1");
     }
 
     #[test]
     fn tag_stripping() {
-        let provider = test_provider();
+        let plugin = test_plugin();
         let gh = make_release("v2.3.4", false, false);
-        let release = provider.convert_release(&gh).expect("should convert");
+        let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "2.3.4");
     }
 
     #[test]
     fn tag_without_prefix() {
-        let provider = test_provider();
+        let plugin = test_plugin();
         let gh = make_release("1.0.0", false, false);
-        let release = provider.convert_release(&gh).expect("should convert");
+        let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "1.0.0");
     }
 
@@ -453,9 +453,9 @@ mod tests {
     fn custom_tag_prefix() {
         let mut config = test_config();
         config.tag_strip_prefix = "release-".to_string();
-        let provider = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
         let gh = make_release("release-3.0.0", false, false);
-        let release = provider.convert_release(&gh).expect("should convert");
+        let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "3.0.0");
     }
 
@@ -463,7 +463,7 @@ mod tests {
     fn asset_filtering() {
         let mut config = test_config();
         config.asset_patterns = vec![r".*\.tar\.gz$".to_string()];
-        let provider = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
 
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
@@ -495,14 +495,14 @@ mod tests {
             ],
         };
 
-        let release = provider.convert_release(&gh).expect("should convert");
+        let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.assets.len(), 1);
         assert_eq!(release.assets[0].name, "app-linux-amd64.tar.gz");
     }
 
     #[test]
     fn no_asset_filter_includes_all() {
-        let provider = test_provider();
+        let plugin = test_plugin();
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
             name: None,
@@ -527,14 +527,14 @@ mod tests {
             ],
         };
 
-        let release = provider.convert_release(&gh).expect("should convert");
+        let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.assets.len(), 2);
     }
 
     #[test]
     fn url_construction() {
-        let provider = test_provider();
-        let url = provider.releases_url();
+        let plugin = test_plugin();
+        let url = plugin.releases_url();
         assert_eq!(
             url,
             "https://api.github.com/repos/octocat/hello-world/releases?per_page=100"
@@ -545,8 +545,8 @@ mod tests {
     fn url_construction_custom_base() {
         let mut config = test_config();
         config.api_base_url = Some("https://ghe.corp.com/api/v3".to_string());
-        let provider = GitHubPlugin::new(config, test_executor()).expect("valid config");
-        let url = provider.releases_url();
+        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let url = plugin.releases_url();
         assert_eq!(
             url,
             "https://ghe.corp.com/api/v3/repos/octocat/hello-world/releases?per_page=100"
@@ -555,9 +555,9 @@ mod tests {
 
     #[test]
     fn date_parsing() {
-        let provider = test_provider();
+        let plugin = test_plugin();
         let gh = make_release("v1.0.0", false, false);
-        let release = provider.convert_release(&gh).expect("should convert");
+        let release = plugin.convert_release(&gh).expect("should convert");
         let published = release.published_at.expect("should have published_at");
         assert_eq!(published.year(), 2024);
         assert_eq!(published.month() as u8, 1);
@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn invalid_date_does_not_fail() {
-        let provider = test_provider();
+        let plugin = test_plugin();
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
             name: None,
@@ -577,12 +577,12 @@ mod tests {
             published_at: Some("not-a-date".to_string()),
             assets: vec![],
         };
-        let release = provider.convert_release(&gh).expect("should convert");
+        let release = plugin.convert_release(&gh).expect("should convert");
         assert!(release.published_at.is_none());
     }
 
     #[test]
-    fn provider_creation_fails_with_invalid_config() {
+    fn plugin_creation_fails_with_invalid_config() {
         let config = test_config();
         let config = GitHubConfig {
             owner: String::new(),
@@ -601,8 +601,8 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_no_command_returns_none() {
         // When detect_installed_version_command is absent, always returns Ok(None).
-        let provider = test_provider();
-        let result = provider.detect_installed_version("example").await.unwrap();
+        let plugin = test_plugin();
+        let result = plugin.detect_installed_version("example").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -612,8 +612,8 @@ mod tests {
         let mut config = test_config();
         config.detect_installed_version_command =
             Some("echo '3.14.1'".to_string());
-        let provider = GitHubPlugin::new(config, test_executor()).expect("valid config");
-        let result = provider
+        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let result = plugin
             .detect_installed_version("any-pkg")
             .await
             .expect("should succeed");
@@ -626,8 +626,8 @@ mod tests {
         let mut config = test_config();
         config.detect_installed_version_command =
             Some("echo '{package_identifier}'".to_string());
-        let provider = GitHubPlugin::new(config, test_executor()).expect("valid config");
-        let result = provider
+        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let result = plugin
             .detect_installed_version("booklore")
             .await
             .expect("should succeed");
@@ -641,8 +641,8 @@ mod tests {
         // An empty output (no non-whitespace lines) should yield None.
         let mut config = test_config();
         config.detect_installed_version_command = Some("true".to_string());
-        let provider = GitHubPlugin::new(config, test_executor()).expect("valid config");
-        let result = provider
+        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let result = plugin
             .detect_installed_version("pkg")
             .await
             .expect("should succeed");
@@ -655,16 +655,16 @@ mod tests {
         let mut config = test_config();
         config.detect_installed_version_command =
             Some("false".to_string());
-        let provider = GitHubPlugin::new(config, test_executor()).expect("valid config");
-        let result = provider.detect_installed_version("pkg").await;
+        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let result = plugin.detect_installed_version("pkg").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn execute_update_missing_release_info_returns_error() {
-        let provider = test_provider();
+        let plugin = test_plugin();
         let (tx, _rx) = mpsc::channel(100);
-        let result = provider
+        let result = plugin
             .execute_update("octocat/hello-world", "1.0.0", None, &tx)
             .await;
         assert!(result.is_err());
@@ -677,14 +677,14 @@ mod tests {
 
     #[tokio::test]
     async fn execute_update_no_install_command_succeeds() {
-        let provider = test_provider();
+        let plugin = test_plugin();
         let (tx, mut rx) = mpsc::channel(100);
         let release_info = ReleaseInfo {
             tag: "v1.0.0".to_string(),
             release_url: "https://example.com".to_string(),
             assets: vec![],
         };
-        let result = provider
+        let result = plugin
             .execute_update("octocat/hello-world", "1.0.0", Some(&release_info), &tx)
             .await;
         assert!(result.is_ok());

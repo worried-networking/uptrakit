@@ -280,4 +280,4 @@ explicit rather than silent.
 
 ##### Strengths
 
-- **SSH agent correctly reuses `CommandExecutor` abstraction for remote operations.** `crates/shared/command/src/executor.rs:142-156` — The `CommandExecutor` trait accommodates future SSH-based or container-based executors. All four providers receive `Arc<dyn CommandExecutor>`.
+- **SSH agent correctly reuses `CommandExecutor` abstraction for remote operations.** `crates/shared/command/src/executor.rs:142-156` — The `CommandExecutor` trait accommodates future SSH-based or container-based executors. All four plugins receive `Arc<dyn CommandExecutor>`.

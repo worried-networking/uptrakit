@@ -179,7 +179,7 @@ async fn establish_ssh_session(
 
 /// Build a `ConnectionContext` for a remote SSH host.
 ///
-/// Injects the SSH host's connection details so that the Docker provider
+/// Injects the SSH host's connection details so that the Docker plugin
 /// (when enabled) can point bollard at the remote Docker daemon via SSH.
 fn build_connection_context(host: &crate::db::entity::ssh_host::Model) -> ConnectionContext {
     ConnectionContext {
@@ -396,7 +396,7 @@ pub(crate) async fn handle_execute_update_ssh(
 ///
 /// Looks up the SSH host by `host_machine_id`, opens a session, and delegates
 /// to the shared `uptrakit_agent_core::handle_discover_software()`. SSH
-/// connection failures are reported as per-provider errors rather than
+/// connection failures are reported as per-plugin errors rather than
 /// aborting the entire run.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
@@ -413,7 +413,7 @@ pub(crate) async fn handle_discover_software_ssh(
                 "no SSH host found for DiscoverSoftware host_machine_id; returning errors"
             );
             let results = payload
-                .providers
+                .plugins
                 .iter()
                 .map(|a| DiscoveryPluginResult {
                     plugin_config_id: a.plugin_config_id,
@@ -439,7 +439,7 @@ pub(crate) async fn handle_discover_software_ssh(
                 "DB error looking up SSH host for DiscoverSoftware"
             );
             let results = payload
-                .providers
+                .plugins
                 .iter()
                 .map(|a| DiscoveryPluginResult {
                     plugin_config_id: a.plugin_config_id,
@@ -466,7 +466,7 @@ pub(crate) async fn handle_discover_software_ssh(
                 "failed to establish SSH session for DiscoverSoftware"
             );
             let results = payload
-                .providers
+                .plugins
                 .iter()
                 .map(|a| DiscoveryPluginResult {
                     plugin_config_id: a.plugin_config_id,

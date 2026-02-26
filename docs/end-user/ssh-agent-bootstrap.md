@@ -207,7 +207,7 @@ The bootstrap command performs these steps in order:
    If `--remove-stale-keys` is passed, existing stale keys are removed before
    the new key is appended (see [Stale key detection](#stale-key-detection)).
 
-5. **Configure sudoers** — Queries all registered providers for their required
+5. **Configure sudoers** — Queries all registered plugins for their required
    sudo commands, resolves each to its absolute path on the remote host via
    `command -v`, and writes a minimal
    `/etc/sudoers.d/uptrakit-<target_username>` with one entry per resolved
@@ -276,7 +276,7 @@ uptrakit-agent-ssh host bootstrap root@192.168.1.100 \
 ## Sudoers configuration
 
 The bootstrap command generates a minimal sudoers file with one entry per
-registered provider command. For example, if only the APT provider is active:
+registered plugin command. For example, if only the APT plugin is active:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
@@ -292,7 +292,7 @@ The `--allow-all` flag writes `NOPASSWD: ALL` instead (less secure; matches the
 pre-1.x behavior). Use it only when the required tools are not yet installed or
 during development.
 
-To refresh the sudoers file after adding new providers, run:
+To refresh the sudoers file after adding new plugins, run:
 
 ```bash
 uptrakit-agent-ssh host update-sudoers <host-name> \
@@ -359,9 +359,9 @@ The target user's home directory could not be resolved via `getent passwd`. This
 can happen if the user's account is misconfigured. Verify that `getent passwd
 <username>` returns a valid entry on the remote host.
 
-### "No provider commands could be resolved on the remote host"
+### "No plugin commands could be resolved on the remote host"
 
-The required provider tools (e.g. `apt-get`) are not installed on the remote
+The required plugin tools (e.g. `apt-get`) are not installed on the remote
 host, so no sudoers entries could be generated. Either install the required tools
 first, or re-run bootstrap with `--allow-all` to fall back to `NOPASSWD: ALL`.
 

@@ -21,18 +21,18 @@ impl HumanOutput for PaginatedResponse<SoftwareItemResponse> {
         }
         let mut out = format!(
             "{:<38} {:<25} {:<30} {:<8} {:<7} UPDATE\n",
-            "ID", "NAME", "PROVIDERS", "ENABLED", "HOSTS"
+            "ID", "NAME", "PLUGINS", "ENABLED", "HOSTS"
         );
         for item in &self.items {
-            let providers = if item.provider_types.is_empty() {
+            let plugins_str = if item.plugins.is_empty() {
                 "-".to_string()
             } else {
-                item.provider_types.join(", ")
+                item.plugins.join(", ")
             };
             let update = if item.update_available { "yes" } else { "-" };
             out.push_str(&format!(
                 "{:<38} {:<25} {:<30} {:<8} {:<7} {}\n",
-                item.id, item.name, providers, item.enabled, item.host_count, update
+                item.id, item.name, plugins_str, item.enabled, item.host_count, update
             ));
         }
         out.push_str(&format!(
@@ -48,12 +48,12 @@ impl HumanOutput for SoftwareItemDetailResponse {
         let mut out = String::new();
         out.push_str(&format!("ID:              {}\n", self.id));
         out.push_str(&format!("Name:            {}\n", self.name));
-        let providers = if self.provider_types.is_empty() {
+        let plugins_str = if self.plugins.is_empty() {
             "-".to_string()
         } else {
-            self.provider_types.join(", ")
+            self.plugins.join(", ")
         };
-        out.push_str(&format!("Providers:       {}\n", providers));
+        out.push_str(&format!("Plugins:         {}\n", plugins_str));
         out.push_str(&format!("Enabled:         {}\n", self.enabled));
         if let Some(ref lv) = self.latest_version {
             out.push_str(&format!("Latest Version:  {}\n", lv));
@@ -87,7 +87,7 @@ impl HumanOutput for SoftwareItemDetailResponse {
             out.push_str("\nAssigned Hosts:\n");
             out.push_str(&format!(
                 "  {:<38} {:<20} {:<20} {:<30} {:<15} {:<15} {:<16} LINKED AT\n",
-                "HOST ID", "HOSTNAME", "PROVIDER", "PACKAGE", "INSTALLED", "LATEST", "STATUS"
+                "HOST ID", "HOSTNAME", "PLUGIN", "PACKAGE", "INSTALLED", "LATEST", "STATUS"
             ));
             for h in &self.hosts {
                 let linked = h
@@ -105,7 +105,7 @@ impl HumanOutput for SoftwareItemDetailResponse {
                     "  {:<38} {:<20} {:<20} {:<30} {:<15} {:<15} {:<16} {}\n",
                     h.host_id,
                     h.hostname,
-                    h.provider_type,
+                    h.plugin_type,
                     h.package_identifier,
                     h.installed_version.as_deref().unwrap_or("-"),
                     h.latest_version.as_deref().unwrap_or("-"),
@@ -123,12 +123,12 @@ impl HumanOutput for SoftwareItemResponse {
         let mut out = String::new();
         out.push_str(&format!("ID:              {}\n", self.id));
         out.push_str(&format!("Name:            {}\n", self.name));
-        let providers = if self.provider_types.is_empty() {
+        let plugins_str = if self.plugins.is_empty() {
             "-".to_string()
         } else {
-            self.provider_types.join(", ")
+            self.plugins.join(", ")
         };
-        out.push_str(&format!("Providers:       {}\n", providers));
+        out.push_str(&format!("Plugins:         {}\n", plugins_str));
         out.push_str(&format!("Enabled:         {}\n", self.enabled));
         if let Some(ds) = &self.discovery_state {
             out.push_str(&format!("Discovery State: {}\n", ds));
@@ -427,7 +427,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "Node.js".to_string(),
-            provider_types: vec!["github_releases".to_string()],
+            plugins: vec!["github_releases".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,
@@ -445,7 +445,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "Homebrew App".to_string(),
-            provider_types: vec!["homebrew".to_string()],
+            plugins: vec!["homebrew".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,
@@ -480,7 +480,7 @@ mod tests {
         };
         let s = resp.to_human_string();
         assert!(s.contains("Node.js"), "name missing");
-        assert!(s.contains("github_releases"), "provider missing");
+        assert!(s.contains("github_releases"), "plugin missing");
         assert!(s.contains("UPDATE"), "UPDATE column header missing");
     }
 
@@ -504,7 +504,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "Node.js".to_string(),
-            provider_types: vec!["github_releases".to_string()],
+            plugins: vec!["github_releases".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,
@@ -523,7 +523,7 @@ mod tests {
                     .parse::<Uuid>()
                     .unwrap(),
                 plugin_config_name: "Default Config".to_string(),
-                provider_type: "github_releases".to_string(),
+                plugin_type: "github_releases".to_string(),
                 package_identifier: "nodejs/node".to_string(),
                 config_override: None,
                 installed_version: Some("20.0.0".to_string()),
@@ -553,7 +553,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "Curl".to_string(),
-            provider_types: vec!["homebrew".to_string()],
+            plugins: vec!["homebrew".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,
@@ -572,7 +572,7 @@ mod tests {
                     .parse::<Uuid>()
                     .unwrap(),
                 plugin_config_name: "Homebrew".to_string(),
-                provider_type: "homebrew".to_string(),
+                plugin_type: "homebrew".to_string(),
                 package_identifier: "curl".to_string(),
                 config_override: None,
                 installed_version: Some("8.7.0".to_string()),
@@ -598,7 +598,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "My App".to_string(),
-            provider_types: vec!["homebrew".to_string()],
+            plugins: vec!["homebrew".to_string()],
             enabled: true,
             discovery_state: Some(SoftwareDiscoveryState::Approved),
             last_checked_at: None,
@@ -623,7 +623,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             name: "Up-to-date App".to_string(),
-            provider_types: vec![],
+            plugins: vec![],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,

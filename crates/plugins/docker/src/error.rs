@@ -3,7 +3,7 @@ use thiserror::Error;
 use uptrakit_plugin_core::PluginError;
 use uptrakit_shared_macros::impl_report_conversion;
 
-/// Errors specific to the Docker provider.
+/// Errors specific to the Docker plugin.
 #[derive(Debug, Error)]
 pub enum DockerError {
     #[error("HTTP request failed: {0}")]
@@ -24,8 +24,8 @@ pub enum DockerError {
     #[error("configuration error: {0}")]
     Configuration(String),
 
-    #[error("provider error: {0}")]
-    Provider(String),
+    #[error("plugin error: {0}")]
+    Plugin(String),
 
     #[error("invalid tag pattern: {0}")]
     InvalidPattern(String),
@@ -43,12 +43,12 @@ pub enum DockerError {
     PullFailed(String),
 }
 
-/// Result type alias for Docker provider operations.
+/// Result type alias for Docker plugin operations.
 pub type Result<T> = std::result::Result<T, Report<DockerError>>;
 
 impl_report_conversion!(reqwest::Error => DockerError, |e| DockerError::Request(e.to_string()));
 impl_report_conversion!(PluginError => DockerError, |e| DockerError::Configuration(e.to_string()));
-impl_report_conversion!(DockerError => PluginError, |e| PluginError::ProviderInternal(e.to_string()));
+impl_report_conversion!(DockerError => PluginError, |e| PluginError::PluginInternal(e.to_string()));
 impl_report_conversion!(bollard::errors::Error => DockerError, |e| DockerError::DaemonConnection(e.to_string()));
 
 #[cfg(test)]
@@ -98,9 +98,9 @@ mod tests {
     }
 
     #[test]
-    fn display_provider() {
-        let err = DockerError::Provider("upstream failure".to_string());
-        assert_eq!(err.to_string(), "provider error: upstream failure");
+    fn display_plugin() {
+        let err = DockerError::Plugin("upstream failure".to_string());
+        assert_eq!(err.to_string(), "plugin error: upstream failure");
     }
 
     #[test]

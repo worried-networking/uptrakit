@@ -9,7 +9,7 @@
 //! ## Structured format (new)
 //! - `hooks: HooksConfig` with predefined templates or custom commands
 //!
-//! Merges pre/post-update commands from provider config (base) with
+//! Merges pre/post-update commands from plugin config (base) with
 //! software item config_override (override). The override completely
 //! replaces the base when present.
 
@@ -28,32 +28,32 @@ pub struct ResolvedHooks {
     pub post_update_hooks: Vec<HookCommand>,
 }
 
-/// Resolve hooks from provider config and config_override.
+/// Resolve hooks from plugin config and config_override.
 ///
 /// Supports both legacy format (`pre_update_commands`, `post_update_commands`)
 /// and new structured format (`hooks: HooksConfig`).
 ///
 /// # Arguments
 ///
-/// * `provider_config` - Base provider configuration JSON
+/// * `plugin_config` - Base plugin configuration JSON
 /// * `config_override` - Optional override configuration JSON from software item
 ///
 /// # Returns
 ///
 /// Resolved hooks with commands and shell type.
 pub fn resolve_hooks(
-    provider_config: &serde_json::Value,
+    plugin_config: &serde_json::Value,
     config_override: Option<&serde_json::Value>,
 ) -> ResolvedHooks {
     // First, try to parse structured hooks from override, then from base
-    let merged_hooks = merge_hooks_config(provider_config, config_override);
+    let merged_hooks = merge_hooks_config(plugin_config, config_override);
 
     if let Some(hooks_config) = merged_hooks {
         return resolve_hooks_config(&hooks_config);
     }
 
     // Fall back to legacy format (custom commands → Shell variant)
-    let (pre, post) = merge_hooks(provider_config, config_override);
+    let (pre, post) = merge_hooks(plugin_config, config_override);
     let shell = HookShell::default();
     ResolvedHooks {
         pre_update_hooks: pre
@@ -80,11 +80,11 @@ fn parse_hooks_config(value: &serde_json::Value) -> Option<HooksConfig> {
         .and_then(|v| serde_json::from_value(v.clone()).ok())
 }
 
-/// Merge structured hooks config from provider config and override.
+/// Merge structured hooks config from plugin config and override.
 ///
 /// Strategy: Override's hooks completely replace base's hooks when present.
 fn merge_hooks_config(
-    provider_config: &serde_json::Value,
+    plugin_config: &serde_json::Value,
     config_override: Option<&serde_json::Value>,
 ) -> Option<HooksConfig> {
     // Check if override has hooks
@@ -95,7 +95,7 @@ fn merge_hooks_config(
     }
 
     // Fall back to base config hooks
-    parse_hooks_config(provider_config)
+    parse_hooks_config(plugin_config)
 }
 
 /// Resolve a HooksConfig into hook commands.
@@ -194,25 +194,25 @@ fn extract_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Merge hooks from provider config and config_override.
+/// Merge hooks from plugin config and config_override.
 ///
 /// Strategy: Override keys completely replace base keys. Missing keys
 /// fall back to base.
 ///
 /// # Arguments
 ///
-/// * `provider_config` - Base provider configuration JSON
+/// * `plugin_config` - Base plugin configuration JSON
 /// * `config_override` - Optional override configuration JSON from software item
 ///
 /// # Returns
 ///
 /// Tuple of `(pre_update_commands, post_update_commands)`
 pub fn merge_hooks(
-    provider_config: &serde_json::Value,
+    plugin_config: &serde_json::Value,
     config_override: Option<&serde_json::Value>,
 ) -> (Vec<String>, Vec<String>) {
-    let base_pre = extract_string_array(provider_config, "pre_update_commands");
-    let base_post = extract_string_array(provider_config, "post_update_commands");
+    let base_pre = extract_string_array(plugin_config, "pre_update_commands");
+    let base_post = extract_string_array(plugin_config, "post_update_commands");
 
     let Some(override_config) = config_override else {
         return (base_pre, base_post);
@@ -234,14 +234,14 @@ pub fn merge_hooks(
     (pre, post)
 }
 
-/// Merge provider config and override into a single config object.
+/// Merge plugin config and override into a single config object.
 ///
 /// The override object's keys completely replace the base object's keys.
 pub fn merge_config(
-    provider_config: &serde_json::Value,
+    plugin_config: &serde_json::Value,
     config_override: Option<&serde_json::Value>,
 ) -> serde_json::Value {
-    let mut merged = provider_config.clone();
+    let mut merged = plugin_config.clone();
 
     if let Some(override_config) = config_override
         && let (Some(base_obj), Some(over_obj)) =

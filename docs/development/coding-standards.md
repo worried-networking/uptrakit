@@ -26,9 +26,9 @@ changes for downstream consumers. External crates matching on these enums must i
 
 Enums currently annotated with `#[non_exhaustive]`:
 
-- `ProviderType` (`shared-types`)
+- `PluginType` (`shared-types`)
 - `ServiceMessage`, `ControllerMessage` (`wire`)
-- `ProviderCapability` (`provider-core`)
+- `PluginCapability` (`plugin-core`)
 
 When adding a new public enum, apply `#[non_exhaustive]` by default unless the enum is explicitly guaranteed to be closed (e.g., a two-variant
 boolean-like enum).
@@ -36,7 +36,7 @@ boolean-like enum).
 ## Design Principles
 
 - Keep every boundary clear: the controller orchestrates scheduling, upstream checks, API/UI; the MQTT service handles MQTT/Home Assistant
-  integration; agents manage installed versions and update execution; providers focus on version detection/updating logic.
+  integration; agents manage installed versions and update execution; plugins focus on version detection/updating logic.
 - Treat custom scripts and command execution paths as handling untrusted input; validate before execution to avoid shell injection.
 - Agent connections are outbound-only, unprivileged, and rely on explicit sudo allowlists for privileged update commands.
 - Logs should contain operational summaries only; do not store full command output internally.
@@ -136,7 +136,7 @@ if let Err(e) = req.validate() {
 chars | | `LoginRequest` | email format, password non-empty | | `CreateOidcProviderRequest` | name non-empty, slug format (lowercase+digits+hyphens,
 1-64), issuer_url scheme, client_id non-empty | | `UpdateScheduledTaskRequest` | cron_expression non-empty, 5 whitespace-separated fields | |
 `UpdateNetworkSettingsRequest` | trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format | | `CreateSoftwareItemRequest` | name
-non-empty, exactly one of provider_config_id/provider_config | | `CreateProviderConfigRequest` | name non-empty |
+non-empty, exactly one of plugin_config_id/plugin_config | | `CreatePluginConfigRequest` | name non-empty |
 
 See also: the `update_hooks.rs` module provides a similar validation pattern (`HookValidationError`) for hook configuration types.
 
@@ -454,8 +454,8 @@ Entity::find().filter(Column::HostId.in_subquery(host_subquery))
 ### Scope pre-loaded sets tightly
 
 When pre-loading a lookup set to avoid per-item queries, scope it to the narrowest key available. For example,
-pre-load autodiscovery ignore rules per `(tenant_id, provider_config_id)`, not per `tenant_id` alone — the
-per-config set is bounded to what a user has explicitly configured for that one provider, while the per-tenant set
+pre-load autodiscovery ignore rules per `(tenant_id, plugin_config_id)`, not per `tenant_id` alone — the
+per-config set is bounded to what a user has explicitly configured for that one plugin, while the per-tenant set
 can be unbounded.
 
 ### Avoid `unwrap_or(0)` on count queries
@@ -506,14 +506,14 @@ struct ProcessDiscoveryArgs<'a> {
     package_identifier: &'a str,
     name: &'a str,
     installed_version: &'a str,
-    provider_type_str: &'a str,
+    plugin_type_str: &'a str,
 }
 
 async fn process_one_discovery(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,
-    provider_config_id: Uuid,
+    plugin_config_id: Uuid,
     args: ProcessDiscoveryArgs<'_>,   // replaces 4 separate parameters
     ignore_set: &HashSet<String>,
     now: OffsetDateTime,

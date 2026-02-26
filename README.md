@@ -11,7 +11,7 @@ confirmation**.
 ## What it does
 
 - Tracks installed software versions across multiple hosts
-- Checks upstream for newer releases using a provider system (e.g. GitHub Releases, Proxmox VE Helper-Scripts)
+- Checks upstream for newer releases using a plugin system (e.g. GitHub Releases, Proxmox VE Helper-Scripts)
 - Runs **manual, user-triggered** updates and reports results
 - Exposes a minimal Web UI + API
 - Integrates with Home Assistant using MQTT `update` auto-discovery so each tracked item shows up as an Update entity
@@ -50,7 +50,7 @@ Contribution guidelines and project conventions:
 - [docs/end-user/](docs/end-user/) — end-user documentation
 - [docs/api/](docs/api/) — HTTP API and Wire protocol documentation
 - [docs/security/](docs/security/) — detailed security description
-- [docs/development/](docs/development/) — setup, testing, coding standards, PR process, dependency rules, provider expectations, and AI guidance
+- [docs/development/](docs/development/) — setup, testing, coding standards, PR process, dependency rules, plugin expectations, and AI guidance
 
 ## License
 

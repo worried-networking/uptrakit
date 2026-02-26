@@ -5,7 +5,7 @@ structured hooks (with predefined templates) and custom commands.
 
 ## Configuration format
 
-Hooks are configured in the provider config or software item's `config_override` under a `hooks` key:
+Hooks are configured in the plugin config or software item's `config_override` under a `hooks` key:
 
 ```json
 {
@@ -125,7 +125,7 @@ Commands are wrapped with fail-early settings before execution to ensure hooks f
 
 ## Input validation
 
-Predefined hook parameters are validated at the API boundary when provider configs and software items are created or
+Predefined hook parameters are validated at the API boundary when plugin configs and software items are created or
 updated:
 
 - **Service names** (systemd): `[a-zA-Z0-9._@:-]+`, max 256 chars. Rejects shell metacharacters (`;`, `|`, `$`,
@@ -137,7 +137,7 @@ Custom commands are not validated (they are intentionally arbitrary shell comman
 
 ## Merge strategy
 
-When both provider config and software item `config_override` define hooks:
+When both plugin config and software item `config_override` define hooks:
 
 1. If override has a `hooks` key, it completely replaces the base config's hooks
 1. If override doesn't have `hooks`, fall back to base config's hooks

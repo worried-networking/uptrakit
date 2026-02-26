@@ -37,7 +37,7 @@ pub enum SoftwareItemQueryError {
     DuplicateHostAssignment,
     /// Package identifier failed validation (e.g. Homebrew naming rules).
     InvalidPackageIdentifier(String),
-    /// `config_override` failed provider-level or hook validation.
+    /// `config_override` failed plugin-level or hook validation.
     InvalidConfigOverride(String),
     /// Inline plugin config failed name/config/hook validation.
     InvalidInlinePluginConfig(String),
@@ -52,7 +52,7 @@ struct ItemHostCount {
 }
 
 #[derive(Debug, FromQueryResult)]
-struct ItemProviderType {
+struct ItemPluginType {
     software_item_id: Uuid,
     plugin_type: String,
 }
@@ -61,7 +61,7 @@ struct ItemProviderType {
 
 fn build_list_response(
     item: &software_item::Model,
-    provider_types: Vec<String>,
+    plugins: Vec<String>,
     host_count: u64,
     latest_version: Option<String>,
     update_available: bool,
@@ -69,7 +69,7 @@ fn build_list_response(
     SoftwareItemResponse {
         id: item.id,
         name: item.name.clone(),
-        provider_types,
+        plugins,
         enabled: item.enabled,
         discovery_state: item.discovery_state.clone(),
         last_checked_at: item.last_checked_at,
@@ -83,7 +83,7 @@ fn build_list_response(
 
 fn build_detail_response(
     item: software_item::Model,
-    provider_types: Vec<String>,
+    plugins: Vec<String>,
     host_count: u64,
     latest_version: Option<String>,
     update_available: bool,
@@ -92,7 +92,7 @@ fn build_detail_response(
     SoftwareItemDetailResponse {
         id: item.id,
         name: item.name,
-        provider_types,
+        plugins,
         enabled: item.enabled,
         discovery_state: item.discovery_state,
         last_checked_at: item.last_checked_at,
@@ -121,14 +121,14 @@ async fn count_linked_hosts(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> 
         .unwrap_or(0)
 }
 
-/// Load the distinct provider types for a software item from its host assignments.
-async fn load_provider_types(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> Vec<String> {
+/// Load the distinct plugin types for a software item from its host assignments.
+async fn load_plugins(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> Vec<String> {
     #[derive(Debug, FromQueryResult)]
     struct PcRow {
         plugin_type: String,
     }
 
-    // Join host_software_items → plugin_configs to collect distinct provider types.
+    // Join host_software_items → plugin_configs to collect distinct plugin types.
     let rows: Vec<PcRow> = HostSoftwareItem::find()
         .select_only()
         .column(plugin_config::Column::PluginType)
@@ -186,14 +186,14 @@ async fn load_item_hosts(
         }
     };
 
-    let provider_configs: HashMap<Uuid, plugin_config::Model> = match PluginConfig::find()
+    let plugin_configs: HashMap<Uuid, plugin_config::Model> = match PluginConfig::find()
         .filter(plugin_config::Column::Id.is_in(pc_ids))
         .all(db)
         .await
     {
         Ok(pcs) => pcs.into_iter().map(|pc| (pc.id, pc)).collect(),
         Err(e) => {
-            tracing::warn!("Failed to load provider configs for software item: {e}");
+            tracing::warn!("Failed to load plugin configs for software item: {e}");
             return Vec::new();
         }
     };
@@ -202,7 +202,7 @@ async fn load_item_hosts(
         .into_iter()
         .filter_map(|link| {
             let host = hosts.get(&link.host_id)?;
-            let pc = provider_configs.get(&link.plugin_config_id)?;
+            let pc = plugin_configs.get(&link.plugin_config_id)?;
             let update_avail =
                 host_update_available(link.installed_version.as_deref(), latest_version);
             Some(SoftwareItemHostSummary {
@@ -211,7 +211,7 @@ async fn load_item_hosts(
                 friendly_name: host.friendly_name.clone(),
                 plugin_config_id: pc.id,
                 plugin_config_name: pc.name.clone(),
-                provider_type: pc.plugin_type.clone(),
+                plugin_type: pc.plugin_type.clone(),
                 package_identifier: link.package_identifier,
                 config_override: link.config_override,
                 installed_version: link.installed_version,
@@ -245,14 +245,14 @@ pub(crate) async fn find_active_item(
 enum ConfigOverrideError {
     #[error("config_override must be a JSON object")]
     NotAnObject,
-    #[error("provider validation failed: {0}")]
-    ProviderValidation(String),
+    #[error("plugin validation failed: {0}")]
+    PluginValidation(String),
 }
 
-/// Validate `config_override` by merging it with the base provider config and running
-/// provider-specific validation. The merged document must satisfy the provider's schema.
+/// Validate `config_override` by merging it with the base plugin config and running
+/// plugin-specific validation. The merged document must satisfy the plugin's schema.
 fn validate_config_override(
-    provider_type: &str,
+    plugin_type: &str,
     base_config: &serde_json::Value,
     override_config: &serde_json::Value,
 ) -> std::result::Result<(), ConfigOverrideError> {
@@ -266,11 +266,11 @@ fn validate_config_override(
         return Err(ConfigOverrideError::NotAnObject);
     }
 
-    PluginRegistry::validate_config_str(provider_type, &merged)
-        .map_err(|e| ConfigOverrideError::ProviderValidation(e.to_string()))
+    PluginRegistry::validate_config_str(plugin_type, &merged)
+        .map_err(|e| ConfigOverrideError::PluginValidation(e.to_string()))
 }
 
-/// Resolve provider config from either an existing ID or an inline create request,
+/// Resolve plugin config from either an existing ID or an inline create request,
 /// within a transaction. Returns `(plugin_config_id, plugin_config::Model)`.
 async fn resolve_plugin_config_txn(
     txn: &sea_orm::DatabaseTransaction,
@@ -326,7 +326,7 @@ async fn resolve_plugin_config_txn(
     }
 }
 
-/// Validate provider config, package identifier, and config_override for a host assignment.
+/// Validate plugin config, package identifier, and config_override for a host assignment.
 fn validate_assignment(
     config: &plugin_config::Model,
     package_identifier: &str,
@@ -454,8 +454,8 @@ pub async fn list_software_items(
         .map(|row| (row.software_item_id, row.count as u64))
         .collect();
 
-    // Bulk-load provider types for all items via JOIN (one query).
-    let provider_type_rows: Vec<ItemProviderType> = HostSoftwareItem::find()
+    // Bulk-load plugin types for all items via JOIN (one query).
+    let plugin_type_rows: Vec<ItemPluginType> = HostSoftwareItem::find()
         .select_only()
         .column(host_software_item::Column::SoftwareItemId)
         .column(plugin_config::Column::PluginType)
@@ -464,14 +464,14 @@ pub async fn list_software_items(
             host_software_item::Relation::PluginConfig.def(),
         )
         .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
-        .into_model::<ItemProviderType>()
+        .into_model::<ItemPluginType>()
         .all(tenant_db.db())
         .await?;
 
-    // Group provider types by software item id, deduplicated.
-    let mut provider_types_map: HashMap<Uuid, Vec<String>> = HashMap::new();
-    for row in provider_type_rows {
-        let entry = provider_types_map.entry(row.software_item_id).or_default();
+    // Group plugin types by software item id, deduplicated.
+    let mut plugins_map: HashMap<Uuid, Vec<String>> = HashMap::new();
+    for row in plugin_type_rows {
+        let entry = plugins_map.entry(row.software_item_id).or_default();
         if !entry.contains(&row.plugin_type) {
             entry.push(row.plugin_type);
         }
@@ -514,7 +514,7 @@ pub async fn list_software_items(
     let response: Vec<SoftwareItemResponse> = items
         .iter()
         .map(|item| {
-            let provider_types = provider_types_map.remove(&item.id).unwrap_or_default();
+            let plugins = plugins_map.remove(&item.id).unwrap_or_default();
             let host_count = host_counts.get(&item.id).copied().unwrap_or(0);
             let latest_version = latest_versions.get(&item.id).cloned();
             let update_available = latest_version.as_deref().is_some_and(|lv| {
@@ -529,7 +529,7 @@ pub async fn list_software_items(
             });
             build_list_response(
                 item,
-                provider_types,
+                plugins,
                 host_count,
                 latest_version,
                 update_available,
@@ -558,13 +558,13 @@ pub async fn get_software_item(
 
     let hosts = load_item_hosts(tenant_db.db(), id, latest_version.as_deref()).await;
     let host_count = hosts.len() as u64;
-    let provider_types = load_provider_types(tenant_db.db(), id).await;
+    let plugins = load_plugins(tenant_db.db(), id).await;
 
     let update_available = hosts.iter().any(|h| h.update_available);
 
     Ok(Some(build_detail_response(
         item,
-        provider_types,
+        plugins,
         host_count,
         latest_version,
         update_available,
@@ -622,7 +622,7 @@ pub async fn update_software_item(
         .update(tenant_db.db())
         .await
         .map_err(SoftwareItemQueryError::Db)?;
-    let provider_types = load_provider_types(tenant_db.db(), id).await;
+    let plugins = load_plugins(tenant_db.db(), id).await;
     let host_count = count_linked_hosts(tenant_db.db(), id).await;
     let latest_version: Option<String> = AvailableVersion::find()
         .filter(available_version::Column::SoftwareItemId.eq(id))
@@ -648,7 +648,7 @@ pub async fn update_software_item(
     };
     Ok(build_list_response(
         &updated,
-        provider_types,
+        plugins,
         host_count,
         latest_version,
         update_available,
@@ -670,7 +670,7 @@ pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool
     Ok(true)
 }
 
-/// Assign hosts to a software item. Each host carries its own provider info.
+/// Assign hosts to a software item. Each host carries its own plugin info.
 /// Returns the updated detail response, or an error if the item or a host is not found.
 pub async fn assign_hosts(
     tenant_db: &TenantDb,
@@ -780,11 +780,11 @@ pub async fn assign_hosts(
 
     let hosts = load_item_hosts(tenant_db.db(), id, latest_version.as_deref()).await;
     let host_count = hosts.len() as u64;
-    let provider_types = load_provider_types(tenant_db.db(), id).await;
+    let plugins = load_plugins(tenant_db.db(), id).await;
     let update_available = hosts.iter().any(|h| h.update_available);
     Ok(build_detail_response(
         item,
-        provider_types,
+        plugins,
         host_count,
         latest_version,
         update_available,
@@ -792,7 +792,7 @@ pub async fn assign_hosts(
     ))
 }
 
-/// Update the provider info for an existing host–software-item assignment.
+/// Update the plugin info for an existing host–software-item assignment.
 pub async fn update_host_assignment(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -886,11 +886,11 @@ pub async fn update_host_assignment(
 
     let hosts = load_item_hosts(tenant_db.db(), id, latest_version.as_deref()).await;
     let host_count = hosts.len() as u64;
-    let provider_types = load_provider_types(tenant_db.db(), id).await;
+    let plugins = load_plugins(tenant_db.db(), id).await;
     let update_available = hosts.iter().any(|h| h.update_available);
     Ok(build_detail_response(
         item,
-        provider_types,
+        plugins,
         host_count,
         latest_version,
         update_available,
@@ -925,8 +925,8 @@ pub async fn unassign_host(
     }
 }
 
-/// Load the provider config ID and package identifier for a specific host assignment.
-/// Used by route handlers to resolve provider info for version checks and updates.
+/// Load the plugin config ID and package identifier for a specific host assignment.
+/// Used by route handlers to resolve plugin info for version checks and updates.
 pub(crate) async fn load_host_assignment(
     db: &sea_orm::DatabaseConnection,
     host_id: Uuid,
@@ -968,7 +968,7 @@ mod tests {
         );
 
         assert_eq!(resp.name, "Node.js");
-        assert_eq!(resp.provider_types, vec!["github_releases"]);
+        assert_eq!(resp.plugins, vec!["github_releases"]);
         assert_eq!(resp.host_count, 3);
         assert!(resp.last_checked_at.is_some());
         assert_eq!(resp.latest_version.as_deref(), Some("22.0.0"));
@@ -1030,7 +1030,7 @@ mod tests {
             friendly_name: "Web Server 1".to_string(),
             plugin_config_id: uuid::Uuid::now_v7(),
             plugin_config_name: "GitHub Releases".to_string(),
-            provider_type: "github_releases".to_string(),
+            plugin_type: "github_releases".to_string(),
             package_identifier: "redis/redis".to_string(),
             config_override: Some(serde_json::json!({"asset_patterns": ["redis.*linux"]})),
             installed_version: Some("7.2.4".to_string()),
@@ -1051,7 +1051,7 @@ mod tests {
         );
 
         assert_eq!(resp.name, "Redis");
-        assert_eq!(resp.provider_types, vec!["github_releases"]);
+        assert_eq!(resp.plugins, vec!["github_releases"]);
         assert_eq!(resp.hosts.len(), 1);
         assert_eq!(resp.hosts[0].hostname, "web-01");
         assert_eq!(resp.hosts[0].package_identifier, "redis/redis");
@@ -1081,7 +1081,7 @@ mod tests {
         assert!(!resp.enabled);
         assert!(resp.last_checked_at.is_none());
         assert_eq!(resp.host_count, 0);
-        assert!(resp.provider_types.is_empty());
+        assert!(resp.plugins.is_empty());
         assert!(!resp.update_available);
     }
 

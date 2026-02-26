@@ -1,9 +1,9 @@
-//! Provider Registry for Uptrakit
+//! Plugin Registry for Uptrakit
 //!
-//! This crate provides a centralized registry for provider operations:
+//! This crate provides a centralized registry for plugin operations:
 //!
-//! - **Provider creation**: Create provider instances from configuration and executor
-//! - **Configuration validation**: Validate provider-specific configuration JSON
+//! - **Plugin creation**: Create plugin instances from configuration and executor
+//! - **Configuration validation**: Validate plugin-specific configuration JSON
 //! - **Secret management**: Mask and restore sensitive fields in configuration
 //!
 //! # Example
@@ -19,16 +19,16 @@
 //! });
 //! PluginRegistry::validate_config(PluginType::GithubReleases, &config)?;
 //!
-//! // Create a provider with a local executor
+//! // Create a plugin with a local executor
 //! let executor = Arc::new(LocalCommandExecutor);
-//! let provider = PluginRegistry::create_provider(
+//! let plugin = PluginRegistry::create_plugin(
 //!     PluginType::GithubReleases,
 //!     &config,
 //!     executor,
 //! )?;
 //!
 //! // Detect installed version
-//! let version = provider.detect_installed_version("example").await?;
+//! let version = plugin.detect_installed_version("example").await?;
 //! ```
 
 pub mod error;
@@ -37,34 +37,34 @@ pub mod registry;
 pub use error::{PluginRegistryError, Result};
 pub use registry::PluginRegistry;
 
-// Re-export commonly used types for provider crate convenience
+// Re-export commonly used types for plugin crate convenience
 pub use uptrakit_plugin_core::{Plugin, PluginCapability, SudoCommandEntry};
 pub use uptrakit_shared_types::PluginType;
 
 // Re-export executor types for downstream convenience
 pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 
-/// Abstraction over the provider registry operations needed by the web API.
+/// Abstraction over the plugin registry operations needed by the web API.
 ///
-/// Defines the three operations used when persisting and returning provider
+/// Defines the three operations used when persisting and returning plugin
 /// configurations over the REST API: config validation, secret masking for
 /// API responses, and secret restoration on update. Implemented by
 /// [`PluginRegistry`].
 ///
-/// Storing this trait in `AppState` as `Arc<dyn ProviderOps>` rather than
+/// Storing this trait in `AppState` as `Arc<dyn PluginOps>` rather than
 /// referencing `PluginRegistry` directly decouples route handlers and query
 /// helpers from the concrete registry, making them testable in isolation.
 pub trait PluginOps: Send + Sync + 'static {
-    /// Validate provider configuration JSON for the given string provider type.
-    fn validate_config_str(&self, provider_type: &str, config: &serde_json::Value) -> Result<()>;
+    /// Validate plugin configuration JSON for the given string plugin type.
+    fn validate_config_str(&self, plugin_type: &str, config: &serde_json::Value) -> Result<()>;
 
-    /// Mask secrets in provider configuration JSON for an API response.
+    /// Mask secrets in plugin configuration JSON for an API response.
     ///
     /// Returns the config with all secret fields replaced by `"***"`.
-    /// Unknown provider types are returned unchanged.
+    /// Unknown plugin types are returned unchanged.
     fn mask_config_secrets_str(
         &self,
-        provider_type: &str,
+        plugin_type: &str,
         config: &serde_json::Value,
     ) -> serde_json::Value;
 
@@ -75,58 +75,58 @@ pub trait PluginOps: Send + Sync + 'static {
     /// untouched.
     fn restore_config_secrets_str(
         &self,
-        provider_type: &str,
+        plugin_type: &str,
         incoming: &mut serde_json::Value,
         existing: &serde_json::Value,
     );
 
-    /// Returns all provider types that have the `DiscoverLocalSoftware` capability.
-    fn discovery_plugin_types(&self) -> Vec<PluginType>;
+    /// Returns all plugin types that have the `DiscoverLocalSoftware` capability.
+    fn discovery_plugins(&self) -> Vec<PluginType>;
 
-    /// Validate a package identifier for the given string provider type.
+    /// Validate a package identifier for the given string plugin type.
     ///
-    /// Returns `Ok(())` for unknown provider types (no constraints apply) and for
-    /// provider types that impose no identifier constraints. Returns `Err(message)`
-    /// when the identifier violates provider-specific rules.
+    /// Returns `Ok(())` for unknown plugin types (no constraints apply) and for
+    /// plugin types that impose no identifier constraints. Returns `Err(message)`
+    /// when the identifier violates plugin-specific rules.
     fn validate_package_identifier_str(
         &self,
-        provider_type: &str,
+        plugin_type: &str,
         value: &str,
     ) -> std::result::Result<(), String>;
 }
 
 impl PluginOps for PluginRegistry {
-    fn validate_config_str(&self, provider_type: &str, config: &serde_json::Value) -> Result<()> {
-        PluginRegistry::validate_config_str(provider_type, config)
+    fn validate_config_str(&self, plugin_type: &str, config: &serde_json::Value) -> Result<()> {
+        PluginRegistry::validate_config_str(plugin_type, config)
     }
 
     fn mask_config_secrets_str(
         &self,
-        provider_type: &str,
+        plugin_type: &str,
         config: &serde_json::Value,
     ) -> serde_json::Value {
-        PluginRegistry::mask_config_secrets_str(provider_type, config)
+        PluginRegistry::mask_config_secrets_str(plugin_type, config)
     }
 
     fn restore_config_secrets_str(
         &self,
-        provider_type: &str,
+        plugin_type: &str,
         incoming: &mut serde_json::Value,
         existing: &serde_json::Value,
     ) {
-        PluginRegistry::restore_config_secrets_str(provider_type, incoming, existing);
+        PluginRegistry::restore_config_secrets_str(plugin_type, incoming, existing);
     }
 
-    fn discovery_plugin_types(&self) -> Vec<PluginType> {
-        PluginRegistry::discovery_plugin_types()
+    fn discovery_plugins(&self) -> Vec<PluginType> {
+        PluginRegistry::discovery_plugins()
     }
 
     fn validate_package_identifier_str(
         &self,
-        provider_type: &str,
+        plugin_type: &str,
         value: &str,
     ) -> std::result::Result<(), String> {
-        let Ok(pt) = provider_type.parse::<PluginType>() else {
+        let Ok(pt) = plugin_type.parse::<PluginType>() else {
             return Ok(());
         };
         PluginRegistry::validate_package_identifier(pt, value)

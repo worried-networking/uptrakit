@@ -57,7 +57,7 @@ creates a load storm against the broker during extended outages. One dependency 
 `rumqttc = { version = "0.25.1" }` is declared inline rather than in the root
 `[workspace.dependencies]` table. This crate is currently the sole consumer, so version drift is
 not an immediate risk. However, the pattern is inconsistent with the workspace standard and would
-become a real risk if a second crate (e.g., a test utility or a future provider) ever needed to
+become a real risk if a second crate (e.g., a test utility or a future plugin) ever needed to
 import `rumqttc` directly. Move to `[workspace.dependencies]` to keep version pinning centralised.
 
 ---

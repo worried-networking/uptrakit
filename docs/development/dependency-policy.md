@@ -38,5 +38,5 @@ than adding direct dependencies in downstream crates:
 
 - `uptrakit-openapi-client` re-exports `reqwest::Error` as `ReqwestError` so the CLI avoids a
   direct reqwest dependency.
-- `uptrakit-provider-core` re-exports `tokio::sync::mpsc` so provider crates can use channels
+- `uptrakit-plugin-core` re-exports `tokio::sync::mpsc` so plugin crates can use channels
   without depending on tokio directly (tokio only in dev-deps for `#[tokio::test]`).

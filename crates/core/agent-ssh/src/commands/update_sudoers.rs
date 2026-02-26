@@ -1,7 +1,7 @@
 //! `update-sudoers` command: regenerate the sudoers file for an enrolled SSH host.
 //!
 //! This command detects whether the agent user is root or has passwordless sudo,
-//! collects required commands from all registered providers, resolves their
+//! collects required commands from all registered plugins, resolves their
 //! absolute paths on the remote host, and writes a minimal sudoers drop-in file.
 
 use rootcause::prelude::*;
@@ -85,11 +85,11 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
 
     let privileged = !is_root; // root needs no sudo prefix
 
-    // 6. Collect provider commands + resolve paths.
-    let provider_sudo_cmds = PluginRegistry::all_required_sudo_commands();
+    // 6. Collect plugin commands + resolve paths.
+    let plugin_sudo_cmds = PluginRegistry::all_required_sudo_commands();
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
-    for (_provider_type, entries) in &provider_sudo_cmds {
+    for (_plugin_type, entries) in &plugin_sudo_cmds {
         for entry in entries {
             match resolve_command_path(&session, &entry.command).await? {
                 Some(path) => {
@@ -117,11 +117,11 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     let sudoers_content = if !resolved.is_empty() {
         SudoersContent::SpecificCommands(resolved)
     } else if args.allow_all {
-        println!("  No provider commands resolved; using NOPASSWD: ALL (--allow-all).");
+        println!("  No plugin commands resolved; using NOPASSWD: ALL (--allow-all).");
         SudoersContent::AllCommands
     } else {
         bail!(Error::InvalidInput(
-            "No provider commands could be resolved on the remote host. \
+            "No plugin commands could be resolved on the remote host. \
              Ensure the required tools are installed or re-run with --allow-all."
                 .to_string()
         ));

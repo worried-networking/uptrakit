@@ -6,9 +6,9 @@ This folder contains user-facing guides for operating Uptrakit, including update
 
 | Document | Description |
 | --- | --- |
-| [System Overview](system-overview.md) | High-level architecture and operational model for controller, agents, and providers. |
+| [System Overview](system-overview.md) | High-level architecture and operational model for controller, agents, and plugins. |
 | [CLI Usage Guide](cli-usage.md) | Command reference for the `uptrakit` binary (all command groups with examples). |
-| [Provider Configurations](provider-configs.md) | Managing provider configs, supported provider types, and autodiscovery. |
+| [Plugin Configurations](plugin-configs.md) | Managing plugin configs, supported plugin types, and autodiscovery. |
 | [Autodiscovery](autodiscovery.md) | How autodiscovery works, reviewing pending items, and the ignore list. |
 | [Update Workflow](update-workflow.md) | Manual update process, scheduling behavior, and history/reporting expectations. |
 | [Update History](update-history.md) | Viewing update history, status reference, and triggering updates from the web UI. |

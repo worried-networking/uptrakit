@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use uptrakit_plugin_core::SecretMasking;
 
-/// Configuration for the Proxmox Helper Scripts provider.
+/// Configuration for the Proxmox Helper Scripts plugin.
 ///
 /// PHS is discovery-only: it reads `/usr/bin/update`, fetches each referenced
 /// CT script from `raw.githubusercontent.com`, and analyses the script to
 /// determine whether the app is GitHub-managed or APT-managed.  The resulting
 /// `DiscoveredSoftware` items carry `github_owner`/`github_repo` or
 /// `apt_package` in their `extra` field so the controller can synthesize the
-/// appropriate downstream provider config automatically.
+/// appropriate downstream plugin config automatically.
 ///
 /// No configuration fields are needed; the config is always serialized as `{}`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -25,7 +25,7 @@ impl SecretMasking for ProxmoxHelperScriptsConfig {
 impl ProxmoxHelperScriptsConfig {
     /// Validate the configuration.
     ///
-    /// Always succeeds — the PHS provider has no required configuration fields.
+    /// Always succeeds — the PHS plugin has no required configuration fields.
     pub fn validate(&self) -> uptrakit_plugin_core::Result<()> {
         Ok(())
     }

@@ -1,9 +1,9 @@
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-/// Trait for provider configs that may contain secrets (API tokens, passwords).
+/// Trait for plugin configs that may contain secrets (API tokens, passwords).
 ///
-/// Providers with no secrets can use the default no-op implementations.
+/// Plugins with no secrets can use the default no-op implementations.
 /// The trait requires `Serialize + DeserializeOwned` because the registry
 /// performs JSON round-tripping when masking/restoring secrets.
 pub trait SecretMasking: Serialize + DeserializeOwned {

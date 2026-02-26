@@ -7,7 +7,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub tenant_id: Uuid,
-    #[sea_orm(column_name = "provider_config_id")]
+    #[sea_orm(column_name = "plugin_config_id")]
     pub plugin_config_id: Uuid,
     pub package_identifier: String,
     pub created_at: OffsetDateTime,

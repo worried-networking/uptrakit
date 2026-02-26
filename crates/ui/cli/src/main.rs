@@ -1949,7 +1949,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                 } => {
                     let resp = commands::autodiscovery::ignores_list(
                         commands::autodiscovery::IgnoresListParams {
-                            provider_config_id: plugin_config.as_ref(),
+                            plugin_config_id: plugin_config.as_ref(),
                             server: cli.server.as_deref(),
                             token: cli.token.as_deref(),
                             insecure,
@@ -1967,7 +1967,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                 } => {
                     let resp = commands::autodiscovery::ignores_create(
                         commands::autodiscovery::IgnoresCreateParams {
-                            provider_config_id: &plugin_config,
+                            plugin_config_id: &plugin_config,
                             package_identifier: package,
                             server: cli.server.as_deref(),
                             token: cli.token.as_deref(),

@@ -24,34 +24,36 @@ certificate renewal) across controller instances using optimistic locking for HA
 
 - Security architecture: [docs/security/security-architecture.md](docs/security/security-architecture.md)
 
-- Provider development expectations: [docs/development/provider-guidelines.md](docs/development/provider-guidelines.md)
+- Plugin development expectations: [docs/development/plugin-guidelines.md](docs/development/plugin-guidelines.md)
+- Plugin system architecture: [docs/development/plugin-system.md](docs/development/plugin-system.md)
 
 - Command executor abstraction: [docs/development/command-executor.md](docs/development/command-executor.md)
 
 ## Project layout
 
-- Rust workspace (`resolver = "3"`) under `crates/*/*` for controller, agent, SSH agent, MQTT service, providers, shared libraries, and CLI/web API.
+- Rust workspace (`resolver = "3"`) under `crates/*/*` for controller, agent, SSH agent, MQTT service, plugins, shared libraries, and CLI/web API.
 - Frontend is a SvelteKit SPA in `frontend/` built with Tailwind CSS and Skeleton UI.
   It can be served from the filesystem (`--static-dir` / auto-detection) or embedded into
   the controller binary at compile time via the `embed-frontend` Cargo feature for
   single-binary deployment.
 
-## Providers
+## Plugins
 
-Providers are pluggable modules that define how to detect installed versions, resolve latest upstream versions, and execute updates. Each provider
-crate implements the `Provider` trait and is registered in `uptrakit-provider-registry`. See
-[Provider Development Guidelines](docs/development/provider-guidelines.md) for the extension pattern.
+Plugins are first-party extension modules that define how to detect installed versions, resolve latest upstream versions, and execute updates. Each
+plugin crate implements the `Plugin` trait and is registered in `uptrakit-plugin-registry`. See
+[Plugin Development Guidelines](docs/development/plugin-guidelines.md) for the extension pattern,
+and [Plugin System Architecture](docs/development/plugin-system.md) for the broader design.
 
-| Provider type | Crate | Version resolution | Autodiscovery | Notes |
+| Plugin type | Crate | Version resolution | Autodiscovery | Notes |
 | --- | --- | --- | --- | --- |
-| `github_releases` | `uptrakit-provider-github` | Controller (GitHub API) | No | Tracks GitHub release tags |
-| `docker_registry` | `uptrakit-provider-docker-registry` | Controller (Registry API) | No | Tracks OCI image tags |
-| `homebrew` | `uptrakit-provider-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks |
-| `proxmox_helper_scripts` | `uptrakit-provider-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers |
-| `apt` | `uptrakit-provider-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT |
+| `github_releases` | `uptrakit-plugin-github` | Controller (GitHub API) | No | Tracks GitHub release tags |
+| `docker` | `uptrakit-plugin-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers |
+| `homebrew` | `uptrakit-plugin-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks; detects host compatibility |
+| `proxmox_helper_scripts` | `uptrakit-plugin-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers |
+| `apt` | `uptrakit-plugin-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
 
-Providers with a local package index (`homebrew`, `proxmox_helper_scripts`, `apt`) resolve both installed and latest versions on the agent.
-All other providers resolve upstream versions on the controller.
+Plugins with a local package index (`homebrew`, `proxmox_helper_scripts`, `apt`) resolve both installed and latest versions on the agent.
+All other plugins resolve upstream versions on the controller.
 
 ## Wire protocol
 

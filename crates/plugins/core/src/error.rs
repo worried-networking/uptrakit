@@ -1,7 +1,7 @@
 use rootcause::prelude::*;
 use thiserror::Error;
 
-/// Errors that can occur within provider operations.
+/// Errors that can occur within plugin operations.
 #[derive(Debug, Error)]
 pub enum PluginError {
     #[error("configuration error: {0}")]
@@ -13,7 +13,7 @@ pub enum PluginError {
     #[error("serialization error: {0}")]
     Serialization(String),
 
-    #[error("missing provider config field: {0}")]
+    #[error("missing plugin config field: {0}")]
     MissingConfig(String),
 
     #[error("no release info provided")]
@@ -40,9 +40,9 @@ pub enum PluginError {
     #[error("install command failed: {0}")]
     InstallFailed(String),
 
-    #[error("provider internal error: {0}")]
-    ProviderInternal(String),
+    #[error("plugin internal error: {0}")]
+    PluginInternal(String),
 }
 
-/// Result type alias for provider operations.
+/// Result type alias for plugin operations.
 pub type Result<T> = std::result::Result<T, Report<PluginError>>;

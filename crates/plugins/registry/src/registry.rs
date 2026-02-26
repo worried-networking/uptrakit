@@ -29,8 +29,8 @@ fn mask_secrets_for<T: SecretMasking>(config: &serde_json::Value) -> serde_json:
         Err(e) => {
             tracing::error!(
                 error = %e,
-                "failed to serialize masked provider config; \
-                 falling back to original — provider secrets may be exposed in API responses"
+                "failed to serialize masked plugin config; \
+                 falling back to original — plugin secrets may be exposed in API responses"
             );
             config.clone()
         }
@@ -58,20 +58,20 @@ fn restore_secrets_for<T: SecretMasking>(
 /// declaration list, eliminating manually-maintained match arms.
 macro_rules! register_plugins {
     ($(
-        $variant:ident => { config: $config:ty, provider: $provider:ty }
+        $variant:ident => { config: $config:ty, plugin: $plugin:ty }
     ),+ $(,)?) => {
         impl PluginRegistry {
-            /// Create a provider instance from provider type, config, and executor.
+            /// Create a plugin instance from plugin type, config, and executor.
             ///
-            /// Deserializes the config, validates it, and constructs the provider.
-            /// All providers follow the same pattern: deserialize → validate →
+            /// Deserializes the config, validates it, and constructs the plugin.
+            /// All plugins follow the same pattern: deserialize → validate →
             /// construct.
-            pub fn create_provider(
-                provider_type: PluginType,
+            pub fn create_plugin(
+                plugin_type: PluginType,
                 config: &serde_json::Value,
                 executor: Arc<dyn CommandExecutor>,
             ) -> Result<Box<dyn Plugin>> {
-                match provider_type {
+                match plugin_type {
                     $(
                         PluginType::$variant => {
                             let typed_config: $config =
@@ -79,23 +79,23 @@ macro_rules! register_plugins {
                             typed_config
                                 .validate()
                                 .map_err(|e| report!(PluginRegistryError::ConfigValidation(e.to_string())))?;
-                            let provider = <$provider>::new(typed_config, executor)
+                            let plugin = <$plugin>::new(typed_config, executor)
                                 .map_err(|e| report!(PluginRegistryError::Instantiation(e.to_string())))?;
-                            Ok(Box::new(provider))
+                            Ok(Box::new(plugin))
                         }
                     )+
-                    _ => Err(report!(PluginRegistryError::UnknownProviderType(format!(
-                        "{provider_type}"
+                    _ => Err(report!(PluginRegistryError::UnknownPluginType(format!(
+                        "{plugin_type}"
                     )))),
                 }
             }
 
-            /// Validate provider configuration JSON.
+            /// Validate plugin configuration JSON.
             pub fn validate_config(
-                provider_type: PluginType,
+                plugin_type: PluginType,
                 config: &serde_json::Value,
             ) -> Result<()> {
-                match provider_type {
+                match plugin_type {
                     $(
                         PluginType::$variant => {
                             let typed_config: $config =
@@ -106,21 +106,21 @@ macro_rules! register_plugins {
                             Ok(())
                         }
                     )+
-                    _ => Err(report!(PluginRegistryError::UnknownProviderType(format!(
-                        "{provider_type}"
+                    _ => Err(report!(PluginRegistryError::UnknownPluginType(format!(
+                        "{plugin_type}"
                     )))),
                 }
             }
 
-            /// Mask secrets in provider configuration JSON for API responses.
+            /// Mask secrets in plugin configuration JSON for API responses.
             ///
             /// Deserializes config, calls [`SecretMasking::with_secrets_masked()`],
-            /// and serializes back. Unknown provider types are returned unchanged.
+            /// and serializes back. Unknown plugin types are returned unchanged.
             pub fn mask_config_secrets(
-                provider_type: PluginType,
+                plugin_type: PluginType,
                 config: &serde_json::Value,
             ) -> serde_json::Value {
-                match provider_type {
+                match plugin_type {
                     $(
                         PluginType::$variant => mask_secrets_for::<$config>(config),
                     )+
@@ -134,11 +134,11 @@ macro_rules! register_plugins {
             /// [`SecretMasking::restore_secrets_from()`], and writes back to
             /// `incoming`.
             pub fn restore_config_secrets(
-                provider_type: PluginType,
+                plugin_type: PluginType,
                 incoming: &mut serde_json::Value,
                 existing: &serde_json::Value,
             ) {
-                match provider_type {
+                match plugin_type {
                     $(
                         PluginType::$variant => {
                             restore_secrets_for::<$config>(incoming, existing);
@@ -148,42 +148,42 @@ macro_rules! register_plugins {
                 }
             }
 
-            /// Create a provider instance for autodiscovery, bypassing `validate()`.
+            /// Create a plugin instance for autodiscovery, bypassing `validate()`.
             ///
-            /// Discovery can proceed with an empty/minimal config.  For providers
+            /// Discovery can proceed with an empty/minimal config.  For plugins
             /// whose `validate()` is a no-op (e.g. `ProxmoxHelperScripts`) the two
             /// construction paths are equivalent.
-            pub fn create_provider_for_discovery(
-                provider_type: PluginType,
+            pub fn create_plugin_for_discovery(
+                plugin_type: PluginType,
                 config: &serde_json::Value,
                 executor: Arc<dyn CommandExecutor>,
             ) -> Result<Box<dyn Plugin>> {
-                match provider_type {
+                match plugin_type {
                     $(
                         PluginType::$variant => {
                             let typed_config: $config =
                                 serde_json::from_value(config.clone()).context_to()?;
                             // No validate() — discovery can proceed with an empty/minimal config.
-                            let provider = <$provider>::new(typed_config, executor)
+                            let plugin = <$plugin>::new(typed_config, executor)
                                 .map_err(|e| report!(PluginRegistryError::Instantiation(e.to_string())))?;
-                            Ok(Box::new(provider))
+                            Ok(Box::new(plugin))
                         }
                     )+
-                    _ => Err(report!(PluginRegistryError::UnknownProviderType(format!(
-                        "{provider_type}"
+                    _ => Err(report!(PluginRegistryError::UnknownPluginType(format!(
+                        "{plugin_type}"
                     )))),
                 }
             }
 
-            /// Returns all provider types that have the `DiscoverLocalSoftware` capability.
+            /// Returns all plugin types that have the `DiscoverLocalSoftware` capability.
             ///
             /// Auto-derived from the macro registration — no manual list needed.
-            pub fn discovery_plugin_types() -> Vec<PluginType> {
+            pub fn discovery_plugins() -> Vec<PluginType> {
                 let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
                 let empty = serde_json::Value::Object(serde_json::Map::new());
                 let mut result = Vec::new();
                 $(
-                    if let Ok(p) = Self::create_provider_for_discovery(
+                    if let Ok(p) = Self::create_plugin_for_discovery(
                         PluginType::$variant, &empty, executor.clone())
                     {
                         if p.has_capability(uptrakit_plugin_core::PluginCapability::DiscoverLocalSoftware) {
@@ -194,10 +194,10 @@ macro_rules! register_plugins {
                 result
             }
 
-            /// Returns required sudo command entries for every registered provider.
+            /// Returns required sudo command entries for every registered plugin.
             ///
-            /// Iterates all known provider types, instantiates each with an empty
-            /// config (using `create_provider_for_discovery` which bypasses validation),
+            /// Iterates all known plugin types, instantiates each with an empty
+            /// config (using `create_plugin_for_discovery` which bypasses validation),
             /// calls `required_sudo_commands()`, and collects non-empty results.
             ///
             /// Used by the bootstrap process and `update-sudoers` command to generate
@@ -208,7 +208,7 @@ macro_rules! register_plugins {
                 let empty = serde_json::Value::Object(serde_json::Map::new());
                 let mut result = Vec::new();
                 $(
-                    if let Ok(p) = Self::create_provider_for_discovery(
+                    if let Ok(p) = Self::create_plugin_for_discovery(
                         PluginType::$variant, &empty, executor.clone())
                     {
                         let entries = p.required_sudo_commands();
@@ -223,38 +223,38 @@ macro_rules! register_plugins {
     };
 }
 
-/// Provider registry for creating and validating providers.
+/// Plugin registry for creating and validating plugins.
 ///
 /// This struct provides a centralized API for:
-/// - Creating provider instances from type, config, and executor
-/// - Validating provider configuration
+/// - Creating plugin instances from type, config, and executor
+/// - Validating plugin configuration
 /// - Masking and restoring secrets in configuration
 ///
-/// All six dispatch methods (`create_provider`, `validate_config`,
+/// All six dispatch methods (`create_plugin`, `validate_config`,
 /// `mask_config_secrets`, `restore_config_secrets`,
-/// `create_provider_for_discovery`, `discovery_provider_types`) are
+/// `create_plugin_for_discovery`, `discovery_plugins`) are
 /// generated by the [`register_plugins!`] macro from a single declaration.
-/// To add a new provider, add one line to the macro invocation below.
+/// To add a new plugin, add one line to the macro invocation below.
 pub struct PluginRegistry;
 
 register_plugins! {
-    GithubReleases       => { config: GitHubConfig,                   provider: GitHubPlugin },
-    Docker               => { config: DockerConfig,                   provider: DockerPlugin },
-    ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig,     provider: ProxmoxHelperScriptsPlugin },
-    Homebrew             => { config: HomebrewConfig,                 provider: HomebrewPlugin },
-    Apt                  => { config: AptConfig,                      provider: AptPlugin },
+    GithubReleases       => { config: GitHubConfig,                   plugin: GitHubPlugin },
+    Docker               => { config: DockerConfig,                   plugin: DockerPlugin },
+    ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig,     plugin: ProxmoxHelperScriptsPlugin },
+    Homebrew             => { config: HomebrewConfig,                 plugin: HomebrewPlugin },
+    Apt                  => { config: AptConfig,                      plugin: AptPlugin },
 }
 
 impl PluginRegistry {
-    /// Validate a package identifier for the given provider type.
+    /// Validate a package identifier for the given plugin type.
     ///
-    /// Returns `Ok(())` for provider types that have no identifier constraints.
-    /// Returns `Err(message)` when the identifier violates provider-specific rules.
+    /// Returns `Ok(())` for plugin types that have no identifier constraints.
+    /// Returns `Err(message)` when the identifier violates plugin-specific rules.
     pub fn validate_package_identifier(
-        provider_type: PluginType,
+        plugin_type: PluginType,
         value: &str,
     ) -> std::result::Result<(), String> {
-        match provider_type {
+        match plugin_type {
             PluginType::Docker => uptrakit_plugin_docker::validate_identifier(value),
             PluginType::Homebrew => uptrakit_plugin_homebrew::validate_identifier(value),
             PluginType::Apt => uptrakit_plugin_apt::validate_identifier(value),
@@ -262,25 +262,25 @@ impl PluginRegistry {
         }
     }
 
-    /// Validate provider configuration from string type.
+    /// Validate plugin configuration from string type.
     ///
-    /// This is a convenience method that accepts a string provider type.
-    pub fn validate_config_str(provider_type: &str, config: &serde_json::Value) -> Result<()> {
-        let pt: PluginType = provider_type.parse().map_err(|_| {
-            report!(PluginRegistryError::UnknownProviderType(
-                provider_type.to_string()
+    /// This is a convenience method that accepts a string plugin type.
+    pub fn validate_config_str(plugin_type: &str, config: &serde_json::Value) -> Result<()> {
+        let pt: PluginType = plugin_type.parse().map_err(|_| {
+            report!(PluginRegistryError::UnknownPluginType(
+                plugin_type.to_string()
             ))
         })?;
 
         Self::validate_config(pt, config)
     }
 
-    /// Mask secrets in provider configuration JSON (string type version).
+    /// Mask secrets in plugin configuration JSON (string type version).
     pub fn mask_config_secrets_str(
-        provider_type: &str,
+        plugin_type: &str,
         config: &serde_json::Value,
     ) -> serde_json::Value {
-        let Ok(pt) = provider_type.parse::<PluginType>() else {
+        let Ok(pt) = plugin_type.parse::<PluginType>() else {
             return config.clone();
         };
         Self::mask_config_secrets(pt, config)
@@ -288,11 +288,11 @@ impl PluginRegistry {
 
     /// Restore masked secrets from existing configuration (string type version).
     pub fn restore_config_secrets_str(
-        provider_type: &str,
+        plugin_type: &str,
         incoming: &mut serde_json::Value,
         existing: &serde_json::Value,
     ) {
-        let Ok(pt) = provider_type.parse::<PluginType>() else {
+        let Ok(pt) = plugin_type.parse::<PluginType>() else {
             return;
         };
         Self::restore_config_secrets(pt, incoming, existing)
@@ -309,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_known_provider_types() {
+    fn parse_known_plugin_types() {
         assert_eq!(
             "github_releases".parse::<PluginType>().ok(),
             Some(PluginType::GithubReleases)
@@ -390,74 +390,74 @@ mod tests {
         let result = PluginRegistry::validate_config_str("unknown", &config);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("unknown provider type"));
+        assert!(err_msg.contains("unknown plugin type"));
     }
 
     #[test]
-    fn create_provider_github() {
+    fn create_plugin_github() {
         let config = serde_json::json!({
             "owner": "octocat",
             "repo": "hello-world"
         });
-        let provider = PluginRegistry::create_provider(
+        let plugin = PluginRegistry::create_plugin(
             PluginType::GithubReleases,
             &config,
             test_executor(),
         );
-        assert!(provider.is_ok());
+        assert!(plugin.is_ok());
     }
 
     #[test]
-    fn create_provider_docker() {
+    fn create_plugin_docker() {
         // Empty config is valid
         let config = serde_json::json!({});
-        let provider = PluginRegistry::create_provider(
+        let plugin = PluginRegistry::create_plugin(
             PluginType::Docker,
             &config,
             test_executor(),
         );
-        assert!(provider.is_ok());
+        assert!(plugin.is_ok());
     }
 
     #[test]
-    fn create_provider_for_discovery_docker() {
+    fn create_plugin_for_discovery_docker() {
         let config = serde_json::json!({});
-        let provider = PluginRegistry::create_provider_for_discovery(
+        let plugin = PluginRegistry::create_plugin_for_discovery(
             PluginType::Docker,
             &config,
             test_executor(),
         );
-        assert!(provider.is_ok());
+        assert!(plugin.is_ok());
     }
 
     #[test]
-    fn create_provider_proxmox() {
+    fn create_plugin_proxmox() {
         // PHS config is always `{}`; extra fields are ignored during deserialization.
         let config = serde_json::json!({});
-        let provider = PluginRegistry::create_provider(
+        let plugin = PluginRegistry::create_plugin(
             PluginType::ProxmoxHelperScripts,
             &config,
             test_executor(),
         );
-        assert!(provider.is_ok());
+        assert!(plugin.is_ok());
     }
 
     #[test]
-    fn proxmox_provider_capabilities() {
+    fn proxmox_plugin_capabilities() {
         // PHS is discovery-only; RefreshPackageIndex capability must not be present.
         let config = serde_json::json!({});
-        let provider = PluginRegistry::create_provider(
+        let plugin = PluginRegistry::create_plugin(
             PluginType::ProxmoxHelperScripts,
             &config,
             test_executor(),
         )
         .expect("create");
         assert!(
-            provider
+            plugin
                 .has_capability(uptrakit_plugin_core::PluginCapability::DiscoverLocalSoftware)
         );
         assert!(
-            !provider
+            !plugin
                 .has_capability(uptrakit_plugin_core::PluginCapability::RefreshPackageIndex)
         );
     }
@@ -485,19 +485,19 @@ mod tests {
     }
 
     #[test]
-    fn create_provider_homebrew() {
+    fn create_plugin_homebrew() {
         let config = serde_json::json!({});
-        let provider =
-            PluginRegistry::create_provider(PluginType::Homebrew, &config, test_executor());
-        assert!(provider.is_ok());
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::Homebrew, &config, test_executor());
+        assert!(plugin.is_ok());
     }
 
     #[test]
-    fn create_provider_homebrew_cask() {
+    fn create_plugin_homebrew_cask() {
         let config = serde_json::json!({"package_type": "cask"});
-        let provider =
-            PluginRegistry::create_provider(PluginType::Homebrew, &config, test_executor());
-        assert!(provider.is_ok());
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::Homebrew, &config, test_executor());
+        assert!(plugin.is_ok());
     }
 
     #[test]
@@ -519,43 +519,43 @@ mod tests {
     }
 
     #[test]
-    fn homebrew_provider_capabilities() {
+    fn homebrew_plugin_capabilities() {
         let config = serde_json::json!({});
-        let provider =
-            PluginRegistry::create_provider(PluginType::Homebrew, &config, test_executor())
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::Homebrew, &config, test_executor())
                 .unwrap();
         assert!(
-            provider
+            plugin
                 .has_capability(uptrakit_plugin_core::PluginCapability::DiscoverLocalSoftware)
         );
         assert!(
-            provider
+            plugin
                 .has_capability(uptrakit_plugin_core::PluginCapability::RefreshPackageIndex)
         );
     }
 
     #[test]
-    fn docker_provider_capabilities() {
+    fn docker_plugin_capabilities() {
         let config = serde_json::json!({});
-        let provider =
-            PluginRegistry::create_provider(PluginType::Docker, &config, test_executor())
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::Docker, &config, test_executor())
                 .unwrap();
         assert!(
-            provider
+            plugin
                 .has_capability(uptrakit_plugin_core::PluginCapability::DiscoverLocalSoftware)
         );
         assert!(
-            !provider
+            !plugin
                 .has_capability(uptrakit_plugin_core::PluginCapability::RefreshPackageIndex)
         );
     }
 
     #[test]
-    fn discovery_plugin_types_includes_docker() {
-        let types = PluginRegistry::discovery_plugin_types();
+    fn discovery_plugins_includes_docker() {
+        let types = PluginRegistry::discovery_plugins();
         assert!(
             types.contains(&PluginType::Docker),
-            "Docker should be in discovery_provider_types()"
+            "Docker should be in discovery_plugins()"
         );
     }
 
@@ -571,21 +571,21 @@ mod tests {
     }
 
     #[test]
-    fn all_required_sudo_commands_no_duplicates_per_provider() {
+    fn all_required_sudo_commands_no_duplicates_per_plugin() {
         let entries = PluginRegistry::all_required_sudo_commands();
         // All entries in results should have non-empty command lists
         for (pt, cmds) in &entries {
             assert!(
                 !cmds.is_empty(),
-                "provider {pt} has empty sudo command list but was included"
+                "plugin {pt} has empty sudo command list but was included"
             );
         }
     }
 
     #[test]
-    fn boxed_provider_preserves_type() {
+    fn boxed_plugin_preserves_type() {
         let github_config = serde_json::json!({"owner": "octocat", "repo": "hello-world"});
-        let github = PluginRegistry::create_provider(
+        let github = PluginRegistry::create_plugin(
             PluginType::GithubReleases,
             &github_config,
             test_executor(),
@@ -594,7 +594,7 @@ mod tests {
         assert_eq!(github.plugin_type(), PluginType::GithubReleases);
 
         let docker_config = serde_json::json!({});
-        let docker = PluginRegistry::create_provider(
+        let docker = PluginRegistry::create_plugin(
             PluginType::Docker,
             &docker_config,
             test_executor(),
@@ -603,7 +603,7 @@ mod tests {
         assert_eq!(docker.plugin_type(), PluginType::Docker);
 
         let proxmox_config = serde_json::json!({});
-        let proxmox = PluginRegistry::create_provider(
+        let proxmox = PluginRegistry::create_plugin(
             PluginType::ProxmoxHelperScripts,
             &proxmox_config,
             test_executor(),
@@ -612,7 +612,7 @@ mod tests {
         assert_eq!(proxmox.plugin_type(), PluginType::ProxmoxHelperScripts);
 
         let homebrew_config = serde_json::json!({});
-        let homebrew = PluginRegistry::create_provider(
+        let homebrew = PluginRegistry::create_plugin(
             PluginType::Homebrew,
             &homebrew_config,
             test_executor(),
@@ -622,7 +622,7 @@ mod tests {
 
         let apt_config = serde_json::json!({});
         let apt =
-            PluginRegistry::create_provider(PluginType::Apt, &apt_config, test_executor())
+            PluginRegistry::create_plugin(PluginType::Apt, &apt_config, test_executor())
                 .expect("create apt");
         assert_eq!(apt.plugin_type(), PluginType::Apt);
     }
@@ -677,19 +677,19 @@ mod tests {
     }
 
     #[test]
-    fn create_provider_apt() {
+    fn create_plugin_apt() {
         let config = serde_json::json!({});
-        let provider =
-            PluginRegistry::create_provider(PluginType::Apt, &config, test_executor());
-        assert!(provider.is_ok());
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::Apt, &config, test_executor());
+        assert!(plugin.is_ok());
     }
 
     #[test]
-    fn create_provider_apt_all_filter() {
+    fn create_plugin_apt_all_filter() {
         let config = serde_json::json!({"discovery_filter": "all"});
-        let provider =
-            PluginRegistry::create_provider(PluginType::Apt, &config, test_executor());
-        assert!(provider.is_ok());
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::Apt, &config, test_executor());
+        assert!(plugin.is_ok());
     }
 
     #[test]
@@ -705,17 +705,17 @@ mod tests {
     }
 
     #[test]
-    fn apt_provider_capabilities() {
+    fn apt_plugin_capabilities() {
         let config = serde_json::json!({});
-        let provider =
-            PluginRegistry::create_provider(PluginType::Apt, &config, test_executor())
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::Apt, &config, test_executor())
                 .unwrap();
         assert!(
-            provider
+            plugin
                 .has_capability(uptrakit_plugin_core::PluginCapability::DiscoverLocalSoftware)
         );
         assert!(
-            provider
+            plugin
                 .has_capability(uptrakit_plugin_core::PluginCapability::RefreshPackageIndex)
         );
     }
@@ -747,16 +747,16 @@ mod tests {
     /// the registry level (unknown type) rather than causing a deserialization
     /// panic or silent data loss.
     #[test]
-    fn create_provider_other_returns_unknown_type_error() {
+    fn create_plugin_other_returns_unknown_type_error() {
         let config = serde_json::json!({});
-        let Err(err) = PluginRegistry::create_provider(
+        let Err(err) = PluginRegistry::create_plugin(
             PluginType::Other("winget".to_string()),
             &config,
             test_executor(),
         ) else {
-            panic!("expected Err for Other provider type");
+            panic!("expected Err for Other plugin type");
         };
-        assert!(err.to_string().contains("unknown provider type"));
+        assert!(err.to_string().contains("unknown plugin type"));
     }
 
     #[test]
@@ -767,8 +767,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// `mask_config_secrets` for an `Other` provider type returns the config
-    /// unchanged (no masking possible for an unknown provider).
+    /// `mask_config_secrets` for an `Other` plugin type returns the config
+    /// unchanged (no masking possible for an unknown plugin).
     #[test]
     fn mask_config_secrets_other_returns_config_unchanged() {
         let config = serde_json::json!({"token": "secret", "repo": "something"});

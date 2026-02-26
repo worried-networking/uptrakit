@@ -9,7 +9,7 @@ use crate::error::{GitHubError, Result};
 /// Sentinel value used to indicate a masked secret in API responses.
 const SECRET_MASK: &str = "***";
 
-/// Configuration for the GitHub Releases provider.
+/// Configuration for the GitHub Releases plugin.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GitHubConfig {
     /// GitHub repository owner (user or organization).

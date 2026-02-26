@@ -43,7 +43,7 @@ pub struct BootstrapParams {
     pub strict_host_key_checking: bool,
     /// Write `NOPASSWD: ALL` instead of specific command entries.
     ///
-    /// Less secure; use only when no provider commands can be resolved on the
+    /// Less secure; use only when no plugin commands can be resolved on the
     /// remote host or during development.
     pub allow_all: bool,
     /// Service UUID for the `authorized_keys` comment.  `None` when the
@@ -306,12 +306,12 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         }
     }
 
-    // Set up sudoers (specific commands per registered providers).
+    // Set up sudoers (specific commands per registered plugins).
     println!("Configuring sudoers...");
-    let provider_sudo_cmds = PluginRegistry::all_required_sudo_commands();
+    let plugin_sudo_cmds = PluginRegistry::all_required_sudo_commands();
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
-    for (_provider_type, entries) in &provider_sudo_cmds {
+    for (_plugin_type, entries) in &plugin_sudo_cmds {
         for entry in entries {
             match resolve_command_path(&session, &entry.command).await? {
                 Some(path) => {
@@ -338,11 +338,11 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     let sudoers_content = if !resolved.is_empty() {
         SudoersContent::SpecificCommands(resolved)
     } else if params.allow_all {
-        println!("  No provider commands resolved; using NOPASSWD: ALL (--allow-all).");
+        println!("  No plugin commands resolved; using NOPASSWD: ALL (--allow-all).");
         SudoersContent::AllCommands
     } else {
         bail!(Error::InvalidInput(
-            "No provider commands could be resolved on the remote host. \
+            "No plugin commands could be resolved on the remote host. \
              Ensure the required tools are installed or re-run with --allow-all."
                 .to_string()
         ));
@@ -408,7 +408,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     );
     println!(
         "      Run 'uptrakit-agent-ssh host update-sudoers {}' to refresh \
-         entries when providers change.",
+         entries when plugins change.",
         params.name
     );
 

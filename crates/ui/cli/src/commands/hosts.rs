@@ -85,8 +85,8 @@ impl HumanOutput for HostResponse {
 impl HumanOutput for TriggerDiscoveryResponse {
     fn to_human_string(&self) -> String {
         format!(
-            "{} (providers queued: {})\n",
-            self.message, self.providers_queued
+            "{} (plugins queued: {})\n",
+            self.message, self.plugins_queued
         )
     }
 }
@@ -321,7 +321,7 @@ mod tests {
     #[test]
     fn trigger_discovery_response_human_output() {
         let resp = TriggerDiscoveryResponse {
-            providers_queued: 3,
+            plugins_queued: 3,
             message: "Discovery queued".to_string(),
         };
         let s = resp.to_human_string();

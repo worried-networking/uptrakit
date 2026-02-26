@@ -123,7 +123,7 @@ conversion enables `.context_to::<LoopError>()?` on SDK connection operations in
 ### Why `#[async_trait]`
 
 All async trait methods use the `#[async_trait]` macro, which desugars `async fn` into `Pin<Box<dyn Future + Send + '_>>` return types. This matches the
-established pattern used across the codebase (Provider, CommandExecutor, TaskExecutor, CertSigner, etc.) and eliminates the manual `Pin<Box<...>>` /
+established pattern used across the codebase (Plugin, CommandExecutor, TaskExecutor, CertSigner, etc.) and eliminates the manual `Pin<Box<...>>` /
 `Box::pin(async move { ... })` boilerplate that was previously required in the trait definition and all implementations.
 
 ## SDK-managed event loop

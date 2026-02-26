@@ -65,9 +65,9 @@ impl TaskExecutor for VersionCheckExecutor {
         let mut by_agent_host: HashMap<(Uuid, String), Vec<VersionCheckAssignment>> =
             HashMap::new();
         for row in rows {
-            let provider_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
+            let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
                 report!(SchedulerError::Execution(format!(
-                    "unknown provider type: {}",
+                    "unknown plugin type: {}",
                     row.plugin_type
                 )))
             })?;
@@ -81,7 +81,7 @@ impl TaskExecutor for VersionCheckExecutor {
                 .push(VersionCheckAssignment {
                     software_item_id: row.software_item_id,
                     name: row.name,
-                    plugin_type: provider_type,
+                    plugin_type,
                     package_identifier: row.package_identifier,
                     config,
                 });
@@ -204,7 +204,7 @@ impl VersionCheckExecutor {
     }
 }
 
-/// Merge a base provider config with per-item overrides.
+/// Merge a base plugin config with per-item overrides.
 fn merge_config(base: &serde_json::Value, overrides: &serde_json::Value) -> serde_json::Value {
     match (base, overrides) {
         (serde_json::Value::Object(b), serde_json::Value::Object(o)) => {

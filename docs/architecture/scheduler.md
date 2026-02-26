@@ -115,7 +115,7 @@ per-controller CA rotation loop still handles the actual key generation and cert
 
 ### VersionCheckExecutor
 
-Queries all enabled software items for the tenant (joined through `provider_config`, `host_software_item`, `service_host`, and `service`), groups them
+Queries all enabled software items for the tenant (joined through `plugin_config`, `host_software_item`, `service_host`, and `service`), groups them
 by agent, and sends `CheckVersionsPayload` messages via `NotificationService`. Agent responses arrive asynchronously through the existing
 `VersionCheckResults` wire message handler.
 

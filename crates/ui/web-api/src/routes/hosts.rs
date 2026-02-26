@@ -245,7 +245,7 @@ pub async fn discover_host(
     (
         StatusCode::OK,
         Json(TriggerDiscoveryResponse {
-            providers_queued: agents_notified,
+            plugins_queued: agents_notified,
             message: format!(
                 "Discovery triggered on {} agent(s) for host '{}'",
                 agents_notified, host_record.hostname

@@ -2,13 +2,13 @@
 
 ## Summary
 
-The Uptrakit backend is a well-structured Rust workspace of 24 crates spanning four clearly separated domains: `core/` (binaries), `providers/` (pluggable detection and update drivers), `shared/` (libraries), and `ui/` (HTTP API and CLI). The codebase consistently applies Rust 2024 edition and resolver version 3 across every crate, uses workspace-pinned dependency versions for all major libraries, and leans on strong type-system patterns — typed permission extractors, `SecretString` at API boundaries, `Zeroizing<>` on key material — that enforce security invariants at compile time rather than by convention. The release profile is production-hardened (`lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`), and the overall dependency DAG is sound with one well-defined layering violation.
+The Uptrakit backend is a well-structured Rust workspace of 24 crates spanning four clearly separated domains: `core/` (binaries), `plugins/` (pluggable detection and update drivers), `shared/` (libraries), and `ui/` (HTTP API and CLI). The codebase consistently applies Rust 2024 edition and resolver version 3 across every crate, uses workspace-pinned dependency versions for all major libraries, and leans on strong type-system patterns — typed permission extractors, `SecretString` at API boundaries, `Zeroizing<>` on key material — that enforce security invariants at compile time rather than by convention. The release profile is production-hardened (`lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`), and the overall dependency DAG is sound with one well-defined layering violation.
 
 The primary architectural concern at workspace level is that `uptrakit-crypto`, a foundational crate that any agent-side consumer will eventually need, unconditionally pulls in `sea-orm`. This couples a cryptographic primitive to the ORM layer and contradicts the clean split that `uptrakit-shared-types` already achieves through its `sea-orm` feature flag. A related concern is that `sea-orm-migration` is declared inline in two crates at an RC version, creating version-drift risk between it and the workspace-pinned `sea-orm` during the RC series. Beyond dependency hygiene, the workspace has no `[workspace.lints]` table, so only one of the 24 crates (`uptrakit-internal-wire`) actually enforces `warnings = "deny"` and `clippy::all = "deny"` — the remaining 23 rely solely on CI configuration.
 
 Several high-severity operational issues span the workspace. The `AGENTS.md` invariant document references a `crates/shared/core/` (`uptrakit-core`) crate that does not exist, which misleads any agent or developer reading the canonical layout map. The mTLS configuration in `uptrakit-controller` uses `.allow_unauthenticated()`, which is intentional for reverse-proxy deployments — this is documented in `pki.rs` and `mtls_acceptor.rs`.
 
-The extensibility seam for providers is well-designed at the `Provider` trait and `register_providers!` macro level. Discovery-capable provider support is now fully registry-driven — `discovery_provider_types()` is auto-generated from the macro, and `create_provider_for_discovery` is macro-generated too; no manual sync is needed. Package-identifier validation is handled through `ProviderRegistry::validate_package_identifier`, completing the provider extensibility story.
+The extensibility seam for plugins is well-designed at the `Plugin` trait and `register_plugins!` macro level. Discovery-capable plugin support is now fully registry-driven — `discovery_plugins()` is auto-generated from the macro, and `create_plugin_for_discovery` is macro-generated too; no manual sync is needed. Package-identifier validation is handled through `PluginRegistry::validate_package_identifier`, completing the plugin extensibility story.
 
 ---
 
@@ -20,7 +20,7 @@ The extensibility seam for providers is well-designed at the `Provider` trait an
 - `Cargo.toml:13-60` (`[workspace.dependencies]`): All major external dependencies — `tokio`, `axum`, `sea-orm`, `rustls`, `serde`, `time`, `aws-lc-rs`, `rcgen`, `uuid`, `rand`, and 25+ more — are pinned here with exact version ranges and default-feature overrides. Per-crate declarations only specify `features = [...]`, eliminating duplicate version declarations across 24 crates.
 - `Cargo.toml:62-67` (`[profile.release]`): `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true` — production-hardened single-binary output with minimal attack surface.
 - `[workspace.package]` carries `license`, `authors`, `repository`, and `version` so every crate can use `*.workspace = true`, ensuring metadata consistency across all published artifacts.
-- The four-domain layout (`core/`, `providers/`, `shared/`, `ui/`) enforces a natural dependency gradient: providers never import from `ui/`, binaries import from `shared/` and `ui/`, `shared/` libraries only import each other in a defined order. This makes cross-cutting concerns auditable.
+- The four-domain layout (`core/`, `plugins/`, `shared/`, `ui/`) enforces a natural dependency gradient: plugins never import from `ui/`, binaries import from `shared/` and `ui/`, `shared/` libraries only import each other in a defined order. This makes cross-cutting concerns auditable.
 - `uptrakit-shared-types/Cargo.toml:9-13`: `sea-orm` and `openapi` features correctly gate optional ORM and OpenAPI dependencies — the correct pattern for workspace-wide shared type crates.
 - `uptrakit-internal-wire/Cargo.toml:21-25`: The only crate that enforces `[lints.rust] warnings = "deny"` and `[lints.clippy] all = "deny"` locally, demonstrating the correct pattern for the rest of the workspace to adopt via `[workspace.lints]`.
 
@@ -144,7 +144,7 @@ Both `oidc_complete_registration` and `oidc_link` reconstruct "fake claims" usin
 
 **[SEVERITY: Medium]** Multiple route files — Pervasive `Path<String>` + manual `uuid::Uuid::parse_str` pattern (43 occurrences)
 
-Axum's extractor system supports `Path(id): Path<Uuid>` directly, returning a typed 422 on malformed input. The manual `parse_str` pattern produces inconsistent error responses (varies by handler), increases per-function complexity, and duplicates UUID validation logic. Key files: `crates/ui/web-api/src/routes/hosts.rs:77`, `services.rs:98`, `software_items.rs:146`, `api_tokens.rs:111`, `provider_configs.rs:106`. This is a workspace-wide pattern problem touching at least 10 route files.
+Axum's extractor system supports `Path(id): Path<Uuid>` directly, returning a typed 422 on malformed input. The manual `parse_str` pattern produces inconsistent error responses (varies by handler), increases per-function complexity, and duplicates UUID validation logic. Key files: `crates/ui/web-api/src/routes/hosts.rs:77`, `services.rs:98`, `software_items.rs:146`, `api_tokens.rs:111`, `plugin_configs.rs:106`. This is a workspace-wide pattern problem touching at least 10 route files.
 
 **[SEVERITY: Medium]** `crates/shared/service-sdk/src/main_helper.rs:37-38,42-43` — `expect()` calls in a shared library outside approved exception list
 
@@ -187,7 +187,7 @@ Full `AppState` construction with `NoopCertSigner` is duplicated verbatim in at 
 
 **[SEVERITY: Medium]** `crates/ui/cli/`: CLI integration tests cover only `hosts`, `services`, `software_items` command groups
 
-`auth`, `scheduler`, `provider_configs`, `settings`, `autodiscovery`, `history`, `update`, and `check` command groups have no integration-level test coverage against `MockApiServer`. The AGENTS.md invariant requires covering success and failure paths for new logic; these commands have existing logic that has never been exercised at the integration level.
+`auth`, `scheduler`, `plugin_configs`, `settings`, `autodiscovery`, `history`, `update`, and `check` command groups have no integration-level test coverage against `MockApiServer`. The AGENTS.md invariant requires covering success and failure paths for new logic; these commands have existing logic that has never been exercised at the integration level.
 
 **[SEVERITY: Medium]** `crates/shared/openapi-client/src/lib.rs:687-885` — Retry-backoff tests do not verify delay durations
 
@@ -263,7 +263,7 @@ A new `Interval` is created and its first tick immediately consumed with `.await
 
 - UUID v7 primary keys throughout all entities — time-ordered, index-friendly, no hot-spot write contention.
 - `crates/shared/db/src/`: `TenantScoped` trait makes tenant-scoped queries structurally impossible to omit on typed query paths — tenant data leakage is a compile-time error, not a runtime risk.
-- Partial (filtered) unique indexes on `software_items` (`WHERE deactivated_at IS NULL`) and `provider_configs` — prevents name collisions among active records while allowing post-soft-delete re-creation.
+- Partial (filtered) unique indexes on `software_items` (`WHERE deactivated_at IS NULL`) and `plugin_configs` — prevents name collisions among active records while allowing post-soft-delete re-creation.
 - Every foreign key has an explicit `ON DELETE` action — no implicit cascade surprises.
 - `m20260209_000001_initial.rs`: `down()` drops all tables in correct reverse FK order — migrations are fully reversible.
 - Referential integrity CHECK constraint on `sessions`: `auth_method != 'oidc' OR oidc_provider_id IS NOT NULL` — enforced at the DB layer, not the application layer.
@@ -273,7 +273,7 @@ A new `Interval` is created and its first tick immediately consumed with `.await
 
 **[SEVERITY: Medium]** `crates/shared/db/src/entity/oidc_provider.rs:89` — Soft-delete column named `deleted_at` instead of `deactivated_at`
 
-All other 7 soft-deletable entities (`tenants`, `users`, `hosts`, `services`, `software_items`, `provider_configs`, `ca_certificates`) use `deactivated_at`. The `oidc_providers` entity uses `deleted_at`. This inconsistency prevents a generic soft-delete utility from working across all entities and confuses developers who expect a uniform column name. A migration renaming the column is the correct fix.
+All other 7 soft-deletable entities (`tenants`, `users`, `hosts`, `services`, `software_items`, `plugin_configs`, `ca_certificates`) use `deactivated_at`. The `oidc_providers` entity uses `deleted_at`. This inconsistency prevents a generic soft-delete utility from working across all entities and confuses developers who expect a uniform column name. A migration renaming the column is the correct fix.
 
 **[SEVERITY: Medium]** `crates/shared/db/src/entity/update_history.rs:28` — Dual output storage: `output` column and `update_output_lines` child table
 
@@ -364,19 +364,19 @@ The enum has 9 variants and will grow with new features. Adding `#[non_exhaustiv
 
 ### Strengths
 
-- `crates/providers/core/src/traits.rs:22-98`: `Provider` trait uses default implementations for all optional methods — adding a new provider requires implementing only the methods relevant to its capability set.
-- `crates/providers/registry/src/registry.rs:43-135`: `register_providers!` macro generates all dispatch boilerplate — adding a new provider type is a one-line change in the macro invocation plus a dependency entry.
-- `crates/shared/wire/src/lib.rs:32` and `crates/shared/types/src/provider_types.rs:17`: `#[non_exhaustive]` on `ProviderCapability`, `ServiceMessage`, `ControllerMessage`, and related wire enums — downstream consumers cannot write exhaustive matches that break on new variants.
+- `crates/plugins/core/src/traits.rs:22-98`: `Plugin` trait uses default implementations for all optional methods — adding a new plugin requires implementing only the methods relevant to its capability set.
+- `crates/plugins/registry/src/registry.rs:43-135`: `register_plugins!` macro generates all dispatch boilerplate — adding a new plugin type is a one-line change in the macro invocation plus a dependency entry.
+- `crates/shared/wire/src/lib.rs:32` and `crates/shared/types/src/plugin_types.rs:17`: `#[non_exhaustive]` on `PluginCapability`, `ServiceMessage`, `ControllerMessage`, and related wire enums — downstream consumers cannot write exhaustive matches that break on new variants.
 - `crates/shared/wire/src/lib.rs:71`: `Capability::Other(String)` forward-compatibility catch-all — unknown capabilities from newer peers are preserved and excluded from intersection without causing a deserialization error.
 - `crates/shared/wire/src/close_reason.rs:49`: `CloseReason::Unknown(String)` mirrors the same forward-compat pattern for close reason codes.
 - `crates/shared/service-sdk/src/lifecycle.rs:76-160`: `ServiceHandler` trait externalizes the entire service-specific surface — new service types plug in without modifying the SDK lifecycle machinery.
-- `crates/providers/core/src/secrets.rs:9-17`: `SecretMasking` trait with no-op defaults — providers that have no secrets do not need to implement masking.
+- `crates/plugins/core/src/secrets.rs:9-17`: `SecretMasking` trait with no-op defaults — plugins that have no secrets do not need to implement masking.
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/providers/registry/src/registry.rs:151-156` — Platform-specific providers compiled unconditionally into all agent binaries
+**[SEVERITY: Medium]** `crates/plugins/registry/src/registry.rs:151-156` — Platform-specific plugins compiled unconditionally into all agent binaries
 
-`HomebrewProvider` (macOS-only) and `ProxmoxHelperScriptsProvider` (Proxmox-VE-only) are compiled into every agent binary regardless of target platform. A Linux agent will accept a `HomebrewProvider` configuration and fail only when the `brew` executable is absent at runtime. Platform-specific providers should be gated with `#[cfg(target_os = "macos")]` or behind optional Cargo features in `uptrakit-provider-registry`, with the macro conditionally including them.
+`HomebrewPlugin` (macOS-only) and `ProxmoxHelperScriptsPlugin` (Proxmox-VE-only) are compiled into every agent binary regardless of target platform. A Linux agent will accept a `HomebrewPlugin` configuration and fail only when the `brew` executable is absent at runtime. Platform-specific plugins should be gated with `#[cfg(target_os = "macos")]` or behind optional Cargo features in `uptrakit-plugin-registry`, with the macro conditionally including them.
 
 **[SEVERITY: Medium]** `crates/shared/wire/src/lib.rs:214-234` — `ServiceMessage` and `ControllerMessage` mix agent-specific and MQTT-specific variants
 

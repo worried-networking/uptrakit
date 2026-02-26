@@ -6,8 +6,8 @@ use uuid::Uuid;
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TriggerDiscoveryResponse {
-    /// Number of provider assignments queued for discovery.
-    pub providers_queued: u32,
+    /// Number of plugin assignments queued for discovery.
+    pub plugins_queued: u32,
     /// Human-readable summary message.
     pub message: String,
 }
@@ -30,8 +30,8 @@ pub struct AutodiscoveryIgnoreResponse {
     pub plugin_config_id: Uuid,
     /// Display name of the referenced plugin config.
     pub plugin_config_name: String,
-    /// Provider type string (e.g. `"homebrew"`).
-    pub provider_type: String,
+    /// Plugin type string (e.g. `"homebrew"`).
+    pub plugin_type: String,
     /// Package identifier to suppress.
     pub package_identifier: String,
     #[serde(with = "time::serde::rfc3339")]

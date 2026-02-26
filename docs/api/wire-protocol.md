@@ -94,21 +94,21 @@ The `host_machine_id` field in each payload determines which host the operation 
   "seq": 1,
   "type": "discover_software",
   "host_machine_id": "abc-123",
-  "providers": [
+  "plugins": [
     {
-      "provider_config_id": "550e8400-...",
-      "provider_type": "homebrew",
+      "plugin_config_id": "550e8400-...",
+      "plugin_type": "homebrew",
       "config": { "package_type": "formula" }
     }
   ]
 }
 ```
 
-`provider_config_id` is `null` for auto-discovery runs where no pre-existing `ProviderConfig` exists for the provider
+`plugin_config_id` is `null` for auto-discovery runs where no pre-existing `PluginConfig` exists for the plugin
 type. In that case the agent uses the default/empty config and annotates each result with `extra` metadata (e.g.
-`{"package_type":"formula"}`). The controller creates the appropriate `ProviderConfig` records from this metadata.
+`{"package_type":"formula"}`). The controller creates the appropriate `PluginConfig` records from this metadata.
 
-Known `provider_type` values for discovery: `homebrew`, `proxmox_helper_scripts`, `apt`.
+Known `plugin_type` values for discovery: `homebrew`, `proxmox_helper_scripts`, `apt`.
 
 #### `discovery_results` payload
 
@@ -119,8 +119,8 @@ Known `provider_type` values for discovery: `homebrew`, `proxmox_helper_scripts`
   "host_machine_id": "abc-123",
   "results": [
     {
-      "provider_config_id": "550e8400-...",
-      "provider_type": "homebrew",
+      "plugin_config_id": "550e8400-...",
+      "plugin_type": "homebrew",
       "discoveries": [
         {
           "package_identifier": "wget",
@@ -137,8 +137,8 @@ Known `provider_type` values for discovery: `homebrew`, `proxmox_helper_scripts`
 
 #### PHS discovery `extra` field
 
-When `provider_type` is `proxmox_helper_scripts`, the `extra` object on each `DiscoveredSoftware`
-item carries metadata used by the controller to synthesize downstream provider configs:
+When `plugin_type` is `proxmox_helper_scripts`, the `extra` object on each `DiscoveredSoftware`
+item carries metadata used by the controller to synthesize downstream plugin configs:
 
 | `extra` key | Type | Meaning |
 | --- | --- | --- |
@@ -147,7 +147,7 @@ item carries metadata used by the controller to synthesize downstream provider c
 | `"apt_package"` | string | Debian package name extracted from the CT script or install script |
 
 The controller dispatches on these fields in `process_phs_results()` to create the appropriate
-`github_releases` or `apt` provider config. Items with neither field are skipped.
+`github_releases` or `apt` plugin config. Items with neither field are skipped.
 
 See [docs/api/autodiscovery.md](autodiscovery.md#phs-discovery-and-config-synthesis) for details.
 

@@ -181,7 +181,7 @@ pub enum HostCommands {
 
         /// Write `NOPASSWD: ALL` instead of specific command entries.
         ///
-        /// Less secure; use only when no provider commands can be resolved on
+        /// Less secure; use only when no plugin commands can be resolved on
         /// the remote host or during development.
         #[arg(long, default_value_t = false)]
         allow_all: bool,
@@ -198,7 +198,7 @@ pub enum HostCommands {
 
     /// Regenerate the sudoers drop-in file for an enrolled SSH host.
     ///
-    /// Connects to the host, resolves provider command paths, and writes a
+    /// Connects to the host, resolves plugin command paths, and writes a
     /// minimal `/etc/sudoers.d/uptrakit-<username>` file.
     UpdateSudoers {
         /// Host name or UUID.
@@ -206,7 +206,7 @@ pub enum HostCommands {
 
         /// Write `NOPASSWD: ALL` instead of specific command entries.
         ///
-        /// Less secure; use only when no provider commands can be resolved on
+        /// Less secure; use only when no plugin commands can be resolved on
         /// the remote host or during development.
         #[arg(long)]
         allow_all: bool,

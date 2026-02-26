@@ -9,7 +9,7 @@ file on remote SSH hosts, why per-command entries are preferred over
 - [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — bootstrap workflow
 - [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — `update-sudoers` command
 - [SSH Agent Secrets](ssh-agent-secrets.md) — broader threat model
-- [Provider Guidelines](../development/provider-guidelines.md) — `required_sudo_commands()` contract
+- [Plugin Guidelines](../development/plugin-guidelines.md) — `required_sudo_commands()` contract
 - [Command Executor](../development/command-executor.md) — `SudoAwareCommandExecutor` and `SudoContext`
 
 ## Why per-command sudoers entries
@@ -28,28 +28,28 @@ uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 **Advantages over `NOPASSWD: ALL`:**
 
 - **Least privilege** — the managed account can only elevate for commands
-  declared by registered providers.
+  declared by registered plugins.
 - **Auditability** — each entry carries a human-readable explanation comment.
 - **Path pinning** — absolute paths prevent `PATH` manipulation attacks where an
   attacker replaces a command with a malicious one in an earlier `PATH` entry.
 - **Regenerability** — the file is machine-managed; running `update-sudoers`
-  keeps it current as providers are added or removed.
+  keeps it current as plugins are added or removed.
 
 ## How entries are generated
 
 Sudoers entries come from the `required_sudo_commands()` method on each
-registered `Provider`. Each entry carries a command name and a human-readable
+registered `Plugin`. Each entry carries a command name and a human-readable
 explanation.
 
 During bootstrap or `update-sudoers`:
 
-1. `ProviderRegistry::all_required_sudo_commands()` collects declarations from all registered providers.
+1. `PluginRegistry::all_required_sudo_commands()` collects declarations from all registered plugins.
 2. For each declared command, `command -v <name>` is run on the remote host to resolve the absolute path.
 3. Resolved entries become `<username> ALL=(root) NOPASSWD: <absolute-path>` lines.
 4. Commands not found on the remote host are skipped with a warning (non-fatal).
 5. The file is written with permissions `440` and validated with `visudo -cf`.
 
-If no commands resolve (all provider tools are missing), the command fails unless `--allow-all` is passed.
+If no commands resolve (all plugin tools are missing), the command fails unless `--allow-all` is passed.
 
 ## The `--allow-all` fallback
 
@@ -62,7 +62,7 @@ uptrakit-agent-ssh host update-sudoers my-server --allow-all
 This writes `NOPASSWD: ALL` instead of per-command entries. Use only when:
 
 - Required tools are not yet installed on the remote host.
-- You are developing a new provider and the command is not deployed yet.
+- You are developing a new plugin and the command is not deployed yet.
 - You have a specific operational reason to grant unrestricted access.
 
 `--allow-all` is never set by default and must be explicitly passed each time.
@@ -70,7 +70,7 @@ This writes `NOPASSWD: ALL` instead of per-command entries. Use only when:
 ## Sudo policy per host
 
 Each enrolled host stores a `sudo_policy` that controls how the SSH agent
-prepends `sudo` at runtime (when executing provider commands over SSH):
+prepends `sudo` at runtime (when executing plugin commands over SSH):
 
 | Policy | CLI value | Behavior |
 | --- | --- | --- |
@@ -108,16 +108,16 @@ The `SudoAwareCommandExecutor` (used in `handle_check_versions_ssh`,
 values at message-dispatch time — it **never** re-detects at runtime, which
 avoids extra SSH round-trips during normal operations.
 
-## Regenerating after provider changes
+## Regenerating after plugin changes
 
-When new providers are added or existing providers add new commands, the sudoers
+When new plugins are added or existing plugins add new commands, the sudoers
 file becomes stale. Refresh it by running:
 
 ```bash
 uptrakit-agent-ssh host update-sudoers my-server
 ```
 
-This resolves current provider commands, writes the updated file, and persists
+This resolves current plugin commands, writes the updated file, and persists
 the detected sudo state. Use `--dry-run` to preview the file without writing:
 
 ```bash
@@ -130,7 +130,7 @@ uptrakit-agent-ssh host update-sudoers my-server --dry-run
 - **Use `--strict-host-key-checking`** during bootstrap to prevent MITM when writing the sudoers file.
 - **Restrict the master encryption key** (`400` permissions, service account ownership) to protect SSH credentials at rest.
 - **Review the sudoers file** after bootstrap: `ssh user@host sudo cat /etc/sudoers.d/uptrakit-user`.
-- **Run `update-sudoers`** after adding or removing providers to keep the file minimal and current.
+- **Run `update-sudoers`** after adding or removing plugins to keep the file minimal and current.
 - **Avoid `--allow-all` for `update-sudoers`** unless the remote host is missing required tools during initial provisioning.
 
 ## File format reference

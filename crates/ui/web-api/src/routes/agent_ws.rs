@@ -11,7 +11,7 @@ use uptrakit_internal_wire::{
     OutgoingSeq, PingPayload, PluginType, RejectedPayload, ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
-    available_version, host, host_software_item, plugin_config as provider_config, service_host,
+    available_version, host, host_software_item, plugin_config, service_host,
     software_item, update_history,
 };
 
@@ -1007,7 +1007,7 @@ async fn deliver_pending_updates(
             }
         };
 
-        // Load per-host provider info from the host_software_item link.
+        // Load per-host plugin info from the host_software_item link.
         let link = match host_software_item::Entity::find_by_id((update_record.host_id, item.id))
             .one(state.db())
             .await
@@ -1028,8 +1028,8 @@ async fn deliver_pending_updates(
             }
         };
 
-        let provider_cfg = match provider_config::Entity::find_by_id(link.plugin_config_id)
-            .filter(provider_config::Column::DeactivatedAt.is_null())
+        let plugin_cfg = match plugin_config::Entity::find_by_id(link.plugin_config_id)
+            .filter(plugin_config::Column::DeactivatedAt.is_null())
             .one(state.db())
             .await
         {
@@ -1048,24 +1048,24 @@ async fn deliver_pending_updates(
             }
         };
 
-        let provider_type: PluginType = match serde_json::from_value(serde_json::Value::String(
-            provider_cfg.plugin_type.clone(),
+        let plugin_type: PluginType = match serde_json::from_value(serde_json::Value::String(
+            plugin_cfg.plugin_type.clone(),
         )) {
             Ok(pt) => pt,
             Err(_) => {
                 tracing::warn!(
                     update_id = %update_record.id,
-                    plugin_type = %provider_cfg.plugin_type,
-                    "unknown provider type, skipping pending update"
+                    plugin_type = %plugin_cfg.plugin_type,
+                    "unknown plugin type, skipping pending update"
                 );
                 continue;
             }
         };
 
         let resolved_hooks =
-            crate::update_hooks::resolve_hooks(&provider_cfg.config, link.config_override.as_ref());
+            crate::update_hooks::resolve_hooks(&plugin_cfg.config, link.config_override.as_ref());
         let merged_config =
-            crate::update_hooks::merge_config(&provider_cfg.config, link.config_override.as_ref());
+            crate::update_hooks::merge_config(&plugin_cfg.config, link.config_override.as_ref());
 
         // Look up the host's machine_id so the agent can route correctly.
         let host_machine_id = match host::Entity::find_by_id(update_record.host_id)
@@ -1094,7 +1094,7 @@ async fn deliver_pending_updates(
             software_item_name: item.name.clone(),
             package_identifier: link.package_identifier.clone(),
             to_version: update_record.to_version.clone(),
-            plugin_type: provider_type,
+            plugin_type,
             plugin_config: merged_config,
             pre_update_hooks: resolved_hooks.pre_update_hooks,
             post_update_hooks: resolved_hooks.post_update_hooks,
@@ -1257,7 +1257,7 @@ async fn upsert_available_version(
 
 /// Send `DiscoverSoftware` to the given agent for the given host.
 ///
-/// Queries all active provider configs for discovery-capable provider types.
+/// Queries all active plugin configs for discovery-capable plugin types.
 /// If no configs exist for a type, sends a single default (empty-config)
 /// assignment so the agent can still discover software.
 pub(crate) async fn trigger_discovery_for_agent_host(
@@ -1266,18 +1266,18 @@ pub(crate) async fn trigger_discovery_for_agent_host(
     tenant_id: uuid::Uuid,
     host_machine_id: &str,
 ) {
-    let discovery_types = state.provider_ops.discovery_plugin_types();
+    let discovery_types = state.plugin_ops.discovery_plugins();
 
-    let mut providers: Vec<DiscoveryPluginAssignment> = Vec::new();
+    let mut plugins: Vec<DiscoveryPluginAssignment> = Vec::new();
 
-    for provider_type in discovery_types {
-        let type_str = provider_type.to_string();
+    for plugin_type in discovery_types {
+        let type_str = plugin_type.to_string();
 
-        let configs = match provider_config::Entity::find()
-            .filter(provider_config::Column::TenantId.eq(tenant_id))
-            .filter(provider_config::Column::PluginType.eq(&type_str))
-            .filter(provider_config::Column::Enabled.eq(true))
-            .filter(provider_config::Column::DeactivatedAt.is_null())
+        let configs = match plugin_config::Entity::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq(&type_str))
+            .filter(plugin_config::Column::Enabled.eq(true))
+            .filter(plugin_config::Column::DeactivatedAt.is_null())
             .all(state.db())
             .await
         {
@@ -1285,8 +1285,8 @@ pub(crate) async fn trigger_discovery_for_agent_host(
             Err(e) => {
                 tracing::warn!(
                     error = %e,
-                    %provider_type,
-                    "failed to query provider configs for discovery trigger"
+                    %plugin_type,
+                    "failed to query plugin configs for discovery trigger"
                 );
                 continue;
             }
@@ -1294,30 +1294,30 @@ pub(crate) async fn trigger_discovery_for_agent_host(
 
         if configs.is_empty() {
             // No configs for this type — send a default assignment.
-            providers.push(DiscoveryPluginAssignment {
+            plugins.push(DiscoveryPluginAssignment {
                 plugin_config_id: None,
-                plugin_type: provider_type.clone(),
+                plugin_type: plugin_type.clone(),
                 config: serde_json::Value::Object(Default::default()),
             });
         } else {
             for cfg in configs {
-                providers.push(DiscoveryPluginAssignment {
+                plugins.push(DiscoveryPluginAssignment {
                     plugin_config_id: Some(cfg.id),
-                    plugin_type: provider_type.clone(),
+                    plugin_type: plugin_type.clone(),
                     config: cfg.config,
                 });
             }
         }
     }
 
-    if providers.is_empty() {
-        tracing::debug!(%agent_id, "no discovery-capable providers configured; skipping discovery trigger");
+    if plugins.is_empty() {
+        tracing::debug!(%agent_id, "no discovery-capable plugins configured; skipping discovery trigger");
         return;
     }
 
     let msg = ControllerMessage::DiscoverSoftware(DiscoverSoftwarePayload {
         host_machine_id: host_machine_id.to_string(),
-        providers,
+        plugins,
     });
 
     tracing::info!(

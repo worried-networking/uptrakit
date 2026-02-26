@@ -138,7 +138,7 @@ pub async fn handle_graceful_shutdown(
 /// regular agent, `SshCommandExecutor` for the SSH agent.
 ///
 /// The `ctx` is used to inject connection-specific overrides (e.g. a remote
-/// Docker host for the SSH agent) into each provider config before creation.
+/// Docker host for the SSH agent) into each plugin config before creation.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
 pub async fn handle_check_versions(
@@ -164,15 +164,15 @@ pub async fn handle_check_versions(
             let mut effective_config = assignment.config.clone();
             ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
-            if let Ok(provider) = uptrakit_plugin_registry::PluginRegistry::create_provider(
+            if let Ok(plugin) = uptrakit_plugin_registry::PluginRegistry::create_plugin(
                 assignment.plugin_type.clone(),
                 &effective_config,
                 Arc::clone(&executor),
-            ) && provider
+            ) && plugin
                 .has_capability(uptrakit_plugin_registry::PluginCapability::RefreshPackageIndex)
             {
                 tracing::info!(plugin_type = %assignment.plugin_type, "refreshing package index");
-                if let Err(e) = provider.refresh_package_index().await {
+                if let Err(e) = plugin.refresh_package_index().await {
                     tracing::warn!(plugin_type = %assignment.plugin_type, error = %e, "failed to refresh package index");
                 }
                 refreshed_types.insert(assignment.plugin_type.clone());
@@ -226,7 +226,7 @@ pub async fn handle_check_versions(
 /// The `executor` is provided by the caller — `LocalCommandExecutor` for the
 /// regular agent, `SshCommandExecutor` for the SSH agent.
 ///
-/// The `ctx` is used to inject connection-specific overrides into the provider
+/// The `ctx` is used to inject connection-specific overrides into the plugin
 /// config before instantiation.
 pub async fn handle_execute_update(
     payload: uptrakit_internal_wire::ExecuteUpdatePayload,
@@ -300,13 +300,13 @@ pub async fn handle_execute_update(
 
 /// Handle a `DiscoverSoftware` message from the controller.
 ///
-/// Iterates over each provider assignment, attempts discovery via the provider
+/// Iterates over each plugin assignment, attempts discovery via the plugin
 /// registry, and returns all results in a single `DiscoveryResults` message.
-/// Provider-level errors are recorded in the result rather than aborting the
+/// Plugin-level errors are recorded in the result rather than aborting the
 /// entire discovery run.
 ///
 /// The `ctx` is used to inject connection-specific overrides (e.g. a remote
-/// Docker host for the SSH agent) into each provider config before creation.
+/// Docker host for the SSH agent) into each plugin config before creation.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if sending the response fails.
 pub async fn handle_discover_software(
@@ -316,14 +316,14 @@ pub async fn handle_discover_software(
     ctx: &ConnectionContext,
 ) -> Option<LoopOutcome> {
     tracing::info!(
-        count = payload.providers.len(),
+        count = payload.plugins.len(),
         host_machine_id = %payload.host_machine_id,
         "received DiscoverSoftware request"
     );
 
-    let mut results = Vec::with_capacity(payload.providers.len());
+    let mut results = Vec::with_capacity(payload.plugins.len());
 
-    for assignment in payload.providers {
+    for assignment in payload.plugins {
         tracing::debug!(
             plugin_type = %assignment.plugin_type,
             plugin_config_id = ?assignment.plugin_config_id,
@@ -334,7 +334,7 @@ pub async fn handle_discover_software(
         ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
         let result =
-            match uptrakit_plugin_registry::PluginRegistry::create_provider_for_discovery(
+            match uptrakit_plugin_registry::PluginRegistry::create_plugin_for_discovery(
                 assignment.plugin_type.clone(),
                 &effective_config,
                 Arc::clone(&executor),
@@ -343,7 +343,7 @@ pub async fn handle_discover_software(
                     tracing::warn!(
                         plugin_type = %assignment.plugin_type,
                         error = %e,
-                        "failed to create provider for discovery"
+                        "failed to create plugin for discovery"
                     );
                     DiscoveryPluginResult {
                         plugin_config_id: assignment.plugin_config_id,
@@ -352,21 +352,21 @@ pub async fn handle_discover_software(
                         error: Some(e.to_string()),
                     }
                 }
-                Ok(provider) => {
+                Ok(plugin) => {
                     use uptrakit_plugin_registry::PluginCapability;
-                    if !provider.has_capability(PluginCapability::DiscoverLocalSoftware) {
+                    if !plugin.has_capability(PluginCapability::DiscoverLocalSoftware) {
                         tracing::warn!(
                             plugin_type = %assignment.plugin_type,
-                            "provider does not support DiscoverLocalSoftware; skipping"
+                            "plugin does not support DiscoverLocalSoftware; skipping"
                         );
                         DiscoveryPluginResult {
                             plugin_config_id: assignment.plugin_config_id,
                             plugin_type: assignment.plugin_type,
                             discoveries: vec![],
-                            error: Some("provider does not support software discovery".to_string()),
+                            error: Some("plugin does not support software discovery".to_string()),
                         }
                     } else {
-                        match provider.discover_software().await {
+                        match plugin.discover_software().await {
                             Ok(discoveries) => {
                                 tracing::info!(
                                     plugin_type = %assignment.plugin_type,

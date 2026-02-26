@@ -233,7 +233,7 @@ pub struct UpdateHookConfig {
 
 /// Full hooks configuration for a software item.
 ///
-/// Stored in provider_config or software item's config_override.
+/// Stored in plugin_config or software item's config_override.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HooksConfig {

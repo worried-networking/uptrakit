@@ -554,7 +554,7 @@ should either `debug_assert!` that the key is not already present, or return
 
 **[SEVERITY: Medium]** `crates/core/controller/src/scheduler/executor.rs:9` — `TaskExecutor` trait has no registration or discovery mechanism for new task types
 
-Adding a new scheduled task requires creating a new executor, adding a match arm, and registering manually. Unlike the `register_providers!` macro, there is no compile-time check ensuring all `ScheduledTaskType` variants have executors.
+Adding a new scheduled task requires creating a new executor, adding a match arm, and registering manually. Unlike the `register_plugins!` macro, there is no compile-time check ensuring all `ScheduledTaskType` variants have executors.
 
 **[SEVERITY: Low]** `crates/core/controller/src/scheduler/claim.rs:160-164` — `find_due_tasks` is scoped to a single `tenant_id`
 

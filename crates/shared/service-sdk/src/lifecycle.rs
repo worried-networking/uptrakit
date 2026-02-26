@@ -90,7 +90,7 @@ pub enum LoopOutcome {
 ///
 /// All async methods are desugared by [`async_trait`] into
 /// `Pin<Box<dyn Future + Send + '_>>`, matching the established pattern
-/// used across the codebase (Provider, CommandExecutor, TaskExecutor, etc.).
+/// used across the codebase (Plugin, CommandExecutor, TaskExecutor, etc.).
 #[async_trait]
 pub trait ServiceHandler: Send {
     /// Directory name used for platform-specific directory resolution

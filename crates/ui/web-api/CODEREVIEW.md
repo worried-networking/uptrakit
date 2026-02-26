@@ -12,12 +12,12 @@ The crate demonstrates several architectural strengths: a well-designed builder 
 
 ### Strengths
 
-- **`AppState` builder pattern** — `src/lib.rs:234-493`. `AppStateBuilder` enforces that all required fields are set before construction; `AppStateBuildError` names the first missing field. Partial state cannot escape at compile time. The `provider_ops` field defaults to the real `ProviderRegistry`, making test injection a one-call override.
+- **`AppState` builder pattern** — `src/lib.rs:234-493`. `AppStateBuilder` enforces that all required fields are set before construction; `AppStateBuildError` names the first missing field. Partial state cannot escape at compile time. The `plugin_ops` field defaults to the real `PluginRegistry`, making test injection a one-call override.
 - **`CaPublicSnapshot` / `CaKeyStore` split** — `src/lib.rs:52-156`. Public CA data is freely cloneable and shareable. Private key material is isolated in `CaKeyStore` (not `Clone`, not `Debug`), distributed only to the three consumers that legitimately need it (OCSP, CRL, cert signer). The `split_snapshot` function ensures consistent construction.
 - **`CaKeyStore` `Debug` redaction** — `src/lib.rs:98-112`. Every key field prints `"[REDACTED]"`. Verified by a dedicated test at `src/lib.rs:1284-1303`.
 - **Dual-router design** — `src/lib.rs:773-989`. `build_router` (HTTPS, full middleware stack) and `build_pki_router` (plain HTTP, PKI endpoints only) are clearly separated. The PKI router intentionally omits `resolve_proxy_headers` with an explanatory comment.
 - **OIDC feature-gating** — `Cargo.toml:10-12` and throughout `src/lib.rs`. OIDC types, flow stores, and routes are completely absent from the binary when the `oidc` feature is disabled. Feature-conditioned fields in `AppState` and `AppStateBuilder` are consistently paired.
-- **`ProviderOps` abstraction** — `src/lib.rs:213-215`. Provider operations injected as `Arc<dyn ProviderOps>`, decoupling all route handlers from the concrete `ProviderRegistry`. Enables mock injection in tests without a running provider ecosystem.
+- **`PluginOps` abstraction** — `src/lib.rs:213-215`. Plugin operations injected as `Arc<dyn PluginOps>`, decoupling all route handlers from the concrete `PluginRegistry`. Enables mock injection in tests without a running plugin ecosystem.
 - **Middleware layering order** — `src/lib.rs:947-960`. `resolve_proxy_headers` → `rate_limit_auth` → `resolve_ip` → `request_log`. Applied in reverse execution order as required by Axum/Tower. Proxy header stripping happens before rate limiting to prevent header-spoofed rate limit bypass.
 - **OIDC state stores as separate per-concern types** — `OidcFlowStore`, `OidcRegistrationStore`, `OidcTokenExchangeStore`, `AccountLinkStore`. Each store is scoped to a single step in the OIDC flow, preventing cross-step state confusion.
 - **`ServiceConnectionRegistry.send()` non-blocking** — `src/service_connections.rs`. Read lock acquired, sender cloned, lock dropped before the async send. No lock held across await points.
@@ -168,7 +168,7 @@ The pattern of `SessionService::new(...)`, `create_refresh_token(...)`, `get_use
 
 #### 2026-02-24 Review
 
-**[SEVERITY: Medium]** `src/queries/provider_configs.rs:155-158` — Duplicated `is_unique_name_violation` uses brittle string matching
+**[SEVERITY: Medium]** `src/queries/plugin_configs.rs:155-158` — Duplicated `is_unique_name_violation` uses brittle string matching
 
 Same `msg.contains("unique") || msg.contains("duplicate")` pattern as `autodiscovery.rs:673-676`. Should be consolidated into `uptrakit-shared-db` using backend-specific error codes.
 
@@ -184,7 +184,7 @@ The outbox write only needs serialized JSON, which could be computed first, avoi
 
 `from_value` takes ownership; since the event is consumed, destructuring would eliminate the clone.
 
-**[SEVERITY: Low]** `src/queries/provider_configs.rs:151-152` — `unreachable!()` in `unwrap_or_else` creates a hidden panic path
+**[SEVERITY: Low]** `src/queries/plugin_configs.rs:151-152` — `unreachable!()` in `unwrap_or_else` creates a hidden panic path
 
 Relies on an invariant not enforced by the type system. Should return a proper error.
 
@@ -229,7 +229,7 @@ The same `NoopCertSigner` struct and full `AppState` construction are verbatim-d
 
 **[SEVERITY: Medium]** `src/queries/` — Several query modules lack unit tests
 
-`src/queries/scheduled_tasks.rs`, `src/queries/services.rs`, `src/queries/autodiscovery.rs`, `src/queries/provider_configs.rs`, and `src/queries/update_history.rs` have no inline tests. The N+1 and full-scan issues identified in the Database section would be far easier to detect and prevent regression with query-level tests using in-memory SQLite.
+`src/queries/scheduled_tasks.rs`, `src/queries/services.rs`, `src/queries/autodiscovery.rs`, `src/queries/plugin_configs.rs`, and `src/queries/update_history.rs` have no inline tests. The N+1 and full-scan issues identified in the Database section would be far easier to detect and prevent regression with query-level tests using in-memory SQLite.
 
 **[SEVERITY: Medium]** `oidc_callback` has no unit tests despite 413 lines and 7 code paths
 
@@ -285,7 +285,7 @@ If the event cursor cannot advance (e.g., the target service never connects), `r
 
 **[SEVERITY: Medium]** `src/routes/agent_ws.rs:937-1010` — `deliver_pending_updates` issues N sequential DB queries per pending update
 
-For each pending update record the function issues separate sequential queries for: software item, host-software-item link, provider config, and host. With M pending updates that is 4M sequential round-trips. Batch the pending-updates delivery: load all software items, all links, all provider configs, and all hosts in four single queries using `is_in`, then join in memory.
+For each pending update record the function issues separate sequential queries for: software item, host-software-item link, plugin config, and host. With M pending updates that is 4M sequential round-trips. Batch the pending-updates delivery: load all software items, all links, all plugin configs, and all hosts in four single queries using `is_in`, then join in memory.
 
 **[SEVERITY: Low]** `src/service_connections.rs:312-319` — `broadcast_server_restarting_scattered` spawns unbounded tasks
 
@@ -327,14 +327,14 @@ Should have a per-event timeout or overall backlog delivery budget.
 - **UUID v7 primary keys** — Time-ordered inserts avoid hot-spot contention on clustered indexes. Used throughout entity definitions.
 - **`TenantScoped` trait** — Compile-time tenant filtering; tenant data leakage is structurally impossible through typed paths.
 - **Transactions used for all multi-step mutations** — `oidc_callback`, `oidc_complete_registration`, `enroll_*`, `merge_service` all begin explicit transactions. Race conditions on first-user detection are explicitly addressed with counts inside the transaction.
-- **Soft-delete partial unique indexes** — `uq_provider_configs_active_name WHERE deactivated_at IS NULL`, `uq_software_items_active_name WHERE deactivated_at IS NULL`. Deactivated entities do not block name reuse.
+- **Soft-delete partial unique indexes** — `uq_plugin_configs_active_name WHERE deactivated_at IS NULL`, `uq_software_items_active_name WHERE deactivated_at IS NULL`. Deactivated entities do not block name reuse.
 - **`lock_exclusive()` before mutation in `merge_service`** — Prevents concurrent merge operations on the same service record.
 - **`INSERT ON CONFLICT DO NOTHING` for lease deduplication** — `src/mqtt_lease_coordinator.rs:141-161`. Concurrent assignment is safe at the DB level.
 
 #### 2026-02-24 Review
 
-- **Batch provider config loading in `list_ignore_rules`.** `src/queries/autodiscovery.rs:103-117` — Collects IDs, single `is_in` query, HashMap for O(1) lookup.
-- **`load_provider_types` uses JOIN instead of N+1.** `src/queries/software_items.rs:94-124`.
+- **Batch plugin config loading in `list_ignore_rules`.** `src/queries/autodiscovery.rs:103-117` — Collects IDs, single `is_in` query, HashMap for O(1) lookup.
+- **`load_plugins` uses JOIN instead of N+1.** `src/queries/software_items.rs:94-124`.
 
 ### Issues
 
@@ -374,13 +374,13 @@ Check-then-insert without transaction. The unique violation handler should retur
 
 **[SEVERITY: Medium]** `src/queries/autodiscovery.rs:600-610` — Unbounded `host_software_items` scan in `process_one_discovery` Phase 2
 
-Missing index on `(provider_config_id, package_identifier)`.
+Missing index on `(plugin_config_id, package_identifier)`.
 
 **[SEVERITY: Medium]** `src/queries/update_history.rs:148-150` — Output not loaded for list_update_history
 
 Returns empty output for records using the newer `update_output_lines` storage, unlike the detail endpoint which correctly falls back.
 
-**[SEVERITY: Low]** `src/queries/provider_configs.rs:87-94` — `find_raw_active_config` swallows DB errors via `.ok().flatten()`
+**[SEVERITY: Low]** `src/queries/plugin_configs.rs:87-94` — `find_raw_active_config` swallows DB errors via `.ok().flatten()`
 
 Transient DB issues are indistinguishable from "config does not exist".
 
@@ -410,7 +410,7 @@ DB outage causes items to report zero linked hosts silently.
 
 **[SEVERITY: Medium]** Pervasive `Path<String>` + manual `uuid::Uuid::parse_str` pattern — 43 occurrences across 10 route files
 
-Axum natively supports `Path(id): Path<Uuid>` which performs the same parse and returns a typed 422 on failure. All 43 occurrences use the manual pattern (e.g., `hosts.rs:77`, `services.rs:98`, `software_items.rs:146`, `api_tokens.rs:111`, `provider_configs.rs:106`). Replace with typed extraction throughout: eliminates boilerplate, produces consistent error responses, and removes 43 instances of hand-written UUID validation.
+Axum natively supports `Path(id): Path<Uuid>` which performs the same parse and returns a typed 422 on failure. All 43 occurrences use the manual pattern (e.g., `hosts.rs:77`, `services.rs:98`, `software_items.rs:146`, `api_tokens.rs:111`, `plugin_configs.rs:106`). Replace with typed extraction throughout: eliminates boilerplate, produces consistent error responses, and removes 43 instances of hand-written UUID validation.
 
 **[SEVERITY: Medium]** `src/routes/services.rs:282` and `src/routes/hosts.rs:141` — Soft-delete `DELETE` endpoints return `200 OK` with body instead of `204 No Content`
 
@@ -440,7 +440,7 @@ These are pragmatic uses but each should carry an inline comment explaining why 
 
 ### Strengths
 
-- **`ProviderOps` trait in `AppState`** — `src/lib.rs:213-215`. Route handlers are fully decoupled from the concrete `ProviderRegistry`. Adding a new provider requires zero changes to web-api route code.
+- **`PluginOps` trait in `AppState`** — `src/lib.rs:213-215`. Route handlers are fully decoupled from the concrete `PluginRegistry`. Adding a new plugin requires zero changes to web-api route code.
 - **OIDC feature-gate** — The entire OIDC subsystem (15+ files) is compilable out. Deployments that do not need OIDC are not burdened with its code surface.
 - **`swagger-ui` feature gate** — `Cargo.toml:13`. Swagger UI can be excluded from production builds.
 - **`db-sqlite` / `db-postgres` / `db-mysql` feature gates** — `Cargo.toml:14-17`. DB backend is selected at compile time, not at runtime, enabling minimal binary sizes.
@@ -459,7 +459,7 @@ The role sync reconstruction only places values at the first dot-separated segme
 
 **[SEVERITY: Low]** `src/routes/oidc_auth.rs` — No mechanism to add custom OIDC scopes beyond the `scopes` column
 
-Additional claim retrieval (groups, department, cost center) requires custom scopes. The current implementation splits `provider.scopes` on whitespace and adds each as a separate `Scope`. This works but is the only extensibility point for claims enrichment. There is no documented path for operators to add custom claims processors without code changes.
+Additional claim retrieval (groups, department, cost center) requires custom scopes. The current implementation splits `plugin.scopes` on whitespace and adds each as a separate `Scope`. This works but is the only extensibility point for claims enrichment. There is no documented path for operators to add custom claims processors without code changes.
 
 #### 2026-02-24 Review
 

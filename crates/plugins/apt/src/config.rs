@@ -12,7 +12,7 @@ pub enum AptDiscoveryFilter {
     All,
 }
 
-/// Configuration for the APT provider.
+/// Configuration for the APT plugin.
 ///
 /// No secrets — the `package_identifier` in `SoftwareItem` is the Debian
 /// package name (e.g., `nginx`, `python3`).

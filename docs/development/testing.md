@@ -77,7 +77,7 @@ the paused state.
 
 ## Testing Expectations -- Overview
 
-Changes should be covered by tests, especially if they touch behavior, parsing, or provider logic. If an integration test is infeasible (e.g., OS
+Changes should be covered by tests, especially if they touch behavior, parsing, or plugin logic. If an integration test is infeasible (e.g., OS
 integration) include at least one of:
 
 - Unit tests around decision logic
@@ -120,7 +120,7 @@ cargo test --workspace --all-features
 
 - Pure logic (unit tests)
 
-- Provider behavior (parsing, version comparison, metadata mapping)
+- Plugin behavior (parsing, version comparison, metadata mapping)
 
 - API boundaries (request/response types, compatibility)
 
@@ -139,7 +139,7 @@ cargo test --workspace --all-features
 Every behaviour change must include tests. Types of tests used:
 
 - **Unit tests**: pure logic, version comparison, parsing.
-- **Provider tests**: parsing upstream metadata, mapping to internal models.
+- **Plugin tests**: parsing upstream metadata, mapping to internal models.
 - **API boundary tests**: request/response (de)serialisation, backwards compatibility.
 - **Error path tests**: expected failures produce correct error types and messages.
 - **Docker integration tests**: reverse proxy tests using real containers (see below).

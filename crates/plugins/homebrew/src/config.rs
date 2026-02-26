@@ -12,15 +12,15 @@ pub enum HomebrewPackageType {
     Cask,
 }
 
-/// Configuration for the Homebrew provider.
+/// Configuration for the Homebrew plugin.
 ///
 /// No secrets — the `package_identifier` in `SoftwareItem` is the formula/cask
 /// name (e.g., `wget`, `firefox`).
 ///
-/// When `package_type` is `None`, the provider discovers all installed packages
+/// When `package_type` is `None`, the plugin discovers all installed packages
 /// (both formulae and casks) and annotates each with
 /// `extra = {"package_type": "formula"}` or `extra = {"package_type": "cask"}`.
-/// This is used during autodiscovery when no pre-existing provider config exists.
+/// This is used during autodiscovery when no pre-existing plugin config exists.
 ///
 /// When `package_type` is set, only that type is discovered (the existing
 /// version-tracking behaviour).

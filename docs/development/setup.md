@@ -4,7 +4,7 @@
 
 - Bug reports (logs and repro steps)
 - Documentation improvements
-- New providers (version detection, upstream checking, update execution)
+- New plugins (version detection, upstream checking, update execution)
 - Performance improvements with evidence
 - CI or tooling improvements
 - Larger changes should start with an issue to align on scope

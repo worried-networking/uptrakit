@@ -47,7 +47,7 @@ pub async fn create_plugin_config(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match pc_queries::create_plugin_config(state.provider_ops.as_ref(), &tenant_db, req).await {
+    match pc_queries::create_plugin_config(state.plugin_ops.as_ref(), &tenant_db, req).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
         Err(pc_queries::CreatePluginConfigError::DuplicateName) => error_response(
             StatusCode::CONFLICT,
@@ -81,7 +81,7 @@ pub async fn list_plugin_configs(
     CanViewSoftware(_user): CanViewSoftware,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    match pc_queries::list_plugin_configs(state.provider_ops.as_ref(), &tenant_db, &params).await {
+    match pc_queries::list_plugin_configs(state.plugin_ops.as_ref(), &tenant_db, &params).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!("Failed to list plugin configs: {e}");
@@ -114,7 +114,7 @@ pub async fn get_plugin_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match pc_queries::get_plugin_config(state.provider_ops.as_ref(), &tenant_db, config_id).await {
+    match pc_queries::get_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Plugin config not found"),
         Err(e) => {
@@ -151,7 +151,7 @@ pub async fn update_plugin_config(
     };
 
     match pc_queries::update_plugin_config(
-        state.provider_ops.as_ref(),
+        state.plugin_ops.as_ref(),
         &tenant_db,
         config_id,
         req,
@@ -265,8 +265,8 @@ pub async fn discover_plugin_config(
     };
 
     if !state
-        .provider_ops
-        .discovery_plugin_types()
+        .plugin_ops
+        .discovery_plugins()
         .contains(&plugin_type)
     {
         return error_response(
@@ -326,7 +326,7 @@ pub async fn discover_plugin_config(
             let msg = uptrakit_internal_wire::ControllerMessage::DiscoverSoftware(
                 uptrakit_internal_wire::DiscoverSoftwarePayload {
                     host_machine_id: machine_id.clone(),
-                    providers: vec![uptrakit_internal_wire::DiscoveryPluginAssignment {
+                    plugins: vec![uptrakit_internal_wire::DiscoveryPluginAssignment {
                         plugin_config_id: Some(cfg.id),
                         plugin_type: plugin_type.clone(),
                         config: cfg.config.clone(),
@@ -340,7 +340,7 @@ pub async fn discover_plugin_config(
     (
         StatusCode::OK,
         Json(TriggerDiscoveryResponse {
-            providers_queued: agents_notified,
+            plugins_queued: agents_notified,
             message: format!(
                 "Discovery triggered for plugin config '{}' on {} agent(s)",
                 cfg.name, agents_notified
@@ -453,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn mask_unknown_provider_type() {
+    fn mask_unknown_plugin_type() {
         let config = serde_json::json!({"key": "value"});
         let masked = PluginRegistry::mask_config_secrets_str("unknown_type", &config);
         assert_eq!(masked, config);
@@ -510,13 +510,13 @@ mod tests {
     }
 
     #[test]
-    fn validate_unknown_provider_type() {
+    fn validate_unknown_plugin_type() {
         let config = serde_json::json!({});
         assert!(PluginRegistry::validate_config_str("nonexistent", &config).is_err());
     }
 
     #[test]
-    fn parse_known_provider_types() {
+    fn parse_known_plugin_types() {
         let github_config = serde_json::json!({
             "owner": "octocat",
             "repo": "hello-world"
@@ -540,7 +540,7 @@ mod tests {
         assert!(PluginRegistry::validate_config_str("unknown", &homebrew_config).is_err());
     }
 
-    // --- Homebrew provider tests ---
+    // --- Homebrew plugin tests ---
 
     #[test]
     fn validate_valid_homebrew_config() {
@@ -562,7 +562,7 @@ mod tests {
         assert_eq!(masked, config);
     }
 
-    // --- Docker provider tests ---
+    // --- Docker plugin tests ---
 
     #[test]
     fn mask_docker_basic_password() {

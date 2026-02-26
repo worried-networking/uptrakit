@@ -15,9 +15,9 @@ The SSH agent is feature-complete for version checks and updates. The implementa
 - SSH transport layer (`russh`) for the bootstrap workflow (connect, authenticate, execute remote commands)
 - Ed25519 keypair generation for automated key deployment
 - A `host bootstrap` command that automates remote host setup (user creation, key deployment, sudoers configuration)
-- A `host update-sudoers` command to regenerate minimal per-command sudoers entries as providers change
+- A `host update-sudoers` command to regenerate minimal per-command sudoers entries as plugins change
 - Per-host sudo state tracking (`is_root`, `sudo_available`, `sudo_policy`) in the local database
-- Runtime `SudoAwareCommandExecutor` wrapping that applies `sudo` based on stored host context — no hard-coded `sudo` in provider commands
+- Runtime `SudoAwareCommandExecutor` wrapping that applies `sudo` based on stored host context — no hard-coded `sudo` in plugin commands
 - Host reporting via `ReportHosts` — on authenticated connect, the SSH agent collects system info
   from each enrolled host over SSH and reports it to the controller
 - Full version check and update execution over SSH, with in-flight update tracking and graceful shutdown (see [Version Check and Update Execution](#version-check-and-update-execution))
@@ -161,7 +161,7 @@ command. It accepts a positional target in standard SSH format
 6. REMOTE SETUP
    - Create user with /bin/sh shell (if different from auth user)
    - Deploy authorized_keys with no-pty/no-agent-forwarding/no-X11-forwarding
-   - Resolve provider commands (command -v per SudoCommandEntry)
+   - Resolve plugin commands (command -v per SudoCommandEntry)
    - Write minimal /etc/sudoers.d/uptrakit-<username> (or NOPASSWD: ALL with --allow-all)
    - Validate with visudo -cf
 7. DISCONNECT auth session
@@ -214,12 +214,12 @@ For detailed usage and troubleshooting, see
 
 The SSH agent tracks per-host sudo state in the local database and uses it to
 dynamically prepend `sudo` to privileged commands at runtime — without
-hard-coding `sudo` in provider command specs.
+hard-coding `sudo` in plugin command specs.
 
 ### How it works
 
-Providers declare which commands they need `sudo` for via `required_sudo_commands()` (see
-[Provider Guidelines](../development/provider-guidelines.md#declaring-privileged-commands-with-required_sudo_commands)).
+Plugins declare which commands they need `sudo` for via `required_sudo_commands()` (see
+[Plugin Guidelines](../development/plugin-guidelines.md#declaring-privileged-commands-with-required_sudo_commands)).
 Each command has a `privileged: bool` flag on its `CommandSpec`.
 
 At runtime, the SSH agent wraps `SshCommandExecutor` with `SudoAwareCommandExecutor`:
@@ -254,7 +254,7 @@ CommandSpec { Exec { program: "sudo", args: ["apt-get", "install", ...] } }
 2. Connect & authenticate (using stored credentials)
 3. Detect is_root (id -u) and sudo_available (sudo -n true)
 4. Persist detected values to DB
-5. Collect provider commands (ProviderRegistry::all_required_sudo_commands())
+5. Collect plugin commands (PluginRegistry::all_required_sudo_commands())
 6. Resolve absolute paths on remote host (command -v per entry)
 7. Build SudoersContent::SpecificCommands or AllCommands (with --allow-all)
 8. Write /etc/sudoers.d/uptrakit-<username>, chmod 440, validate with visudo -cf
@@ -269,14 +269,14 @@ See [Sudoers Management](../security/sudoers-management.md) for the security mod
 ## Command Execution over SSH
 
 The `SshCommandExecutor` (`ssh_executor.rs`) implements the `CommandExecutor` trait from
-`uptrakit-command`, enabling providers to run version detection and update commands on remote hosts
+`uptrakit-command`, enabling plugins to run version detection and update commands on remote hosts
 transparently.
 
 ### Architecture
 
 ```text
 ┌────────────────────┐      CommandSpec      ┌─────────────────────┐
-│  Provider          │ ────────────────────► │  SshCommandExecutor │
+│  Plugin            │ ────────────────────► │  SshCommandExecutor │
 │  (transport-       │      CommandOutput    │                     │
 │   agnostic)        │ ◄──────────────────── │  build_remote_      │
 └────────────────────┘                       │  command_string()   │
@@ -439,7 +439,7 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 
 | Function / Type | Description |
 | --- | --- |
-| `check_version(provider_type, config, package_identifier, executor)` | Runs a single version check for a package using the given executor |
+| `check_version(plugin_type, config, package_identifier, executor)` | Runs a single version check for a package using the given executor |
 | `execute_update(payload, executor, output_tx)` | Executes an update and streams output lines |
 | `handle_check_versions(payload, executor, conn)` | Refreshes package indexes, runs version checks, sends `version_check_results` |
 | `handle_execute_update(payload, executor, in_flight, conn)` | Rejects if update already in flight; spawns update task |
@@ -459,4 +459,4 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 - [Wire Protocol](../api/wire-protocol.md) — `SshAgent` service type in enrollment; `host_machine_id` routing field
 - [Services and Operations](../api/services-operations.md) — shared service management API
 - [Command Executor](../development/command-executor.md) — `CommandExecutor` trait, `privileged` flag, and `SudoAwareCommandExecutor`
-- [Provider Guidelines](../development/provider-guidelines.md) — `required_sudo_commands()` contract
+- [Plugin Guidelines](../development/plugin-guidelines.md) — `required_sudo_commands()` contract

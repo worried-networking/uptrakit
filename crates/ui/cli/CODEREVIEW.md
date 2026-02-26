@@ -6,7 +6,7 @@
 `uptrakit` binary and depends on `uptrakit-openapi-client` (the typed HTTP client generated from
 the OpenAPI spec) rather than `uptrakit-web-api` directly — a correct and clean boundary. All
 eleven command namespaces (`auth`, `hosts`, `services`, `software_items`, `check`, `update`,
-`history`, `scheduler`, `settings`, `provider_configs`, `autodiscovery`) are implemented and wired
+`history`, `scheduler`, `settings`, `plugin_configs`, `autodiscovery`) are implemented and wired
 through `main.rs`.
 
 The crate introduced two notable design decisions in the `refactor(cli)` commit: the `HumanOutput`
@@ -214,9 +214,9 @@ serialisation to `String` is effectively infallible for a value already in memor
 fallback discards the error. Consistent with the rest of the crate, `context_to()?` should be used
 instead.
 
-**[SEVERITY: Low]** `crates/ui/cli/src/commands/provider_configs.rs:48` — raw `self.config`
+**[SEVERITY: Low]** `crates/ui/cli/src/commands/plugin_configs.rs:48` — raw `self.config`
 printed without pretty-printing
-`ProviderConfigResponse.config` is a `serde_json::Value`. The `HumanOutput` implementation
+`PluginConfigResponse.config` is a `serde_json::Value`. The `HumanOutput` implementation
 formats it as `format!("Config: {}\n", self.config)` which produces compact JSON inline. For
 operator readability, it should use `serde_json::to_string_pretty(&self.config)`.
 
@@ -256,7 +256,7 @@ operator readability, it should use `serde_json::to_string_pretty(&self.config)`
 and `software_items` namespaces are covered by integration tests
 Nine of the twelve command namespaces have zero integration-level test coverage against
 `MockApiServer`: `auth` (login, token create/list/revoke, status), `scheduler` (list, show,
-trigger), `settings` (all subcommands), `provider_configs` (list, show, create, update, delete,
+trigger), `settings` (all subcommands), `plugin_configs` (list, show, create, update, delete,
 discover), `autodiscovery` (ignores list/create/delete), `check` (all, item), `update` (trigger),
 `history` (list, show), and `api` (raw request). The `check::all` function has a non-trivial
 two-step interaction (list tasks, then trigger by ID) that would benefit particularly from a

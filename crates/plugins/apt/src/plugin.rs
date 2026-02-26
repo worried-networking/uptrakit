@@ -61,7 +61,7 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// Provider for APT (Debian/Ubuntu package manager).
+/// Plugin for APT (Debian/Ubuntu package manager).
 ///
 /// Supports installed version detection, package index refresh, autodiscovery,
 /// and updates for Debian packages managed by `apt-get`.
@@ -74,7 +74,7 @@ pub struct AptPlugin {
 }
 
 impl AptPlugin {
-    /// Create a new APT provider with the given configuration.
+    /// Create a new APT plugin with the given configuration.
     pub fn new(config: AptConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         config
             .validate()
@@ -150,7 +150,7 @@ impl Plugin for AptPlugin {
             .execute_quiet(&CommandSpec::exec("which", ["apt-get".to_string()]))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "which apt-get failed: {e}"
                 )))
             })?;
@@ -175,7 +175,7 @@ impl Plugin for AptPlugin {
             ))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "reboot-required check failed: {e}"
                 )))
             })?;
@@ -209,7 +209,7 @@ impl Plugin for AptPlugin {
             ).privileged())
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "apt-get update failed: {e}"
                 )))
             })?;
@@ -237,7 +237,7 @@ impl Plugin for AptPlugin {
             ))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "dpkg-query failed: {e}"
                 )))
             })?;
@@ -259,7 +259,7 @@ impl Plugin for AptPlugin {
                     ))
                     .await
                     .map_err(|e| {
-                        report!(PluginError::ProviderInternal(format!(
+                        report!(PluginError::PluginInternal(format!(
                             "apt-mark showmanual failed: {e}"
                         )))
                     })?;
@@ -315,7 +315,7 @@ impl Plugin for AptPlugin {
             ))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "dpkg-query failed: {e}"
                 )))
             })?;
@@ -353,7 +353,7 @@ impl Plugin for AptPlugin {
             ))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "apt-cache madison failed: {e}"
                 )))
             })?;
@@ -641,10 +641,10 @@ mod tests {
     // ── required_sudo_commands ───────────────────────────────────────────
 
     #[test]
-    fn apt_provider_required_sudo_commands() {
-        let provider =
-            AptPlugin::new(AptConfig::default(), test_executor()).expect("create provider");
-        let entries = provider.required_sudo_commands();
+    fn apt_plugin_required_sudo_commands() {
+        let plugin =
+            AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+        let entries = plugin.required_sudo_commands();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].command, "apt-get");
         assert!(!entries[0].explanation.is_empty());
@@ -653,31 +653,31 @@ mod tests {
     // ── capabilities ────────────────────────────────────────────────────
 
     #[test]
-    fn apt_provider_capabilities() {
-        let provider =
-            AptPlugin::new(AptConfig::default(), test_executor()).expect("create provider");
-        assert!(provider.has_capability(PluginCapability::DiscoverLocalSoftware));
-        assert!(provider.has_capability(PluginCapability::RefreshPackageIndex));
-        assert!(provider.has_capability(PluginCapability::DetectHostCompatibility));
-        assert!(provider.has_capability(PluginCapability::PostUpdateHook));
-        assert_eq!(provider.capabilities().len(), 4);
+    fn apt_plugin_capabilities() {
+        let plugin =
+            AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+        assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
+        assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
+        assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
+        assert!(plugin.has_capability(PluginCapability::PostUpdateHook));
+        assert_eq!(plugin.capabilities().len(), 4);
     }
 
     // ── empty identifier guards ──────────────────────────────────────────
 
     #[tokio::test]
     async fn detect_installed_version_empty_identifier_fails() {
-        let provider =
-            AptPlugin::new(AptConfig::default(), test_executor()).expect("create provider");
-        let result = provider.detect_installed_version("").await;
+        let plugin =
+            AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+        let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn fetch_releases_empty_identifier_fails() {
-        let provider =
-            AptPlugin::new(AptConfig::default(), test_executor()).expect("create provider");
-        let result = provider.fetch_releases("").await;
+        let plugin =
+            AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+        let result = plugin.fetch_releases("").await;
         assert!(result.is_err());
     }
 

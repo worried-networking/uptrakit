@@ -600,4 +600,4 @@ enable future connection reuse without changing the handler interfaces.
 
 ##### Strengths
 
-- **SSH agent reuses Provider and CommandExecutor abstractions.** `src/client.rs:10` — Any new provider registered in `register_providers!` is automatically available for SSH-managed hosts.
+- **SSH agent reuses Plugin and CommandExecutor abstractions.** `src/client.rs:10` — Any new plugin registered in `register_plugins!` is automatically available for SSH-managed hosts.

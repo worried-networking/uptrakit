@@ -1,19 +1,19 @@
-//! Runtime connection context injected by agents into provider creation.
+//! Runtime connection context injected by agents into plugin creation.
 //!
 //! [`ConnectionContext`] allows agents — in particular `agent-ssh` — to override
-//! provider configuration fields that depend on transport-level knowledge (e.g.
+//! plugin configuration fields that depend on transport-level knowledge (e.g.
 //! which Docker daemon endpoint to reach).  It is constructed once per host
-//! connection and threaded through all handler functions so that providers can
+//! connection and threaded through all handler functions so that plugins can
 //! be pointed at the right daemon without modifying the user-visible config JSON
 //! stored in the database.
 
 use uptrakit_plugin_registry::PluginType;
 
-/// Runtime connection details injected by the agent into provider creation.
+/// Runtime connection details injected by the agent into plugin creation.
 ///
-/// # Merging into provider config
+/// # Merging into plugin config
 ///
-/// Before the provider registry deserializes a provider configuration, call
+/// Before the plugin registry deserializes a plugin configuration, call
 /// [`apply_to_config`] to merge applicable fields from this context into the
 /// config JSON.  Fields that are already present in the user-visible config
 /// are left unchanged (user config takes precedence).
@@ -21,7 +21,7 @@ use uptrakit_plugin_registry::PluginType;
 /// # Default
 ///
 /// [`ConnectionContext::default()`] (all `None`) is used by the local `agent`
-/// and in tests — it has no effect on provider configuration.
+/// and in tests — it has no effect on plugin configuration.
 #[derive(Clone, Debug, Default)]
 pub struct ConnectionContext {
     /// Docker daemon endpoint (overrides `DockerConfig.docker_host` when not
@@ -41,16 +41,16 @@ pub struct ConnectionContext {
 }
 
 impl ConnectionContext {
-    /// Merge applicable fields from this context into a provider config JSON.
+    /// Merge applicable fields from this context into a plugin config JSON.
     ///
-    /// Only the fields relevant to `provider_type` are applied.  Fields that
+    /// Only the fields relevant to `plugin_type` are applied.  Fields that
     /// already exist in `config` are preserved (user config takes precedence).
     pub fn apply_to_config(
         &self,
-        provider_type: &PluginType,
+        plugin_type: &PluginType,
         config: &mut serde_json::Value,
     ) {
-        if !matches!(provider_type, PluginType::Docker) {
+        if !matches!(plugin_type, PluginType::Docker) {
             return;
         }
         let Some(obj) = config.as_object_mut() else {
@@ -86,7 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_injects_docker_host_for_docker_provider() {
+    fn apply_injects_docker_host_for_docker_plugin() {
         let ctx = ConnectionContext {
             docker_host_override: Some("ssh://user@host:2222".to_string()),
             ssh_key_path: Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519")),
@@ -114,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_does_nothing_for_non_docker_providers() {
+    fn apply_does_nothing_for_non_docker_plugins() {
         let ctx = ConnectionContext {
             docker_host_override: Some("ssh://user@host:2222".to_string()),
             ssh_key_path: None,

@@ -117,8 +117,8 @@ impl ImageRef {
 /// Returns `Ok(())` when the string is a valid Docker image reference,
 /// or an error message string on failure.
 ///
-/// Used by the provider registry to validate `package_identifier` values
-/// for the Docker provider.
+/// Used by the plugin registry to validate `package_identifier` values
+/// for the Docker plugin.
 pub fn validate_identifier(id: &str) -> std::result::Result<(), String> {
     id.parse::<ImageRef>().map(|_| ()).map_err(|e| e.to_string())
 }

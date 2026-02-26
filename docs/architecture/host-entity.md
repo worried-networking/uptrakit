@@ -173,27 +173,27 @@ in the `services.client_version` column and enforces a minimum version check:
 The controller can request installed version detection from agents:
 
 1. **Controller → Agent**: `CheckVersions(CheckVersionsPayload)` containing a list of `VersionCheckAssignment` items
-1. **Agent processes**: For each assignment, the agent dispatches to the appropriate `Provider` based on `provider_type`
+1. **Agent processes**: For each assignment, the agent dispatches to the appropriate `Plugin` based on `plugin_type`
 1. **Agent → Controller**: `VersionCheckResults(VersionCheckResultsPayload)` containing results with optional
    `installed_version`, `latest_version`, or `error`
 1. **Controller stores**: Updates `host_software_items.installed_version` and `installed_version_detected_at` for
-   successful results. If `latest_version` is present (agent-side providers like Homebrew), upserts an
+   successful results. If `latest_version` is present (agent-side plugins like Homebrew), upserts an
    `available_version` record for the software item
 
 **VersionCheckAssignment fields:**
 
 - `software_item_id`: UUID of the software item
 - `name`: Display name for logging
-- `provider_type`: Provider discriminator (`github_releases`, `docker_registry`, `proxmox_helper_scripts`, `homebrew`)
-- `package_identifier`: Provider-specific identifier
-- `config`: Provider configuration as JSON
+- `plugin_type`: Plugin discriminator (`github_releases`, `docker_registry`, `proxmox_helper_scripts`, `homebrew`)
+- `package_identifier`: Plugin-specific identifier
+- `config`: Plugin configuration as JSON
 
-**Providers**: Each provider crate implements a `Provider` struct with `detect_installed_version()` (currently returns
-`Ok(None)` — stub) and `execute_update()` containing provider-specific update logic. Both version detection and update
-execution are dispatched through the Provider Registry (`ProviderRegistry::create_provider()`). The agent's
-`version_check.rs` handles version detection; `update.rs` handles update execution via `execute_provider_update()`.
+**Plugins**: Each plugin crate implements a `Plugin` struct with `detect_installed_version()` (currently returns
+`Ok(None)` — stub) and `execute_update()` containing plugin-specific update logic. Both version detection and update
+execution are dispatched through the Plugin Registry (`PluginRegistry::create_plugin()`). The agent's
+`version_check.rs` handles version detection; `update.rs` handles update execution via `execute_plugin_update()`.
 Command execution utilities (`shell_escape`, `run_command_exec`, `run_command_with_shell`, `run_command`) live in the
-`uptrakit-command` crate; provider-core re-exports them with `ProviderError` conversion.
+`uptrakit-command` crate; plugin-core re-exports them with `PluginError` conversion.
 
 ## Agent host info collection
 

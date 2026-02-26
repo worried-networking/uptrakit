@@ -23,7 +23,7 @@ Two issues require attention before the next protocol version increment:
 `ServiceMessage` and `ControllerMessage` mix agent and MQTT
 concerns in a single enum without documented segregation guidance for
 `ServiceHandler` implementors; and `EnrollPayload.service_type` deprecation is
-documented in a comment but not enforced by the compiler. `ProviderType` now
+documented in a comment but not enforced by the compiler. `PluginType` now
 correctly uses `Other(String)` for forward-compatibility, matching the pattern
 established by `Capability` and `CloseReason`.
 

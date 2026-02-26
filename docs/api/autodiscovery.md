@@ -47,7 +47,7 @@ to `true`, activating version tracking for the item.
 {
   "id": "019...",
   "name": "git",
-  "provider_types": ["homebrew"],
+  "plugin_types": ["homebrew"],
   "enabled": true,
   "discovery_state": "approved",
   "host_count": 1,
@@ -68,7 +68,7 @@ to `true`, activating version tracking for the item.
 ### `POST /api/v1/hosts/{id}/discover`
 
 Trigger an autodiscovery run for a specific host. The controller dispatches discovery requests to
-all connected agents linked to this host. Each agent queries its discovery-capable providers and
+all connected agents linked to this host. Each agent queries its discovery-capable plugins and
 returns results.
 
 **Permission:** `manage_software`
@@ -85,14 +85,14 @@ returns results.
 
 ```json
 {
-  "providers_queued": 2,
-  "message": "Discovery triggered for 2 provider(s)"
+  "plugins_queued": 2,
+  "message": "Discovery triggered for 2 plugin(s)"
 }
 ```
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `providers_queued` | integer | Number of provider configs queued for discovery |
+| `plugins_queued` | integer | Number of plugin configs queued for discovery |
 | `message` | string | Human-readable confirmation |
 
 **Error responses:**
@@ -121,7 +121,7 @@ so discarded packages can be re-discovered in future runs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `provider_config_id` | UUID | No | Limit discard to pending items from a specific provider config |
+| `plugin_config_id` | UUID | No | Limit discard to pending items from a specific plugin config |
 
 **Request body:** none
 
@@ -145,10 +145,10 @@ so discarded packages can be re-discovered in future runs.
 
 ---
 
-### `POST /api/v1/provider-configs/{id}/discover`
+### `POST /api/v1/plugin-configs/{id}/discover`
 
-Trigger an autodiscovery run for a specific provider config across all connected agents.
-Returns an error if the provider type does not support the `DiscoverLocalSoftware` capability.
+Trigger an autodiscovery run for a specific plugin config across all connected agents.
+Returns an error if the plugin type does not support the `DiscoverLocalSoftware` capability.
 
 **Permission:** `manage_software`
 
@@ -156,7 +156,7 @@ Returns an error if the provider type does not support the `DiscoverLocalSoftwar
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `id` | UUID | Provider config UUID |
+| `id` | UUID | Plugin config UUID |
 
 **Request body:** none
 
@@ -164,29 +164,29 @@ Returns an error if the provider type does not support the `DiscoverLocalSoftwar
 
 ```json
 {
-  "providers_queued": 3,
+  "plugins_queued": 3,
   "message": "Discovery triggered for 3 agent(s)"
 }
 ```
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `providers_queued` | integer | Number of agents queued for discovery |
+| `plugins_queued` | integer | Number of agents queued for discovery |
 | `message` | string | Human-readable confirmation |
 
 **Error responses:**
 
 | Status | Condition |
 | --- | --- |
-| `400` | Provider type does not support software discovery |
-| `404` | Provider config not found or not active |
+| `400` | Plugin type does not support software discovery |
+| `404` | Plugin config not found or not active |
 
 ---
 
-### `DELETE /api/v1/provider-configs/{id}/discovered`
+### `DELETE /api/v1/plugin-configs/{id}/discovered`
 
-Bulk-discard all pending discovered items for a provider config across all hosts. Soft-deletes
-every software item with `discovery_state = "pending"` linked to this provider config. No ignore
+Bulk-discard all pending discovered items for a plugin config across all hosts. Soft-deletes
+every software item with `discovery_state = "pending"` linked to this plugin config. No ignore
 rules are created.
 
 **Permission:** `manage_software`
@@ -195,7 +195,7 @@ rules are created.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `id` | UUID | Provider config UUID |
+| `id` | UUID | Plugin config UUID |
 
 **Request body:** none
 
@@ -215,7 +215,7 @@ rules are created.
 
 | Status | Condition |
 | --- | --- |
-| `404` | Provider config not found or not active |
+| `404` | Plugin config not found or not active |
 
 ---
 
@@ -232,7 +232,7 @@ from being created as pending items in future discovery runs.
 | --- | --- | --- | --- |
 | `page` | integer | `1` | Page number (1-indexed) |
 | `per_page` | integer | `20` | Items per page (max 1000) |
-| `provider_config_id` | UUID | — | Filter results to a specific provider config |
+| `plugin_config_id` | UUID | — | Filter results to a specific plugin config |
 
 **Response `200`:** Paginated list of ignore rules
 
@@ -241,9 +241,9 @@ from being created as pending items in future discovery runs.
   "items": [
     {
       "id": "019...",
-      "provider_config_id": "019...",
-      "provider_config_name": "Homebrew (Formulae)",
-      "provider_type": "homebrew",
+      "plugin_config_id": "019...",
+      "plugin_config_name": "Homebrew (Formulae)",
+      "plugin_type": "homebrew",
       "package_identifier": "telnet",
       "created_at": "2026-02-23T10:00:00Z"
     }
@@ -260,9 +260,9 @@ from being created as pending items in future discovery runs.
 | Field | Type | Description |
 | --- | --- | --- |
 | `id` | UUID | Ignore rule UUID |
-| `provider_config_id` | UUID | Provider config this rule applies to |
-| `provider_config_name` | string | Display name of the provider config |
-| `provider_type` | string | Provider type (e.g. `"homebrew"`, `"proxmox_helper_scripts"`) |
+| `plugin_config_id` | UUID | Plugin config this rule applies to |
+| `plugin_config_name` | string | Display name of the plugin config |
+| `plugin_type` | string | Plugin type (e.g. `"homebrew"`, `"proxmox_helper_scripts"`) |
 | `package_identifier` | string | Package identifier suppressed from discovery |
 | `created_at` | ISO 8601 datetime | When the rule was created |
 
@@ -271,7 +271,7 @@ from being created as pending items in future discovery runs.
 ### `POST /api/v1/autodiscovery/ignores`
 
 Create an ignore rule to permanently suppress a specific package from future discovery runs.
-This endpoint is idempotent: if a rule already exists for the `(provider_config_id,
+This endpoint is idempotent: if a rule already exists for the `(plugin_config_id,
 package_identifier)` pair, the existing rule is returned rather than creating a duplicate.
 
 **Permission:** `manage_software`
@@ -280,14 +280,14 @@ package_identifier)` pair, the existing rule is returned rather than creating a 
 
 ```json
 {
-  "provider_config_id": "019...",
+  "plugin_config_id": "019...",
   "package_identifier": "telnet"
 }
 ```
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `provider_config_id` | UUID | Yes | Provider config to scope the rule to |
+| `plugin_config_id` | UUID | Yes | Plugin config to scope the rule to |
 | `package_identifier` | string | Yes | Package identifier to suppress (must not be empty) |
 
 **Response `201`:** Ignore rule response (same shape as items returned by
@@ -296,9 +296,9 @@ package_identifier)` pair, the existing rule is returned rather than creating a 
 ```json
 {
   "id": "019...",
-  "provider_config_id": "019...",
-  "provider_config_name": "Homebrew (Formulae)",
-  "provider_type": "homebrew",
+  "plugin_config_id": "019...",
+  "plugin_config_name": "Homebrew (Formulae)",
+  "plugin_type": "homebrew",
   "package_identifier": "telnet",
   "created_at": "2026-02-23T10:00:00Z"
 }
@@ -308,8 +308,8 @@ package_identifier)` pair, the existing rule is returned rather than creating a 
 
 | Status | Condition |
 | --- | --- |
-| `400` | `provider_config_id` or `package_identifier` missing or invalid |
-| `404` | Provider config not found or not active |
+| `400` | `plugin_config_id` or `package_identifier` missing or invalid |
+| `404` | Plugin config not found or not active |
 
 ---
 
@@ -342,7 +342,7 @@ discovery runs.
 
 The host assignment delete endpoint accepts an optional `ignore` query parameter. When set to
 `true`, the operation removes the host assignment **and** atomically creates an ignore rule for the
-`(provider_config_id, package_identifier)` pair recorded on that specific host assignment.
+`(plugin_config_id, package_identifier)` pair recorded on that specific host assignment.
 
 ```http
 DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true
@@ -354,9 +354,9 @@ DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true
 | --- | --- | --- | --- |
 | `ignore` | boolean | `false` | When `true`, also create an ignore rule for this host assignment |
 
-The ignore rule is scoped to the `(provider_config_id, package_identifier)` stored on the
+The ignore rule is scoped to the `(plugin_config_id, package_identifier)` stored on the
 `host_software_item` row being deleted, and applies tenant-wide — future discovery runs on any host
-will skip that package for that provider config.
+will skip that package for that plugin config.
 
 ### Example: unassign a host and suppress the package from re-discovery
 
@@ -380,8 +380,8 @@ rediscovery, omit the `?ignore=true` parameter.
 
 ## PHS Discovery and Config Synthesis
 
-When the PHS provider (`proxmox_helper_scripts`) returns discovery results, each item's `extra`
-field carries metadata that the controller uses to synthesize a downstream provider config:
+When the PHS plugin (`proxmox_helper_scripts`) returns discovery results, each item's `extra`
+field carries metadata that the controller uses to synthesize a downstream plugin config:
 
 | `extra` field | Outcome |
 | --- | --- |
@@ -389,7 +389,7 @@ field carries metadata that the controller uses to synthesize a downstream provi
 | `"apt_package"` | Controller finds or creates a shared `"APT (auto)"` config (`{}`). Software item's `package_identifier` is the Debian package name. |
 | Neither | Item is skipped (warned in agent log). |
 
-The PHS provider config itself is never directly linked to `host_software_items` — it is used only
+The PHS plugin config itself is never directly linked to `host_software_items` — it is used only
 as the discovery trigger. All version tracking and update execution happen through the synthesized
 configs.
 
@@ -401,5 +401,5 @@ configs.
   schema, and existing software item CRUD endpoints.
 - [HTTP Web API](http-web-api.md) — common API patterns, pagination, error response format, and
   authentication.
-- [Provider Guidelines](../development/provider-guidelines.md) — `DiscoverLocalSoftware` provider
+- [Plugin Guidelines](../development/plugin-guidelines.md) — `DiscoverLocalSoftware` plugin
   capability and `discover_software()` method contract.

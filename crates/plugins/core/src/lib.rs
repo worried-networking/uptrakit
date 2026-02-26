@@ -17,28 +17,28 @@ pub use types::{
 };
 pub use version::Version;
 
-// Re-export command crate types (keeps existing imports working for provider crates)
+// Re-export command crate types (keeps existing imports working for plugin crates)
 pub use uptrakit_command::UpdateOutputLine;
 
-// Re-export shared-types enums used by providers
+// Re-export shared-types enums used by plugins
 pub use uptrakit_shared_types::{HookShell, OutputStreamType};
 
-// Re-export executor types for provider crate convenience
+// Re-export executor types for plugin crate convenience
 pub use uptrakit_command::{
     CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor,
     SudoAwareCommandExecutor, SudoContext, SudoPolicy,
 };
 
-// Re-export SecretString so provider crates use it via provider-core
+// Re-export SecretString so plugin crates use it via plugin-core
 pub use uptrakit_shared_types::SecretString;
 
-// Re-export tokio::sync::mpsc so provider crates don't need a direct tokio dependency
+// Re-export tokio::sync::mpsc so plugin crates don't need a direct tokio dependency
 pub use tokio::sync::mpsc;
 
 /// Typed sender for streaming update output lines to the executor.
 ///
 /// Prefer this alias over `mpsc::Sender<UpdateOutputLine>` directly so that
-/// provider code remains decoupled from the concrete channel implementation.
+/// plugin code remains decoupled from the concrete channel implementation.
 pub type UpdateOutputSender = mpsc::Sender<UpdateOutputLine>;
 
 /// Typed receiver for consuming update output lines produced by the executor.

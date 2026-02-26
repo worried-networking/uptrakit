@@ -25,7 +25,7 @@ impl HumanOutput for PaginatedResponse<AutodiscoveryIgnoreResponse> {
         for r in &self.items {
             out.push_str(&format!(
                 "{:<38} {:<25} {:<20} {}\n",
-                r.id, r.plugin_config_name, r.provider_type, r.package_identifier
+                r.id, r.plugin_config_name, r.plugin_type, r.package_identifier
             ));
         }
         out.push_str(&format!(
@@ -44,7 +44,7 @@ impl HumanOutput for AutodiscoveryIgnoreResponse {
             "Plugin Config:    {} ({})\n",
             self.plugin_config_name, self.plugin_config_id
         ));
-        out.push_str(&format!("Provider Type:    {}\n", self.provider_type));
+        out.push_str(&format!("Plugin Type:    {}\n", self.plugin_type));
         out.push_str(&format!("Package:          {}\n", self.package_identifier));
         out.push_str(&format!(
             "Created:          {}\n",
@@ -59,7 +59,7 @@ impl HumanOutput for AutodiscoveryIgnoreResponse {
 // ── Params ───────────────────────────────────────────────────────────────────
 
 pub struct IgnoresListParams<'a> {
-    pub provider_config_id: Option<&'a Uuid>,
+    pub plugin_config_id: Option<&'a Uuid>,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -69,7 +69,7 @@ pub struct IgnoresListParams<'a> {
 }
 
 pub struct IgnoresCreateParams<'a> {
-    pub provider_config_id: &'a Uuid,
+    pub plugin_config_id: &'a Uuid,
     pub package_identifier: String,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
@@ -99,7 +99,7 @@ pub async fn ignores_list(
     let list_params = ListIgnoresParams {
         page: params.page,
         per_page: params.per_page,
-        plugin_config_id: params.provider_config_id,
+        plugin_config_id: params.plugin_config_id,
     };
     client
         .list_autodiscovery_ignores(&list_params)
@@ -117,7 +117,7 @@ pub async fn ignores_create(
         params.request_timeout,
     )?;
     let req = CreateAutodiscoveryIgnoreRequest {
-        plugin_config_id: *params.provider_config_id,
+        plugin_config_id: *params.plugin_config_id,
         package_identifier: params.package_identifier,
     };
     client.create_autodiscovery_ignore(&req).await.context_to()
@@ -155,7 +155,7 @@ mod tests {
                 .parse::<Uuid>()
                 .unwrap(),
             plugin_config_name: "My GitHub".to_string(),
-            provider_type: "github_releases".to_string(),
+            plugin_type: "github_releases".to_string(),
             package_identifier: "org/my-app".to_string(),
             created_at: datetime!(2025-01-01 00:00:00 UTC),
         }

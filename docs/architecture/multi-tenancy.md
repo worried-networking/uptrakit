@@ -26,8 +26,8 @@ The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenan
 | --- | --- |
 | `services` | — (index on `tenant_id`) |
 | `hosts` | `machine_id` unique → `(tenant_id, machine_id)` |
-| `provider_configs` | — (index on `tenant_id`) |
-| `software_items` | `(provider_config_id, package_identifier)` → `(tenant_id, provider_config_id, package_identifier)` |
+| `plugin_configs` | — (index on `tenant_id`) |
+| `software_items` | `(plugin_config_id, package_identifier)` → `(tenant_id, plugin_config_id, package_identifier)` |
 | `oidc_providers` | `slug` unique → `(tenant_id, slug)` |
 | `user_roles` | PK `(user_id, role_id)` → `(tenant_id, user_id, role_id)` |
 | `settings` | PK `(key)` → `(tenant_id, key)` |

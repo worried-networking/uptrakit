@@ -136,7 +136,7 @@ pub async fn create_autodiscovery_ignore(
         id: uuid::Uuid::nil(), // will be replaced below
         plugin_config_id: cfg.id,
         plugin_config_name: cfg.name.clone(),
-        provider_type: cfg.plugin_type.clone(),
+        plugin_type: cfg.plugin_type.clone(),
         package_identifier: req.package_identifier.clone(),
         created_at: time::OffsetDateTime::now_utc(),
     };
@@ -162,7 +162,7 @@ pub async fn create_autodiscovery_ignore(
             id: rule.id,
             plugin_config_id: cfg.id,
             plugin_config_name: cfg.name,
-            provider_type: cfg.plugin_type,
+            plugin_type: cfg.plugin_type,
             package_identifier: rule.package_identifier,
             created_at: rule.created_at,
         }),

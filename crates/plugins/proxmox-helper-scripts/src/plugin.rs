@@ -15,7 +15,7 @@ use crate::discovery::{
 /// Capabilities: discovery only — no release-index refresh needed.
 const CAPABILITIES: &[PluginCapability] = &[PluginCapability::DiscoverLocalSoftware];
 
-/// Provider for Proxmox Helper Scripts (discovery-only).
+/// Plugin for Proxmox Helper Scripts (discovery-only).
 ///
 /// Discovers PHS-managed software by:
 /// 1. Reading `/usr/bin/update` and parsing CT script URLs from it.
@@ -25,7 +25,7 @@ const CAPABILITIES: &[PluginCapability] = &[PluginCapability::DiscoverLocalSoftw
 ///    - `{ "github_owner": "…", "github_repo": "…" }` — GitHub-managed
 ///    - `{ "apt_package": "…" }` — APT-managed
 ///
-/// The controller synthesises the appropriate downstream provider config
+/// The controller synthesises the appropriate downstream plugin config
 /// (`github_releases` or `apt`) automatically from the `extra` metadata.
 pub struct ProxmoxHelperScriptsPlugin {
     _config: ProxmoxHelperScriptsConfig,
@@ -34,7 +34,7 @@ pub struct ProxmoxHelperScriptsPlugin {
 }
 
 impl ProxmoxHelperScriptsPlugin {
-    /// Create a new Proxmox Helper Scripts provider.
+    /// Create a new Proxmox Helper Scripts plugin.
     pub fn new(
         config: ProxmoxHelperScriptsConfig,
         executor: Arc<dyn CommandExecutor>,
@@ -46,7 +46,7 @@ impl ProxmoxHelperScriptsPlugin {
             ))
             .build()
             .map_err(|e| {
-                rootcause::report!(uptrakit_plugin_core::PluginError::ProviderInternal(
+                rootcause::report!(uptrakit_plugin_core::PluginError::PluginInternal(
                     format!("failed to build HTTP client: {e}")
                 ))
             })?;
@@ -297,35 +297,35 @@ mod tests {
 
     #[test]
     fn capabilities_discovery_only() {
-        let provider = ProxmoxHelperScriptsPlugin::new(
+        let plugin = ProxmoxHelperScriptsPlugin::new(
             ProxmoxHelperScriptsConfig::default(),
             test_executor(),
         )
         .expect("create");
-        assert!(provider.has_capability(PluginCapability::DiscoverLocalSoftware));
-        assert!(!provider.has_capability(PluginCapability::RefreshPackageIndex));
-        assert_eq!(provider.capabilities().len(), 1);
+        assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
+        assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
+        assert_eq!(plugin.capabilities().len(), 1);
     }
 
     #[test]
-    fn provider_type_is_proxmox_helper_scripts() {
-        let provider = ProxmoxHelperScriptsPlugin::new(
+    fn plugin_type_is_proxmox_helper_scripts() {
+        let plugin = ProxmoxHelperScriptsPlugin::new(
             ProxmoxHelperScriptsConfig::default(),
             test_executor(),
         )
         .expect("create");
-        assert_eq!(provider.plugin_type(), PluginType::ProxmoxHelperScripts);
+        assert_eq!(plugin.plugin_type(), PluginType::ProxmoxHelperScripts);
     }
 
     #[tokio::test]
     async fn discover_software_returns_empty_without_update_script() {
         // On a non-PHS system /usr/bin/update likely does not exist.
-        let provider = ProxmoxHelperScriptsPlugin::new(
+        let plugin = ProxmoxHelperScriptsPlugin::new(
             ProxmoxHelperScriptsConfig::default(),
             test_executor(),
         )
         .expect("create");
-        let result = provider.discover_software().await;
+        let result = plugin.discover_software().await;
         assert!(result.is_ok());
         // No error; result is empty or whatever is found on the test machine.
     }

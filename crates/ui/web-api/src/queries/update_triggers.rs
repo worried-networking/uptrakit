@@ -34,12 +34,12 @@ pub enum TriggerUpdateError {
     /// (host_id, software_item_id) pair.
     #[error("an update is already pending or in progress")]
     UpdateAlreadyActive,
-    /// The provider config referenced by the host assignment was not found.
-    #[error("provider config not found")]
-    ProviderConfigNotFound,
-    /// The provider type stored in the config could not be deserialized.
-    #[error("unknown provider type: {0}")]
-    UnknownProviderType(String),
+    /// The plugin config referenced by the host assignment was not found.
+    #[error("plugin config not found")]
+    PluginConfigNotFound,
+    /// The plugin type stored in the config could not be deserialized.
+    #[error("unknown plugin type: {0}")]
+    UnknownPluginType(String),
     /// A database error occurred.
     #[error("database error: {0}")]
     Database(#[from] sea_orm::DbErr),
@@ -105,7 +105,7 @@ pub async fn trigger_update_for_host(
         .await?
         .ok_or(TriggerUpdateError::HostNotFound)?;
 
-    // 3. Verify host is assigned to the software item and load per-host provider info.
+    // 3. Verify host is assigned to the software item and load per-host plugin info.
     let link = HostSoftwareItem::find_by_id((host_id, item_id))
         .one(db)
         .await?
@@ -144,8 +144,8 @@ pub async fn trigger_update_for_host(
         return Err(TriggerUpdateError::UpdateAlreadyActive);
     }
 
-    // 7. Load provider config from the host-specific assignment.
-    let provider_config = uptrakit_shared_db::entity::prelude::PluginConfig::find_by_id(
+    // 7. Load plugin config from the host-specific assignment.
+    let plugin_config = uptrakit_shared_db::entity::prelude::PluginConfig::find_by_id(
         link.plugin_config_id,
     )
     .filter(
@@ -153,7 +153,7 @@ pub async fn trigger_update_for_host(
     )
     .one(db)
     .await?
-    .ok_or(TriggerUpdateError::ProviderConfigNotFound)?;
+    .ok_or(TriggerUpdateError::PluginConfigNotFound)?;
 
     // 8. Create update_history record with status = Pending.
     let now = OffsetDateTime::now_utc();
@@ -176,21 +176,21 @@ pub async fn trigger_update_for_host(
 
     update_record.insert(db).await?;
 
-    // 9. Resolve hooks from provider config + per-host config_override.
+    // 9. Resolve hooks from plugin config + per-host config_override.
     let resolved_hooks = crate::update_hooks::resolve_hooks(
-        &provider_config.config,
+        &plugin_config.config,
         link.config_override.as_ref(),
     );
 
     // 10. Merge config.
     let merged_config =
-        crate::update_hooks::merge_config(&provider_config.config, link.config_override.as_ref());
+        crate::update_hooks::merge_config(&plugin_config.config, link.config_override.as_ref());
 
-    // 11. Convert provider type.
-    let provider_type: uptrakit_internal_wire::PluginType = serde_json::from_value(
-        serde_json::Value::String(provider_config.plugin_type.clone()),
+    // 11. Convert plugin type.
+    let plugin_type: uptrakit_internal_wire::PluginType = serde_json::from_value(
+        serde_json::Value::String(plugin_config.plugin_type.clone()),
     )
-    .map_err(|_| TriggerUpdateError::UnknownProviderType(provider_config.plugin_type.clone()))?;
+    .map_err(|_| TriggerUpdateError::UnknownPluginType(plugin_config.plugin_type.clone()))?;
 
     // 12. Build ExecuteUpdatePayload and dispatch to the agent.
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
@@ -200,7 +200,7 @@ pub async fn trigger_update_for_host(
         software_item_name: item.name.clone(),
         package_identifier: link.package_identifier.clone(),
         to_version,
-        plugin_type: provider_type,
+        plugin_type,
         plugin_config: merged_config,
         pre_update_hooks: resolved_hooks.pre_update_hooks,
         post_update_hooks: resolved_hooks.post_update_hooks,

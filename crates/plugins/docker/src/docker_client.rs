@@ -34,9 +34,9 @@ pub struct LocalContainerInfo {
 
 // ── Trait ────────────────────────────────────────────────────────────────────
 
-/// Docker daemon operations needed by the Docker provider.
+/// Docker daemon operations needed by the Docker plugin.
 ///
-/// The trait exists so that [`crate::provider::DockerProvider`] can be
+/// The trait exists so that [`crate::plugin::DockerPlugin`] can be
 /// tested with a mock implementation that does not require a live Docker daemon.
 #[async_trait]
 pub(crate) trait DockerClient: Send + Sync {
@@ -107,7 +107,7 @@ impl BollardDockerClient {
                     let _ = ssh_key_path; // ssh_key_path passed to BollardDockerClient::new
                     // Bollard resolves SSH connection from DOCKER_HOST env or URI.
                     // We set the env variable before connecting.
-                    // SAFETY: This is called once during provider construction,
+                    // SAFETY: This is called once during plugin construction,
                     // before any threads that read DOCKER_HOST are spawned.
                     unsafe { std::env::set_var("DOCKER_HOST", h) };
                     bollard::Docker::connect_with_defaults()

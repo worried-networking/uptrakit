@@ -193,7 +193,7 @@ non-interactive command execution.
 ### Sudoers configuration
 
 The bootstrap command writes `/etc/sudoers.d/uptrakit-<target_username>` with
-minimal per-command entries derived from registered providers. For example:
+minimal per-command entries derived from registered plugins. For example:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
@@ -203,13 +203,13 @@ uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 ```
 
 This grants the target user passwordless sudo access only for the specific
-absolute paths required by the registered providers — not unrestricted root
+absolute paths required by the registered plugins — not unrestricted root
 access.
 
 The `--allow-all` flag writes `NOPASSWD: ALL` instead (legacy behavior; less
 secure). Avoid using `--allow-all` in production.
 
-Refresh the sudoers file after adding new providers with:
+Refresh the sudoers file after adding new plugins with:
 
 ```bash
 uptrakit-agent-ssh host update-sudoers <host>

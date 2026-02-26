@@ -27,7 +27,7 @@ structured journald, etc.) to filter and search by field values.
 | `error` | Unrecoverable failures that terminate an operation or require operator attention. |
 | `warn` | Unexpected conditions that are handled but may indicate misconfiguration or degraded operation (e.g., TOFU without a pinned fingerprint, rate limits encountered). |
 | `info` | High-level lifecycle events: service started, enrollment completed, connection established, CA fetched, update completed. One or a few lines per major operation. |
-| `debug` | Per-step instrumentation useful for diagnosing failures during development or on-site debugging: detected version, sending message, executing provider, spawning command. |
+| `debug` | Per-step instrumentation useful for diagnosing failures during development or on-site debugging: detected version, sending message, executing plugin, spawning command. |
 | `trace` | Highly verbose, per-message or per-item events: individual output lines from commands, WebSocket frames, token cache hits, slug validation skip. Never enable in production unless targeting a specific subsystem. |
 
 **Examples from the codebase:**

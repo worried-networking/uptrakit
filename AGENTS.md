@@ -16,8 +16,8 @@ Key components:
   distribution.
 - **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version
   detection and update execution via sudo allowlists.
-- **Providers**: pluggable modules that define how to detect installed versions, resolve latest versions, and perform
-  updates.
+- **Plugins**: first-party extension modules that detect, report, and update software; each crate implements the
+  `Plugin` trait and is registered in `uptrakit-plugin-registry`.
 
 For full project context, see [README.md](README.md). For contribution rules, see [CONTRIBUTING.md](CONTRIBUTING.md).
 For system design and technology choices, see [ARCHITECTURE.md](ARCHITECTURE.md). For security policy and cryptographic
@@ -26,7 +26,7 @@ details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [d
 ## Documentation split
 
 - **End-user docs** ([`docs/end-user/`](docs/end-user/)): overview, manual update workflow, Home Assistant/MQTT
-  integration, deployment map, CLI usage guide, provider configurations, update history, profile and API
+  integration, deployment map, CLI usage guide, plugin configurations, update history, profile and API
   tokens, and autodiscovery (including
   [docs/end-user/deployment/reverse-proxy.md](docs/end-user/deployment/reverse-proxy.md)).
 - **API & protocol docs** ([`docs/api/`](docs/api/)): AsyncAPI/wire protocol
@@ -39,8 +39,9 @@ details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [d
   guidance.
 - **Architecture docs** ([`docs/architecture/`](docs/architecture/)): entity-level design for multi-tenancy, hosts,
   software items, and update history.
-- **Development docs** (`docs/development/`): setup, testing, coding standards, PR process, dependency policy, provider
-  guidelines, AI usage expectations, and database migration authoring
+- **Development docs** (`docs/development/`): setup, testing, coding standards, PR process, dependency policy, plugin
+  guidelines ([plugin-guidelines.md](docs/development/plugin-guidelines.md)), plugin system architecture
+  ([plugin-system.md](docs/development/plugin-system.md)), AI usage expectations, and database migration authoring
   ([database-migrations.md](docs/development/database-migrations.md)).
 - **Deployment guides**: reverse proxy deployment and per-proxy guides live under
   [`docs/end-user/deployment/`](docs/end-user/deployment/). Reverse proxy security model is at
@@ -60,14 +61,14 @@ uptrakit/
 │   │   │   ├── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
-│   ├── providers/
-│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait + SecretMasking; re-exports tokio::sync::mpsc
-│   │   ├── docker/                     # uptrakit-provider-docker               (lib)  — Docker/OCI provider: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; ssh feature gates bollard/ssh
-│   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
-│   │   ├── homebrew/                   # uptrakit-provider-homebrew             (lib)  — Homebrew formulae/cask provider
-│   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider (discovery-only: fetches CT scripts, analyzes for GitHub/APT upstream, emits extra metadata for controller-side config synthesis)
-│   │   ├── apt/                        # uptrakit-provider-apt                  (lib)  — APT (Debian/Ubuntu) provider (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install)
-│   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation; ssh feature propagates to uptrakit-provider-docker/ssh → bollard/ssh
+│   ├── plugins/
+│   │   ├── core/                       # uptrakit-plugin-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult
+│   │   ├── docker/                     # uptrakit-plugin-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; ssh feature gates bollard/ssh
+│   │   ├── github/                     # uptrakit-plugin-github                 (lib)  — GitHub Releases plugin
+│   │   ├── homebrew/                   # uptrakit-plugin-homebrew               (lib)  — Homebrew formulae/cask plugin; implements DetectHostCompatibility (checks `which brew`)
+│   │   ├── proxmox-helper-scripts/     # uptrakit-plugin-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/APT upstream, emits extra metadata for controller-side config synthesis)
+│   │   ├── apt/                        # uptrakit-plugin-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required)
+│   │   └── registry/                   # uptrakit-plugin-registry               (lib)  — plugin dispatch & validation; ssh feature propagates to uptrakit-plugin-docker/ssh → bollard/ssh
 │   ├── shared/
 │   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, handle_check_versions/execute_update/graceful_shutdown
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag
@@ -82,7 +83,7 @@ uptrakit/
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, services, software-items, provider-configs, autodiscovery, checks, updates, history, scheduler, settings); lib target exposes modules for integration tests
+│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, services, software-items, plugin-configs, autodiscovery, checks, updates, history, scheduler, settings); lib target exposes modules for integration tests
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
@@ -92,7 +93,7 @@ uptrakit/
 │   │       ├── profile/                #   /profile — account info + API token management (create/revoke)
 │   │       ├── history/                #   /history — update history with filters (host, software item, status) + trigger update button
 │   │       ├── scheduler/              #   /scheduler — scheduler task management (edit cron, enable/disable, trigger now)
-│   │       ├── provider-configs/       #   /provider-configs — provider config CRUD + autodiscovery ignore rules management
+│   │       ├── plugin-configs/         #   /plugin-configs — plugin config CRUD + autodiscovery ignore rules management
 │   │       ├── software/               #   /software — software item list; Pending tab for discovered items; Edit action (name/enabled)
 │   │       └── settings/               #   Settings sub-components (Registration, Auth, MQTT, OIDC, Certs, Enrollment); global CA rotation; MQTT client limit
 │   ├── package.json                    # npm scripts: build, check, lint, format, format:check
@@ -170,11 +171,11 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Agents initiate outbound-only connections.** Agents connect to the controller via secure WebSocket
    (`/api/v1/ws/service`). They never listen on any port or accept inbound connections.
 1. **Agents run unprivileged.** They run as a dedicated user (e.g. `uptrakit`). Only the specific commands declared
-   by registered providers via `required_sudo_commands()` are granted `NOPASSWD` sudo access — not blanket `ALL`.
+   by registered plugins via `required_sudo_commands()` are granted `NOPASSWD` sudo access — not blanket `ALL`.
    Sudoers files are generated by `host bootstrap` / `host update-sudoers` and contain one entry per resolved command.
    See [Sudoers Management](docs/security/sudoers-management.md).
-1. **Provider split.** Most providers resolve upstream versions on the controller and installed versions on the agent.
-   Providers with a local package index (e.g. Homebrew) or delegated upstream source (e.g. PHS with GitHub config)
+1. **Plugin split.** Most plugins resolve upstream versions on the controller and installed versions on the agent.
+   Plugins with a local package index (e.g. Homebrew) or delegated upstream source (e.g. PHS with GitHub config)
    resolve both on the agent via `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in
    `VersionCheckResult`. Keep this boundary clear.
 1. **No shell injection.** Any path that constructs or executes shell commands must validate inputs. Custom scripts are
@@ -264,54 +265,69 @@ for user review. Key invariants:
 
 3. **Ignore list is separate from deletion.** `DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true`
    removes the host assignment and creates an `autodiscovery_ignore` row keyed on the assignment's
-   `(provider_config_id, package_identifier)`. Without `?ignore=true`, unassigning is a plain delete with no ignore
+   `(plugin_config_id, package_identifier)`. Without `?ignore=true`, unassigning is a plain delete with no ignore
    rule. Deleting a software item (`DELETE /api/v1/software-items/{id}`) never creates ignore rules. Bulk-discard
-   endpoints (`DELETE /api/v1/hosts/{id}/discovered`, `DELETE /api/v1/provider-configs/{id}/discovered`) also
+   endpoints (`DELETE /api/v1/hosts/{id}/discovered`, `DELETE /api/v1/plugin-configs/{id}/discovered`) also
    perform plain soft-deletes — no ignore rules created.
 
-4. **Auto-created ProviderConfigs.** When no `ProviderConfig` exists for a discovery-capable type at trigger time,
+4. **Auto-created PluginConfigs.** When no `PluginConfig` exists for a discovery-capable type at trigger time,
    the agent receives a default (empty-config) assignment. Results come back with `extra` metadata (e.g.
    `{"package_type":"formula"}` for Homebrew or `{"containers":["mycontainer"]}` for Docker).
    The controller auto-creates named configs: `"Docker"`, `"Homebrew (Formulae)"`,
    `"Homebrew (Casks)"`, `"APT"`.
 
-   **PHS (Proxmox Helper Scripts) is a special case.** The PHS provider is discovery-only. During
+   **PHS (Proxmox Helper Scripts) is a special case.** The PHS plugin is discovery-only. During
    discovery, it fetches each container's CT script from `raw.githubusercontent.com` and analyzes it:
    - GitHub-managed apps emit `extra: {"github_owner": "...", "github_repo": "..."}`. The controller
-     auto-creates a `github_releases` provider config per `(owner, repo)` pair, pre-configured with
+     auto-creates a `github_releases` plugin config per `(owner, repo)` pair, pre-configured with
      `detect_installed_version_command` (reads `$HOME/.{slug}`) and `install_command`
      (`env PHS_SILENT=1 /usr/bin/update`). The `package_identifier` on the `SoftwareItem` is the PHS slug.
    - APT-managed apps emit `extra: {"apt_package": "..."}`. The controller reuses (or creates) a shared
-     `"APT (auto)"` provider config. The `package_identifier` is the Debian package name.
+     `"APT (auto)"` plugin config. The `package_identifier` is the Debian package name.
    - Apps whose scripts contain neither GitHub patterns nor a specific `apt install` line are skipped.
-   The PHS provider config itself (`proxmox_helper_scripts`, always `{}`) is retained as an anchor for
+   The PHS plugin config itself (`proxmox_helper_scripts`, always `{}`) is retained as an anchor for
    discovery runs but never linked directly to `SoftwareItem` host assignments.
 
-5. **Discovery capability is derived from the registry.** Call `state.provider_ops.discovery_provider_types()`
-   (or `ProviderRegistry::discovery_provider_types()` statically) to get the current list of discovery-capable
-   provider types. This is derived automatically from each provider's `capabilities()` method via the registry —
-   no static list is maintained separately. `ProviderType::supports_discovery()` has been removed.
+5. **Discovery capability is derived from the registry.** Call `state.plugin_ops.discovery_plugin_types()`
+   (or `PluginRegistry::discovery_plugin_types()` statically) to get the current list of discovery-capable
+   plugin types. This is derived automatically from each plugin's `capabilities()` method via the registry —
+   no static list is maintained separately.
 
-6. **Package identifier validation goes through `ProviderRegistry`.** Provider-specific constraints on the
-   `package_identifier` field (e.g. Homebrew's allowed character set) must be implemented in the provider crate as
+6. **Package identifier validation goes through `PluginRegistry`.** Plugin-specific constraints on the
+   `package_identifier` field (e.g. Homebrew's allowed character set) must be implemented in the plugin crate as
    `pub fn validate_identifier(value: &str) -> Result<(), String>` and wired through
-   `ProviderRegistry::validate_package_identifier(provider_type, value)`. Never add provider-specific validation logic
-   directly to web API query helpers or route handlers. The `ProviderOps` trait exposes this as
-   `validate_package_identifier_str(provider_type: &str, value: &str)` for trait-object dispatch. See
-   [Provider Guidelines](docs/development/provider-guidelines.md) for the full extension pattern.
+   `PluginRegistry::validate_package_identifier(plugin_type, value)`. Never add plugin-specific validation logic
+   directly to web API query helpers or route handlers. The `PluginOps` trait exposes this as
+   `validate_package_identifier_str(plugin_type: &str, value: &str)` for trait-object dispatch. See
+   [Plugin Guidelines](docs/development/plugin-guidelines.md) for the full extension pattern.
 
-7. **Providers declare required sudo commands via `required_sudo_commands()`.** Any provider that needs root-level
-   command execution must override `required_sudo_commands() -> Vec<SudoCommandEntry>` on its `Provider` impl.
+7. **Plugins declare required sudo commands via `required_sudo_commands()`.** Any plugin that needs root-level
+   command execution must override `required_sudo_commands() -> Vec<SudoCommandEntry>` on its `Plugin` impl.
    Each `SudoCommandEntry` carries a bare command name (e.g. `"apt-get"`) and a human-readable explanation.
    **Never hardcode absolute paths** — they are resolved on the target host via `command -v` at bootstrap time.
-   **Never hardcode `sudo` in `CommandSpec`** — instead call `.privileged()` on the spec. `ProviderRegistry::all_required_sudo_commands()`
+   **Never hardcode `sudo` in `CommandSpec`** — instead call `.privileged()` on the spec. `PluginRegistry::all_required_sudo_commands()`
    aggregates all declarations for use by the SSH agent's sudoers generation logic. See
-   [Provider Guidelines](docs/development/provider-guidelines.md) and [Sudoers Management](docs/security/sudoers-management.md).
+   [Plugin Guidelines](docs/development/plugin-guidelines.md) and [Sudoers Management](docs/security/sudoers-management.md).
 
-8. **Partial unique indexes.** `software_items` uses a partial unique index
+8. **New plugin capabilities.** Three new `PluginCapability` variants were added in the plugin refactor:
+
+   - `DetectHostCompatibility` — the plugin implements `detect_host_compatibility()` which returns a
+     `HostCompatibility` enum (`Compatible` or `Incompatible { reason: String }`). Implemented by:
+     `AptPlugin` (checks `which apt-get`) and `HomebrewPlugin` (checks `which brew`).
+   - `PreUpdateHook` — the plugin implements `pre_update_hook(context: &UpdateHookContext)` which
+     returns `PreUpdateHookResult` (`Proceed` or `Abort { reason: String }`). An `Abort` cancels the
+     update before it executes.
+   - `PostUpdateHook` — the plugin implements `post_update_hook(context: &UpdateHookContext)` which
+     is non-fatal. Implemented by `AptPlugin` (checks `/var/run/reboot-required` and logs a warning).
+
+   The `UpdateHookContext` struct contains `package_identifier`, `to_version`, and `from_version`.
+   These plugin-level hooks are distinct from the user-configured `hooks` in plugin config JSON
+   (documented in [Update Hooks](docs/development/update-hooks.md)).
+
+9. **Partial unique indexes.** `software_items` uses a partial unique index
    `(tenant_id, name) WHERE deactivated_at IS NULL` — prevents duplicate item names within a tenant while
    allowing re-creation after soft-delete. `host_software_items` uses a unique index
-   `(host_id, provider_config_id, package_identifier)` — prevents tracking the same package twice on one host.
+   `(host_id, plugin_config_id, package_identifier)` — prevents tracking the same package twice on one host.
 
 #### Key files
 
@@ -326,8 +342,8 @@ for user review. Key invariants:
 | `crates/ui/web-api/src/routes/agent_ws.rs` | `trigger_discovery_for_agent_host()` helper |
 | `docs/api/autodiscovery.md` | Full API reference for autodiscovery endpoints |
 | `docs/end-user/autodiscovery.md` | End-user guide (discovery workflow, review, ignore list) |
-| `docs/end-user/provider-configs.md` | End-user guide for provider config CRUD and discovery |
-| `docs/end-user/cli-usage.md` | CLI command reference including `provider-configs` and `autodiscovery` groups |
+| `docs/end-user/plugin-configs.md` | End-user guide for plugin config CRUD and discovery |
+| `docs/end-user/cli-usage.md` | CLI command reference including `plugin-configs` and `autodiscovery` groups |
 
 ### Home Assistant MQTT discovery
 
@@ -650,7 +666,7 @@ For more in-depth information on specific topics, refer to the following documen
 ### End-user Guides
 
 - [CLI Usage Guide](docs/end-user/cli-usage.md)
-- [Provider Configurations](docs/end-user/provider-configs.md)
+- [Plugin Configurations](docs/end-user/plugin-configs.md)
 - [Update History](docs/end-user/update-history.md)
 - [Profile and API Tokens](docs/end-user/profile-tokens.md)
 - [Autodiscovery](docs/end-user/autodiscovery.md)
@@ -667,7 +683,8 @@ For more in-depth information on specific topics, refer to the following documen
 - [Coding Standards](docs/development/coding-standards.md)
 - [Error Handling](docs/development/error-handling.md)
 - [Testing Expectations](docs/development/testing.md)
-- [Provider Guidelines](docs/development/provider-guidelines.md)
+- [Plugin Guidelines](docs/development/plugin-guidelines.md)
+- [Plugin System Architecture](docs/development/plugin-system.md)
 - [Command Executor](docs/development/command-executor.md)
 - [Update Hooks](docs/development/update-hooks.md)
 - [Service Lifecycle](docs/development/service-lifecycle.md)

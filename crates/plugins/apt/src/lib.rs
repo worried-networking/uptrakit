@@ -1,7 +1,7 @@
 pub mod config;
 pub mod error;
-pub mod provider;
+pub mod plugin;
 
 pub use config::{AptConfig, AptDiscoveryFilter};
 pub use error::{AptError, Result};
-pub use provider::{AptPlugin, validate_identifier};
+pub use plugin::{AptPlugin, validate_identifier};

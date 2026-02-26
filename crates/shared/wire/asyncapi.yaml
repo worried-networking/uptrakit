@@ -390,7 +390,7 @@ operations:
     summary: Agent receives a software update command (agent-only)
     description: |
       The controller pushes this message to trigger a software update on the agent.
-      The message includes the target version, provider configuration, and optional
+      The message includes the target version, plugin configuration, and optional
       pre/post-update commands. The agent should acknowledge with `UpdateStarted`,
       stream progress via `UpdateOutput`, and report the final result with `UpdateResult`.
       Updates may be queued and delivered on reconnect if the agent was offline.
@@ -1501,13 +1501,13 @@ components:
             - apt
         package_identifier:
           type: string
-          description: Package identifier for the provider
+          description: Package identifier for the plugin
           examples:
             - prometheus/prometheus
             - nginx:latest
         config:
           type: object
-          description: Provider-specific configuration
+          description: Plugin-specific configuration
 
     versionCheckResultsPayload:
       type: object
@@ -1551,17 +1551,17 @@ components:
           type: string
           description: >
             Latest available version from the local package index, if the
-            provider supports agent-side release fetching (e.g. Homebrew).
-            Omitted when the provider resolves latest versions on the controller.
+            plugin supports agent-side release fetching (e.g. Homebrew).
+            Omitted when the plugin resolves latest versions on the controller.
           examples:
             - "2.54.0"
         error:
           type: string
           description: Error message if detection failed
           examples:
-            - "unsupported provider type"
+            - "unsupported plugin type"
 
-    updateProviderType:
+    updatePluginType:
       type: string
       enum:
         - github_releases
@@ -1569,7 +1569,7 @@ components:
         - docker
         - homebrew
         - apt
-      description: Provider type for update execution
+      description: Plugin type for update execution
 
     outputStreamType:
       type: string
@@ -1766,7 +1766,7 @@ components:
             - Node.js
         package_identifier:
           type: string
-          description: Provider-specific package identifier
+          description: Plugin-specific package identifier
           examples:
             - nodejs/node
         to_version:
@@ -1775,7 +1775,7 @@ components:
           examples:
             - v20.0.0
         plugin_type:
-          $ref: "#/components/schemas/updateProviderType"
+          $ref: "#/components/schemas/updatePluginType"
         plugin_config:
           type: object
           description: Merged plugin configuration (base + override)
@@ -2403,7 +2403,7 @@ components:
       properties:
         package_identifier:
           type: string
-          description: Provider-specific package identifier (e.g. Homebrew formula name)
+          description: Plugin-specific package identifier (e.g. Homebrew formula name)
           examples:
             - wget
         name:
@@ -2426,7 +2426,7 @@ components:
             - proxmox_helper_scripts (APT-managed app): {"apt_package":"grafana"}
           nullable: true
 
-    discoveryProviderAssignment:
+    discoveryPluginAssignment:
       type: object
       required:
         - plugin_type
@@ -2455,7 +2455,7 @@ components:
         - seq
         - type
         - host_machine_id
-        - providers
+        - plugins
       properties:
         seq:
           type: integer
@@ -2471,13 +2471,13 @@ components:
           description: Machine ID of the host to run discovery on
           examples:
             - machine-abc-123
-        providers:
+        plugins:
           type: array
-          description: Per-provider discovery assignments
+          description: Per-plugin discovery assignments
           items:
-            $ref: "#/components/schemas/discoveryProviderAssignment"
+            $ref: "#/components/schemas/discoveryPluginAssignment"
 
-    discoveryProviderResult:
+    discoveryPluginResult:
       type: object
       required:
         - plugin_type

@@ -45,9 +45,7 @@ Examples:
 
 ```text
 m20260209_000001_initial.rs
-m20260224_000001_mqtt_ha_discovery.rs
-m20260225_000001_rename_docker_provider.rs
-m20260225_000002_phs_discovery_only.rs
+m20260226_000001_add_some_feature.rs
 ```
 
 - The date is the wall-clock date when you write the migration (UTC).

@@ -48,7 +48,7 @@ fn query_error_to_response(e: SoftwareItemQueryError) -> Response {
         ),
         SoftwareItemQueryError::DuplicateHostAssignment => error_response(
             StatusCode::CONFLICT,
-            "This host already has an assignment for the given provider config and package identifier",
+            "This host already has an assignment for the given plugin config and package identifier",
         ),
         SoftwareItemQueryError::HostNotFound(id) => error_response(
             StatusCode::BAD_REQUEST,
@@ -349,7 +349,7 @@ pub struct DeleteHostAssignmentParams {
 /// Unassign a software item from a host.
 ///
 /// The optional `ignore=true` query parameter also creates an autodiscovery
-/// ignore rule based on the host assignment's provider config and package
+/// ignore rule based on the host assignment's plugin config and package
 /// identifier, so this combination is not re-discovered in future runs.
 #[utoipa::path(
     delete,
@@ -357,7 +357,7 @@ pub struct DeleteHostAssignmentParams {
     params(
         ("id" = String, Path, description = "Software item UUID"),
         ("host_id" = String, Path, description = "Host UUID"),
-        ("ignore" = Option<bool>, Query, description = "If true, permanently suppress this package/provider combination from future autodiscovery runs")
+        ("ignore" = Option<bool>, Query, description = "If true, permanently suppress this package/plugin combination from future autodiscovery runs")
     ),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -383,7 +383,7 @@ pub async fn unassign_host(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
     };
 
-    // If ignore=true, load the assignment before deleting to capture provider info.
+    // If ignore=true, load the assignment before deleting to capture plugin info.
     let ignore_info: Option<(uuid::Uuid, String)> = if params.ignore.unwrap_or(false) {
         match host_software_item::Entity::find_by_id((host_id, item_id))
             .one(tenant_db.db())
@@ -426,7 +426,7 @@ pub async fn unassign_host(
     }
 }
 
-/// Update the provider assignment for a specific host–software-item link.
+/// Update the plugin assignment for a specific host–software-item link.
 #[utoipa::path(
     put,
     path = "/api/v1/software-items/{id}/hosts/{host_id}",
@@ -564,12 +564,12 @@ pub async fn trigger_update(
         Err(crate::queries::update_triggers::TriggerUpdateError::UpdateAlreadyActive) => {
             error_response(StatusCode::CONFLICT, "An update is already pending or in progress")
         }
-        Err(crate::queries::update_triggers::TriggerUpdateError::ProviderConfigNotFound) => {
+        Err(crate::queries::update_triggers::TriggerUpdateError::PluginConfigNotFound) => {
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Plugin config not found")
         }
-        Err(crate::queries::update_triggers::TriggerUpdateError::UnknownProviderType(pt)) => {
-            tracing::error!("Unknown provider type: {pt}");
-            error_response(StatusCode::BAD_REQUEST, "Unknown provider type")
+        Err(crate::queries::update_triggers::TriggerUpdateError::UnknownPluginType(pt)) => {
+            tracing::error!("Unknown plugin type: {pt}");
+            error_response(StatusCode::BAD_REQUEST, "Unknown plugin type")
         }
         Err(crate::queries::update_triggers::TriggerUpdateError::Database(e)) => {
             tracing::error!("Database error in trigger_update: {e}");
@@ -580,7 +580,7 @@ pub async fn trigger_update(
 
 /// Trigger a version check for a specific software item across all assigned hosts.
 ///
-/// Each host receives a version-check message using its own per-host provider config
+/// Each host receives a version-check message using its own per-host plugin config
 /// and package identifier.
 #[utoipa::path(
     post,
@@ -684,7 +684,7 @@ pub async fn check_versions(
     {
         Ok(cs) => cs.into_iter().map(|c| (c.id, c)).collect(),
         Err(e) => {
-            tracing::error!("Failed to load provider configs: {e}");
+            tracing::error!("Failed to load plugin configs: {e}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -707,7 +707,7 @@ pub async fn check_versions(
             continue;
         };
 
-        let provider_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
+        let plugin_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
             serde_json::Value::String(prov_config.plugin_type.clone()),
         ) {
             Ok(pt) => pt,
@@ -720,7 +720,7 @@ pub async fn check_versions(
         let assignment = uptrakit_internal_wire::VersionCheckAssignment {
             software_item_id: item_id,
             name: item.name.clone(),
-            plugin_type: provider_type,
+            plugin_type,
             package_identifier: link.package_identifier.clone(),
             config,
         };
@@ -807,7 +807,7 @@ pub async fn check_versions_host(
         }
     };
 
-    // Verify host is assigned and load per-host provider info
+    // Verify host is assigned and load per-host plugin info
     let link = match item_queries::load_host_assignment(tenant_db.db(), host_id, item_id).await {
         Some(l) => l,
         None => {
@@ -855,34 +855,34 @@ pub async fn check_versions_host(
         }
     };
 
-    // Load the per-host provider config
-    let provider_config = match find_raw_active_config(&tenant_db, link.plugin_config_id).await {
+    // Load the per-host plugin config
+    let plugin_config = match find_raw_active_config(&tenant_db, link.plugin_config_id).await {
         Some(c) => c,
         None => {
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Provider config not found",
+                "Plugin config not found",
             );
         }
     };
 
-    let provider_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
-        serde_json::Value::String(provider_config.plugin_type.clone()),
+    let plugin_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
+        serde_json::Value::String(plugin_config.plugin_type.clone()),
     ) {
         Ok(pt) => pt,
         Err(_) => {
-            tracing::error!("Unknown provider type: {}", provider_config.plugin_type);
-            return error_response(StatusCode::BAD_REQUEST, "Unknown provider type");
+            tracing::error!("Unknown plugin type: {}", plugin_config.plugin_type);
+            return error_response(StatusCode::BAD_REQUEST, "Unknown plugin type");
         }
     };
 
     let config =
-        crate::update_hooks::merge_config(&provider_config.config, link.config_override.as_ref());
+        crate::update_hooks::merge_config(&plugin_config.config, link.config_override.as_ref());
 
     let assignment = uptrakit_internal_wire::VersionCheckAssignment {
         software_item_id: item_id,
         name: item.name.clone(),
-        plugin_type: provider_type,
+        plugin_type,
         package_identifier: link.package_identifier.clone(),
         config,
     };

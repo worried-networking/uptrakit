@@ -16,7 +16,7 @@ These nine crates form the foundational layer that every other crate in the work
 
 - **Clean dependency layering (with one exception).** `uptrakit-shared-types` correctly gates its `sea-orm` and `openapi` (utoipa) integrations behind optional Cargo features (`sea-orm` and `openapi`). `uptrakit-web-api-types` mirrors this pattern with its own `openapi` feature gate. Any crate that does not need ORM or OpenAPI annotation machinery incurs zero cost and no transitive dependency.
 
-- **Correct abstraction boundaries for `uptrakit-agent-core`.** The crate delegates all provider management to `uptrakit-provider-registry`, keeps transport concerns in `uptrakit-service-sdk`, and injects execution via the `CommandExecutor` trait from `uptrakit-command`. The three concerns — provider logic, transport, and execution — never bleed across boundaries at this layer.
+- **Correct abstraction boundaries for `uptrakit-agent-core`.** The crate delegates all plugin management to `uptrakit-plugin-registry`, keeps transport concerns in `uptrakit-service-sdk`, and injects execution via the `CommandExecutor` trait from `uptrakit-command`. The three concerns — plugin logic, transport, and execution — never bleed across boundaries at this layer.
 
 - **`uptrakit-openapi-client` re-export strategy.** The client re-exports `uptrakit-web-api-types` as `types`, `reqwest::StatusCode`, `reqwest::Error`, and `uuid::Uuid` under a single facade. Downstream crates (the CLI in particular) depend on `uptrakit-openapi-client` alone and do not accumulate a web of transitive explicit dependencies. This is a deliberate and sound API surface decision.
 
@@ -74,7 +74,7 @@ These two calls appear in a `#[test]` function (`expand_tilde_works_without_home
 
 - **`RetryConfig` documentation.** The retry logic in `uptrakit-openapi-client` is clearly documented: which status codes trigger retry, how exponential backoff is computed (doubling, capped at `max_delay`), and which codes are never retried (4xx, network errors, auth failures). The `Retry-After` header parsing path is documented as numeric-seconds-only. This level of documentation on a retry implementation is uncommon and highly valuable.
 
-- **Typed errors throughout `uptrakit-shared-types`.** Every domain type with a `FromStr` implementation pairs it with a dedicated error type (e.g., `ParseProviderTypeError`, `ParseHookShellError`, `ParseServiceTypeError`). No `FromStr` implementation returns `String` as its error type. This is correct Rust idiom and enables callers to match on specific failure cases.
+- **Typed errors throughout `uptrakit-shared-types`.** Every domain type with a `FromStr` implementation pairs it with a dedicated error type (e.g., `ParsePluginTypeError`, `ParseHookShellError`, `ParseServiceTypeError`). No `FromStr` implementation returns `String` as its error type. This is correct Rust idiom and enables callers to match on specific failure cases.
 
 #### 2026-02-24 Review
 
@@ -110,7 +110,7 @@ Both `LocalCommandExecutor::execute` (lines 176-183) and `LocalCommandExecutor::
 
 - **`uptrakit-openapi-client` retry tests verify call counts.** The retry-exhaustion tests (`retry_exhausted_on_repeated_503`, `retry_exhausted_on_repeated_429`) use `mock.assert_calls(3)` to verify the exact number of HTTP requests made, confirming that the retry loop iterates the expected number of times. The no-retry tests (`no_retry_on_400`, `no_retry_on_401`) confirm that `mock.assert_calls(1)` holds for non-retriable status codes.
 
-- **`uptrakit-shared-types` serialization tests.** `provider_types.rs` carries 11 tests covering serialization round-trips for all `ProviderType` variants (including `Other(String)`), `Display`, `FromStr` (valid and invalid), `as_str` / `Display` consistency, and optional field omission for `ReleaseAsset`/`ReleaseInfo`. All are deterministic and have no external dependencies.
+- **`uptrakit-shared-types` serialization tests.** `plugin_types.rs` carries 11 tests covering serialization round-trips for all `PluginType` variants (including `Other(String)`), `Display`, `FromStr` (valid and invalid), `as_str` / `Display` consistency, and optional field omission for `ReleaseAsset`/`ReleaseInfo`. All are deterministic and have no external dependencies.
 
 - **`uptrakit-build-info` output stability test.** `render_human_uses_stable_keys_and_order` constructs a `BuildInfo` with fixed values and asserts the exact multi-line string output. This is a contract test that will catch any future field reordering or format change.
 
@@ -215,7 +215,7 @@ AGENTS.md restricts `as_u16()` to documented serialization sites only. Both call
 
 ### Strengths
 
-- **`uptrakit-command` `CommandExecutor` is injected via `Arc<dyn CommandExecutor>`.** Providers receive an executor through dependency injection rather than constructing a `LocalCommandExecutor` directly. This makes providers independently testable without spawning subprocesses: test code can substitute a `TrackingExecutor` or a `MockExecutor` that records calls and returns canned outputs. The trait is `Send + Sync`, making it safe to store in `Arc`.
+- **`uptrakit-command` `CommandExecutor` is injected via `Arc<dyn CommandExecutor>`.** Plugins receive an executor through dependency injection rather than constructing a `LocalCommandExecutor` directly. This makes plugins independently testable without spawning subprocesses: test code can substitute a `TrackingExecutor` or a `MockExecutor` that records calls and returns canned outputs. The trait is `Send + Sync`, making it safe to store in `Arc`.
 
 - **`uptrakit-openapi-client` `mock` feature is correctly test-only.** `mock = ["dep:httpmock"]` is declared in `[features]`, and `httpmock` appears as both `optional = true` in `[dependencies]` (for the feature activation) and in `[dev-dependencies]` (for tests within the crate itself). Downstream crates activate the feature in their `[dev-dependencies]` section. Production builds never compile `httpmock` or the `mock` module.
 
@@ -237,10 +237,10 @@ Unlike `Capability` which uses `Other(String)`, `ServiceType` fails deserializat
 
 **[SEVERITY: Low]** `crates/shared/types/src/` — Six shared-types domain enums lack `#[non_exhaustive]` despite being cross-crate types
 
-Inconsistent: `ProviderType`, `ServiceType`, `HookShell` have it, but `SoftwareDiscoveryState`, `MqttTransport`, `MqttClientConnectionStatus`, `DeviceAuthStatus`, `OutputStreamType`, `ServiceStatus` do not.
+Inconsistent: `PluginType`, `ServiceType`, `HookShell` have it, but `SoftwareDiscoveryState`, `MqttTransport`, `MqttClientConnectionStatus`, `DeviceAuthStatus`, `OutputStreamType`, `ServiceStatus` do not.
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/shared/agent-core/Cargo.toml:22` — `uptrakit-agent-core` links all providers unconditionally
+**[SEVERITY: Medium]** `crates/shared/agent-core/Cargo.toml:22` — `uptrakit-agent-core` links all plugins unconditionally
 
-`uptrakit-provider-registry` is an unconditional dependency of `uptrakit-agent-core`. The registry in turn compiles all provider crates (GitHub, Docker Registry, Homebrew, Proxmox Helper Scripts) into every binary that links `uptrakit-agent-core`. A Linux agent binary currently includes `HomebrewProvider` even though `brew` will never be present on a Linux host. The provider's `validate()` call will succeed (it does not check for `brew` at validation time), and the failure only surfaces at runtime when an update assignment for a Homebrew software item arrives. At current scale this is acceptable, but as the provider set grows the binary size impact will increase and the runtime-failure-only discovery will become harder to diagnose. Fix: introduce `#[cfg(target_os = "macos")]` guards in the registry or provider-specific Cargo features.
+`uptrakit-plugin-registry` is an unconditional dependency of `uptrakit-agent-core`. The registry in turn compiles all plugin crates (GitHub, Docker Registry, Homebrew, Proxmox Helper Scripts) into every binary that links `uptrakit-agent-core`. A Linux agent binary currently includes `HomebrewPlugin` even though `brew` will never be present on a Linux host. The plugin's `validate()` call will succeed (it does not check for `brew` at validation time), and the failure only surfaces at runtime when an update assignment for a Homebrew software item arrives. At current scale this is acceptable, but as the plugin set grows the binary size impact will increase and the runtime-failure-only discovery will become harder to diagnose. Fix: introduce `#[cfg(target_os = "macos")]` guards in the registry or plugin-specific Cargo features.

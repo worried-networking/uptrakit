@@ -1,11 +1,11 @@
 # Command Executor
 
-The `CommandExecutor` trait decouples provider logic from the command execution transport. Providers build a
+The `CommandExecutor` trait decouples plugin logic from the command execution transport. Plugins build a
 `CommandSpec` describing *what* to run, and the injected executor decides *how* to run it (locally, over SSH, etc.).
 
 **Related docs:**
 
-- [Provider Guidelines](provider-guidelines.md) -- provider architecture and construction
+- [Plugin Guidelines](plugin-guidelines.md) -- plugin architecture and construction
 - [Coding Standards](coding-standards.md) -- error handling conventions used throughout
 - [SSH Agent Architecture](../architecture/ssh-agent.md) -- future SSH executor use case
 - [Secure Development](../security/secure-development.md) -- shell injection prevention
@@ -13,7 +13,7 @@ The `CommandExecutor` trait decouples provider logic from the command execution 
 ## Key types
 
 All types live in `crates/shared/command/src/executor.rs` and are re-exported from `uptrakit_command` and
-`uptrakit_provider_core::command`.
+`uptrakit_plugin_core::command`.
 
 ### `CommandSpec`
 
@@ -181,34 +181,34 @@ with hosts bootstrapped before the sudo tracking migration.
 See [SSH Agent Architecture — Sudo Context](../architecture/ssh-agent.md#sudo-context-and-dynamic-execution) for the full SSH agent integration.
 See [Sudoers Management](../security/sudoers-management.md) for the security model and operator guidance.
 
-## Provider construction
+## Plugin construction
 
-Every provider struct stores `Arc<dyn CommandExecutor>` and receives it via the constructor:
+Every plugin struct stores `Arc<dyn CommandExecutor>` and receives it via the constructor:
 
 ```rust
-pub struct MyProvider {
+pub struct MyPlugin {
     config: MyConfig,
     executor: Arc<dyn CommandExecutor>,
 }
 
-impl MyProvider {
+impl MyPlugin {
     pub fn new(config: MyConfig, executor: Arc<dyn CommandExecutor>) -> Self {
         Self { config, executor }
     }
 }
 ```
 
-The `ProviderRegistry::create_provider()` method accepts the executor and forwards it to each provider:
+The `PluginRegistry::create_plugin()` method accepts the executor and forwards it to each plugin:
 
 ```rust
-let provider = ProviderRegistry::create_provider(
-    ProviderType::GithubReleases,
+let plugin = PluginRegistry::create_plugin(
+    PluginType::GithubReleases,
     &config,
     executor,
 )?;
 ```
 
-## Using the executor in providers
+## Using the executor in plugins
 
 ### Streaming execution (e.g., `execute_update`)
 
@@ -217,7 +217,7 @@ let cmd_output = self
     .executor
     .execute(&CommandSpec::shell(&install_cmd), output_tx)
     .await
-    .context_transform(|e| ProviderError::InstallFailed(e.to_string()))?;
+    .context_transform(|e| PluginError::InstallFailed(e.to_string()))?;
 ```
 
 ### Quiet execution (e.g., `detect_installed_version`)
@@ -253,7 +253,7 @@ let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(
 let executor: Arc<dyn CommandExecutor> =
     Arc::new(SudoAwareCommandExecutor::new(raw, host.resolved_sudo_context()));
 
-// Use exactly like LocalCommandExecutor — providers are transport-agnostic.
+// Use exactly like LocalCommandExecutor — plugins are transport-agnostic.
 let output = executor
     .execute_quiet(&CommandSpec::exec("uname", ["-r".to_string()]))
     .await?;
@@ -310,8 +310,8 @@ fn test_executor() -> Arc<dyn CommandExecutor> {
 }
 
 #[test]
-fn create_provider() {
-    let provider = MyProvider::new(config, test_executor());
+fn create_plugin() {
+    let plugin = MyPlugin::new(config, test_executor());
     // ...
 }
 ```

@@ -15,7 +15,7 @@ use crate::types::UpdateOutputLine;
 
 /// Specification for a command to execute.
 ///
-/// Providers build a `CommandSpec` describing *what* to run, and the injected
+/// Plugins build a `CommandSpec` describing *what* to run, and the injected
 /// [`CommandExecutor`] decides *how* to run it (locally, over SSH, etc.).
 ///
 /// The `privileged` flag marks commands that require root privileges. When
@@ -165,7 +165,7 @@ impl CommandSpec {
 
 /// Trait for executing commands.
 ///
-/// Providers call methods on this trait instead of spawning processes directly.
+/// Plugins call methods on this trait instead of spawning processes directly.
 /// The default implementation ([`LocalCommandExecutor`]) runs commands on the
 /// local machine; future implementations (e.g., SSH) can run them remotely.
 #[async_trait]

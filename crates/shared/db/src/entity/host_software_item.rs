@@ -8,7 +8,7 @@ pub struct Model {
     pub host_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub software_item_id: Uuid,
-    #[sea_orm(column_name = "provider_config_id")]
+    #[sea_orm(column_name = "plugin_config_id")]
     pub plugin_config_id: Uuid,
     pub package_identifier: String,
     #[sea_orm(column_type = "JsonBinary", nullable)]

@@ -10,7 +10,7 @@ use crate::connection_context::ConnectionContext;
 pub struct VersionCheckOutcome {
     /// Detected installed version, if any.
     pub installed_version: Option<String>,
-    /// Latest available version from the local package index, if the provider
+    /// Latest available version from the local package index, if the plugin
     /// supports agent-side release fetching.
     pub latest_version: Option<String>,
     /// Error message if detection failed.
@@ -20,26 +20,26 @@ pub struct VersionCheckOutcome {
 /// Check the installed version (and optionally the latest version) for a
 /// software item.
 ///
-/// If the provider supports `RefreshPackageIndex`, the latest available version
-/// is also fetched via `fetch_releases()`. For providers that resolve latest
+/// If the plugin supports `RefreshPackageIndex`, the latest available version
+/// is also fetched via `fetch_releases()`. For plugins that resolve latest
 /// versions on the controller side, `latest_version` will be `None`.
 ///
 /// The `ctx` parameter is used to inject connection-specific overrides (e.g.
-/// a remote Docker host for the SSH agent) into the provider config before
+/// a remote Docker host for the SSH agent) into the plugin config before
 /// instantiation.
 pub async fn check_version(
-    provider_type: PluginType,
+    plugin_type: PluginType,
     config: &serde_json::Value,
     package_identifier: &str,
     executor: Arc<dyn CommandExecutor>,
     ctx: &ConnectionContext,
 ) -> VersionCheckOutcome {
-    tracing::debug!(provider_type = ?provider_type, package_identifier, "checking version");
+    tracing::debug!(plugin_type = ?plugin_type, package_identifier, "checking version");
 
     let mut effective_config = config.clone();
-    ctx.apply_to_config(&provider_type, &mut effective_config);
+    ctx.apply_to_config(&plugin_type, &mut effective_config);
 
-    let provider = match PluginRegistry::create_provider(provider_type, &effective_config, executor) {
+    let plugin = match PluginRegistry::create_plugin(plugin_type, &effective_config, executor) {
         Ok(p) => p,
         Err(e) => {
             return VersionCheckOutcome {
@@ -51,7 +51,7 @@ pub async fn check_version(
     };
 
     tracing::debug!("detecting installed version");
-    let installed_version = match provider.detect_installed_version(package_identifier).await {
+    let installed_version = match plugin.detect_installed_version(package_identifier).await {
         Ok(Some(version)) => {
             tracing::debug!(version = %version, "installed version detected");
             Some(version.to_string())
@@ -69,17 +69,17 @@ pub async fn check_version(
         }
     };
 
-    // For providers that can resolve latest versions locally (e.g., Homebrew),
+    // For plugins that can resolve latest versions locally (e.g., Homebrew),
     // also fetch the latest available version from the package index.
-    let latest_version = if provider.has_capability(PluginCapability::RefreshPackageIndex) {
-        tracing::debug!("fetching releases from provider");
-        match provider.fetch_releases(package_identifier).await {
+    let latest_version = if plugin.has_capability(PluginCapability::RefreshPackageIndex) {
+        tracing::debug!("fetching releases from plugin");
+        match plugin.fetch_releases(package_identifier).await {
             Ok(releases) => {
                 tracing::debug!(count = releases.len(), "releases fetched");
                 releases.first().map(|r| r.version.to_string())
             }
             Err(e) => {
-                tracing::debug!(error = %e, "failed to fetch latest version from provider");
+                tracing::debug!(error = %e, "failed to fetch latest version from plugin");
                 None
             }
         }
@@ -147,7 +147,7 @@ mod tests {
     #[tokio::test]
     async fn check_version_proxmox_is_discovery_only() {
         // PHS is discovery-only; `detect_installed_version` is not supported.
-        // Version detection is delegated to the synthesised GitHub/APT provider
+        // Version detection is delegated to the synthesised GitHub/APT plugin
         // config that the controller creates from the PHS `extra` metadata.
         let config = serde_json::json!({});
         let outcome = check_version(
@@ -198,7 +198,7 @@ mod tests {
             docker_host_override: Some("ssh://user@host:2222".to_string()),
             ssh_key_path: None,
         };
-        // With a valid docker host override, the provider is created with the
+        // With a valid docker host override, the plugin is created with the
         // injected host. The check itself will fail (no daemon) but that proves
         // the injection path runs without panicking.
         let outcome = check_version(

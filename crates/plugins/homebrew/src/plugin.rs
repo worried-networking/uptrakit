@@ -52,7 +52,7 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// Provider for Homebrew (macOS/Linux package manager).
+/// Plugin for Homebrew (macOS/Linux package manager).
 ///
 /// Supports both formulae and casks. The `package_identifier` in `SoftwareItem`
 /// is the Homebrew formula/cask name (e.g., `wget`, `firefox`).
@@ -62,7 +62,7 @@ pub struct HomebrewPlugin {
 }
 
 impl HomebrewPlugin {
-    /// Create a new Homebrew provider with the given configuration.
+    /// Create a new Homebrew plugin with the given configuration.
     pub fn new(config: HomebrewConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         config
             .validate()
@@ -255,7 +255,7 @@ impl Plugin for HomebrewPlugin {
             .execute_quiet(&CommandSpec::exec("which", ["brew".to_string()]))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "which brew failed: {e}"
                 )))
             })?;
@@ -274,7 +274,7 @@ impl Plugin for HomebrewPlugin {
             .execute_quiet(&CommandSpec::exec("brew", ["update".to_string()]))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "brew update failed: {e}"
                 )))
             })?;
@@ -300,7 +300,7 @@ impl Plugin for HomebrewPlugin {
             ))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "brew info failed: {e}"
                 )))
             })?;
@@ -310,7 +310,7 @@ impl Plugin for HomebrewPlugin {
         }
 
         let json: serde_json::Value = serde_json::from_str(&cmd_output.output).map_err(|e| {
-            report!(PluginError::ProviderInternal(format!(
+            report!(PluginError::PluginInternal(format!(
                 "failed to parse brew info JSON: {e}"
             )))
         })?;
@@ -319,7 +319,7 @@ impl Plugin for HomebrewPlugin {
             None => {
                 // Discover-all mode: return both formulae and casks, each tagged
                 // with extra metadata so the controller can route them to the
-                // correct auto-created provider configs.
+                // correct auto-created plugin configs.
                 tracing::debug!("discovering all installed Homebrew packages (formulae + casks)");
                 let mut all = Self::parse_installed_formulae(&json, true);
                 all.extend(Self::parse_installed_casks(&json, true));
@@ -353,7 +353,7 @@ impl Plugin for HomebrewPlugin {
             ))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "brew info failed: {e}"
                 )))
             })?;
@@ -363,7 +363,7 @@ impl Plugin for HomebrewPlugin {
         }
 
         let json: serde_json::Value = serde_json::from_str(&cmd_output.output).map_err(|e| {
-            report!(PluginError::ProviderInternal(format!(
+            report!(PluginError::PluginInternal(format!(
                 "failed to parse brew info JSON: {e}"
             )))
         })?;
@@ -389,7 +389,7 @@ impl Plugin for HomebrewPlugin {
             ))
             .await
             .map_err(|e| {
-                report!(PluginError::ProviderInternal(format!(
+                report!(PluginError::PluginInternal(format!(
                     "brew info failed: {e}"
                 )))
             })?;
@@ -399,7 +399,7 @@ impl Plugin for HomebrewPlugin {
         }
 
         let json: serde_json::Value = serde_json::from_str(&cmd_output.output).map_err(|e| {
-            report!(PluginError::ProviderInternal(format!(
+            report!(PluginError::PluginInternal(format!(
                 "failed to parse brew info JSON: {e}"
             )))
         })?;
@@ -754,63 +754,63 @@ mod tests {
         }
     }
 
-    // ── Provider trait ──────────────────────────────────────────────────
+    // ── Plugin trait ──────────────────────────────────────────────────
 
     #[test]
-    fn homebrew_provider_capabilities() {
-        let provider =
+    fn homebrew_plugin_capabilities() {
+        let plugin =
             HomebrewPlugin::new(HomebrewConfig::default(), test_executor()).expect("create");
-        assert!(provider.has_capability(PluginCapability::DiscoverLocalSoftware));
-        assert!(provider.has_capability(PluginCapability::RefreshPackageIndex));
-        assert!(provider.has_capability(PluginCapability::DetectHostCompatibility));
-        assert_eq!(provider.capabilities().len(), 3);
+        assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
+        assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
+        assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
+        assert_eq!(plugin.capabilities().len(), 3);
     }
 
     #[test]
     fn is_cask_returns_false_for_none() {
-        let provider =
+        let plugin =
             HomebrewPlugin::new(HomebrewConfig { package_type: None }, test_executor())
                 .expect("create");
-        assert!(!provider.is_cask());
+        assert!(!plugin.is_cask());
     }
 
     #[test]
     fn is_cask_returns_true_for_cask() {
-        let provider = HomebrewPlugin::new(
+        let plugin = HomebrewPlugin::new(
             HomebrewConfig {
                 package_type: Some(HomebrewPackageType::Cask),
             },
             test_executor(),
         )
         .expect("create");
-        assert!(provider.is_cask());
+        assert!(plugin.is_cask());
     }
 
     #[test]
     fn is_cask_returns_false_for_formula() {
-        let provider = HomebrewPlugin::new(
+        let plugin = HomebrewPlugin::new(
             HomebrewConfig {
                 package_type: Some(HomebrewPackageType::Formula),
             },
             test_executor(),
         )
         .expect("create");
-        assert!(!provider.is_cask());
+        assert!(!plugin.is_cask());
     }
 
     #[tokio::test]
-    async fn homebrew_provider_detect_installed_empty_identifier_fails() {
-        let provider =
+    async fn homebrew_plugin_detect_installed_empty_identifier_fails() {
+        let plugin =
             HomebrewPlugin::new(HomebrewConfig::default(), test_executor()).expect("create");
-        let result = provider.detect_installed_version("").await;
+        let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn homebrew_provider_fetch_releases_empty_identifier_fails() {
-        let provider =
+    async fn homebrew_plugin_fetch_releases_empty_identifier_fails() {
+        let plugin =
             HomebrewPlugin::new(HomebrewConfig::default(), test_executor()).expect("create");
-        let result = provider.fetch_releases("").await;
+        let result = plugin.fetch_releases("").await;
         assert!(result.is_err());
     }
 

@@ -16,4 +16,4 @@ pub enum AptError {
 pub type Result<T> = std::result::Result<T, Report<AptError>>;
 
 impl_report_conversion!(PluginError => AptError, |e| AptError::Configuration(e.to_string()));
-impl_report_conversion!(AptError => PluginError, |e| PluginError::ProviderInternal(e.to_string()));
+impl_report_conversion!(AptError => PluginError, |e| PluginError::PluginInternal(e.to_string()));

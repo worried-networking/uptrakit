@@ -19,7 +19,7 @@ use crate::image_ref::ImageRef;
 use crate::registry::RegistryClient;
 use crate::tag::filter_and_sort_tags;
 
-/// Docker provider implementation.
+/// Docker plugin implementation.
 ///
 /// Tracks container image tags from OCI/Docker registries.
 /// Supports two tracking modes:
@@ -36,7 +36,7 @@ pub struct DockerPlugin {
 }
 
 impl DockerPlugin {
-    /// Create a new `DockerProvider` from the given configuration.
+    /// Create a new `DockerPlugin` from the given configuration.
     pub fn new(config: DockerConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         let docker_client = Arc::new(BollardDockerClient::new(
             config.docker_host.as_deref(),
@@ -129,7 +129,7 @@ impl Plugin for DockerPlugin {
         let ir: ImageRef = package_identifier
             .parse()
             .map_err(|e: crate::image_ref::ParseImageRefError| {
-                uptrakit_plugin_core::PluginError::ProviderInternal(e.to_string())
+                uptrakit_plugin_core::PluginError::PluginInternal(e.to_string())
             })?;
 
         match self.config.tracking_mode {
@@ -189,7 +189,7 @@ impl Plugin for DockerPlugin {
         let ir: ImageRef = package_identifier
             .parse()
             .map_err(|e: crate::image_ref::ParseImageRefError| {
-                PluginError::ProviderInternal(e.to_string())
+                PluginError::PluginInternal(e.to_string())
             })?;
 
         let tag = self.config.resolved_tracked_tag();
@@ -205,7 +205,7 @@ impl Plugin for DockerPlugin {
                 Ok(Some(Version::new(&digest_info.digest)))
             }
             Ok(None) => Ok(None),
-            Err(e) => Err(uptrakit_plugin_core::PluginError::ProviderInternal(
+            Err(e) => Err(uptrakit_plugin_core::PluginError::PluginInternal(
                 e.to_string(),
             )
             .into()),
@@ -222,7 +222,7 @@ impl Plugin for DockerPlugin {
         let ir: ImageRef = package_identifier
             .parse()
             .map_err(|e: crate::image_ref::ParseImageRefError| {
-                PluginError::ProviderInternal(e.to_string())
+                PluginError::PluginInternal(e.to_string())
             })?;
 
         let image = &ir.image;
@@ -330,7 +330,7 @@ impl Plugin for DockerPlugin {
             .list_containers(true)
             .await
             .map_err(|e| {
-                uptrakit_plugin_core::PluginError::ProviderInternal(e.to_string())
+                uptrakit_plugin_core::PluginError::PluginInternal(e.to_string())
             })?;
 
         // Group container names by full image ref (image:tag).
@@ -461,13 +461,13 @@ mod tests {
     }
 
     #[test]
-    fn provider_creation_succeeds_with_empty_config() {
+    fn plugin_creation_succeeds_with_empty_config() {
         let config = DockerConfig::default();
         assert!(DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).is_ok());
     }
 
     #[test]
-    fn provider_creation_fails_with_invalid_regex() {
+    fn plugin_creation_fails_with_invalid_regex() {
         let config = DockerConfig {
             tag_patterns: vec!["[bad".to_string()],
             ..Default::default()
@@ -477,24 +477,24 @@ mod tests {
 
     #[test]
     fn capabilities_includes_discover_local_software() {
-        let provider = DockerPlugin::new_for_test(
+        let plugin = DockerPlugin::new_for_test(
             DockerConfig::default(),
             test_executor(),
             default_mock_client(),
         )
         .unwrap();
-        assert!(provider.has_capability(PluginCapability::DiscoverLocalSoftware));
+        assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
     }
 
     #[test]
     fn capabilities_excludes_refresh_package_index() {
-        let provider = DockerPlugin::new_for_test(
+        let plugin = DockerPlugin::new_for_test(
             DockerConfig::default(),
             test_executor(),
             default_mock_client(),
         )
         .unwrap();
-        assert!(!provider.has_capability(PluginCapability::RefreshPackageIndex));
+        assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
     }
 
     #[tokio::test]
@@ -503,8 +503,8 @@ mod tests {
             tracking_mode: TrackingMode::SemverTags,
             ..Default::default()
         };
-        let provider = DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).unwrap();
-        let result = provider.detect_installed_version("nginx").await.unwrap();
+        let plugin = DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).unwrap();
+        let result = plugin.detect_installed_version("nginx").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -521,8 +521,8 @@ mod tests {
             inspect_result: Some(digest.clone()),
             containers: vec![],
         });
-        let provider = DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
-        let result = provider.detect_installed_version("nginx").await.unwrap();
+        let plugin = DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
+        let result = plugin.detect_installed_version("nginx").await.unwrap();
         assert_eq!(result.map(|v| v.to_string()), Some(digest));
     }
 
@@ -535,10 +535,10 @@ mod tests {
             inspect_result: None,
             containers: vec![],
         });
-        let provider = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
             .expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
-        let result = provider
+        let result = plugin
             .execute_update("nginx", "1.25.0", None, &tx)
             .await
             .expect("execute_update should succeed");
@@ -558,10 +558,10 @@ mod tests {
             inspect_result: None,
             containers: vec![],
         });
-        let provider = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
             .expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
-        let result = provider.execute_update("nginx", "1.25.0", None, &tx).await;
+        let result = plugin.execute_update("nginx", "1.25.0", None, &tx).await;
 
         assert!(result.is_err(), "pull failure should be propagated");
 
@@ -581,10 +581,10 @@ mod tests {
             post_pull_command: Some("echo post-pull {image}:{tag}".to_string()),
             ..Default::default()
         };
-        let provider = DockerPlugin::new_for_test(config, test_executor(), mock)
+        let plugin = DockerPlugin::new_for_test(config, test_executor(), mock)
             .expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
-        let result = provider
+        let result = plugin
             .execute_update("nginx", "1.25.0", None, &tx)
             .await
             .expect("execute_update with post_pull_command should succeed");
@@ -614,10 +614,10 @@ mod tests {
             ..Default::default()
         };
         // Use a mock executor so the docker compose command is not actually run.
-        let provider = DockerPlugin::new_for_test(config, mock_executor(), mock)
+        let plugin = DockerPlugin::new_for_test(config, mock_executor(), mock)
             .expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
-        let result = provider
+        let result = plugin
             .execute_update("nginx", "1.25.0", None, &tx)
             .await
             .expect("execute_update with compose_restart should succeed");
@@ -645,8 +645,8 @@ mod tests {
                 },
             ],
         });
-        let provider = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
-        let discoveries = provider.discover_software().await.unwrap();
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        let discoveries = plugin.discover_software().await.unwrap();
         // Both containers share the same image, so they should be grouped
         assert_eq!(discoveries.len(), 1);
         assert_eq!(discoveries[0].package_identifier, "nginx:latest");
@@ -664,8 +664,8 @@ mod tests {
                 names: vec!["bare-sha-container".to_string()],
             }],
         });
-        let provider = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
-        let discoveries = provider.discover_software().await.unwrap();
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        let discoveries = plugin.discover_software().await.unwrap();
         assert!(discoveries.is_empty(), "SHA images should be skipped");
     }
 
@@ -680,8 +680,8 @@ mod tests {
                 names: vec!["local-container".to_string()],
             }],
         });
-        let provider = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
-        let discoveries = provider.discover_software().await.unwrap();
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        let discoveries = plugin.discover_software().await.unwrap();
         assert!(
             discoveries.is_empty(),
             "images without RepoDigests should be skipped"
@@ -695,7 +695,7 @@ mod tests {
             tag_strip_prefix: String::new(),
             ..Default::default()
         };
-        let provider = DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
+        let plugin = DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
         let ir: ImageRef = "nginx".parse().unwrap();
         let tags = vec![
             "1.25.0".to_string(),
@@ -704,7 +704,7 @@ mod tests {
             "latest".to_string(),
             "alpine".to_string(),
         ];
-        let releases = provider.tags_to_releases(&ir, tags);
+        let releases = plugin.tags_to_releases(&ir, tags);
         assert_eq!(releases.len(), 3);
         assert_eq!(releases[0].version.as_str(), "1.26.0");
         assert_eq!(releases[1].version.as_str(), "1.25.0");

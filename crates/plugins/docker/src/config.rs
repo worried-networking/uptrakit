@@ -7,7 +7,7 @@ use crate::error::{DockerError, Result};
 /// Sentinel value used to indicate a masked secret in API responses.
 const SECRET_MASK: &str = "***";
 
-/// Tracking mode for the Docker provider.
+/// Tracking mode for the Docker plugin.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrackingMode {
@@ -47,7 +47,7 @@ pub struct ComposeRestartConfig {
     pub working_dir: Option<String>,
 }
 
-/// Configuration for the Docker provider.
+/// Configuration for the Docker plugin.
 ///
 /// The `package_identifier` on each software item (a Docker image reference
 /// such as `nginx` or `ghcr.io/owner/app:latest`) drives all registry

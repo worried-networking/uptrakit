@@ -13,7 +13,8 @@ Uptrakit.
 | [Error Handling](error-handling.md) | rootcause/thiserror patterns, decision guide, anti-patterns, and approved exceptions. |
 | [PR Process](pr-process.md) | Pull request requirements, review expectations, and merge readiness checklist. |
 | [Dependency Policy](dependency-policy.md) | Dependency introduction/update rules and `cargo deny` policy. |
-| [Provider Guidelines](provider-guidelines.md) | Provider architecture expectations and implementation conventions. |
+| [Plugin Guidelines](plugin-guidelines.md) | Plugin architecture expectations, capabilities, host compatibility detection, and lifecycle hooks. |
+| [Plugin System](plugin-system.md) | Plugin system architecture, discovery flow, and capability extension model. |
 | [AI Guidelines](ai-guidelines.md) | Policy for using AI tools in project development. |
 | [CLI Output](cli-output.md) | CLI output formatting conventions and standards. |
 | [Commit Messages](commit-messages.md) | Conventional Commits format and examples. |

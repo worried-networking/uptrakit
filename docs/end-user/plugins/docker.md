@@ -1,12 +1,12 @@
-# Docker Provider
+# Docker Plugin
 
-The `docker` provider tracks container images in Docker/OCI-compatible registries. It supports two
+The `docker` plugin tracks container images in Docker/OCI-compatible registries. It supports two
 tracking modes: semver-based tag tracking and SHA digest-based tracking. It can also discover
 running and stopped containers on the agent host and auto-populate your software catalog.
 
 ## Package Identifier Format
 
-A Docker provider's `package_identifier` is an **image reference** in standard Docker format:
+A Docker plugin's `package_identifier` is an **image reference** in standard Docker format:
 
 ```text
 [registry/][repository/]image[:tag]
@@ -26,7 +26,7 @@ mode the tag portion is typically omitted (or set to a common value like `latest
 
 ### SemverTags (default)
 
-In `semver_tags` mode the provider lists all tags from the registry, filters them by
+In `semver_tags` mode the plugin lists all tags from the registry, filters them by
 `tag_patterns`, strips `tag_strip_prefix`, parses the remaining string as a semver version, and
 returns the sorted list of releases.
 
@@ -37,11 +37,11 @@ returns the sorted list of releases.
 
 ### DigestTracking
 
-In `digest_tracking` mode the provider fetches the manifest digest for a specific tag
+In `digest_tracking` mode the plugin fetches the manifest digest for a specific tag
 (`tracked_tag`, default `"latest"`) and treats the SHA digest as the "version". This is useful for
 mutable tags like `latest` that do not carry a stable version identifier.
 
-- The provider checks whether the local Docker daemon has the image by calling `inspect_image`.
+- The plugin checks whether the local Docker daemon has the image by calling `inspect_image`.
 - If the image is present locally, its `RepoDigests` field is compared against the registry
   manifest digest to determine whether an update is available.
 - The "version" displayed in Uptrakit is the `sha256:…` digest.
@@ -126,7 +126,7 @@ A custom shell command executed after a successful pull. Supports the following 
 
 ## Autodiscovery
 
-The Docker provider supports **local software discovery**. When discovery runs, the agent queries
+The Docker plugin supports **local software discovery**. When discovery runs, the agent queries
 the local Docker daemon for all containers (running and stopped) via `list_containers`. For each
 container image that is not a bare SHA digest:
 
@@ -140,7 +140,7 @@ Name derivation:
 - **Single container** for an image → container name (leading `/` stripped)
 - **Multiple containers** for the same image → `"image:tag"` format
 
-Auto-created provider config name: **`"Docker"`** (one config per tenant, shared across all hosts).
+Auto-created plugin config name: **`"Docker"`** (one config per tenant, shared across all hosts).
 
 Discovered items use `digest_tracking` semantics by default; `package_identifier` is set to the
 full image reference including tag.
@@ -150,17 +150,17 @@ full image reference including tag.
 > **Note:** Remote Docker via SSH is only available when using the **SSH agent** binary
 > (`uptrakit-agent-ssh`). It is not available in the standard `uptrakit-agent`.
 
-When `agent-ssh` connects to a remote host, it automatically configures the Docker provider to
+When `agent-ssh` connects to a remote host, it automatically configures the Docker plugin to
 reach the remote host's Docker daemon over the same SSH connection. You do not need to set
 `docker_host` manually for SSH agent deployments; the connection context is injected automatically.
 
-To manually override the Docker daemon endpoint, set `docker_host` in the provider config:
+To manually override the Docker daemon endpoint, set `docker_host` in the plugin config:
 
 ```json
 { "docker_host": "ssh://user@host:22" }
 ```
 
-SSH connections require the `ssh` Cargo feature to be enabled on the `uptrakit-provider-docker`
+SSH connections require the `ssh` Cargo feature to be enabled on the `uptrakit-plugin-docker`
 crate (automatically enabled in `uptrakit-agent-ssh`). The SSH client uses the default SSH key
 resolution (SSH agent or `~/.ssh/id_*`).
 
@@ -218,7 +218,7 @@ Package identifier: `ghcr.io/myorg/myapp`
 
 ## Related Documentation
 
-- [Provider Configurations](../provider-configs.md) — creating and managing provider configs
+- [Plugin Configurations](../plugin-configs.md) — creating and managing plugin configs
 - [Autodiscovery](../autodiscovery.md) — discovery workflow and ignore rules
-- [Provider Guidelines](../../development/provider-guidelines.md) — implementation details
+- [Plugin Guidelines](../../development/plugin-guidelines.md) — implementation details
 - [SSH Agent](../../architecture/ssh-agent.md) — SSH agent setup for remote host management

@@ -65,7 +65,7 @@ impl UptrakitClient {
 
     /// Assign hosts to a software item.
     ///
-    /// Each host assignment carries its own `provider_config_id`, `package_identifier`,
+    /// Each host assignment carries its own `plugin_config_id`, `package_identifier`,
     /// and optional `config_override`.
     pub async fn assign_hosts(
         &self,
@@ -85,7 +85,7 @@ impl UptrakitClient {
     /// Unassign a host from a software item and create an autodiscovery ignore rule.
     ///
     /// Equivalent to `DELETE .../hosts/{host_id}?ignore=true`. The ignore rule is created for
-    /// the `(provider_config_id, package_identifier)` pair stored on the host assignment,
+    /// the `(plugin_config_id, package_identifier)` pair stored on the host assignment,
     /// preventing re-discovery of that package on any host in the future.
     pub async fn unassign_host_with_ignore(&self, item_id: &Uuid, host_id: &Uuid) -> Result<()> {
         #[derive(serde::Serialize)]
@@ -99,7 +99,7 @@ impl UptrakitClient {
         .await
     }
 
-    /// Update the provider assignment for a specific host–software-item link.
+    /// Update the plugin assignment for a specific host–software-item link.
     pub async fn update_host_assignment(
         &self,
         item_id: &Uuid,
@@ -160,7 +160,7 @@ mod tests {
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "Node.js");
         assert_eq!(json["enabled"], true);
-        // provider fields must NOT appear in the serialized form
+        // plugin fields must NOT appear in the serialized form
         assert!(json.get("provider_config_id").is_none());
         assert!(json.get("package_identifier").is_none());
     }
@@ -174,7 +174,7 @@ mod tests {
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "Node.js LTS");
         assert_eq!(json["enabled"], false);
-        // provider fields must NOT appear
+        // plugin fields must NOT appear
         assert!(json.get("package_identifier").is_none());
         assert!(json.get("config_override").is_none());
     }

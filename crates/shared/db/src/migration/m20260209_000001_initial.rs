@@ -893,7 +893,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         // ============================================================
-        // 8. Providers & software items
+        // 8. Plugins & software items
         // ============================================================
 
         // --- plugin_configs ---
@@ -969,7 +969,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         // --- software_items ---
-        // Provider coupling lives on host_software_items, not here.
+        // Plugin coupling lives on host_software_items, not here.
         // Each SoftwareItem is a named catalog entry scoped to a tenant.
         manager
             .create_table(
@@ -1033,8 +1033,8 @@ impl MigrationTrait for Migration {
             .await?;
 
         // --- host_software_items ---
-        // Provider coupling (provider_config_id, package_identifier, config_override)
-        // lives here so one SoftwareItem can be tracked via different providers/packages
+        // Plugin coupling (plugin_config_id, package_identifier, config_override)
+        // lives here so one SoftwareItem can be tracked via different plugins/packages
         // across different hosts.
         manager
             .create_table(
@@ -1048,7 +1048,7 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(HostSoftwareItems::ProviderConfigId)
+                        ColumnDef::new(HostSoftwareItems::PluginConfigId)
                             .uuid()
                             .not_null(),
                     )
@@ -1081,10 +1081,10 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_host_software_items_provider_config")
+                            .name("fk_host_software_items_plugin_config")
                             .from(
                                 HostSoftwareItems::Table,
-                                HostSoftwareItems::ProviderConfigId,
+                                HostSoftwareItems::PluginConfigId,
                             )
                             .to(PluginConfigs::Table, PluginConfigs::Id)
                             .on_delete(ForeignKeyAction::Restrict),
@@ -1093,22 +1093,22 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Prevent the same (host, provider, package) combo appearing under two different
+        // Prevent the same (host, plugin, package) combo appearing under two different
         // software items.
         manager
             .get_connection()
             .execute_unprepared(
                 "CREATE UNIQUE INDEX uq_host_software_items_active \
-                 ON host_software_items(host_id, provider_config_id, package_identifier)",
+                 ON host_software_items(host_id, plugin_config_id, package_identifier)",
             )
             .await?;
 
         manager
             .create_index(
                 Index::create()
-                    .name("idx_host_software_items_provider_config_id")
+                    .name("idx_host_software_items_plugin_config_id")
                     .table(HostSoftwareItems::Table)
-                    .col(HostSoftwareItems::ProviderConfigId)
+                    .col(HostSoftwareItems::PluginConfigId)
                     .to_owned(),
             )
             .await?;
@@ -1131,7 +1131,7 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(AutodiscoveryIgnores::ProviderConfigId)
+                        ColumnDef::new(AutodiscoveryIgnores::PluginConfigId)
                             .uuid()
                             .not_null(),
                     )
@@ -1146,10 +1146,10 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_autodiscovery_ignores_provider_config")
+                            .name("fk_autodiscovery_ignores_plugin_config")
                             .from(
                                 AutodiscoveryIgnores::Table,
-                                AutodiscoveryIgnores::ProviderConfigId,
+                                AutodiscoveryIgnores::PluginConfigId,
                             )
                             .to(PluginConfigs::Table, PluginConfigs::Id)
                             .on_delete(ForeignKeyAction::Cascade),
@@ -1164,7 +1164,7 @@ impl MigrationTrait for Migration {
                     .name("uq_autodiscovery_ignores_tenant_config_package")
                     .table(AutodiscoveryIgnores::Table)
                     .col(AutodiscoveryIgnores::TenantId)
-                    .col(AutodiscoveryIgnores::ProviderConfigId)
+                    .col(AutodiscoveryIgnores::PluginConfigId)
                     .col(AutodiscoveryIgnores::PackageIdentifier)
                     .unique()
                     .to_owned(),
@@ -2099,11 +2099,11 @@ async fn seed_rbac(manager: &SchemaManager<'_>, now: time::OffsetDateTime) -> Re
         ),
         (
             "view_software",
-            "View software items, provider configs, and update history",
+            "View software items, plugin configs, and update history",
         ),
         (
             "manage_software",
-            "Manage software items, provider configs, version checks, updates, and scheduler",
+            "Manage software items, plugin configs, version checks, updates, and scheduler",
         ),
         ("view_hosts", "View hosts"),
         ("manage_hosts", "Manage hosts (update, deactivate)"),
@@ -2478,7 +2478,7 @@ enum AutodiscoveryIgnores {
     Table,
     Id,
     TenantId,
-    ProviderConfigId,
+    PluginConfigId,
     PackageIdentifier,
     CreatedAt,
 }
@@ -2488,7 +2488,7 @@ enum HostSoftwareItems {
     Table,
     HostId,
     SoftwareItemId,
-    ProviderConfigId,
+    PluginConfigId,
     PackageIdentifier,
     ConfigOverride,
     InstalledVersion,

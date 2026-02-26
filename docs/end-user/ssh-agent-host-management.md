@@ -121,7 +121,7 @@ For detailed options and troubleshooting, see
 ### Refresh sudoers for a host
 
 The `host update-sudoers` command regenerates the sudoers drop-in file for an
-already-enrolled host. Use this after enabling new providers or when the
+already-enrolled host. Use this after enabling new plugins or when the
 installed command paths on the remote host have changed.
 
 ```bash
@@ -133,7 +133,7 @@ The command:
 
 1. Connects to the remote host using the stored credentials.
 2. Detects the agent user's privilege context (`id -u`, `sudo -n true`).
-3. Resolves each registered provider command to its absolute path via `command -v`.
+3. Resolves each registered plugin command to its absolute path via `command -v`.
 4. Writes a minimal `/etc/sudoers.d/uptrakit-<username>` with one entry per
    resolved command. Validates with `visudo -cf`.
 5. Persists the detected sudo state to the database.

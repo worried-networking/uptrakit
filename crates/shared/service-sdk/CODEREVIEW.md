@@ -60,7 +60,7 @@ correct `LoopError` variant at the lifecycle boundary.
 **TOFU implementation is correctly layered.**
 `build_tofu_client_config` in `tls.rs` uses a custom `ServerCertVerifier` that
 intentionally skips chain verification but still delegates TLS 1.2 and 1.3
-signature verification to the installed crypto provider. The comment makes the
+signature verification to the installed crypto plugin. The comment makes the
 security invariant explicit: "security relies on fingerprint verification after
 download."
 
@@ -304,7 +304,7 @@ standard.
 
 **`async_trait` used consistently.**
 `ServiceHandler` methods are annotated with `#[async_trait]`, matching the
-established pattern used by `Provider`, `CommandExecutor`, and `TaskExecutor`
+established pattern used by `Plugin`, `CommandExecutor`, and `TaskExecutor`
 across the codebase.
 
 **`thiserror`-derived errors with semantic variants.**
@@ -349,7 +349,7 @@ requiring an SDK change, preserving backward compatibility.
 
 #### Issues
 
-**[SEVERITY: Low]** `src/lifecycle.rs:76` — `ServiceHandler` requires `Send` but not `Sync`, inconsistent with `Provider` trait
+**[SEVERITY: Low]** `src/lifecycle.rs:76` — `ServiceHandler` requires `Send` but not `Sync`, inconsistent with `Plugin` trait
 
 Current constraint is correct for single-owner pattern but warrants a design-note comment.
 

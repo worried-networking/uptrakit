@@ -1,7 +1,7 @@
 //! SSH-backed [`CommandExecutor`] implementation.
 //!
 //! [`SshCommandExecutor`] runs commands on remote hosts via an
-//! [`SshSession`], bridging the provider command abstraction with
+//! [`SshSession`], bridging the plugin command abstraction with
 //! the SSH transport layer.
 
 use std::sync::Arc;

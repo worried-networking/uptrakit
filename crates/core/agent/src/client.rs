@@ -11,7 +11,7 @@ pub(crate) use uptrakit_agent_core::{InFlightUpdate, UpdateEvent};
 ///
 /// Wraps [`LocalCommandExecutor`] with [`SudoAwareCommandExecutor`] using the
 /// default [`SudoContext`] (non-root user, sudo available, auto policy).
-/// This matches the pre-`privileged`-flag behaviour where providers hard-coded
+/// This matches the pre-`privileged`-flag behaviour where plugins hard-coded
 /// `sudo` directly.
 fn make_executor() -> Arc<dyn CommandExecutor> {
     let raw: Arc<dyn CommandExecutor> = Arc::new(LocalCommandExecutor);

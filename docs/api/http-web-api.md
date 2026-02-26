@@ -55,23 +55,23 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
 - `/api/v1/services/enrollment-token`: manage enrollment tokens for agents or MQTT services.
 - `/api/v1/software-items`: CRUD endpoints for software items. A software item is a named catalog
-  entry; provider config and package identifier live on each host assignment (`host_software_items`),
+  entry; plugin config and package identifier live on each host assignment (`host_software_items`),
   not on the item itself.
 - `POST /api/v1/software-items/{id}/approve`: approve a discovered (pending) software item.
   Requires `manage_software`.
 - `POST /api/v1/software-items/{id}/hosts`: assign a software item to one or more hosts. Each host
-  assignment carries its own `provider_config_id`, `package_identifier`, and optional
+  assignment carries its own `plugin_config_id`, `package_identifier`, and optional
   `config_override`. Requires `manage_software`.
-- `PUT /api/v1/software-items/{id}/hosts/{host_id}`: update the provider config, package
+- `PUT /api/v1/software-items/{id}/hosts/{host_id}`: update the plugin config, package
   identifier, or config override for a specific host assignment. Requires `manage_software`.
 - `DELETE /api/v1/software-items/{id}/hosts/{host_id}[?ignore=true]`: remove a host assignment.
   Pass `?ignore=true` to also create an autodiscovery ignore rule for the assignment's
-  `(provider_config_id, package_identifier)`. Requires `manage_software`.
+  `(plugin_config_id, package_identifier)`. Requires `manage_software`.
 - `/api/v1/update-history`: read-only history with filters by host, software item, or status.
 - `POST /api/v1/hosts/{id}/discover`: trigger software discovery on a specific host. Requires `manage_software`.
-- `DELETE /api/v1/hosts/{id}/discovered[?provider_config_id={uuid}]`: bulk-discard pending discovered items for a host. Requires `manage_software`.
-- `POST /api/v1/provider-configs/{id}/discover`: trigger discovery for a specific provider config. Requires `manage_software`.
-- `DELETE /api/v1/provider-configs/{id}/discovered`: bulk-discard pending discovered items for a provider config. Requires `manage_software`.
+- `DELETE /api/v1/hosts/{id}/discovered[?plugin_config_id={uuid}]`: bulk-discard pending discovered items for a host. Requires `manage_software`.
+- `POST /api/v1/plugin-configs/{id}/discover`: trigger discovery for a specific plugin config. Requires `manage_software`.
+- `DELETE /api/v1/plugin-configs/{id}/discovered`: bulk-discard pending discovered items for a plugin config. Requires `manage_software`.
 - `/api/v1/autodiscovery/ignores`: CRUD for permanent suppression rules. See [docs/api/autodiscovery.md](autodiscovery.md) for full details.
 
 `ServiceResponse` includes an optional `ping_interval_seconds` field (`Option<u32>`) that reports the per-service
@@ -135,7 +135,7 @@ Types are defined in `crates/shared/web-api-types/src/services.rs`:
 
 ## Multi-Tenancy
 
-- Tenant-aware tables store `tenant_id` (e.g., `services`, `hosts`, `provider_configs`, `software_items`, `settings`, `mqtt_clients`).
+- Tenant-aware tables store `tenant_id` (e.g., `services`, `hosts`, `plugin_configs`, `software_items`, `settings`, `mqtt_clients`).
 - `TenantContext` middleware extracts `X-Tenant-Id` from the request or falls back to the default tenant (`AppState.default_tenant_id`).
 - Global tables like `users`, `roles`, `permissions`, `api_tokens`, and `pending_*` remain unscoped.
 
@@ -202,17 +202,17 @@ Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
 | Type | Fields |
 | --- | --- |
 | `TriggerVersionCheckResponse` | `agents_notified` (u32), `message` (String) |
-| `SoftwareItemResponse` | `id`, `name`, `provider_types`, `enabled`, `discovery_state`, `last_checked_at`, `host_count`, `latest_version` (Option), `update_available`, `created_at`, `updated_at` |
+| `SoftwareItemResponse` | `id`, `name`, `plugin_types`, `enabled`, `discovery_state`, `last_checked_at`, `host_count`, `latest_version` (Option), `update_available`, `created_at`, `updated_at` |
 | `SoftwareItemDetailResponse` | Extends `SoftwareItemResponse` with `hosts: Vec<SoftwareItemHostSummary>` |
-| `SoftwareItemHostSummary` | `host_id`, `hostname`, `friendly_name`, `provider_config_id`, `provider_config_name`, `provider_type`, `package_identifier`, `config_override`, `installed_version`, `installed_version_detected_at`, `last_updated_at`, `linked_at`, `latest_version` (Option), `update_available` |
+| `SoftwareItemHostSummary` | `host_id`, `hostname`, `friendly_name`, `plugin_config_id`, `plugin_config_name`, `plugin_type`, `package_identifier`, `config_override`, `installed_version`, `installed_version_detected_at`, `last_updated_at`, `linked_at`, `latest_version` (Option), `update_available` |
 | `TriggerUpdateRequest` | `to_version` (String), `release_info` (Option — `{ tag: String, release_url: String }`) |
 | `TriggerUpdateResponse` | `update_history_id` (Uuid), `status` (TriggerUpdateStatus — `pending`, `queued`) |
 
 **`latest_version` and `update_available`** are populated by the controller at read time:
 
 - `latest_version` is sourced from the `available_versions` table for the software item. It is
-  populated by agent-side providers (Homebrew, PHS) during the `VersionCheckResults` WebSocket
-  handler, and by the scheduled upstream resolver for controller-side providers (GitHub Releases,
+  populated by agent-side plugins (Homebrew, PHS) during the `VersionCheckResults` WebSocket
+  handler, and by the scheduled upstream resolver for controller-side plugins (GitHub Releases,
   Docker Registry). `null` when neither has run yet.
 - `update_available` at the item level is `true` if any assigned host's `installed_version`
   differs from `latest_version` (string equality). At the host level (`SoftwareItemHostSummary`),
@@ -447,7 +447,7 @@ All paginated endpoints return a `PaginatedResponse<T>`:
 | `GET /api/v1/hosts` | `PaginationParams` | |
 | `GET /api/v1/software-items` | `PaginationParams` | |
 | `GET /api/v1/update-history` | `UpdateHistoryQuery` (includes `page`/`per_page`) | Filterable by `host_id`, `software_item_id`, `status` |
-| `GET /api/v1/provider-configs` | `PaginationParams` | |
+| `GET /api/v1/plugin-configs` | `PaginationParams` | |
 
 ### Endpoints NOT paginated (already bounded)
 

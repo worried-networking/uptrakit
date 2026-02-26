@@ -2,7 +2,7 @@
 //!
 //! Provides [`SudoPolicy`], [`SudoContext`], and [`SudoAwareCommandExecutor`]
 //! for runtime privilege escalation decisions. Instead of hard-coding `sudo`
-//! in provider [`CommandSpec`]s, providers mark commands as
+//! in plugin [`CommandSpec`]s, plugins mark commands as
 //! [`CommandSpec::privileged`] and the executor decides at runtime whether to
 //! prepend `sudo` based on the detected host context.
 

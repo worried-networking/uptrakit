@@ -7,7 +7,7 @@ use crate::pagination::PaginationParams;
 use crate::plugin_configs::CreatePluginConfigRequest;
 use crate::validation::{Validate, ValidationError};
 
-/// Create a new software item (catalog entry only — no provider coupling).
+/// Create a new software item (catalog entry only — no plugin coupling).
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateSoftwareItemRequest {
@@ -26,7 +26,7 @@ pub struct UpdateSoftwareItemRequest {
     pub enabled: Option<bool>,
 }
 
-/// Per-host provider assignment used when assigning hosts to a software item.
+/// Per-host plugin assignment used when assigning hosts to a software item.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostSoftwareAssignment {
@@ -35,20 +35,20 @@ pub struct HostSoftwareAssignment {
     pub plugin_config_id: Option<Uuid>,
     /// Inline plugin config to create (mutually exclusive with `plugin_config_id`).
     pub plugin_config: Option<CreatePluginConfigRequest>,
-    /// Provider-specific package identifier. Defaults to `""` if omitted.
+    /// Plugin-specific package identifier. Defaults to `""` if omitted.
     pub package_identifier: Option<String>,
-    /// Provider-specific overrides merged onto the base config at resolution time.
+    /// Plugin-specific overrides merged onto the base config at resolution time.
     pub config_override: Option<serde_json::Value>,
 }
 
-/// Assign one or more hosts to a software item, each with its own provider info.
+/// Assign one or more hosts to a software item, each with its own plugin info.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AssignHostsRequest {
     pub host_assignments: Vec<HostSoftwareAssignment>,
 }
 
-/// Update the provider info for an existing host–software-item assignment.
+/// Update the plugin info for an existing host–software-item assignment.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHostAssignmentRequest {
@@ -66,8 +66,8 @@ pub struct UpdateHostAssignmentRequest {
 pub struct SoftwareItemResponse {
     pub id: Uuid,
     pub name: String,
-    /// Distinct provider type strings from all active host assignments (for display in lists).
-    pub provider_types: Vec<String>,
+    /// Distinct plugin type identifiers from all active host assignments (for display in lists).
+    pub plugins: Vec<String>,
     pub enabled: bool,
     /// Discovery state for auto-discovered items. `None` means manually created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -77,14 +77,14 @@ pub struct SoftwareItemResponse {
     pub last_checked_at: Option<OffsetDateTime>,
     pub host_count: u64,
     /// Latest known version from the `available_versions` table.
-    /// Populated for agent-side providers (Homebrew, PHS) that report upstream versions.
-    /// `None` for controller-side providers (GitHub Releases, Docker) until upstream
+    /// Populated for agent-side plugins (Homebrew, PHS) that report upstream versions.
+    /// `None` for controller-side plugins (GitHub Releases, Docker) until upstream
     /// resolution is available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_version: Option<String>,
     /// `true` when at least one assigned host has an `installed_version` that differs
     /// from `latest_version` (and both values are known). Uses string equality — no
-    /// semver parsing — because version formats are provider-specific.
+    /// semver parsing — because version formats are plugin-specific.
     pub update_available: bool,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
@@ -99,8 +99,8 @@ pub struct SoftwareItemResponse {
 pub struct SoftwareItemDetailResponse {
     pub id: Uuid,
     pub name: String,
-    /// Distinct provider type strings from all active host assignments.
-    pub provider_types: Vec<String>,
+    /// Distinct plugin type identifiers from all active host assignments.
+    pub plugins: Vec<String>,
     pub enabled: bool,
     /// Discovery state for auto-discovered items. `None` means manually created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -133,7 +133,7 @@ pub struct SoftwareItemHostSummary {
     pub friendly_name: String,
     pub plugin_config_id: Uuid,
     pub plugin_config_name: String,
-    pub provider_type: String,
+    pub plugin_type: String,
     pub package_identifier: String,
     pub config_override: Option<serde_json::Value>,
     pub installed_version: Option<String>,
@@ -199,7 +199,7 @@ pub struct ReleaseInfoRequest {
 pub struct TriggerUpdateRequest {
     /// Target version to update to.
     pub to_version: String,
-    /// Optional release information (for providers that need it).
+    /// Optional release information (for plugins that need it).
     pub release_info: Option<ReleaseInfoRequest>,
 }
 
@@ -375,7 +375,7 @@ mod tests {
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
             name: "1Password".to_string(),
-            provider_types: vec!["homebrew".to_string(), "github_releases".to_string()],
+            plugins: vec!["homebrew".to_string(), "github_releases".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
@@ -391,7 +391,7 @@ mod tests {
         assert_eq!(deserialized.id, sample_uuid());
         assert_eq!(deserialized.name, "1Password");
         assert_eq!(deserialized.host_count, 5);
-        assert_eq!(deserialized.provider_types.len(), 2);
+        assert_eq!(deserialized.plugins.len(), 2);
         assert!(deserialized.enabled);
         assert_eq!(deserialized.latest_version.as_deref(), Some("8.10.0"));
         assert!(deserialized.update_available);
@@ -403,7 +403,7 @@ mod tests {
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
             name: "MyApp".to_string(),
-            provider_types: vec!["github_releases".to_string()],
+            plugins: vec!["github_releases".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: None,
@@ -425,12 +425,12 @@ mod tests {
     }
 
     #[test]
-    fn software_item_response_empty_provider_types() {
+    fn software_item_response_empty_plugins() {
         use time::macros::datetime;
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
             name: "Test".to_string(),
-            provider_types: vec![],
+            plugins: vec![],
             enabled: false,
             discovery_state: None,
             last_checked_at: None,
@@ -443,7 +443,7 @@ mod tests {
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SoftwareItemResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert!(deserialized.provider_types.is_empty());
+        assert!(deserialized.plugins.is_empty());
         assert!(deserialized.last_checked_at.is_none());
         assert!(!deserialized.enabled);
         assert!(!deserialized.update_available);

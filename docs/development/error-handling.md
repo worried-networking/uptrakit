@@ -49,16 +49,16 @@ Use `.context()` when you want to add semantic meaning on top of the original er
 
 ## Error Flow Across Boundaries
 
-Errors propagate from provider crates through the controller into HTTP responses:
+Errors propagate from plugin crates through the controller into HTTP responses:
 
 ```text
-Provider crate                  Controller / Web-API              HTTP handler
-──────────────                  ──────────────────                ────────────
-ProviderError                   AgentRouteError                   axum::Response
+Plugin crate                    Controller / Web-API              HTTP handler
+────────────                    ──────────────────                ────────────
+PluginError                     AgentRouteError                   axum::Response
  ├─ Configuration(String)        ├─ Database(DbErr)                ├─ 400 Bad Request
  ├─ Network(String)              ├─ BadRequest(String)             ├─ 404 Not Found
- └─ ProviderInternal(String)     ├─ NotFound(String)               ├─ 500 Internal Error
-                                 └─ Provider(String)               └─ (JSON body)
+ └─ PluginInternal(String)       ├─ NotFound(String)               ├─ 500 Internal Error
+                                 └─ Plugin(String)                 └─ (JSON body)
        │                                │                                │
        │  impl_report_conversion!       │  match on Report               │
        │  + .context_to()?              │  + error_response()            │
@@ -340,7 +340,7 @@ fn parse_my_value(s: &str) -> Result<MyType, String> {
 ### Pattern 15: HTTP input validation helpers
 
 Thin validation functions that produce user-facing HTTP 400 error messages may return `Result<T, String>` when the
-string goes directly into an HTTP error response (e.g. `validate_provider_config_request`,
+string goes directly into an HTTP error response (e.g. `validate_plugin_config_request`,
 `validate_homebrew_package_identifier`). These are display-only error strings, not propagated errors.
 
 ### Pattern 16: Display fallbacks

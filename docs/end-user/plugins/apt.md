@@ -1,13 +1,13 @@
-# APT Provider
+# APT Plugin
 
-The `apt` provider tracks and updates packages managed by **APT** (Advanced Package Tool) on
+The `apt` plugin tracks and updates packages managed by **APT** (Advanced Package Tool) on
 Debian and Ubuntu systems. It integrates with the local `dpkg`, `apt-get`, and `apt-cache`
 toolchain to detect installed versions, resolve the latest available versions, and perform
 updates.
 
-## What the Provider Tracks
+## What the Plugin Tracks
 
-The APT provider tracks Debian packages installed and managed by the system package manager.
+The APT plugin tracks Debian packages installed and managed by the system package manager.
 For each tracked package, Uptrakit:
 
 - Reports the **installed version** from the `dpkg` database.
@@ -20,6 +20,22 @@ For each tracked package, Uptrakit:
 
 APT version strings follow the Debian versioning scheme, for example:
 `2:8.1.2269-1ubuntu5`, `1.24.0-2ubuntu7.3`, or `3.11.0-5ubuntu2`.
+
+## Host Compatibility Detection
+
+The APT plugin implements `PluginCapability::DetectHostCompatibility`. On each host, it checks
+whether `apt-get` is available by running `which apt-get`. If the command is not found, the plugin
+reports itself as incompatible and is skipped for that host.
+
+This means APT plugin configs are automatically skipped on macOS, Windows, or any Linux
+distribution that does not use APT (e.g. Fedora, Arch).
+
+## Post-Update Hook
+
+The APT plugin implements `PluginCapability::PostUpdateHook`. After a successful package update,
+it checks whether `/var/run/reboot-required` exists on the host. If the file is present, a warning
+is logged indicating that a system reboot is required to complete the update. This check is
+non-fatal and does not mark the update as failed.
 
 ## Configuration
 
@@ -46,9 +62,9 @@ Use `all` when you want to track every package on the system, including librarie
 dependencies automatically installed with other packages. Use `manual` (the default) to
 limit discovery to packages you intentionally installed.
 
-## Auto-Created Provider Config
+## Auto-Created Plugin Config
 
-When an agent with an APT provider assignment connects and no matching provider config
+When an agent with an APT plugin assignment connects and no matching plugin config
 exists, Uptrakit automatically creates one named **`APT`** with the default configuration
 (`{"discovery_filter": "manual"}`).
 
@@ -84,17 +100,17 @@ sudo visudo -c -f /etc/sudoers.d/uptrakit
 > [Filesystem and Dependency Security](../../security/filesystem-dependency-security.md)
 > for background on the agent's privilege model.
 
-## Creating an APT Provider Config via CLI
+## Creating an APT Plugin Config via CLI
 
 ```bash
-# Create a provider config with the default (manual) filter
-uptrakit provider-configs create \
+# Create a plugin config with the default (manual) filter
+uptrakit plugin-configs create \
   --name "APT Packages" \
   --type apt \
   --config '{}'
 
-# Create a provider config that discovers all installed packages
-uptrakit provider-configs create \
+# Create a plugin config that discovers all installed packages
+uptrakit plugin-configs create \
   --name "APT All Packages" \
   --type apt \
   --config '{"discovery_filter": "all"}'
@@ -115,7 +131,7 @@ version information.
 
 ### Autodiscovery
 
-The provider discovers installed packages in two steps:
+The plugin discovers installed packages in two steps:
 
 1. **Query all installed packages:** Runs `dpkg-query --show --showformat=...` to get
    all packages with non-empty versions.
@@ -145,7 +161,7 @@ This pins the installation to the exact version selected by the user.
 
 ## Related Documentation
 
-- [Provider Configurations](../provider-configs.md) — managing provider configs, CRUD,
+- [Plugin Configurations](../plugin-configs.md) — managing plugin configs, CRUD,
   and autodiscovery overview.
 - [Autodiscovery](../autodiscovery.md) — discovery workflow, review process, and ignore
   list.

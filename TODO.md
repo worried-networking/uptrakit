@@ -33,7 +33,7 @@ Essential infrastructure needed before feature development.
 - [x] Select and integrate database solution (SQLite for simplicity, PostgreSQL for production)
 - [ ] Design core database schema
   - [x] Hosts table (machine_id, hostname, OS info, architecture, last seen, linked agents)
-  - [x] Software items table (provider config, package identifier, config override, host assignments)
+  - [x] Software items table (plugin config, package identifier, config override, host assignments)
   - [x] Available versions table (software item ID, version, release date, extra metadata)
   - [x] Update history table (host ID, software item ID, from/to version, status, output, actor_type, actor_id)
   - [x] Scheduled checks table (software item ID, schedule, last run, next run)
@@ -45,7 +45,7 @@ Essential infrastructure needed before feature development.
 
 - [ ] Define Rust structs for core entities
   - [ ] Host model with serialization
-  - [ ] SoftwareItem model with provider-specific fields
+  - [ ] SoftwareItem model with plugin-specific fields
   - [x] Version model with comparison and ordering
   - [x] UpdateRecord model for tracking history
 - [x] Implement version comparison logic (semver, custom formats)
@@ -138,17 +138,37 @@ Essential infrastructure needed before feature development.
 - [x] Implement agent status monitoring (online/offline)
 - [x] Add agent metadata collection (OS, architecture, machine_id via HostInfo)
 
-### Provider Trait System
+### Plugin Trait System
 
-- [x] Refine Provider trait definition
+- [x] Refine Plugin trait definition
   - [x] Methods for version detection
   - [x] Methods for version checking
   - [x] Methods for update execution
   - [x] Error handling patterns
-- [x] Create provider registry system
-- [x] Implement provider configuration mechanism
-- [x] Add provider capability discovery
-- [x] Design provider-specific configuration storage
+  - [x] `detect_host_compatibility()` method — `DetectHostCompatibility` capability
+  - [x] `pre_update_hook()` method — `PreUpdateHook` capability (can abort update)
+  - [x] `post_update_hook()` method — `PostUpdateHook` capability (non-fatal)
+- [x] Create plugin registry system (`PluginRegistry`, `register_plugins!` macro)
+- [x] Implement plugin configuration mechanism (`plugin_configs` table, `plugin_type` column)
+- [x] Add plugin capability discovery (`PluginCapability` enum, 5 variants)
+- [x] Design plugin-specific configuration storage
+- [x] Rename: `Provider` → `Plugin`, `ProviderType` → `PluginType`, `ProviderCapability` → `PluginCapability`
+- [x] Rename: `crates/providers/*` → `crates/plugins/*`
+- [x] Rename: DB table `provider_configs` → `plugin_configs`, column `provider_type` → `plugin_type`
+- [x] Rename: HTTP routes `/api/v1/provider-configs` → `/api/v1/plugin-configs`
+- [x] Rename: CLI subcommand `provider-configs` → `plugin-configs`
+- [x] Rename: Wire protocol fields `provider_type` → `plugin_type`, `provider_config` → `plugin_config`
+- [x] AptPlugin: implement `DetectHostCompatibility` (checks `which apt-get`)
+- [x] AptPlugin: implement `PostUpdateHook` (checks `/var/run/reboot-required`)
+- [x] HomebrewPlugin: implement `DetectHostCompatibility` (checks `which brew`)
+
+### Plugin System: Follow-up Items
+
+- [ ] Wire compatibility detection results to controller for dashboard display
+- [ ] Add `RebootRequired` wire message / post-update event system for APT plugin
+- [ ] "Run arbitrary commands" plugin type (custom script plugin)
+- [ ] Plugin system: formal multi-plugin-config-synthesis protocol
+- [ ] Plugin compatibility status visible in Hosts UI per host
 
 ______________________________________________________________________
 
@@ -158,11 +178,11 @@ Main functionality that delivers the core value proposition.
 
 ### Version Detection (Agent-Side)
 
-- [ ] Implement provider-specific version detection
-  - [ ] GitHub releases provider
+- [ ] Implement plugin-specific version detection
+  - [ ] GitHub releases plugin
   - [ ] System package managers (apt, yum, pacman)
-  - [x] Docker container provider
-  - [x] Proxmox Helper Scripts provider
+  - [x] Docker container plugin
+  - [x] Proxmox Helper Scripts plugin
 - [ ] Add caching for detected versions
 - [ ] Implement periodic inventory scanning
 - [ ] Send version inventory to controller
@@ -170,32 +190,32 @@ Main functionality that delivers the core value proposition.
 
 ### Version Checking (Controller-Side)
 
-- [ ] Implement provider-specific version checking
+- [ ] Implement plugin-specific version checking
   - [x] GitHub releases API integration
   - [ ] Package repository API integration
   - [x] Docker registry API integration (semver tag filtering + digest tracking)
   - [x] Proxmox Helper Scripts repository check
-- [x] Add version comparison logic per provider
+- [x] Add version comparison logic per plugin
 - [ ] Implement channel support (stable, beta, nightly)
 - [ ] Cache available versions with TTL
 - [x] Handle API rate limiting
 - [ ] Add retry logic for failed checks
 
-### Provider Implementations
+### Plugin Implementations
 
-- [x] Complete GitHub releases provider
+- [x] Complete GitHub releases plugin
   - [x] Asset detection and selection
   - [x] Release notes extraction
   - [x] Pre-release handling
-- [ ] Implement Proxmox Helper Scripts provider
+- [ ] Implement Proxmox Helper Scripts plugin
   - [x] Script version detection
   - [x] Script update mechanism
   - [x] Software discovery (`discover_software()`)
   - [ ] Script integrity verification
-- [ ] Add system package manager provider
+- [ ] Add system package manager plugin
   - [ ] Support for multiple package managers
   - [ ] Package dependency handling
-- [x] Create Docker container provider
+- [x] Create Docker container plugin
   - [x] Image version checking (semver tag filtering + digest change detection)
   - [x] Registry authentication (anonymous, basic, bearer with OCI token flow)
   - [x] Multi-registry support (Docker Hub, GHCR, any OCI-compliant registry)
@@ -203,9 +223,9 @@ Main functionality that delivers the core value proposition.
 ### Update Execution
 
 - [x] Design update execution framework
-  - [x] Pre-update hooks (from provider config + config_override)
-  - [x] Update steps execution (provider-specific via ExecuteUpdate message)
-  - [x] Post-update hooks (from provider config + config_override)
+  - [x] Pre-update hooks (from plugin config + config_override)
+  - [x] Update steps execution (plugin-specific via ExecuteUpdate message)
+  - [x] Post-update hooks (from plugin config + config_override)
   - [ ] Rollback triggers
 - [x] Implement update state machine
   - [x] Pending → In Progress → Completed/Failed
@@ -237,12 +257,12 @@ Main functionality that delivers the core value proposition.
   - [x] Event-driven trigger on new host registration
   - [x] `discovery_state` field on `software_items` (`pending` / `approved` / null)
   - [x] `autodiscovery_ignores` table for permanent suppression
-  - [x] Partial unique index on `provider_configs(tenant_id, name)` for race-safe auto-creation
+  - [x] Partial unique index on `plugin_configs(tenant_id, name)` for race-safe auto-creation
 - [x] Implement `DiscoverSoftware` / `DiscoveryResults` wire messages
 - [x] Agent-core `handle_discover_software()` shared implementation
 - [x] Regular agent and SSH agent support for `DiscoverSoftware`
-- [x] Controller `DiscoveryResults` handler with auto-creation of `ProviderConfig` records
-- [x] `ProviderType::supports_discovery()` capability check
+- [x] Controller `DiscoveryResults` handler with auto-creation of `PluginConfig` records
+- [x] Plugin capability check via `PluginCapability::DiscoverLocalSoftware`
 - [x] Homebrew: discover all (formulae + casks) when `package_type = None`; set `extra` metadata
 - [ ] Proxmox Helper Scripts: move synthesis responsibility into providers
   - [ ] Provider discovery response must declare final tracking target (`provider_type`, config identity/selection key, package identifier)
@@ -252,8 +272,8 @@ Main functionality that delivers the core value proposition.
   - [x] `POST /api/v1/software-items/{id}/approve`
   - [x] `POST /api/v1/hosts/{id}/discover`
   - [x] `DELETE /api/v1/hosts/{id}/discovered`
-  - [x] `POST /api/v1/provider-configs/{id}/discover`
-  - [x] `DELETE /api/v1/provider-configs/{id}/discovered`
+  - [x] `POST /api/v1/plugin-configs/{id}/discover`
+  - [x] `DELETE /api/v1/plugin-configs/{id}/discovered`
   - [x] `GET /api/v1/autodiscovery/ignores`
   - [x] `POST /api/v1/autodiscovery/ignores`
   - [x] `DELETE /api/v1/autodiscovery/ignores/{id}`
@@ -328,7 +348,7 @@ Ways users interact with the system.
   - [ ] Host detail drill-down
   - [x] Host status indicators
 - [ ] Create software list view
-  - [ ] Grouped by host or provider
+  - [ ] Grouped by host or plugin
   - [ ] Current vs. available version display
   - [ ] Update action buttons
 - [ ] Add update trigger UI
@@ -340,7 +360,7 @@ Ways users interact with the system.
   - [ ] Enable/disable schedules
   - [ ] Test schedule expressions
 - [ ] Add settings/configuration UI
-  - [ ] Provider configurations
+  - [ ] Plugin configurations
   - [ ] Global settings
   - [ ] User management
 
@@ -418,7 +438,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 - [x] The SSH agent manages one or more remote hosts — each appears as a separate host in the controller
 - [x] CLI subcommands for local SSH host management (`host add/list/show/update/remove/bootstrap`)
 - [ ] Configuration file defines target hosts (hostname, port, username, key path, sudo setup)
-- [ ] Clearly separate SSH transport logic from provider execution logic so providers remain transport-agnostic
+- [ ] Clearly separate SSH transport logic from plugin execution logic so plugins remain transport-agnostic
 
 ### SSH Transport Layer
 
@@ -435,19 +455,19 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 
 ### Remote Execution
 
-- [ ] Run provider detection commands on the remote host over SSH and parse output locally
+- [ ] Run plugin detection commands on the remote host over SSH and parse output locally
 - [ ] Execute updates via sudo on the remote host (same sudo allowlist model as the regular agent)
 - [x] Stream command output back for progress reporting
 - [ ] Enforce per-host update locking (no concurrent updates to the same host)
 - [ ] Timeout and kill long-running remote commands
 - [ ] Handle connection drops mid-command gracefully (report failure, do not leave orphan processes)
 
-### Provider Compatibility
+### Plugin Compatibility
 
-- [ ] All agent-side providers must work over SSH (same commands, different transport)
-- [x] Provider trait uses a transport abstraction (`CommandExecutor`) so the same provider logic works for both local and SSH execution
+- [ ] All agent-side plugins must work over SSH (same commands, different transport)
+- [x] Plugin trait uses a transport abstraction (`CommandExecutor`) so the same plugin logic works for both local and SSH execution
 - [x] Implement `SshCommandExecutor` that executes commands over SSH connections
-- [ ] Provider-level capability flag indicating SSH compatibility
+- [ ] Plugin-level capability flag indicating SSH compatibility
 
 ### Security Considerations
 
@@ -470,46 +490,48 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 
 ______________________________________________________________________
 
-## Phase 5: Provider Ecosystem (Priority 3-4)
+## Phase 5: Plugin Ecosystem (Priority 3-4)
 
-Expanding the provider system with more integrations.
+Expanding the plugin system with more integrations.
 
-### Additional Providers
+### Additional Plugins
 
-- [ ] Implement custom script provider
+- [ ] Implement custom script plugin ("run arbitrary commands" plugin type)
   - [ ] Script definition format
   - [ ] Script execution sandbox
   - [ ] Script output parsing
-- [ ] Add pip/PyPI provider
-- [ ] Add npm/Node.js provider
-- [ ] Add Cargo/Rust provider
-- [ ] Add Flatpak provider
-- [ ] Add Snap provider
-- [ ] Add AppImage provider
-- [x] Add Homebrew provider (macOS)
-- [ ] Add Chocolatey provider (Windows)
+- [ ] Add pip/PyPI plugin
+- [ ] Add npm/Node.js plugin
+- [ ] Add Cargo/Rust plugin
+- [ ] Add Flatpak plugin
+- [ ] Add Snap plugin
+- [ ] Add AppImage plugin
+- [x] Add Homebrew plugin (macOS)
+- [ ] Add Chocolatey plugin (Windows)
 
-### Provider Framework
+### Plugin Framework
 
-- [ ] Create provider testing framework
+- [ ] Create plugin testing framework
   - [ ] Mock version sources
-  - [ ] Test harness for providers
-- [ ] Add provider validation tools
-- [ ] Implement provider hot-reloading
-- [ ] Create provider marketplace/registry concept
-- [ ] Add provider versioning
+  - [ ] Test harness for plugins
+- [ ] Add plugin validation tools
+- [ ] Implement plugin hot-reloading
+- [ ] Create plugin marketplace/registry concept
+- [ ] Add plugin versioning
+- [ ] Formal multi-plugin-config-synthesis protocol
 
 ### Documentation
 
-- [ ] Write provider development guide
-  - [ ] Trait implementation tutorial
-  - [ ] Best practices
-  - [ ] Testing guidelines
-- [ ] Create provider examples
-  - [ ] Simple provider template
-  - [ ] Complex provider example
-- [ ] Document provider API reference
-- [ ] Add troubleshooting guide for providers
+- [x] Write plugin development guide ([docs/development/plugin-guidelines.md](docs/development/plugin-guidelines.md))
+  - [x] Trait implementation conventions
+  - [x] Capability declarations
+  - [x] Testing guidelines (mock executor pattern)
+- [x] Plugin system architecture ([docs/development/plugin-system.md](docs/development/plugin-system.md))
+- [ ] Create plugin examples
+  - [ ] Simple plugin template
+  - [ ] Complex plugin example
+- [ ] Document plugin API reference
+- [ ] Add troubleshooting guide for plugins
 
 ______________________________________________________________________
 
@@ -533,7 +555,7 @@ Polish and additional capabilities for production use.
   - [ ] Snapshot creation before updates
   - [ ] Rollback trigger conditions
   - [ ] Rollback execution
-- [ ] Implement rollback for supported providers
+- [ ] Implement rollback for supported plugins
 - [ ] Add rollback history tracking
 - [ ] Create rollback UI
 - [ ] Add automatic rollback on failure
@@ -684,7 +706,7 @@ Ensuring robustness and maintainability.
 - [ ] Add integration tests
   - [ ] Agent-controller communication
   - [ ] Database operations
-  - [ ] Provider implementations
+  - [ ] Plugin implementations
   - [ ] End-to-end update workflows
   - [x] OCSP revocation checking with reverse proxies (Nginx `ssl_ocsp leaf`). Uses a standalone test OCSP responder (`ocsp_responder.rs`) reachable
     from Docker via `host.docker.internal`. CRL tests exist for Nginx, HAProxy, and Envoy; OCSP test covers Nginx.
@@ -697,7 +719,7 @@ Ensuring robustness and maintainability.
   - [ ] Database failure scenarios
   - [ ] Agent crash scenarios
 - [ ] Create test fixtures and mocks
-  - [ ] Mock providers
+  - [ ] Mock plugins
   - [ ] Mock version sources
   - [ ] Test data generators
 
@@ -888,7 +910,7 @@ Items to consider for future versions but not currently prioritized:
 
 - [x] Multi-tenant support (database infrastructure, single-tenant mode)
   - [x] Tenants table with default tenant seeding
-  - [x] `tenant_id` FK on all scoped tables (agents, services, hosts, provider_configs, software_items, oidc_providers, user_roles, settings)
+  - [x] `tenant_id` FK on all scoped tables (agents, services, hosts, plugin_configs, software_items, oidc_providers, user_roles, settings)
   - [x] TenantContext extractor (X-Tenant-Id header with default tenant fallback)
   - [x] Global vs tenant-scoped settings (SettingKey::is_global())
   - [x] All route handlers updated for tenant awareness

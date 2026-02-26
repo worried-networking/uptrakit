@@ -256,10 +256,7 @@ mod tests {
 
     #[test]
     fn create_software_item_request_default_enabled() {
-        let json = serde_json::json!({
-            "name": "Node.js",
-            "provider_config_id": "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
-        });
+        let json = serde_json::json!({ "name": "Node.js" });
         let req: CreateSoftwareItemRequest = serde_json::from_value(json).unwrap();
         assert!(req.enabled);
     }
@@ -268,7 +265,6 @@ mod tests {
     fn create_software_item_request_explicit_enabled_false() {
         let json = serde_json::json!({
             "name": "Node.js",
-            "provider_config_id": "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6",
             "enabled": false
         });
         let req: CreateSoftwareItemRequest = serde_json::from_value(json).unwrap();

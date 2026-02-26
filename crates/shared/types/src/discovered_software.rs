@@ -1,22 +1,22 @@
 use serde::{Deserialize, Serialize};
 
-/// A piece of software discovered on the local system by a provider.
+/// A piece of software discovered on the local system by a plugin.
 ///
-/// `installed_version` is required — providers that cannot determine a version
+/// `installed_version` is required — plugins that cannot determine a version
 /// must omit the item from results entirely.
 ///
-/// This type is the canonical shared definition used in both the agent/provider
-/// layer and the wire protocol. The `uptrakit-provider-core` crate re-exports it.
+/// This type is the canonical shared definition used in both the agent/plugin
+/// layer and the wire protocol. The `uptrakit-plugin-core` crate re-exports it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DiscoveredSoftware {
-    /// Provider-specific identifier for this software (e.g., package name, app slug).
+    /// Plugin-specific identifier for this software (e.g., package name, app slug).
     pub package_identifier: String,
     /// Human-readable display name.
     pub name: String,
-    /// Currently installed version (required; providers omit items with unknown versions).
+    /// Currently installed version (required; plugins omit items with unknown versions).
     pub installed_version: String,
-    /// Additional provider-specific metadata (e.g. `{"package_type": "formula"}`).
+    /// Additional plugin-specific metadata (e.g. `{"package_type": "formula"}`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extra: Option<serde_json::Value>,
 }

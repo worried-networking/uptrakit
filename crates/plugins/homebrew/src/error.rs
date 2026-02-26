@@ -18,4 +18,4 @@ pub enum HomebrewError {
 pub type Result<T> = std::result::Result<T, Report<HomebrewError>>;
 
 impl_report_conversion!(PluginError => HomebrewError, |e| HomebrewError::CommandFailed(e.to_string()));
-impl_report_conversion!(HomebrewError => PluginError, |e| PluginError::ProviderInternal(e.to_string()));
+impl_report_conversion!(HomebrewError => PluginError, |e| PluginError::PluginInternal(e.to_string()));

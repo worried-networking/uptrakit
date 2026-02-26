@@ -56,7 +56,7 @@ crates/shared/openapi-client/
     ├── oidc_auth.rs        # OIDC auth flows (authorize, exchange, link, complete registration)
     ├── oidc_providers.rs   # OIDC provider CRUD + activate/deactivate
     ├── pki.rs              # PKI endpoints (CA cert, CRL download)
-    ├── provider_configs.rs # Provider configuration CRUD
+    ├── plugin_configs.rs   # Plugin configuration CRUD
     ├── scheduler.rs        # Scheduler task list/get/update/trigger
     ├── services.rs         # Service list/get/approve/reject/remove/merge + enrollment tokens
     ├── settings.rs         # Settings (registration, auth, certs, network, CA, server cert)
@@ -208,13 +208,13 @@ directly. `Option::None` fields are automatically skipped by
 - `ca_cert(&self) -> Result<String>` -- unauthenticated, returns PEM
 - `ca_crl(&self) -> Result<String>` -- unauthenticated, returns PEM
 
-### Provider configs (`provider_configs.rs`)
+### Plugin configs (`plugin_configs.rs`)
 
-- `create_provider_config(&self, req) -> Result<ProviderConfigResponse>`
-- `list_provider_configs(&self, params) -> Result<PaginatedResponse<ProviderConfigResponse>>`
-- `get_provider_config(&self, id: &Uuid) -> Result<ProviderConfigResponse>`
-- `update_provider_config(&self, id: &Uuid, req) -> Result<ProviderConfigResponse>`
-- `delete_provider_config(&self, id: &Uuid) -> Result<()>`
+- `create_plugin_config(&self, req) -> Result<PluginConfigResponse>`
+- `list_plugin_configs(&self, params) -> Result<PaginatedResponse<PluginConfigResponse>>`
+- `get_plugin_config(&self, id: &Uuid) -> Result<PluginConfigResponse>`
+- `update_plugin_config(&self, id: &Uuid, req) -> Result<PluginConfigResponse>`
+- `delete_plugin_config(&self, id: &Uuid) -> Result<()>`
 
 ### Scheduler (`scheduler.rs`)
 
@@ -335,7 +335,7 @@ When an API path changes, update `paths.rs`. The compiler will catch every
 stale reference in both the client methods and the mock helpers.
 
 Sub-modules: `auth`, `api_tokens`, `health`, `hosts`, `oidc_auth`,
-`oidc_providers`, `pki`, `provider_configs`, `scheduler`, `services`,
+`oidc_providers`, `pki`, `plugin_configs`, `scheduler`, `services`,
 `settings`, `settings_mqtt`, `software_items`, `system_alerts`,
 `update_history`.
 
@@ -474,15 +474,15 @@ provides `on_*` helpers for every endpoint, so tests never hard-code paths.
 | `on_ca_cert()` | GET | `/api/v1/pki/ca.crt` |
 | `on_ca_crl()` | GET | `/api/v1/pki/ca.crl` |
 
-#### `server.provider_configs()` → `MockProviderConfigs`
+#### `server.plugin_configs()` → `MockPluginConfigs`
 
 | Method | HTTP | Path |
 | --- | --- | --- |
-| `on_list()` | GET | `/api/v1/provider-configs` |
-| `on_create()` | POST | `/api/v1/provider-configs` |
-| `on_get(id)` | GET | `/api/v1/provider-configs/{id}` |
-| `on_update(id)` | PUT | `/api/v1/provider-configs/{id}` |
-| `on_delete(id)` | DELETE | `/api/v1/provider-configs/{id}` |
+| `on_list()` | GET | `/api/v1/plugin-configs` |
+| `on_create()` | POST | `/api/v1/plugin-configs` |
+| `on_get(id)` | GET | `/api/v1/plugin-configs/{id}` |
+| `on_update(id)` | PUT | `/api/v1/plugin-configs/{id}` |
+| `on_delete(id)` | DELETE | `/api/v1/plugin-configs/{id}` |
 
 #### `server.scheduler()` → `MockScheduler`
 

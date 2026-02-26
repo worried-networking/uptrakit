@@ -803,7 +803,7 @@ async fn handle_enrolled(
 
 /// Maximum incoming WebSocket message size (1 MB).
 ///
-/// The largest legitimate message is `ExecuteUpdate` with provider config and
+/// The largest legitimate message is `ExecuteUpdate` with plugin config and
 /// release assets, typically well under 100 KB. 1 MB provides ample headroom
 /// while preventing memory-exhaustion DoS from oversized payloads.
 const MAX_WS_MESSAGE_SIZE: usize = 1_048_576;

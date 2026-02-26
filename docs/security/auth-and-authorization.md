@@ -88,8 +88,8 @@ from `crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name stri
 | `ViewAgents` | `view_agents` | List agents/services |
 | `ManageAgents` | `manage_agents` | Approve, reject, delete, merge agents; manage enrollment tokens |
 | `ManageGlobalSettings` | `manage_global_settings` | View and modify global settings (network, CA, TLS, system alerts) |
-| `ViewSoftware` | `view_software` | View software items, provider configs, and update history |
-| `ManageSoftware` | `manage_software` | Manage software items, provider configs, version checks, updates, and scheduler |
+| `ViewSoftware` | `view_software` | View software items, plugin configs, and update history |
+| `ManageSoftware` | `manage_software` | Manage software items, plugin configs, version checks, updates, and scheduler |
 | `ViewHosts` | `view_hosts` | View hosts |
 | `ManageHosts` | `manage_hosts` | Manage hosts (update, deactivate) |
 

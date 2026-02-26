@@ -37,7 +37,7 @@ Several Medium-severity schema decisions (soft-delete naming inconsistency, dual
   function. `TenantDb` in `web-api` can implement a generic `find_by_id_scoped` helper that
   makes it structurally impossible to fetch rows from a tenant-scoped table without applying
   the tenant filter, as long as the path uses the typed helper. Ten entities implement the
-  trait (hosts, services, oidc_providers, scheduled_tasks, software_items, provider_configs,
+  trait (hosts, services, oidc_providers, scheduled_tasks, software_items, plugin_configs,
   mqtt_clients, settings, settings_versions, user_roles).
 
 - **Relation declarations are complete.** Every `Relation` enum variant has a matching
@@ -111,9 +111,9 @@ findings) is owned by `uptrakit-crypto`, not this crate; it is cross-referenced 
   deserialization errors through `TryGetError::DbErr`, and includes a documented rationale
   for the serialization sentinel.
 
-- **`provider_config.config` stored as `serde_json::Value`.** Using `Json` column type with
-  `serde_json::Value` is the correct approach for a polymorphic provider configuration blob
-  where the schema depends on `provider_type`. Avoids premature normalization.
+- **`plugin_config.config` stored as `serde_json::Value`.** Using `Json` column type with
+  `serde_json::Value` is the correct approach for a polymorphic plugin configuration blob
+  where the schema depends on `plugin_type`. Avoids premature normalization.
 
 - **`ActiveModelBehavior` implemented on every entity.** All entities implement the default
   `ActiveModelBehavior`, which is the correct baseline for entities that do not need
@@ -125,7 +125,7 @@ findings) is owned by `uptrakit-crypto`, not this crate; it is cross-referenced 
 
 #### Issues
 
-**[SEVERITY: Low]** `crates/ui/web-api/src/queries/provider_configs.rs:155-158` — Second instance of string-based unique violation detection duplicated from autodiscovery.rs
+**[SEVERITY: Low]** `crates/ui/web-api/src/queries/plugin_configs.rs:155-158` — Second instance of string-based unique violation detection duplicated from autodiscovery.rs
 
 Two independent copies of the same fragile detection logic. Should be consolidated into `uptrakit-shared-db` using backend-specific error codes.
 
@@ -133,8 +133,8 @@ Two independent copies of the same fragile detection logic. Should be consolidat
 named `deleted_at` instead of `deactivated_at`.
 
 All other soft-deletable entities in this crate (`hosts`, `services`, `software_items`,
-`provider_configs`, `ca_certificates`, `tenants`, `users`) use `deactivated_at`. The OIDC
-provider entity uses `deleted_at`. This inconsistency prevents a generic soft-delete utility
+`plugin_configs`, `ca_certificates`, `tenants`, `users`) use `deactivated_at`. The OIDC
+plugin entity uses `deleted_at`. This inconsistency prevents a generic soft-delete utility
 from working across all entities, forces consumers to remember which column name to use per
 entity type, and risks bugs when filtering in new query helpers. The column name should be
 migrated to `deactivated_at` to match the established convention.
@@ -233,11 +233,11 @@ both kinds of records and asserts the correct output is returned in each case.
   `#[sea_orm(primary_key, auto_increment = false)]` with `Uuid` type. UUID v7 is
   time-ordered, which eliminates B-tree hot-spot contention on insert-heavy tables and makes
   the PK usable as a coarse-grained cursor for range queries. Observed consistently across
-  `hosts`, `services`, `software_items`, `provider_configs`, `update_history`, `oidc_provider`,
+  `hosts`, `services`, `software_items`, `plugin_configs`, `update_history`, `oidc_provider`,
   `mqtt_lease`, `api_token`, `available_version`, and all other entities.
 
 - **Partial (filtered) unique indexes for soft-delete.** The migration creates
-  `uq_provider_configs_active_name WHERE deactivated_at IS NULL` and
+  `uq_plugin_configs_active_name WHERE deactivated_at IS NULL` and
   `uq_software_items_active_name WHERE deactivated_at IS NULL`. This correctly enforces name
   uniqueness only among active records without blocking reuse of names after deactivation,
   and without requiring application-layer uniqueness checks.
@@ -248,7 +248,7 @@ both kinds of records and asserts the correct output is returned in each case.
 
 - **CHECK constraint on `sessions`.** `auth_method != 'oidc' OR oidc_provider_id IS NOT NULL`
   is enforced at the DB level. The ORM model cannot accidentally create an OIDC session
-  without a provider ID.
+  without a plugin ID.
 
 - **All ephemeral tables have `expires_at` indexes.** Pending OIDC flows, device flows,
   pending account links, and pending token exchanges all have indexes on `expires_at`,
@@ -263,9 +263,9 @@ both kinds of records and asserts the correct output is returned in each case.
 
 #### Issues
 
-**[SEVERITY: Medium]** `m20260209_000001_initial.rs:1093-1101` — Missing index on `host_software_items(provider_config_id, package_identifier)` for autodiscovery lookup
+**[SEVERITY: Medium]** `m20260209_000001_initial.rs:1093-1101` — Missing index on `host_software_items(plugin_config_id, package_identifier)` for autodiscovery lookup
 
-Phase 2 of `process_one_discovery` queries by this combination. Only `provider_config_id` is indexed alone.
+Phase 2 of `process_one_discovery` queries by this combination. Only `plugin_config_id` is indexed alone.
 
 **[SEVERITY: Medium]** `m20260209_000001_initial.rs:862-893` — Missing index on `service_hosts(host_id)` for host-to-agent lookups
 
@@ -277,7 +277,7 @@ Frequent check requires index intersections without a composite index.
 
 **[SEVERITY: Low]** `m20260209_000001_initial.rs:309` — No partial unique index on `oidc_providers` for active names
 
-Unlike `provider_configs` and `software_items`, OIDC provider slugs cannot be reused after soft-deletion.
+Unlike `plugin_configs` and `software_items`, OIDC provider slugs cannot be reused after soft-deletion.
 
 ### Issues
 
@@ -437,26 +437,26 @@ a utility function so it is co-located with the entity definitions.
 
 #### Issues
 
-**[SEVERITY: Low]** `crates/shared/db/src/entity/provider_config.rs:14` — `provider_config.provider_type` stored as `String` in DB
+**[SEVERITY: Low]** `crates/shared/db/src/entity/plugin_config.rs:14` — `plugin_config.plugin_type` stored as `String` in DB
 
 Provides forward compatibility at storage level but typos in manual edits produce runtime errors rather than constraint violations.
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/shared/db/src/entity/provider_config.rs:11` — `provider_type`
-stored as unvalidated `String` rather than the `ProviderType` enum from `uptrakit-shared-types`.
+**[SEVERITY: Medium]** `crates/shared/db/src/entity/plugin_config.rs:11` — `plugin_type`
+stored as unvalidated `String` rather than the `PluginType` enum from `uptrakit-shared-types`.
 
 ```
-// entity/provider_config.rs:11
-pub provider_type: String,
+// entity/plugin_config.rs:11
+pub plugin_type: String,
 ```
 
-The `ProviderType` enum in `uptrakit-shared-types` is the canonical typed representation of
-provider types, with `FromStr`, `Display`, and `as_str()` implementations. The entity uses
+The `PluginType` enum in `uptrakit-shared-types` is the canonical typed representation of
+plugin types, with `FromStr`, `Display`, and `as_str()` implementations. The entity uses
 raw `String`, delegating the string-to-enum conversion to every consumer. This allows
-invalid provider type strings to be stored in the DB (e.g., from a future migration gap or
-direct DB edit) and forces every query helper to call `ProviderType::from_str()` individually,
-with inconsistent error handling. Using a `DeriveActiveEnum` on `ProviderType` (or at minimum
+invalid plugin type strings to be stored in the DB (e.g., from a future migration gap or
+direct DB edit) and forces every query helper to call `PluginType::from_str()` individually,
+with inconsistent error handling. Using a `DeriveActiveEnum` on `PluginType` (or at minimum
 a newtype wrapper that validates on deserialize) would push the validation to the ORM boundary.
 Note that `uptrakit-shared-types` already gates its SeaORM derives behind a `sea-orm` feature
 flag, so adding `DeriveActiveEnum` there is architecturally correct.

@@ -11,55 +11,55 @@ without your explicit approval.
 ## How It Works
 
 When an agent registers a new host (or reconnects with a previously unseen host), the controller
-sends a discovery request to that agent. The agent queries each of its discovery-capable providers
+sends a discovery request to that agent. The agent queries each of its discovery-capable plugins
 and returns a list of installed packages. The controller then creates software items in a `pending`
 state for any packages it has not seen before.
 
-Discovery results carry the provider config and package identifier used to detect the package.
+Discovery results carry the plugin config and package identifier used to detect the package.
 This information is stored on the host assignment — not on the software item itself — so the same
-software item (e.g. "git") can later appear on multiple hosts via different providers, all under
+software item (e.g. "git") can later appear on multiple hosts via different plugins, all under
 one catalog entry.
 
-Discovery-capable providers currently supported:
+Discovery-capable plugins currently supported:
 
-| Provider | What it discovers |
+| Plugin | What it discovers |
 | --- | --- |
 | Docker | Running and stopped containers on the host, grouped by image reference |
 | Homebrew (Formulae) | Homebrew formula packages installed on the host |
 | Homebrew (Casks) | Homebrew cask packages installed on the host |
 | Proxmox Helper Scripts | Applications managed by community Proxmox VE helper scripts |
 
-If no provider config exists for a discovery-capable provider when a host registers, Uptrakit
+If no plugin config exists for a discovery-capable plugin when a host registers, Uptrakit
 creates one automatically (for example, `"Docker"`, `"Homebrew (Formulae)"`, or
 `"Proxmox Helper Scripts"`). This means the feature works out of the box on supported hosts with
 no manual configuration required.
 
 ### Proxmox Helper Scripts discovery
 
-PHS discovery works differently from other providers. Instead of creating software items linked
-to the PHS provider config, it analyses each container's CT script to identify the upstream source:
+PHS discovery works differently from other plugins. Instead of creating software items linked
+to the PHS plugin config, it analyses each container's CT script to identify the upstream source:
 
 - **GitHub-managed apps** (e.g. Booklore, Radarr, Sonarr, Pangolin, Uptime Kuma): Uptrakit
-  auto-creates a `github_releases` provider config for the upstream repository, pre-configured to
+  auto-creates a `github_releases` plugin config for the upstream repository, pre-configured to
   read the installed version from the PHS version file (`~/.{slug}`) and to run the unattended
-  update script (`env PHS_SILENT=1 /usr/bin/update`). The software item's provider config will be
+  update script (`env PHS_SILENT=1 /usr/bin/update`). The software item's plugin config will be
   the synthesized GitHub config, not the PHS config.
 
 - **APT-managed apps** (e.g. Grafana, Plex): Uptrakit finds or creates a shared `APT (auto)`
-  provider config. The software item's `package_identifier` is the Debian package name.
+  plugin config. The software item's `package_identifier` is the Debian package name.
 
 - **Undetectable apps**: Apps whose scripts contain neither a GitHub release source nor a specific
   `apt install` line are skipped. A warning is logged on the agent. Check agent logs
   (`journalctl -u uptrakit-agent`) if you expect to see an app but it does not appear as pending.
 
 After approving PHS-discovered items, version checking and updates are handled by the synthesized
-`github_releases` or `APT` configs — not by the PHS provider itself.
+`github_releases` or `APT` configs — not by the PHS plugin itself.
 
 Auto-created config name for the PHS discovery anchor: **`"Proxmox Helper Scripts"`**.
 
 ### Docker discovery
 
-The Docker provider discovers containers by querying the local Docker daemon for all containers
+The Docker plugin discovers containers by querying the local Docker daemon for all containers
 (running and stopped). For each container image that is not a bare SHA digest:
 
 - Images with no registry provenance (locally built, no `RepoDigests`) are skipped.
@@ -68,7 +68,7 @@ The Docker provider discovers containers by querying the local Docker daemon for
 
 Auto-created config name: **`"Docker"`** (one shared config per tenant; no per-host split).
 
-See [Docker Provider](providers/docker.md#autodiscovery) for the full discovery behaviour and name
+See [Docker Plugin](plugins/docker.md#autodiscovery) for the full discovery behaviour and name
 derivation rules.
 
 ## Software Item States
@@ -113,8 +113,8 @@ you will never want to track.
 ## The Ignore List
 
 The ignore list lets you permanently suppress specific packages from appearing in future discovery
-runs. An ignore rule is keyed on a `(provider_config, package_identifier)` pair — meaning it is
-scoped to the specific provider and package name, and applies across all hosts.
+runs. An ignore rule is keyed on a `(plugin_config, package_identifier)` pair — meaning it is
+scoped to the specific plugin and package name, and applies across all hosts.
 
 Once an ignore rule exists, autodiscovery will skip that package entirely when it would otherwise
 create a pending item for it.
@@ -129,14 +129,14 @@ assignment, or pass `?ignore=true` when deleting a host assignment via the API
 assignment and simultaneously creates an ignore rule so the package will not be re-discovered
 on any host.
 
-**Directly via the API** — Create an ignore rule for any `(provider_config_id,
+**Directly via the API** — Create an ignore rule for any `(plugin_config_id,
 package_identifier)` combination without needing to remove an existing assignment first. This is
 useful for pre-suppressing packages you know you will never want before they appear.
 
 ### Removing an ignore rule
 
 Delete the ignore rule by its ID. After removal, the next discovery run for the relevant host and
-provider will be able to create a pending item for that package again.
+plugin will be able to create a pending item for that package again.
 
 See the [API reference](../api/autodiscovery.md#get-apiv1autodiscoveryignores) for managing
 ignore rules via the API.
@@ -147,14 +147,14 @@ Autodiscovery runs automatically when an agent registers a new host. You can als
 demand:
 
 - **Web UI** — Go to **Hosts**, open the **⋯** context menu for any host, and select
-  **Trigger Discovery**. A toast notification confirms how many providers were queued.
-- **Trigger for a specific host** — runs discovery across all provider configs associated
+  **Trigger Discovery**. A toast notification confirms how many plugins were queued.
+- **Trigger for a specific host** — runs discovery across all plugin configs associated
   with that host.
-- **Trigger for a specific provider config** — runs discovery for that provider across all
-  connected agents. Returns an error if the provider type does not support discovery.
+- **Trigger for a specific plugin config** — runs discovery for that plugin across all
+  connected agents. Returns an error if the plugin type does not support discovery.
 
 See [POST /api/v1/hosts/{id}/discover](../api/autodiscovery.md#post-apiv1hostsiddiscover) and
-[POST /api/v1/provider-configs/{id}/discover](../api/autodiscovery.md#post-apiv1provider-configsiddiscover)
+[POST /api/v1/plugin-configs/{id}/discover](../api/autodiscovery.md#post-apiv1plugin-configsiddiscover)
 in the API reference.
 
 ## Bulk Discard
@@ -164,8 +164,8 @@ registration produces a large list you do not want to review individually — yo
 them:
 
 - **By host** — removes all pending items for a specific host. Optionally filter to a single
-  provider config.
-- **By provider config** — removes all pending items across all hosts for a specific provider
+  plugin config.
+- **By plugin config** — removes all pending items across all hosts for a specific plugin
   config.
 
 Bulk discard performs a soft-delete. No ignore rules are created, so discarded packages can be
@@ -173,14 +173,14 @@ re-discovered in a future run.
 
 See [DELETE /api/v1/hosts/{id}/discovered](../api/autodiscovery.md#delete-apiv1hostsdiscovered)
 and
-[DELETE /api/v1/provider-configs/{id}/discovered](../api/autodiscovery.md#delete-apiv1provider-configsiddiscovered)
+[DELETE /api/v1/plugin-configs/{id}/discovered](../api/autodiscovery.md#delete-apiv1plugin-configsiddiscovered)
 in the API reference.
 
 ## Typical Workflow
 
 1. An agent connects and registers a new host.
 2. Uptrakit sends a discovery request. The agent queries Homebrew, Proxmox Helper Scripts, or
-   other supported providers.
+   other supported plugins.
 3. Discovered packages appear in the **Software → Pending** tab with a **Pending** badge.
 4. You review the list and choose for each item:
    - Approve the items you want Uptrakit to track and update.
@@ -194,6 +194,6 @@ in the API reference.
   shapes, and ignore rule management.
 - [Software Item Entity](../architecture/software-item-entity.md) — underlying data model and
   database schema.
-- [System Overview](system-overview.md) — agent and provider architecture.
+- [System Overview](system-overview.md) — agent and plugin architecture.
 - [Update Workflow](update-workflow.md) — what happens after an item is approved and version
   tracking begins.

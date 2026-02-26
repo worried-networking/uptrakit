@@ -1,23 +1,23 @@
-# Provider Configurations
+# Plugin Configurations
 
-A **provider configuration** (provider config) defines a software source that Uptrakit uses to
+A **plugin configuration** (plugin config) defines a software source that Uptrakit uses to
 resolve upstream versions, check installed versions, and optionally discover packages automatically.
-Each software item host assignment links to a provider config, so Uptrakit knows which provider
+Each software item host assignment links to a plugin config, so Uptrakit knows which plugin
 logic to run and which remote package to query.
 
-Provider configs are tenant-scoped, reusable objects. Multiple software items can reference the
-same provider config.
+Plugin configs are tenant-scoped, reusable objects. Multiple software items can reference the
+same plugin config.
 
-## Provider Types
+## Plugin Types
 
-Uptrakit ships with five built-in provider types:
+Uptrakit ships with five built-in plugin types:
 
-| Provider type | Description | Autodiscovery |
+| Plugin type | Description | Autodiscovery |
 | --- | --- | --- |
 | `github_releases` | Tracks releases published on GitHub. Resolves the latest release tag and optionally filters by asset or pre-release status. | No |
 | `docker` | Tracks image tags or SHA digests in a Docker/OCI registry. Can pull images via the local or remote Docker daemon, and discovers running/stopped containers. | Yes |
 | `homebrew` | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host. | Yes |
-| `proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream `github_releases` or `apt` provider configs automatically. Does not perform version detection or updates directly. | Yes |
+| `proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream `github_releases` or `apt` plugin configs automatically. Does not perform version detection or updates directly. | Yes |
 | `apt` | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh. | Yes |
 
 ### `github_releases` configuration fields
@@ -33,8 +33,8 @@ Uptrakit ships with five built-in provider types:
 
 ### `docker` configuration fields
 
-The `docker` provider requires no mandatory fields — an empty config `{}` is valid. For the full
-field reference, see [Docker Provider](providers/docker.md).
+The `docker` plugin requires no mandatory fields — an empty config `{}` is valid. For the full
+field reference, see [Docker Plugin](plugins/docker.md).
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -56,13 +56,13 @@ field reference, see [Docker Provider](providers/docker.md).
 
 ### `proxmox_helper_scripts` configuration fields
 
-The `proxmox_helper_scripts` provider requires no configuration fields — its config is always an
+The `proxmox_helper_scripts` plugin requires no configuration fields — its config is always an
 empty object `{}`. Uptrakit auto-creates a config named `"Proxmox Helper Scripts"` when the first
 supporting agent connects.
 
-**Important:** The PHS provider is discovery-only. It does not track installed or upstream
+**Important:** The PHS plugin is discovery-only. It does not track installed or upstream
 versions itself, and it does not execute updates. Instead, when a PHS container is discovered,
-the controller automatically creates one of the following provider configs for version tracking
+the controller automatically creates one of the following plugin configs for version tracking
 and update execution:
 
 - A `github_releases` config for each `(owner, repo)` pair found in the CT script — pre-configured
@@ -80,80 +80,80 @@ existing configs if they already exist.
 | `discovery_filter` | No | `manual` (default) or `all`. Controls which packages are surfaced during autodiscovery. `manual` surfaces only packages explicitly installed by the user (`apt-mark showmanual`); `all` surfaces every installed package. |
 
 Uptrakit auto-creates a config named `"APT"` when the first agent with APT support
-connects and no matching provider config exists.
+connects and no matching plugin config exists.
 
 For full details and `sudoers` configuration requirements, see
-[APT Provider](providers/apt.md).
+[APT Plugin](plugins/apt.md).
 
-## Managing Provider Configs
+## Managing Plugin Configs
 
 ### Web UI
 
-Navigate to **Provider Configs** in the main navigation. The page lists all provider configs for
+Navigate to **Plugin Configs** in the main navigation. The page lists all plugin configs for
 your account with their type, name, and assigned software items count.
 
-**Creating a provider config:**
+**Creating a plugin config:**
 
-1. Click **New Provider Config**.
-2. Select the provider type.
+1. Click **New Plugin Config**.
+2. Select the plugin type.
 3. Enter a name and fill in the type-specific fields.
 4. Click **Save**.
 
-**Editing a provider config:**
+**Editing a plugin config:**
 
-Open the context menu (three-dot button) on any provider config row and select **Edit**. You can
+Open the context menu (three-dot button) on any plugin config row and select **Edit**. You can
 update the name and any configuration fields. Changes take effect on the next version check cycle.
 
-**Deleting a provider config:**
+**Deleting a plugin config:**
 
-Open the context menu and select **Delete**. A provider config cannot be deleted while software
+Open the context menu and select **Delete**. A plugin config cannot be deleted while software
 items reference it. Remove or reassign those items first.
 
 ### CLI
 
 ```bash
-# List all provider configs
-uptrakit provider-configs list
+# List all plugin configs
+uptrakit plugin-configs list
 
-# Show details for a specific provider config
-uptrakit provider-configs show <PROVIDER_CONFIG_ID>
+# Show details for a specific plugin config
+uptrakit plugin-configs show <PLUGIN_CONFIG_ID>
 
-# Create a GitHub Releases provider config
-uptrakit provider-configs create \
+# Create a GitHub Releases plugin config
+uptrakit plugin-configs create \
   --name "my-app GitHub Releases" \
   --type github_releases \
   --config '{"owner":"example","repo":"my-app"}'
 
-# Create a Docker provider config (semver tags)
-uptrakit provider-configs create \
+# Create a Docker plugin config (semver tags)
+uptrakit plugin-configs create \
   --name "my-image Docker" \
   --type docker \
   --config '{"tracking_mode":"semver_tags","tag_patterns":["^[0-9]+\\.[0-9]+\\.[0-9]+$"]}'
 
-# Create a Homebrew formula provider config
-uptrakit provider-configs create \
+# Create a Homebrew formula plugin config
+uptrakit plugin-configs create \
   --name "git Homebrew" \
   --type homebrew \
   --config '{"package_type":"formula","formula":"git"}'
 
-# Update a provider config's name
-uptrakit provider-configs update <PROVIDER_CONFIG_ID> --name "New Name"
+# Update a plugin config's name
+uptrakit plugin-configs update <PLUGIN_CONFIG_ID> --name "New Name"
 
 # Update configuration fields
-uptrakit provider-configs update <PROVIDER_CONFIG_ID> \
+uptrakit plugin-configs update <PLUGIN_CONFIG_ID> \
   --config '{"owner":"example","repo":"updated-repo"}'
 
-# Delete a provider config
-uptrakit provider-configs delete <PROVIDER_CONFIG_ID>
+# Delete a plugin config
+uptrakit plugin-configs delete <PLUGIN_CONFIG_ID>
 ```
 
 ## Autodiscovery
 
-The `docker`, `homebrew`, `proxmox_helper_scripts`, and `apt` provider types support
+The `docker`, `homebrew`, `proxmox_helper_scripts`, and `apt` plugin types support
 **autodiscovery**: the agent queries the local runtime (Docker daemon or package manager) and reports installed
 packages back to the controller, which creates pending software items for your review.
 
-If no provider config exists for a discovery-capable type when a host registers, Uptrakit
+If no plugin config exists for a discovery-capable type when a host registers, Uptrakit
 automatically creates one. Auto-created configs are named:
 
 - `Docker`
@@ -163,7 +163,7 @@ automatically creates one. Auto-created configs are named:
 - `APT`
 
 **PHS auto-created configs:** In addition to the `"Proxmox Helper Scripts"` config used as a
-discovery anchor, the PHS provider triggers creation of downstream `github_releases` and
+discovery anchor, the PHS plugin triggers creation of downstream `github_releases` and
 `APT (auto)` configs during discovery (see [PHS configuration](#proxmox_helper_scripts-configuration-fields)
 for details). These synthesized configs are what appear as parent configs on your approved PHS software items.
 
@@ -171,17 +171,17 @@ for details). These synthesized configs are what appear as parent configs on you
 
 Discovery runs automatically when an agent registers a new host. You can also trigger it on demand.
 
-**Web UI** — Go to **Provider Configs**, open the context menu on a discovery-capable config, and
+**Web UI** — Go to **Plugin Configs**, open the context menu on a discovery-capable config, and
 select **Trigger Discovery**. Alternatively, go to **Hosts**, open the host context menu, and
-select **Trigger Discovery** to run all discovery-capable providers for that host.
+select **Trigger Discovery** to run all discovery-capable plugins for that host.
 
 **CLI:**
 
 ```bash
-# Trigger discovery for a specific provider config (all connected agents)
-uptrakit provider-configs discover <PROVIDER_CONFIG_ID>
+# Trigger discovery for a specific plugin config (all connected agents)
+uptrakit plugin-configs discover <PLUGIN_CONFIG_ID>
 
-# Trigger discovery for a specific host (all discovery-capable providers)
+# Trigger discovery for a specific host (all discovery-capable plugins)
 uptrakit hosts discover <HOST_ID>
 ```
 
@@ -190,19 +190,19 @@ uptrakit hosts discover <HOST_ID>
 After discovery, pending items appear in the **Software → Pending** tab for your review. If you
 want to clear all pending items at once without reviewing them individually:
 
-**Web UI** — Go to **Provider Configs**, open the context menu, and select **Discard Discovered**.
+**Web UI** — Go to **Plugin Configs**, open the context menu, and select **Discard Discovered**.
 
 **CLI:**
 
 ```bash
-# Discard all pending discovered items for a provider config
-uptrakit provider-configs discard-discovered <PROVIDER_CONFIG_ID>
+# Discard all pending discovered items for a plugin config
+uptrakit plugin-configs discard-discovered <PLUGIN_CONFIG_ID>
 
 # Discard all pending discovered items for a specific host
 uptrakit hosts discard-discovered <HOST_ID>
 
-# Discard pending items for a specific provider config on a specific host
-uptrakit hosts discard-discovered <HOST_ID> --provider-config <PROVIDER_CONFIG_ID>
+# Discard pending items for a specific plugin config on a specific host
+uptrakit hosts discard-discovered <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID>
 ```
 
 Discard performs a soft-delete with no ignore rules created. Discarded packages can be
@@ -211,15 +211,15 @@ re-discovered on the next discovery run.
 ## Autodiscovery Ignore Rules
 
 An ignore rule permanently suppresses a specific package from appearing in future discovery
-results. Ignore rules are keyed on a `(provider_config, package_identifier)` pair and apply
+results. Ignore rules are keyed on a `(plugin_config, package_identifier)` pair and apply
 across all hosts.
 
 ### Managing ignore rules in the Web UI
 
-Navigate to **Provider Configs**, then select a provider config to view its ignore rules. From
+Navigate to **Plugin Configs**, then select a plugin config to view its ignore rules. From
 there you can:
 
-- View all ignore rules for the provider config.
+- View all ignore rules for the plugin config.
 - Add a new ignore rule by entering a package identifier.
 - Delete an existing ignore rule to re-enable future discovery of that package.
 
@@ -237,7 +237,7 @@ uptrakit autodiscovery ignores show <IGNORE_ID>
 
 # Create an ignore rule to pre-suppress a package
 uptrakit autodiscovery ignores create \
-  --provider-config <PROVIDER_CONFIG_ID> \
+  --plugin-config <PLUGIN_CONFIG_ID> \
   --package "unwanted-package"
 
 # Delete an ignore rule (re-enables future discovery)
@@ -254,8 +254,8 @@ uptrakit software-items unassign <ITEM_ID> --host <HOST_ID> --ignore
 
 - [Autodiscovery](autodiscovery.md) — full discovery workflow, review process, and ignore list
   concepts.
-- [CLI Usage Guide](cli-usage.md) — all `provider-configs` and `autodiscovery` commands.
-- [Software Item Entity](../architecture/software-item-entity.md) — data model and provider
+- [CLI Usage Guide](cli-usage.md) — all `plugin-configs` and `autodiscovery` commands.
+- [Software Item Entity](../architecture/software-item-entity.md) — data model and plugin
   config relationships.
 - [API Reference: Autodiscovery](../api/autodiscovery.md) — REST endpoint details for discovery
   and ignore rules.
