@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-pub use uptrakit_shared_types::{DiscoveredSoftware, PluginType, ReleaseAsset, ReleaseInfo};
+pub use uptrakit_shared_types::{
+    DiscoveredSoftware, DiscoveryTarget, PluginRole, PluginType, ReleaseAsset, ReleaseInfo,
+};
 
 use crate::version::Version;
 
@@ -142,6 +144,7 @@ mod tests {
             package_identifier: "prometheus".to_string(),
             name: "Prometheus".to_string(),
             installed_version: "2.53.0".to_string(),
+            targets: vec![],
             extra: Some(serde_json::json!({"install_path": "/usr/local/bin/prometheus"})),
         };
         let json = serde_json::to_string(&sw).expect("serialize");
@@ -155,10 +158,12 @@ mod tests {
             package_identifier: "grafana".to_string(),
             name: "Grafana".to_string(),
             installed_version: "10.0.0".to_string(),
+            targets: vec![],
             extra: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("extra"));
+        assert!(!json.contains("targets"));
         let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, sw);
     }

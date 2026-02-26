@@ -1,5 +1,6 @@
 mod device_auth_status;
 mod discovered_software;
+mod discovery_target;
 pub mod hex;
 mod hook_shell;
 mod masked_email;
@@ -15,6 +16,7 @@ mod software_discovery_state;
 
 pub use device_auth_status::{DeviceAuthStatus, ParseDeviceAuthStatusError};
 pub use discovered_software::DiscoveredSoftware;
+pub use discovery_target::DiscoveryTarget;
 pub use hook_shell::{HookShell, ParseHookShellError};
 pub use masked_email::{MaskedEmail, ParseMaskedEmailError};
 pub use mqtt_connection_status::{

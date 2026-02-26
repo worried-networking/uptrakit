@@ -12,8 +12,8 @@ pub use traits::{
     HostCompatibility, Plugin, PreUpdateHookResult, SudoCommandEntry, UpdateHookContext,
 };
 pub use types::{
-    DiscoveredSoftware, PluginCapability, PluginType, ReleaseAsset, ReleaseInfo,
-    UpstreamRelease,
+    DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole, PluginType, ReleaseAsset,
+    ReleaseInfo, UpstreamRelease,
 };
 pub use version::Version;
 
