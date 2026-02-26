@@ -30,6 +30,7 @@ use uptrakit_shared_db::MaskedEmail;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link, user_role};
 use uptrakit_web_api_types::SecretString;
+use uuid::Uuid;
 
 pub use super::auth::AuthResponse;
 use crate::auth::registration::RegistrationMode;
@@ -60,7 +61,7 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
     let providers = OidcProvider::find()
         .filter(oidc_provider::Column::TenantId.eq(state.default_tenant_id))
         .filter(oidc_provider::Column::IsActive.eq(true))
-        .filter(oidc_provider::Column::DeletedAt.is_null())
+        .filter(oidc_provider::Column::DeactivatedAt.is_null())
         .all(state.db())
         .await
         .unwrap_or_default();
@@ -98,7 +99,7 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
 #[utoipa::path(
     get,
     path = "/api/v1/auth/oidc/{provider_id}/authorize",
-    params(("provider_id" = String, Path, description = "OIDC Provider ID")),
+    params(("provider_id" = Uuid, Path, description = "OIDC Provider ID")),
     responses(
         (status = 200, description = "Authorization URL", body = OidcAuthorizeResponse),
         (status = 404, description = "Provider not found or inactive")
@@ -107,7 +108,7 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
 )]
 pub async fn oidc_authorize(
     State(state): State<Arc<AppState>>,
-    Path(provider_id): Path<String>,
+    Path(provider_id): Path<Uuid>,
     external_base_url: Option<Extension<crate::extract::ExternalBaseUrl>>,
     headers: HeaderMap,
 ) -> Response {
@@ -127,13 +128,8 @@ pub async fn oidc_authorize(
         }
     };
 
-    let provider_uuid = match uuid::Uuid::parse_str(&provider_id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid provider ID"),
-    };
-
     let provider =
-        match find_active_provider(state.db(), state.default_tenant_id, provider_uuid).await {
+        match find_active_provider(state.db(), state.default_tenant_id, provider_id).await {
             Some(p) => p,
             None => return error_response(StatusCode::NOT_FOUND, "Provider not found or inactive"),
         };
@@ -190,7 +186,7 @@ pub async fn oidc_authorize(
         .oidc_flow_store
         .insert(
             csrf_state.secret().clone(),
-            provider_uuid,
+            provider_id,
             &pkce_verifier,
             &nonce,
         )
@@ -1203,7 +1199,7 @@ async fn find_active_provider(
     OidcProvider::find_by_id(id)
         .filter(oidc_provider::Column::TenantId.eq(tenant_id))
         .filter(oidc_provider::Column::IsActive.eq(true))
-        .filter(oidc_provider::Column::DeletedAt.is_null())
+        .filter(oidc_provider::Column::DeactivatedAt.is_null())
         .one(db)
         .await
         .ok()

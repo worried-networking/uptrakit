@@ -86,7 +86,7 @@ pub struct Model {
     pub is_active: bool,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
-    pub deleted_at: Option<OffsetDateTime>,
+    pub deactivated_at: Option<OffsetDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

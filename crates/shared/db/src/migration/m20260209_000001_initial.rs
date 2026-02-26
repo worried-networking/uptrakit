@@ -306,7 +306,7 @@ impl MigrationTrait for Migration {
                     .col(boolean(OidcProviders::IsActive))
                     .col(timestamp(OidcProviders::CreatedAt))
                     .col(timestamp(OidcProviders::UpdatedAt))
-                    .col(timestamp_null(OidcProviders::DeletedAt))
+                    .col(timestamp_null(OidcProviders::DeactivatedAt))
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_oidc_providers_tenant")
@@ -353,9 +353,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_oidc_providers_deleted_at")
+                    .name("idx_oidc_providers_deactivated_at")
                     .table(OidcProviders::Table)
-                    .col(OidcProviders::DeletedAt)
+                    .col(OidcProviders::DeactivatedAt)
                     .to_owned(),
             )
             .await?;
@@ -2304,7 +2304,7 @@ enum OidcProviders {
     IsActive,
     CreatedAt,
     UpdatedAt,
-    DeletedAt,
+    DeactivatedAt,
 }
 
 #[derive(DeriveIden)]

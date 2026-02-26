@@ -80,7 +80,7 @@ pub async fn update_authentication_settings(
                 let active_providers = tenant_db
                     .find::<oidc_provider::Entity>()
                     .filter(oidc_provider::Column::IsActive.eq(true))
-                    .filter(oidc_provider::Column::DeletedAt.is_null())
+                    .filter(oidc_provider::Column::DeactivatedAt.is_null())
                     .all(tenant_db.db())
                     .await
                     .unwrap_or_default();

@@ -13,6 +13,7 @@ use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, oidc_provider::RoleMapping};
 use uptrakit_web_api_types::validation::Validate;
+use uuid::Uuid;
 
 pub use uptrakit_web_api_types::oidc_providers::{
     CreateOidcProviderRequest, OidcProviderResponse, UpdateOidcProviderRequest,
@@ -64,7 +65,7 @@ pub async fn create_provider(
     let existing = tenant_db
         .find::<oidc_provider::Entity>()
         .filter(oidc_provider::Column::Slug.eq(&req.slug))
-        .filter(oidc_provider::Column::DeletedAt.is_null())
+        .filter(oidc_provider::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await;
 
@@ -99,7 +100,7 @@ pub async fn create_provider(
         is_active: Set(false),
         created_at: Set(now),
         updated_at: Set(now),
-        deleted_at: Set(None),
+        deactivated_at: Set(None),
     };
 
     match provider.insert(tenant_db.db()).await {
@@ -132,7 +133,7 @@ pub async fn list_providers(
 ) -> Response {
     match tenant_db
         .find::<oidc_provider::Entity>()
-        .filter(oidc_provider::Column::DeletedAt.is_null())
+        .filter(oidc_provider::Column::DeactivatedAt.is_null())
         .order_by_asc(oidc_provider::Column::Name)
         .all(tenant_db.db())
         .await
@@ -155,7 +156,7 @@ pub async fn list_providers(
 #[utoipa::path(
     get,
     path = "/api/v1/settings/oidc-providers/{id}",
-    params(("id" = String, Path, description = "Provider ID")),
+    params(("id" = Uuid, Path, description = "Provider ID")),
     extensions(("x-required-permission" = json!("view_settings"))),
     responses(
         (status = 200, description = "Provider details", body = OidcProviderResponse),
@@ -166,14 +167,9 @@ pub async fn list_providers(
 )]
 pub async fn get_provider(
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(provider_id): Path<Uuid>,
     CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    let provider_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(provider) => {
             (StatusCode::OK, Json(oidc_provider_response_from(provider))).into_response()
@@ -186,7 +182,7 @@ pub async fn get_provider(
 #[utoipa::path(
     put,
     path = "/api/v1/settings/oidc-providers/{id}",
-    params(("id" = String, Path, description = "Provider ID")),
+    params(("id" = Uuid, Path, description = "Provider ID")),
     request_body = UpdateOidcProviderRequest,
     extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
@@ -198,15 +194,10 @@ pub async fn get_provider(
 )]
 pub async fn update_provider(
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(provider_id): Path<Uuid>,
     CanManageSettings(_user): CanManageSettings,
     Json(req): Json<UpdateOidcProviderRequest>,
 ) -> Response {
-    let provider_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
         None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
@@ -219,7 +210,7 @@ pub async fn update_provider(
         let existing = tenant_db
             .find::<oidc_provider::Entity>()
             .filter(oidc_provider::Column::Slug.eq(new_slug.as_str()))
-            .filter(oidc_provider::Column::DeletedAt.is_null())
+            .filter(oidc_provider::Column::DeactivatedAt.is_null())
             .filter(oidc_provider::Column::Id.ne(provider_id))
             .one(tenant_db.db())
             .await;
@@ -285,7 +276,7 @@ pub async fn update_provider(
 #[utoipa::path(
     delete,
     path = "/api/v1/settings/oidc-providers/{id}",
-    params(("id" = String, Path, description = "Provider ID")),
+    params(("id" = Uuid, Path, description = "Provider ID")),
     extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 204, description = "Provider deleted"),
@@ -297,14 +288,9 @@ pub async fn update_provider(
 )]
 pub async fn delete_provider(
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(provider_id): Path<Uuid>,
     CanManageSettings(user): CanManageSettings,
 ) -> Response {
-    let provider_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
         None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
@@ -325,7 +311,7 @@ pub async fn delete_provider(
 
     let now = OffsetDateTime::now_utc();
     let mut model: oidc_provider::ActiveModel = provider.into();
-    model.deleted_at = Set(Some(now));
+    model.deactivated_at = Set(Some(now));
     model.is_active = Set(false);
     model.updated_at = Set(now);
 
@@ -342,7 +328,7 @@ pub async fn delete_provider(
 #[utoipa::path(
     post,
     path = "/api/v1/settings/oidc-providers/{id}/activate",
-    params(("id" = String, Path, description = "Provider ID")),
+    params(("id" = Uuid, Path, description = "Provider ID")),
     extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 200, description = "Provider activated", body = OidcProviderResponse),
@@ -354,14 +340,9 @@ pub async fn delete_provider(
 )]
 pub async fn activate_provider(
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(provider_id): Path<Uuid>,
     CanManageSettings(_user): CanManageSettings,
 ) -> Response {
-    let provider_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
         None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
@@ -382,7 +363,7 @@ pub async fn activate_provider(
         .find::<oidc_provider::Entity>()
         .filter(oidc_provider::Column::IsActive.eq(true))
         .filter(oidc_provider::Column::Id.ne(provider_id))
-        .filter(oidc_provider::Column::DeletedAt.is_null())
+        .filter(oidc_provider::Column::DeactivatedAt.is_null())
         .all(tenant_db.db())
         .await;
 
@@ -413,7 +394,7 @@ pub async fn activate_provider(
 #[utoipa::path(
     post,
     path = "/api/v1/settings/oidc-providers/{id}/deactivate",
-    params(("id" = String, Path, description = "Provider ID")),
+    params(("id" = Uuid, Path, description = "Provider ID")),
     extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 200, description = "Provider deactivated", body = OidcProviderResponse),
@@ -425,14 +406,9 @@ pub async fn activate_provider(
 )]
 pub async fn deactivate_provider(
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(provider_id): Path<Uuid>,
     CanManageSettings(user): CanManageSettings,
 ) -> Response {
-    let provider_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
         None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
@@ -470,7 +446,7 @@ async fn find_non_deleted_provider(
 ) -> Option<oidc_provider::Model> {
     tenant_db
         .find_by_id::<oidc_provider::Entity, _>(id)
-        .filter(oidc_provider::Column::DeletedAt.is_null())
+        .filter(oidc_provider::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
         .ok()

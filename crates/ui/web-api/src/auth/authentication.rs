@@ -171,7 +171,7 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
         for (_, provider) in &other_link {
             if let Some(p) = provider
                 && p.is_active
-                && p.deleted_at.is_none()
+                && p.deactivated_at.is_none()
             {
                 return Ok(OidcUserResolution::LinkViaOidcRequired {
                     user_id: found_user.id,
@@ -511,7 +511,7 @@ mod tests {
             is_active: true,
             created_at: OffsetDateTime::UNIX_EPOCH,
             updated_at: OffsetDateTime::UNIX_EPOCH,
-            deleted_at: None,
+            deactivated_at: None,
         }
     }
 

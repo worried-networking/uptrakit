@@ -502,7 +502,7 @@ pub(crate) async fn bootstrap_oidc(
     let existing = OidcProvider::find()
         .filter(oidc_provider::Column::Slug.eq(slug))
         .filter(oidc_provider::Column::TenantId.eq(tenant_id))
-        .filter(oidc_provider::Column::DeletedAt.is_null())
+        .filter(oidc_provider::Column::DeactivatedAt.is_null())
         .one(db)
         .await
         .context(AppError::Database)?;
@@ -535,7 +535,7 @@ pub(crate) async fn bootstrap_oidc(
                 is_active: Set(true),
                 created_at: Set(now),
                 updated_at: Set(now),
-                deleted_at: Set(None),
+                deactivated_at: Set(None),
             };
             provider.insert(db).await.context(AppError::Database)?;
             tracing::info!(slug = slug, name = name, "bootstrapped OIDC provider");
