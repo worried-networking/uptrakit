@@ -69,12 +69,14 @@ export async function handleLogin(data: LoginRequest) {
 	const res = await api.login(data);
 	accessToken = res.access_token;
 	user = res.user;
+	sessionExpired = false;
 }
 
 export async function handleRegister(data: RegisterRequest) {
 	const res = await api.register(data);
 	accessToken = res.access_token;
 	user = res.user;
+	sessionExpired = false;
 }
 
 export async function handleLogout() {
@@ -83,6 +85,9 @@ export async function handleLogout() {
 	} finally {
 		accessToken = null;
 		user = null;
+		// Always clear a stale session-expired banner on logout so it doesn't
+		// bleed into the next login attempt.
+		sessionExpired = false;
 	}
 }
 
@@ -98,12 +103,14 @@ export async function handleOidcCallback(code: string) {
 	const res = await api.oidcExchange(code);
 	accessToken = res.access_token;
 	user = res.user;
+	sessionExpired = false;
 }
 
 export async function handleOidcCompleteRegistration(registrationCode: string, registrationToken: string) {
 	const res = await api.oidcCompleteRegistration(registrationCode, registrationToken);
 	accessToken = res.access_token;
 	user = res.user;
+	sessionExpired = false;
 }
 
 export async function handleOidcLink(linkToken: string, password?: string) {
@@ -114,4 +121,5 @@ export async function handleOidcLink(linkToken: string, password?: string) {
 	const res = await api.oidcLink(data);
 	accessToken = res.access_token;
 	user = res.user;
+	sessionExpired = false;
 }
