@@ -325,10 +325,25 @@ The SSH agent handles `CheckVersions` and `ExecuteUpdate` messages from the cont
 
 ### SSH Session Model
 
-SSH sessions are **stateless and per-operation** — there is no persistent SSH connection pool. A dedicated session is
-opened when the controller sends a `CheckVersions` or `ExecuteUpdate` message and is dropped when the operation
-completes. For updates, the `SshCommandExecutor` holds the session via `Arc<SshSession>` for the duration of the
-update task so the connection is not closed while streaming output lines.
+The SSH agent maintains a **persistent connection pool** (`SshConnectionPool` in `ssh_pool.rs`) — one
+`Arc<SshSession>` per enrolled host. Because `SshSession::exec_command_streaming` takes `&self`, multiple concurrent
+callers can open independent SSH channels on the **same TCP connection** simultaneously (multiplexing).
+
+#### Pool lifecycle
+
+- **Acquire**: `pool.acquire(&host)` returns a cached session if one has been used within the last 300 seconds
+  (the idle TTL). If no session exists, or the existing one has expired, a new TCP+SSH handshake is performed and the
+  session is stored in the pool.
+- **Evict**: If a caller detects a connection-level error, it calls `pool.evict(&host_id)` so the next request
+  establishes a fresh connection rather than reusing the stale one.
+- **Disconnect**: On shutdown, `pool.disconnect_all()` sends a clean SSH disconnect to every remote host instead of
+  silently dropping the sockets.
+
+#### Session sharing with `Arc`
+
+`pool.acquire()` returns `Arc<SshSession>`. The pool keeps one `Arc` internally; callers hold a second clone for the
+duration of their operation. For update tasks spawned by `handle_execute_update()`, the executor carries its own `Arc`
+clone so the SSH connection stays alive until streaming output completes — independently of the pool's own reference.
 
 See [SSH Agent Secrets — SSH Session Lifecycle](../security/ssh-agent-secrets.md#ssh-session-lifecycle) for the
 security implications of this design.
@@ -349,12 +364,12 @@ specification.
    Each assignment carries role-based `PluginAssignment` entries (`detect_version` and optionally
    `fetch_releases`).
 2. SSH agent looks up the matching host in `ssh_hosts`.
-3. An SSH session is opened to that host and an `SshCommandExecutor` is constructed (wrapped with
-   `SudoAwareCommandExecutor` for privilege elevation).
+3. A session is acquired from `SshConnectionPool` (reusing an existing connection when available) and
+   an `SshCommandExecutor` is constructed (wrapped with `SudoAwareCommandExecutor` for privilege elevation).
 4. `uptrakit_agent_core::handle_check_versions()` is called with the executor; it dispatches to the
    `detect_version` plugin for installed version detection and the `fetch_releases` plugin (if present)
    for agent-side latest version resolution, then sends `version_check_results` back to the controller.
-5. The SSH session is dropped when the function returns.
+5. The caller's `Arc<SshSession>` clone is dropped; the pool retains its own clone for future reuse.
 
 ### Updates
 
@@ -362,13 +377,15 @@ specification.
    `execute_update_plugin` (required `PluginAssignment`) and optionally `detect_version_plugin`
    (for before/after installed-version detection).
 2. SSH agent looks up the matching host and rejects the message if an update is already in flight.
-3. An SSH session is opened, wrapped in `Arc<SshSession>`, and passed to `SshCommandExecutor`
-   (wrapped with `SudoAwareCommandExecutor`).
+3. A session is acquired from `SshConnectionPool` and passed (via `Arc<SshSession>`) to
+   `SshCommandExecutor` (wrapped with `SudoAwareCommandExecutor`).
 4. `uptrakit_agent_core::handle_execute_update()` spawns an async task that uses the
    `execute_update_plugin` to perform the update and the `detect_version_plugin` (if present) for
    before/after version detection. It streams `update_output` lines and sends a final
    `update_result` to the controller.
-5. The `Arc<SshSession>` keeps the SSH connection alive until the update task completes and is then dropped.
+5. The spawned task's `Arc<SshSession>` clone keeps the SSH connection alive until streaming
+   completes. The pool retains its own clone so the same connection can be reused for subsequent
+   operations once the update task finishes.
 
 ### In-Flight Update Tracking
 
@@ -381,6 +398,8 @@ delivery over the WebSocket.
 
 On shutdown, the SSH agent delegates to `uptrakit_agent_core::handle_graceful_shutdown()`, which waits for any
 in-flight update to complete before disconnecting, respecting the controller-provided `shutdown_timeout_seconds`.
+After the graceful shutdown completes, `SshConnectionPool::disconnect_all()` sends a clean SSH disconnect to every
+pooled session so remote hosts do not see silent socket drops.
 A SIGHUP signal triggers a graceful restart (drain + reconnect) rather than a hard stop.
 
 ## Host Reporting
@@ -390,7 +409,8 @@ On authenticated WebSocket connect, the SSH agent reports host information for a
 ### Collection flow
 
 1. The SSH agent iterates over all hosts in its local SQLite database.
-2. For each host, it opens an SSH connection (using the stored credentials) and executes remote commands to collect:
+2. For each host, it acquires a session from `SshConnectionPool` (establishing a new connection if none is
+   cached) and executes remote commands to collect:
    - `machine_id` — `/etc/machine-id` (Linux) or `IOPlatformUUID` (macOS)
    - `os_type` — `uname -s`
    - `os_version` — `/etc/os-release` `PRETTY_NAME` (Linux) or `sw_vers` (macOS)

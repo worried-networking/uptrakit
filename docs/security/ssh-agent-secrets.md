@@ -235,19 +235,36 @@ For details on how the CLI host management subcommands work, see [SSH Agent Host
 
 ## SSH Session Lifecycle
 
-Each version check and update operation opens a **dedicated SSH session** — there is no persistent SSH connection
-pool.
+The SSH agent maintains a **persistent connection pool** (`SshConnectionPool`) — one authenticated session per
+enrolled host. Sessions are reused across `CheckVersions`, `ExecuteUpdate`, `DiscoverSoftware`, and `ReportHosts`
+operations, eliminating repeated TCP+SSH handshakes.
 
-- The session is created when the controller sends a `CheckVersions` or `ExecuteUpdate` message to the SSH agent.
-- For version checks, the session is dropped immediately when `handle_check_versions()` returns.
-- For updates, the `SshCommandExecutor` holds the session via `Arc<SshSession>` for the duration of the update task.
-  The connection remains open until the task completes (streaming all output lines), after which the `Arc` is dropped
-  and the session is closed.
-- The SSH private key is decrypted from the local `ssh_hosts` database only when establishing a session. Plaintext key
-  material exists only in process memory during active operations and is never written to disk or logged.
+### Pool behaviour
 
-This design minimises the window during which a live SSH connection and plaintext key material are present in memory,
-reducing the impact of a process-level compromise.
+- **Session acquisition**: `pool.acquire(&host)` returns a cached `Arc<SshSession>` if the session was used within
+  the last 300 seconds. An expired or absent session triggers a new TCP+SSH handshake.
+- **Session eviction**: If a caller detects a connection-level error, it calls `pool.evict(&host_id)` to remove the
+  stale entry. The next `acquire` for that host establishes a fresh connection.
+- **Shutdown**: `pool.disconnect_all()` sends a clean SSH disconnect to every pooled session during service shutdown,
+  avoiding silent socket drops on remote hosts.
+
+### Key material exposure
+
+The SSH private key is decrypted from the local `ssh_hosts` database **only when establishing a new session**.
+Plaintext key material exists only in process memory during the TCP+SSH handshake and is never written to disk or
+logged. Pooled sessions do not hold any plaintext key material — only the established cryptographic session state.
+
+For Docker plugin operations over SSH, `build_connection_context()` writes the decrypted private key to a
+temporary file (`$TMPDIR/uptrakit-ssh-key-<host-id>`) with 0o600 permissions so that bollard's `connect_with_ssh()`
+can authenticate using the stored host key. The file is deleted via a `Drop` implementation (`SecureKeyFile`) as soon
+as the last clone of the `ConnectionContext` is dropped (after the operation or spawned task completes).
+
+### Tradeoff: persistent connections vs. minimal exposure window
+
+The persistent pool increases the window during which a live SSH connection is present in process memory (sessions
+stay alive up to 300 seconds after last use). In exchange, it eliminates repeated plaintext key decryption and
+handshake overhead per operation. The key material exposure window is unchanged — keys are decrypted only on new
+connections, not on pool reuse.
 
 See [SSH Agent Architecture — Version Check and Update Execution](../architecture/ssh-agent.md#version-check-and-update-execution)
 for the full dispatch flow.
