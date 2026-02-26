@@ -2,7 +2,7 @@ use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
 // Canonical types from shared-types with feature-gated SeaORM derives.
-pub use uptrakit_shared_types::{ServiceStatus, ServiceType};
+pub use uptrakit_shared_types::ServiceStatus;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "services")]
@@ -10,7 +10,8 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub tenant_id: Uuid,
-    pub service_type: ServiceType,
+    #[sea_orm(column_type = "Text")]
+    pub capabilities: String,
     pub hostname: String,
     pub friendly_name: String,
     pub ip_address: Option<String>,

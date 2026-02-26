@@ -633,10 +633,10 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Services::Id).uuid().not_null().primary_key())
                     .col(ColumnDef::new(Services::TenantId).uuid().not_null())
                     .col(
-                        ColumnDef::new(Services::ServiceType)
-                            .string()
+                        ColumnDef::new(Services::Capabilities)
+                            .text()
                             .not_null()
-                            .default("agent"),
+                            .default("[]"),
                     )
                     .col(string(Services::Hostname))
                     .col(string(Services::FriendlyName))
@@ -675,27 +675,6 @@ impl MigrationTrait for Migration {
                     .name("idx_services_tenant_id")
                     .table(Services::Table)
                     .col(Services::TenantId)
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_services_service_type")
-                    .table(Services::Table)
-                    .col(Services::ServiceType)
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_services_tenant_id_service_type")
-                    .table(Services::Table)
-                    .col(Services::TenantId)
-                    .col(Services::ServiceType)
                     .to_owned(),
             )
             .await?;
@@ -1861,7 +1840,7 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(ControllerEvents::TargetServiceId).uuid())
-                    .col(ColumnDef::new(ControllerEvents::TargetServiceType).text())
+                    .col(ColumnDef::new(ControllerEvents::TargetCapability).text())
                     .col(
                         ColumnDef::new(ControllerEvents::MessageJson)
                             .json()
@@ -2390,7 +2369,7 @@ enum Services {
     Table,
     Id,
     TenantId,
-    ServiceType,
+    Capabilities,
     Hostname,
     FriendlyName,
     IpAddress,
@@ -2650,7 +2629,7 @@ enum ControllerEvents {
     Id,
     SourceControllerId,
     TargetServiceId,
-    TargetServiceType,
+    TargetCapability,
     MessageJson,
     CreatedAt,
 }
