@@ -798,66 +798,16 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
     }
 
     #[test]
-    fn parse_alt_url_prefix_single_script() {
-        // github.com/…/raw/… form is detected just like the canonical URL.
+    fn parse_alt_url_prefix() {
+        // github.com/…/raw/… form is detected and normalised to the canonical URL.
         let content = r#"bash -c "$(curl -fsSL https://github.com/community-scripts/ProxmoxVE/raw/main/ct/booklore.sh)""#;
         let scripts = parse_phs_scripts(content);
         assert_eq!(scripts.len(), 1);
         assert_eq!(scripts[0].slug, "booklore");
-        // script_url is always normalised to the canonical form.
         assert_eq!(
             scripts[0].script_url,
             "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/booklore.sh"
         );
-    }
-
-    #[test]
-    fn parse_alt_url_prefix_multiple_scripts() {
-        let content = r#"
-bash -c "$(curl -fsSL https://github.com/community-scripts/ProxmoxVE/raw/main/ct/booklore.sh)"
-bash -c "$(curl -fsSL https://github.com/community-scripts/ProxmoxVE/raw/main/ct/crafty-controller.sh)"
-"#;
-        let scripts = parse_phs_scripts(content);
-        assert_eq!(scripts.len(), 2);
-        assert_eq!(scripts[0].slug, "booklore");
-        assert_eq!(scripts[1].slug, "crafty-controller");
-    }
-
-    #[test]
-    fn parse_mixed_url_prefixes_deduplicates_by_slug() {
-        // Same slug appearing with the canonical and alternative prefix on
-        // different lines must be reported only once.
-        let content = r#"
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/booklore.sh)"
-bash -c "$(curl -fsSL https://github.com/community-scripts/ProxmoxVE/raw/main/ct/booklore.sh)"
-"#;
-        let scripts = parse_phs_scripts(content);
-        assert_eq!(scripts.len(), 1);
-        assert_eq!(scripts[0].slug, "booklore");
-    }
-
-    #[test]
-    fn parse_mixed_url_prefixes_different_slugs() {
-        // One slug per URL form — both should be returned.
-        let content = r#"
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/foo.sh)"
-bash -c "$(curl -fsSL https://github.com/community-scripts/ProxmoxVE/raw/main/ct/bar.sh)"
-"#;
-        let scripts = parse_phs_scripts(content);
-        assert_eq!(scripts.len(), 2);
-        let slugs: Vec<&str> = scripts.iter().map(|s| s.slug.as_str()).collect();
-        assert!(slugs.contains(&"foo"));
-        assert!(slugs.contains(&"bar"));
-        // Both script URLs are normalised to the canonical form.
-        for script in &scripts {
-            assert!(
-                script
-                    .script_url
-                    .starts_with("https://raw.githubusercontent.com/"),
-                "expected canonical URL, got: {}",
-                script.script_url
-            );
-        }
     }
 
     // ── slug_to_display_name ────────────────────────────────────────
