@@ -315,10 +315,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
             if let Some(helper) = &entry.helper_script {
                 // Install the helper script then use its known path directly
                 // as the sudoers command — no `command -v` resolution needed.
-                println!(
-                    "  Installing helper script '{}'...",
-                    helper.install_path
-                );
+                println!("  Installing helper script '{}'...", helper.install_path);
                 install_helper_script(&session, helper, use_sudo).await?;
                 resolved.push(ResolvedSudoCommand {
                     command_path: helper.install_path.to_string(),

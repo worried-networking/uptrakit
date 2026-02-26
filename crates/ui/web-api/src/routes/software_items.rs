@@ -13,8 +13,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, RelationTrait, Set,
-    prelude::Expr,
+    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, RelationTrait, Set, prelude::Expr,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -191,7 +190,10 @@ async fn run_controller_fetch_jobs(
             }
         };
 
-        let latest = releases.iter().find(|r| !r.is_prerelease).or(releases.first());
+        let latest = releases
+            .iter()
+            .find(|r| !r.is_prerelease)
+            .or(releases.first());
         let Some(latest) = latest else {
             tracing::debug!(
                 plugin_type = ?job.plugin_type,
@@ -202,8 +204,7 @@ async fn run_controller_fetch_jobs(
         };
 
         let latest_version_str = latest.version.to_string();
-        let release_metadata =
-            serde_json::to_value(latest).unwrap_or(serde_json::Value::Null);
+        let release_metadata = serde_json::to_value(latest).unwrap_or(serde_json::Value::Null);
 
         tracing::debug!(
             plugin_type = ?job.plugin_type,
@@ -913,13 +914,16 @@ pub async fn check_versions(
     // Phase 1: Collect controller-side fetch_releases jobs, deduplicated by
     // (plugin_config_id, package_identifier).
     let mut controller_job_map: HashMap<(Uuid, String), ControllerFetchJob> = HashMap::new();
-    for pa in plugin_assignments.iter().filter(|pa| pa.role == "fetch_releases") {
+    for pa in plugin_assignments
+        .iter()
+        .filter(|pa| pa.role == "fetch_releases")
+    {
         let Some(config_model) = configs.get(&pa.plugin_config_id) else {
             continue;
         };
-        let Ok(plugin_type) = serde_json::from_value::<PluginType>(
-            serde_json::Value::String(config_model.plugin_type.clone()),
-        ) else {
+        let Ok(plugin_type) = serde_json::from_value::<PluginType>(serde_json::Value::String(
+            config_model.plugin_type.clone(),
+        )) else {
             continue;
         };
         let merged =
@@ -971,9 +975,9 @@ pub async fn check_versions(
             .get(&(link.host_id, "fetch_releases".to_string()))
             .and_then(|p| {
                 let config_model = configs.get(&p.plugin_config_id)?;
-                let plugin_type: PluginType = serde_json::from_value(
-                    serde_json::Value::String(config_model.plugin_type.clone()),
-                )
+                let plugin_type: PluginType = serde_json::from_value(serde_json::Value::String(
+                    config_model.plugin_type.clone(),
+                ))
                 .ok()?;
                 let merged = crate::update_hooks::merge_config(
                     &config_model.config,
@@ -1017,7 +1021,10 @@ pub async fn check_versions(
     }
 
     let message = match (agents_notified, controller_checks_run) {
-        (a, 0) => format!("Version check triggered for '{}' on {a} agent(s)", item.name),
+        (a, 0) => format!(
+            "Version check triggered for '{}' on {a} agent(s)",
+            item.name
+        ),
         (0, c) => format!(
             "Version check completed for '{}' ({c} controller-side fetch(es))",
             item.name
@@ -1153,9 +1160,9 @@ pub async fn check_versions_host(
         let Some(config) = find_raw_active_config(&tenant_db, plugin.plugin_config_id).await else {
             continue;
         };
-        let Ok(plugin_type) = serde_json::from_value::<PluginType>(
-            serde_json::Value::String(config.plugin_type.clone()),
-        ) else {
+        let Ok(plugin_type) = serde_json::from_value::<PluginType>(serde_json::Value::String(
+            config.plugin_type.clone(),
+        )) else {
             tracing::error!("Unknown plugin type: {}", config.plugin_type);
             continue;
         };

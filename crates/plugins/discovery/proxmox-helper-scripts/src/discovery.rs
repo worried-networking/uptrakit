@@ -14,8 +14,7 @@ const PHS_CT_URL_PREFIX: &str =
 /// instead of `raw.githubusercontent.com`. Both URLs serve identical content;
 /// this prefix is recognised during detection and the resulting slug is always
 /// fetched via the canonical [`PHS_CT_URL_PREFIX`] URL.
-const PHS_CT_URL_PREFIX_ALT: &str =
-    "https://github.com/community-scripts/ProxmoxVE/raw/main/ct/";
+const PHS_CT_URL_PREFIX_ALT: &str = "https://github.com/community-scripts/ProxmoxVE/raw/main/ct/";
 
 /// Base URL prefix for PHS community-scripts install scripts.
 pub const PHS_INSTALL_URL_PREFIX: &str =

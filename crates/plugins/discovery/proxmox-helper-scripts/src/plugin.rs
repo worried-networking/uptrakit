@@ -133,11 +133,8 @@ impl ProxmoxHelperScriptsPlugin {
         let output = self
             .executor
             .execute_quiet(
-                &CommandSpec::exec(
-                    PHS_VERSION_HELPER_PATH,
-                    [version_file_basename.to_string()],
-                )
-                .privileged(),
+                &CommandSpec::exec(PHS_VERSION_HELPER_PATH, [version_file_basename.to_string()])
+                    .privileged(),
             )
             .await
             .ok()?;

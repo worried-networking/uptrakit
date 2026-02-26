@@ -10,9 +10,7 @@ use uptrakit_openapi_client::types::software_items::TriggerVersionCheckResponse;
 
 impl HumanOutput for TriggerVersionCheckResponse {
     fn to_human_string(&self) -> String {
-        let mut lines = vec![
-            format!("Agents notified: {}", self.agents_notified),
-        ];
+        let mut lines = vec![format!("Agents notified: {}", self.agents_notified)];
         if self.controller_checks_run > 0 {
             lines.push(format!(
                 "Controller-side checks run: {}",
@@ -124,9 +122,6 @@ mod tests {
         assert!(s.contains("0"), "agents_notified missing");
         assert!(s.contains("2"), "controller_checks_run missing");
         assert!(s.contains("Controller-side checks run"), "label missing");
-        assert!(
-            s.contains("controller-side"),
-            "message missing"
-        );
+        assert!(s.contains("controller-side"), "message missing");
     }
 }

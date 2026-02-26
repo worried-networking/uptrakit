@@ -1542,13 +1542,8 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
 
-        let result = phs_result_with_two_targets(
-            "booklore",
-            "BookLore",
-            "1.18.5",
-            "BookLore",
-            "BookLore",
-        );
+        let result =
+            phs_result_with_two_targets("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
 
         process_plugin_result(&db, tenant_id, host_id, now, &result)
             .await
@@ -1570,7 +1565,11 @@ mod tests {
             .all(&db)
             .await
             .expect("query host_software_items");
-        assert_eq!(hsi.len(), 1, "expected exactly one host_software_items link");
+        assert_eq!(
+            hsi.len(),
+            1,
+            "expected exactly one host_software_items link"
+        );
 
         // Exactly two plugin_configs: releases_github + generic_shell.
         let configs = PluginConfig::find()

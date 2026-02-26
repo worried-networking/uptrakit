@@ -90,10 +90,7 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
             if let Some(helper) = &entry.helper_script {
                 // Install the helper script then use its known path directly
                 // as the sudoers command — no `command -v` resolution needed.
-                println!(
-                    "  Installing helper script '{}'...",
-                    helper.install_path
-                );
+                println!("  Installing helper script '{}'...", helper.install_path);
                 install_helper_script(&session, helper, privileged).await?;
                 resolved.push(ResolvedSudoCommand {
                     command_path: helper.install_path.to_string(),

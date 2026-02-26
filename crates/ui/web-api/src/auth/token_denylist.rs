@@ -77,13 +77,16 @@ impl TokenDenylist {
     /// `iat_cutoff` wins (monotonically advancing revocation).
     pub async fn deny_user(&self, user_id: Uuid, iat_cutoff: i64, purge_after: i64) {
         let mut inner = self.inner.write().await;
-        let entry = inner
-            .user_entries
-            .entry(user_id)
-            .or_insert(UserDenyEntry { iat_cutoff: 0, purge_after: 0 });
+        let entry = inner.user_entries.entry(user_id).or_insert(UserDenyEntry {
+            iat_cutoff: 0,
+            purge_after: 0,
+        });
         // Keep the most recent revocation (furthest-forward iat_cutoff).
         if iat_cutoff > entry.iat_cutoff {
-            *entry = UserDenyEntry { iat_cutoff, purge_after };
+            *entry = UserDenyEntry {
+                iat_cutoff,
+                purge_after,
+            };
         }
     }
 
@@ -118,7 +121,9 @@ impl TokenDenylist {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let mut inner = self.inner.write().await;
         inner.jti_entries.retain(|_, exp| *exp > now);
-        inner.user_entries.retain(|_, entry| entry.purge_after > now);
+        inner
+            .user_entries
+            .retain(|_, entry| entry.purge_after > now);
     }
 }
 
@@ -205,7 +210,11 @@ mod tests {
         denylist.purge_expired().await;
 
         // Entry should still be present — tokens before iat_cutoff are still denied
-        assert!(denylist.is_denied("jti-old", &user_id, iat_cutoff - 1).await);
+        assert!(
+            denylist
+                .is_denied("jti-old", &user_id, iat_cutoff - 1)
+                .await
+        );
         // But tokens at or after iat_cutoff are allowed
         assert!(!denylist.is_denied("jti-new", &user_id, iat_cutoff).await);
     }
