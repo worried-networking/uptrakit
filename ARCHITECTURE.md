@@ -69,7 +69,7 @@ Each assignment carries an `execution_site` column (`auto` | `agent` | `controll
 | `github_releases` | `uptrakit-plugin-github` | Controller (GitHub API) | No | Tracks GitHub release tags; `ControllerSideFetchReleases` capability |
 | `docker` | `uptrakit-plugin-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers; `ControllerSideFetchReleases` capability |
 | `homebrew` | `uptrakit-plugin-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks; detects host compatibility |
-| `proxmox_helper_scripts` | `uptrakit-plugin-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only) |
+| `proxmox_helper_scripts` | `uptrakit-plugin-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins) |
 | `apt` | `uptrakit-plugin-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
 
 Plugins with a local package index (`homebrew`, `proxmox_helper_scripts`, `apt`) resolve both installed and latest versions on the agent.

@@ -378,33 +378,61 @@ rediscovery, omit the `?ignore=true` parameter.
 
 ---
 
-## PHS Discovery and Config Synthesis
+## Plugin-Driven Discovery Targets
 
-When the PHS plugin (`proxmox_helper_scripts`) returns discovery results, each item's `extra`
-field carries metadata that the controller uses to synthesize a downstream plugin config:
+Discovery results use structured `DiscoveryTarget` values instead of opaque `extra` metadata.
+Each `DiscoveredSoftware` item carries a `targets` array that tells the controller exactly which
+plugin configs and role assignments to create. The controller processes these generically — no
+plugin-specific synthesis logic exists in the web-API layer.
 
-| `extra` field | Outcome |
+### Processing rules
+
+The controller routes each discovered item through one of two paths:
+
+| Condition | Processing |
 | --- | --- |
-| `"github_owner"` + `"github_repo"` | Controller finds or creates a `github_releases` config for `owner/repo` with PHS-specific `detect_installed_version_command` and `install_command`. Software item is linked to this GitHub config via role-specific plugin rows. |
-| `"apt_package"` | Controller finds or creates a shared `"APT (auto)"` config (`{}`). Software item's `package_identifier` is the Debian package name. |
-| Neither | Item is skipped (warned in agent log). |
+| `targets` is non-empty | For each target: find-or-create the plugin config matching `(plugin_type, plugin_config)`, then create role assignments per `target.roles`. |
+| `targets` is empty, `plugin_config_id` is set | Use the discovering plugin's own config for all three roles (`detect_version`, `fetch_releases`, `execute_update`). |
 
-The PHS plugin config itself is never directly linked to `host_software_item_plugins` -- it is used
-only as the discovery trigger. All version tracking and update execution happen through the synthesized
+### PHS discovery targets
+
+The PHS plugin (`proxmox_helper_scripts`) always emits `DiscoveryTarget` values. It analyzes
+each container's CT script and builds targets:
+
+| Script analysis result | `DiscoveryTarget` emitted |
+| --- | --- |
+| GitHub repository detected | `plugin_type: github_releases`, config with `owner`, `repo`, `detect_installed_version_command`, `install_command`. Name: `"{owner}/{repo}"`. |
+| APT package detected | `plugin_type: apt`, config: `{}`. Name: `"APT (auto)"`. |
+| Neither detected | Item skipped (warning logged on agent). |
+
+The PHS plugin config itself is never directly linked to `host_software_item_plugins` — it is used
+only as the discovery trigger. All version tracking and update execution happen through the target
 configs.
+
+### Homebrew discovery targets
+
+The Homebrew plugin in discover-all mode (no pre-existing config) emits per-item targets:
+
+| Package type | `DiscoveryTarget` emitted |
+| --- | --- |
+| Formula | `plugin_type: homebrew`, config: `{"package_type": "formula"}`. Name: `"Homebrew (Formulae)"`. |
+| Cask | `plugin_type: homebrew`, config: `{"package_type": "cask"}`. Name: `"Homebrew (Casks)"`. |
+
+When running with an existing config (pre-created with a specific `package_type`), targets are
+empty and the controller uses the config-ID path.
 
 ### Role plugin rows created by autodiscovery
 
-When autodiscovery processes a result, it creates up to three `host_software_item_plugins` rows
-per discovery result -- one for each role:
+When autodiscovery processes a target, it creates `host_software_item_plugins` rows for each role
+listed in `target.roles` (typically all three):
 
 | Role | Plugin config | Description |
 | --- | --- | --- |
-| `detect_version` | Synthesized config (e.g. `github_releases` or `apt`) | Detects the installed version on the agent host |
-| `fetch_releases` | Synthesized config (same as above) | Fetches the latest available upstream version |
-| `execute_update` | Synthesized config (same as above) | Executes the actual software update |
+| `detect_version` | Target config (e.g. `github_releases` or `apt`) | Detects the installed version on the agent host |
+| `fetch_releases` | Target config (same as above) | Fetches the latest available upstream version |
+| `execute_update` | Target config (same as above) | Executes the actual software update |
 
-For PHS discoveries with a `github_releases` synthesized config, the `fetch_releases` role
+For PHS discoveries with a `github_releases` target config, the `fetch_releases` role
 typically runs controller-side (via the scheduler) because the GitHub Releases plugin has the
 `ControllerSideFetchReleases` capability. The `execution_site` column defaults to `"auto"`, which
 lets the system decide based on plugin capabilities.

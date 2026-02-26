@@ -66,7 +66,7 @@ uptrakit/
 │   │   ├── docker/                     # uptrakit-plugin-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; ssh feature gates bollard/ssh
 │   │   ├── github/                     # uptrakit-plugin-github                 (lib)  — GitHub Releases plugin
 │   │   ├── homebrew/                   # uptrakit-plugin-homebrew               (lib)  — Homebrew formulae/cask plugin; implements DetectHostCompatibility (checks `which brew`)
-│   │   ├── proxmox-helper-scripts/     # uptrakit-plugin-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/APT upstream, emits extra metadata for controller-side config synthesis)
+│   │   ├── proxmox-helper-scripts/     # uptrakit-plugin-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/APT upstream, emits DiscoveryTarget values for generic controller processing)
 │   │   ├── apt/                        # uptrakit-plugin-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required)
 │   │   └── registry/                   # uptrakit-plugin-registry               (lib)  — plugin dispatch & validation; ssh feature propagates to uptrakit-plugin-docker/ssh → bollard/ssh
 │   ├── shared/
@@ -275,23 +275,39 @@ for user review. Key invariants:
    endpoints (`DELETE /api/v1/hosts/{id}/discovered`, `DELETE /api/v1/plugin-configs/{id}/discovered`) also
    perform plain soft-deletes — no ignore rules created.
 
-4. **Auto-created PluginConfigs.** When no `PluginConfig` exists for a discovery-capable type at trigger time,
-   the agent receives a default (empty-config) assignment. Results come back with `extra` metadata (e.g.
-   `{"package_type":"formula"}` for Homebrew or `{"containers":["mycontainer"]}` for Docker).
-   The controller auto-creates named configs: `"Docker"`, `"Homebrew (Formulae)"`,
-   `"Homebrew (Casks)"`, `"APT"`.
+4. **Plugin-driven discovery targets.** Discovery results use structured `DiscoveryTarget` values
+   (`crates/shared/types/src/discovery_target.rs`) instead of opaque `extra` metadata. Each
+   `DiscoveredSoftware` item can carry a `targets: Vec<DiscoveryTarget>` that tells the controller
+   exactly which plugin configs and role assignments to create — no plugin-specific synthesis logic
+   in the web-API.
 
-   **PHS (Proxmox Helper Scripts) is a special case.** The PHS plugin is discovery-only. During
-   discovery, it fetches each container's CT script from `raw.githubusercontent.com` and analyzes it:
-   - GitHub-managed apps emit `extra: {"github_owner": "...", "github_repo": "..."}`. The controller
-     auto-creates a `github_releases` plugin config per `(owner, repo)` pair, pre-configured with
-     `detect_installed_version_command` (reads `$HOME/.{slug}`) and `install_command`
-     (`env PHS_SILENT=1 /usr/bin/update`). The `package_identifier` on the `SoftwareItem` is the PHS slug.
-   - APT-managed apps emit `extra: {"apt_package": "..."}`. The controller reuses (or creates) a shared
-     `"APT (auto)"` plugin config. The `package_identifier` is the Debian package name.
+   The controller processes discovery results generically via two paths:
+   - **Target-based** (non-empty `targets`): for each target, find-or-create the plugin config and
+     create role assignments per the target's `roles` list.
+   - **Config-ID-based** (empty `targets`, `plugin_config_id` set): use the discovering plugin's own
+     config for all three roles.
+
+   **PHS (Proxmox Helper Scripts)** always emits `DiscoveryTarget` values. During discovery, it
+   fetches each container's CT script from `raw.githubusercontent.com` and analyzes it:
+   - GitHub-managed apps emit a `DiscoveryTarget` with `plugin_type: GithubReleases`, config
+     containing `owner`, `repo`, `detect_installed_version_command` (reads `$HOME/.{slug}`), and
+     `install_command` (`env PHS_SILENT=1 /usr/bin/update`). The PHS constants live in
+     `crates/plugins/proxmox-helper-scripts/src/discovery.rs`.
+   - APT-managed apps emit a `DiscoveryTarget` with `plugin_type: Apt`, empty config `{}`, and
+     name `"APT (auto)"`.
    - Apps whose scripts contain neither GitHub patterns nor a specific `apt install` line are skipped.
    The PHS plugin config itself (`proxmox_helper_scripts`, always `{}`) is retained as an anchor for
    discovery runs but never linked directly to `SoftwareItem` host assignments.
+
+   **Homebrew** in discover-all mode (no pre-existing config) emits per-item `DiscoveryTarget` values
+   with `plugin_type: Homebrew` and config `{"package_type": "formula"}` or `{"package_type": "cask"}`,
+   plus display names `"Homebrew (Formulae)"` and `"Homebrew (Casks)"`. When running with an existing
+   config, targets are empty and the controller uses the config-ID path.
+
+   **Docker and APT** emit empty `targets` when running with an existing config (config-ID path).
+
+   The `extra` field on `DiscoveredSoftware` is purely informational metadata (e.g. Docker's
+   `{"containers": ["web-server"]}`) — the controller never interprets it for config synthesis.
 
 5. **Discovery capability is derived from the registry.** Call `state.plugin_ops.discovery_plugin_types()`
    (or `PluginRegistry::discovery_plugin_types()` statically) to get the current list of discovery-capable
@@ -348,7 +364,8 @@ for user review. Key invariants:
 | --- | --- |
 | `crates/shared/types/src/plugin_role.rs` | `PluginRole` enum (`DetectVersion`, `FetchReleases`, `ExecuteUpdate`, `Other`) |
 | `crates/shared/types/src/software_discovery_state.rs` | `SoftwareDiscoveryState` enum |
-| `crates/shared/types/src/discovered_software.rs` | Unified `DiscoveredSoftware` type |
+| `crates/shared/types/src/discovered_software.rs` | `DiscoveredSoftware` type (with `targets: Vec<DiscoveryTarget>`) |
+| `crates/shared/types/src/discovery_target.rs` | `DiscoveryTarget` struct (plugin type, config, name, roles, overrides) |
 | `crates/shared/db/src/entity/host_software_item_plugin.rs` | SeaORM entity for role-based plugin assignments |
 | `crates/shared/db/src/entity/autodiscovery_ignore.rs` | SeaORM entity for ignore rules |
 | `crates/shared/agent-core/src/discovery.rs` | `handle_discover_software()` agent-side logic |

@@ -273,11 +273,11 @@ Main functionality that delivers the core value proposition.
 - [x] Regular agent and SSH agent support for `DiscoverSoftware`
 - [x] Controller `DiscoveryResults` handler with auto-creation of `PluginConfig` records
 - [x] Plugin capability check via `PluginCapability::DiscoverLocalSoftware`
-- [x] Homebrew: discover all (formulae + casks) when `package_type = None`; set `extra` metadata
-- [ ] Proxmox Helper Scripts: move synthesis responsibility into providers
-  - [ ] Provider discovery response must declare final tracking target (`provider_type`, config identity/selection key, package identifier)
-  - [ ] Web API autodiscovery consumer must rely on provider response contract instead of provider-specific synthesis logic
-  - [ ] Remove controller-side PHS-specific synthesis branching after provider contract is implemented
+- [x] Homebrew: discover all (formulae + casks) when `package_type = None`; emit `DiscoveryTarget` per item
+- [x] Proxmox Helper Scripts: move synthesis responsibility into plugins via `DiscoveryTarget`
+  - [x] Plugin discovery response declares final tracking target (`DiscoveryTarget` with plugin type, config, roles)
+  - [x] Web API autodiscovery consumer processes targets generically instead of plugin-specific synthesis logic
+  - [x] Removed controller-side PHS-specific synthesis branching (`process_phs_results`, `process_homebrew_default`)
 - [x] REST API for autodiscovery
   - [x] `POST /api/v1/software-items/{id}/approve`
   - [x] `POST /api/v1/hosts/{id}/discover`

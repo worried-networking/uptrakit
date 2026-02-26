@@ -195,8 +195,9 @@ and is not sent to the agent.
 ```
 
 `plugin_config_id` is `null` for auto-discovery runs where no pre-existing `PluginConfig` exists for the plugin
-type. In that case the agent uses the default/empty config and annotates each result with `extra` metadata (e.g.
-`{"package_type":"formula"}`). The controller creates the appropriate `PluginConfig` records from this metadata.
+type. In that case the agent uses the default/empty config and plugins emit `DiscoveryTarget` values inside
+each `DiscoveredSoftware` item's `targets` array. The controller creates the appropriate `PluginConfig` records
+from these structured targets.
 
 Known `plugin_type` values for discovery: `homebrew`, `proxmox_helper_scripts`, `apt`.
 
@@ -209,14 +210,33 @@ Known `plugin_type` values for discovery: `homebrew`, `proxmox_helper_scripts`, 
   "host_machine_id": "abc-123",
   "results": [
     {
+      "plugin_config_id": null,
+      "plugin_type": "proxmox_helper_scripts",
+      "discoveries": [
+        {
+          "package_identifier": "booklore",
+          "name": "BookLore",
+          "installed_version": "1.18.5",
+          "targets": [
+            {
+              "plugin_type": "github_releases",
+              "plugin_config": { "owner": "BookLore", "repo": "BookLore" },
+              "plugin_config_name": "BookLore/BookLore",
+              "roles": ["detect_version", "fetch_releases", "execute_update"]
+            }
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
       "plugin_config_id": "550e8400-...",
       "plugin_type": "homebrew",
       "discoveries": [
         {
           "package_identifier": "wget",
           "name": "Wget",
-          "installed_version": "1.21.4",
-          "extra": { "package_type": "formula" }
+          "installed_version": "1.21.4"
         }
       ],
       "error": null
@@ -225,21 +245,30 @@ Known `plugin_type` values for discovery: `homebrew`, `proxmox_helper_scripts`, 
 }
 ```
 
-#### PHS discovery `extra` field
+#### `DiscoveredSoftware` fields
 
-When `plugin_type` is `proxmox_helper_scripts`, the `extra` object on each `DiscoveredSoftware`
-item carries metadata used by the controller to synthesize downstream plugin configs:
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `package_identifier` | string | Yes | Plugin-specific package identifier |
+| `name` | string | Yes | Human-readable display name |
+| `installed_version` | string | Yes | Currently installed version |
+| `targets` | `DiscoveryTarget[]` | No | Structured targets for plugin config creation (empty = use discovering plugin's config) |
+| `extra` | object | No | Informational metadata only (e.g. Docker's container names). Not used for config synthesis. |
 
-| `extra` key | Type | Meaning |
-| --- | --- | --- |
-| `"github_owner"` | string | GitHub repository owner extracted from the CT script |
-| `"github_repo"` | string | GitHub repository name extracted from the CT script |
-| `"apt_package"` | string | Debian package name extracted from the CT script or install script |
+#### `DiscoveryTarget` fields
 
-The controller dispatches on these fields in `process_phs_results()` to create the appropriate
-`github_releases` or `apt` plugin config. Items with neither field are skipped.
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `plugin_type` | string | Yes | Target plugin type (may differ from discovering plugin) |
+| `plugin_config` | object | Yes | Config JSON for find-or-create of the target plugin config |
+| `plugin_config_name` | string | Yes | Display name for auto-created plugin config |
+| `roles` | `string[]` | Yes | Which roles this target covers (e.g. `["detect_version", "fetch_releases", "execute_update"]`) |
+| `package_identifier` | string | No | Package identifier override (default: same as parent item) |
+| `config_override` | object | No | Per-assignment config override |
+| `execution_site` | string | No | Execution site hint (`"auto"`, `"agent"`, `"controller"`; default: `"auto"`) |
 
-See [docs/api/autodiscovery.md](autodiscovery.md#phs-discovery-and-config-synthesis) for details.
+See [docs/api/autodiscovery.md](autodiscovery.md#plugin-driven-discovery-targets) for the full
+processing rules and plugin-specific target patterns.
 
 See [docs/api/autodiscovery.md](autodiscovery.md) for the full autodiscovery workflow.
 

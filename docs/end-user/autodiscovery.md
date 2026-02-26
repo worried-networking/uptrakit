@@ -15,17 +15,17 @@ sends a discovery request to that agent. The agent queries each of its discovery
 and returns a list of installed packages. The controller then creates software items in a `pending`
 state for any packages it has not seen before.
 
-Discovery results carry the plugin config and package identifier used to detect the package.
-When a discovered item is approved, the controller creates **three role-based plugin assignments**
-for the host:
+Discovery results carry structured **discovery targets** that tell the controller exactly which
+plugin config and roles to create. When a discovered item is approved, the controller creates
+role-based plugin assignments for the host based on the targets:
 
 | Role | Assignment |
 | --- | --- |
-| `detect_version` | Uses the discovering plugin config to detect the installed version on the host. |
-| `fetch_releases` | Uses the same (or a synthesized) plugin config to fetch the latest upstream version. |
-| `execute_update` | Uses the same (or a synthesized) plugin config to run updates. |
+| `detect_version` | Uses the target plugin config to detect the installed version on the host. |
+| `fetch_releases` | Uses the target plugin config to fetch the latest upstream version. |
+| `execute_update` | Uses the target plugin config to run updates. |
 
-All three assignments default to `execution_site: auto`, meaning the system decides where each
+All assignments default to `execution_site: auto`, meaning the system decides where each
 operation runs based on the plugin's capabilities. Plugins that support controller-side release
 fetching (GitHub Releases, Docker) will have their `fetch_releases` role executed on the controller
 automatically. Plugins that require a local package index (Homebrew, APT) always run on the agent.
@@ -39,35 +39,40 @@ Discovery-capable plugins currently supported:
 
 | Plugin | What it discovers |
 | --- | --- |
+| APT | Debian/Ubuntu packages installed via APT |
 | Docker | Running and stopped containers on the host, grouped by image reference |
 | Homebrew (Formulae) | Homebrew formula packages installed on the host |
 | Homebrew (Casks) | Homebrew cask packages installed on the host |
 | Proxmox Helper Scripts | Applications managed by community Proxmox VE helper scripts |
 
-If no plugin config exists for a discovery-capable plugin when a host registers, Uptrakit
-creates one automatically (for example, `"Docker"`, `"Homebrew (Formulae)"`, or
-`"Proxmox Helper Scripts"`). This means the feature works out of the box on supported hosts with
-no manual configuration required.
+If no plugin config exists for a discovery-capable plugin when a host registers, the plugin
+emits **discovery targets** that tell the controller which plugin configs to create automatically
+(for example, `"Docker"`, `"Homebrew (Formulae)"`, or `"Proxmox Helper Scripts"`). This means
+the feature works out of the box on supported hosts with no manual configuration required.
 
 ### Proxmox Helper Scripts discovery
 
 PHS discovery works differently from other plugins. Instead of creating software items linked
-to the PHS plugin config, it analyses each container's CT script to identify the upstream source:
+to the PHS plugin config, the PHS plugin analyses each container's CT script to identify the
+upstream source and emits **discovery targets** that tell the controller which plugin config to
+create:
 
-- **GitHub-managed apps** (e.g. Booklore, Radarr, Sonarr, Pangolin, Uptime Kuma): Uptrakit
-  auto-creates a `github_releases` plugin config for the upstream repository, pre-configured to
-  read the installed version from the PHS version file (`~/.{slug}`) and to run the unattended
-  update script (`env PHS_SILENT=1 /usr/bin/update`). The software item's plugin config will be
-  the synthesized GitHub config, not the PHS config.
+- **GitHub-managed apps** (e.g. Booklore, Radarr, Sonarr, Pangolin, Uptime Kuma): The PHS plugin
+  emits a target for the `github_releases` plugin type, pre-configured with the repository owner
+  and name, the installed version detection command (`~/.{slug}`), and the unattended update script
+  (`env PHS_SILENT=1 /usr/bin/update`). The controller auto-creates the GitHub Releases plugin
+  config from the target. The software item's plugin config will be the auto-created GitHub config,
+  not the PHS config.
 
-- **APT-managed apps** (e.g. Grafana, Plex): Uptrakit finds or creates a shared `APT (auto)`
-  plugin config. The software item's `package_identifier` is the Debian package name.
+- **APT-managed apps** (e.g. Grafana, Plex): The PHS plugin emits a target for the `apt` plugin
+  type. The controller finds or creates a shared `APT (auto)` plugin config. The software item's
+  `package_identifier` is the Debian package name.
 
 - **Undetectable apps**: Apps whose scripts contain neither a GitHub release source nor a specific
   `apt install` line are skipped. A warning is logged on the agent. Check agent logs
   (`journalctl -u uptrakit-agent`) if you expect to see an app but it does not appear as pending.
 
-After approving PHS-discovered items, version checking and updates are handled by the synthesized
+After approving PHS-discovered items, version checking and updates are handled by the target
 `github_releases` or `APT` configs — not by the PHS plugin itself.
 
 Auto-created config name for the PHS discovery anchor: **`"Proxmox Helper Scripts"`**.
@@ -201,9 +206,9 @@ in the API reference.
    - Approve the items you want Uptrakit to track and update.
    - Delete items you do not need right now (re-discoverable later).
    - Ignore items you never want to see again.
-5. Approved items immediately become active: three role-based plugin assignments
-   (`detect_version`, `fetch_releases`, `execute_update`) are created with `execution_site: auto`,
-   and version checking begins on the next scheduler cycle.
+5. Approved items immediately become active: role-based plugin assignments are created per the
+   discovery targets (typically all three: `detect_version`, `fetch_releases`, `execute_update`)
+   with `execution_site: auto`, and version checking begins on the next scheduler cycle.
 
 ## Related Documentation
 

@@ -111,14 +111,25 @@ When a host registers (or discovery is manually triggered), the controller sends
 ```
 
 `plugin_config_id` is `null` for auto-discovery runs where no pre-existing plugin config exists. The
-agent uses a default/empty config and annotates results with `extra` metadata. The controller then
-auto-creates named plugin configs (`"Docker"`, `"Homebrew (Formulae)"`, `"APT"`, etc.).
+agent uses a default/empty config and plugins emit `DiscoveryTarget` values inside each
+`DiscoveredSoftware` item's `targets` array. The controller creates the appropriate `PluginConfig`
+records from these structured targets.
 
 The agent calls `PluginRegistry::create_plugin_for_discovery()` for each entry (which skips
 `validate()` to allow empty configs), then calls `discover_software()` on each plugin instance.
 
 Discovery results are sent back in a `discovery_results` message. The controller processes these in
-`process_discovery_results()` and creates pending software items for any newly discovered packages.
+`process_discovery_results()` using a generic, target-based flow:
+
+1. **Target-based path** (non-empty `targets`): For each `DiscoveryTarget`, find-or-create the
+   plugin config matching `(plugin_type, plugin_config)`, then create role assignments per
+   `target.roles`.
+2. **Config-ID path** (empty `targets`, `plugin_config_id` set): Use the discovering plugin's own
+   config for all three roles.
+
+This eliminates all plugin-specific synthesis logic from the web-API layer. Plugins are responsible
+for emitting the correct `DiscoveryTarget` values that describe how their discovered items should be
+tracked.
 
 ## The `register_plugins!` Macro
 
@@ -264,9 +275,9 @@ The `UpdateHookContext` passed to plugin hooks contains `package_identifier`, `t
   `/var/run/reboot-required`) surfaced as controller-side notifications or Home Assistant entities.
 - **"Run arbitrary commands" plugin type** — a plugin that executes user-provided shell scripts for
   both version detection and updates, enabling one-off integrations without writing a Rust crate.
-- **Formal multi-plugin-config-synthesis protocol** — a documented, stable contract for how
-  discovery-only plugins (like PHS) emit `extra` metadata that the controller uses to synthesize
-  downstream plugin configs.
+- **~~Formal multi-plugin-config-synthesis protocol~~** — completed. Plugins now emit structured
+  `DiscoveryTarget` values via `DiscoveredSoftware.targets`. The controller processes them
+  generically without plugin-specific synthesis logic.
 - **Pre-update hook abort propagation** — surface abort reasons in the update history UI.
 
 ## Related Documentation

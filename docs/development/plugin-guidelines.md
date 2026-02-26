@@ -497,11 +497,61 @@ software they can manage on the local system. Plugins that support this capabili
 | :--- | :--- | :--- |
 | `package_identifier` | `String` | Plugin-specific identifier (maps to `SoftwareItem.package_identifier`). |
 | `name` | `String` | Human-readable display name. |
-| `installed_version` | `Option<Version>` | Currently installed version, if detected. |
-| `extra` | `Option<serde_json::Value>` | Arbitrary plugin-specific metadata (for example, install path). |
+| `installed_version` | `String` | Currently installed version (required; plugins omit items with unknown versions). |
+| `targets` | `Vec<DiscoveryTarget>` | Structured targets for plugin config creation. Empty = use discovering plugin's config. |
+| `extra` | `Option<serde_json::Value>` | Informational metadata only (e.g. Docker container names). Not used for config synthesis. |
 
 The default implementation returns an empty list. Plugins that support discovery (e.g.,
 Proxmox Helper-Scripts) override this method to scan the local system.
+
+### Emitting `DiscoveryTarget` values
+
+When your plugin discovers software that should be tracked by a **different** plugin type (cross-plugin
+discovery), or when running without a pre-existing plugin config, emit `DiscoveryTarget` values in the
+`targets` field of each `DiscoveredSoftware` item:
+
+```rust
+use uptrakit_plugin_core::{DiscoveredSoftware, DiscoveryTarget, PluginRole, PluginType};
+
+DiscoveredSoftware {
+    package_identifier: "booklore".to_string(),
+    name: "BookLore".to_string(),
+    installed_version: "1.18.5".to_string(),
+    targets: vec![DiscoveryTarget {
+        plugin_type: PluginType::GithubReleases,
+        plugin_config: serde_json::json!({
+            "owner": "BookLore",
+            "repo": "BookLore",
+        }),
+        plugin_config_name: "BookLore/BookLore".to_string(),
+        roles: vec![
+            PluginRole::DetectVersion,
+            PluginRole::FetchReleases,
+            PluginRole::ExecuteUpdate,
+        ],
+        package_identifier: None,
+        config_override: None,
+        execution_site: None,
+    }],
+    extra: None,
+}
+```
+
+**When to emit targets:**
+
+- Your plugin discovers software that should be managed by a different plugin type (e.g. PHS
+  discovers GitHub-managed apps).
+- Your plugin is running in discover-all mode without a pre-existing config and needs the controller
+  to auto-create named configs (e.g. Homebrew emitting `"Homebrew (Formulae)"` / `"Homebrew (Casks)"`).
+
+**When to leave targets empty:**
+
+- Your plugin is running with an existing `plugin_config_id` and all discovered items should use
+  that config for all roles. The controller will use the config-ID-based path.
+
+The controller processes targets generically: for each target, it finds or creates a plugin config
+matching `(plugin_type, plugin_config)` and creates role assignments per `target.roles`. No
+plugin-specific synthesis logic exists in the controller.
 
 ## Testing
 
@@ -594,12 +644,20 @@ See [Docker Plugin](../end-user/plugins/docker.md) for the full end-user referen
 
 Discovery-only plugin for software installed via [Proxmox VE community helper scripts](https://github.com/community-scripts/ProxmoxVE).
 Does **not** perform version detection, upstream release fetching, or update execution. Its sole
-responsibility is to discover which PHS-managed apps are present in a container and emit metadata for
-the controller to synthesize downstream plugin configs.
+responsibility is to discover which PHS-managed apps are present in a container and emit
+`DiscoveryTarget` values that tell the controller which downstream plugin configs to create.
 
 **Config (`ProxmoxHelperScriptsConfig`):** No fields — the config is always `{}`.
 
 **Capabilities:** `DiscoverLocalSoftware` only.
 
+**Discovery targets emitted:**
+
+- GitHub-managed apps: `DiscoveryTarget { plugin_type: GithubReleases, ... }` with owner, repo,
+  `detect_installed_version_command`, and `install_command` pre-configured. Constants
+  `PHS_DETECT_VERSION_CMD` and `PHS_INSTALL_CMD` are defined in
+  `crates/plugins/proxmox-helper-scripts/src/discovery.rs`.
+- APT-managed apps: `DiscoveryTarget { plugin_type: Apt, config: {}, name: "APT (auto)" }`.
+
 Cross-reference: [PHS end-user guide](../end-user/autodiscovery.md#proxmox-helper-scripts-discovery),
-[PHS API notes](../api/autodiscovery.md#phs-discovery-and-config-synthesis).
+[PHS API notes](../api/autodiscovery.md#plugin-driven-discovery-targets).
