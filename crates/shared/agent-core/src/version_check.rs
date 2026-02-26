@@ -237,6 +237,7 @@ mod tests {
         let ctx = ConnectionContext {
             docker_host_override: Some("ssh://user@host:2222".to_string()),
             ssh_key_path: None,
+            ..Default::default()
         };
         // With a valid docker host override, the plugin is created with the
         // injected host. The check itself will fail (no daemon) but that proves

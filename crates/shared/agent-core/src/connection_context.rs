@@ -7,6 +7,8 @@
 //! be pointed at the right daemon without modifying the user-visible config JSON
 //! stored in the database.
 
+use std::sync::Arc;
+
 use uptrakit_plugin_infrastructure_registry::PluginType;
 
 /// Runtime connection details injected by the agent into plugin creation.
@@ -20,24 +22,51 @@ use uptrakit_plugin_infrastructure_registry::PluginType;
 ///
 /// # Default
 ///
-/// [`ConnectionContext::default()`] (all `None`) is used by the local `agent`
-/// and in tests — it has no effect on plugin configuration.
-#[derive(Clone, Debug, Default)]
+/// [`ConnectionContext::default()`] (all fields `None` / empty) is used by the
+/// local `agent` and in tests — it has no effect on plugin configuration.
+#[derive(Clone, Default)]
 pub struct ConnectionContext {
     /// Docker daemon endpoint (overrides `DockerConfig.docker_host` when not
     /// already set by the user in their config).
     ///
     /// Populated by `agent-ssh`:
-    /// `"ssh://user@host:port"` — points bollard at the remote daemon.
+    /// `"ssh://user@host:port"` — points bollard at the remote daemon via
+    /// the system `ssh` binary (bollard `ssh` feature / `openssh` crate).
     pub docker_host_override: Option<String>,
 
     /// Path to the SSH private key file used when `docker_host_override` is
     /// an `ssh://` URI.
     ///
-    /// Normally injected by `agent-ssh` so bollard can authenticate to the
-    /// remote Docker daemon.  When `None`, bollard falls back to the default
-    /// SSH key locations (`~/.ssh/id_ed25519`, SSH agent, etc.).
+    /// Injected by `agent-ssh` so bollard can authenticate to the remote
+    /// Docker daemon using the host's stored key.  When `None`, bollard falls
+    /// back to the default SSH key locations (`~/.ssh/id_ed25519`, SSH
+    /// agent, etc.).
     pub ssh_key_path: Option<std::path::PathBuf>,
+
+    /// Opaque RAII handles kept alive for the lifetime of any operation that
+    /// uses this context.
+    ///
+    /// `agent-ssh` uses this to carry cleanup handles (e.g. a temporary SSH
+    /// private key file) into spawned update tasks, ensuring they are not
+    /// dropped prematurely.  Because `ConnectionContext` is `Clone`, cloning
+    /// it increments the `Arc` reference counts inside this field; handles
+    /// are cleaned up only when the last clone is dropped.
+    ///
+    /// The local agent and tests always leave this empty.
+    pub keep_alive: Vec<Arc<dyn std::any::Any + Send + Sync>>,
+}
+
+impl std::fmt::Debug for ConnectionContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectionContext")
+            .field("docker_host_override", &self.docker_host_override)
+            .field("ssh_key_path", &self.ssh_key_path)
+            .field(
+                "keep_alive",
+                &format_args!("[{} handle(s)]", self.keep_alive.len()),
+            )
+            .finish()
+    }
 }
 
 impl ConnectionContext {
@@ -79,6 +108,7 @@ mod tests {
         let ctx = ConnectionContext::default();
         assert!(ctx.docker_host_override.is_none());
         assert!(ctx.ssh_key_path.is_none());
+        assert!(ctx.keep_alive.is_empty());
     }
 
     #[test]
@@ -86,6 +116,7 @@ mod tests {
         let ctx = ConnectionContext {
             docker_host_override: Some("ssh://user@host:2222".to_string()),
             ssh_key_path: Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519")),
+            ..Default::default()
         };
         let mut config = serde_json::json!({});
 
@@ -99,7 +130,7 @@ mod tests {
     fn apply_does_not_overwrite_existing_docker_host() {
         let ctx = ConnectionContext {
             docker_host_override: Some("ssh://user@host:2222".to_string()),
-            ssh_key_path: None,
+            ..Default::default()
         };
         let mut config = serde_json::json!({ "docker_host": "unix:///custom.sock" });
 
@@ -113,13 +144,44 @@ mod tests {
     fn apply_does_nothing_for_non_docker_plugins() {
         let ctx = ConnectionContext {
             docker_host_override: Some("ssh://user@host:2222".to_string()),
-            ssh_key_path: None,
+            ..Default::default()
         };
         let mut config = serde_json::json!({});
 
         ctx.apply_to_config(&PluginType::ReleasesGithub, &mut config);
 
         assert!(config.get("docker_host").is_none());
+    }
+
+    #[test]
+    fn keep_alive_clone_shares_arc() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static DROPPED: AtomicUsize = AtomicUsize::new(0);
+
+        struct DropCounter;
+        impl Drop for DropCounter {
+            fn drop(&mut self) {
+                DROPPED.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let counter = Arc::new(DropCounter);
+        let ctx = ConnectionContext {
+            keep_alive: vec![counter as Arc<dyn std::any::Any + Send + Sync>],
+            ..Default::default()
+        };
+
+        // Clone shares the Arc — not yet dropped.
+        let cloned = ctx.clone();
+        assert_eq!(DROPPED.load(Ordering::Relaxed), 0);
+
+        // Drop the original — still not dropped (cloned holds it).
+        drop(ctx);
+        assert_eq!(DROPPED.load(Ordering::Relaxed), 0);
+
+        // Drop the clone — now the counter is dropped.
+        drop(cloned);
+        assert_eq!(DROPPED.load(Ordering::Relaxed), 1);
     }
 
     #[test]
