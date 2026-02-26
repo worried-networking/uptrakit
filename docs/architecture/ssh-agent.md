@@ -334,20 +334,29 @@ specification.
 
 ### Version Checks
 
-1. Controller sends `CheckVersions` with `host_machine_id`.
+1. Controller sends `CheckVersions` with `host_machine_id` and a list of `VersionCheckAssignment` items.
+   Each assignment carries role-based `PluginAssignment` entries (`detect_version` and optionally
+   `fetch_releases`).
 2. SSH agent looks up the matching host in `ssh_hosts`.
-3. An SSH session is opened to that host and an `SshCommandExecutor` is constructed.
-4. `uptrakit_agent_core::handle_check_versions()` is called with the executor; it refreshes the package index,
-   runs version checks for each package assignment, and sends `version_check_results` back to the controller.
+3. An SSH session is opened to that host and an `SshCommandExecutor` is constructed (wrapped with
+   `SudoAwareCommandExecutor` for privilege elevation).
+4. `uptrakit_agent_core::handle_check_versions()` is called with the executor; it dispatches to the
+   `detect_version` plugin for installed version detection and the `fetch_releases` plugin (if present)
+   for agent-side latest version resolution, then sends `version_check_results` back to the controller.
 5. The SSH session is dropped when the function returns.
 
 ### Updates
 
-1. Controller sends `ExecuteUpdate` with `host_machine_id`.
+1. Controller sends `ExecuteUpdate` with `host_machine_id` and role-based plugin assignments:
+   `execute_update_plugin` (required `PluginAssignment`) and optionally `detect_version_plugin`
+   (for before/after installed-version detection).
 2. SSH agent looks up the matching host and rejects the message if an update is already in flight.
-3. An SSH session is opened, wrapped in `Arc<SshSession>`, and passed to `SshCommandExecutor`.
-4. `uptrakit_agent_core::handle_execute_update()` spawns an async task that streams `update_output` lines and
-   sends a final `update_result` to the controller.
+3. An SSH session is opened, wrapped in `Arc<SshSession>`, and passed to `SshCommandExecutor`
+   (wrapped with `SudoAwareCommandExecutor`).
+4. `uptrakit_agent_core::handle_execute_update()` spawns an async task that uses the
+   `execute_update_plugin` to perform the update and the `detect_version_plugin` (if present) for
+   before/after version detection. It streams `update_output` lines and sends a final
+   `update_result` to the controller.
 5. The `Arc<SshSession>` keeps the SSH connection alive until the update task completes and is then dropped.
 
 ### In-Flight Update Tracking
@@ -439,8 +448,8 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 
 | Function / Type | Description |
 | --- | --- |
-| `check_version(plugin_type, config, package_identifier, executor)` | Runs a single version check for a package using the given executor |
-| `execute_update(payload, executor, output_tx)` | Executes an update and streams output lines |
+| `check_version(plugin_assignment, executor)` | Runs a single version check for a role-based plugin assignment using the given executor |
+| `execute_update(payload, executor, output_tx)` | Executes an update using role-based plugin assignments and streams output lines |
 | `handle_check_versions(payload, executor, conn)` | Refreshes package indexes, runs version checks, sends `version_check_results` |
 | `handle_execute_update(payload, executor, in_flight, conn)` | Rejects if update already in flight; spawns update task |
 | `handle_graceful_shutdown(conn, in_flight, timeout, reason, outcome)` | Drains in-flight update before disconnecting |

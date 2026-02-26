@@ -55,15 +55,17 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
 - `/api/v1/services/enrollment-token`: manage enrollment tokens for agents or MQTT services.
 - `/api/v1/software-items`: CRUD endpoints for software items. A software item is a named catalog
-  entry; plugin config and package identifier live on each host assignment (`host_software_items`),
-  not on the item itself.
+  entry; plugin configs and package identifiers live on role-specific plugin assignments
+  (`host_software_item_plugins`), not on the item itself.
 - `POST /api/v1/software-items/{id}/approve`: approve a discovered (pending) software item.
   Requires `manage_software`.
 - `POST /api/v1/software-items/{id}/hosts`: assign a software item to one or more hosts. Each host
-  assignment carries its own `plugin_config_id`, `package_identifier`, and optional
-  `config_override`. Requires `manage_software`.
-- `PUT /api/v1/software-items/{id}/hosts/{host_id}`: update the plugin config, package
-  identifier, or config override for a specific host assignment. Requires `manage_software`.
+  assignment carries a list of role-specific plugin assignments (`plugins: Vec<HostPluginRoleAssignment>`),
+  where each role entry specifies the `role`, `plugin_config_id` (or inline `plugin_config`),
+  `package_identifier`, optional `config_override`, and `execution_site`. Requires `manage_software`.
+- `PUT /api/v1/software-items/{id}/hosts/{host_id}`: update a specific role assignment for a host --
+  change the plugin config, package identifier, config override, or execution site. The request body
+  includes `role` to identify which role to update. Requires `manage_software`.
 - `DELETE /api/v1/software-items/{id}/hosts/{host_id}[?ignore=true]`: remove a host assignment.
   Pass `?ignore=true` to also create an autodiscovery ignore rule for the assignment's
   `(plugin_config_id, package_identifier)`. Requires `manage_software`.
@@ -202,21 +204,28 @@ Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
 | Type | Fields |
 | --- | --- |
 | `TriggerVersionCheckResponse` | `agents_notified` (u32), `message` (String) |
-| `SoftwareItemResponse` | `id`, `name`, `plugin_types`, `enabled`, `discovery_state`, `last_checked_at`, `host_count`, `latest_version` (Option), `update_available`, `created_at`, `updated_at` |
+| `SoftwareItemResponse` | `id`, `name`, `plugins` (Vec&lt;String&gt; -- distinct plugin types), `enabled`, `discovery_state`, `last_checked_at`, `host_count`, `latest_version` (Option), `update_available`, `created_at`, `updated_at` |
 | `SoftwareItemDetailResponse` | Extends `SoftwareItemResponse` with `hosts: Vec<SoftwareItemHostSummary>` |
-| `SoftwareItemHostSummary` | `host_id`, `hostname`, `friendly_name`, `plugin_config_id`, `plugin_config_name`, `plugin_type`, `package_identifier`, `config_override`, `installed_version`, `installed_version_detected_at`, `last_updated_at`, `linked_at`, `latest_version` (Option), `update_available` |
-| `TriggerUpdateRequest` | `to_version` (String), `release_info` (Option — `{ tag: String, release_url: String }`) |
-| `TriggerUpdateResponse` | `update_history_id` (Uuid), `status` (TriggerUpdateStatus — `pending`, `queued`) |
+| `SoftwareItemHostSummary` | `host_id`, `hostname`, `friendly_name`, `plugins` (Vec&lt;HostPluginRoleSummary&gt;), `installed_version`, `installed_version_detected_at`, `latest_version` (Option), `latest_release_metadata` (Option), `update_available`, `last_updated_at`, `linked_at` |
+| `HostPluginRoleSummary` | `role` (PluginRole), `plugin_config_id`, `plugin_config_name`, `plugin_type`, `package_identifier`, `config_override` (Option), `execution_site` |
+| `HostSoftwareAssignment` | `host_id`, `plugins` (Vec&lt;HostPluginRoleAssignment&gt;) |
+| `HostPluginRoleAssignment` | `role` (PluginRole), `plugin_config_id` (Option), `plugin_config` (Option -- inline create), `package_identifier`, `config_override` (Option), `execution_site` (default `"auto"`) |
+| `UpdateHostAssignmentRequest` | `role` (PluginRole), `plugin_config_id` (Option), `plugin_config` (Option), `package_identifier` (Option), `config_override` (Option), `execution_site` (Option) |
+| `TriggerUpdateRequest` | `to_version` (String), `release_info` (Option -- `{ tag, release_url, assets }`) |
+| `TriggerUpdateResponse` | `update_history_id` (Uuid), `status` (TriggerUpdateStatus -- `pending`, `queued`) |
 
 **`latest_version` and `update_available`** are populated by the controller at read time:
 
-- `latest_version` is sourced from the `available_versions` table for the software item. It is
-  populated by agent-side plugins (Homebrew, PHS) during the `VersionCheckResults` WebSocket
-  handler, and by the scheduled upstream resolver for controller-side plugins (GitHub Releases,
-  Docker Registry). `null` when neither has run yet.
-- `update_available` at the item level is `true` if any assigned host's `installed_version`
-  differs from `latest_version` (string equality). At the host level (`SoftwareItemHostSummary`),
-  it is `true` when both `installed_version` and `latest_version` are non-null and differ.
+- `latest_version` is stored per-host on `host_software_items.latest_version`. It is populated by
+  agent-side `fetch_releases` plugins (Homebrew, APT) during the `VersionCheckResults` WebSocket
+  handler, and by the controller scheduler for controller-side `fetch_releases` plugins (GitHub
+  Releases, Docker Registry). `null` when no upstream version has been resolved yet.
+- At the item level (`SoftwareItemResponse`), `latest_version` is derived as the maximum across all
+  hosts' per-host `latest_version` values.
+- `update_available` at the item level is `true` if any assigned host has an `installed_version`
+  that differs from its per-host `latest_version` (and both are known; string equality). At the
+  host level (`SoftwareItemHostSummary`), it is `true` when both `installed_version` and
+  `latest_version` are non-null and differ.
 - `last_checked_at` on `SoftwareItemResponse` is updated in a single batch `UPDATE` after the
   `VersionCheckResults` WebSocket message is processed, covering all items that had at least one
   successful result.

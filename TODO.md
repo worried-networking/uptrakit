@@ -34,7 +34,7 @@ Essential infrastructure needed before feature development.
 - [ ] Design core database schema
   - [x] Hosts table (machine_id, hostname, OS info, architecture, last seen, linked agents)
   - [x] Software items table (plugin config, package identifier, config override, host assignments)
-  - [x] Available versions table (software item ID, version, release date, extra metadata)
+  - [x] ~~Available versions table~~ (removed; per-host latest version now tracked on `host_software_items`)
   - [x] Update history table (host ID, software item ID, from/to version, status, output, actor_type, actor_id)
   - [x] Scheduled checks table (software item ID, schedule, last run, next run)
 - [x] Implement database migrations system
@@ -162,12 +162,22 @@ Essential infrastructure needed before feature development.
 - [x] AptPlugin: implement `PostUpdateHook` (checks `/var/run/reboot-required`)
 - [x] HomebrewPlugin: implement `DetectHostCompatibility` (checks `which brew`)
 
+### Role-Based Plugin Assignment
+
+- [x] `host_software_item_plugins` table with per-role plugin assignments (`detect_version`, `fetch_releases`, `execute_update`)
+- [x] `PluginRole` enum in `crates/shared/types/src/plugin_role.rs` with wire forward-compatibility (`Other(String)`)
+- [x] `execution_site` column (`auto` | `agent` | `controller`) on plugin assignments
+- [x] `ControllerSideFetchReleases` plugin capability for controller-side fetch_releases (GitHub, Docker)
+- [x] Per-host latest version tracking on `host_software_items` (replaced centralised `available_versions` table)
+- [x] Controller-side `fetch_releases` execution for API-based plugins
+- [x] Agent-side `fetch_releases` for local package-index plugins (APT, Homebrew)
+
 ### Plugin System: Follow-up Items
 
 - [ ] Wire compatibility detection results to controller for dashboard display
 - [ ] Add `RebootRequired` wire message / post-update event system for APT plugin
 - [ ] "Run arbitrary commands" plugin type (custom script plugin)
-- [ ] Plugin system: formal multi-plugin-config-synthesis protocol
+- [x] Plugin system: role-based multi-plugin assignment per host-software-item pair (replaces monolithic plugin reference)
 - [ ] Plugin compatibility status visible in Hosts UI per host
 
 ______________________________________________________________________
@@ -197,7 +207,7 @@ Main functionality that delivers the core value proposition.
   - [x] Proxmox Helper Scripts repository check
 - [x] Add version comparison logic per plugin
 - [ ] Implement channel support (stable, beta, nightly)
-- [ ] Cache available versions with TTL
+- [ ] Cache latest version responses with TTL (per-host latest version is now on `host_software_items`)
 - [x] Handle API rate limiting
 - [ ] Add retry logic for failed checks
 
@@ -518,7 +528,7 @@ Expanding the plugin system with more integrations.
 - [ ] Implement plugin hot-reloading
 - [ ] Create plugin marketplace/registry concept
 - [ ] Add plugin versioning
-- [ ] Formal multi-plugin-config-synthesis protocol
+- [x] Role-based multi-plugin assignment per host-software-item pair
 
 ### Documentation
 

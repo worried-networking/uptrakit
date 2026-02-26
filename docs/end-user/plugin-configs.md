@@ -2,8 +2,9 @@
 
 A **plugin configuration** (plugin config) defines a software source that Uptrakit uses to
 resolve upstream versions, check installed versions, and optionally discover packages automatically.
-Each software item host assignment links to a plugin config, so Uptrakit knows which plugin
-logic to run and which remote package to query.
+Each software item host assignment has up to three **role-based plugin assignments**
+(`detect_version`, `fetch_releases`, `execute_update`), each linking to a plugin config.
+This tells Uptrakit which plugin logic to run for each concern and which remote package to query.
 
 Plugin configs are tenant-scoped, reusable objects. Multiple software items can reference the
 same plugin config.
@@ -84,6 +85,44 @@ connects and no matching plugin config exists.
 
 For full details and `sudoers` configuration requirements, see
 [APT Plugin](plugins/apt.md).
+
+## Role-Based Host Assignments
+
+When a software item is assigned to a host, Uptrakit creates up to three **plugin assignments** —
+one per plugin role:
+
+| Role | What it does |
+| --- | --- |
+| `detect_version` | Detects the currently installed version on the host. |
+| `fetch_releases` | Fetches the latest available version from an upstream source. |
+| `execute_update` | Executes the actual software update on the host. |
+
+By default, all three roles use the same plugin config. However, you can **mix and match** plugins
+per role. For example, you could use an APT plugin for detecting the installed version and executing
+updates, but a GitHub Releases plugin for fetching upstream releases.
+
+Each plugin assignment carries its own `package_identifier`, `config_override`, and
+`execution_site`, giving you fine-grained control over how each role operates on each host.
+
+### Execution site
+
+The `execution_site` field controls where a plugin role's operation runs:
+
+| Value | Behaviour |
+| --- | --- |
+| `auto` | **Default.** The system decides automatically. For `fetch_releases`, plugins that support controller-side execution (GitHub Releases, Docker) run on the controller; plugins that need a local package index (Homebrew, APT) run on the agent. For `detect_version` and `execute_update`, the agent always runs them. |
+| `agent` | Force the operation to run on the agent, even if the plugin supports controller-side execution. Useful when the upstream source is only reachable from the agent's network. |
+| `controller` | Force the operation to run on the controller. Only valid for `fetch_releases`. Use this when you want the controller to fetch releases centrally, avoiding redundant API calls across multiple agents. |
+
+In most cases, `auto` is the right choice. The system automatically deduplicates controller-side
+`fetch_releases` calls: when multiple hosts share the same `(plugin_config, package_identifier)`
+combination, the controller fetches once and propagates the result to all of them.
+
+### Latest version tracking
+
+Latest version information is tracked per-host in the host assignment (`host_software_items` table),
+not globally. This means different hosts can report different latest versions if their
+`fetch_releases` plugins or execution sites differ.
 
 ## Managing Plugin Configs
 

@@ -87,6 +87,96 @@ Both the regular agent and the SSH agent receive `check_versions`, `execute_upda
 The `host_machine_id` field in each payload determines which host the operation targets
 (see [`host_machine_id` Field](#host_machine_id-field)).
 
+#### `check_versions` payload
+
+Each `VersionCheckAssignment` carries role-based `PluginAssignment` entries instead of flat plugin fields.
+The `detect_version` and `fetch_releases` fields are optional -- absent when no plugin is configured for
+that role on this host-software pair.
+
+```json
+{
+  "seq": 1,
+  "type": "check_versions",
+  "host_machine_id": "abc-123",
+  "assignments": [
+    {
+      "software_item_id": "550e8400-...",
+      "name": "Nginx",
+      "detect_version": {
+        "plugin_type": "apt",
+        "package_identifier": "nginx",
+        "config": {}
+      },
+      "fetch_releases": {
+        "plugin_type": "apt",
+        "package_identifier": "nginx",
+        "config": {}
+      }
+    },
+    {
+      "software_item_id": "660e8400-...",
+      "name": "1Password",
+      "detect_version": {
+        "plugin_type": "homebrew",
+        "package_identifier": "1password-cli",
+        "config": { "package_type": "cask" }
+      }
+    }
+  ]
+}
+```
+
+**`PluginAssignment` fields:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `plugin_type` | string | Plugin discriminator (e.g. `"apt"`, `"homebrew"`, `"github_releases"`) |
+| `package_identifier` | string | Plugin-specific package identifier |
+| `config` | object | Merged plugin configuration (base config + override) |
+
+The `fetch_releases` field is only included for agent-side plugins (those without the
+`ControllerSideFetchReleases` capability, or with `execution_site = "agent"`). Controller-side
+`fetch_releases` (e.g. GitHub Releases, Docker Registry) is handled by the controller scheduler
+and is not sent to the agent.
+
+#### `execute_update` payload
+
+```json
+{
+  "seq": 1,
+  "type": "execute_update",
+  "host_machine_id": "abc-123",
+  "update_history_id": "770e8400-...",
+  "software_item_id": "550e8400-...",
+  "software_item_name": "Nginx",
+  "to_version": "1.24.0",
+  "detect_version_plugin": {
+    "plugin_type": "apt",
+    "package_identifier": "nginx",
+    "config": {}
+  },
+  "execute_update_plugin": {
+    "plugin_type": "apt",
+    "package_identifier": "nginx",
+    "config": {}
+  },
+  "pre_update_hooks": [],
+  "post_update_hooks": []
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `host_machine_id` | string | Target host's machine ID |
+| `update_history_id` | UUID | Update history record ID |
+| `software_item_id` | UUID | Software item being updated |
+| `software_item_name` | string | Display name for logging |
+| `to_version` | string | Target version |
+| `detect_version_plugin` | `PluginAssignment?` | Plugin for before/after installed-version detection. Absent when no `detect_version` plugin is configured. |
+| `execute_update_plugin` | `PluginAssignment` | Plugin for the `execute_update` role (required) |
+| `pre_update_hooks` | `Vec<HookCommand>` | Pre-update hook commands |
+| `post_update_hooks` | `Vec<HookCommand>` | Post-update hook commands |
+
 #### `discover_software` payload
 
 ```json
@@ -160,8 +250,8 @@ See [docs/api/autodiscovery.md](autodiscovery.md) for the full autodiscovery wor
 ## `host_machine_id` Field
 
 `CheckVersionsPayload` and `ExecuteUpdatePayload` both carry a required `host_machine_id: String` field as their first
-field. The controller groups package assignments by `(service_id, host_machine_id)` and sends one message per host so
-that each agent instance receives only the checks and updates relevant to its managed hosts.
+field. The controller groups role-based plugin assignments by `(service_id, host_machine_id)` and sends one message per
+host so that each agent instance receives only the checks and updates relevant to its managed hosts.
 
 ### Regular agent behavior
 

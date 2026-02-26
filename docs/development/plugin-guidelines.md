@@ -36,6 +36,7 @@ other trait methods have default no-op implementations; plugins override only wh
 | `DetectHostCompatibility` | `detect_host_compatibility()` | Determine whether this plugin is applicable to the current host environment. |
 | `PreUpdateHook` | `pre_update_hook()` | Run plugin-level logic before an update begins; can abort the update. |
 | `PostUpdateHook` | `post_update_hook()` | Run plugin-level logic after an update completes; non-fatal. |
+| `ControllerSideFetchReleases` | _(no trait method)_ | Declares that `fetch_releases()` can run on the controller without local system state. See [Declaring ControllerSideFetchReleases](#declaring-controllersidefetchreleases). |
 
 ## Host Compatibility Detection
 
@@ -137,6 +138,74 @@ fn post_update_hook(&self, context: &UpdateHookContext, executor: &dyn CommandEx
 }
 ```
 
+## Declaring `ControllerSideFetchReleases`
+
+If your plugin's `fetch_releases()` implementation makes only HTTP/API calls and does not depend on
+any local system state (no `CommandExecutor` calls, no filesystem access, no local package index),
+you should declare `ControllerSideFetchReleases` in your `capabilities()`:
+
+```rust
+fn capabilities(&self) -> &'static [PluginCapability] {
+    &[PluginCapability::ControllerSideFetchReleases]
+}
+```
+
+**When to declare it:**
+
+- Your `fetch_releases()` only performs HTTP requests to an external API (GitHub REST API, OCI
+  registry, etc.).
+- It does not call `self.executor.execute()` or `self.executor.execute_quiet()`.
+- It does not read from the local filesystem or depend on a locally synced package index.
+
+**When NOT to declare it:**
+
+- Your plugin needs a local package index (e.g. Homebrew's `brew info --json`, APT's
+  `apt-cache policy`). These must run agent-side.
+- Your `fetch_releases()` shells out to a local CLI tool.
+
+**Effect:** When `execution_site` is `auto` (the default), the controller runs `fetch_releases()`
+once per unique `(plugin_config_id, package_identifier)` combination and propagates the result
+to all hosts sharing that combination. This avoids redundant API calls when many hosts track the
+same upstream release. The controller uses a `NoopCommandExecutor` — if your plugin accidentally
+calls it, the process will panic.
+
+**Current plugins with this capability:** `GitHubPlugin`, `DockerPlugin`.
+
+## The Role Model for New Plugins
+
+When implementing a new plugin, consider which of the three roles it will serve:
+
+### Single-plugin-for-all-roles (common case)
+
+Most plugins implement all three roles (`detect_version`, `fetch_releases`, `execute_update`) in
+a single plugin crate. When autodiscovery or manual assignment creates host assignments, all three
+role rows point to the same `plugin_config_id`. This is the default and requires no special
+handling.
+
+### Partial-role plugins
+
+Some plugins only make sense for a subset of roles:
+
+- **Discovery-only plugins** (e.g. `ProxmoxHelperScriptsPlugin`) — implement `discover_software()`
+  but do not participate in any of the three version/update roles. The controller synthesizes
+  downstream plugin configs that fill the role assignments.
+- **Fetch-only plugins** — a hypothetical plugin that only knows how to fetch upstream releases
+  (e.g. a custom changelog scraper). Users would pair it with another plugin for detection and
+  updates.
+
+When your plugin does not implement a particular role's method (e.g. it has no `execute_update()`),
+the default trait implementation returns an error. The system will not call a role method on a
+plugin that is not assigned to that role, so this is safe.
+
+### Testing role assignments
+
+When writing integration tests for a new plugin, verify that:
+
+1. The plugin's `capabilities()` accurately reflects whether it declares
+   `ControllerSideFetchReleases`.
+2. All three role methods (`detect_installed_version`, `fetch_releases`, `execute_update`) either
+   work correctly or return a clear error if the plugin does not support that role.
+
 ## Dependencies and re-exports
 
 Plugin crates should avoid unnecessary direct dependencies. The `uptrakit-plugin-core` crate
@@ -231,13 +300,21 @@ This ensures that boxed `dyn Plugin` objects can be introspected after creation 
 
 ## Plugin Architecture
 
-Each software item is associated with a plugin. A plugin defines:
+Each software item on a host is managed through **role-based plugin assignments**. There are three
+plugin roles, and each `(host, software_item)` pair can have up to one plugin assignment per role:
 
-| Concern | Runs on | Responsibility |
+| Role | Default execution site | Responsibility |
 | :--- | :--- | :--- |
-| Remote/upstream version | Controller or Agent | Fetch latest version metadata. Most plugins (GitHub, Docker) resolve on the controller. Plugins with a local package index (Homebrew) resolve on the agent via `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in `VersionCheckResult`. |
-| Local/installed version | Agent | Detect currently installed version |
-| Update execution | Agent | Run the update (via sudo-allowlisted commands or custom script) |
+| `detect_version` | Agent | Detect the currently installed version on the host. |
+| `fetch_releases` | Agent or Controller (depends on `execution_site` and plugin capabilities) | Fetch latest version metadata from an upstream source. |
+| `execute_update` | Agent | Run the update (via sudo-allowlisted commands or custom script). |
+
+Different plugins can be assigned to different roles for the same software item on the same host.
+For example, a PHS-discovered container might use APT for `detect_version` and `execute_update`
+but a GitHub Releases config for `fetch_releases`.
+
+See [Plugin System Architecture: Role-Based Plugin Assignments](plugin-system.md#role-based-plugin-assignments)
+for the full data model and execution site decision logic.
 
 Plugin crates:
 

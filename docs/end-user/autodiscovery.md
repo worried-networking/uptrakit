@@ -16,9 +16,24 @@ and returns a list of installed packages. The controller then creates software i
 state for any packages it has not seen before.
 
 Discovery results carry the plugin config and package identifier used to detect the package.
-This information is stored on the host assignment — not on the software item itself — so the same
-software item (e.g. "git") can later appear on multiple hosts via different plugins, all under
-one catalog entry.
+When a discovered item is approved, the controller creates **three role-based plugin assignments**
+for the host:
+
+| Role | Assignment |
+| --- | --- |
+| `detect_version` | Uses the discovering plugin config to detect the installed version on the host. |
+| `fetch_releases` | Uses the same (or a synthesized) plugin config to fetch the latest upstream version. |
+| `execute_update` | Uses the same (or a synthesized) plugin config to run updates. |
+
+All three assignments default to `execution_site: auto`, meaning the system decides where each
+operation runs based on the plugin's capabilities. Plugins that support controller-side release
+fetching (GitHub Releases, Docker) will have their `fetch_releases` role executed on the controller
+automatically. Plugins that require a local package index (Homebrew, APT) always run on the agent.
+
+Plugin assignment information is stored on the host assignment — not on the software item itself —
+so the same software item (e.g. "git") can later appear on multiple hosts via different plugins,
+all under one catalog entry. You can later customize the role assignments per host if needed (for
+example, switching the `fetch_releases` role to a different plugin config).
 
 Discovery-capable plugins currently supported:
 
@@ -186,7 +201,9 @@ in the API reference.
    - Approve the items you want Uptrakit to track and update.
    - Delete items you do not need right now (re-discoverable later).
    - Ignore items you never want to see again.
-5. Approved items immediately become active: version checking begins on the next scheduler cycle.
+5. Approved items immediately become active: three role-based plugin assignments
+   (`detect_version`, `fetch_releases`, `execute_update`) are created with `execution_site: auto`,
+   and version checking begins on the next scheduler cycle.
 
 ## Related Documentation
 

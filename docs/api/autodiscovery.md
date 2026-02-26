@@ -354,9 +354,9 @@ DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true
 | --- | --- | --- | --- |
 | `ignore` | boolean | `false` | When `true`, also create an ignore rule for this host assignment |
 
-The ignore rule is scoped to the `(plugin_config_id, package_identifier)` stored on the
-`host_software_item` row being deleted, and applies tenant-wide — future discovery runs on any host
-will skip that package for that plugin config.
+The ignore rule is scoped to the `(plugin_config_id, package_identifier)` from the role plugin
+assignments on the host-software pair being deleted, and applies tenant-wide -- future discovery runs
+on any host will skip that package for that plugin config.
 
 ### Example: unassign a host and suppress the package from re-discovery
 
@@ -385,13 +385,29 @@ field carries metadata that the controller uses to synthesize a downstream plugi
 
 | `extra` field | Outcome |
 | --- | --- |
-| `"github_owner"` + `"github_repo"` | Controller finds or creates a `github_releases` config for `owner/repo` with PHS-specific `detect_installed_version_command` and `install_command`. Software item is linked to this GitHub config. |
+| `"github_owner"` + `"github_repo"` | Controller finds or creates a `github_releases` config for `owner/repo` with PHS-specific `detect_installed_version_command` and `install_command`. Software item is linked to this GitHub config via role-specific plugin rows. |
 | `"apt_package"` | Controller finds or creates a shared `"APT (auto)"` config (`{}`). Software item's `package_identifier` is the Debian package name. |
 | Neither | Item is skipped (warned in agent log). |
 
-The PHS plugin config itself is never directly linked to `host_software_items` — it is used only
-as the discovery trigger. All version tracking and update execution happen through the synthesized
+The PHS plugin config itself is never directly linked to `host_software_item_plugins` -- it is used
+only as the discovery trigger. All version tracking and update execution happen through the synthesized
 configs.
+
+### Role plugin rows created by autodiscovery
+
+When autodiscovery processes a result, it creates up to three `host_software_item_plugins` rows
+per discovery result -- one for each role:
+
+| Role | Plugin config | Description |
+| --- | --- | --- |
+| `detect_version` | Synthesized config (e.g. `github_releases` or `apt`) | Detects the installed version on the agent host |
+| `fetch_releases` | Synthesized config (same as above) | Fetches the latest available upstream version |
+| `execute_update` | Synthesized config (same as above) | Executes the actual software update |
+
+For PHS discoveries with a `github_releases` synthesized config, the `fetch_releases` role
+typically runs controller-side (via the scheduler) because the GitHub Releases plugin has the
+`ControllerSideFetchReleases` capability. The `execution_site` column defaults to `"auto"`, which
+lets the system decide based on plugin capabilities.
 
 ## Related Documentation
 

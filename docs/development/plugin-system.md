@@ -23,23 +23,76 @@ The plugin system is composed of:
 ## How Plugins Relate to Software Items and Host Assignments
 
 Each software item in Uptrakit has one or more **host assignments** (`host_software_items`). A host
-assignment links a software item to a specific host and carries:
+assignment links a software item to a specific host and tracks per-host state such as
+`installed_version` and `latest_version`.
 
-- `plugin_config_id` — which plugin config to use for this host.
+### Role-Based Plugin Assignments
+
+Each host assignment has up to three **plugin assignments** (`host_software_item_plugins`), one per
+**plugin role**:
+
+| Role | String value | Responsibility |
+| :--- | :--- | :--- |
+| `DetectVersion` | `detect_version` | Detect the currently installed version on the agent host. |
+| `FetchReleases` | `fetch_releases` | Fetch the latest available version from an upstream source. |
+| `ExecuteUpdate` | `execute_update` | Execute the actual software update on the agent host. |
+
+Each plugin assignment row carries:
+
+- `plugin_config_id` — which plugin config to use for this role.
 - `package_identifier` — the package name or image reference within that plugin.
 - `config_override` — optional per-host JSON override merged on top of the base plugin config.
+- `execution_site` — where the operation runs: `auto` (default), `agent`, or `controller`.
+- `role` — one of the three role strings above.
+- `ordinal` — ordering within the same role (currently always 0; reserved for future multi-instance
+  roles such as hook chains).
+
+This design allows **mix-and-match** plugin configurations per role. For example, a host could use
+an APT plugin for `detect_version`, a GitHub plugin for `fetch_releases`, and a custom script
+plugin for `execute_update` — all for the same software item.
 
 A **plugin config** (`plugin_configs` table) stores the serialized configuration for a specific
 plugin type (e.g. a GitHub Releases config with `owner` and `repo`, or a Homebrew config with
-`package_type`). Multiple host assignments can share the same plugin config.
+`package_type`). Multiple plugin assignments can share the same plugin config.
+
+### Plugin Role Enum
+
+The `PluginRole` enum (`crates/shared/types/src/plugin_role.rs`) is `#[non_exhaustive]` and
+forward-compatible over the wire:
+
+```rust
+#[non_exhaustive]
+pub enum PluginRole {
+    DetectVersion,
+    FetchReleases,
+    ExecuteUpdate,
+    /// Unknown role from a newer peer — deserialized via From<String>, never fails.
+    Other(String),
+}
+```
+
+- **Serde deserialization is infallible**: unknown role strings (e.g. from a newer server) become
+  `Other(String)` rather than a parse error, allowing older agents to survive rolling upgrades.
+- **`FromStr` is fallible**: used in API validation and URL parameter parsing where unknown roles
+  should be rejected.
+
+### Plugin Instance Creation Flow
 
 When Uptrakit needs to check or update a software item on a host, it:
 
-1. Loads the host assignment to find the `plugin_config_id` and `package_identifier`.
-2. Loads the plugin config and merges any `config_override`.
+1. Loads the host assignment and its plugin assignments for the relevant role(s).
+2. For each role, loads the plugin config and merges any `config_override`.
 3. Creates a plugin instance via `PluginRegistry::create_plugin()` with the merged config.
-4. Runs the relevant plugin method (`detect_installed_version`, `execute_update`, etc.) via the
-   injected `CommandExecutor` (local for the regular agent, SSH for `agent-ssh`).
+4. Runs the relevant plugin method (`detect_installed_version`, `fetch_releases`,
+   `execute_update`, etc.) via the injected `CommandExecutor` (local for the regular agent,
+   SSH for `agent-ssh`).
+
+### Per-Host Latest Version Tracking
+
+The `available_versions` table has been removed. Latest version information is now tracked
+per-host on `host_software_items.latest_version` (with `latest_version_fetched_at` and
+`latest_release_metadata`). This reflects the reality that different hosts may see different
+latest versions depending on their `fetch_releases` plugin and execution site.
 
 ## Plugin Discovery Flow
 
@@ -103,9 +156,49 @@ The `PluginCapability` enum defines the optional behaviors a plugin may support:
 | `DetectHostCompatibility` | Plugin can determine if it is applicable to the current host via `detect_host_compatibility()`. |
 | `PreUpdateHook` | Plugin can run logic before an update via `pre_update_hook()`; can abort the update. |
 | `PostUpdateHook` | Plugin can run logic after an update via `post_update_hook()`; non-fatal. |
+| `ControllerSideFetchReleases` | Plugin's `fetch_releases()` does not require local system state and can run on the controller instead of the agent. See [Execution Site Decision Logic](#execution-site-decision-logic). |
 
 Each capability maps to an optional method on the `Plugin` trait. Plugins that do not implement a
 method should not declare the corresponding capability, and vice versa.
+
+### `ControllerSideFetchReleases` Capability
+
+Plugins that declare `ControllerSideFetchReleases` signal that their `fetch_releases()`
+implementation does not require any local system state — no package index, no filesystem access,
+no local commands. This means the controller can call `fetch_releases()` directly rather than
+delegating to an agent.
+
+Current plugins with this capability:
+
+| Plugin | Reason |
+| :--- | :--- |
+| `GitHubPlugin` | Fetches releases via the GitHub REST API — pure HTTP calls. |
+| `DockerPlugin` | Queries OCI registry tag lists via HTTP — no local Docker daemon needed. |
+
+Plugins **without** this capability (e.g. `HomebrewPlugin`, `AptPlugin`) require a local package
+index and must always run `fetch_releases()` on the agent.
+
+### Execution Site Decision Logic
+
+The `execution_site` field on each plugin assignment controls where the operation runs. The three
+values are:
+
+| Value | Behaviour |
+| :--- | :--- |
+| `auto` | **Default.** The system decides based on plugin capabilities. For the `fetch_releases` role: if the plugin declares `ControllerSideFetchReleases`, the controller runs `fetch_releases()` once per unique `(plugin_config_id, package_identifier)` and propagates the result to all hosts sharing that combination. Otherwise, the agent runs it. For `detect_version` and `execute_update` roles, the agent always runs them. |
+| `agent` | Force agent-side execution regardless of plugin capabilities. Useful when the controller cannot reach the upstream source (e.g. registry behind a firewall accessible only from the agent host). |
+| `controller` | Force controller-side execution. Only valid for the `fetch_releases` role. The controller creates a plugin instance with a `NoopCommandExecutor` and calls `fetch_releases()` directly. |
+
+The version check executor runs in two phases:
+
+1. **Phase A — Controller-side `fetch_releases`:** Queries `host_software_item_plugins` rows with
+   `role = 'fetch_releases'` that resolve to controller-side execution (`execution_site =
+   'controller'`, or `execution_site = 'auto'` with `ControllerSideFetchReleases`). Groups by
+   `(plugin_config_id, package_identifier)` to deduplicate API calls, then stores the result in
+   `host_software_items.latest_version`.
+2. **Phase B — Agent-side assignments:** Builds `VersionCheckAssignment` per
+   `(service_id, host_machine_id)` group using `detect_version` role plugins and `fetch_releases`
+   role plugins that resolve to agent-side execution. Sends `CheckVersions` wire messages as before.
 
 ### Adding a New Capability
 
@@ -155,13 +248,13 @@ The `UpdateHookContext` passed to plugin hooks contains `package_identifier`, `t
 
 ## First-Party Plugin Crates
 
-| Plugin type | Crate | Host compat | Pre-hook | Post-hook | Discovery |
-| :--- | :--- | :---: | :---: | :---: | :---: |
-| `github_releases` | `uptrakit-plugin-github` | No | No | No | No |
-| `docker` | `uptrakit-plugin-docker` | No | No | No | Yes |
-| `homebrew` | `uptrakit-plugin-homebrew` | Yes | No | No | Yes |
-| `proxmox_helper_scripts` | `uptrakit-plugin-proxmox-helper-scripts` | No | No | No | Yes |
-| `apt` | `uptrakit-plugin-apt` | Yes | No | Yes | Yes |
+| Plugin type | Crate | Host compat | Pre-hook | Post-hook | Discovery | Controller-side fetch |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| `github_releases` | `uptrakit-plugin-github` | No | No | No | No | Yes |
+| `docker` | `uptrakit-plugin-docker` | No | No | No | Yes | Yes |
+| `homebrew` | `uptrakit-plugin-homebrew` | Yes | No | No | Yes | No |
+| `proxmox_helper_scripts` | `uptrakit-plugin-proxmox-helper-scripts` | No | No | No | Yes | No |
+| `apt` | `uptrakit-plugin-apt` | Yes | No | Yes | Yes | No |
 
 ## Future Roadmap
 

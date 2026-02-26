@@ -44,16 +44,34 @@ plugin crate implements the `Plugin` trait and is registered in `uptrakit-plugin
 [Plugin Development Guidelines](docs/development/plugin-guidelines.md) for the extension pattern,
 and [Plugin System Architecture](docs/development/plugin-system.md) for the broader design.
 
-| Plugin type | Crate | Version resolution | Autodiscovery | Notes |
+### Role-based plugin assignment
+
+Each `(host, software_item)` pair can have up to one plugin per **role**, stored in the `host_software_item_plugins` table. Three roles are defined by
+the `PluginRole` enum (`crates/shared/types/src/plugin_role.rs`):
+
+| Role | Purpose |
+| --- | --- |
+| `detect_version` | Detects the installed version on the agent host |
+| `fetch_releases` | Fetches the latest available version (controller-side or agent-side) |
+| `execute_update` | Executes the actual software update on the agent host |
+
+Each assignment carries an `execution_site` column (`auto` | `agent` | `controller`) that determines where the operation runs. Plugins declaring the
+`ControllerSideFetchReleases` capability (GitHub, Docker) have their `fetch_releases` executed on the controller by default when `execution_site` is
+`auto`. Local package-index plugins (Homebrew, APT) always run agent-side. Per-host version tracking (`installed_version`, `latest_version`) lives on
+`host_software_items`; there is no separate `available_versions` table.
+
+### Plugin catalogue
+
+| Plugin type | Crate | fetch_releases site | Autodiscovery | Notes |
 | --- | --- | --- | --- | --- |
-| `github_releases` | `uptrakit-plugin-github` | Controller (GitHub API) | No | Tracks GitHub release tags |
-| `docker` | `uptrakit-plugin-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers |
+| `github_releases` | `uptrakit-plugin-github` | Controller (GitHub API) | No | Tracks GitHub release tags; `ControllerSideFetchReleases` capability |
+| `docker` | `uptrakit-plugin-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers; `ControllerSideFetchReleases` capability |
 | `homebrew` | `uptrakit-plugin-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks; detects host compatibility |
-| `proxmox_helper_scripts` | `uptrakit-plugin-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers |
+| `proxmox_helper_scripts` | `uptrakit-plugin-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only) |
 | `apt` | `uptrakit-plugin-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
 
 Plugins with a local package index (`homebrew`, `proxmox_helper_scripts`, `apt`) resolve both installed and latest versions on the agent.
-All other plugins resolve upstream versions on the controller.
+All other plugins resolve upstream versions on the controller via `ControllerSideFetchReleases`.
 
 ## Wire protocol
 
