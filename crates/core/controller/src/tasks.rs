@@ -50,7 +50,7 @@ impl BackgroundTasks {
     /// Execute the graceful shutdown sequence.
     ///
     /// 1. Stop accepting new HTTPS connections.
-    /// 2. Scatter `ServerRestarting` notifications to connected agents.
+    /// 2. Scatter `ServerRestarting` notifications to connected agents, then wait for drain.
     /// 3. Cancel all token-based background tasks.
     /// 4. Abort non-token tasks (CRL manager, PKI HTTP).
     /// 5. Await cancellable tasks with a per-task timeout.
@@ -65,12 +65,12 @@ impl BackgroundTasks {
         // 1. Stop accepting new connections
         server_handle.graceful_shutdown(Some(shutdown_timeout));
 
-        // 2. Scatter restart notifications to avoid thundering herd
+        // 2. Scatter restart notifications, then wait for services to disconnect
         let connected_count = service_connections.connection_count().await;
         if connected_count > 0 {
             tracing::info!(
-                connected_agents = connected_count,
-                "sending server restarting notifications"
+                connected = connected_count,
+                "sending ServerRestarting notifications to connected services"
             );
             service_connections
                 .broadcast_server_restarting_scattered(
@@ -80,7 +80,14 @@ impl BackgroundTasks {
                     durations::RESTART_NOTIFICATION_SCATTER,
                 )
                 .await;
-            tokio::time::sleep(durations::RESTART_NOTIFICATION_SCATTER).await;
+            tracing::info!(
+                count = connected_count,
+                timeout_secs = shutdown_timeout.as_secs(),
+                "waiting for services to disconnect gracefully"
+            );
+            wait_for_service_drain(&service_connections, shutdown_timeout).await;
+        } else {
+            tracing::info!("no services connected, skipping service drain");
         }
 
         // 3. Cancel all token-based tasks
@@ -104,6 +111,66 @@ impl BackgroundTasks {
         }
 
         tracing::info!("graceful shutdown complete");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Service drain helper
+// ---------------------------------------------------------------------------
+
+/// Poll `service_connections` until all services have disconnected or `shutdown_timeout` elapses.
+///
+/// Logs progress at every change in the connection count and emits a warning if the timeout is
+/// reached before all services have disconnected.
+pub(crate) async fn wait_for_service_drain(
+    service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
+    shutdown_timeout: Duration,
+) {
+    use crate::durations::SERVICE_DRAIN_POLL_INTERVAL;
+
+    let start = tokio::time::Instant::now();
+    let deadline = tokio::time::sleep(shutdown_timeout);
+    tokio::pin!(deadline);
+    let mut poll = tokio::time::interval(SERVICE_DRAIN_POLL_INTERVAL);
+    // First tick fires immediately; skip it so we don't check before any service has had a chance
+    // to process the notification.
+    poll.tick().await;
+
+    let mut last_count = service_connections.connection_count().await;
+
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut deadline => {
+                let remaining = service_connections.connection_count().await;
+                tracing::warn!(
+                    remaining,
+                    timeout_secs = shutdown_timeout.as_secs(),
+                    "graceful shutdown timeout reached, forcing"
+                );
+                break;
+            }
+            _ = poll.tick() => {
+                let count = service_connections.connection_count().await;
+                if count != last_count {
+                    let disconnected = last_count.saturating_sub(count);
+                    tracing::info!(
+                        disconnected,
+                        remaining = count,
+                        "services disconnected during graceful shutdown"
+                    );
+                    last_count = count;
+                }
+                if count == 0 {
+                    let elapsed = start.elapsed();
+                    tracing::info!(
+                        elapsed_secs = format!("{:.1}", elapsed.as_secs_f64()),
+                        "all services disconnected, proceeding with shutdown"
+                    );
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -447,4 +514,69 @@ pub fn spawn_server_cert_renewal(
             }
         }
     })
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::time::Duration;
+
+    use uptrakit_web_api::service_connections::ServiceConnectionRegistry;
+    use uuid::Uuid;
+
+    use super::wait_for_service_drain;
+
+    /// Early exit: the drain loop should return as soon as the last service disconnects,
+    /// well before the full `shutdown_timeout` elapses.
+    #[tokio::test(start_paused = true)]
+    async fn drain_exits_early_when_services_disconnect() {
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::nil();
+        registry
+            .register(service_id, BTreeSet::new(), None, None)
+            .await;
+
+        // Unregister the service after 5 s (simulated).
+        let registry_clone = registry.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            registry_clone.unregister(&service_id).await;
+        });
+
+        let start = tokio::time::Instant::now();
+        wait_for_service_drain(&registry, Duration::from_secs(30)).await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_secs(5),
+            "should have waited at least 5 s, elapsed = {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(30),
+            "should have exited before the 30 s timeout, elapsed = {elapsed:?}"
+        );
+    }
+
+    /// Timeout path: when no service disconnects the loop should wait exactly the timeout duration.
+    #[tokio::test(start_paused = true)]
+    async fn drain_waits_full_timeout_when_service_never_disconnects() {
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::nil();
+        registry
+            .register(service_id, BTreeSet::new(), None, None)
+            .await;
+
+        let start = tokio::time::Instant::now();
+        wait_for_service_drain(&registry, Duration::from_secs(5)).await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_secs(5),
+            "should have waited the full 5 s timeout, elapsed = {elapsed:?}"
+        );
+    }
 }

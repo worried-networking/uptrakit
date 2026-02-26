@@ -31,3 +31,6 @@ pub const BACKGROUND_TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 /// Duration over which to scatter `ServerRestarting` notifications to avoid thundering herd
 /// (5 seconds).
 pub const RESTART_NOTIFICATION_SCATTER: Duration = Duration::from_secs(5);
+
+/// Polling interval when waiting for connected services to drain during shutdown (250 ms).
+pub const SERVICE_DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(250);
