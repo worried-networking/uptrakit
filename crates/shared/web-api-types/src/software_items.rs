@@ -255,8 +255,15 @@ pub struct TriggerUpdateResponse {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TriggerVersionCheckResponse {
-    /// Number of agents that were notified.
+    /// Number of agents that were sent version-check messages.
     pub agents_notified: u32,
+    /// Number of controller-side `fetch_releases` checks that ran synchronously.
+    ///
+    /// Non-zero when at least one `fetch_releases` plugin has
+    /// `ControllerSideFetchReleases` capability (e.g. GitHub, Docker) and ran
+    /// directly on the controller rather than being delegated to an agent.
+    #[serde(default)]
+    pub controller_checks_run: u32,
     /// Human-readable status message.
     pub message: String,
 }
@@ -617,25 +624,53 @@ mod tests {
     fn trigger_version_check_response_round_trip() {
         let resp = TriggerVersionCheckResponse {
             agents_notified: 3,
+            controller_checks_run: 0,
             message: "Version check triggered for 3 agents".to_string(),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: TriggerVersionCheckResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.agents_notified, 3);
+        assert_eq!(deserialized.controller_checks_run, 0);
         assert_eq!(deserialized.message, "Version check triggered for 3 agents");
+    }
+
+    #[test]
+    fn trigger_version_check_response_controller_only() {
+        let resp = TriggerVersionCheckResponse {
+            agents_notified: 0,
+            controller_checks_run: 2,
+            message: "Version check completed for 2 item(s) on the controller".to_string(),
+        };
+        let json = serde_json::to_string(&resp).expect("serialization should succeed");
+        let deserialized: TriggerVersionCheckResponse =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(deserialized.agents_notified, 0);
+        assert_eq!(deserialized.controller_checks_run, 2);
+    }
+
+    #[test]
+    fn trigger_version_check_response_controller_checks_run_defaults_to_zero() {
+        // Old JSON without controller_checks_run should deserialize with default 0.
+        let json = r#"{"agents_notified":1,"message":"ok"}"#;
+        let deserialized: TriggerVersionCheckResponse =
+            serde_json::from_str(json).expect("deserialization should succeed");
+        assert_eq!(deserialized.agents_notified, 1);
+        assert_eq!(deserialized.controller_checks_run, 0);
     }
 
     #[test]
     fn trigger_version_check_response_zero_agents() {
         let resp = TriggerVersionCheckResponse {
             agents_notified: 0,
+            controller_checks_run: 0,
             message: "No agents connected".to_string(),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: TriggerVersionCheckResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.agents_notified, 0);
+        assert_eq!(deserialized.controller_checks_run, 0);
     }
 
     // ── TriggerUpdateStatus Display ──────────────────────────────────

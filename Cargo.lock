@@ -6687,6 +6687,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
+ "uptrakit-command",
  "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-registry",
