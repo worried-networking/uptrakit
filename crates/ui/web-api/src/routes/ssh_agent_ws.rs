@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -6,8 +6,8 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uptrakit_internal_wire::{
-    ApprovedPayload, CertificatePayload, CloseReason, ControllerMessage, ErrorCode, ErrorPayload,
-    IncomingSeq, OutgoingSeq, PingPayload, RejectedPayload, ServiceMessage,
+    ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage, ErrorCode,
+    ErrorPayload, IncomingSeq, OutgoingSeq, PingPayload, RejectedPayload, ServiceMessage,
 };
 use uptrakit_shared_db::entity::{
     service as ssh_agent_service, service_certificate as ssh_agent_service_certificate,
@@ -75,17 +75,26 @@ pub(crate) async fn handle_ssh_agent_authenticated(
         in_seq,
     } = ctx;
 
+    // Load service to derive capabilities for registration.
+    let capabilities: BTreeSet<Capability> = match ssh_agent_service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => crate::service_profile::parse_capabilities(&svc.capabilities),
+        _ => BTreeSet::new(),
+    };
+
     // Register in connection registry.
     let (mut push_rx, cancel_token) = state
         .service_connections
-        .register_ssh_agent(service_id)
+        .register(service_id, capabilities.clone(), None, None)
         .await;
 
     let delivered = state
         .notification_service
         .deliver_backlog_for_authenticated_service(
             service_id,
-            uptrakit_shared_db::entity::service::ServiceType::SshAgent,
+            &capabilities,
             last_seen_at,
         )
         .await;
@@ -598,7 +607,7 @@ pub(crate) async fn do_ssh_agent_enroll(
         let token_hash = match crate::settings_store::load_setting(
             db,
             tenant_id,
-            crate::SettingKey::SshAgentEnrollmentTokenHash,
+            crate::SettingKey::EnrollmentTokenHash,
         )
         .await
         {
@@ -650,10 +659,17 @@ pub(crate) async fn do_ssh_agent_enroll(
 
     let now = time::OffsetDateTime::now_utc();
 
+    let ssh_caps: BTreeSet<Capability> = BTreeSet::from([
+        Capability::GracefulShutdown,
+        Capability::SoftwareDiscovery,
+        Capability::SshRemote,
+        Capability::UpdateHooks,
+    ]);
+
     let service = ssh_agent_service::ActiveModel {
         id: Set(service_id),
         tenant_id: Set(tenant_id),
-        service_type: Set(ssh_agent_service::ServiceType::SshAgent),
+        capabilities: Set(crate::service_profile::serialize_capabilities(&ssh_caps)),
         hostname: Set(hostname.to_string()),
         friendly_name: Set(friendly_name.to_string()),
         ip_address: Set(ip_address.map(|ip| ip.to_string())),
@@ -785,7 +801,7 @@ mod tests {
             "CREATE TABLE services (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
-                service_type TEXT NOT NULL,
+                capabilities TEXT NOT NULL DEFAULT '[]',
                 hostname TEXT NOT NULL,
                 friendly_name TEXT NOT NULL,
                 ip_address TEXT,
@@ -834,10 +850,8 @@ mod tests {
 
         assert_eq!(result.service.ip_address.as_deref(), Some("203.0.113.10"));
         assert!(result.service.last_seen_at.is_some());
-        assert_eq!(
-            result.service.service_type,
-            ssh_agent_service::ServiceType::SshAgent
-        );
+        let caps = crate::service_profile::parse_capabilities(&result.service.capabilities);
+        assert!(caps.contains(&Capability::SshRemote));
     }
 
     #[tokio::test]

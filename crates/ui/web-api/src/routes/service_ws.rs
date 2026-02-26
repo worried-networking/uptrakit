@@ -30,13 +30,6 @@ pub(crate) const WS_MESSAGE_RATE_LIMIT: u32 = 50;
 /// Window for WebSocket message rate limiting.
 pub(crate) const WS_MESSAGE_RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Shutdown timeout for Agent and SshAgent service types (seconds).
-const AGENT_SHUTDOWN_TIMEOUT_SECS: u64 = 120;
-/// Default ping interval for Agent and SshAgent service types (seconds).
-const AGENT_DEFAULT_PING_INTERVAL_SECS: u32 = 300;
-/// Default ping interval for Mqtt service type (seconds).
-const MQTT_DEFAULT_PING_INTERVAL_SECS: u32 = 15;
-
 /// Fixed-window rate limiter for WebSocket message processing.
 pub(crate) struct MessageRateLimiter {
     window_start: std::time::Instant,
@@ -294,7 +287,7 @@ enum ConnectionType {
 /// Unified WebSocket handler for both agent and MQTT services.
 ///
 /// Determines the connection type (Authenticated / Enrolled / Anonymous) and,
-/// once the `service_type` is known, dispatches to the appropriate
+/// once the capabilities are known, dispatches to the appropriate
 /// service-specific handler in [`super::agent_ws`] or [`super::mqtt_ws`].
 ///
 /// Per-IP rate limiting is applied before the WebSocket upgrade to prevent
@@ -345,7 +338,6 @@ pub async fn service_ws(
             Ok(service) => {
                 tracing::info!(
                     service_id = %service.id,
-                    service_type = ?service.service_type,
                     "enrolled service WS upgrade (bearer)"
                 );
                 ConnectionType::Enrolled(service.id)
@@ -560,7 +552,7 @@ async fn handle_authenticated(
         }
     };
 
-    // 2. Service status check -- also determines service_type.
+    // 2. Service status check.
     let service = match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
         .one(state.db())
         .await
@@ -614,23 +606,12 @@ async fn handle_authenticated(
     // Send ServiceSettings on connect.
     let renewal_window_hours = state.settings.renewal_window_hours();
     let ca_bundle_hash = state.ca_snapshot.borrow().bundle_hash.clone();
-    let shutdown_timeout: Option<u32> = match service.service_type {
-        service_entity::ServiceType::Agent => Some(AGENT_SHUTDOWN_TIMEOUT_SECS as u32),
-        service_entity::ServiceType::Mqtt => None,
-        service_entity::ServiceType::SshAgent => Some(AGENT_SHUTDOWN_TIMEOUT_SECS as u32),
-        _ => {
-            tracing::warn!(service_type = ?service.service_type, "unknown ServiceType for shutdown timeout; defaulting to agent timeout");
-            Some(AGENT_SHUTDOWN_TIMEOUT_SECS as u32)
-        }
-    };
+    use crate::service_profile::{ServiceProfile, parse_capabilities};
+    let capabilities = parse_capabilities(&service.capabilities);
+    let profile = ServiceProfile::from_capabilities(&capabilities);
+    let shutdown_timeout = profile.shutdown_timeout_secs();
     let ping_secs = service.ping_interval_seconds.map_or_else(
-        || match service.service_type {
-            service_entity::ServiceType::Agent | service_entity::ServiceType::SshAgent => {
-                AGENT_DEFAULT_PING_INTERVAL_SECS
-            }
-            service_entity::ServiceType::Mqtt => MQTT_DEFAULT_PING_INTERVAL_SECS,
-            _ => AGENT_DEFAULT_PING_INTERVAL_SECS,
-        },
+        || profile.default_ping_interval_secs(),
         |v| v as u32,
     );
     let ping_interval = std::time::Duration::from_secs(u64::from(ping_secs));
@@ -648,47 +629,28 @@ async fn handle_authenticated(
         return;
     }
 
-    // Dispatch to service-type-specific authenticated handler.
-    match service.service_type {
-        service_entity::ServiceType::Agent => {
-            let ctx = AuthenticatedContext {
-                service_id,
-                cert: cert_id,
-                last_seen_at: previous_last_seen_at,
-                out_seq,
-                in_seq,
-            };
-            super::agent_ws::handle_agent_authenticated(&mut sink, &mut stream, &state, ctx).await;
-        }
-        service_entity::ServiceType::Mqtt => {
-            let ctx = AuthenticatedContext {
-                service_id,
-                cert: cert_id,
-                last_seen_at: previous_last_seen_at,
-                out_seq,
-                in_seq,
-            };
-            super::mqtt_ws::handle_mqtt_authenticated(&mut sink, &mut stream, &state, ctx).await;
-        }
-        service_entity::ServiceType::SshAgent => {
-            let ctx = AuthenticatedContext {
-                service_id,
-                cert: cert_id,
-                last_seen_at: previous_last_seen_at,
-                out_seq,
-                in_seq,
-            };
-            super::ssh_agent_ws::handle_ssh_agent_authenticated(
-                &mut sink,
-                &mut stream,
-                &state,
-                ctx,
-            )
-            .await;
-        }
-        _ => {
-            tracing::error!(%service_id, "unsupported service type in authenticated handler");
-        }
+    // Dispatch to capability-specific authenticated handler.
+    let has_mqtt = capabilities.contains(&Capability::MqttBridge);
+    let has_ssh = capabilities.contains(&Capability::SshRemote);
+    let ctx = AuthenticatedContext {
+        service_id,
+        cert: cert_id,
+        last_seen_at: previous_last_seen_at,
+        out_seq,
+        in_seq,
+    };
+    if has_mqtt {
+        super::mqtt_ws::handle_mqtt_authenticated(&mut sink, &mut stream, &state, ctx).await;
+    } else if has_ssh {
+        super::ssh_agent_ws::handle_ssh_agent_authenticated(
+            &mut sink,
+            &mut stream,
+            &state,
+            ctx,
+        )
+        .await;
+    } else {
+        super::agent_ws::handle_agent_authenticated(&mut sink, &mut stream, &state, ctx).await;
     }
 }
 
@@ -752,46 +714,41 @@ async fn handle_enrolled(
         }
     }
 
-    // Dispatch to service-type-specific enrolled loop.
-    match service.service_type {
-        service_entity::ServiceType::Agent => {
-            super::agent_ws::handle_agent_enrolled(
-                &mut sink,
-                &mut stream,
-                &state,
-                service_id,
-                out_seq,
-                in_seq,
-            )
-            .await;
-        }
-        service_entity::ServiceType::Mqtt => {
-            super::mqtt_ws::handle_mqtt_enrolled(
-                &mut sink,
-                &mut stream,
-                &state,
-                service_id,
-                service.status == service_entity::ServiceStatus::Approved,
-                out_seq,
-                in_seq,
-            )
-            .await;
-        }
-        service_entity::ServiceType::SshAgent => {
-            super::ssh_agent_ws::handle_ssh_agent_enrolled(
-                &mut sink,
-                &mut stream,
-                &state,
-                service_id,
-                service.status == service_entity::ServiceStatus::Approved,
-                out_seq,
-                in_seq,
-            )
-            .await;
-        }
-        _ => {
-            tracing::error!(%service_id, "unsupported service type in enrolled handler");
-        }
+    // Dispatch to capability-specific enrolled loop.
+    use crate::service_profile::parse_capabilities;
+    let capabilities = parse_capabilities(&service.capabilities);
+    if capabilities.contains(&Capability::MqttBridge) {
+        super::mqtt_ws::handle_mqtt_enrolled(
+            &mut sink,
+            &mut stream,
+            &state,
+            service_id,
+            service.status == service_entity::ServiceStatus::Approved,
+            out_seq,
+            in_seq,
+        )
+        .await;
+    } else if capabilities.contains(&Capability::SshRemote) {
+        super::ssh_agent_ws::handle_ssh_agent_enrolled(
+            &mut sink,
+            &mut stream,
+            &state,
+            service_id,
+            service.status == service_entity::ServiceStatus::Approved,
+            out_seq,
+            in_seq,
+        )
+        .await;
+    } else {
+        super::agent_ws::handle_agent_enrolled(
+            &mut sink,
+            &mut stream,
+            &state,
+            service_id,
+            out_seq,
+            in_seq,
+        )
+        .await;
     }
 
     tracing::debug!(%service_id, "enrolled service disconnected");
@@ -827,7 +784,7 @@ async fn handle_anonymous(
     let deadline = tokio::time::Instant::now() + ANONYMOUS_TIMEOUT;
 
     // Wait for first message -- must be Enroll.
-    let (service_id, service_type, initial_approved) = loop {
+    let (service_id, enroll_capabilities, initial_approved) = loop {
         let msg = match tokio::time::timeout_at(deadline, stream.next()).await {
             Ok(Some(Ok(m))) => m,
             Ok(Some(Err(e))) => {
@@ -864,47 +821,25 @@ async fn handle_anonymous(
 
                 match service_msg {
                     ServiceMessage::Enroll(payload) => {
-                        match payload.service_type {
-                            uptrakit_internal_wire::ServiceType::Agent => {
-                                match enroll_agent(&state, &payload, client_ip, &mut sink, out_seq)
-                                    .await
-                                {
-                                    Some((id, approved)) => {
-                                        break (id, service_entity::ServiceType::Agent, approved);
-                                    }
-                                    None => return, // enrollment failed, error already sent
-                                }
+                        let caps = payload.capabilities.clone();
+                        let has_mqtt =
+                            caps.contains(&Capability::MqttBridge);
+                        let has_ssh =
+                            caps.contains(&Capability::SshRemote);
+
+                        let enrollment_result = if has_mqtt {
+                            enroll_mqtt(&state, &payload, client_ip, &mut sink, out_seq).await
+                        } else if has_ssh {
+                            enroll_ssh_agent(&state, &payload, client_ip, &mut sink, out_seq).await
+                        } else {
+                            enroll_agent(&state, &payload, client_ip, &mut sink, out_seq).await
+                        };
+
+                        match enrollment_result {
+                            Some((id, approved)) => {
+                                break (id, caps, approved);
                             }
-                            uptrakit_internal_wire::ServiceType::Mqtt => {
-                                match enroll_mqtt(&state, &payload, client_ip, &mut sink, out_seq)
-                                    .await
-                                {
-                                    Some((id, approved)) => {
-                                        break (id, service_entity::ServiceType::Mqtt, approved);
-                                    }
-                                    None => return,
-                                }
-                            }
-                            uptrakit_internal_wire::ServiceType::SshAgent => {
-                                match enroll_ssh_agent(
-                                    &state, &payload, client_ip, &mut sink, out_seq,
-                                )
-                                .await
-                                {
-                                    Some((id, approved)) => {
-                                        break (
-                                            id,
-                                            service_entity::ServiceType::SshAgent,
-                                            approved,
-                                        );
-                                    }
-                                    None => return,
-                                }
-                            }
-                            _ => {
-                                tracing::warn!("unsupported service type in enroll payload");
-                                return;
-                            }
+                            None => return, // enrollment failed, error already sent
                         }
                     }
                     _ => {
@@ -924,52 +859,48 @@ async fn handle_anonymous(
         }
     };
 
-    // Dispatch to service-type-specific enrolled loop.
-    match service_type {
-        service_entity::ServiceType::Agent => {
-            // Register in connection registry.
-            let (mut push_rx, cancel_token) =
-                state.service_connections.register_agent(service_id).await;
-            super::agent_ws::run_agent_enrolled_loop(
-                &mut sink,
-                &mut stream,
-                (&mut push_rx, &cancel_token),
-                &state,
-                service_id,
-                out_seq,
-                in_seq,
-            )
-            .await;
-            if !cancel_token.is_cancelled() {
-                state.service_connections.unregister(&service_id).await;
-            }
-        }
-        service_entity::ServiceType::Mqtt => {
-            super::mqtt_ws::handle_mqtt_enrolled(
-                &mut sink,
-                &mut stream,
-                &state,
-                service_id,
-                initial_approved,
-                out_seq,
-                in_seq,
-            )
-            .await;
-        }
-        service_entity::ServiceType::SshAgent => {
-            super::ssh_agent_ws::handle_ssh_agent_enrolled(
-                &mut sink,
-                &mut stream,
-                &state,
-                service_id,
-                initial_approved,
-                out_seq,
-                in_seq,
-            )
-            .await;
-        }
-        _ => {
-            tracing::error!(%service_id, "unsupported service type after enrollment");
+    // Dispatch to capability-specific enrolled loop.
+    if enroll_capabilities.contains(&Capability::MqttBridge) {
+        super::mqtt_ws::handle_mqtt_enrolled(
+            &mut sink,
+            &mut stream,
+            &state,
+            service_id,
+            initial_approved,
+            out_seq,
+            in_seq,
+        )
+        .await;
+    } else if enroll_capabilities.contains(&Capability::SshRemote) {
+        super::ssh_agent_ws::handle_ssh_agent_enrolled(
+            &mut sink,
+            &mut stream,
+            &state,
+            service_id,
+            initial_approved,
+            out_seq,
+            in_seq,
+        )
+        .await;
+    } else {
+        // Register in connection registry.
+        let (mut push_rx, cancel_token) =
+            state
+                .service_connections
+                .register(service_id, enroll_capabilities.clone(), None, None)
+                .await;
+        super::agent_ws::run_agent_enrolled_loop(
+            &mut sink,
+            &mut stream,
+            (&mut push_rx, &cancel_token),
+            &state,
+            service_id,
+            out_seq,
+            in_seq,
+        )
+        .await;
+        if !cancel_token.is_cancelled() {
+            state.service_connections.unregister(&service_id).await;
         }
     }
 
@@ -999,6 +930,7 @@ async fn enroll_agent(
         friendly_name: &payload.friendly_name,
         enrollment_token: payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
         ip_address: client_ip,
+        capabilities_json: crate::service_profile::serialize_capabilities(&payload.capabilities),
     })
     .await;
 
@@ -1258,7 +1190,7 @@ mod tests {
             "CREATE TABLE services (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
-                service_type TEXT NOT NULL,
+                capabilities TEXT NOT NULL DEFAULT '[]',
                 hostname TEXT NOT NULL,
                 friendly_name TEXT NOT NULL,
                 ip_address TEXT,
@@ -1283,7 +1215,7 @@ mod tests {
         service_entity::ActiveModel {
             id: Set(id),
             tenant_id: Set(uuid::Uuid::now_v7()),
-            service_type: Set(service_entity::ServiceType::Agent),
+            capabilities: Set("[]".to_string()),
             hostname: Set("test-host".to_string()),
             friendly_name: Set("test-host".to_string()),
             ip_address: Set(ip_address.map(ToOwned::to_owned)),

@@ -720,8 +720,14 @@ mod tests {
     use sea_orm::{
         ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Schema,
     };
+    use std::collections::BTreeSet;
+    use uptrakit_internal_wire::Capability;
     use uptrakit_shared_db::MqttTransport;
     use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease, tenant};
+
+    fn mqtt_caps() -> BTreeSet<Capability> {
+        BTreeSet::from([Capability::GracefulShutdown, Capability::MqttBridge])
+    }
 
     async fn test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
@@ -792,7 +798,7 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
         let _rx = registry
-            .register_mqtt(service_id, "instance-1".to_string(), 10)
+            .register(service_id, mqtt_caps(), Some("instance-1".to_string()), Some(10))
             .await;
 
         let coordinator = MqttLeaseCoordinator::new(db.clone(), registry.clone());
@@ -843,7 +849,7 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
         let _ = registry
-            .register_mqtt(service_id, "instance-1".to_string(), 10)
+            .register(service_id, mqtt_caps(), Some("instance-1".to_string()), Some(10))
             .await;
 
         let now = OffsetDateTime::now_utc();
@@ -888,7 +894,7 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
         let _ = registry
-            .register_mqtt(service_id, "instance-1".to_string(), 10)
+            .register(service_id, mqtt_caps(), Some("instance-1".to_string()), Some(10))
             .await;
 
         let coordinator = MqttLeaseCoordinator::new(db.clone(), registry.clone());

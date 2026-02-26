@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -5,10 +6,10 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uptrakit_internal_wire::{
-    ApprovedPayload, CertificatePayload, CloseReason, ControllerMessage, ErrorCode, ErrorPayload,
-    IncomingSeq, MqttClientConnectionStatus as WireMqttClientConnectionStatus,
-    MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload, RejectedPayload,
-    ServiceMessage,
+    ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage, ErrorCode,
+    ErrorPayload, IncomingSeq, MqttClientConnectionStatus as WireMqttClientConnectionStatus,
+    MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload,
+    RejectedPayload, ServiceMessage,
 };
 use uptrakit_shared_db::entity::{
     service as mqtt_service, service_certificate as mqtt_service_certificate,
@@ -143,10 +144,23 @@ pub(crate) async fn handle_mqtt_authenticated(
         }
     };
 
+    // Fetch service model to derive capabilities.
+    let service_model = match mqtt_service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(s)) => s,
+        Ok(None) | Err(_) => {
+            tracing::error!(%service_id, "failed to load service for capabilities");
+            return;
+        }
+    };
+    let capabilities = crate::service_profile::parse_capabilities(&service_model.capabilities);
+
     // Register in connection registry.
     let (mut push_rx, cancel_token) = state
         .service_connections
-        .register_mqtt(service_id, instance_id.clone(), max_tenants)
+        .register(service_id, capabilities.clone(), Some(instance_id.clone()), Some(max_tenants))
         .await;
 
     // Send Registered acknowledgment.
@@ -226,7 +240,7 @@ pub(crate) async fn handle_mqtt_authenticated(
         .notification_service
         .deliver_backlog_for_authenticated_service(
             service_id,
-            uptrakit_shared_db::entity::service::ServiceType::Mqtt,
+            &capabilities,
             last_seen_at,
         )
         .await;
@@ -709,7 +723,7 @@ pub(crate) async fn do_mqtt_service_enroll(
         let token_hash = match crate::settings_store::load_setting(
             db,
             tenant_id,
-            crate::SettingKey::MqttEnrollmentTokenHash,
+            crate::SettingKey::EnrollmentTokenHash,
         )
         .await
         {
@@ -757,10 +771,13 @@ pub(crate) async fn do_mqtt_service_enroll(
 
     let now = time::OffsetDateTime::now_utc();
 
+    let mqtt_caps: BTreeSet<Capability> =
+        BTreeSet::from([Capability::GracefulShutdown, Capability::MqttBridge]);
+
     let service = mqtt_service::ActiveModel {
         id: Set(service_id),
         tenant_id: Set(tenant_id),
-        service_type: Set(mqtt_service::ServiceType::Mqtt),
+        capabilities: Set(crate::service_profile::serialize_capabilities(&mqtt_caps)),
         hostname: Set(hostname.to_string()),
         friendly_name: Set(friendly_name.to_string()),
         ip_address: Set(ip_address.map(|ip| ip.to_string())),
@@ -888,7 +905,7 @@ mod tests {
             "CREATE TABLE services (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
-                service_type TEXT NOT NULL,
+                capabilities TEXT NOT NULL DEFAULT '[]',
                 hostname TEXT NOT NULL,
                 friendly_name TEXT NOT NULL,
                 ip_address TEXT,

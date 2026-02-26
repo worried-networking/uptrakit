@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -6,9 +6,10 @@ use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
-    ApprovedPayload, CertificatePayload, CloseReason, ControllerMessage, DiscoverSoftwarePayload,
-    DiscoveryPluginAssignment, ErrorCode, ErrorPayload, ExecuteUpdatePayload, IncomingSeq,
-    OutgoingSeq, PingPayload, PluginType, RejectedPayload, ServiceMessage, UpdateFinalStatus,
+    ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage,
+    DiscoverSoftwarePayload, DiscoveryPluginAssignment, ErrorCode, ErrorPayload,
+    ExecuteUpdatePayload, IncomingSeq, OutgoingSeq, PingPayload, PluginType, RejectedPayload,
+    ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, service_host,
@@ -69,8 +70,20 @@ pub(crate) async fn handle_agent_authenticated(
         out_seq,
         in_seq,
     } = ctx;
+    // Fetch the service model to derive capabilities for registration.
+    let capabilities: BTreeSet<Capability> = match uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => crate::service_profile::parse_capabilities(&svc.capabilities),
+        _ => BTreeSet::new(),
+    };
+
     // Register first so concurrent outbox events can reach us via push_rx.
-    let (mut push_rx, cancel_token) = state.service_connections.register_agent(agent_id).await;
+    let (mut push_rx, cancel_token) = state
+        .service_connections
+        .register(agent_id, capabilities.clone(), None, None)
+        .await;
 
     // Deliver pending updates for hosts linked to this agent.
     // Any concurrent outbox events that arrive between registration and
@@ -83,7 +96,7 @@ pub(crate) async fn handle_agent_authenticated(
         .notification_service
         .deliver_backlog_for_authenticated_service(
             agent_id,
-            uptrakit_shared_db::entity::service::ServiceType::Agent,
+            &capabilities,
             last_seen_at,
         )
         .await;
@@ -686,7 +699,18 @@ pub(crate) async fn handle_agent_enrolled(
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) {
-    let (mut push_rx, cancel_token) = state.service_connections.register_agent(agent_id).await;
+    // Fetch the service model to derive capabilities for registration.
+    let capabilities: BTreeSet<Capability> = match uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => crate::service_profile::parse_capabilities(&svc.capabilities),
+        _ => BTreeSet::new(),
+    };
+    let (mut push_rx, cancel_token) = state
+        .service_connections
+        .register(agent_id, capabilities, None, None)
+        .await;
     run_agent_enrolled_loop(
         sink,
         stream,
@@ -713,7 +737,7 @@ const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_se
 /// push messages (Approved / Rejected).
 ///
 /// The `connection` tuple contains the push-message receiver and cancellation
-/// token returned by `ServiceConnectionRegistry::register_agent()`.
+/// token returned by `ServiceConnectionRegistry::register()`.
 pub(crate) async fn run_agent_enrolled_loop(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
