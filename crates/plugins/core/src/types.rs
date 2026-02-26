@@ -28,6 +28,15 @@ pub enum PluginCapability {
     PreUpdateHook,
     /// Plugin can run logic after an update is applied.
     PostUpdateHook,
+    /// Plugin's `fetch_releases()` does not require any local system state
+    /// (no package index, no filesystem access, no local commands) and can
+    /// be called from the controller process directly rather than through
+    /// an agent.
+    ///
+    /// All `fetch_releases` calls default to agent-side. This capability is
+    /// an explicit opt-in to controller-side execution. The user can override
+    /// via `execution_site` on the plugin assignment.
+    ControllerSideFetchReleases,
 }
 
 /// Metadata for an upstream software release.
@@ -72,6 +81,14 @@ mod tests {
         );
         assert_ne!(
             PluginCapability::PreUpdateHook,
+            PluginCapability::RefreshPackageIndex
+        );
+        assert_eq!(
+            PluginCapability::ControllerSideFetchReleases,
+            PluginCapability::ControllerSideFetchReleases
+        );
+        assert_ne!(
+            PluginCapability::ControllerSideFetchReleases,
             PluginCapability::RefreshPackageIndex
         );
     }
