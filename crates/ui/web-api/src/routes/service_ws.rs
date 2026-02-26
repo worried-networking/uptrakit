@@ -284,11 +284,11 @@ enum ConnectionType {
 // Unified entry point
 // ---------------------------------------------------------------------------
 
-/// Unified WebSocket handler for both agent and MQTT services.
+/// Unified WebSocket handler for all service types.
 ///
-/// Determines the connection type (Authenticated / Enrolled / Anonymous) and,
-/// once the capabilities are known, dispatches to the appropriate
-/// service-specific handler in [`super::agent_ws`] or [`super::mqtt_ws`].
+/// Determines the connection type (Authenticated / Enrolled / Anonymous) and
+/// dispatches to the unified capability-gated handler in
+/// [`super::service_handler`].
 ///
 /// Per-IP rate limiting is applied before the WebSocket upgrade to prevent
 /// connection floods and brute-force bearer secret guessing.

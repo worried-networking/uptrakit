@@ -354,7 +354,7 @@ for user review. Key invariants:
 | `crates/shared/agent-core/src/discovery.rs` | `handle_discover_software()` agent-side logic |
 | `crates/ui/web-api/src/queries/autodiscovery.rs` | DB helpers + `process_discovery_results()` |
 | `crates/ui/web-api/src/routes/autodiscovery.rs` | Ignore list CRUD routes |
-| `crates/ui/web-api/src/routes/agent_ws.rs` | `trigger_discovery_for_agent_host()` helper |
+| `crates/ui/web-api/src/routes/service_handler.rs` | `trigger_discovery_for_agent_host()` helper |
 | `docs/api/autodiscovery.md` | Full API reference for autodiscovery endpoints |
 | `docs/end-user/autodiscovery.md` | End-user guide (discovery workflow, review, ignore list) |
 | `docs/end-user/plugin-configs.md` | End-user guide for plugin config CRUD and discovery |
@@ -412,8 +412,7 @@ All topics use the MQTT client's `topic_prefix` field.
 | `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler |
 | `crates/ui/web-api/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items with per-host version data |
 | `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + outbox write) |
-| `crates/ui/web-api/src/routes/mqtt_ws.rs` | `MqttTriggerUpdate` handler; states push after `TenantAssignments` |
-| `crates/ui/web-api/src/routes/agent_ws.rs` | States push after `VersionCheckResults` and `UpdateResult` |
+| `crates/ui/web-api/src/routes/service_handler.rs` | `MqttTriggerUpdate` handler; states push after `TenantAssignments`, `VersionCheckResults`, and `UpdateResult` |
 | `crates/ui/web-api/src/queries/update_triggers.rs` | `trigger_update_for_host` shared by REST and MQTT WS handlers |
 | `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide |
 | `docs/api/wire-protocol.md` | `software_states` and `mqtt_trigger_update` payload docs |

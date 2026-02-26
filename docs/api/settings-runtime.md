@@ -350,7 +350,8 @@ Agents and MQTT services share a unified wire protocol (`ServiceMessage` / `Cont
 `VersionCheckResults`, `UpdateStarted`, `UpdateOutput`, `UpdateResult`) and MQTT-specific variants (`Register`,
 `ReleaseTenants`), plus shared variants (`Enroll`, `RequestCertificate`, `RenewCertificate`, `Ping`, `Disconnecting`).
 `ControllerMessage` is fully shared. The `service_ws.rs` module is the single public WebSocket entry point;
-`agent_ws.rs` and `mqtt_ws.rs` are `pub(crate)` internal implementation modules.
+`service_handler.rs` is the `pub(crate)` internal implementation module containing
+capability-gated message dispatch for all service types.
 
 **Enrollment and approval:**
 
@@ -396,7 +397,7 @@ MQTT services use the unified service entity:
 | `crates/shared/db/src/entity/controller_event.rs` | SeaORM entity for the notification outbox |
 | `crates/ui/web-api/src/routes/settings_mqtt.rs` | MQTT config API route handlers |
 | `crates/ui/web-api/src/routes/service_ws.rs` | Unified WebSocket entry point (`/api/v1/ws/service`) |
-| `crates/ui/web-api/src/routes/mqtt_ws.rs` | Internal MQTT WebSocket handler (`pub(crate)`) |
+| `crates/ui/web-api/src/routes/service_handler.rs` | Unified capability-gated WebSocket handler (`pub(crate)`) |
 | `crates/ui/web-api/src/routes/services.rs` | Unified service management REST endpoints |
 | `crates/core/mqtt/src/main.rs` | Entry point, enrollment flow, authenticated main loop |
 | `crates/core/mqtt/src/cli.rs` | CLI argument definitions |

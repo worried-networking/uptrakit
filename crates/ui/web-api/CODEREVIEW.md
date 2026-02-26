@@ -132,8 +132,8 @@ The `==` operator short-circuits, but the compared values (CA CNs) are not confi
 - **Zero `#[allow(dead_code)]` or `#[allow(unused)]` annotations** anywhere in the crate.
 - **`WS_MESSAGE_RATE_LIMIT` / `WS_MESSAGE_RATE_WINDOW` named constants** — `src/routes/service_ws.rs:29-31`. WebSocket rate-limit parameters are named and documented, not magic numbers.
 - **`MAX_WS_MESSAGE_SIZE` and `ANONYMOUS_TIMEOUT` named** — `src/routes/service_ws.rs:797-801`. Domain-meaningful values with doc comments.
-- **`APPROVAL_POLL_INTERVAL` named constant** — `src/routes/agent_ws.rs:635`. Agent enrolled-loop poll interval is explicit and documented.
-- **`MAX_UPDATE_OUTPUT_BYTES` named constant** — `src/routes/agent_ws.rs:48`. Output cap is named and the cap-enforcement logic (conditional `UPDATE` + `rows_affected == 0` guard) is well-documented.
+- **`APPROVAL_POLL_INTERVAL` named constant** — `src/routes/service_handler.rs`. Enrolled-loop poll interval is explicit and documented.
+- **`MAX_UPDATE_OUTPUT_BYTES` named constant** — `src/routes/service_handler.rs`. Output cap is named and the cap-enforcement logic is well-documented.
 - **`model_to_config` isolation in lease coordinator** — `src/mqtt_lease_coordinator.rs:687-712`. The conversion from DB model to wire type is a single private function, not repeated inline across all callers.
 
 #### 2026-02-24 Review
@@ -263,8 +263,8 @@ Should test that `svc.broadcast(msg)` does NOT write to the outbox, verifying th
 - **`ServiceConnectionRegistry.send()` does not hold a lock across await** — Read lock is acquired, sender cloned, lock released, then the async send executes. No deadlock risk under high connection load.
 - **Event poller advances cursor only past successfully delivered events** — `src/event_poller.rs:102-183`. A delivery failure stops the batch at the failing event and retries from that point. After `MAX_DELIVERY_RETRIES` (3) failures the event is permanently skipped. This prevents a single bad event from blocking all subsequent delivery indefinitely.
 - **`MqttLeaseCoordinator` uses `INSERT ON CONFLICT DO NOTHING`** — `src/mqtt_lease_coordinator.rs:141-161`. Concurrent assignment attempts are idempotent at the DB level; only one instance wins the lease.
-- **Enrolled-loop approval polling decoupled from ping frequency** — `src/routes/agent_ws.rs:635`, `669-670`. A dedicated `APPROVAL_POLL_INTERVAL` (5 seconds) drives DB polls for status changes, independent of whether the agent sends pings. A silent agent still receives timely approval/rejection.
-- **Cancellation token propagated to WebSocket connection loops** — Both `handle_agent_authenticated` and `run_agent_enrolled_loop` select on `cancel_token.cancelled()`, enabling a new connection for the same agent to supersede the old one immediately via `CloseReason::Superseded`.
+- **Enrolled-loop approval polling decoupled from ping frequency** — `src/routes/service_handler.rs`. A dedicated `APPROVAL_POLL_INTERVAL` (5 seconds) drives DB polls for status changes, independent of whether the service sends pings. A silent service still receives timely approval/rejection.
+- **Cancellation token propagated to WebSocket connection loops** — The unified `handle_authenticated_loop` and `handle_enrolled_loop` in `service_handler.rs` select on `cancel_token.cancelled()`, enabling a new connection for the same service to supersede the old one immediately via `CloseReason::Superseded`.
 
 #### 2026-02-24 Review
 
@@ -283,7 +283,7 @@ When `existing.instance_id != instance_id` (line 545-555), the function overwrit
 
 If the event cursor cannot advance (e.g., the target service never connects), `retry_counts` accumulates entries for every event in the stuck window. The `retain` cleanup on line 180 only fires when `new_cursor` advances. A long outage with many events produces unbounded map growth. Add a hard cap (e.g., 10,000 entries) or a TTL-based eviction that does not depend on cursor progress.
 
-**[SEVERITY: Medium]** `src/routes/agent_ws.rs:937-1010` — `deliver_pending_updates` issues N sequential DB queries per pending update
+**[SEVERITY: Medium]** `src/routes/service_handler.rs` — `deliver_pending_updates` issues N sequential DB queries per pending update
 
 For each pending update record the function issues separate sequential queries for: software item, host-software-item link, plugin config, and host. With M pending updates that is 4M sequential round-trips. Batch the pending-updates delivery: load all software items, all links, all plugin configs, and all hosts in four single queries using `is_in`, then join in memory.
 
@@ -291,7 +291,7 @@ For each pending update record the function issues separate sequential queries f
 
 Each agent receives a separate `tokio::spawn`'d task with a random delay. With thousands of connected agents, this briefly creates thousands of tasks competing for the event loop. A bounded `tokio::sync::Semaphore` with a reasonable concurrency limit (e.g., 256) would smooth the burst without meaningfully delaying shutdown notification.
 
-**[SEVERITY: Low]** `src/routes/agent_ws.rs:669-670` — First approval-poll tick consumed immediately
+**[SEVERITY: Low]** `src/routes/service_handler.rs` — First approval-poll tick consumed immediately
 
 ```rust
 let mut approval_poll = tokio::time::interval(APPROVAL_POLL_INTERVAL);

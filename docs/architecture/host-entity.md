@@ -120,9 +120,9 @@ The controller enforces several connection-level limits on the WebSocket endpoin
 | Enrollment response timeout | 60 seconds | Prevents blocking on unresponsive controllers during Enroll/RequestCertificate exchanges |
 | Enrollment approval timeout | 30 minutes | Prevents indefinite blocking while waiting for human approval |
 
-These limits are defined as constants in `service_ws.rs` (`MAX_WS_MESSAGE_SIZE`, `ANONYMOUS_TIMEOUT`), `agent_ws.rs`
-(`APPROVAL_POLL_INTERVAL`, `MAX_UPDATE_OUTPUT_BYTES`), `mqtt_ws.rs` (`APPROVAL_POLL_INTERVAL`), and
-`enrollment/src/ws.rs` (`CONNECT_TIMEOUT`, `RESPONSE_TIMEOUT`, `APPROVAL_TIMEOUT`).
+These limits are defined as constants in `service_ws.rs` (`MAX_WS_MESSAGE_SIZE`, `ANONYMOUS_TIMEOUT`),
+`service_handler.rs` (`APPROVAL_POLL_INTERVAL`, `MAX_UPDATE_OUTPUT_BYTES`), and `enrollment/src/ws.rs`
+(`CONNECT_TIMEOUT`, `RESPONSE_TIMEOUT`, `APPROVAL_TIMEOUT`).
 
 ## Agent graceful shutdown
 
@@ -162,10 +162,8 @@ controlled by signal handlers and a configurable timeout.
 Agents report their binary version via the `agent_version` field in `ReportHostsPayload`. The controller stores this
 in the `services.client_version` column and enforces a minimum version check:
 
-- **Minimum version**: Hardcoded `MIN_AGENT_VERSION` constant in `crates/ui/web-api/src/routes/agent_ws.rs` (currently
-  `"0.0.1"`; note: `agent_ws.rs` is now a `pub(crate)` internal module)
-- **Enforcement**: On `ReportHosts`, if the agent's version is below the minimum (semver comparison), the controller
-  sends an `Error { code: "agent_version_too_old" }` message and closes the connection
+- **Storage**: On `ReportHosts`, the controller stores the agent's version in `services.client_version`
+  via the unified handler in `crates/ui/web-api/src/routes/service_handler.rs`
 - **API exposure**: The `client_version` field is included in `ServiceResponse` (REST API)
 
 ## Version check wire protocol

@@ -242,7 +242,7 @@ See [Software Item Entity](../architecture/software-item-entity.md) for the full
 | File | Purpose |
 | --- | --- |
 | `crates/ui/web-api/src/routes/software_items.rs` | Route handlers (`check_versions`, `check_versions_host`, `trigger_update`) |
-| `crates/ui/web-api/src/routes/agent_ws.rs` | `VersionCheckResults` handler (updates `last_checked_at`) |
+| `crates/ui/web-api/src/routes/service_handler.rs` | `VersionCheckResults` handler (updates `last_checked_at`) |
 | `crates/shared/web-api-types/src/software_items.rs` | Response and request types |
 
 ## Scheduler Endpoints
