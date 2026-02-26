@@ -185,7 +185,7 @@
 					<th>Agents</th>
 					<th>Last Seen</th>
 					{#if canManage}
-						<th class="w-20"></th>
+						<th class="w-20 sticky right-0 bg-surface-50 dark:bg-surface-900"></th>
 					{/if}
 				</tr>
 			</thead>
@@ -200,7 +200,7 @@
 						<td>{host.agents.length}</td>
 						<td>{formatDate(host.last_seen_at)}</td>
 						{#if canManage}
-							<td>
+							<td class="sticky right-0 bg-surface-50 dark:bg-surface-900">
 								<div class="actions-menu">
 									<button
 										class="btn btn-sm preset-tonal"
