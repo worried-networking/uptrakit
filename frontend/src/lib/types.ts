@@ -51,13 +51,12 @@ export interface LoginRequest {
 	password: string;
 }
 
-export type ServiceType = 'agent' | 'mqtt' | 'ssh_agent';
-
 export type ServiceStatus = 'pending' | 'approved' | 'rejected' | 'deactivated';
 
 export interface ServiceResponse {
 	id: string;
-	service_type: ServiceType;
+	capabilities: string[];
+	service_label: string;
 	hostname: string;
 	friendly_name: string;
 	ip_address: string | null;
@@ -129,17 +128,11 @@ export interface EnrollmentTokenStatus {
 	configured: boolean;
 }
 
-export interface EnrollmentTokenStatusesResponse {
-	agent: EnrollmentTokenStatus;
-	mqtt: EnrollmentTokenStatus;
-	ssh_agent: EnrollmentTokenStatus;
-}
-
 export interface CombinedSettingsResponse {
 	registration: RegistrationSettings;
 	authentication: AuthenticationSettings;
 	agent_certificates: AgentCertificateSettings;
-	enrollment_tokens: EnrollmentTokenStatusesResponse;
+	enrollment_token: EnrollmentTokenStatus;
 }
 
 export interface EnrollmentTokenResponse {

@@ -28,9 +28,7 @@
 	let mqttClients: MqttClientResponse[] | undefined = $state(undefined);
 	let oidcProviders: OidcProviderResponse[] | undefined = $state(undefined);
 	let agentCertSettings: AgentCertSettingsData | undefined = $state(undefined);
-	let agentTokenStatus: EnrollmentTokenStatus | undefined = $state(undefined);
-	let mqttTokenStatus: EnrollmentTokenStatus | undefined = $state(undefined);
-	let sshAgentTokenStatus: EnrollmentTokenStatus | undefined = $state(undefined);
+	let enrollmentTokenStatus: EnrollmentTokenStatus | undefined = $state(undefined);
 
 	// Not reactive — only used for setTimeout cleanup.
 	let mqttPollHandle: ReturnType<typeof setTimeout> | null = null;
@@ -120,9 +118,7 @@
 			registrationSettings = combined.registration;
 			authSettings = combined.authentication;
 			agentCertSettings = combined.agent_certificates;
-			agentTokenStatus = combined.enrollment_tokens.agent;
-			mqttTokenStatus = combined.enrollment_tokens.mqtt;
-			sshAgentTokenStatus = combined.enrollment_tokens.ssh_agent;
+			enrollmentTokenStatus = combined.enrollment_token;
 		} else {
 			const msg = results[0].reason instanceof Error ? results[0].reason.message : 'Failed to load combined settings.';
 			registrationError = msg;
@@ -196,13 +192,7 @@
 				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
 			</aside>
 		{/if}
-		<EnrollmentTokenSettings
-			agentStatus={agentTokenStatus}
-			mqttStatus={mqttTokenStatus}
-			sshAgentStatus={sshAgentTokenStatus}
-			onSuccess={showSuccess}
-			onError={showError}
-		/>
+		<EnrollmentTokenSettings status={enrollmentTokenStatus} onSuccess={showSuccess} onError={showError} />
 		{#if enrollmentTokenError}
 			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
 				<p>{enrollmentTokenError}</p>

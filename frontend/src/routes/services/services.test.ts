@@ -40,7 +40,8 @@ function makePage(items: ServiceResponse[]): PaginatedResponse<ServiceResponse> 
 const approvedAgent: ServiceResponse = {
 	id: 'svc-001',
 	friendly_name: 'prod-agent',
-	service_type: 'agent',
+	capabilities: ['software_discovery', 'update_hooks', 'graceful_shutdown'],
+	service_label: 'Agent',
 	hostname: 'prod-host',
 	ip_address: '10.0.0.1',
 	status: 'approved',
@@ -95,7 +96,7 @@ describe('Services Page', () => {
 		expect(screen.queryByText('Services')).not.toBeInTheDocument();
 	});
 
-	it('calls getServices with the agent type when the Agents filter button is clicked', async () => {
+	it('calls getServices with the software_discovery capability when the Agents filter button is clicked', async () => {
 		vi.mocked(api.getServices).mockResolvedValue(makePage([]));
 		render(ServicesPage);
 		// Wait for the initial load triggered by $effect
@@ -104,7 +105,9 @@ describe('Services Page', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Agents' }));
 
 		await waitFor(() =>
-			expect(vi.mocked(api.getServices)).toHaveBeenCalledWith(expect.objectContaining({ type: 'agent' }))
+			expect(vi.mocked(api.getServices)).toHaveBeenCalledWith(
+				expect.objectContaining({ capability: 'software_discovery' })
+			)
 		);
 	});
 

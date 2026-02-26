@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import { getServices, approveService, rejectService, deleteService, mergeService, updateService } from '$lib/api';
-	import type { ServiceResponse, ServiceType } from '$lib/types';
+	import type { ServiceResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
@@ -12,20 +12,23 @@
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 
-	const TYPE_FILTER_VALUES = ['all', 'agent', 'mqtt', 'ssh_agent'] as const satisfies readonly ('all' | ServiceType)[];
+	const CAPABILITY_FILTER_VALUES = ['all', 'software_discovery', 'mqtt_bridge', 'ssh_remote'] as const;
+	type CapabilityFilter = (typeof CAPABILITY_FILTER_VALUES)[number];
 
 	let services: ServiceResponse[] = $state([]);
 	let error: string | null = $state(null);
 	let openMenuId: string | null = $state(null);
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
 	let confirmAction: { serviceId: string; action: 'approve' | 'reject' | 'delete'; name: string } | null = $state(null);
-	let mergeSource: { id: string; name: string; type: ServiceType } | null = $state(null);
+	let mergeSource: { id: string; name: string; capabilities: string[] } | null = $state(null);
 	let mergeTargetId: string | null = $state(null);
 	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
-	let typeFilter: 'all' | ServiceType = $state(parseUrlParam(page.url, 'type', TYPE_FILTER_VALUES, 'all'));
+	let capabilityFilter: CapabilityFilter = $state(
+		parseUrlParam(page.url, 'capability', CAPABILITY_FILTER_VALUES, 'all')
+	);
 
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageAgents) ?? false);
 
@@ -33,7 +36,7 @@
 
 	$effect(() => {
 		const parts: string[] = [];
-		if (typeFilter !== 'all') parts.push(`type=${typeFilter}`);
+		if (capabilityFilter !== 'all') parts.push(`capability=${capabilityFilter}`);
 		if (currentPage > 1) parts.push(`page=${currentPage}`);
 		const search = parts.join('&');
 		goto(search ? `${location.pathname}?${search}` : location.pathname, {
@@ -44,7 +47,7 @@
 	});
 
 	$effect(() => {
-		const _filter = typeFilter; // explicit dependency tracking
+		const _filter = capabilityFilter; // explicit dependency tracking
 		loadServices(untrack(() => currentPage));
 
 		refreshInterval = setInterval(() => {
@@ -64,7 +67,7 @@
 		try {
 			if (!background) error = null;
 			const result = await getServices({
-				type: typeFilter === 'all' ? undefined : typeFilter,
+				capability: capabilityFilter === 'all' ? undefined : capabilityFilter,
 				page
 			});
 			services = result.items;
@@ -92,9 +95,9 @@
 		openMenuId = null;
 	}
 
-	function setFilter(filter: 'all' | ServiceType) {
+	function setFilter(filter: CapabilityFilter) {
 		currentPage = 1;
-		typeFilter = filter;
+		capabilityFilter = filter;
 		closeMenu();
 	}
 
@@ -109,7 +112,7 @@
 
 	function openMergeDialog(service: ServiceResponse) {
 		closeMenu();
-		mergeSource = { id: service.id, name: service.friendly_name, type: service.service_type };
+		mergeSource = { id: service.id, name: service.friendly_name, capabilities: service.capabilities };
 		mergeTargetId = null;
 	}
 
@@ -207,17 +210,6 @@
 		reject: { title: 'Reject Service', verb: 'reject', btnClass: 'preset-filled-error-500' },
 		delete: { title: 'Delete Service', verb: 'permanently delete', btnClass: 'preset-filled-error-500' }
 	} as const;
-
-	function formatServiceType(serviceType: ServiceType): string {
-		switch (serviceType) {
-			case 'agent':
-				return 'Agent';
-			case 'mqtt':
-				return 'MQTT Service';
-			case 'ssh_agent':
-				return 'SSH Agent';
-		}
-	}
 </script>
 
 <svelte:window
@@ -236,26 +228,26 @@
 
 	<div class="mb-6 flex flex-wrap gap-2">
 		<button
-			class="btn btn-sm {typeFilter === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			class="btn btn-sm {capabilityFilter === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
 			onclick={() => setFilter('all')}
 		>
 			All Services
 		</button>
 		<button
-			class="btn btn-sm {typeFilter === 'agent' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-			onclick={() => setFilter('agent')}
+			class="btn btn-sm {capabilityFilter === 'software_discovery' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('software_discovery')}
 		>
 			Agents
 		</button>
 		<button
-			class="btn btn-sm {typeFilter === 'mqtt' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-			onclick={() => setFilter('mqtt')}
+			class="btn btn-sm {capabilityFilter === 'mqtt_bridge' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('mqtt_bridge')}
 		>
 			MQTT Services
 		</button>
 		<button
-			class="btn btn-sm {typeFilter === 'ssh_agent' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-			onclick={() => setFilter('ssh_agent')}
+			class="btn btn-sm {capabilityFilter === 'ssh_remote' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('ssh_remote')}
 		>
 			SSH Agents
 		</button>
@@ -273,7 +265,7 @@
 			<thead>
 				<tr>
 					<th>Name</th>
-					<th>Type</th>
+					<th>Label</th>
 					<th>Hostname</th>
 					<th>IP</th>
 					<th>Status</th>
@@ -288,7 +280,7 @@
 					<tr>
 						<td>{service.friendly_name}</td>
 						<td>
-							<span class="badge preset-tonal">{formatServiceType(service.service_type)}</span>
+							<span class="badge preset-tonal">{service.service_label}</span>
 						</td>
 						<td>{service.hostname}</td>
 						<td>{service.ip_address ?? '\u2014'}</td>
@@ -428,7 +420,7 @@
 					<span>Select target service</span>
 					<select class="select" bind:value={mergeTargetId}>
 						<option value={null}>-- Select a service --</option>
-						{#each services.filter((s) => s.status === 'approved' && s.service_type === mergeSource?.type && s.id !== mergeSource?.id) as target (target.id)}
+						{#each services.filter((s) => s.status === 'approved' && s.capabilities.includes('software_discovery') && s.id !== mergeSource?.id) as target (target.id)}
 							<option value={target.id}>{target.friendly_name} ({target.hostname})</option>
 						{/each}
 					</select>
@@ -452,7 +444,7 @@
 			>
 				<h3 class="h3">Edit Ping Interval</h3>
 				<p>
-					Set a custom ping interval for <strong>{editPingService.name}</strong>. Leave empty to use the service-type
+					Set a custom ping interval for <strong>{editPingService.name}</strong>. Leave empty to use the service-profile
 					default.
 				</p>
 				<label class="label">

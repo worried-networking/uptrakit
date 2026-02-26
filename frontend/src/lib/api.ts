@@ -309,13 +309,13 @@ export async function oidcExchange(code: string): Promise<AuthResponse> {
 }
 
 export function getServices(options?: {
-	type?: string;
+	capability?: string;
 	status?: string;
 	page?: number;
 	perPage?: number;
 }): Promise<PaginatedResponse<ServiceResponse>> {
 	const params = new URLSearchParams();
-	if (options?.type) params.set('type', options.type);
+	if (options?.capability) params.set('capability', options.capability);
 	if (options?.status) params.set('status', options.status);
 	if (options?.page != null) params.set('page', String(options.page));
 	if (options?.perPage != null) params.set('per_page', String(options.perPage));
@@ -396,24 +396,20 @@ export function updateAgentCertificateSettings(
 	return request('/settings/agent-certificates', { method: 'PUT', body: JSON.stringify(data) });
 }
 
-export function getEnrollmentTokenStatus(
-	type: 'agent' | 'mqtt' | 'ssh_agent' = 'agent'
-): Promise<EnrollmentTokenStatus> {
-	return request(`/services/enrollment-token/status?type=${type}`);
+export function getEnrollmentTokenStatus(): Promise<EnrollmentTokenStatus> {
+	return request('/services/enrollment-token/status');
 }
 
 export function getCombinedSettings(): Promise<CombinedSettingsResponse> {
 	return request('/settings');
 }
 
-export function createEnrollmentToken(
-	type: 'agent' | 'mqtt' | 'ssh_agent' = 'agent'
-): Promise<EnrollmentTokenResponse> {
-	return request(`/services/enrollment-token?type=${type}`, { method: 'POST' });
+export function createEnrollmentToken(): Promise<EnrollmentTokenResponse> {
+	return request('/services/enrollment-token', { method: 'POST' });
 }
 
-export function revokeEnrollmentToken(type: 'agent' | 'mqtt' | 'ssh_agent' = 'agent'): Promise<MessageResponse> {
-	return request(`/services/enrollment-token?type=${type}`, { method: 'DELETE' });
+export function revokeEnrollmentToken(): Promise<MessageResponse> {
+	return request('/services/enrollment-token', { method: 'DELETE' });
 }
 
 // --- Network Settings APIs ---
