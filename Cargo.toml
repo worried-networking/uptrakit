@@ -1,7 +1,10 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/*/*",
+    "crates/core/*",
+    "crates/shared/*",
+    "crates/ui/*",
+    "crates/plugins/*/*",
 ]
 
 [workspace.package]
@@ -60,8 +63,8 @@ uptrakit-shared-macros = { path = "crates/shared/macros" }
 uptrakit-shared-types = { path = "crates/shared/types" }
 uptrakit-openapi-client = { path = "crates/shared/openapi-client" }
 uptrakit-command = { path = "crates/shared/command" }
-uptrakit-plugin-infrastructure-core = { path = "crates/plugins/core" }
-uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/registry" }
+uptrakit-plugin-infrastructure-core = { path = "crates/plugins/infrastructure/core" }
+uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructure/registry" }
 
 [profile.release]
 opt-level = 3
