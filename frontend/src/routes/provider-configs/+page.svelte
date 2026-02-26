@@ -32,7 +32,7 @@
 	let configsLoading: boolean = $state(true);
 	let showConfigModal: boolean = $state(false);
 	let editingConfig: ProviderConfigResponse | null = $state(null);
-	let configForm = $state({ name: '', provider_type: 'github_releases', config: '{}', enabled: true });
+	let configForm = $state({ name: '', provider_type: 'releases_github', config: '{}', enabled: true });
 	let configDeleteConfirm: { id: string; name: string } | null = $state(null);
 	let discoveringId: string | null = $state(null);
 	let discardingId: string | null = $state(null);
@@ -102,7 +102,7 @@
 
 	function openCreateConfig() {
 		editingConfig = null;
-		configForm = { name: '', provider_type: 'github_releases', config: '{}', enabled: true };
+		configForm = { name: '', provider_type: 'releases_github', config: '{}', enabled: true };
 		showConfigModal = true;
 	}
 
@@ -424,10 +424,12 @@
 				<label class="label">
 					<span>Provider Type</span>
 					<select class="select" bind:value={configForm.provider_type}>
-						<option value="github_releases">GitHub Releases</option>
-						<option value="docker_registry">Docker Registry</option>
-						<option value="homebrew">Homebrew</option>
-						<option value="proxmox_helper_scripts">Proxmox Helper Scripts</option>
+						<option value="releases_github">GitHub Releases</option>
+						<option value="releases_docker">Docker Registry</option>
+						<option value="package_manager_homebrew">Homebrew</option>
+						<option value="discovery_proxmox_helper_scripts">Proxmox Helper Scripts</option>
+						<option value="package_manager_apt">APT</option>
+						<option value="generic_shell">Shell</option>
 					</select>
 				</label>
 			{/if}
