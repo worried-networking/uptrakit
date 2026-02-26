@@ -217,7 +217,9 @@ pub(crate) fn wrap_command_for_shell(cmd: &str, shell: HookShell) -> crate::Resu
         HookShell::Bash => Ok(format!("set -euo pipefail\n{cmd}")),
         HookShell::Sh => Ok(format!("set -eu\n{cmd}")),
         HookShell::PowerShell => Ok(format!("$ErrorActionPreference = 'Stop'\n{cmd}")),
-        _ => bail!(crate::error::CommandError::UnsupportedShell(format!("{shell:?}"))),
+        _ => bail!(crate::error::CommandError::UnsupportedShell(format!(
+            "{shell:?}"
+        ))),
     }
 }
 
@@ -347,8 +349,8 @@ mod tests {
 
     #[test]
     fn wrap_command_for_sh() {
-        let wrapped = wrap_command_for_shell("echo hello", HookShell::Sh)
-            .expect("Sh is a supported shell");
+        let wrapped =
+            wrap_command_for_shell("echo hello", HookShell::Sh).expect("Sh is a supported shell");
         assert!(wrapped.starts_with("set -eu\n"));
         assert!(wrapped.ends_with("echo hello"));
     }

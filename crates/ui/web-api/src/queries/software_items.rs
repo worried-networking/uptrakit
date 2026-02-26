@@ -6,16 +6,14 @@ use std::collections::HashMap;
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 use uptrakit_shared_db::entity::{
-    host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
-    software_item,
+    host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, software_item,
 };
 use uptrakit_web_api_types::PluginRole;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::software_items::{
-    AssignHostsRequest, CreateSoftwareItemRequest, HostPluginRoleAssignment,
-    HostPluginRoleSummary, ListSoftwareItemsParams, SoftwareItemDetailResponse,
-    SoftwareItemHostSummary, SoftwareItemResponse, UpdateHostAssignmentRequest,
-    UpdateSoftwareItemRequest,
+    AssignHostsRequest, CreateSoftwareItemRequest, HostPluginRoleAssignment, HostPluginRoleSummary,
+    ListSoftwareItemsParams, SoftwareItemDetailResponse, SoftwareItemHostSummary,
+    SoftwareItemResponse, UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
 };
 use uuid::Uuid;
 
@@ -147,9 +145,7 @@ async fn load_latest_version_for_item(
         .await
         .unwrap_or_default();
 
-    rows.into_iter()
-        .filter_map(|r| r.latest_version)
-        .max()
+    rows.into_iter().filter_map(|r| r.latest_version).max()
 }
 
 /// Bulk-load latest versions for multiple software items.
@@ -282,13 +278,9 @@ async fn load_item_hosts(
     };
 
     // Group plugin rows by host_id.
-    let mut plugins_by_host: HashMap<Uuid, Vec<&host_software_item_plugin::Model>> =
-        HashMap::new();
+    let mut plugins_by_host: HashMap<Uuid, Vec<&host_software_item_plugin::Model>> = HashMap::new();
     for row in &plugin_rows {
-        plugins_by_host
-            .entry(row.host_id)
-            .or_default()
-            .push(row);
+        plugins_by_host.entry(row.host_id).or_default().push(row);
     }
 
     links
@@ -478,8 +470,7 @@ fn validate_assignment(
     }
 
     if let Some(override_val) = config_override {
-        if let Err(e) =
-            validate_config_override(&config.plugin_type, &config.config, override_val)
+        if let Err(e) = validate_config_override(&config.plugin_type, &config.config, override_val)
         {
             return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
         }
@@ -654,18 +645,12 @@ pub async fn list_software_items(
             let update_available = installed_map
                 .get(&item.id)
                 .map(|pairs| {
-                    pairs.iter().any(|(iv, lv)| {
-                        host_update_available(iv.as_deref(), lv.as_deref())
-                    })
+                    pairs
+                        .iter()
+                        .any(|(iv, lv)| host_update_available(iv.as_deref(), lv.as_deref()))
                 })
                 .unwrap_or(false);
-            build_list_response(
-                item,
-                plugins,
-                host_count,
-                latest_version,
-                update_available,
-            )
+            build_list_response(item, plugins, host_count, latest_version, update_available)
         })
         .collect();
 
@@ -763,10 +748,7 @@ pub async fn update_software_item(
             .unwrap_or_default()
             .iter()
             .any(|h| {
-                host_update_available(
-                    h.installed_version.as_deref(),
-                    h.latest_version.as_deref(),
-                )
+                host_update_available(h.installed_version.as_deref(), h.latest_version.as_deref())
             })
     } else {
         false
@@ -883,8 +865,7 @@ pub async fn assign_hosts(
                     // Update existing plugin assignment for this role.
                     let mut active: host_software_item_plugin::ActiveModel = existing.into();
                     active.plugin_config_id = Set(plugin_config_id);
-                    active.package_identifier =
-                        Set(role_assignment.package_identifier.clone());
+                    active.package_identifier = Set(role_assignment.package_identifier.clone());
                     active.config_override = Set(role_assignment.config_override.clone());
                     active.execution_site = Set(execution_site.clone());
                     active.updated_at = Set(now);
@@ -901,9 +882,7 @@ pub async fn assign_hosts(
                         plugin_config_id: Set(plugin_config_id),
                         role: Set(role.as_str().to_string()),
                         ordinal: Set(0),
-                        package_identifier: Set(
-                            role_assignment.package_identifier.clone(),
-                        ),
+                        package_identifier: Set(role_assignment.package_identifier.clone()),
                         config_override: Set(role_assignment.config_override.clone()),
                         execution_site: Set(execution_site.clone()),
                         created_at: Set(now),
@@ -1255,10 +1234,7 @@ mod tests {
         assert_eq!(resp.hosts[0].hostname, "web-01");
         assert_eq!(resp.hosts[0].plugins.len(), 1);
         assert_eq!(resp.hosts[0].plugins[0].role, PluginRole::FetchReleases);
-        assert_eq!(
-            resp.hosts[0].plugins[0].package_identifier,
-            "redis/redis"
-        );
+        assert_eq!(resp.hosts[0].plugins[0].package_identifier, "redis/redis");
         assert_eq!(resp.hosts[0].installed_version, Some("7.2.4".to_string()));
         assert_eq!(resp.hosts[0].latest_version.as_deref(), Some("7.4.0"));
         assert!(resp.hosts[0].update_available);
@@ -1298,7 +1274,7 @@ mod tests {
 
         let result = validate_config_override("releases_github", &base, &override_val);
         assert!(result.is_ok());
-}
+    }
 
     #[test]
     fn validate_config_override_invalid_merge() {
@@ -1340,7 +1316,11 @@ mod tests {
 
         for case in cases {
             assert!(
-                PluginRegistry::validate_package_identifier(PluginType::PackageManagerHomebrew, case).is_ok(),
+                PluginRegistry::validate_package_identifier(
+                    PluginType::PackageManagerHomebrew,
+                    case
+                )
+                .is_ok(),
                 "expected valid: {case}"
             );
         }
@@ -1363,8 +1343,11 @@ mod tests {
 
         for case in cases {
             assert!(
-                PluginRegistry::validate_package_identifier(PluginType::PackageManagerHomebrew, case)
-                    .is_err(),
+                PluginRegistry::validate_package_identifier(
+                    PluginType::PackageManagerHomebrew,
+                    case
+                )
+                .is_err(),
                 "expected invalid: {case}"
             );
         }

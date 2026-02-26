@@ -6,7 +6,9 @@ use rootcause::prelude::*;
 use serde_json::json;
 use uptrakit_plugin_infrastructure_core::mpsc;
 
-use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
+use uptrakit_plugin_infrastructure_core::command::{
+    CommandExecutor, CommandSpec, send_output, shell_escape,
+};
 use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, OutputStreamType, Plugin, PluginCapability, PluginError, PluginType,
     ReleaseInfo, UpdateOutputLine, UpstreamRelease, Version,
@@ -129,11 +131,12 @@ impl Plugin for DockerPlugin {
         &self,
         package_identifier: &str,
     ) -> uptrakit_plugin_infrastructure_core::Result<Vec<UpstreamRelease>> {
-        let ir: ImageRef = package_identifier
-            .parse()
-            .map_err(|e: crate::image_ref::ParseImageRefError| {
-                uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
-            })?;
+        let ir: ImageRef =
+            package_identifier
+                .parse()
+                .map_err(|e: crate::image_ref::ParseImageRefError| {
+                    uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
+                })?;
 
         match self.config.tracking_mode {
             TrackingMode::SemverTags => {
@@ -189,11 +192,12 @@ impl Plugin for DockerPlugin {
             return Ok(None);
         }
 
-        let ir: ImageRef = package_identifier
-            .parse()
-            .map_err(|e: crate::image_ref::ParseImageRefError| {
-                PluginError::PluginInternal(e.to_string())
-            })?;
+        let ir: ImageRef =
+            package_identifier
+                .parse()
+                .map_err(|e: crate::image_ref::ParseImageRefError| {
+                    PluginError::PluginInternal(e.to_string())
+                })?;
 
         let tag = self.config.resolved_tracked_tag();
         let full_ref = format!("{}:{tag}", ir.image);
@@ -208,10 +212,10 @@ impl Plugin for DockerPlugin {
                 Ok(Some(Version::new(&digest_info.digest)))
             }
             Ok(None) => Ok(None),
-            Err(e) => Err(uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(
-                e.to_string(),
-            )
-            .into()),
+            Err(e) => Err(
+                uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
+                    .into(),
+            ),
         }
     }
 
@@ -222,11 +226,12 @@ impl Plugin for DockerPlugin {
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> uptrakit_plugin_infrastructure_core::Result<String> {
-        let ir: ImageRef = package_identifier
-            .parse()
-            .map_err(|e: crate::image_ref::ParseImageRefError| {
-                PluginError::PluginInternal(e.to_string())
-            })?;
+        let ir: ImageRef =
+            package_identifier
+                .parse()
+                .map_err(|e: crate::image_ref::ParseImageRefError| {
+                    PluginError::PluginInternal(e.to_string())
+                })?;
 
         let image = &ir.image;
         let tag = to_version;
@@ -476,7 +481,9 @@ mod tests {
             tag_patterns: vec!["[bad".to_string()],
             ..Default::default()
         };
-        assert!(DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).is_err());
+        assert!(
+            DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).is_err()
+        );
     }
 
     #[test]
@@ -507,7 +514,8 @@ mod tests {
             tracking_mode: TrackingMode::SemverTags,
             ..Default::default()
         };
-        let plugin = DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).unwrap();
+        let plugin =
+            DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).unwrap();
         let result = plugin.detect_installed_version("nginx").await.unwrap();
         assert!(result.is_none());
     }
@@ -585,8 +593,8 @@ mod tests {
             post_pull_command: Some("echo post-pull {image}:{tag}".to_string()),
             ..Default::default()
         };
-        let plugin = DockerPlugin::new_for_test(config, test_executor(), mock)
-            .expect("valid config");
+        let plugin =
+            DockerPlugin::new_for_test(config, test_executor(), mock).expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
         let result = plugin
             .execute_update("nginx", "1.25.0", None, &tx)
@@ -618,8 +626,8 @@ mod tests {
             ..Default::default()
         };
         // Use a mock executor so the docker compose command is not actually run.
-        let plugin = DockerPlugin::new_for_test(config, mock_executor(), mock)
-            .expect("valid config");
+        let plugin =
+            DockerPlugin::new_for_test(config, mock_executor(), mock).expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
         let result = plugin
             .execute_update("nginx", "1.25.0", None, &tx)
@@ -649,7 +657,8 @@ mod tests {
                 },
             ],
         });
-        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
         let discoveries = plugin.discover_software().await.unwrap();
         // Both containers share the same image, so they should be grouped
         assert_eq!(discoveries.len(), 1);
@@ -668,7 +677,8 @@ mod tests {
                 names: vec!["bare-sha-container".to_string()],
             }],
         });
-        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
         let discoveries = plugin.discover_software().await.unwrap();
         assert!(discoveries.is_empty(), "SHA images should be skipped");
     }
@@ -684,7 +694,8 @@ mod tests {
                 names: vec!["local-container".to_string()],
             }],
         });
-        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
         let discoveries = plugin.discover_software().await.unwrap();
         assert!(
             discoveries.is_empty(),

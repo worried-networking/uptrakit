@@ -110,10 +110,8 @@ fn build_plugin_assignment(
         serde_json::from_value(serde_json::Value::String(config.plugin_type.clone()))
             .map_err(|_| TriggerUpdateError::UnknownPluginType(config.plugin_type.clone()))?;
 
-    let merged_config = crate::update_hooks::merge_config(
-        &config.config,
-        assignment.config_override.as_ref(),
-    );
+    let merged_config =
+        crate::update_hooks::merge_config(&config.config, assignment.config_override.as_ref());
 
     Ok(PluginAssignment {
         plugin_type,

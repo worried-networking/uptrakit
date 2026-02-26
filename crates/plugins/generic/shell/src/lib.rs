@@ -3,5 +3,5 @@ pub mod error;
 pub mod plugin;
 
 pub use config::ShellConfig;
-pub use error::{ShellError, Result};
+pub use error::{Result, ShellError};
 pub use plugin::ShellPlugin;

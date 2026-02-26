@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn resolve_shutdown_hangup() {
-        use super::{resolve_shutdown, LoopOutcome, ShutdownCause, Signal};
+        use super::{LoopOutcome, ShutdownCause, Signal, resolve_shutdown};
         use uptrakit_internal_wire::DisconnectReason;
         let (reason, outcome) = resolve_shutdown(ShutdownCause::Signal(Signal::Hangup));
         assert_eq!(reason, DisconnectReason::Restart);
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn resolve_shutdown_terminate() {
-        use super::{resolve_shutdown, LoopOutcome, ShutdownCause, Signal};
+        use super::{LoopOutcome, ShutdownCause, Signal, resolve_shutdown};
         use uptrakit_internal_wire::DisconnectReason;
         let (reason, outcome) = resolve_shutdown(ShutdownCause::Signal(Signal::Terminate));
         assert_eq!(reason, DisconnectReason::Shutdown);
@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn resolve_shutdown_server_restarting() {
-        use super::{resolve_shutdown, LoopOutcome, ShutdownCause};
+        use super::{LoopOutcome, ShutdownCause, resolve_shutdown};
         use uptrakit_internal_wire::DisconnectReason;
         let (reason, outcome) = resolve_shutdown(ShutdownCause::ServerRestarting);
         assert_eq!(reason, DisconnectReason::Restart);

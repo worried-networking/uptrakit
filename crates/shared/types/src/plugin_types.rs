@@ -122,7 +122,9 @@ impl From<PluginType> for String {
     fn from(pt: PluginType) -> String {
         match pt {
             PluginType::ReleasesGithub => "releases_github".to_string(),
-            PluginType::DiscoveryProxmoxHelperScripts => "discovery_proxmox_helper_scripts".to_string(),
+            PluginType::DiscoveryProxmoxHelperScripts => {
+                "discovery_proxmox_helper_scripts".to_string()
+            }
             PluginType::ReleasesDocker => "releases_docker".to_string(),
             PluginType::PackageManagerHomebrew => "package_manager_homebrew".to_string(),
             PluginType::PackageManagerApt => "package_manager_apt".to_string(),
@@ -320,8 +322,14 @@ mod tests {
             "discovery_proxmox_helper_scripts"
         );
         assert_eq!(PluginType::ReleasesDocker.to_string(), "releases_docker");
-        assert_eq!(PluginType::PackageManagerHomebrew.to_string(), "package_manager_homebrew");
-        assert_eq!(PluginType::PackageManagerApt.to_string(), "package_manager_apt");
+        assert_eq!(
+            PluginType::PackageManagerHomebrew.to_string(),
+            "package_manager_homebrew"
+        );
+        assert_eq!(
+            PluginType::PackageManagerApt.to_string(),
+            "package_manager_apt"
+        );
         assert_eq!(PluginType::GenericShell.to_string(), "generic_shell");
         assert_eq!(
             PluginType::Other("custom_type".to_string()).to_string(),
@@ -336,7 +344,9 @@ mod tests {
             Some(PluginType::ReleasesGithub)
         );
         assert_eq!(
-            "discovery_proxmox_helper_scripts".parse::<PluginType>().ok(),
+            "discovery_proxmox_helper_scripts"
+                .parse::<PluginType>()
+                .ok(),
             Some(PluginType::DiscoveryProxmoxHelperScripts)
         );
         assert_eq!(

@@ -35,17 +35,18 @@ fn plugin_config_to_response(
     ops: &dyn PluginOps,
     m: plugin_config::Model,
 ) -> Option<PluginConfigResponse> {
-    let plugin_type: uptrakit_plugin_infrastructure_registry::PluginType = match m.plugin_type.parse() {
-        Ok(pt) => pt,
-        Err(_) => {
-            tracing::error!(
-                id = %m.id,
-                plugin_type = %m.plugin_type,
-                "plugin config has invalid plugin_type in database, skipping"
-            );
-            return None;
-        }
-    };
+    let plugin_type: uptrakit_plugin_infrastructure_registry::PluginType =
+        match m.plugin_type.parse() {
+            Ok(pt) => pt,
+            Err(_) => {
+                tracing::error!(
+                    id = %m.id,
+                    plugin_type = %m.plugin_type,
+                    "plugin config has invalid plugin_type in database, skipping"
+                );
+                return None;
+            }
+        };
     let config = ops.mask_config_secrets_str(plugin_type.as_str(), &m.config);
     Some(PluginConfigResponse {
         id: m.id,
@@ -264,10 +265,7 @@ pub async fn update_plugin_config(
 
 /// Soft-delete a plugin configuration.
 /// Returns `true` if deleted, `false` if not found.
-pub async fn delete_plugin_config(
-    tenant_db: &TenantDb,
-    id: Uuid,
-) -> Result<bool, sea_orm::DbErr> {
+pub async fn delete_plugin_config(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm::DbErr> {
     let config = match find_raw_active_config(tenant_db, id).await {
         Some(c) => c,
         None => return Ok(false),

@@ -237,9 +237,7 @@ fn strip_shell_prefixes(line: &str) -> &str {
         else if let Some(pos) = s.find('=') {
             let key = &s[..pos];
             if key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-                let rest = s[pos + 1..].trim_start_matches(|c: char| {
-                    c != ' ' && c != '\t'
-                });
+                let rest = s[pos + 1..].trim_start_matches(|c: char| c != ' ' && c != '\t');
                 s = rest.trim_start();
             } else {
                 break;
@@ -380,9 +378,7 @@ fn is_valid_deb_package(pkg: &str) -> bool {
     if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
         return false;
     }
-    chars.all(|c| {
-        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '+' || c == '.' || c == '-'
-    })
+    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '+' || c == '.' || c == '-')
 }
 
 // ── Existing helper functions (unchanged) ─────────────────────────────────────
@@ -531,8 +527,7 @@ check_for_gh_release "booklore" "BookLore/BookLore"
     #[test]
     fn analyze_hyphen_strip_key_match() {
         // Key "uptime-kuma" → strip hyphens → "uptimekuma" == slug "uptimekuma".
-        let content =
-            r#"check_for_gh_release "uptime-kuma" "louislam/uptime-kuma""#;
+        let content = r#"check_for_gh_release "uptime-kuma" "louislam/uptime-kuma""#;
         let result = analyze_phs_script("uptimekuma", content);
         assert_eq!(result.github_owner.as_deref(), Some("louislam"));
         assert_eq!(result.github_repo.as_deref(), Some("uptime-kuma"));

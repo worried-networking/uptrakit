@@ -881,7 +881,10 @@ mod tests {
 
         match &args.command {
             Some(Commands::Host {
-                command: HostCommands::Bootstrap { remove_stale_keys, .. },
+                command:
+                    HostCommands::Bootstrap {
+                        remove_stale_keys, ..
+                    },
             }) => {
                 assert!(*remove_stale_keys, "--remove-stale-keys should be true");
             }
@@ -902,7 +905,10 @@ mod tests {
 
         match &args_no_flag.command {
             Some(Commands::Host {
-                command: HostCommands::Bootstrap { remove_stale_keys, .. },
+                command:
+                    HostCommands::Bootstrap {
+                        remove_stale_keys, ..
+                    },
             }) => {
                 assert!(!*remove_stale_keys, "default should be false");
             }

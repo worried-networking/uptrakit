@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use uptrakit_agent_core::ConnectionContext;
-use uptrakit_command::{CommandExecutor, LocalCommandExecutor, SudoAwareCommandExecutor, SudoContext};
+use uptrakit_command::{
+    CommandExecutor, LocalCommandExecutor, SudoAwareCommandExecutor, SudoContext,
+};
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
 
 // Re-export shared types so main.rs can reference them from one place.
@@ -30,7 +32,13 @@ pub(crate) async fn handle_check_versions(
     conn: &mut ControllerConnection,
 ) -> Option<LoopOutcome> {
     let executor = make_executor();
-    uptrakit_agent_core::handle_check_versions(payload, executor, conn, &ConnectionContext::default()).await
+    uptrakit_agent_core::handle_check_versions(
+        payload,
+        executor,
+        conn,
+        &ConnectionContext::default(),
+    )
+    .await
 }
 
 /// Handle an `ExecuteUpdate` message from the controller.
@@ -66,7 +74,13 @@ pub(crate) async fn handle_discover_software(
     conn: &mut ControllerConnection,
 ) -> Option<LoopOutcome> {
     let executor = make_executor();
-    uptrakit_agent_core::handle_discover_software(payload, executor, conn, &ConnectionContext::default()).await
+    uptrakit_agent_core::handle_discover_software(
+        payload,
+        executor,
+        conn,
+        &ConnectionContext::default(),
+    )
+    .await
 }
 
 pub(crate) use uptrakit_agent_core::{

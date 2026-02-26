@@ -3,15 +3,15 @@ use std::sync::Arc;
 use rootcause::prelude::*;
 
 use uptrakit_command::CommandExecutor;
-use uptrakit_plugin_infrastructure_core::{Plugin, PluginType, SecretMasking, SudoCommandEntry};
-use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
-use uptrakit_plugin_releases_docker::{DockerConfig, DockerPlugin};
-use uptrakit_plugin_releases_github::{GitHubConfig, GitHubPlugin};
-use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
 use uptrakit_plugin_discovery_proxmox_helper_scripts::{
     ProxmoxHelperScriptsConfig, ProxmoxHelperScriptsPlugin,
 };
 use uptrakit_plugin_generic_shell::{ShellConfig, ShellPlugin};
+use uptrakit_plugin_infrastructure_core::{Plugin, PluginType, SecretMasking, SudoCommandEntry};
+use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
+use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
+use uptrakit_plugin_releases_docker::{DockerConfig, DockerPlugin};
+use uptrakit_plugin_releases_github::{GitHubConfig, GitHubPlugin};
 
 use crate::error::{PluginRegistryError, Result};
 
@@ -257,10 +257,18 @@ impl PluginRegistry {
         value: &str,
     ) -> std::result::Result<(), String> {
         match plugin_type {
-            PluginType::ReleasesGithub => uptrakit_plugin_releases_github::validate_identifier(value),
-            PluginType::ReleasesDocker => uptrakit_plugin_releases_docker::validate_identifier(value),
-            PluginType::PackageManagerHomebrew => uptrakit_plugin_package_manager_homebrew::validate_identifier(value),
-            PluginType::PackageManagerApt => uptrakit_plugin_package_manager_apt::validate_identifier(value),
+            PluginType::ReleasesGithub => {
+                uptrakit_plugin_releases_github::validate_identifier(value)
+            }
+            PluginType::ReleasesDocker => {
+                uptrakit_plugin_releases_docker::validate_identifier(value)
+            }
+            PluginType::PackageManagerHomebrew => {
+                uptrakit_plugin_package_manager_homebrew::validate_identifier(value)
+            }
+            PluginType::PackageManagerApt => {
+                uptrakit_plugin_package_manager_apt::validate_identifier(value)
+            }
             _ => Ok(()),
         }
     }
@@ -322,7 +330,9 @@ mod tests {
             Some(PluginType::ReleasesDocker)
         );
         assert_eq!(
-            "discovery_proxmox_helper_scripts".parse::<PluginType>().ok(),
+            "discovery_proxmox_helper_scripts"
+                .parse::<PluginType>()
+                .ok(),
             Some(PluginType::DiscoveryProxmoxHelperScripts)
         );
         assert_eq!(
@@ -385,7 +395,8 @@ mod tests {
         // PHS config is always `{}`; validation always succeeds.
         let config = serde_json::json!({});
         assert!(
-            PluginRegistry::validate_config(PluginType::DiscoveryProxmoxHelperScripts, &config).is_ok()
+            PluginRegistry::validate_config(PluginType::DiscoveryProxmoxHelperScripts, &config)
+                .is_ok()
         );
     }
 
@@ -407,11 +418,8 @@ mod tests {
     #[test]
     fn create_plugin_github() {
         let config = serde_json::json!({});
-        let plugin = PluginRegistry::create_plugin(
-            PluginType::ReleasesGithub,
-            &config,
-            test_executor(),
-        );
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::ReleasesGithub, &config, test_executor());
         assert!(plugin.is_ok());
     }
 
@@ -419,11 +427,8 @@ mod tests {
     fn create_plugin_docker() {
         // Empty config is valid
         let config = serde_json::json!({});
-        let plugin = PluginRegistry::create_plugin(
-            PluginType::ReleasesDocker,
-            &config,
-            test_executor(),
-        );
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::ReleasesDocker, &config, test_executor());
         assert!(plugin.is_ok());
     }
 
@@ -460,14 +465,12 @@ mod tests {
             test_executor(),
         )
         .expect("create");
-        assert!(
-            plugin
-                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware)
-        );
-        assert!(
-            !plugin
-                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex)
-        );
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+        ));
+        assert!(!plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex
+        ));
     }
 
     #[test]
@@ -495,51 +498,64 @@ mod tests {
     #[test]
     fn create_plugin_homebrew() {
         let config = serde_json::json!({});
-        let plugin =
-            PluginRegistry::create_plugin(PluginType::PackageManagerHomebrew, &config, test_executor());
+        let plugin = PluginRegistry::create_plugin(
+            PluginType::PackageManagerHomebrew,
+            &config,
+            test_executor(),
+        );
         assert!(plugin.is_ok());
     }
 
     #[test]
     fn create_plugin_homebrew_cask() {
         let config = serde_json::json!({"package_type": "cask"});
-        let plugin =
-            PluginRegistry::create_plugin(PluginType::PackageManagerHomebrew, &config, test_executor());
+        let plugin = PluginRegistry::create_plugin(
+            PluginType::PackageManagerHomebrew,
+            &config,
+            test_executor(),
+        );
         assert!(plugin.is_ok());
     }
 
     #[test]
     fn validate_homebrew_config() {
         let config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config(PluginType::PackageManagerHomebrew, &config).is_ok());
+        assert!(
+            PluginRegistry::validate_config(PluginType::PackageManagerHomebrew, &config).is_ok()
+        );
     }
 
     #[test]
     fn validate_homebrew_config_cask() {
         let config = serde_json::json!({"package_type": "cask"});
-        assert!(PluginRegistry::validate_config(PluginType::PackageManagerHomebrew, &config).is_ok());
+        assert!(
+            PluginRegistry::validate_config(PluginType::PackageManagerHomebrew, &config).is_ok()
+        );
     }
 
     #[test]
     fn validate_homebrew_config_invalid_package_type() {
         let config = serde_json::json!({"package_type": "invalid"});
-        assert!(PluginRegistry::validate_config(PluginType::PackageManagerHomebrew, &config).is_err());
+        assert!(
+            PluginRegistry::validate_config(PluginType::PackageManagerHomebrew, &config).is_err()
+        );
     }
 
     #[test]
     fn homebrew_plugin_capabilities() {
         let config = serde_json::json!({});
-        let plugin =
-            PluginRegistry::create_plugin(PluginType::PackageManagerHomebrew, &config, test_executor())
-                .unwrap();
-        assert!(
-            plugin
-                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware)
-        );
-        assert!(
-            plugin
-                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex)
-        );
+        let plugin = PluginRegistry::create_plugin(
+            PluginType::PackageManagerHomebrew,
+            &config,
+            test_executor(),
+        )
+        .unwrap();
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+        ));
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex
+        ));
     }
 
     #[test]
@@ -548,14 +564,12 @@ mod tests {
         let plugin =
             PluginRegistry::create_plugin(PluginType::ReleasesDocker, &config, test_executor())
                 .unwrap();
-        assert!(
-            plugin
-                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware)
-        );
-        assert!(
-            !plugin
-                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex)
-        );
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+        ));
+        assert!(!plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex
+        ));
     }
 
     #[test]
@@ -617,7 +631,10 @@ mod tests {
             test_executor(),
         )
         .expect("create proxmox");
-        assert_eq!(proxmox.plugin_type(), PluginType::DiscoveryProxmoxHelperScripts);
+        assert_eq!(
+            proxmox.plugin_type(),
+            PluginType::DiscoveryProxmoxHelperScripts
+        );
 
         let homebrew_config = serde_json::json!({});
         let homebrew = PluginRegistry::create_plugin(
@@ -629,16 +646,20 @@ mod tests {
         assert_eq!(homebrew.plugin_type(), PluginType::PackageManagerHomebrew);
 
         let apt_config = serde_json::json!({});
-        let apt =
-            PluginRegistry::create_plugin(PluginType::PackageManagerApt, &apt_config, test_executor())
-                .expect("create apt");
+        let apt = PluginRegistry::create_plugin(
+            PluginType::PackageManagerApt,
+            &apt_config,
+            test_executor(),
+        )
+        .expect("create apt");
         assert_eq!(apt.plugin_type(), PluginType::PackageManagerApt);
     }
 
     #[test]
     fn mask_config_secrets_homebrew() {
         let config = serde_json::json!({"package_type": "formula"});
-        let masked = PluginRegistry::mask_config_secrets(PluginType::PackageManagerHomebrew, &config);
+        let masked =
+            PluginRegistry::mask_config_secrets(PluginType::PackageManagerHomebrew, &config);
         assert_eq!(masked, config);
     }
 
@@ -709,14 +730,12 @@ mod tests {
         let plugin =
             PluginRegistry::create_plugin(PluginType::PackageManagerApt, &config, test_executor())
                 .unwrap();
-        assert!(
-            plugin
-                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware)
-        );
-        assert!(
-            plugin
-                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex)
-        );
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+        ));
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex
+        ));
     }
 
     #[test]
@@ -729,14 +748,16 @@ mod tests {
     #[test]
     fn validate_package_identifier_apt_valid() {
         assert!(
-            PluginRegistry::validate_package_identifier(PluginType::PackageManagerApt, "nginx").is_ok()
+            PluginRegistry::validate_package_identifier(PluginType::PackageManagerApt, "nginx")
+                .is_ok()
         );
     }
 
     #[test]
     fn validate_package_identifier_apt_uppercase_fails() {
         assert!(
-            PluginRegistry::validate_package_identifier(PluginType::PackageManagerApt, "Nginx").is_err()
+            PluginRegistry::validate_package_identifier(PluginType::PackageManagerApt, "Nginx")
+                .is_err()
         );
     }
 
@@ -745,14 +766,16 @@ mod tests {
     #[test]
     fn create_plugin_shell_version_only() {
         let config = serde_json::json!({"version_command": "myapp --version"});
-        let plugin = PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor());
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor());
         assert!(plugin.is_ok());
     }
 
     #[test]
     fn create_plugin_shell_update_only() {
         let config = serde_json::json!({"update_command": "apt-get install -y myapp"});
-        let plugin = PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor());
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor());
         assert!(plugin.is_ok());
     }
 
@@ -762,7 +785,8 @@ mod tests {
             "version_command": "myapp --version",
             "update_command": "apt-get install -y myapp"
         });
-        let plugin = PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor());
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor());
         assert!(plugin.is_ok());
     }
 
@@ -777,38 +801,40 @@ mod tests {
 
     #[test]
     fn validate_package_identifier_github_valid() {
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::ReleasesGithub,
-            "octocat/hello-world"
-        )
-        .is_ok());
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::ReleasesGithub,
+                "octocat/hello-world"
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn validate_package_identifier_github_no_slash_fails() {
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::ReleasesGithub,
-            "octocat"
-        )
-        .is_err());
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::ReleasesGithub, "octocat")
+                .is_err()
+        );
     }
 
     #[test]
     fn validate_package_identifier_github_traversal_fails() {
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::ReleasesGithub,
-            "octocat/../evil"
-        )
-        .is_err());
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::ReleasesGithub,
+                "octocat/../evil"
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn validate_package_identifier_github_empty_repo_fails() {
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::ReleasesGithub,
-            "octocat/"
-        )
-        .is_err());
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::ReleasesGithub, "octocat/")
+                .is_err()
+        );
     }
 
     // ── PluginType::Other(String) behaviour ──────────────────────────────
@@ -842,10 +868,8 @@ mod tests {
     #[test]
     fn mask_config_secrets_other_returns_config_unchanged() {
         let config = serde_json::json!({"token": "secret", "repo": "something"});
-        let result = PluginRegistry::mask_config_secrets(
-            PluginType::Other("winget".to_string()),
-            &config,
-        );
+        let result =
+            PluginRegistry::mask_config_secrets(PluginType::Other("winget".to_string()), &config);
         assert_eq!(result, config);
     }
 
@@ -854,48 +878,49 @@ mod tests {
     /// `Other` always returns `Ok(())`.
     #[test]
     fn validate_package_identifier_other_is_permissive() {
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::Other("flatpak".to_string()),
-            "org.example.App"
-        )
-        .is_ok());
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::Other("flatpak".to_string()),
+                "org.example.App"
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn validate_package_identifier_docker_valid() {
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::ReleasesDocker,
-            "nginx"
-        )
-        .is_ok());
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::ReleasesDocker,
-            "ghcr.io/owner/app:latest"
-        )
-        .is_ok());
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::ReleasesDocker,
-            "myuser/app:v2"
-        )
-        .is_ok());
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::ReleasesDocker, "nginx")
+                .is_ok()
+        );
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::ReleasesDocker,
+                "ghcr.io/owner/app:latest"
+            )
+            .is_ok()
+        );
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::ReleasesDocker,
+                "myuser/app:v2"
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn validate_package_identifier_docker_invalid() {
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::ReleasesDocker,
-            ""
-        )
-        .is_err());
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::ReleasesDocker,
-            "nginx latest"
-        )
-        .is_err());
-        assert!(PluginRegistry::validate_package_identifier(
-            PluginType::ReleasesDocker,
-            "ghcr.io//app"
-        )
-        .is_err());
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::ReleasesDocker, "").is_err()
+        );
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::ReleasesDocker, "nginx latest")
+                .is_err()
+        );
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::ReleasesDocker, "ghcr.io//app")
+                .is_err()
+        );
     }
 }

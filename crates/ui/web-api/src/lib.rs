@@ -486,9 +486,9 @@ impl AppStateBuilder {
             token_denylist: self
                 .token_denylist
                 .ok_or(AppStateBuildError("token_denylist"))?,
-            plugin_ops: self
-                .plugin_ops
-                .unwrap_or_else(|| Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry)),
+            plugin_ops: self.plugin_ops.unwrap_or_else(|| {
+                Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry)
+            }),
         })
     }
 }

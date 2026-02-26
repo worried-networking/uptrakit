@@ -18,12 +18,12 @@ use uptrakit_internal_wire::{
 use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqttClientConnectionStatus;
 
 use super::LoopAction;
+use crate::AppState;
+use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use crate::routes::service_ws::protocol::{
     MessageRateLimiter, close_with_reason, deserialize_service_msg, record_service_activity,
     send_pong, serialize_controller_msg,
 };
-use crate::AppState;
-use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 
 // ---------------------------------------------------------------------------
 // MqttContext
@@ -98,8 +98,7 @@ pub(super) async fn handle_mqtt_register_phase(
                         if send_pong(sink, out_seq, service_ts).await.is_err() {
                             return None;
                         }
-                        if let Err(e) =
-                            record_service_activity(state.db(), service_id, None).await
+                        if let Err(e) = record_service_activity(state.db(), service_id, None).await
                         {
                             tracing::warn!(
                                 error = %e,

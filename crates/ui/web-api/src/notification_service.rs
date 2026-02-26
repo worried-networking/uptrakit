@@ -133,8 +133,8 @@ impl NotificationService {
         let broadcast_condition = Condition::all()
             .add(controller_event::Column::TargetServiceId.is_null())
             .add({
-                let mut cap_condition = Condition::any()
-                    .add(controller_event::Column::TargetCapability.is_null());
+                let mut cap_condition =
+                    Condition::any().add(controller_event::Column::TargetCapability.is_null());
                 for cap in &relevant_capabilities {
                     cap_condition = cap_condition
                         .add(controller_event::Column::TargetCapability.eq(cap.as_str()));
@@ -193,8 +193,7 @@ impl NotificationService {
     /// (immediately) and to the outbox for cross-controller delivery.
     pub async fn push_software_states_for_tenant(&self, tenant_id: uuid::Uuid) {
         let payload = match crate::queries::mqtt_software_states::load_software_states_for_tenant(
-            &self.db,
-            tenant_id,
+            &self.db, tenant_id,
         )
         .await
         {
@@ -455,10 +454,8 @@ mod tests {
         let svc = NotificationService::new(db.clone(), registry.clone(), controller_id);
 
         let service_id = Uuid::now_v7();
-        let mqtt_capabilities = BTreeSet::from([
-            Capability::MqttBridge,
-            Capability::GracefulShutdown,
-        ]);
+        let mqtt_capabilities =
+            BTreeSet::from([Capability::MqttBridge, Capability::GracefulShutdown]);
         let (mut rx, _cancel) = registry
             .register(
                 service_id,

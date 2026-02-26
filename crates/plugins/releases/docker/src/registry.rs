@@ -125,9 +125,7 @@ impl RegistryClient {
                 .bearer_auth(&token)
                 .send()
                 .await
-                .context_transform(|e| {
-                    DockerError::Request(format!("GET retry failed: {e}"))
-                })?;
+                .context_transform(|e| DockerError::Request(format!("GET retry failed: {e}")))?;
 
             return self.handle_response(retry_response).await;
         }
@@ -179,9 +177,7 @@ impl RegistryClient {
                 .bearer_auth(&token)
                 .send()
                 .await
-                .context_transform(|e| {
-                    DockerError::Request(format!("HEAD retry failed: {e}"))
-                })?;
+                .context_transform(|e| DockerError::Request(format!("HEAD retry failed: {e}")))?;
 
             return self.extract_digest(retry_response).await;
         }

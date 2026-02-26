@@ -197,8 +197,7 @@ async fn handle_connection(
             .await;
         }
         ConnectionType::Anonymous => {
-            connection::handle_anonymous(socket, state, client_ip, &mut out_seq, &mut in_seq)
-                .await;
+            connection::handle_anonymous(socket, state, client_ip, &mut out_seq, &mut in_seq).await;
         }
     }
 }

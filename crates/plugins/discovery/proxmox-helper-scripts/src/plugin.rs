@@ -61,9 +61,11 @@ impl ProxmoxHelperScriptsPlugin {
             ))
             .build()
             .map_err(|e| {
-                rootcause::report!(uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(
-                    format!("failed to build HTTP client: {e}")
-                ))
+                rootcause::report!(
+                    uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(format!(
+                        "failed to build HTTP client: {e}"
+                    ))
+                )
             })?;
 
         Ok(Self {
@@ -228,19 +230,14 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                 .clone()
                 .unwrap_or_else(|| slug_to_display_name(&script.slug));
 
-            if let (Some(owner), Some(repo)) =
-                (&analysis.github_owner, &analysis.github_repo)
-            {
+            if let (Some(owner), Some(repo)) = (&analysis.github_owner, &analysis.github_repo) {
                 // GitHub-managed: read version from $HOME/.{slug}.
                 let home = match home {
                     Some(ref h) => h.clone(),
                     None => {
                         let h = self
                             .executor
-                            .execute_quiet(&CommandSpec::exec(
-                                "printenv",
-                                ["HOME".to_string()],
-                            ))
+                            .execute_quiet(&CommandSpec::exec("printenv", ["HOME".to_string()]))
                             .await
                             .ok()
                             .map(|o| o.output.trim().to_string())
@@ -256,8 +253,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                 };
 
                 let version_path = format!("{home}/.{}", script.slug);
-                let Some(installed_version) =
-                    self.try_read_version_file(&version_path).await
+                let Some(installed_version) = self.try_read_version_file(&version_path).await
                 else {
                     tracing::debug!(slug = %script.slug,
                         "PHS version file absent; skipping GitHub item");
@@ -307,8 +303,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
             } else {
                 // Neither — try install-script fallback.
                 use crate::discovery::PHS_INSTALL_URL_PREFIX;
-                let install_url =
-                    format!("{PHS_INSTALL_URL_PREFIX}{}-install.sh", script.slug);
+                let install_url = format!("{PHS_INSTALL_URL_PREFIX}{}-install.sh", script.slug);
                 let Some(install_body) = self.fetch_text(&install_url).await else {
                     tracing::warn!(slug = %script.slug,
                         "install-script fetch failed; skipping");
@@ -372,11 +367,9 @@ mod tests {
 
     #[test]
     fn capabilities_discovery_only() {
-        let plugin = ProxmoxHelperScriptsPlugin::new(
-            ProxmoxHelperScriptsConfig::default(),
-            test_executor(),
-        )
-        .expect("create");
+        let plugin =
+            ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .expect("create");
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
         assert_eq!(plugin.capabilities().len(), 1);
@@ -384,22 +377,21 @@ mod tests {
 
     #[test]
     fn plugin_type_is_proxmox_helper_scripts() {
-        let plugin = ProxmoxHelperScriptsPlugin::new(
-            ProxmoxHelperScriptsConfig::default(),
-            test_executor(),
-        )
-        .expect("create");
-        assert_eq!(plugin.plugin_type(), PluginType::DiscoveryProxmoxHelperScripts);
+        let plugin =
+            ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .expect("create");
+        assert_eq!(
+            plugin.plugin_type(),
+            PluginType::DiscoveryProxmoxHelperScripts
+        );
     }
 
     #[tokio::test]
     async fn discover_software_returns_empty_without_update_script() {
         // On a non-PHS system /usr/bin/update likely does not exist.
-        let plugin = ProxmoxHelperScriptsPlugin::new(
-            ProxmoxHelperScriptsConfig::default(),
-            test_executor(),
-        )
-        .expect("create");
+        let plugin =
+            ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .expect("create");
         let result = plugin.discover_software().await;
         assert!(result.is_ok());
         // No error; result is empty or whatever is found on the test machine.

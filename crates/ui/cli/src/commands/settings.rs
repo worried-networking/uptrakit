@@ -191,10 +191,7 @@ impl HumanOutput for MqttClientResponse {
         out.push_str(&format!("Topic Prefix:  {}\n", self.topic_prefix));
         out.push_str(&format!("HA Discovery:  {}\n", self.ha_discovery));
         if self.ha_discovery {
-            out.push_str(&format!(
-                "HA Prefix:     {}\n",
-                self.ha_discovery_prefix
-            ));
+            out.push_str(&format!("HA Prefix:     {}\n", self.ha_discovery_prefix));
         }
         out.push_str(&format!("Status:        {}\n", self.connection_status));
         out

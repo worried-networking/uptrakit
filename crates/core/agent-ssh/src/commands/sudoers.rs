@@ -51,10 +51,7 @@ pub enum SudoersContent {
 /// `command -v <name>`.
 ///
 /// Returns `None` if the command is not found or the session fails.
-pub async fn resolve_command_path(
-    session: &SshSession,
-    command: &str,
-) -> Result<Option<String>> {
+pub async fn resolve_command_path(session: &SshSession, command: &str) -> Result<Option<String>> {
     let escaped = shell_escape(command);
     let cmd = format!("command -v {escaped}");
     let result = session.exec_command(&cmd).await?;
@@ -98,7 +95,10 @@ pub fn generate_sudoers_content(username: &str, content: &SudoersContent) -> Str
         }
         SudoersContent::SpecificCommands(entries) => {
             for entry in entries {
-                out.push_str(&format!("# {}: {}\n", entry.command_path, entry.explanation));
+                out.push_str(&format!(
+                    "# {}: {}\n",
+                    entry.command_path, entry.explanation
+                ));
                 out.push_str(&format!(
                     "{username} ALL=(root) NOPASSWD: {}\n",
                     entry.command_path
@@ -181,12 +181,10 @@ mod tests {
 
     #[test]
     fn generate_sudoers_specific_commands() {
-        let content = SudoersContent::SpecificCommands(vec![
-            ResolvedSudoCommand {
-                command_path: "/usr/bin/apt-get".to_string(),
-                explanation: "Package installation requires root".to_string(),
-            },
-        ]);
+        let content = SudoersContent::SpecificCommands(vec![ResolvedSudoCommand {
+            command_path: "/usr/bin/apt-get".to_string(),
+            explanation: "Package installation requires root".to_string(),
+        }]);
         let text = generate_sudoers_content("bob", &content);
 
         assert!(text.contains("# Managed by Uptrakit"));

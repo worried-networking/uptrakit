@@ -95,7 +95,10 @@ impl ImageRef {
         } else if self.registry == "ghcr.io" {
             format!("https://ghcr.io/{}:{tag_or_digest}", self.repository)
         } else {
-            format!("https://{}/{}:{tag_or_digest}", self.registry, self.repository)
+            format!(
+                "https://{}/{}:{tag_or_digest}",
+                self.registry, self.repository
+            )
         }
     }
 
@@ -120,7 +123,9 @@ impl ImageRef {
 /// Used by the plugin registry to validate `package_identifier` values
 /// for the Docker plugin.
 pub fn validate_identifier(id: &str) -> std::result::Result<(), String> {
-    id.parse::<ImageRef>().map(|_| ()).map_err(|e| e.to_string())
+    id.parse::<ImageRef>()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────

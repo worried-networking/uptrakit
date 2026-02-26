@@ -406,19 +406,12 @@ pub async fn unassign_host(
                     .one(tenant_db.db())
                     .await
                 {
-                    Ok(Some(plugin)) => {
-                        Some((plugin.plugin_config_id, plugin.package_identifier))
-                    }
+                    Ok(Some(plugin)) => Some((plugin.plugin_config_id, plugin.package_identifier)),
                     Ok(None) => {
-                        return error_response(
-                            StatusCode::NOT_FOUND,
-                            "Host assignment not found",
-                        )
+                        return error_response(StatusCode::NOT_FOUND, "Host assignment not found");
                     }
                     Err(e) => {
-                        tracing::error!(
-                            "Failed to look up host assignment for ignore: {e}"
-                        );
+                        tracing::error!("Failed to look up host assignment for ignore: {e}");
                         return error_response(
                             StatusCode::INTERNAL_SERVER_ERROR,
                             "Internal server error",
@@ -539,20 +532,22 @@ pub async fn trigger_update(
     };
 
     // Convert the API release_info type to the wire type before delegating.
-    let release_info = req.release_info.map(|ri| uptrakit_internal_wire::ReleaseInfo {
-        tag: ri.tag,
-        release_url: ri.release_url,
-        assets: ri
-            .assets
-            .into_iter()
-            .map(|a| uptrakit_internal_wire::ReleaseAsset {
-                name: a.name,
-                download_url: a.download_url,
-                size: a.size,
-                content_type: None,
-            })
-            .collect(),
-    });
+    let release_info = req
+        .release_info
+        .map(|ri| uptrakit_internal_wire::ReleaseInfo {
+            tag: ri.tag,
+            release_url: ri.release_url,
+            assets: ri
+                .assets
+                .into_iter()
+                .map(|a| uptrakit_internal_wire::ReleaseAsset {
+                    name: a.name,
+                    download_url: a.download_url,
+                    size: a.size,
+                    content_type: None,
+                })
+                .collect(),
+        });
 
     match crate::queries::update_triggers::trigger_update_for_host(
         tenant_db.db(),
@@ -588,7 +583,10 @@ pub async fn trigger_update(
             error_response(StatusCode::NOT_FOUND, "Host not found")
         }
         Err(crate::queries::update_triggers::TriggerUpdateError::HostNotAssigned) => {
-            error_response(StatusCode::BAD_REQUEST, "Host is not assigned to this software item")
+            error_response(
+                StatusCode::BAD_REQUEST,
+                "Host is not assigned to this software item",
+            )
         }
         Err(crate::queries::update_triggers::TriggerUpdateError::NoAgent) => {
             error_response(StatusCode::NOT_FOUND, "No agent linked to this host")
@@ -597,7 +595,10 @@ pub async fn trigger_update(
             error_response(StatusCode::BAD_REQUEST, "Agent is not approved")
         }
         Err(crate::queries::update_triggers::TriggerUpdateError::UpdateAlreadyActive) => {
-            error_response(StatusCode::CONFLICT, "An update is already pending or in progress")
+            error_response(
+                StatusCode::CONFLICT,
+                "An update is already pending or in progress",
+            )
         }
         Err(crate::queries::update_triggers::TriggerUpdateError::NoExecuteUpdatePlugin) => {
             error_response(
@@ -677,9 +678,7 @@ pub async fn check_versions(
     // Load all plugin role assignments for all hosts of this software item.
     let plugin_assignments = match HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
-        .filter(
-            host_software_item_plugin::Column::Role.is_in(["detect_version", "fetch_releases"]),
-        )
+        .filter(host_software_item_plugin::Column::Role.is_in(["detect_version", "fetch_releases"]))
         .all(tenant_db.db())
         .await
     {
@@ -692,8 +691,10 @@ pub async fn check_versions(
 
     // Collect distinct config IDs and host IDs.
     let host_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.host_id).collect();
-    let config_ids: Vec<uuid::Uuid> =
-        plugin_assignments.iter().map(|p| p.plugin_config_id).collect();
+    let config_ids: Vec<uuid::Uuid> = plugin_assignments
+        .iter()
+        .map(|p| p.plugin_config_id)
+        .collect();
 
     // Batch query: Hosts (tenant-scoped).
     let hosts: std::collections::HashMap<uuid::Uuid, host::Model> = match tenant_db
@@ -732,27 +733,25 @@ pub async fn check_versions(
     };
 
     // Batch query: Plugin configs (tenant-scoped).
-    let configs: std::collections::HashMap<uuid::Uuid, plugin_config::Model> =
-        if config_ids.is_empty() {
-            std::collections::HashMap::new()
-        } else {
-            match tenant_db
-                .find::<plugin_config::Entity>()
-                .filter(plugin_config::Column::Id.is_in(config_ids))
-                .filter(plugin_config::Column::DeactivatedAt.is_null())
-                .all(tenant_db.db())
-                .await
-            {
-                Ok(cs) => cs.into_iter().map(|c| (c.id, c)).collect(),
-                Err(e) => {
-                    tracing::error!("Failed to load plugin configs: {e}");
-                    return error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Internal server error",
-                    );
-                }
+    let configs: std::collections::HashMap<uuid::Uuid, plugin_config::Model> = if config_ids
+        .is_empty()
+    {
+        std::collections::HashMap::new()
+    } else {
+        match tenant_db
+            .find::<plugin_config::Entity>()
+            .filter(plugin_config::Column::Id.is_in(config_ids))
+            .filter(plugin_config::Column::DeactivatedAt.is_null())
+            .all(tenant_db.db())
+            .await
+        {
+            Ok(cs) => cs.into_iter().map(|c| (c.id, c)).collect(),
+            Err(e) => {
+                tracing::error!("Failed to load plugin configs: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
-        };
+        }
+    };
 
     // Index plugin assignments by (host_id, role).
     let mut plugin_by_host_role: std::collections::HashMap<
@@ -958,9 +957,7 @@ pub async fn check_versions_host(
     let role_plugins = match HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
-        .filter(
-            host_software_item_plugin::Column::Role.is_in(["detect_version", "fetch_releases"]),
-        )
+        .filter(host_software_item_plugin::Column::Role.is_in(["detect_version", "fetch_releases"]))
         .all(tenant_db.db())
         .await
     {
@@ -976,8 +973,7 @@ pub async fn check_versions_host(
     let mut fetch_releases: Option<uptrakit_internal_wire::PluginAssignment> = None;
 
     for plugin in &role_plugins {
-        let Some(config) = find_raw_active_config(&tenant_db, plugin.plugin_config_id).await
-        else {
+        let Some(config) = find_raw_active_config(&tenant_db, plugin.plugin_config_id).await else {
             continue;
         };
         let Ok(plugin_type) = serde_json::from_value::<uptrakit_internal_wire::PluginType>(

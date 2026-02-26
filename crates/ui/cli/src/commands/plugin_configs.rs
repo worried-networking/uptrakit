@@ -187,10 +187,7 @@ pub async fn delete(params: DeleteParams<'_>) -> Result<DeletedOutput> {
         params.insecure,
         params.request_timeout,
     )?;
-    client
-        .delete_plugin_config(params.id)
-        .await
-        .context_to()?;
+    client.delete_plugin_config(params.id).await.context_to()?;
     Ok(DeletedOutput {
         message: format!("Plugin config {} deleted.", params.id),
     })
@@ -203,10 +200,7 @@ pub async fn discover(params: DiscoverParams<'_>) -> Result<TriggerDiscoveryResp
         params.insecure,
         params.request_timeout,
     )?;
-    client
-        .discover_plugin_config(params.id)
-        .await
-        .context_to()
+    client.discover_plugin_config(params.id).await.context_to()
 }
 
 pub async fn discard_discovered(

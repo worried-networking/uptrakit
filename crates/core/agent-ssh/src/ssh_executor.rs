@@ -150,8 +150,7 @@ mod tests {
     #[test]
     fn shell_mode_wraps_with_fail_early() {
         let spec = CommandSpec::shell("echo hello && echo world");
-        let result =
-            build_remote_command_string(&spec).expect("bash is a supported shell");
+        let result = build_remote_command_string(&spec).expect("bash is a supported shell");
         // Shell mode resolves to: ("bash", ["-c", "set -euo pipefail\n..."])
         assert!(result.starts_with("'bash' '-c'"));
         assert!(result.contains("set -euo pipefail"));

@@ -1123,10 +1123,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                 .await?;
                 output::print_output(format, &resp)?;
             }
-            HostsCommands::DiscardDiscovered {
-                id,
-                plugin_config,
-            } => {
+            HostsCommands::DiscardDiscovered { id, plugin_config } => {
                 let resp =
                     commands::hosts::discard_discovered(commands::hosts::DiscardDiscoveredParams {
                         id: &id,
@@ -1816,28 +1813,26 @@ async fn run(cli: Cli) -> error::Result<()> {
         },
         Commands::PluginConfigs { command } => match command {
             PluginConfigsCommands::List { page, per_page } => {
-                let resp =
-                    commands::plugin_configs::list(commands::plugin_configs::ListParams {
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        insecure,
-                        page,
-                        per_page,
-                        request_timeout,
-                    })
-                    .await?;
+                let resp = commands::plugin_configs::list(commands::plugin_configs::ListParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    page,
+                    per_page,
+                    request_timeout,
+                })
+                .await?;
                 output::print_output(format, &resp)?;
             }
             PluginConfigsCommands::Show { id } => {
-                let resp =
-                    commands::plugin_configs::show(commands::plugin_configs::ShowParams {
-                        id: &id,
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        insecure,
-                        request_timeout,
-                    })
-                    .await?;
+                let resp = commands::plugin_configs::show(commands::plugin_configs::ShowParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
                 output::print_output(format, &resp)?;
             }
             PluginConfigsCommands::Create {
@@ -1914,16 +1909,15 @@ async fn run(cli: Cli) -> error::Result<()> {
                 output::print_output(format, &resp)?;
             }
             PluginConfigsCommands::Discover { id } => {
-                let resp = commands::plugin_configs::discover(
-                    commands::plugin_configs::DiscoverParams {
+                let resp =
+                    commands::plugin_configs::discover(commands::plugin_configs::DiscoverParams {
                         id: &id,
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
                         insecure,
                         request_timeout,
-                    },
-                )
-                .await?;
+                    })
+                    .await?;
                 output::print_output(format, &resp)?;
             }
             PluginConfigsCommands::DiscardDiscovered { id } => {
@@ -3075,11 +3069,7 @@ mod tests {
         .expect("should parse");
         match args.command {
             Some(Commands::Hosts {
-                command:
-                    HostsCommands::DiscardDiscovered {
-                        id,
-                        plugin_config,
-                    },
+                command: HostsCommands::DiscardDiscovered { id, plugin_config },
             }) => {
                 assert_eq!(id, uuid(HOST_UUID));
                 assert_eq!(plugin_config, Some(uuid(PC_UUID)));
@@ -3280,9 +3270,7 @@ mod tests {
             Some(Commands::PluginConfigs {
                 command:
                     PluginConfigsCommands::Create {
-                        name,
-                        plugin_type,
-                        ..
+                        name, plugin_type, ..
                     },
             }) => {
                 assert_eq!(name, "My GitHub");
@@ -3322,13 +3310,9 @@ mod tests {
 
     #[test]
     fn plugin_configs_discard_discovered_parses() {
-        let args = Cli::try_parse_from([
-            "uptrakit",
-            "plugin-configs",
-            "discard-discovered",
-            PC_UUID,
-        ])
-        .expect("should parse");
+        let args =
+            Cli::try_parse_from(["uptrakit", "plugin-configs", "discard-discovered", PC_UUID])
+                .expect("should parse");
         match args.command {
             Some(Commands::PluginConfigs {
                 command: PluginConfigsCommands::DiscardDiscovered { id },

@@ -8,16 +8,14 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::SinkExt;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use sea_orm::sea_query::Expr;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use uptrakit_internal_wire::{
     CertificatePayload, CloseReason, ControllerMessage, DiscoveryResultsPayload, ErrorCode,
     ErrorPayload, OutgoingSeq, ReportHostsPayload, VersionCheckResultsPayload,
 };
-use uptrakit_shared_db::entity::{
-    host, host_software_item, service, service_host, software_item,
-};
+use uptrakit_shared_db::entity::{host, host_software_item, service, service_host, software_item};
 
 use super::LoopAction;
 use super::discovery::trigger_discovery_for_agent_host;
@@ -135,11 +133,9 @@ pub(super) async fn handle_renew_certificate(
                 );
             }
 
-            if let Err(e) = crate::settings_store::bump_revocation_version(
-                state.db(),
-                state.default_tenant_id,
-            )
-            .await
+            if let Err(e) =
+                crate::settings_store::bump_revocation_version(state.db(), state.default_tenant_id)
+                    .await
             {
                 tracing::warn!(
                     error = ?e,
@@ -370,10 +366,7 @@ pub(super) async fn handle_version_check_results(
     if !checked_ids.is_empty()
         && let Err(e) = software_item::Entity::update_many()
             .filter(software_item::Column::Id.is_in(checked_ids))
-            .col_expr(
-                software_item::Column::LastCheckedAt,
-                Expr::value(now),
-            )
+            .col_expr(software_item::Column::LastCheckedAt, Expr::value(now))
             .exec(state.db())
             .await
     {
@@ -437,15 +430,14 @@ pub(super) async fn handle_discovery_results(
         if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
             .one(state.db())
             .await
-            && let Err(e) =
-                crate::queries::autodiscovery::process_discovery_results(
-                    state.db(),
-                    service_id,
-                    svc.tenant_id,
-                    host_id,
-                    payload,
-                )
-                .await
+            && let Err(e) = crate::queries::autodiscovery::process_discovery_results(
+                state.db(),
+                service_id,
+                svc.tenant_id,
+                host_id,
+                payload,
+            )
+            .await
         {
             tracing::warn!(
                 error = %e,

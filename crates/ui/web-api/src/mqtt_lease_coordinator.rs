@@ -798,7 +798,12 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
         let _rx = registry
-            .register(service_id, mqtt_caps(), Some("instance-1".to_string()), Some(10))
+            .register(
+                service_id,
+                mqtt_caps(),
+                Some("instance-1".to_string()),
+                Some(10),
+            )
             .await;
 
         let coordinator = MqttLeaseCoordinator::new(db.clone(), registry.clone());
@@ -849,7 +854,12 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
         let _ = registry
-            .register(service_id, mqtt_caps(), Some("instance-1".to_string()), Some(10))
+            .register(
+                service_id,
+                mqtt_caps(),
+                Some("instance-1".to_string()),
+                Some(10),
+            )
             .await;
 
         let now = OffsetDateTime::now_utc();
@@ -894,7 +904,12 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
         let _ = registry
-            .register(service_id, mqtt_caps(), Some("instance-1".to_string()), Some(10))
+            .register(
+                service_id,
+                mqtt_caps(),
+                Some("instance-1".to_string()),
+                Some(10),
+            )
             .await;
 
         let coordinator = MqttLeaseCoordinator::new(db.clone(), registry.clone());

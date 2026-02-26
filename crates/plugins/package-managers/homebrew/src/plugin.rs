@@ -295,7 +295,9 @@ impl Plugin for HomebrewPlugin {
         if result.exit_code == 0 {
             Ok(HostCompatibility::Compatible)
         } else {
-            Ok(HostCompatibility::Incompatible("brew not found".to_string()))
+            Ok(HostCompatibility::Incompatible(
+                "brew not found".to_string(),
+            ))
         }
     }
 
@@ -709,7 +711,10 @@ mod tests {
         let packages = HomebrewPlugin::parse_installed_formulae(&json, true);
         assert_eq!(packages.len(), 2);
         assert_eq!(packages[0].targets.len(), 1);
-        assert_eq!(packages[0].targets[0].plugin_type, PluginType::PackageManagerHomebrew);
+        assert_eq!(
+            packages[0].targets[0].plugin_type,
+            PluginType::PackageManagerHomebrew
+        );
         assert_eq!(
             packages[0].targets[0].plugin_config,
             serde_json::json!({"package_type": "formula"})
@@ -738,7 +743,10 @@ mod tests {
         let packages = HomebrewPlugin::parse_installed_casks(&json, true);
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].targets.len(), 1);
-        assert_eq!(packages[0].targets[0].plugin_type, PluginType::PackageManagerHomebrew);
+        assert_eq!(
+            packages[0].targets[0].plugin_type,
+            PluginType::PackageManagerHomebrew
+        );
         assert_eq!(
             packages[0].targets[0].plugin_config,
             serde_json::json!({"package_type": "cask"})
@@ -814,9 +822,8 @@ mod tests {
 
     #[test]
     fn is_cask_returns_false_for_none() {
-        let plugin =
-            HomebrewPlugin::new(HomebrewConfig { package_type: None }, test_executor())
-                .expect("create");
+        let plugin = HomebrewPlugin::new(HomebrewConfig { package_type: None }, test_executor())
+            .expect("create");
         assert!(!plugin.is_cask());
     }
 
@@ -864,18 +871,22 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_which_exits_zero() {
-        let plugin =
-            HomebrewPlugin::new(HomebrewConfig::default(), FixedExitCodeExecutor::with_exit_code(0))
-                .expect("create");
+        let plugin = HomebrewPlugin::new(
+            HomebrewConfig::default(),
+            FixedExitCodeExecutor::with_exit_code(0),
+        )
+        .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
     }
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
-        let plugin =
-            HomebrewPlugin::new(HomebrewConfig::default(), FixedExitCodeExecutor::with_exit_code(1))
-                .expect("create");
+        let plugin = HomebrewPlugin::new(
+            HomebrewConfig::default(),
+            FixedExitCodeExecutor::with_exit_code(1),
+        )
+        .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
             HostCompatibility::Incompatible(msg) => {

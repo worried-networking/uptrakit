@@ -537,7 +537,9 @@ mod tests {
     use axum::Json;
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
-    use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set};
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
+    };
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{
         prelude::{AuthMethod, Service},

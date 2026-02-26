@@ -39,10 +39,7 @@ pub async fn load_software_states_for_tenant(
         .filter(
             Condition::any()
                 .add(software_item::Column::DiscoveryState.is_null())
-                .add(
-                    software_item::Column::DiscoveryState
-                        .eq(SoftwareDiscoveryState::Approved),
-                ),
+                .add(software_item::Column::DiscoveryState.eq(SoftwareDiscoveryState::Approved)),
         )
         .all(db)
         .await?;
@@ -96,7 +93,10 @@ pub async fn load_software_states_for_tenant(
     // Index hsi rows by software_item_id for O(1) lookup during assembly.
     let mut hsi_by_item: HashMap<Uuid, Vec<&HostSoftwareItemRow>> = HashMap::new();
     for row in &hsi_rows {
-        hsi_by_item.entry(row.software_item_id).or_default().push(row);
+        hsi_by_item
+            .entry(row.software_item_id)
+            .or_default()
+            .push(row);
     }
 
     // 5. Assemble the payload.

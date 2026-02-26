@@ -255,7 +255,10 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
 
     if params.remove_stale_keys && !stale_lines.is_empty() {
         // 5f. Remove stale keys and write the new entry atomically.
-        println!("Removing {} stale key(s) from authorized_keys...", stale_lines.len());
+        println!(
+            "Removing {} stale key(s) from authorized_keys...",
+            stale_lines.len()
+        );
 
         let stale_set: std::collections::HashSet<&str> =
             stale_lines.iter().map(String::as_str).collect();
@@ -266,21 +269,16 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
             .filter(|l| !stale_set.contains(l))
             .collect();
 
-        let new_entry = format!(
-            "{AUTHORIZED_KEYS_RESTRICTIONS} {stripped_pubkey} {service_comment}"
-        );
+        let new_entry =
+            format!("{AUTHORIZED_KEYS_RESTRICTIONS} {stripped_pubkey} {service_comment}");
         let new_content = if keep_lines.is_empty() {
             format!("{new_entry}\n")
         } else {
             format!("{}\n{new_entry}\n", keep_lines.join("\n"))
         };
 
-        let write_cmd = cmd_write_authorized_keys(
-            &home_dir,
-            &new_content,
-            &params.target_username,
-            use_sudo,
-        );
+        let write_cmd =
+            cmd_write_authorized_keys(&home_dir, &new_content, &params.target_username, use_sudo);
         let write_result = session.exec_command(&write_cmd).await?;
         if write_result.exit_code != 0 {
             bail!(Error::SshCommand(format!(
@@ -348,7 +346,13 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         ));
     };
 
-    write_sudoers_file(&session, &params.target_username, &sudoers_content, use_sudo).await?;
+    write_sudoers_file(
+        &session,
+        &params.target_username,
+        &sudoers_content,
+        use_sudo,
+    )
+    .await?;
 
     // 6. DISCONNECT auth session.
     session.disconnect().await;
@@ -646,7 +650,6 @@ fn parse_existing_authorized_keys(content: &str) -> ExistingAuthorizedKeys {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -748,13 +751,8 @@ mod tests {
 
     #[test]
     fn cmd_authorized_keys_includes_restrictions() {
-        let cmd = cmd_setup_authorized_keys(
-            "/home/svc",
-            "ssh-ed25519 AAAA...",
-            "svc",
-            false,
-            "uptrakit",
-        );
+        let cmd =
+            cmd_setup_authorized_keys("/home/svc", "ssh-ed25519 AAAA...", "svc", false, "uptrakit");
         assert!(
             cmd.contains("no-pty,no-agent-forwarding,no-X11-forwarding ssh-ed25519"),
             "authorized_keys entry must include restriction prefix: {cmd}"
@@ -765,13 +763,8 @@ mod tests {
     fn cmd_authorized_keys_includes_service_comment() {
         let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         let comment = format!("uptrakit-{uuid}");
-        let cmd = cmd_setup_authorized_keys(
-            "/home/svc",
-            "ssh-ed25519 AAAA...",
-            "svc",
-            false,
-            &comment,
-        );
+        let cmd =
+            cmd_setup_authorized_keys("/home/svc", "ssh-ed25519 AAAA...", "svc", false, &comment);
         assert!(
             cmd.contains(&comment),
             "authorized_keys entry must contain service comment: {cmd}"
@@ -782,9 +775,7 @@ mod tests {
 
     #[test]
     fn is_uptrakit_key_line_detects_plain_uptrakit() {
-        assert!(is_uptrakit_key_line(
-            "no-pty ssh-ed25519 AAAA... uptrakit"
-        ));
+        assert!(is_uptrakit_key_line("no-pty ssh-ed25519 AAAA... uptrakit"));
     }
 
     #[test]
@@ -837,10 +828,12 @@ mod tests {
         let result = parse_existing_authorized_keys(content);
         assert_eq!(result.all_key_lines.len(), 4);
         assert_eq!(result.uptrakit_key_lines.len(), 2);
-        assert!(result
-            .uptrakit_key_lines
-            .iter()
-            .all(|l| l.ends_with("uptrakit") || l.contains("uptrakit-")));
+        assert!(
+            result
+                .uptrakit_key_lines
+                .iter()
+                .all(|l| l.ends_with("uptrakit") || l.contains("uptrakit-"))
+        );
     }
 
     #[test]

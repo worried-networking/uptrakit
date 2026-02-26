@@ -118,11 +118,7 @@ impl ServiceConnectionRegistry {
             instance_id,
             max_tenants,
             assigned_mqtt_clients: HashSet::new(),
-            last_heartbeat: if is_mqtt {
-                Some(Instant::now())
-            } else {
-                None
-            },
+            last_heartbeat: if is_mqtt { Some(Instant::now()) } else { None },
             connected_at: OffsetDateTime::now_utc(),
         };
 
@@ -211,11 +207,7 @@ impl ServiceConnectionRegistry {
     /// capability.
     ///
     /// Snapshots the senders under the lock and releases it before sending.
-    pub async fn broadcast_by_capability(
-        &self,
-        capability: &Capability,
-        msg: ControllerMessage,
-    ) {
+    pub async fn broadcast_by_capability(&self, capability: &Capability, msg: ControllerMessage) {
         let senders: Vec<mpsc::Sender<ControllerMessage>> = {
             let guard = self.inner.read().await;
             guard
@@ -524,12 +516,7 @@ mod tests {
             )
             .await;
         let _ = registry
-            .register(
-                svc_idle,
-                mqtt_caps(),
-                Some("idle".to_string()),
-                Some(10),
-            )
+            .register(svc_idle, mqtt_caps(), Some("idle".to_string()), Some(10))
             .await;
 
         for _ in 0..3 {

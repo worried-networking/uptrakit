@@ -2241,7 +2241,10 @@ mod tests {
     fn plugin_type_all_variants() {
         for (plugin, expected) in [
             (PluginType::ReleasesGithub, "releases_github"),
-            (PluginType::DiscoveryProxmoxHelperScripts, "discovery_proxmox_helper_scripts"),
+            (
+                PluginType::DiscoveryProxmoxHelperScripts,
+                "discovery_proxmox_helper_scripts",
+            ),
             (PluginType::ReleasesDocker, "releases_docker"),
         ] {
             let json = serde_json::to_string(&plugin).unwrap();

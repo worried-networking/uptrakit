@@ -74,8 +74,14 @@ mod tests {
             PluginCapability::DetectHostCompatibility,
             PluginCapability::DetectHostCompatibility
         );
-        assert_eq!(PluginCapability::PreUpdateHook, PluginCapability::PreUpdateHook);
-        assert_eq!(PluginCapability::PostUpdateHook, PluginCapability::PostUpdateHook);
+        assert_eq!(
+            PluginCapability::PreUpdateHook,
+            PluginCapability::PreUpdateHook
+        );
+        assert_eq!(
+            PluginCapability::PostUpdateHook,
+            PluginCapability::PostUpdateHook
+        );
         // They should be distinct from the original two.
         assert_ne!(
             PluginCapability::DetectHostCompatibility,

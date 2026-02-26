@@ -32,9 +32,8 @@ use rootcause::prelude::*;
 use sea_orm::EntityTrait;
 
 use uptrakit_internal_wire::{
-    ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage,
-    ErrorCode, ErrorPayload, IncomingSeq,
-    MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq,
+    ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage, ErrorCode,
+    ErrorPayload, IncomingSeq, MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq,
     PingPayload, RejectedPayload, ServiceMessage,
 };
 use uptrakit_shared_db::entity::service;
@@ -123,11 +122,13 @@ pub(crate) async fn handle_authenticated_loop(
     } = ctx;
 
     // Load service from DB, derive capabilities.
-    let capabilities: BTreeSet<Capability> =
-        match service::Entity::find_by_id(service_id).one(state.db()).await {
-            Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
-            _ => BTreeSet::new(),
-        };
+    let capabilities: BTreeSet<Capability> = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
+        _ => BTreeSet::new(),
+    };
 
     let is_mqtt = capabilities.contains(&Capability::MqttBridge);
     let has_software_discovery = capabilities.contains(&Capability::SoftwareDiscovery);
@@ -255,7 +256,8 @@ pub(crate) async fn handle_authenticated_loop(
     // ------------------------------------------------------------------
     // UpdateHooks: deliver pending updates (non-MQTT only)
     // ------------------------------------------------------------------
-    if has_update_hooks && !is_mqtt
+    if has_update_hooks
+        && !is_mqtt
         && let Err(e) = deliver_pending_updates(state, service_id, sink, out_seq).await
     {
         tracing::error!(error = %e, %service_id, "failed to deliver pending updates on reconnect");
@@ -495,11 +497,13 @@ pub(crate) async fn handle_enrolled_loop(
     in_seq: &mut IncomingSeq,
 ) {
     // Fetch service to derive capabilities for registration.
-    let capabilities: BTreeSet<Capability> =
-        match service::Entity::find_by_id(service_id).one(state.db()).await {
-            Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
-            _ => BTreeSet::new(),
-        };
+    let capabilities: BTreeSet<Capability> = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
+        _ => BTreeSet::new(),
+    };
 
     // Register in service_connections.
     let (mut push_rx, cancel_token) = state
@@ -747,4 +751,3 @@ pub(crate) async fn handle_enrolled_loop(
     }
     tracing::debug!(%service_id, "enrolled service disconnected");
 }
-

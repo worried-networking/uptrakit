@@ -165,8 +165,7 @@ mod tests {
     async fn check_version_github_detect_not_supported() {
         // The GitHub plugin is fetch-only; using it for detect returns an error.
         let assignment = gh_assignment();
-        let outcome =
-            check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         // The GitHub plugin's default detect_installed_version returns an error.
@@ -180,8 +179,7 @@ mod tests {
             package_identifier: "nginx".to_string(),
             config: serde_json::json!({}),
         };
-        let outcome =
-            check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_none());
@@ -195,8 +193,7 @@ mod tests {
             package_identifier: "booklore".to_string(),
             config: serde_json::json!({}),
         };
-        let outcome =
-            check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         // The trait default returns an error for unsupported operations.
@@ -211,8 +208,7 @@ mod tests {
             package_identifier: "octocat/hello-world".to_string(),
             config: serde_json::json!({"api_base_url": "http://api.github.com"}),
         };
-        let outcome =
-            check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.error.is_some());
         assert!(outcome.error.unwrap().contains("https"));
@@ -225,8 +221,7 @@ mod tests {
             package_identifier: String::new(),
             config: serde_json::json!({}),
         };
-        let outcome =
-            check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_some());
@@ -246,15 +241,13 @@ mod tests {
         // With a valid docker host override, the plugin is created with the
         // injected host. The check itself will fail (no daemon) but that proves
         // the injection path runs without panicking.
-        let outcome =
-            check_version(Some(&assignment), None, test_executor(), &ctx).await;
+        let outcome = check_version(Some(&assignment), None, test_executor(), &ctx).await;
         let _ = outcome;
     }
 
     #[tokio::test]
     async fn check_version_no_assignments_returns_empty() {
-        let outcome =
-            check_version(None, None, test_executor(), &no_ctx()).await;
+        let outcome = check_version(None, None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_none());

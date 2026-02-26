@@ -150,13 +150,8 @@ pub async fn update_plugin_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match pc_queries::update_plugin_config(
-        state.plugin_ops.as_ref(),
-        &tenant_db,
-        config_id,
-        req,
-    )
-    .await
+    match pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)
+        .await
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(UpdatePluginConfigError::NotFound) => {
@@ -264,11 +259,7 @@ pub async fn discover_plugin_config(
         }
     };
 
-    if !state
-        .plugin_ops
-        .discovery_plugins()
-        .contains(&plugin_type)
-    {
+    if !state.plugin_ops.discovery_plugins().contains(&plugin_type) {
         return error_response(
             StatusCode::BAD_REQUEST,
             format!(
@@ -495,15 +486,21 @@ mod tests {
             "script_url": "https://example.com/update.sh"
         });
         assert!(
-            PluginRegistry::validate_config_str("discovery_proxmox_helper_scripts", &proxmox_config)
-                .is_ok()
+            PluginRegistry::validate_config_str(
+                "discovery_proxmox_helper_scripts",
+                &proxmox_config
+            )
+            .is_ok()
         );
 
         let docker_config = serde_json::json!({});
         assert!(PluginRegistry::validate_config_str("releases_docker", &docker_config).is_ok());
 
         let homebrew_config = serde_json::json!({});
-        assert!(PluginRegistry::validate_config_str("package_manager_homebrew", &homebrew_config).is_ok());
+        assert!(
+            PluginRegistry::validate_config_str("package_manager_homebrew", &homebrew_config)
+                .is_ok()
+        );
 
         assert!(PluginRegistry::validate_config_str("unknown", &homebrew_config).is_err());
     }

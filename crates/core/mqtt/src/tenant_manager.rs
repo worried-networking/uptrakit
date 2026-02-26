@@ -25,8 +25,7 @@ struct ClientState {
 pub struct TenantManager {
     clients: HashMap<Uuid, ClientState>,
     event_tx: Option<mpsc::UnboundedSender<MqttServiceEvent>>,
-    software_states:
-        HashMap<Uuid, Vec<uptrakit_internal_wire::MqttSoftwareStateItem>>,
+    software_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttSoftwareStateItem>>,
 }
 
 impl TenantManager {
@@ -238,13 +237,9 @@ impl TenantManager {
 
         for item in items {
             for host in &item.hosts {
-                let uid = crate::ha_discovery::unique_id(
-                    tenant_id,
-                    item.software_item_id,
-                    host.host_id,
-                );
-                let config_topic =
-                    crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
+                let uid =
+                    crate::ha_discovery::unique_id(tenant_id, item.software_item_id, host.host_id);
+                let config_topic = crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
                 let config_json = crate::ha_discovery::build_discovery_config(
                     ha_prefix,
                     topic_prefix,

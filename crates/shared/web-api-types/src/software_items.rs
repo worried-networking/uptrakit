@@ -422,9 +422,11 @@ mod tests {
             "1password"
         );
         assert_eq!(deserialized.host_assignments[1].plugins.len(), 1);
-        assert!(deserialized.host_assignments[1].plugins[0]
-            .plugin_config
-            .is_some());
+        assert!(
+            deserialized.host_assignments[1].plugins[0]
+                .plugin_config
+                .is_some()
+        );
     }
 
     #[test]
@@ -465,7 +467,10 @@ mod tests {
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
             name: "1Password".to_string(),
-            plugins: vec!["package_manager_homebrew".to_string(), "releases_github".to_string()],
+            plugins: vec![
+                "package_manager_homebrew".to_string(),
+                "releases_github".to_string(),
+            ],
             enabled: true,
             discovery_state: None,
             last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),

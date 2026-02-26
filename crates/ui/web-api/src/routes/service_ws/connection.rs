@@ -194,10 +194,9 @@ pub(super) async fn handle_authenticated(
     let capabilities = parse_capabilities(&service.capabilities);
     let profile = ServiceProfile::from_capabilities(&capabilities);
     let shutdown_timeout = profile.shutdown_timeout_secs();
-    let ping_secs = service.ping_interval_seconds.map_or_else(
-        || profile.default_ping_interval_secs(),
-        |v| v as u32,
-    );
+    let ping_secs = service
+        .ping_interval_seconds
+        .map_or_else(|| profile.default_ping_interval_secs(), |v| v as u32);
     let ping_interval = std::time::Duration::from_secs(u64::from(ping_secs));
     let settings_msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
         renewal_window_hours,
@@ -221,13 +220,7 @@ pub(super) async fn handle_authenticated(
         out_seq,
         in_seq,
     };
-    super::handler::handle_authenticated_loop(
-        &mut sink,
-        &mut stream,
-        &state,
-        ctx,
-    )
-    .await;
+    super::handler::handle_authenticated_loop(&mut sink, &mut stream, &state, ctx).await;
 }
 
 // ---------------------------------------------------------------------------

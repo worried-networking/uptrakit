@@ -18,8 +18,8 @@ use sea_orm::{
 };
 use std::collections::HashSet;
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload};
 use uptrakit_internal_wire::DiscoveryTarget;
+use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload};
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
     autodiscovery_ignore, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
@@ -194,23 +194,22 @@ pub async fn discard_pending_items(
 
     // If a plugin config filter is requested, restrict to items that have at
     // least one host_software_item_plugin row with that plugin config ID.
-    let plugin_filtered_item_ids: Option<Vec<Uuid>> =
-        if let Some(pc_id) = plugin_config_id_filter {
-            let linked: Vec<Uuid> = HostSoftwareItemPlugin::find()
-                .filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
-                .all(db)
-                .await?
-                .into_iter()
-                .map(|l| l.software_item_id)
-                .collect();
+    let plugin_filtered_item_ids: Option<Vec<Uuid>> = if let Some(pc_id) = plugin_config_id_filter {
+        let linked: Vec<Uuid> = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|l| l.software_item_id)
+            .collect();
 
-            if linked.is_empty() {
-                return Ok(DiscardDiscoveredResponse { discarded_count: 0 });
-            }
-            Some(linked)
-        } else {
-            None
-        };
+        if linked.is_empty() {
+            return Ok(DiscardDiscoveredResponse { discarded_count: 0 });
+        }
+        Some(linked)
+    } else {
+        None
+    };
 
     if let Some(ref pfids) = plugin_filtered_item_ids {
         id_query = id_query.filter(software_item::Column::Id.is_in(pfids.clone()));
@@ -300,9 +299,7 @@ pub async fn find_or_create_default_plugin_config(
     display_name: &str,
 ) -> Result<Uuid, AutodiscoveryError> {
     // First pass: search for an existing config with matching JSON.
-    if let Some(id) =
-        find_matching_plugin_config(db, tenant_id, plugin_type, config_json).await?
-    {
+    if let Some(id) = find_matching_plugin_config(db, tenant_id, plugin_type, config_json).await? {
         return Ok(id);
     }
 
@@ -421,15 +418,8 @@ async fn process_plugin_result(
         };
         if !item.targets.is_empty() {
             // Target-based: each target specifies its own plugin config and roles.
-            process_targets_discovery(
-                db,
-                tenant_id,
-                host_id,
-                &item_info,
-                &item.targets,
-                now,
-            )
-            .await?;
+            process_targets_discovery(db, tenant_id, host_id, &item_info, &item.targets, now)
+                .await?;
         } else if let Some(existing_pc_id) = result.plugin_config_id {
             // Config-ID-based: use the pre-existing plugin config for all roles.
             let ignore_set = load_ignore_set(db, tenant_id, existing_pc_id).await?;
@@ -486,10 +476,7 @@ async fn process_targets_discovery(
             .as_deref()
             .unwrap_or(item.package_identifier);
 
-        let execution_site = target
-            .execution_site
-            .as_deref()
-            .unwrap_or("auto");
+        let execution_site = target.execution_site.as_deref().unwrap_or("auto");
 
         // Find-or-create plugin config for this target.
         let pc_id = find_or_create_default_plugin_config(
@@ -521,15 +508,8 @@ async fn process_targets_discovery(
         };
 
         // Find-or-create the software item and host link.
-        let software_item_id = find_or_create_software_item(
-            db,
-            tenant_id,
-            host_id,
-            pc_id,
-            &target_item,
-            now,
-        )
-        .await?;
+        let software_item_id =
+            find_or_create_software_item(db, tenant_id, host_id, pc_id, &target_item, now).await?;
 
         // If None, the item already existed and was updated in-place.
         let Some(software_item_id) = software_item_id else {
@@ -639,10 +619,9 @@ async fn find_or_create_software_item(
             package_identifier = %package_identifier,
             "removing orphaned host link for discarded software item; will re-discover"
         );
-        if let Some(hsi) =
-            HostSoftwareItem::find_by_id((host_id, plugin_link.software_item_id))
-                .one(db)
-                .await?
+        if let Some(hsi) = HostSoftwareItem::find_by_id((host_id, plugin_link.software_item_id))
+            .one(db)
+            .await?
         {
             let hsi_active: host_software_item::ActiveModel = hsi.into();
             hsi_active.delete(db).await?;
@@ -736,15 +715,8 @@ async fn process_one_discovery(
         return Ok(());
     }
 
-    let software_item_id = find_or_create_software_item(
-        db,
-        tenant_id,
-        host_id,
-        plugin_config_id,
-        &args,
-        now,
-    )
-    .await?;
+    let software_item_id =
+        find_or_create_software_item(db, tenant_id, host_id, plugin_config_id, &args, now).await?;
 
     // If None, the item already existed and was updated in-place.
     let Some(software_item_id) = software_item_id else {
@@ -887,7 +859,10 @@ mod tests {
             updated_at: Set(now),
             deactivated_at: Set(deactivated_at),
         };
-        SoftwareItem::insert(model).exec(db).await.expect("insert software_item");
+        SoftwareItem::insert(model)
+            .exec(db)
+            .await
+            .expect("insert software_item");
     }
 
     async fn insert_host_link(
@@ -909,7 +884,10 @@ mod tests {
             last_updated_at: Set(None),
             linked_at: Set(now),
         };
-        HostSoftwareItem::insert(link).exec(db).await.expect("insert host_software_item");
+        HostSoftwareItem::insert(link)
+            .exec(db)
+            .await
+            .expect("insert host_software_item");
 
         // Also create plugin link rows for all three roles to match the new schema.
         for role in ["detect_version", "fetch_releases", "execute_update"] {
@@ -1048,8 +1026,9 @@ mod tests {
             .expect("count before");
         assert_eq!(links_before, 1, "expected one host link before discard");
 
-        let result =
-            discard_pending_items(&db, tenant_id, None, None).await.expect("discard");
+        let result = discard_pending_items(&db, tenant_id, None, None)
+            .await
+            .expect("discard");
         assert_eq!(result.discarded_count, 1);
 
         let links_after = HostSoftwareItem::find()
@@ -1057,7 +1036,10 @@ mod tests {
             .count(&db)
             .await
             .expect("count after");
-        assert_eq!(links_after, 0, "host link must be deleted when software item is discarded");
+        assert_eq!(
+            links_after, 0,
+            "host link must be deleted when software item is discarded"
+        );
     }
 
     /// When `find_or_create_software_item` encounters a host link pointing to a
@@ -1102,7 +1084,11 @@ mod tests {
             .all(&db)
             .await
             .expect("active items");
-        assert_eq!(active_items.len(), 1, "expected exactly one new pending item");
+        assert_eq!(
+            active_items.len(),
+            1,
+            "expected exactly one new pending item"
+        );
         assert_eq!(
             active_items[0].discovery_state,
             Some(SoftwareDiscoveryState::Pending)
@@ -1115,7 +1101,10 @@ mod tests {
             .count(&db)
             .await
             .expect("new link count");
-        assert_eq!(new_link_count, 3, "expected plugin link rows for all three roles");
+        assert_eq!(
+            new_link_count, 3,
+            "expected plugin link rows for all three roles"
+        );
     }
 
     /// `process_one_discovery` must update `installed_version` in place when the
@@ -1182,9 +1171,8 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
 
-        let result = phs_result_with_github_target(
-            "booklore", "BookLore", "1.18.5", "BookLore", "BookLore",
-        );
+        let result =
+            phs_result_with_github_target("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
 
         process_plugin_result(&db, tenant_id, host_id, now, &result)
             .await
@@ -1217,7 +1205,11 @@ mod tests {
             .all(&db)
             .await
             .expect("query plugin links");
-        assert_eq!(plugin_links.len(), 3, "expected three role-based plugin links");
+        assert_eq!(
+            plugin_links.len(),
+            3,
+            "expected three role-based plugin links"
+        );
     }
 
     /// An APT PHS item (with target) must create/reuse a shared `apt` plugin config.
@@ -1252,7 +1244,11 @@ mod tests {
             .all(&db)
             .await
             .expect("query plugin links");
-        assert_eq!(plugin_links.len(), 3, "expected three role-based plugin links");
+        assert_eq!(
+            plugin_links.len(),
+            3,
+            "expected three role-based plugin links"
+        );
 
         let hsi = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
@@ -1284,7 +1280,10 @@ mod tests {
             .all(&db)
             .await
             .expect("query configs");
-        assert!(configs.is_empty(), "no config should be created for skipped item");
+        assert!(
+            configs.is_empty(),
+            "no config should be created for skipped item"
+        );
 
         let items = SoftwareItem::find()
             .filter(software_item::Column::TenantId.eq(tenant_id))
@@ -1307,12 +1306,10 @@ mod tests {
         insert_host(&db, host1, tenant_id).await;
         insert_host(&db, host2, tenant_id).await;
 
-        let result1 = phs_result_with_github_target(
-            "booklore", "BookLore", "1.18.5", "BookLore", "BookLore",
-        );
-        let result2 = phs_result_with_github_target(
-            "booklore", "BookLore", "1.18.5", "BookLore", "BookLore",
-        );
+        let result1 =
+            phs_result_with_github_target("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
+        let result2 =
+            phs_result_with_github_target("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
 
         process_plugin_result(&db, tenant_id, host1, now, &result1)
             .await
@@ -1327,7 +1324,10 @@ mod tests {
             .count(&db)
             .await
             .expect("count configs");
-        assert_eq!(config_count, 1, "both hosts must share a single plugin config");
+        assert_eq!(
+            config_count, 1,
+            "both hosts must share a single plugin config"
+        );
 
         let host1_links = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host1))
@@ -1380,7 +1380,11 @@ mod tests {
             .all(&db)
             .await
             .expect("query plugin links");
-        assert_eq!(plugin_links.len(), 3, "expected three role-based plugin links");
+        assert_eq!(
+            plugin_links.len(),
+            3,
+            "expected three role-based plugin links"
+        );
 
         for link in &plugin_links {
             assert_eq!(link.package_identifier, "wget");

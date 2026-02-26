@@ -9,13 +9,13 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::SinkExt;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use sea_orm::sea_query::{Expr, ExprTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
-    ControllerMessage, ExecuteUpdatePayload, OutgoingSeq, PluginAssignment,
-    UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
+    ControllerMessage, ExecuteUpdatePayload, OutgoingSeq, PluginAssignment, UpdateFinalStatus,
+    UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
 };
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
@@ -23,8 +23,8 @@ use uptrakit_shared_db::entity::{
 };
 
 use super::{HandlerError, HandlerResult, LoopAction, MAX_UPDATE_OUTPUT_BYTES};
-use crate::routes::service_ws::protocol::serialize_controller_msg;
 use crate::AppState;
+use crate::routes::service_ws::protocol::serialize_controller_msg;
 
 // ---------------------------------------------------------------------------
 // load_linked_host_ids
@@ -151,32 +151,28 @@ pub(super) async fn deliver_pending_updates(
         };
 
         // Load role-specific plugin assignments for this host-software pair.
-        let execute_update_assignment = match load_role_plugin(
-            state.db(),
-            update_record.host_id,
-            item.id,
-            "execute_update",
-        )
-        .await
-        {
-            Ok(Some(data)) => data,
-            Ok(None) => {
-                tracing::warn!(
-                    update_id = %update_record.id,
-                    host_id = %update_record.host_id,
-                    software_item_id = %item.id,
-                    "no execute_update plugin assigned, skipping pending update"
-                );
-                continue;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "failed to load execute_update plugin for pending update"
-                );
-                continue;
-            }
-        };
+        let execute_update_assignment =
+            match load_role_plugin(state.db(), update_record.host_id, item.id, "execute_update")
+                .await
+            {
+                Ok(Some(data)) => data,
+                Ok(None) => {
+                    tracing::warn!(
+                        update_id = %update_record.id,
+                        host_id = %update_record.host_id,
+                        software_item_id = %item.id,
+                        "no execute_update plugin assigned, skipping pending update"
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to load execute_update plugin for pending update"
+                    );
+                    continue;
+                }
+            };
 
         let detect_version_assignment =
             match load_role_plugin(state.db(), update_record.host_id, item.id, "detect_version")
@@ -192,18 +188,19 @@ pub(super) async fn deliver_pending_updates(
                 }
             };
 
-        let execute_update_plugin =
-            match build_plugin_assignment(&execute_update_assignment.0, &execute_update_assignment.1)
-            {
-                Some(a) => a,
-                None => {
-                    tracing::warn!(
-                        update_id = %update_record.id,
-                        "unknown plugin type for execute_update, skipping pending update"
-                    );
-                    continue;
-                }
-            };
+        let execute_update_plugin = match build_plugin_assignment(
+            &execute_update_assignment.0,
+            &execute_update_assignment.1,
+        ) {
+            Some(a) => a,
+            None => {
+                tracing::warn!(
+                    update_id = %update_record.id,
+                    "unknown plugin type for execute_update, skipping pending update"
+                );
+                continue;
+            }
+        };
 
         let detect_version_plugin = detect_version_assignment
             .as_ref()
@@ -312,9 +309,7 @@ pub(super) async fn handle_update_started(
         );
     }
     if let Err(e) = update_output_line::Entity::delete_many()
-        .filter(
-            update_output_line::Column::UpdateHistoryId.eq(payload.update_history_id),
-        )
+        .filter(update_output_line::Column::UpdateHistoryId.eq(payload.update_history_id))
         .exec(state.db())
         .await
     {
@@ -364,9 +359,7 @@ pub(super) async fn handle_update_output(
             Expr::col(update_history::Column::OutputBytes).add(line_len),
         )
         .filter(update_history::Column::Id.eq(payload.update_history_id))
-        .filter(
-            update_history::Column::OutputBytes.lt(MAX_UPDATE_OUTPUT_BYTES as i64),
-        )
+        .filter(update_history::Column::OutputBytes.lt(MAX_UPDATE_OUTPUT_BYTES as i64))
         .exec(state.db())
         .await;
 
@@ -460,9 +453,7 @@ pub(super) async fn handle_update_result(
     }
 
     if let Err(e) = update_output_line::Entity::delete_many()
-        .filter(
-            update_output_line::Column::UpdateHistoryId.eq(payload.update_history_id),
-        )
+        .filter(update_output_line::Column::UpdateHistoryId.eq(payload.update_history_id))
         .exec(state.db())
         .await
     {
@@ -474,17 +465,14 @@ pub(super) async fn handle_update_result(
 
     if payload.status == UpdateFinalStatus::Completed
         && let Some(ref to_version) = payload.to_version
-        && let Ok(Some(link)) = host_software_item::Entity::find_by_id((
-            record.host_id,
-            record.software_item_id,
-        ))
-        .one(state.db())
-        .await
+        && let Ok(Some(link)) =
+            host_software_item::Entity::find_by_id((record.host_id, record.software_item_id))
+                .one(state.db())
+                .await
     {
         let mut link_active: host_software_item::ActiveModel = link.into();
         link_active.installed_version = Set(Some(to_version.clone()));
-        link_active.installed_version_detected_at =
-            Set(Some(time::OffsetDateTime::now_utc()));
+        link_active.installed_version_detected_at = Set(Some(time::OffsetDateTime::now_utc()));
         link_active.last_updated_at = Set(Some(time::OffsetDateTime::now_utc()));
         if let Err(e) = link_active.update(state.db()).await {
             tracing::warn!(

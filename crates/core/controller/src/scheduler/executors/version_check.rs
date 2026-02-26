@@ -144,9 +144,7 @@ impl VersionCheckExecutor {
         &self,
         tenant_id: Uuid,
     ) -> crate::scheduler::error::Result<()> {
-        let rows = self
-            .query_controller_fetch_releases_rows(tenant_id)
-            .await?;
+        let rows = self.query_controller_fetch_releases_rows(tenant_id).await?;
         if rows.is_empty() {
             return Ok(());
         }
@@ -281,8 +279,7 @@ impl VersionCheckExecutor {
             };
 
             let latest_version_str = latest.version.to_string();
-            let release_metadata =
-                serde_json::to_value(latest).unwrap_or(serde_json::Value::Null);
+            let release_metadata = serde_json::to_value(latest).unwrap_or(serde_json::Value::Null);
             let now = OffsetDateTime::now_utc();
 
             tracing::debug!(
@@ -382,10 +379,7 @@ impl VersionCheckExecutor {
     // ── Phase B ──────────────────────────────────────────────────────────
 
     /// Build and send `CheckVersions` messages to agents.
-    async fn send_agent_assignments(
-        &self,
-        tenant_id: Uuid,
-    ) -> crate::scheduler::error::Result<()> {
+    async fn send_agent_assignments(&self, tenant_id: Uuid) -> crate::scheduler::error::Result<()> {
         let rows = self.query_agent_assignment_rows(tenant_id).await?;
         if rows.is_empty() {
             tracing::debug!("no software items assigned to agents for version check");
@@ -399,10 +393,8 @@ impl VersionCheckExecutor {
         //
         // Key: (service_id, host_machine_id)
         // Inner key: software_item_id -> partial VersionCheckAssignment
-        let mut by_agent_host: HashMap<
-            (Uuid, String),
-            HashMap<Uuid, VersionCheckAssignment>,
-        > = HashMap::new();
+        let mut by_agent_host: HashMap<(Uuid, String), HashMap<Uuid, VersionCheckAssignment>> =
+            HashMap::new();
 
         for row in rows {
             let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
@@ -425,14 +417,15 @@ impl VersionCheckExecutor {
 
             let agent_key = (row.service_id, row.host_machine_id.clone());
             let items = by_agent_host.entry(agent_key).or_default();
-            let item = items
-                .entry(row.software_item_id)
-                .or_insert_with(|| VersionCheckAssignment {
-                    software_item_id: row.software_item_id,
-                    name: row.software_item_name.clone(),
-                    detect_version: None,
-                    fetch_releases: None,
-                });
+            let item =
+                items
+                    .entry(row.software_item_id)
+                    .or_insert_with(|| VersionCheckAssignment {
+                        software_item_id: row.software_item_id,
+                        name: row.software_item_name.clone(),
+                        detect_version: None,
+                        fetch_releases: None,
+                    });
 
             match row.role.as_str() {
                 "detect_version" => {
@@ -451,9 +444,9 @@ impl VersionCheckExecutor {
                                 noop_executor.clone(),
                             );
                             match plugin {
-                                Ok(p) => !p.has_capability(
-                                    PluginCapability::ControllerSideFetchReleases,
-                                ),
+                                Ok(p) => {
+                                    !p.has_capability(PluginCapability::ControllerSideFetchReleases)
+                                }
                                 Err(_) => {
                                     // If we can't create the plugin, let the agent try
                                     true
@@ -554,8 +547,7 @@ impl VersionCheckExecutor {
             )
             .join(JoinType::InnerJoin, service_host::Relation::Service.def())
             .filter(
-                host_software_item_plugin::Column::Role
-                    .is_in(["detect_version", "fetch_releases"]),
+                host_software_item_plugin::Column::Role.is_in(["detect_version", "fetch_releases"]),
             )
             .filter(software_item::Column::TenantId.eq(tenant_id))
             .filter(software_item::Column::Enabled.eq(true))

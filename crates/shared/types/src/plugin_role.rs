@@ -201,10 +201,7 @@ mod tests {
     fn plugin_role_other_roundtrip() {
         let original = r#""custom_role""#;
         let deserialized: PluginRole = serde_json::from_str(original).expect("deserialize");
-        assert_eq!(
-            deserialized,
-            PluginRole::Other("custom_role".to_string())
-        );
+        assert_eq!(deserialized, PluginRole::Other("custom_role".to_string()));
         let reserialized = serde_json::to_string(&deserialized).expect("serialize");
         assert_eq!(reserialized, original);
     }

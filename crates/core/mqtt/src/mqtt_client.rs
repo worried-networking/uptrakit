@@ -153,10 +153,12 @@ impl MqttEventReporter {
     }
 
     fn report_status(&self, status: MqttClientConnectionStatus) {
-        let _ = self.sender.send(MqttServiceEvent::Status(MqttClientStatusEvent {
-            mqtt_client_id: self.mqtt_client_id,
-            status,
-        }));
+        let _ = self
+            .sender
+            .send(MqttServiceEvent::Status(MqttClientStatusEvent {
+                mqtt_client_id: self.mqtt_client_id,
+                status,
+            }));
     }
 
     fn report_reconnected(&self) {

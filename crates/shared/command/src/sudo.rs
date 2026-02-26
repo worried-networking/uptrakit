@@ -366,7 +366,10 @@ mod tests {
         let result = exec.apply_sudo(&spec);
         match &result.mode {
             CommandMode::Exec { program, .. } => {
-                assert_eq!(program, "apt-get", "ForceWithout: sudo must not be prepended");
+                assert_eq!(
+                    program, "apt-get",
+                    "ForceWithout: sudo must not be prepended"
+                );
             }
             other => panic!("expected Exec mode, got: {other:?}"),
         }

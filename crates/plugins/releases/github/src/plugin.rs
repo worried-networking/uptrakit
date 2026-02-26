@@ -202,11 +202,7 @@ impl GitHubPlugin {
     }
 
     /// Check rate limit headers and log warnings.
-    fn check_rate_limit(
-        &self,
-        headers: &reqwest::header::HeaderMap,
-        package_identifier: &str,
-    ) {
+    fn check_rate_limit(&self, headers: &reqwest::header::HeaderMap, package_identifier: &str) {
         let remaining = headers
             .get("x-ratelimit-remaining")
             .and_then(|v| v.to_str().ok())

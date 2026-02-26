@@ -101,9 +101,10 @@ mod tests {
             mode: RegistrationMode::Invite,
             require_token_for_oidc: true,
         };
-        let authentication = uptrakit_web_api_types::settings_auth::AuthenticationSettingsResponse {
-            password_auth_enabled: false,
-        };
+        let authentication =
+            uptrakit_web_api_types::settings_auth::AuthenticationSettingsResponse {
+                password_auth_enabled: false,
+            };
         let agent_certificates = AgentCertificateSettingsResponse {
             lifetime_days: 14,
             renewal_window_hours: 9,

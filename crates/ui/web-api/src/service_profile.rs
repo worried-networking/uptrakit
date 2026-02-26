@@ -119,7 +119,10 @@ mod tests {
     #[test]
     fn profile_mqtt_bridge() {
         let c = caps(&[Capability::MqttBridge, Capability::GracefulShutdown]);
-        assert_eq!(ServiceProfile::from_capabilities(&c), ServiceProfile::MqttBridge);
+        assert_eq!(
+            ServiceProfile::from_capabilities(&c),
+            ServiceProfile::MqttBridge
+        );
     }
 
     #[test]
@@ -154,13 +157,19 @@ mod tests {
     #[test]
     fn profile_unknown_only_graceful_shutdown() {
         let c = caps(&[Capability::GracefulShutdown]);
-        assert_eq!(ServiceProfile::from_capabilities(&c), ServiceProfile::Unknown);
+        assert_eq!(
+            ServiceProfile::from_capabilities(&c),
+            ServiceProfile::Unknown
+        );
     }
 
     #[test]
     fn mqtt_bridge_takes_precedence() {
         let c = caps(&[Capability::MqttBridge, Capability::SoftwareDiscovery]);
-        assert_eq!(ServiceProfile::from_capabilities(&c), ServiceProfile::MqttBridge);
+        assert_eq!(
+            ServiceProfile::from_capabilities(&c),
+            ServiceProfile::MqttBridge
+        );
     }
 
     // ---------------------------------------------------------------
@@ -217,7 +226,10 @@ mod tests {
 
     #[test]
     fn label_mqtt_bridge() {
-        assert_eq!(ServiceProfile::MqttBridge.service_label(false), "MQTT Bridge");
+        assert_eq!(
+            ServiceProfile::MqttBridge.service_label(false),
+            "MQTT Bridge"
+        );
     }
 
     #[test]
@@ -258,8 +270,7 @@ mod tests {
 
     #[test]
     fn parse_preserves_all_known_capabilities() {
-        let json =
-            r#"["graceful_shutdown","mqtt_bridge","software_discovery","ssh_remote","update_hooks"]"#;
+        let json = r#"["graceful_shutdown","mqtt_bridge","software_discovery","ssh_remote","update_hooks"]"#;
         let parsed = parse_capabilities(json);
         assert_eq!(parsed.len(), 5);
         assert!(parsed.contains(&Capability::GracefulShutdown));

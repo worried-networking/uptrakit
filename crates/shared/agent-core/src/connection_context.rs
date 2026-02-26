@@ -45,11 +45,7 @@ impl ConnectionContext {
     ///
     /// Only the fields relevant to `plugin_type` are applied.  Fields that
     /// already exist in `config` are preserved (user config takes precedence).
-    pub fn apply_to_config(
-        &self,
-        plugin_type: &PluginType,
-        config: &mut serde_json::Value,
-    ) {
+    pub fn apply_to_config(&self, plugin_type: &PluginType, config: &mut serde_json::Value) {
         if !matches!(plugin_type, PluginType::ReleasesDocker) {
             return;
         }

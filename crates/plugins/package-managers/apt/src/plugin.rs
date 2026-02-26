@@ -43,10 +43,7 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
 
     // All characters must be in [a-z0-9+\-.].
     for ch in value.chars() {
-        if !ch.is_ascii_lowercase()
-            && !ch.is_ascii_digit()
-            && !matches!(ch, '+' | '-' | '.')
-        {
+        if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && !matches!(ch, '+' | '-' | '.') {
             return Err(format!(
                 "package_identifier contains invalid character: '{ch}'"
             ));
@@ -124,8 +121,7 @@ impl AptPlugin {
     }
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier)
-            .map_err(|e| report!(PluginError::Configuration(e)))
+        validate_identifier(package_identifier).map_err(|e| report!(PluginError::Configuration(e)))
     }
 }
 
@@ -158,7 +154,9 @@ impl Plugin for AptPlugin {
         if result.exit_code == 0 {
             Ok(HostCompatibility::Compatible)
         } else {
-            Ok(HostCompatibility::Incompatible("apt-get not found".to_string()))
+            Ok(HostCompatibility::Incompatible(
+                "apt-get not found".to_string(),
+            ))
         }
     }
 
@@ -203,10 +201,10 @@ impl Plugin for AptPlugin {
         tracing::info!("refreshing APT package index");
         let cmd_output = self
             .executor
-            .execute_quiet(&CommandSpec::exec(
-                "apt-get",
-                ["update".to_string(), "-q".to_string()],
-            ).privileged())
+            .execute_quiet(
+                &CommandSpec::exec("apt-get", ["update".to_string(), "-q".to_string()])
+                    .privileged(),
+            )
             .await
             .map_err(|e| {
                 report!(PluginError::PluginInternal(format!(
@@ -253,10 +251,7 @@ impl Plugin for AptPlugin {
             AptDiscoveryFilter::Manual => {
                 let mark_output = self
                     .executor
-                    .execute_quiet(&CommandSpec::exec(
-                        "apt-mark",
-                        ["showmanual".to_string()],
-                    ))
+                    .execute_quiet(&CommandSpec::exec("apt-mark", ["showmanual".to_string()]))
                     .await
                     .map_err(|e| {
                         report!(PluginError::PluginInternal(format!(
@@ -417,10 +412,7 @@ impl Plugin for AptPlugin {
 
         let cmd_output = self
             .executor
-            .execute(
-                &CommandSpec::exec("apt-get", args).privileged(),
-                output_tx,
-            )
+            .execute(&CommandSpec::exec("apt-get", args).privileged(), output_tx)
             .await
             .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
 
@@ -592,10 +584,7 @@ mod tests {
 
     #[test]
     fn parse_madison_output_malformed_line_skipped_gracefully() {
-        let output = concat!(
-            "no pipe here\n",
-            "   nginx | 1.24.0 | source\n",
-        );
+        let output = concat!("no pipe here\n", "   nginx | 1.24.0 | source\n",);
         assert_eq!(
             AptPlugin::parse_madison_output(output),
             Some("1.24.0".to_string())
@@ -643,8 +632,7 @@ mod tests {
 
     #[test]
     fn apt_plugin_required_sudo_commands() {
-        let plugin =
-            AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
         let entries = plugin.required_sudo_commands();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].command, "apt-get");
@@ -655,8 +643,7 @@ mod tests {
 
     #[test]
     fn apt_plugin_capabilities() {
-        let plugin =
-            AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
@@ -668,16 +655,14 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_empty_identifier_fails() {
-        let plugin =
-            AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
         let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn fetch_releases_empty_identifier_fails() {
-        let plugin =
-            AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
         let result = plugin.fetch_releases("").await;
         assert!(result.is_err());
     }
@@ -686,16 +671,22 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_which_exits_zero() {
-        let plugin = AptPlugin::new(AptConfig::default(), FixedExitCodeExecutor::with_exit_code(0))
-            .expect("create");
+        let plugin = AptPlugin::new(
+            AptConfig::default(),
+            FixedExitCodeExecutor::with_exit_code(0),
+        )
+        .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
     }
 
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
-        let plugin = AptPlugin::new(AptConfig::default(), FixedExitCodeExecutor::with_exit_code(1))
-            .expect("create");
+        let plugin = AptPlugin::new(
+            AptConfig::default(),
+            FixedExitCodeExecutor::with_exit_code(1),
+        )
+        .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
             HostCompatibility::Incompatible(msg) => {
@@ -710,8 +701,11 @@ mod tests {
     #[tokio::test]
     async fn post_update_hook_emits_reboot_message_when_file_exists() {
         // exit_code 0 means `test -f /var/run/reboot-required` succeeded (file exists)
-        let plugin = AptPlugin::new(AptConfig::default(), FixedExitCodeExecutor::with_exit_code(0))
-            .expect("create");
+        let plugin = AptPlugin::new(
+            AptConfig::default(),
+            FixedExitCodeExecutor::with_exit_code(0),
+        )
+        .expect("create");
         let ctx = UpdateHookContext {
             package_identifier: "nginx".to_string(),
             to_version: "1.24.0".to_string(),
@@ -733,8 +727,11 @@ mod tests {
     #[tokio::test]
     async fn post_update_hook_silent_when_file_missing() {
         // exit_code 1 means `test -f /var/run/reboot-required` failed (file absent)
-        let plugin = AptPlugin::new(AptConfig::default(), FixedExitCodeExecutor::with_exit_code(1))
-            .expect("create");
+        let plugin = AptPlugin::new(
+            AptConfig::default(),
+            FixedExitCodeExecutor::with_exit_code(1),
+        )
+        .expect("create");
         let ctx = UpdateHookContext {
             package_identifier: "nginx".to_string(),
             to_version: "1.24.0".to_string(),
@@ -748,15 +745,21 @@ mod tests {
         while rx.recv().await.is_some() {
             found_any = true;
         }
-        assert!(!found_any, "expected no output when reboot-required file is absent");
+        assert!(
+            !found_any,
+            "expected no output when reboot-required file is absent"
+        );
     }
 
     #[tokio::test]
     async fn post_update_hook_always_returns_ok() {
         // Even when the executor returns a non-zero exit code (file missing),
         // post_update_hook should return Ok(()) — it is non-fatal.
-        let plugin = AptPlugin::new(AptConfig::default(), FixedExitCodeExecutor::with_exit_code(1))
-            .expect("create");
+        let plugin = AptPlugin::new(
+            AptConfig::default(),
+            FixedExitCodeExecutor::with_exit_code(1),
+        )
+        .expect("create");
         let ctx = UpdateHookContext {
             package_identifier: "pkg".to_string(),
             to_version: "1.0".to_string(),

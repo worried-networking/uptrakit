@@ -139,14 +139,15 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<ServiceRes
         params.insecure,
         params.request_timeout,
     )?;
-    let query = ListServicesQuery {
-        capability: params.capability.map(|s| s.to_string()),
-        status: params.status.map(|s| s.parse()).transpose().map_err(
-            |e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())),
-        )?,
-        page: params.page,
-        per_page: params.per_page,
-    };
+    let query =
+        ListServicesQuery {
+            capability: params.capability.map(|s| s.to_string()),
+            status: params.status.map(|s| s.parse()).transpose().map_err(
+                |e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())),
+            )?,
+            page: params.page,
+            per_page: params.per_page,
+        };
     client.list_services(&query).await.context_to()
 }
 

@@ -68,11 +68,7 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     // 4. Update DB with detected values (always refresh on this command).
     update_host_sudo_state(db, &host.id, Some(sudo_available), Some(is_root), None).await?;
 
-    tracing::info!(
-        is_root,
-        sudo_available,
-        "sudo state detected and persisted"
-    );
+    tracing::info!(is_root, sudo_available, "sudo state detected and persisted");
 
     // 5. Permission check.
     if !is_root && !sudo_available {

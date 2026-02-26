@@ -92,8 +92,7 @@ impl BollardDockerClient {
         const TIMEOUT: u64 = 120;
 
         match docker_host {
-            None => bollard::Docker::connect_with_defaults()
-                .context_to::<DockerError>(),
+            None => bollard::Docker::connect_with_defaults().context_to::<DockerError>(),
 
             Some(h) if h.starts_with("unix://") => {
                 let path = &h["unix://".len()..];
@@ -110,8 +109,7 @@ impl BollardDockerClient {
                     // SAFETY: This is called once during plugin construction,
                     // before any threads that read DOCKER_HOST are spawned.
                     unsafe { std::env::set_var("DOCKER_HOST", h) };
-                    bollard::Docker::connect_with_defaults()
-                        .context_to::<DockerError>()
+                    bollard::Docker::connect_with_defaults().context_to::<DockerError>()
                 }
                 #[cfg(not(feature = "ssh"))]
                 {
@@ -123,10 +121,8 @@ impl BollardDockerClient {
                 }
             }
 
-            Some(h) => {
-                bollard::Docker::connect_with_http(h, TIMEOUT, API_DEFAULT_VERSION)
-                    .context_to::<DockerError>()
-            }
+            Some(h) => bollard::Docker::connect_with_http(h, TIMEOUT, API_DEFAULT_VERSION)
+                .context_to::<DockerError>(),
         }
     }
 }
@@ -229,10 +225,7 @@ impl DockerClient for BollardDockerClient {
 /// Map a [`DockerAuth`] config value to bollard credentials.
 fn map_auth_to_credentials(image: &str, auth: &DockerAuth) -> bollard::auth::DockerCredentials {
     use crate::image_ref::ImageRef;
-    let server_address = image
-        .parse::<ImageRef>()
-        .map(|r| r.server_address())
-        .ok();
+    let server_address = image.parse::<ImageRef>().map(|r| r.server_address()).ok();
 
     match auth {
         DockerAuth::Basic { username, password } => bollard::auth::DockerCredentials {

@@ -207,9 +207,7 @@ impl ServiceIdentityState {
     /// bearer token in the enrollment HTTP request and must be a plain string
     /// at that boundary. Do not log or format the returned value.
     pub fn enrollment_secret(&self) -> Option<&str> {
-        self.enrollment_secret
-            .as_ref()
-            .map(|s| s.expose_secret())
+        self.enrollment_secret.as_ref().map(|s| s.expose_secret())
     }
 
     /// Certificate expiry read from the PEM-encoded certificate.

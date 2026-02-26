@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
+use uptrakit_plugin_infrastructure_core::command::{
+    CommandExecutor, CommandSpec, send_output, shell_escape,
+};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     OutputStreamType, Plugin, PluginCapability, PluginError, PluginType, ReleaseInfo,
@@ -54,8 +56,7 @@ impl Plugin for ShellPlugin {
             return Ok(None);
         };
 
-        let cmd = cmd_template
-            .replace("{package_identifier}", &shell_escape(package_identifier));
+        let cmd = cmd_template.replace("{package_identifier}", &shell_escape(package_identifier));
 
         let output = self
             .executor
@@ -90,9 +91,7 @@ impl Plugin for ShellPlugin {
             ));
         };
 
-        let tag = release_info
-            .map(|r| r.tag.as_str())
-            .unwrap_or(to_version);
+        let tag = release_info.map(|r| r.tag.as_str()).unwrap_or(to_version);
 
         let cmd = cmd_template
             .replace("{version}", &shell_escape(to_version))
@@ -196,9 +195,7 @@ mod tests {
     async fn execute_update_returns_error_when_no_command() {
         let plugin = make_plugin(Some("echo hi"), None);
         let (tx, _rx) = mpsc::channel(100);
-        let result = plugin
-            .execute_update("pkg", "1.0.0", None, &tx)
-            .await;
+        let result = plugin.execute_update("pkg", "1.0.0", None, &tx).await;
         assert!(result.is_err());
     }
 

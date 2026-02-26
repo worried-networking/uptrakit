@@ -12,10 +12,10 @@ use futures_util::{SinkExt, StreamExt};
 use http::Uri;
 use rootcause::prelude::*;
 use rustls::pki_types::ServerName;
+use std::collections::BTreeSet;
 use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use std::collections::BTreeSet;
 
 use uptrakit_internal_wire::{
     Capability, CertificatePayload, ControllerEnvelope, ControllerMessage, EnrollPayload,

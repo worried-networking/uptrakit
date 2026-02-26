@@ -58,8 +58,7 @@ impl UptrakitClient {
 
     /// Delete a plugin configuration.
     pub async fn delete_plugin_config(&self, id: &Uuid) -> Result<()> {
-        self.delete(&crate::paths::plugin_configs::by_id(id))
-            .await
+        self.delete(&crate::paths::plugin_configs::by_id(id)).await
     }
 }
 

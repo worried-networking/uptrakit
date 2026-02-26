@@ -410,7 +410,11 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
     // may run before the first enrollment, so errors are silently ignored.
     let service_id = {
         let mut identity = ServiceIdentityState::new_single_dir(p.state_dir);
-        identity.load().await.ok().and_then(|()| identity.service_id())
+        identity
+            .load()
+            .await
+            .ok()
+            .and_then(|()| identity.service_id())
     };
 
     let params = BootstrapParams {

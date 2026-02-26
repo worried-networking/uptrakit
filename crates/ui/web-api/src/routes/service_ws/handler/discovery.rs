@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-use uptrakit_internal_wire::{ControllerMessage, DiscoverSoftwarePayload, DiscoveryPluginAssignment};
+use uptrakit_internal_wire::{
+    ControllerMessage, DiscoverSoftwarePayload, DiscoveryPluginAssignment,
+};
 use uptrakit_shared_db::entity::plugin_config;
 
 use crate::AppState;

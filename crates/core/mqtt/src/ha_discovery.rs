@@ -324,66 +324,146 @@ mod tests {
 
     #[test]
     fn build_discovery_config_platform_mqtt() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "myhost");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "myhost",
+        );
         assert_eq!(v["platform"], "mqtt");
     }
 
     #[test]
     fn build_discovery_config_unique_id_matches() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "myhost");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "myhost",
+        );
         let expected_uid = unique_id(tenant(), item(), host());
         assert_eq!(v["unique_id"], expected_uid.as_str());
     }
 
     #[test]
     fn build_discovery_config_name_format() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "MyApp", "server1");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "MyApp",
+            "server1",
+        );
         assert_eq!(v["name"], "MyApp on server1");
     }
 
     #[test]
     fn build_discovery_config_state_topic_correct() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "h");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+        );
         let expected = state_topic("uptrakit", item(), host());
         assert_eq!(v["state_topic"], expected.as_str());
     }
 
     #[test]
     fn build_discovery_config_latest_version_topic_correct() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "h");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+        );
         let expected = latest_version_topic("uptrakit", item(), host());
         assert_eq!(v["latest_version_topic"], expected.as_str());
     }
 
     #[test]
     fn build_discovery_config_command_topic_correct() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "h");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+        );
         let expected = command_topic("uptrakit", item(), host());
         assert_eq!(v["command_topic"], expected.as_str());
     }
 
     #[test]
     fn build_discovery_config_payload_install() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "h");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+        );
         assert_eq!(v["payload_install"], "install");
     }
 
     #[test]
     fn build_discovery_config_availability_topic() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "h");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+        );
         assert_eq!(v["availability_topic"], "uptrakit/status");
     }
 
     #[test]
     fn build_discovery_config_availability_payloads() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "h");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+        );
         assert_eq!(v["payload_available"], "online");
         assert_eq!(v["payload_not_available"], "offline");
     }
 
     #[test]
     fn build_discovery_config_device_identifiers() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "h");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+        );
         let tenant_simple = tenant().simple().to_string();
         let expected_id = format!("uptrakit_{tenant_simple}");
         assert_eq!(v["device"]["identifiers"][0], expected_id.as_str());
@@ -391,14 +471,30 @@ mod tests {
 
     #[test]
     fn build_discovery_config_device_name_and_manufacturer() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "h");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+        );
         assert_eq!(v["device"]["name"], "Uptrakit");
         assert_eq!(v["device"]["manufacturer"], "Uptrakit");
     }
 
     #[test]
     fn build_discovery_config_serializes_to_valid_json() {
-        let v = build_discovery_config("homeassistant", "uptrakit", tenant(), item(), host(), "App", "h");
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+        );
         let s = v.to_string();
         let reparsed: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(reparsed["platform"], "mqtt");
@@ -435,11 +531,7 @@ mod tests {
 
     #[test]
     fn parse_command_topic_too_many_segments() {
-        let topic = format!(
-            "uptrakit/update/{}/{}/extra/set",
-            item(),
-            host()
-        );
+        let topic = format!("uptrakit/update/{}/{}/extra/set", item(), host());
         assert!(parse_command_topic("uptrakit", &topic).is_none());
     }
 
