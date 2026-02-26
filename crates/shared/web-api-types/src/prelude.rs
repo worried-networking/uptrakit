@@ -14,7 +14,7 @@ pub use crate::device_auth::DeviceAuthPollResponse;
 pub use uptrakit_shared_types::DeviceAuthStatus;
 
 // ── Services ─────────────────────────────────────────────────────────
-pub use crate::services::{ServiceResponse, ServiceStatus, ServiceType};
+pub use crate::services::{ServiceResponse, ServiceStatus};
 
 // ── Hosts ────────────────────────────────────────────────────────────
 pub use crate::hosts::{HostAgentSummary, HostResponse};

@@ -306,7 +306,7 @@ mod tests {
         let service_a = service::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
             tenant_id: Set(tenant_a),
-            service_type: Set(service::ServiceType::Agent),
+            capabilities: Set("[]".to_string()),
             hostname: Set("host-a".to_string()),
             friendly_name: Set("Agent A".to_string()),
             ip_address: Set(None),
@@ -324,7 +324,7 @@ mod tests {
         let service_b = service::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
             tenant_id: Set(tenant_b),
-            service_type: Set(service::ServiceType::Agent),
+            capabilities: Set("[]".to_string()),
             hostname: Set("host-b".to_string()),
             friendly_name: Set("Agent B".to_string()),
             ip_address: Set(None),

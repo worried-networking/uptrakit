@@ -3,16 +3,15 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 // Canonical types from shared-types with feature-gated OpenAPI derives.
-pub use uptrakit_shared_types::{
-    ParseServiceStatusError, ParseServiceTypeError, ServiceStatus, ServiceType,
-};
+pub use uptrakit_shared_types::{ParseServiceStatusError, ServiceStatus};
 
 /// Unified response for any service (agent or MQTT).
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ServiceResponse {
     pub id: Uuid,
-    pub service_type: ServiceType,
+    pub capabilities: Vec<String>,
+    pub service_label: String,
     pub hostname: String,
     pub friendly_name: String,
     pub ip_address: Option<String>,
@@ -36,8 +35,8 @@ pub struct ServiceResponse {
         schema(value_type = String, format = DateTime)
     )]
     pub updated_at: OffsetDateTime,
-    /// Custom ping interval override in seconds. `None` means the service-type
-    /// default is used (300s for agents, 15s for MQTT).
+    /// Custom ping interval override in seconds. `None` means the
+    /// service-profile default is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ping_interval_seconds: Option<u32>,
 }
@@ -46,8 +45,8 @@ pub struct ServiceResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct ListServicesQuery {
-    /// Filter by service type: `agent`, `mqtt`, or `ssh_agent`.
-    pub r#type: Option<ServiceType>,
+    /// Filter by capability.
+    pub capability: Option<String>,
     /// Filter by status: `pending`, `approved`, `rejected`, `deactivated`.
     pub status: Option<ServiceStatus>,
     /// Page number (1-indexed). Defaults to 1.
@@ -98,7 +97,12 @@ mod tests {
     fn service_response_round_trip_all_fields() {
         let resp = ServiceResponse {
             id: sample_uuid(),
-            service_type: ServiceType::Agent,
+            capabilities: vec![
+                "software_discovery".into(),
+                "update_hooks".into(),
+                "graceful_shutdown".into(),
+            ],
+            service_label: "Agent".into(),
             hostname: "host-1.local".to_string(),
             friendly_name: "My Agent".to_string(),
             ip_address: Some("10.0.0.1".to_string()),
@@ -113,7 +117,11 @@ mod tests {
         let deserialized: ServiceResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.id, sample_uuid());
-        assert_eq!(deserialized.service_type, ServiceType::Agent);
+        assert_eq!(
+            deserialized.capabilities,
+            vec!["software_discovery", "update_hooks", "graceful_shutdown"]
+        );
+        assert_eq!(deserialized.service_label, "Agent");
         assert_eq!(deserialized.hostname, "host-1.local");
         assert_eq!(deserialized.friendly_name, "My Agent");
         assert_eq!(deserialized.ip_address.as_deref(), Some("10.0.0.1"));
@@ -127,7 +135,8 @@ mod tests {
     fn service_response_round_trip_none_fields() {
         let resp = ServiceResponse {
             id: sample_uuid(),
-            service_type: ServiceType::Mqtt,
+            capabilities: vec!["mqtt_bridge".into(), "graceful_shutdown".into()],
+            service_label: "MQTT Bridge".into(),
             hostname: "mqtt-broker".to_string(),
             friendly_name: "MQTT Service".to_string(),
             ip_address: None,
@@ -152,7 +161,13 @@ mod tests {
     fn service_response_ssh_agent_type() {
         let resp = ServiceResponse {
             id: sample_uuid(),
-            service_type: ServiceType::SshAgent,
+            capabilities: vec![
+                "ssh_remote".into(),
+                "software_discovery".into(),
+                "update_hooks".into(),
+                "graceful_shutdown".into(),
+            ],
+            service_label: "SSH Agent".into(),
             hostname: "ssh-host".to_string(),
             friendly_name: "SSH Agent".to_string(),
             ip_address: None,
@@ -165,9 +180,10 @@ mod tests {
         };
         let json_value =
             serde_json::to_value(&resp).expect("serialization to Value should succeed");
+        assert!(json_value.get("capabilities").is_some());
         assert_eq!(
-            json_value.get("service_type").and_then(|v| v.as_str()),
-            Some("ssh_agent")
+            json_value.get("service_label").and_then(|v| v.as_str()),
+            Some("SSH Agent")
         );
         assert_eq!(
             json_value.get("status").and_then(|v| v.as_str()),
@@ -180,7 +196,7 @@ mod tests {
     #[test]
     fn list_services_query_round_trip_all_fields() {
         let query = ListServicesQuery {
-            r#type: Some(ServiceType::Agent),
+            capability: Some("software_discovery".into()),
             status: Some(ServiceStatus::Approved),
             page: Some(2),
             per_page: Some(50),
@@ -188,7 +204,10 @@ mod tests {
         let json = serde_json::to_string(&query).expect("serialization should succeed");
         let deserialized: ListServicesQuery =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert_eq!(deserialized.r#type, Some(ServiceType::Agent));
+        assert_eq!(
+            deserialized.capability.as_deref(),
+            Some("software_discovery")
+        );
         assert_eq!(deserialized.status, Some(ServiceStatus::Approved));
         assert_eq!(deserialized.page, Some(2));
         assert_eq!(deserialized.per_page, Some(50));
@@ -197,7 +216,7 @@ mod tests {
     #[test]
     fn list_services_query_round_trip_none_fields() {
         let query = ListServicesQuery {
-            r#type: None,
+            capability: None,
             status: None,
             page: None,
             per_page: None,
@@ -205,7 +224,7 @@ mod tests {
         let json = serde_json::to_string(&query).expect("serialization should succeed");
         let deserialized: ListServicesQuery =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert!(deserialized.r#type.is_none());
+        assert!(deserialized.capability.is_none());
         assert!(deserialized.status.is_none());
         assert!(deserialized.page.is_none());
         assert!(deserialized.per_page.is_none());
@@ -216,7 +235,7 @@ mod tests {
     #[test]
     fn pagination_returns_page_and_per_page() {
         let query = ListServicesQuery {
-            r#type: None,
+            capability: None,
             status: None,
             page: Some(3),
             per_page: Some(25),
@@ -229,7 +248,7 @@ mod tests {
     #[test]
     fn pagination_returns_none_when_not_set() {
         let query = ListServicesQuery {
-            r#type: None,
+            capability: None,
             status: None,
             page: None,
             per_page: None,
@@ -242,7 +261,7 @@ mod tests {
     #[test]
     fn pagination_resolve_applies_defaults() {
         let query = ListServicesQuery {
-            r#type: None,
+            capability: None,
             status: None,
             page: None,
             per_page: None,

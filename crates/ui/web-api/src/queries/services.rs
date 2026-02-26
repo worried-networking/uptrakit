@@ -4,6 +4,7 @@ use sea_orm::{
     sea_query::{Expr, OnConflict},
 };
 use time::OffsetDateTime;
+use uptrakit_internal_wire::Capability;
 use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
 use uptrakit_shared_db::entity::{service, service_certificate, service_host};
 use uptrakit_web_api_types::pagination::PaginatedResponse;
@@ -11,6 +12,7 @@ use uptrakit_web_api_types::services::{ListServicesQuery, ServiceResponse};
 use uuid::Uuid;
 
 use crate::auth::token;
+use crate::service_profile::{ServiceProfile, parse_capabilities};
 use crate::tenant_db::TenantDb;
 
 /// Errors returned by service mutation queries.
@@ -22,8 +24,8 @@ pub enum ServiceQueryError {
     NotPending,
     /// The service must be in `Approved` status for this operation.
     NotApproved,
-    /// Only `Agent` service types support this operation.
-    NotAgentType,
+    /// The service does not support merge (requires SoftwareDiscovery capability).
+    NotMergeable,
     /// The target service is still connected (checked before calling the query).
     TargetConnected,
     /// The source service ID was not found.
@@ -35,9 +37,14 @@ pub enum ServiceQueryError {
 // --- Private helpers ---
 
 fn model_to_response(m: service::Model) -> ServiceResponse {
+    let caps = parse_capabilities(&m.capabilities);
+    let profile = ServiceProfile::from_capabilities(&caps);
+    let has_ssh = caps.contains(&Capability::SshRemote);
+    let cap_strings: Vec<String> = caps.iter().map(|c| c.as_str().to_string()).collect();
     ServiceResponse {
         id: m.id,
-        service_type: m.service_type,
+        capabilities: cap_strings,
+        service_label: profile.service_label(has_ssh).to_string(),
         hostname: m.hostname,
         friendly_name: m.friendly_name,
         ip_address: m.ip_address,
@@ -62,8 +69,9 @@ pub async fn list_services(
         .find::<service::Entity>()
         .filter(service::Column::DeactivatedAt.is_null());
 
-    if let Some(ref type_filter) = query.r#type {
-        q = q.filter(service::Column::ServiceType.eq(*type_filter));
+    if let Some(ref cap_filter) = query.capability {
+        // JSON text column: use LIKE to match capability string within the JSON array
+        q = q.filter(service::Column::Capabilities.contains(cap_filter));
     }
     if let Some(ref status_filter) = query.status {
         q = q.filter(service::Column::Status.eq(*status_filter));
@@ -254,7 +262,7 @@ pub async fn merge_service(
         .await
         .map_err(ServiceQueryError::Db)?;
 
-    // Find target service (must be approved, not deactivated, agent type).
+    // Find target service (must be approved, not deactivated, mergeable).
     let target = tenant_db
         .find_by_id::<service::Entity, _>(target_uuid)
         .lock_exclusive()
@@ -264,14 +272,15 @@ pub async fn merge_service(
         .map_err(ServiceQueryError::Db)?
         .ok_or(ServiceQueryError::NotFound)?;
 
-    if target.service_type != service::ServiceType::Agent {
-        return Err(ServiceQueryError::NotAgentType);
+    let target_caps = parse_capabilities(&target.capabilities);
+    if !target_caps.contains(&Capability::SoftwareDiscovery) {
+        return Err(ServiceQueryError::NotMergeable);
     }
     if target.status != service::ServiceStatus::Approved {
         return Err(ServiceQueryError::NotApproved);
     }
 
-    // Find source service (must be pending, not deactivated, agent type).
+    // Find source service (must be pending, not deactivated, mergeable).
     let source = tenant_db
         .find_by_id::<service::Entity, _>(source_uuid)
         .lock_exclusive()
@@ -281,8 +290,9 @@ pub async fn merge_service(
         .map_err(ServiceQueryError::Db)?
         .ok_or(ServiceQueryError::SourceNotFound)?;
 
-    if source.service_type != service::ServiceType::Agent {
-        return Err(ServiceQueryError::NotAgentType);
+    let source_caps = parse_capabilities(&source.capabilities);
+    if !source_caps.contains(&Capability::SoftwareDiscovery) {
+        return Err(ServiceQueryError::NotMergeable);
     }
     if source.status != service::ServiceStatus::Pending {
         return Err(ServiceQueryError::NotPending);
