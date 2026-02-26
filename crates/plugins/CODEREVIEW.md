@@ -1,12 +1,12 @@
 # CODEREVIEW — Plugins (all 6 crates)
 
 Crates reviewed:
-- `uptrakit-plugin-core` (`crates/plugins/core/`)
-- `uptrakit-plugin-registry` (`crates/plugins/registry/`)
-- `uptrakit-plugin-github` (`crates/plugins/github/`)
-- `uptrakit-plugin-docker` (`crates/plugins/docker/`) — renamed from `uptrakit-plugin-docker-registry` (`crates/plugins/docker-registry/`)
-- `uptrakit-plugin-homebrew` (`crates/plugins/homebrew/`)
-- `uptrakit-plugin-proxmox-helper-scripts` (`crates/plugins/proxmox-helper-scripts/`)
+- `uptrakit-plugin-infrastructure-core` (`crates/plugins/infrastructure/core/`)
+- `uptrakit-plugin-infrastructure-registry` (`crates/plugins/infrastructure/registry/`)
+- `uptrakit-plugin-releases-github` (`crates/plugins/releases/github/`)
+- `uptrakit-plugin-releases-docker` (`crates/plugins/releases/docker/`) — renamed from `uptrakit-plugin-releases-docker-registry` (`crates/plugins/docker-registry/`)
+- `uptrakit-plugin-package-manager-homebrew` (`crates/plugins/package-managers/homebrew/`)
+- `uptrakit-plugin-discovery-proxmox-helper-scripts` (`crates/plugins/discovery/proxmox-helper-scripts/`)
 
 Related shared crate reviewed for cross-cutting issues:
 - `uptrakit-shared-types` (`crates/shared/types/src/plugin_types.rs`)
@@ -30,16 +30,16 @@ The remaining issues — a hardcoded `per_page=100` in GitHub pagination and a w
 ### Strengths
 
 **Object-safe `Plugin` trait with opt-in methods.**
-`crates/plugins/core/src/traits.rs:22-98`. The trait has exactly one required method (`plugin_type`). Every other method has a default implementation that returns a typed error. New plugins only override what they support. `capabilities()` returns `&'static [PluginCapability]` — no heap allocation on the hot version-check path. `has_capability` is a trivial slice contains check.
+`crates/plugins/infrastructure/core/src/traits.rs:22-98`. The trait has exactly one required method (`plugin_type`). Every other method has a default implementation that returns a typed error. New plugins only override what they support. `capabilities()` returns `&'static [PluginCapability]` — no heap allocation on the hot version-check path. `has_capability` is a trivial slice contains check.
 
 **`register_plugins!` macro eliminates all dispatch duplication.**
-`crates/plugins/registry/src/registry.rs:43-156`. A single declaration block generates all six dispatch methods (`create_plugin`, `validate_config`, `mask_config_secrets`, `restore_config_secrets`, `create_plugin_for_discovery`, `discovery_plugins`) with consistent error handling (`context_to`, `RegistryError`). Adding a new plugin requires exactly one line in this macro invocation plus a `Cargo.toml` dependency. Discovery capability is automatically derived from each plugin's `capabilities()` method — no manual list needed. The doc-comment on `PluginRegistry` explicitly states this invariant.
+`crates/plugins/infrastructure/registry/src/registry.rs:43-156`. A single declaration block generates all six dispatch methods (`create_plugin`, `validate_config`, `mask_config_secrets`, `restore_config_secrets`, `create_plugin_for_discovery`, `discovery_plugins`) with consistent error handling (`context_to`, `RegistryError`). Adding a new plugin requires exactly one line in this macro invocation plus a `Cargo.toml` dependency. Discovery capability is automatically derived from each plugin's `capabilities()` method — no manual list needed. The doc-comment on `PluginRegistry` explicitly states this invariant.
 
 **`PluginOps` trait decouples the web API from the concrete registry.**
-`crates/plugins/registry/src/lib.rs:57-86`. `AppState` holds `Arc<dyn PluginOps>` rather than a direct reference to `PluginRegistry`. Route handlers and query helpers are testable in isolation by substituting a mock implementation. `PluginRegistry` implements `PluginOps` through delegation, keeping the blanket impl trivial.
+`crates/plugins/infrastructure/registry/src/lib.rs:57-86`. `AppState` holds `Arc<dyn PluginOps>` rather than a direct reference to `PluginRegistry`. Route handlers and query helpers are testable in isolation by substituting a mock implementation. `PluginRegistry` implements `PluginOps` through delegation, keeping the blanket impl trivial.
 
 **`SecretMasking` trait with no-op defaults.**
-`crates/plugins/core/src/secrets.rs:9-17`. Plugins with no secrets implement `SecretMasking` with a single empty `impl` (see `HomebrewConfig`). Plugins with secrets override the two methods. The JSON round-trip pattern in `mask_secrets_for` and `restore_secrets_for` (registry.rs:17-39) means masking logic never diverges from the serialized representation.
+`crates/plugins/infrastructure/core/src/secrets.rs:9-17`. Plugins with no secrets implement `SecretMasking` with a single empty `impl` (see `HomebrewConfig`). Plugins with secrets override the two methods. The JSON round-trip pattern in `mask_secrets_for` and `restore_secrets_for` (registry.rs:17-39) means masking logic never diverges from the serialized representation.
 
 **`CommandExecutor` dependency injection.**
 All four local plugins (`HomebrewPlugin`, `ProxmoxHelperScriptsPlugin`, `GitHubPlugin`, `DockerPlugin`) receive `Arc<dyn CommandExecutor>` at construction time. Integration and unit tests pass a `LocalCommandExecutor`; production code does the same. This makes all plugin logic testable without real subprocesses.
@@ -48,7 +48,7 @@ All four local plugins (`HomebrewPlugin`, `ProxmoxHelperScriptsPlugin`, `GitHubP
 Unknown capabilities from a newer peer are preserved and excluded from capability intersection checks. `#[non_exhaustive]` on `PluginCapability` reinforces this. Capability gating at the event-loop level is correctly restricted to `is_known()` variants only.
 
 **`ProxmoxHelperScriptsConfig` two-context design.**
-`crates/plugins/proxmox-helper-scripts/src/config.rs:61-118`. The `script_url` field defaults to an empty string at deserialization time (`#[serde(default)]`). `validate()` rejects an empty URL for version-check or update contexts. The comment at lines 63-66 clearly documents that `validate()` must not be called during discovery. This is an explicit and documented design choice, not a hidden special case.
+`crates/plugins/discovery/proxmox-helper-scripts/src/config.rs:61-118`. The `script_url` field defaults to an empty string at deserialization time (`#[serde(default)]`). `validate()` rejects an empty URL for version-check or update contexts. The comment at lines 63-66 clearly documents that `validate()` must not be called during discovery. This is an explicit and documented design choice, not a hidden special case.
 
 ---
 
@@ -66,7 +66,7 @@ Zero `unsafe` blocks across all six plugin crates. The async executor is driven 
 `github/src/plugin.rs:53-57`. `HeaderValue::from_str(&value).map_err(...)` correctly propagates an error if the token contains non-ASCII characters, preventing a panic from `from_static`.
 
 **Path traversal validation in `ProxmoxHelperScriptsConfig`.**
-`crates/plugins/proxmox-helper-scripts/src/config.rs:47-55`. The `GitHubReleaseSource` validation explicitly rejects `owner` and `repo` values containing `/` or `..`, defending against URL path traversal when constructing API URLs.
+`crates/plugins/discovery/proxmox-helper-scripts/src/config.rs:47-55`. The `GitHubReleaseSource` validation explicitly rejects `owner` and `repo` values containing `/` or `..`, defending against URL path traversal when constructing API URLs.
 
 **`DockerAuth` uses `#[serde(tag = "type")]` tagged union.**
 The discriminant is a fixed set of known variants. No free-form string dispatch. Unknown auth types fail at deserialization, not silently fall through to wrong behaviour.
@@ -76,7 +76,7 @@ Plugins that have no secrets implement an empty `impl SecretMasking for Homebrew
 
 ### Issues
 
-**[SEVERITY: Low]** `crates/plugins/github/src/plugin.rs:52` — Bearer token is materialized as a plain `String` in memory
+**[SEVERITY: Low]** `crates/plugins/releases/github/src/plugin.rs:52` — Bearer token is materialized as a plain `String` in memory
 
 The format string `format!("Bearer {}", token.expose_secret())` creates a heap-allocated `String` containing the full credential. This string lives until the `reqwest::Client` is dropped. For long-lived plugin instances this extends the lifetime of the plaintext credential in memory beyond what `SecretString` is designed to allow. A `SecretString` wrapper around the formatted header value, or constructing the header directly from the token bytes without an intermediate allocation, would reduce the exposure window.
 
@@ -106,7 +106,7 @@ Asset filter patterns are compiled once at construction time (`github/src/plugin
 
 ### Issues
 
-**[SEVERITY: Low]** `crates/plugins/github/src/plugin.rs:97` — GitHub releases API hardcoded at `per_page=100`, no pagination
+**[SEVERITY: Low]** `crates/plugins/releases/github/src/plugin.rs:97` — GitHub releases API hardcoded at `per_page=100`, no pagination
 
 ```rust
 format!("{}/repos/{}/{}/releases?per_page=100", ...)
@@ -148,15 +148,15 @@ Tests at lines 100-279 cover: all five default method returns, `has_capability` 
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/plugins/github/src/plugin.rs` — No test for `fetch_releases` HTTP interaction
+**[SEVERITY: Medium]** `crates/plugins/releases/github/src/plugin.rs` — No test for `fetch_releases` HTTP interaction
 
 `GitHubPlugin::fetch_releases` is the primary controller-side operation for the GitHub plugin. It is the only significant async operation in the crates with no test coverage. There is no mock HTTP server (e.g., `httpmock`) test exercising: a normal 200 response with releases, a 403 rate-limited response, a 404 not-found response, or an invalid JSON body. The existing `url_construction` test covers URL generation only. The rest of the codebase uses `MockApiServer` via `httpmock` for exactly this pattern (see CLI integration tests); it should be used here.
 
-**[SEVERITY: Low]** `crates/plugins/homebrew/src/plugin.rs:708-722` — `detect_installed_version` and `fetch_releases` tested only for the empty-identifier guard
+**[SEVERITY: Low]** `crates/plugins/package-managers/homebrew/src/plugin.rs:708-722` — `detect_installed_version` and `fetch_releases` tested only for the empty-identifier guard
 
 The tests `homebrew_plugin_detect_installed_version_empty_identifier_fails` and `homebrew_plugin_fetch_releases_empty_identifier_fails` only verify the early-return guard. There are no tests for the JSON parsing code path inside `detect_installed_version` or `fetch_releases` using the sample JSON fixtures that are already defined in the test module. The existing `parse_installed_version` and `parse_latest_version` unit tests verify the parsing helpers directly, but the full async method path (including the `is_cask()` branch and the `Version::new` wrapping) is not exercised through mocked executor output.
 
-**[SEVERITY: Low]** `crates/plugins/registry/src/registry.rs:243` — Tests use `LocalCommandExecutor` directly, not a mock executor
+**[SEVERITY: Low]** `crates/plugins/infrastructure/registry/src/registry.rs:243` — Tests use `LocalCommandExecutor` directly, not a mock executor
 
 All registry tests construct plugins with `LocalCommandExecutor`. This is acceptable for construction and config tests since plugins are not invoked. However, any future test of `create_plugin_for_discovery` discovery behaviour would need a mock executor. Introducing a `MockCommandExecutor` (already present elsewhere in the codebase for scheduler tests) would enable more thorough registry-level tests.
 
@@ -185,7 +185,7 @@ If `create_plugin` succeeds, the returned `Box<dyn Plugin>` is guaranteed to be 
 
 ### Issues
 
-**[SEVERITY: Low]** `crates/plugins/github/src/plugin.rs` — No retry on transient HTTP failure
+**[SEVERITY: Low]** `crates/plugins/releases/github/src/plugin.rs` — No retry on transient HTTP failure
 
 `fetch_releases` wraps `self.client.get(&url).send().await` with a direct `.map_err` that immediately propagates any network error. A DNS resolution failure, a TCP RST, or a 5xx response during a transient GitHub outage will abort the version check entirely. The calling agent will mark the check as failed and wait for the next scheduled interval. The `uptrakit-service-sdk` backoff utilities exist in the workspace; a simple exponential retry (max 3 attempts) on `reqwest::Error::is_connect()` or `is_timeout()` would reduce noise from transient failures.
 
@@ -213,18 +213,18 @@ All public enums and structs in plugin configs use `snake_case` serialization, m
 Optional fields such as `DockerConfig.auth`, `DockerConfig.tracked_tag`, `ProxmoxHelperScriptsConfig.github`, and `GitHubReleaseSource.auth_token` all use `skip_serializing_if`. API responses do not include null fields for unset options.
 
 **Plugin crate `lib.rs` files use selective re-exports.**
-Each plugin crate re-exports only its public surface (`Config`, `Plugin`, `Error`). Internal helpers are not re-exported. `uptrakit-plugin-registry/src/lib.rs` explicitly documents its re-export strategy and the purpose of each public type.
+Each plugin crate re-exports only its public surface (`Config`, `Plugin`, `Error`). Internal helpers are not re-exported. `uptrakit-plugin-infrastructure-registry/src/lib.rs` explicitly documents its re-export strategy and the purpose of each public type.
 
 **Zero `#[allow(clippy::...)]` in any plugin crate.**
 No suppressed Clippy lints across all six crates.
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/plugins/registry/src/registry.rs` — No `#[must_use]` on `mask_config_secrets` and `mask_config_secrets_str`
+**[SEVERITY: Medium]** `crates/plugins/infrastructure/registry/src/registry.rs` — No `#[must_use]` on `mask_config_secrets` and `mask_config_secrets_str`
 
 Both methods return a `serde_json::Value` representing the masked configuration. If a caller forgets to use the return value (for example, calling `mask_config_secrets(...)` without assigning the result), the masking has no effect and the original config is used. Adding `#[must_use]` to both methods would produce a compiler warning for callers that discard the result. `restore_config_secrets` correctly mutates in place and does not need `#[must_use]`.
 
-**[SEVERITY: Low]** `crates/plugins/proxmox-helper-scripts/src/config.rs:67` — `script_url` empty-string default is a semantic workaround, not a type-safe design
+**[SEVERITY: Low]** `crates/plugins/discovery/proxmox-helper-scripts/src/config.rs:67` — `script_url` empty-string default is a semantic workaround, not a type-safe design
 
 The `#[serde(default)]` on `script_url` exists to allow `{}` to deserialize successfully for the discovery context. The doc-comment explains this is intentional. However, the `String` type with an empty-string sentinel conflates "not provided" with "explicitly set to empty". Using `Option<String>` for `script_url` with `#[serde(default)]` would make the distinction type-safe: `None` means "not provided" (valid for discovery), `Some("")` would remain an error from `validate()`. This would also eliminate the need for the special-case comment warning developers not to call `validate()` during discovery, since the caller could pass `script_url: None` explicitly.
 
@@ -248,7 +248,7 @@ Both wire enums use the same `Unknown`/`Other` string-preserving variant. New pl
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/plugins/registry/src/registry.rs:151-156` — No feature-flag gating for platform-specific plugins
+**[SEVERITY: Medium]** `crates/plugins/infrastructure/registry/src/registry.rs:151-156` — No feature-flag gating for platform-specific plugins
 
 `HomebrewPlugin` is macOS-specific. `ProxmoxHelperScriptsPlugin` is Proxmox VE-specific. Both are compiled unconditionally into all agent binaries, including Linux agents where `brew` is absent. A Linux agent will accept a valid `HomebrewPlugin` configuration (since `validate()` does not check for `brew` presence), construct the plugin successfully, and fail only when `detect_installed_version` or `discover_software` is called.
 
@@ -262,7 +262,7 @@ MQTT-specific message variants are deserializable on agent WebSocket connections
 
 The `service_type` field has been removed from `EnrollPayload`. Service identity is now determined by the `BTreeSet<Capability>` advertised during enrollment. Enrollment uses a single `register()` call and a single enrollment token, replacing the former per-service-type tokens and `register_agent`/`register_mqtt`/`register_ssh_agent` functions.
 
-**[SEVERITY: Low]** `crates/plugins/proxmox-helper-scripts/src/config.rs:67-74` — No shared abstraction for "config valid for discovery but not update"
+**[SEVERITY: Low]** `crates/plugins/discovery/proxmox-helper-scripts/src/config.rs:67-74` — No shared abstraction for "config valid for discovery but not update"
 
 `ProxmoxHelperScriptsConfig` uses an empty-string default for `script_url` to enable discovery with a minimal config. There is no shared trait or type that expresses "this config is valid for discovery but not for update execution". A future plugin with a similar split between discovery-config and full-config validity will face the same design challenge and may solve it differently, leading to an inconsistent pattern across plugins.
 

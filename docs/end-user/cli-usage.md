@@ -199,13 +199,13 @@ uptrakit plugin-configs list --page 1 --per-page 20
 uptrakit plugin-configs show <PLUGIN_CONFIG_ID>
 
 # Create a new plugin config
-uptrakit plugin-configs create --name "My App Releases" --type github_releases \
+uptrakit plugin-configs create --name "My App Releases" --type releases_github \
   --config '{"owner":"example","repo":"my-app"}'
 
-uptrakit plugin-configs create --name "My Docker Image" --type docker \
+uptrakit plugin-configs create --name "My Docker Image" --type releases_docker \
   --config '{"tracking_mode":"semver_tags"}'
 
-uptrakit plugin-configs create --name "My Formula" --type homebrew \
+uptrakit plugin-configs create --name "My Formula" --type package_manager_homebrew \
   --config '{"package_type":"formula","formula":"my-formula"}'
 
 # Update a plugin config

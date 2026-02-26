@@ -1,6 +1,6 @@
 # APT Plugin
 
-The `apt` plugin tracks and updates packages managed by **APT** (Advanced Package Tool) on
+The `package_manager_apt` plugin tracks and updates packages managed by **APT** (Advanced Package Tool) on
 Debian and Ubuntu systems. It integrates with the local `dpkg`, `apt-get`, and `apt-cache`
 toolchain to detect installed versions, resolve the latest available versions, and perform
 updates.
@@ -106,13 +106,13 @@ sudo visudo -c -f /etc/sudoers.d/uptrakit
 # Create a plugin config with the default (manual) filter
 uptrakit plugin-configs create \
   --name "APT Packages" \
-  --type apt \
+  --type package_manager_apt \
   --config '{}'
 
 # Create a plugin config that discovers all installed packages
 uptrakit plugin-configs create \
   --name "APT All Packages" \
-  --type apt \
+  --type package_manager_apt \
   --config '{"discovery_filter": "all"}'
 ```
 

@@ -15,19 +15,19 @@ Uptrakit ships with six built-in plugin types:
 
 | Plugin type | Description | Autodiscovery |
 | --- | --- | --- |
-| `github_releases` | Fetches releases published on GitHub. Controller-side only — does not detect installed versions or execute updates directly. | No |
-| `shell` | Generic agent-side plugin: detects the installed version via a configurable shell command and/or executes updates via a configurable shell command. | No |
-| `docker` | Tracks image tags or SHA digests in a Docker/OCI registry. Can pull images via the local or remote Docker daemon, and discovers running/stopped containers. | Yes |
-| `homebrew` | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host. | Yes |
-| `proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream `github_releases` + `shell` plugin configs automatically. Does not perform version detection or updates directly. | Yes |
-| `apt` | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh. | Yes |
+| `releases_github` | Fetches releases published on GitHub. Controller-side only — does not detect installed versions or execute updates directly. | No |
+| `generic_shell` | Generic agent-side plugin: detects the installed version via a configurable shell command and/or executes updates via a configurable shell command. | No |
+| `releases_docker` | Tracks image tags or SHA digests in a Docker/OCI registry. Can pull images via the local or remote Docker daemon, and discovers running/stopped containers. | Yes |
+| `package_manager_homebrew` | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host. | Yes |
+| `discovery_proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream `releases_github` + `generic_shell` plugin configs automatically. Does not perform version detection or updates directly. | Yes |
+| `package_manager_apt` | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh. | Yes |
 
-### `github_releases` configuration fields
+### `releases_github` configuration fields
 
 The GitHub Releases plugin is **controller-side only**. It fetches upstream release metadata via
 the GitHub REST API. The `owner` and `repo` are **not** configuration fields — they are expressed
 as the `package_identifier` of the software item (format: `"owner/repo"`). A single
-`github_releases` config can therefore serve any number of tracked GitHub repositories.
+`releases_github` config can therefore serve any number of tracked GitHub repositories.
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -41,7 +41,7 @@ as the `package_identifier` of the software item (format: `"owner/repo"`). A sin
 must be set to `"owner/repo"` (e.g. `"octocat/hello-world"`). This value is validated when
 a software item is saved.
 
-### `shell` configuration fields
+### `generic_shell` configuration fields
 
 The Shell plugin provides generic agent-side operations using user-supplied shell commands.
 Both fields are independently optional, but at least one must be set.
@@ -59,9 +59,9 @@ Both fields are independently optional, but at least one must be set.
 | `{version}` | The target version string (shell-escaped). |
 | `{tag}` | The release tag (e.g. `v1.2.3`). Falls back to `{version}` when no release info is available. |
 
-### `docker` configuration fields
+### `releases_docker` configuration fields
 
-The `docker` plugin requires no mandatory fields — an empty config `{}` is valid. For the full
+The `releases_docker` plugin requires no mandatory fields — an empty config `{}` is valid. For the full
 field reference, see [Docker Plugin](plugins/docker.md).
 
 | Field | Required | Description |
@@ -74,7 +74,7 @@ field reference, see [Docker Plugin](plugins/docker.md).
 | `compose_restart` | No | Run `docker compose up -d` after pulling |
 | `post_pull_command` | No | Custom shell command after pulling |
 
-### `homebrew` configuration fields
+### `package_manager_homebrew` configuration fields
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -82,9 +82,9 @@ field reference, see [Docker Plugin](plugins/docker.md).
 | `formula` | No | Homebrew formula name (required when `package_type` is `formula`) |
 | `cask` | No | Homebrew cask token (required when `package_type` is `cask`) |
 
-### `proxmox_helper_scripts` configuration fields
+### `discovery_proxmox_helper_scripts` configuration fields
 
-The `proxmox_helper_scripts` plugin requires no configuration fields — its config is always an
+The `discovery_proxmox_helper_scripts` plugin requires no configuration fields — its config is always an
 empty object `{}`. Uptrakit auto-creates a config named `"Proxmox Helper Scripts"` when the first
 supporting agent connects.
 
@@ -94,17 +94,17 @@ the plugin emits structured `DiscoveryTarget` values that the controller process
 plugin configs automatically:
 
 - For **GitHub-managed containers** (CT script sources a GitHub release), two configs are created:
-  - A `github_releases` config for `FetchReleases` — keyed on the GitHub settings only
+  - A `releases_github` config for `FetchReleases` — keyed on the GitHub settings only
     (no `owner`/`repo` in the config); the `owner/repo` is expressed as the software item's
     `package_identifier`.
-  - A `shell` config for `DetectVersion` and `ExecuteUpdate` — pre-configured with the
+  - A `generic_shell` config for `DetectVersion` and `ExecuteUpdate` — pre-configured with the
     PHS-standard version-file read command and the unattended update command.
 - For **APT-managed containers**, a shared `APT (auto)` config is created for all three roles.
 
 You may rename or adjust these synthesized configs as needed. Re-running discovery will reuse
 existing configs if they already exist.
 
-### `apt` configuration fields
+### `package_manager_apt` configuration fields
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -191,31 +191,31 @@ uptrakit plugin-configs show <PLUGIN_CONFIG_ID>
 # package_identifier, not here; this config covers all your GitHub-tracked repos)
 uptrakit plugin-configs create \
   --name "GitHub Releases" \
-  --type github_releases \
+  --type releases_github \
   --config '{}'
 
 # Create a GitHub Releases config with an auth token (for higher rate limits)
 uptrakit plugin-configs create \
   --name "GitHub Releases (authenticated)" \
-  --type github_releases \
+  --type releases_github \
   --config '{"auth_token":"ghp_yourtoken"}'
 
 # Create a Shell plugin config for version detection and updates
 uptrakit plugin-configs create \
   --name "My App Shell" \
-  --type shell \
+  --type generic_shell \
   --config '{"version_command":"my-app --version","update_command":"apt-get install -y my-app={version}"}'
 
 # Create a Docker plugin config (semver tags)
 uptrakit plugin-configs create \
   --name "my-image Docker" \
-  --type docker \
+  --type releases_docker \
   --config '{"tracking_mode":"semver_tags","tag_patterns":["^[0-9]+\\.[0-9]+\\.[0-9]+$"]}'
 
 # Create a Homebrew formula plugin config
 uptrakit plugin-configs create \
   --name "git Homebrew" \
-  --type homebrew \
+  --type package_manager_homebrew \
   --config '{"package_type":"formula","formula":"git"}'
 
 # Update a plugin config's name
@@ -231,7 +231,7 @@ uptrakit plugin-configs delete <PLUGIN_CONFIG_ID>
 
 ## Autodiscovery
 
-The `docker`, `homebrew`, `proxmox_helper_scripts`, and `apt` plugin types support
+The `releases_docker`, `package_manager_homebrew`, `discovery_proxmox_helper_scripts`, and `package_manager_apt` plugin types support
 **autodiscovery**: the agent queries the local runtime (Docker daemon or package manager) and reports installed
 packages back to the controller, which creates pending software items for your review.
 
@@ -245,9 +245,9 @@ automatically creates one. Auto-created configs are named:
 - `APT`
 
 **PHS auto-created configs:** In addition to the `"Proxmox Helper Scripts"` config used as a
-discovery anchor, the PHS plugin triggers creation of downstream `github_releases`, `shell`, and
+discovery anchor, the PHS plugin triggers creation of downstream `releases_github`, `generic_shell`, and
 `APT (auto)` configs during discovery (see
-[PHS configuration](#proxmox_helper_scripts-configuration-fields) for details). These synthesized
+[PHS configuration](#discovery_proxmox_helper_scripts-configuration-fields) for details). These synthesized
 configs are what appear as parent configs on your approved PHS software items.
 
 ### Triggering discovery

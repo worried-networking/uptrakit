@@ -191,7 +191,7 @@ The controller can request installed version detection from agents:
 
 **PluginAssignment fields:**
 
-- `plugin_type`: Plugin discriminator (`github_releases`, `docker_registry`, `apt`, `homebrew`, etc.)
+- `plugin_type`: Plugin discriminator (`releases_github`, `releases_docker`, `package_manager_apt`, `package_manager_homebrew`, etc.)
 - `package_identifier`: Plugin-specific identifier
 - `config`: Merged plugin configuration as JSON (base config + override)
 
@@ -199,7 +199,7 @@ The controller can request installed version detection from agents:
 containing plugin-specific logic. Both version detection and update execution are dispatched through the Plugin
 Registry (`PluginRegistry::create_plugin()`). The agent's `version_check.rs` handles version detection; `update.rs`
 handles update execution via `execute_plugin_update()`. Command execution utilities (`shell_escape`,
-`run_command_exec`, `run_command_with_shell`, `run_command`) live in the `uptrakit-command` crate; plugin-core
+`run_command_exec`, `run_command_with_shell`, `run_command`) live in the `uptrakit-command` crate; plugin-infrastructure-core
 re-exports them with `PluginError` conversion.
 
 ## Agent host info collection

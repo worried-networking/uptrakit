@@ -103,12 +103,12 @@ that role on this host-software pair.
       "software_item_id": "550e8400-...",
       "name": "Nginx",
       "detect_version": {
-        "plugin_type": "apt",
+        "plugin_type": "package_manager_apt",
         "package_identifier": "nginx",
         "config": {}
       },
       "fetch_releases": {
-        "plugin_type": "apt",
+        "plugin_type": "package_manager_apt",
         "package_identifier": "nginx",
         "config": {}
       }
@@ -117,7 +117,7 @@ that role on this host-software pair.
       "software_item_id": "660e8400-...",
       "name": "1Password",
       "detect_version": {
-        "plugin_type": "homebrew",
+        "plugin_type": "package_manager_homebrew",
         "package_identifier": "1password-cli",
         "config": { "package_type": "cask" }
       }
@@ -130,7 +130,7 @@ that role on this host-software pair.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `plugin_type` | string | Plugin discriminator (e.g. `"apt"`, `"homebrew"`, `"github_releases"`) |
+| `plugin_type` | string | Plugin discriminator (e.g. `"apt"`, `"homebrew"`, `"releases_github"`) |
 | `package_identifier` | string | Plugin-specific package identifier |
 | `config` | object | Merged plugin configuration (base config + override) |
 
@@ -151,12 +151,12 @@ and is not sent to the agent.
   "software_item_name": "Nginx",
   "to_version": "1.24.0",
   "detect_version_plugin": {
-    "plugin_type": "apt",
+    "plugin_type": "package_manager_apt",
     "package_identifier": "nginx",
     "config": {}
   },
   "execute_update_plugin": {
-    "plugin_type": "apt",
+    "plugin_type": "package_manager_apt",
     "package_identifier": "nginx",
     "config": {}
   },
@@ -187,7 +187,7 @@ and is not sent to the agent.
   "plugins": [
     {
       "plugin_config_id": "550e8400-...",
-      "plugin_type": "homebrew",
+      "plugin_type": "package_manager_homebrew",
       "config": { "package_type": "formula" }
     }
   ]
@@ -199,7 +199,7 @@ type. In that case the agent uses the default/empty config and plugins emit `Dis
 each `DiscoveredSoftware` item's `targets` array. The controller creates the appropriate `PluginConfig` records
 from these structured targets.
 
-Known `plugin_type` values for discovery: `homebrew`, `proxmox_helper_scripts`, `apt`.
+Known `plugin_type` values for discovery: `package_manager_homebrew`, `discovery_proxmox_helper_scripts`, `package_manager_apt`.
 
 #### `discovery_results` payload
 
@@ -211,7 +211,7 @@ Known `plugin_type` values for discovery: `homebrew`, `proxmox_helper_scripts`, 
   "results": [
     {
       "plugin_config_id": null,
-      "plugin_type": "proxmox_helper_scripts",
+      "plugin_type": "discovery_proxmox_helper_scripts",
       "discoveries": [
         {
           "package_identifier": "booklore",
@@ -219,7 +219,7 @@ Known `plugin_type` values for discovery: `homebrew`, `proxmox_helper_scripts`, 
           "installed_version": "1.18.5",
           "targets": [
             {
-              "plugin_type": "github_releases",
+              "plugin_type": "releases_github",
               "plugin_config": { "owner": "BookLore", "repo": "BookLore" },
               "plugin_config_name": "BookLore/BookLore",
               "roles": ["detect_version", "fetch_releases", "execute_update"]
@@ -231,7 +231,7 @@ Known `plugin_type` values for discovery: `homebrew`, `proxmox_helper_scripts`, 
     },
     {
       "plugin_config_id": "550e8400-...",
-      "plugin_type": "homebrew",
+      "plugin_type": "package_manager_homebrew",
       "discoveries": [
         {
           "package_identifier": "wget",

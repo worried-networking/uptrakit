@@ -28,7 +28,7 @@ Enums currently annotated with `#[non_exhaustive]`:
 
 - `PluginType` (`shared-types`)
 - `ServiceMessage`, `ControllerMessage` (`wire`)
-- `PluginCapability` (`plugin-core`)
+- `PluginCapability` (`plugin-infrastructure-core`)
 
 When adding a new public enum, apply `#[non_exhaustive]` by default unless the enum is explicitly guaranteed to be closed (e.g., a two-variant
 boolean-like enum).

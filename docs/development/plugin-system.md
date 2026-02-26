@@ -12,12 +12,12 @@ a richer capability model including host compatibility detection and per-plugin 
 
 The plugin system is composed of:
 
-- **`uptrakit-plugin-core`** (`crates/plugins/core/`) — the `Plugin` trait, `PluginCapability` enum,
+- **`uptrakit-plugin-infrastructure-core`** (`crates/plugins/infrastructure/core/`) — the `Plugin` trait, `PluginCapability` enum,
   and supporting types (`HostCompatibility`, `UpdateHookContext`, `PreUpdateHookResult`,
   `SecretMasking`).
 - **First-party plugin crates** (`crates/plugins/*/`) — one crate per plugin type, each implementing
   the `Plugin` trait.
-- **`uptrakit-plugin-registry`** (`crates/plugins/registry/`) — centralized dispatch and validation
+- **`uptrakit-plugin-infrastructure-registry`** (`crates/plugins/infrastructure/registry/`) — centralized dispatch and validation
   using the `register_plugins!` macro.
 
 ## How Plugins Relate to Software Items and Host Assignments
@@ -107,8 +107,8 @@ When a host registers (or discovery is manually triggered), the controller sends
   "type": "discover_software",
   "host_machine_id": "...",
   "plugins": [
-    { "plugin_config_id": "...", "plugin_type": "homebrew", "config": {...} },
-    { "plugin_config_id": null, "plugin_type": "apt", "config": {} }
+    { "plugin_config_id": "...", "plugin_type": "package_manager_homebrew", "config": {...} },
+    { "plugin_config_id": null, "plugin_type": "package_manager_apt", "config": {} }
   ]
 }
 ```
@@ -140,12 +140,12 @@ The plugin registry uses a macro to generate all dispatch methods from a single 
 
 ```rust
 register_plugins! {
-    GithubReleases       => { config: GitHubConfig,                   plugin: GitHubPlugin },
-    Docker               => { config: DockerConfig,                   plugin: DockerPlugin },
-    ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig,     plugin: ProxmoxHelperScriptsPlugin },
-    Homebrew             => { config: HomebrewConfig,                 plugin: HomebrewPlugin },
-    Apt                  => { config: AptConfig,                      plugin: AptPlugin },
-    Shell                => { config: ShellConfig,                    plugin: ShellPlugin },
+    ReleasesGithub                => { config: GitHubConfig,                   plugin: GitHubPlugin },
+    ReleasesDocker                => { config: DockerConfig,                   plugin: DockerPlugin },
+    DiscoveryProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig,     plugin: ProxmoxHelperScriptsPlugin },
+    PackageManagerHomebrew        => { config: HomebrewConfig,                 plugin: HomebrewPlugin },
+    PackageManagerApt             => { config: AptConfig,                      plugin: AptPlugin },
+    GenericShell                  => { config: ShellConfig,                    plugin: ShellPlugin },
 }
 ```
 
@@ -219,11 +219,11 @@ The version check executor runs in two phases:
 
 To add a new capability to the plugin system:
 
-1. Add a new variant to the `PluginCapability` enum in `crates/plugins/core/src/traits.rs`.
+1. Add a new variant to the `PluginCapability` enum in `crates/plugins/infrastructure/core/src/traits.rs`.
    Mark the enum `#[non_exhaustive]` (already the case).
 2. Add the corresponding method to the `Plugin` trait with a default no-op implementation.
 3. Define any new input/output types (e.g. `MyHookContext`, `MyHookResult`) in
-   `crates/plugins/core/src/`.
+   `crates/plugins/infrastructure/core/src/`.
 4. Implement the new method in the plugin crates that should support it.
 5. Update `AGENTS.md` and this document with the new capability description.
 
@@ -265,14 +265,14 @@ The `UpdateHookContext` passed to plugin hooks contains `package_identifier`, `t
 
 | Plugin type | Crate | Host compat | Pre-hook | Post-hook | Discovery | Controller-side fetch |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| `github_releases` | `uptrakit-plugin-github` | No | No | No | No | Yes |
-| `shell` | `uptrakit-plugin-shell` | No | No | No | No | No |
-| `docker` | `uptrakit-plugin-docker` | No | No | No | Yes | Yes |
-| `homebrew` | `uptrakit-plugin-homebrew` | Yes | No | No | Yes | No |
-| `proxmox_helper_scripts` | `uptrakit-plugin-proxmox-helper-scripts` | No | No | No | Yes | No |
-| `apt` | `uptrakit-plugin-apt` | Yes | No | Yes | Yes | No |
+| `releases_github` | `uptrakit-plugin-releases-github` | No | No | No | No | Yes |
+| `generic_shell` | `uptrakit-plugin-generic-shell` | No | No | No | No | No |
+| `releases_docker` | `uptrakit-plugin-releases-docker` | No | No | No | Yes | Yes |
+| `package_manager_homebrew` | `uptrakit-plugin-package-manager-homebrew` | Yes | No | No | Yes | No |
+| `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | No | No | No | Yes | No |
+| `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Yes | No | Yes | Yes | No |
 
-**Shell plugin** (`uptrakit-plugin-shell`): agent-side plugin with two independently-optional
+**Shell plugin** (`uptrakit-plugin-generic-shell`): agent-side plugin with two independently-optional
 shell commands. `version_command` detects the installed version (first non-empty trimmed stdout
 line). `update_command` executes an update. Both commands support `{package_identifier}`,
 `{version}`, and `{tag}` placeholders (shell-escaped). At least one field must be set.
@@ -285,7 +285,7 @@ agent-side.
   Hosts and Software dashboards.
 - **RebootRequired event system** — post-update events (e.g. APT `PostUpdateHook` detecting
   `/var/run/reboot-required`) surfaced as controller-side notifications or Home Assistant entities.
-- **~~"Run arbitrary commands" plugin type~~** — completed. The `shell` plugin (`uptrakit-plugin-shell`)
+- **~~"Run arbitrary commands" plugin type~~** — completed. The `generic_shell` plugin (`uptrakit-plugin-generic-shell`)
   provides agent-side version detection and update execution via user-supplied shell commands,
   enabling one-off integrations without writing a Rust crate.
 - **~~Formal multi-plugin-config-synthesis protocol~~** — completed. Plugins now emit structured

@@ -1,7 +1,7 @@
 # Plugin Development Guidelines
 
 Plugins are first-party extension modules that detect, report, and update software on managed hosts.
-Each plugin crate implements the `Plugin` trait and is registered in `uptrakit-plugin-registry`. This
+Each plugin crate implements the `Plugin` trait and is registered in `uptrakit-plugin-infrastructure-registry`. This
 document describes the full lifecycle and conventions for building and extending plugins.
 
 When adding or changing a plugin, document the full lifecycle:
@@ -15,13 +15,13 @@ When adding or changing a plugin, document the full lifecycle:
 
 Plugins should keep parsing and comparison logic in pure functions so they are easy to test.
 
-The plugin registry crate (`uptrakit-plugin-registry`) centralizes config validation, mask/restore
+The plugin registry crate (`uptrakit-plugin-infrastructure-registry`) centralizes config validation, mask/restore
 workflows, and creates plugin instances based on `PluginType`. Document plugin behavior so the registry
 can continue to validate configs and mask secrets correctly.
 
 `PluginType` implements `FromStr`, `Display`, and `as_str()` for string conversion. Use
 `s.parse::<PluginType>()` to convert strings (returns `ParsePluginTypeError` on failure). The string
-representations are: `github_releases`, `proxmox_helper_scripts`, `docker`, `homebrew`, `apt`.
+representations are: `releases_github`, `releases_docker`, `discovery_proxmox_helper_scripts`, `package_manager_homebrew`, `package_manager_apt`, `generic_shell`.
 
 ## Plugin Capabilities
 
@@ -208,14 +208,14 @@ When writing integration tests for a new plugin, verify that:
 
 ## Dependencies and re-exports
 
-Plugin crates should avoid unnecessary direct dependencies. The `uptrakit-plugin-core` crate
+Plugin crates should avoid unnecessary direct dependencies. The `uptrakit-plugin-infrastructure-core` crate
 re-exports commonly needed types:
 
-- **`uptrakit_plugin_core::mpsc`** — re-export of `tokio::sync::mpsc`. Use this instead of
+- **`uptrakit_plugin_infrastructure_core::mpsc`** — re-export of `tokio::sync::mpsc`. Use this instead of
   depending on tokio directly. Tokio should only be in `[dev-dependencies]` (for `#[tokio::test]`).
-- **`uptrakit_plugin_core::CommandExecutor`**, **`CommandSpec`**, etc. — re-exports from
+- **`uptrakit_plugin_infrastructure_core::CommandExecutor`**, **`CommandSpec`**, etc. — re-exports from
   `uptrakit-command`.
-- **`uptrakit_plugin_core::SecretString`** — re-export from `uptrakit-shared-types`.
+- **`uptrakit_plugin_infrastructure_core::SecretString`** — re-export from `uptrakit-shared-types`.
 
 See [Dependency Policy](dependency-policy.md) for the full re-export strategy.
 
@@ -235,7 +235,7 @@ If your plugin needs passwordless `sudo` to run certain commands, implement
 `required_sudo_commands()` on the `Plugin` trait:
 
 ```rust
-use uptrakit_plugin_core::SudoCommandEntry;
+use uptrakit_plugin_infrastructure_core::SudoCommandEntry;
 
 fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
     vec![SudoCommandEntry {
@@ -281,7 +281,7 @@ operator guidance.
 
 ## Plugin Trait: Required Methods
 
-The `Plugin` trait (`crates/plugins/core/src/traits.rs`) defines the contract for all plugin
+The `Plugin` trait (`crates/plugins/infrastructure/core/src/traits.rs`) defines the contract for all plugin
 implementations. Two methods are required (no default implementation):
 
 | Method | Signature | Description |
@@ -322,13 +322,13 @@ Plugin crates:
 | :--- | :--- | :--- |
 | `uptrakit-shared-types` | `crates/shared/types/` | Canonical home for `PluginType`, `ReleaseAsset`, and `ReleaseInfo` (plus `SecretString`, hex helpers). |
 | `uptrakit-command` | `crates/shared/command/` | Shell execution, `CommandExecutor` trait, `CommandSpec`, `LocalCommandExecutor`. |
-| `uptrakit-plugin-core` | `crates/plugins/core/` | Plugin trait/abstractions; re-exports shared types and executor types. |
-| `uptrakit-plugin-registry` | `crates/plugins/registry/` | Centralized plugin dispatch and validation; re-exports `PluginType`. |
-| `uptrakit-plugin-docker` | `crates/plugins/docker/` | Docker/OCI image tracking and container discovery. |
-| `uptrakit-plugin-github` | `crates/plugins/github/` | GitHub Releases: fetches metadata; agent installs. |
-| `uptrakit-plugin-homebrew` | `crates/plugins/homebrew/` | Homebrew: agent-side version tracking and updates. Implements `DetectHostCompatibility` (checks `which brew`). |
-| `uptrakit-plugin-proxmox-helper-scripts` | `crates/plugins/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. |
-| `uptrakit-plugin-apt` | `crates/plugins/apt/` | APT: Debian/Ubuntu package management. Implements `DetectHostCompatibility` (checks `which apt-get`) and `PostUpdateHook` (checks `/var/run/reboot-required`). |
+| `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | Plugin trait/abstractions; re-exports shared types and executor types. |
+| `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | Centralized plugin dispatch and validation; re-exports `PluginType`. |
+| `uptrakit-plugin-releases-docker` | `crates/plugins/releases/docker/` | Docker/OCI image tracking and container discovery. |
+| `uptrakit-plugin-releases-github` | `crates/plugins/releases/github/` | GitHub Releases: fetches metadata; agent installs. |
+| `uptrakit-plugin-package-manager-homebrew` | `crates/plugins/package-managers/homebrew/` | Homebrew: agent-side version tracking and updates. Implements `DetectHostCompatibility` (checks `which brew`). |
+| `uptrakit-plugin-discovery-proxmox-helper-scripts` | `crates/plugins/discovery/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. |
+| `uptrakit-plugin-package-manager-apt` | `crates/plugins/package-managers/apt/` | APT: Debian/Ubuntu package management. Implements `DetectHostCompatibility` (checks `which apt-get`) and `PostUpdateHook` (checks `/var/run/reboot-required`). |
 
 ## Adding a New Plugin
 
@@ -340,7 +340,7 @@ Checklist for adding a new first-party plugin:
 3. **Declare capabilities** — include only the `PluginCapability` variants your plugin actually
    supports. Avoid declaring capabilities the plugin does not implement.
 4. **Register in `PluginRegistry`** — add a single entry to the `register_plugins!` macro invocation
-   in `crates/plugins/registry/src/registry.rs`. The macro generates all dispatch methods
+   in `crates/plugins/infrastructure/registry/src/registry.rs`. The macro generates all dispatch methods
    automatically.
 5. **Add tests** — cover success and failure paths for all implemented methods.
 
@@ -351,11 +351,11 @@ that generates all dispatch methods from a single declaration:
 
 ```rust
 register_plugins! {
-    GithubReleases => { config: GitHubConfig, plugin: GitHubPlugin },
-    Docker => { config: DockerConfig, plugin: DockerPlugin },
-    ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, plugin: ProxmoxHelperScriptsPlugin },
-    Homebrew => { config: HomebrewConfig, plugin: HomebrewPlugin },
-    Apt => { config: AptConfig, plugin: AptPlugin },
+    ReleasesGithub => { config: GitHubConfig, plugin: GitHubPlugin },
+    ReleasesDocker => { config: DockerConfig, plugin: DockerPlugin },
+    DiscoveryProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, plugin: ProxmoxHelperScriptsPlugin },
+    PackageManagerHomebrew => { config: HomebrewConfig, plugin: HomebrewPlugin },
+    PackageManagerApt => { config: AptConfig, plugin: AptPlugin },
 }
 ```
 
@@ -386,7 +386,7 @@ Plugin-specific identifier validation is exposed through two APIs:
 **Static dispatch (preferred for internal use):**
 
 ```rust
-PluginRegistry::validate_package_identifier(PluginType::Homebrew, value)?;
+PluginRegistry::validate_package_identifier(PluginType::PackageManagerHomebrew, value)?;
 ```
 
 **Trait object dispatch (via `PluginOps`):**
@@ -403,7 +403,7 @@ human-readable message when the identifier is invalid.
 1. Add a `pub fn validate_identifier(value: &str) -> Result<(), String>` to your plugin crate
    (e.g., `crates/plugins/my-plugin/src/plugin.rs`) and re-export it from `lib.rs`.
 2. Add a match arm to `PluginRegistry::validate_package_identifier` in
-   `crates/plugins/registry/src/registry.rs`:
+   `crates/plugins/infrastructure/registry/src/registry.rs`:
 
    ```rust
    pub fn validate_package_identifier(
@@ -411,7 +411,7 @@ human-readable message when the identifier is invalid.
        value: &str,
    ) -> std::result::Result<(), String> {
        match plugin_type {
-           PluginType::Homebrew => uptrakit_plugin_homebrew::validate_identifier(value),
+           PluginType::PackageManagerHomebrew => uptrakit_plugin_package_manager_homebrew::validate_identifier(value),
            PluginType::MyPlugin => uptrakit_plugin_my_plugin::validate_identifier(value),
            _ => Ok(()),
        }
@@ -426,8 +426,8 @@ identifier validation must go through `PluginRegistry::validate_package_identifi
 
 ### Secret masking with the `SecretMasking` trait
 
-The `SecretMasking` trait (`crates/plugins/core/src/secrets.rs`, re-exported from
-`uptrakit-plugin-core`) provides a standard interface for masking and restoring secrets in plugin
+The `SecretMasking` trait (`crates/plugins/infrastructure/core/src/secrets.rs`, re-exported from
+`uptrakit-plugin-infrastructure-core`) provides a standard interface for masking and restoring secrets in plugin
 configurations. It has two methods with default no-op implementations:
 
 ```rust
@@ -473,14 +473,14 @@ impl_report_conversion!(PluginError => DockerError, |e| DockerError::Configurati
 This bidirectional pattern allows:
 
 - The plugin registry to convert plugin errors into `PluginError` when dispatching.
-- Plugin implementations to call shared code (e.g., from `uptrakit-plugin-core`) and convert
+- Plugin implementations to call shared code (e.g., from `uptrakit-plugin-infrastructure-core`) and convert
   `PluginError` back into their local error type.
 
 When adding a new plugin, always implement both directions.
 
-The agent crate imports `uptrakit-command` for shell execution and `uptrakit-plugin-registry` for
-plugin dispatch — it does not depend on `uptrakit-plugin-core` directly. The web-api crate imports
-`uptrakit-plugin-registry` (not `uptrakit-plugin-core`). The wire protocol crate
+The agent crate imports `uptrakit-command` for shell execution and `uptrakit-plugin-infrastructure-registry` for
+plugin dispatch — it does not depend on `uptrakit-plugin-infrastructure-core` directly. The web-api crate imports
+`uptrakit-plugin-infrastructure-registry` (not `uptrakit-plugin-infrastructure-core`). The wire protocol crate
 (`uptrakit-internal-wire`) imports `PluginType`, `ReleaseAsset`, and `ReleaseInfo` directly from
 `uptrakit-shared-types`, keeping it free of plugin-implementation dependencies.
 
@@ -511,14 +511,14 @@ discovery), or when running without a pre-existing plugin config, emit `Discover
 `targets` field of each `DiscoveredSoftware` item:
 
 ```rust
-use uptrakit_plugin_core::{DiscoveredSoftware, DiscoveryTarget, PluginRole, PluginType};
+use uptrakit_plugin_infrastructure_core::{DiscoveredSoftware, DiscoveryTarget, PluginRole, PluginType};
 
 DiscoveredSoftware {
     package_identifier: "booklore".to_string(),
     name: "BookLore".to_string(),
     installed_version: "1.18.5".to_string(),
     targets: vec![DiscoveryTarget {
-        plugin_type: PluginType::GithubReleases,
+        plugin_type: PluginType::ReleasesGithub,
         plugin_config: serde_json::json!({
             "owner": "BookLore",
             "repo": "BookLore",
@@ -606,7 +606,7 @@ See also:
 - [Command Executor](command-executor.md) — full `CommandExecutor` trait reference.
 - [Sudoers Management](../security/sudoers-management.md) — security model for privileged commands.
 
-## GitHub Releases plugin (`uptrakit-plugin-github`)
+## GitHub Releases plugin (`uptrakit-plugin-releases-github`)
 
 Fetches release metadata from the GitHub API and converts it into `UpstreamRelease` values.
 
@@ -632,7 +632,7 @@ Fetches release metadata from the GitHub API and converts it into `UpstreamRelea
 - Asset filtering uses regex matching against asset names
 - `detect_installed_version_command` runs via the injected `CommandExecutor` (local or SSH)
 
-## Docker plugin (`uptrakit-plugin-docker`)
+## Docker plugin (`uptrakit-plugin-releases-docker`)
 
 Tracks container image tags from OCI/Docker registries. Supports Docker Hub, GHCR, and any OCI
 Distribution Spec-compliant registry. Supports both controller-side upstream version resolution and
@@ -640,7 +640,7 @@ agent-side container discovery.
 
 See [Docker Plugin](../end-user/plugins/docker.md) for the full end-user reference.
 
-## Proxmox Helper Scripts plugin (`uptrakit-plugin-proxmox-helper-scripts`)
+## Proxmox Helper Scripts plugin (`uptrakit-plugin-discovery-proxmox-helper-scripts`)
 
 Discovery-only plugin for software installed via [Proxmox VE community helper scripts](https://github.com/community-scripts/ProxmoxVE).
 Does **not** perform version detection, upstream release fetching, or update execution. Its sole
@@ -653,11 +653,11 @@ responsibility is to discover which PHS-managed apps are present in a container 
 
 **Discovery targets emitted:**
 
-- GitHub-managed apps: `DiscoveryTarget { plugin_type: GithubReleases, ... }` with owner, repo,
+- GitHub-managed apps: `DiscoveryTarget { plugin_type: ReleasesGithub, ... }` with owner, repo,
   `detect_installed_version_command`, and `install_command` pre-configured. Constants
   `PHS_DETECT_VERSION_CMD` and `PHS_INSTALL_CMD` are defined in
-  `crates/plugins/proxmox-helper-scripts/src/discovery.rs`.
-- APT-managed apps: `DiscoveryTarget { plugin_type: Apt, config: {}, name: "APT (auto)" }`.
+  `crates/plugins/discovery/proxmox-helper-scripts/src/discovery.rs`.
+- APT-managed apps: `DiscoveryTarget { plugin_type: PackageManagerApt, config: {}, name: "APT (auto)" }`.
 
 Cross-reference: [PHS end-user guide](../end-user/autodiscovery.md#proxmox-helper-scripts-discovery),
 [PHS API notes](../api/autodiscovery.md#plugin-driven-discovery-targets).

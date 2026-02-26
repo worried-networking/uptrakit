@@ -114,7 +114,7 @@ Extends `SoftwareItemResponse` with:
 | `role` | `PluginRole` | `detect_version`, `fetch_releases`, or `execute_update` |
 | `plugin_config_id` | `Uuid` | Referenced plugin config |
 | `plugin_config_name` | `String` | Display name of the plugin config |
-| `plugin_type` | `String` | Plugin type identifier (e.g. `"homebrew"`, `"github_releases"`) |
+| `plugin_type` | `String` | Plugin type identifier (e.g. `"package_manager_homebrew"`, `"releases_github"`) |
 | `package_identifier` | `String` | Plugin-specific package identifier |
 | `config_override` | `Option<Value>` | Per-role overrides merged onto the base config |
 | `execution_site` | `String` | `"auto"`, `"agent"`, or `"controller"` |

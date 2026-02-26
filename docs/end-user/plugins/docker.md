@@ -1,6 +1,6 @@
 # Docker Plugin
 
-The `docker` plugin tracks container images in Docker/OCI-compatible registries. It supports two
+The `releases_docker` plugin tracks container images in Docker/OCI-compatible registries. It supports two
 tracking modes: semver-based tag tracking and SHA digest-based tracking. It can also discover
 running and stopped containers on the agent host and auto-populate your software catalog.
 
@@ -160,7 +160,7 @@ To manually override the Docker daemon endpoint, set `docker_host` in the plugin
 { "docker_host": "ssh://user@host:22" }
 ```
 
-SSH connections require the `ssh` Cargo feature to be enabled on the `uptrakit-plugin-docker`
+SSH connections require the `ssh` Cargo feature to be enabled on the `uptrakit-plugin-releases-docker`
 crate (automatically enabled in `uptrakit-agent-ssh`). The SSH client uses the default SSH key
 resolution (SSH agent or `~/.ssh/id_*`).
 

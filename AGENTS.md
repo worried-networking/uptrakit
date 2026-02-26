@@ -17,7 +17,7 @@ Key components:
 - **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version
   detection and update execution via sudo allowlists.
 - **Plugins**: first-party extension modules that detect, report, and update software; each crate implements the
-  `Plugin` trait and is registered in `uptrakit-plugin-registry`.
+  `Plugin` trait and is registered in `uptrakit-plugin-infrastructure-registry`.
 
 For full project context, see [README.md](README.md). For contribution rules, see [CONTRIBUTING.md](CONTRIBUTING.md).
 For system design and technology choices, see [ARCHITECTURE.md](ARCHITECTURE.md). For security policy and cryptographic
@@ -62,14 +62,19 @@ uptrakit/
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   ├── plugins/
-│   │   ├── core/                       # uptrakit-plugin-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult
-│   │   ├── docker/                     # uptrakit-plugin-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; ssh feature gates bollard/ssh
-│   │   ├── github/                     # uptrakit-plugin-github                 (lib)  — GitHub Releases plugin: controller-side fetch_releases only; owner/repo parsed from package_identifier at call time (format "owner/repo"); exports validate_identifier
-│   │   ├── shell/                      # uptrakit-plugin-shell                  (lib)  — generic agent-side plugin: version_command (detect_installed_version) + update_command (execute_update); supports {package_identifier}, {version}, {tag} placeholders; at least one field required
-│   │   ├── homebrew/                   # uptrakit-plugin-homebrew               (lib)  — Homebrew formulae/cask plugin; implements DetectHostCompatibility (checks `which brew`)
-│   │   ├── proxmox-helper-scripts/     # uptrakit-plugin-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/APT upstream, emits two DiscoveryTarget values per GitHub-managed item: GithubReleases/FetchReleases + Shell/[DetectVersion,ExecuteUpdate])
-│   │   ├── apt/                        # uptrakit-plugin-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required)
-│   │   └── registry/                   # uptrakit-plugin-registry               (lib)  — plugin dispatch & validation; ssh feature propagates to uptrakit-plugin-docker/ssh → bollard/ssh
+│   │   ├── infrastructure/
+│   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult
+│   │   │   └── registry/              # uptrakit-plugin-infrastructure-registry               (lib)  — plugin dispatch & validation; ssh feature propagates to uptrakit-plugin-releases-docker/ssh → bollard/ssh
+│   │   ├── releases/
+│   │   │   ├── docker/                 # uptrakit-plugin-releases-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; ssh feature gates bollard/ssh
+│   │   │   └── github/                 # uptrakit-plugin-releases-github                 (lib)  — GitHub Releases plugin: controller-side fetch_releases only; owner/repo parsed from package_identifier at call time (format "owner/repo"); exports validate_identifier
+│   │   ├── generic/
+│   │   │   └── shell/                  # uptrakit-plugin-generic-shell                  (lib)  — generic agent-side plugin: version_command (detect_installed_version) + update_command (execute_update); supports {package_identifier}, {version}, {tag} placeholders; at least one field required
+│   │   ├── package-managers/
+│   │   │   ├── homebrew/               # uptrakit-plugin-package-manager-homebrew               (lib)  — Homebrew formulae/cask plugin; implements DetectHostCompatibility (checks `which brew`)
+│   │   │   └── apt/                    # uptrakit-plugin-package-manager-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required)
+│   │   └── discovery/
+│   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/APT upstream, emits two DiscoveryTarget values per GitHub-managed item: ReleasesGithub/FetchReleases + GenericShell/[DetectVersion,ExecuteUpdate])
 │   ├── shared/
 │   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, handle_check_versions/execute_update/graceful_shutdown
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag
@@ -291,21 +296,21 @@ for user review. Key invariants:
    **PHS (Proxmox Helper Scripts)** always emits `DiscoveryTarget` values. During discovery, it
    fetches each container's CT script from `raw.githubusercontent.com` and analyzes it:
    - GitHub-managed apps emit **two** `DiscoveryTarget` values:
-     1. `plugin_type: GithubReleases`, roles `[FetchReleases]`, config without `owner`/`repo`
+     1. `plugin_type: ReleasesGithub`, roles `[FetchReleases]`, config without `owner`/`repo`
         (only `tag_strip_prefix`, `include_prereleases`, `asset_patterns`), and
         `package_identifier: Some("owner/repo")` override.
-     2. `plugin_type: Shell`, roles `[DetectVersion, ExecuteUpdate]`, config with
+     2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]`, config with
         `version_command` (`cat -- "${HOME}/.{package_identifier}"`) and
         `update_command` (`env PHS_SILENT=1 /usr/bin/update`).
-     The PHS shell constants live in `crates/plugins/proxmox-helper-scripts/src/plugin.rs`.
-   - APT-managed apps emit a `DiscoveryTarget` with `plugin_type: Apt`, empty config `{}`, and
+     The PHS shell constants live in `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`.
+   - APT-managed apps emit a `DiscoveryTarget` with `plugin_type: PackageManagerApt`, empty config `{}`, and
      name `"APT (auto)"`.
    - Apps whose scripts contain neither GitHub patterns nor a specific `apt install` line are skipped.
-   The PHS plugin config itself (`proxmox_helper_scripts`, always `{}`) is retained as an anchor for
+   The PHS plugin config itself (`discovery_proxmox_helper_scripts`, always `{}`) is retained as an anchor for
    discovery runs but never linked directly to `SoftwareItem` host assignments.
 
    **Homebrew** in discover-all mode (no pre-existing config) emits per-item `DiscoveryTarget` values
-   with `plugin_type: Homebrew` and config `{"package_type": "formula"}` or `{"package_type": "cask"}`,
+   with `plugin_type: PackageManagerHomebrew` and config `{"package_type": "formula"}` or `{"package_type": "cask"}`,
    plus display names `"Homebrew (Formulae)"` and `"Homebrew (Casks)"`. When running with an existing
    config, targets are empty and the controller uses the config-ID path.
 
@@ -335,7 +340,7 @@ for user review. Key invariants:
    aggregates all declarations for use by the SSH agent's sudoers generation logic. See
    [Plugin Guidelines](docs/development/plugin-guidelines.md) and [Sudoers Management](docs/security/sudoers-management.md).
 
-8. **Plugin capabilities.** The `PluginCapability` enum (in `crates/plugins/core/src/types.rs`) has six variants:
+8. **Plugin capabilities.** The `PluginCapability` enum (in `crates/plugins/infrastructure/core/src/types.rs`) has six variants:
 
    - `DiscoverLocalSoftware` — the plugin can discover locally installed software.
    - `RefreshPackageIndex` — the plugin can refresh/sync a local package index from remote sources.

@@ -1485,10 +1485,10 @@ components:
           type: string
           description: Plugin type identifier
           examples:
-            - github_releases
-            - docker
-            - homebrew
-            - apt
+            - releases_github
+            - releases_docker
+            - package_manager_homebrew
+            - package_manager_apt
         package_identifier:
           type: string
           description: Package identifier for this role's plugin
@@ -2447,8 +2447,8 @@ components:
           type: string
           description: Target plugin type (may differ from the discovering plugin)
           examples:
-            - github_releases
-            - apt
+            - releases_github
+            - package_manager_apt
         plugin_config:
           type: object
           description: Config JSON for find-or-create of the target plugin config
@@ -2501,8 +2501,8 @@ components:
           type: string
           description: Plugin type identifier
           examples:
-            - homebrew
-            - apt
+            - package_manager_homebrew
+            - package_manager_apt
         config:
           type: object
           description: Plugin-specific configuration ({} for default assignments)
@@ -2551,8 +2551,8 @@ components:
           type: string
           description: Plugin type that produced these results
           examples:
-            - homebrew
-            - apt
+            - package_manager_homebrew
+            - package_manager_apt
         discoveries:
           type: array
           description: Discovered software items (absent or empty on error)

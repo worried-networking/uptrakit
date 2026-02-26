@@ -13,7 +13,7 @@ The `CommandExecutor` trait decouples plugin logic from the command execution tr
 ## Key types
 
 All types live in `crates/shared/command/src/executor.rs` and are re-exported from `uptrakit_command` and
-`uptrakit_plugin_core::command`.
+`uptrakit_plugin_infrastructure_core::command`.
 
 ### `CommandSpec`
 
@@ -202,7 +202,7 @@ The `PluginRegistry::create_plugin()` method accepts the executor and forwards i
 
 ```rust
 let plugin = PluginRegistry::create_plugin(
-    PluginType::GithubReleases,
+    PluginType::ReleasesGithub,
     &config,
     executor,
 )?;

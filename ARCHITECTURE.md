@@ -42,7 +42,7 @@ certificate renewal) across controller instances using optimistic locking for HA
 ## Plugins
 
 Plugins are first-party extension modules that define how to detect installed versions, resolve latest upstream versions, and execute updates. Each
-plugin crate implements the `Plugin` trait and is registered in `uptrakit-plugin-registry`. See
+plugin crate implements the `Plugin` trait and is registered in `uptrakit-plugin-infrastructure-registry`. See
 [Plugin Development Guidelines](docs/development/plugin-guidelines.md) for the extension pattern,
 and [Plugin System Architecture](docs/development/plugin-system.md) for the broader design.
 
@@ -66,13 +66,15 @@ Each assignment carries an `execution_site` column (`auto` | `agent` | `controll
 
 | Plugin type | Crate | fetch_releases site | Autodiscovery | Notes |
 | --- | --- | --- | --- | --- |
-| `github_releases` | `uptrakit-plugin-github` | Controller (GitHub API) | No | Tracks GitHub release tags; `ControllerSideFetchReleases` capability |
-| `docker` | `uptrakit-plugin-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers; `ControllerSideFetchReleases` capability |
-| `homebrew` | `uptrakit-plugin-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks; detects host compatibility |
-| `proxmox_helper_scripts` | `uptrakit-plugin-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins) |
-| `apt` | `uptrakit-plugin-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
+| `releases_github` | `uptrakit-plugin-releases-github` | Controller (GitHub API) | No | Tracks GitHub release tags; `ControllerSideFetchReleases` capability |
+| `releases_docker` | `uptrakit-plugin-releases-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers; `ControllerSideFetchReleases` capability |
+| `package_manager_homebrew` | `uptrakit-plugin-package-manager-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks; detects host compatibility |
+| `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins) |
+| `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
 
-Plugins with a local package index (`homebrew`, `proxmox_helper_scripts`, `apt`) resolve both installed and latest versions on the agent.
+Plugins with a local package index (`package_manager_homebrew`,
+`discovery_proxmox_helper_scripts`, `package_manager_apt`) resolve both
+installed and latest versions on the agent.
 All other plugins resolve upstream versions on the controller via `ControllerSideFetchReleases`.
 
 ## Capability-based service identity

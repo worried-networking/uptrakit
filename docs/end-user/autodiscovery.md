@@ -58,13 +58,13 @@ upstream source and emits **discovery targets** that tell the controller which p
 create:
 
 - **GitHub-managed apps** (e.g. Booklore, Radarr, Sonarr, Pangolin, Uptime Kuma): The PHS plugin
-  emits a target for the `github_releases` plugin type, pre-configured with the repository owner
+  emits a target for the `releases_github` plugin type, pre-configured with the repository owner
   and name, the installed version detection command (`~/.{slug}`), and the unattended update script
   (`env PHS_SILENT=1 /usr/bin/update`). The controller auto-creates the GitHub Releases plugin
   config from the target. The software item's plugin config will be the auto-created GitHub config,
   not the PHS config.
 
-- **APT-managed apps** (e.g. Grafana, Plex): The PHS plugin emits a target for the `apt` plugin
+- **APT-managed apps** (e.g. Grafana, Plex): The PHS plugin emits a target for the `package_manager_apt` plugin
   type. The controller finds or creates a shared `APT (auto)` plugin config. The software item's
   `package_identifier` is the Debian package name.
 
@@ -73,7 +73,7 @@ create:
   (`journalctl -u uptrakit-agent`) if you expect to see an app but it does not appear as pending.
 
 After approving PHS-discovered items, version checking and updates are handled by the target
-`github_releases` or `APT` configs — not by the PHS plugin itself.
+`releases_github` or `APT` configs — not by the PHS plugin itself.
 
 Auto-created config name for the PHS discovery anchor: **`"Proxmox Helper Scripts"`**.
 

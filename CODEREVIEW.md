@@ -364,19 +364,19 @@ The enum has 9 variants and will grow with new features. Adding `#[non_exhaustiv
 
 ### Strengths
 
-- `crates/plugins/core/src/traits.rs:22-98`: `Plugin` trait uses default implementations for all optional methods — adding a new plugin requires implementing only the methods relevant to its capability set.
-- `crates/plugins/registry/src/registry.rs:43-135`: `register_plugins!` macro generates all dispatch boilerplate — adding a new plugin type is a one-line change in the macro invocation plus a dependency entry.
+- `crates/plugins/infrastructure/core/src/traits.rs:22-98`: `Plugin` trait uses default implementations for all optional methods — adding a new plugin requires implementing only the methods relevant to its capability set.
+- `crates/plugins/infrastructure/registry/src/registry.rs:43-135`: `register_plugins!` macro generates all dispatch boilerplate — adding a new plugin type is a one-line change in the macro invocation plus a dependency entry.
 - `crates/shared/wire/src/lib.rs:32` and `crates/shared/types/src/plugin_types.rs:17`: `#[non_exhaustive]` on `PluginCapability`, `ServiceMessage`, `ControllerMessage`, and related wire enums — downstream consumers cannot write exhaustive matches that break on new variants.
 - `crates/shared/wire/src/lib.rs:71`: `Capability::Other(String)` forward-compatibility catch-all — unknown capabilities from newer peers are preserved and excluded from intersection without causing a deserialization error.
 - `crates/shared/wire/src/close_reason.rs:49`: `CloseReason::Unknown(String)` mirrors the same forward-compat pattern for close reason codes.
 - `crates/shared/service-sdk/src/lifecycle.rs:76-160`: `ServiceHandler` trait externalizes the entire service-specific surface — new service roles plug in without modifying the SDK lifecycle machinery.
-- `crates/plugins/core/src/secrets.rs:9-17`: `SecretMasking` trait with no-op defaults — plugins that have no secrets do not need to implement masking.
+- `crates/plugins/infrastructure/core/src/secrets.rs:9-17`: `SecretMasking` trait with no-op defaults — plugins that have no secrets do not need to implement masking.
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/plugins/registry/src/registry.rs:151-156` — Platform-specific plugins compiled unconditionally into all agent binaries
+**[SEVERITY: Medium]** `crates/plugins/infrastructure/registry/src/registry.rs:151-156` — Platform-specific plugins compiled unconditionally into all agent binaries
 
-`HomebrewPlugin` (macOS-only) and `ProxmoxHelperScriptsPlugin` (Proxmox-VE-only) are compiled into every agent binary regardless of target platform. A Linux agent will accept a `HomebrewPlugin` configuration and fail only when the `brew` executable is absent at runtime. Platform-specific plugins should be gated with `#[cfg(target_os = "macos")]` or behind optional Cargo features in `uptrakit-plugin-registry`, with the macro conditionally including them.
+`HomebrewPlugin` (macOS-only) and `ProxmoxHelperScriptsPlugin` (Proxmox-VE-only) are compiled into every agent binary regardless of target platform. A Linux agent will accept a `HomebrewPlugin` configuration and fail only when the `brew` executable is absent at runtime. Platform-specific plugins should be gated with `#[cfg(target_os = "macos")]` or behind optional Cargo features in `uptrakit-plugin-infrastructure-registry`, with the macro conditionally including them.
 
 **[SEVERITY: Medium]** `crates/shared/wire/src/lib.rs:214-234` — `ServiceMessage` and `ControllerMessage` mix agent-specific and MQTT-specific variants
 

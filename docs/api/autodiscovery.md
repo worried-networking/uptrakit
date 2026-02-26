@@ -243,7 +243,7 @@ from being created as pending items in future discovery runs.
       "id": "019...",
       "plugin_config_id": "019...",
       "plugin_config_name": "Homebrew (Formulae)",
-      "plugin_type": "homebrew",
+      "plugin_type": "package_manager_homebrew",
       "package_identifier": "telnet",
       "created_at": "2026-02-23T10:00:00Z"
     }
@@ -262,7 +262,7 @@ from being created as pending items in future discovery runs.
 | `id` | UUID | Ignore rule UUID |
 | `plugin_config_id` | UUID | Plugin config this rule applies to |
 | `plugin_config_name` | string | Display name of the plugin config |
-| `plugin_type` | string | Plugin type (e.g. `"homebrew"`, `"proxmox_helper_scripts"`) |
+| `plugin_type` | string | Plugin type (e.g. `"package_manager_homebrew"`, `"discovery_proxmox_helper_scripts"`) |
 | `package_identifier` | string | Package identifier suppressed from discovery |
 | `created_at` | ISO 8601 datetime | When the rule was created |
 
@@ -298,7 +298,7 @@ package_identifier)` pair, the existing rule is returned rather than creating a 
   "id": "019...",
   "plugin_config_id": "019...",
   "plugin_config_name": "Homebrew (Formulae)",
-  "plugin_type": "homebrew",
+  "plugin_type": "package_manager_homebrew",
   "package_identifier": "telnet",
   "created_at": "2026-02-23T10:00:00Z"
 }
@@ -396,13 +396,13 @@ The controller routes each discovered item through one of two paths:
 
 ### PHS discovery targets
 
-The PHS plugin (`proxmox_helper_scripts`) always emits `DiscoveryTarget` values. It analyzes
+The PHS plugin (`discovery_proxmox_helper_scripts`) always emits `DiscoveryTarget` values. It analyzes
 each container's CT script and builds targets:
 
 | Script analysis result | `DiscoveryTarget` emitted |
 | --- | --- |
-| GitHub repository detected | `plugin_type: github_releases`, config with `owner`, `repo`, `detect_installed_version_command`, `install_command`. Name: `"{owner}/{repo}"`. |
-| APT package detected | `plugin_type: apt`, config: `{}`. Name: `"APT (auto)"`. |
+| GitHub repository detected | `plugin_type: releases_github`, config with `owner`, `repo`, `detect_installed_version_command`, `install_command`. Name: `"{owner}/{repo}"`. |
+| APT package detected | `plugin_type: package_manager_apt`, config: `{}`. Name: `"APT (auto)"`. |
 | Neither detected | Item skipped (warning logged on agent). |
 
 The PHS plugin config itself is never directly linked to `host_software_item_plugins` — it is used
@@ -415,8 +415,8 @@ The Homebrew plugin in discover-all mode (no pre-existing config) emits per-item
 
 | Package type | `DiscoveryTarget` emitted |
 | --- | --- |
-| Formula | `plugin_type: homebrew`, config: `{"package_type": "formula"}`. Name: `"Homebrew (Formulae)"`. |
-| Cask | `plugin_type: homebrew`, config: `{"package_type": "cask"}`. Name: `"Homebrew (Casks)"`. |
+| Formula | `plugin_type: package_manager_homebrew`, config: `{"package_type": "formula"}`. Name: `"Homebrew (Formulae)"`. |
+| Cask | `plugin_type: package_manager_homebrew`, config: `{"package_type": "cask"}`. Name: `"Homebrew (Casks)"`. |
 
 When running with an existing config (pre-created with a specific `package_type`), targets are
 empty and the controller uses the config-ID path.
@@ -428,11 +428,11 @@ listed in `target.roles` (typically all three):
 
 | Role | Plugin config | Description |
 | --- | --- | --- |
-| `detect_version` | Target config (e.g. `github_releases` or `apt`) | Detects the installed version on the agent host |
+| `detect_version` | Target config (e.g. `releases_github` or `package_manager_apt`) | Detects the installed version on the agent host |
 | `fetch_releases` | Target config (same as above) | Fetches the latest available upstream version |
 | `execute_update` | Target config (same as above) | Executes the actual software update |
 
-For PHS discoveries with a `github_releases` target config, the `fetch_releases` role
+For PHS discoveries with a `releases_github` target config, the `fetch_releases` role
 typically runs controller-side (via the scheduler) because the GitHub Releases plugin has the
 `ControllerSideFetchReleases` capability. The `execution_site` column defaults to `"auto"`, which
 lets the system decide based on plugin capabilities.

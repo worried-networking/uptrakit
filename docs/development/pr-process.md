@@ -31,4 +31,4 @@ Use Conventional Commits to aid changelog generation.
 ```
 
 Common types include `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, and `chore`. Use scopes that map to crates/components (e.g.,
-`controller`, `agent`, `plugin-github`). Breaking changes require `!` (e.g., `feat(api)!: ...`). Keep commits small and focused.
+`controller`, `agent`, `plugin-releases-github`). Breaking changes require `!` (e.g., `feat(api)!: ...`). Keep commits small and focused.
