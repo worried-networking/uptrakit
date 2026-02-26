@@ -8,6 +8,7 @@ mod host_ops;
 mod ssh_config;
 mod ssh_executor;
 mod ssh_key;
+mod ssh_pool;
 mod ssh_target;
 mod ssh_transport;
 
@@ -76,6 +77,7 @@ struct SshAgentHandler {
     state_dir: std::path::PathBuf,
     local_db: Option<sea_orm::DatabaseConnection>,
     in_flight_update: Option<client::InFlightUpdate>,
+    pool: ssh_pool::SshConnectionPool,
 }
 
 #[async_trait::async_trait]
@@ -99,7 +101,7 @@ impl ServiceHandler for SshAgentHandler {
         tracing::debug!("local SSH host database initialized");
 
         // Report enrolled hosts to controller.
-        client::report_enrolled_hosts(&local_db, conn).await;
+        client::report_enrolled_hosts(&local_db, conn, &self.pool).await;
 
         self.local_db = Some(local_db);
         Ok(())
@@ -118,15 +120,21 @@ impl ServiceHandler for SshAgentHandler {
         })?;
         match msg {
             ControllerMessage::CheckVersions(payload) => {
-                Ok(client::handle_check_versions_ssh(payload, db, conn).await)
+                Ok(client::handle_check_versions_ssh(payload, db, conn, &self.pool).await)
             }
             ControllerMessage::ExecuteUpdate(payload) => {
-                client::handle_execute_update_ssh(*payload, db, &mut self.in_flight_update, conn)
-                    .await;
+                client::handle_execute_update_ssh(
+                    *payload,
+                    db,
+                    &mut self.in_flight_update,
+                    conn,
+                    &self.pool,
+                )
+                .await;
                 Ok(None)
             }
             ControllerMessage::DiscoverSoftware(payload) => {
-                Ok(client::handle_discover_software_ssh(payload, db, conn).await)
+                Ok(client::handle_discover_software_ssh(payload, db, conn, &self.pool).await)
             }
             _ => {
                 tracing::debug!("ignoring unrecognized message in authenticated loop");
@@ -185,14 +193,20 @@ impl ServiceHandler for SshAgentHandler {
         shutdown_timeout_seconds: u32,
     ) -> LoopOutcome {
         let (disconnect_reason, outcome) = resolve_shutdown(cause);
-        client::handle_graceful_shutdown(
+        let outcome = client::handle_graceful_shutdown(
             conn,
             self.in_flight_update.take(),
             shutdown_timeout_seconds,
             disconnect_reason,
             outcome,
         )
-        .await
+        .await;
+
+        // Gracefully close all pooled SSH connections so remote hosts receive
+        // a clean disconnect rather than a silent socket drop.
+        self.pool.disconnect_all().await;
+
+        outcome
     }
 }
 
@@ -278,6 +292,7 @@ async fn main() {
         state_dir,
         local_db: None,
         in_flight_update: None,
+        pool: ssh_pool::SshConnectionPool::new(),
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent-ssh",

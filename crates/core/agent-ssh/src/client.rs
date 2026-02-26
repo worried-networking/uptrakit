@@ -1,5 +1,5 @@
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use std::collections::BTreeSet;
 use uptrakit_agent_core::ConnectionContext;
@@ -12,13 +12,95 @@ use uptrakit_internal_wire::{
 };
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
 
+use crate::db::entity::ssh_host::Model;
 use crate::host_info::collect_remote_host_info;
 use crate::host_ops::{find_host_by_machine_id, list_hosts, update_host_machine_id};
 use crate::ssh_executor::SshCommandExecutor;
-use crate::ssh_transport::{AuthMethod, SshConnectionConfig};
+use crate::ssh_pool::SshConnectionPool;
 
 // Re-export shared update types for use in main.rs.
 pub(crate) use uptrakit_agent_core::{InFlightUpdate, UpdateEvent};
+
+// ── Temporary key file ────────────────────────────────────────────────────────
+
+/// RAII wrapper that deletes the SSH private key file on drop.
+///
+/// Written to a temporary path with 0o600 permissions by
+/// [`build_connection_context`] so bollard's SSH transport can authenticate
+/// with the stored per-host key.  Stored as `Arc<SecureKeyFile>` inside
+/// [`ConnectionContext::keep_alive`] so the file persists for the full
+/// duration of the operation (including spawned update tasks).
+struct SecureKeyFile {
+    path: PathBuf,
+}
+
+impl Drop for SecureKeyFile {
+    fn drop(&mut self) {
+        // Best-effort cleanup — log on failure but do not panic.
+        if let Err(e) = std::fs::remove_file(&self.path) {
+            tracing::warn!(
+                path = %self.path.display(),
+                error = %e,
+                "failed to remove temporary SSH key file"
+            );
+        }
+    }
+}
+
+// ── Connection context ────────────────────────────────────────────────────────
+
+/// Build a [`ConnectionContext`] for the given SSH host.
+///
+/// Decrypts the host's private key and writes it to a temporary file at
+/// `$TMPDIR/uptrakit-ssh-key-<host_id>` with 0o600 permissions.  The file
+/// is deleted when the last clone of the returned `ConnectionContext` is
+/// dropped (via [`ConnectionContext::keep_alive`]).
+///
+/// The `docker_host_override` is set to `ssh://user@host:port` so bollard
+/// connects to the remote Docker daemon via the system `ssh` binary.  The
+/// `ssh_key_path` is populated with the temporary file path so bollard can
+/// authenticate using the stored key rather than falling back to default
+/// SSH key locations.
+async fn build_connection_context(host: &Model) -> ConnectionContext {
+    let key_path = std::env::temp_dir()
+        .join(format!("uptrakit-ssh-key-{}", host.id.replace('-', "")));
+
+    let pem_bytes = host.private_key.expose_secret().as_bytes().to_vec();
+
+    match uptrakit_directories::write_secure_file(&key_path, &pem_bytes).await {
+        Ok(()) => {
+            let keep: Arc<dyn std::any::Any + Send + Sync> = Arc::new(SecureKeyFile {
+                path: key_path.clone(),
+            });
+            ConnectionContext {
+                docker_host_override: Some(format!(
+                    "ssh://{}@{}:{}",
+                    host.username, host.hostname, host.port
+                )),
+                ssh_key_path: Some(key_path),
+                keep_alive: vec![keep],
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                host_name = %host.name,
+                error = %e,
+                "failed to write temporary SSH key file; Docker operations \
+                 on this host may not work (bollard will fall back to default key locations)"
+            );
+            ConnectionContext {
+                docker_host_override: Some(format!(
+                    "ssh://{}@{}:{}",
+                    host.username, host.hostname, host.port
+                )),
+                ssh_key_path: None,
+                keep_alive: vec![],
+            }
+        }
+    }
+}
+
+// ── ReportHosts ───────────────────────────────────────────────────────────────
 
 /// Connect to each enrolled SSH host, collect system info, and send a
 /// `ReportHosts` message to the controller.
@@ -27,6 +109,7 @@ pub(crate) use uptrakit_agent_core::{InFlightUpdate, UpdateEvent};
 pub(crate) async fn report_enrolled_hosts(
     local_db: &sea_orm::DatabaseConnection,
     conn: &mut ControllerConnection,
+    pool: &SshConnectionPool,
 ) {
     let hosts = match list_hosts(local_db).await {
         Ok(h) => h,
@@ -41,39 +124,18 @@ pub(crate) async fn report_enrolled_hosts(
     for host in &hosts {
         tracing::debug!(host_name = %host.name, hostname = %host.hostname, "collecting host info");
 
-        let config = SshConnectionConfig {
-            hostname: host.hostname.clone(),
-            port: host.port as u16,
-            connect_timeout: Duration::from_secs(10),
-        };
-
-        let private_key_pem = host.private_key.expose_secret();
-        let auth = AuthMethod::PrivateKey(private_key_pem);
-
-        let (session, _fingerprint) = match crate::ssh_transport::connect_and_authenticate(
-            &config,
-            &host.username,
-            &auth,
-            host.host_key_fingerprint.as_deref(),
-        )
-        .await
-        {
-            Ok(result) => result,
+        let session = match pool.acquire(host).await {
+            Ok(s) => s,
             Err(e) => {
                 tracing::warn!(
                     host_name = %host.name,
                     hostname = %host.hostname,
                     error = %e,
-                    "failed to connect to SSH host for reporting, skipping"
+                    "failed to acquire SSH session for reporting, skipping"
                 );
                 continue;
             }
         };
-
-        // Wrap the session in Arc so it can be shared with the SshCommandExecutor.
-        // The executor is dropped at end of the verification block so that
-        // Arc::try_unwrap succeeds later for the disconnect call.
-        let session = Arc::new(session);
 
         // Verify that command execution is available via the CommandExecutor
         // interface before proceeding with host information collection.
@@ -88,8 +150,9 @@ pub(crate) async fn report_enrolled_hosts(
             tracing::warn!(
                 host_name = %host.name,
                 hostname = %host.hostname,
-                "SSH command executor check failed, skipping host"
+                "SSH command executor check failed, evicting session and skipping host"
             );
+            pool.evict(&host.id).await;
             continue;
         }
 
@@ -106,12 +169,6 @@ pub(crate) async fn report_enrolled_hosts(
                 error = %e,
                 "failed to persist machine_id for SSH host"
             );
-        }
-
-        // executor was dropped above so the Arc has exactly one strong
-        // reference; try_unwrap gives us ownership for the disconnect call.
-        if let Ok(owned) = Arc::try_unwrap(session) {
-            owned.disconnect().await;
         }
 
         tracing::debug!(
@@ -153,59 +210,19 @@ pub(crate) fn ssh_agent_capabilities() -> BTreeSet<Capability> {
     .collect()
 }
 
-/// Establish an SSH session for the given host model.
-async fn establish_ssh_session(
-    host: &crate::db::entity::ssh_host::Model,
-) -> Result<Arc<crate::ssh_transport::SshSession>, String> {
-    let config = SshConnectionConfig {
-        hostname: host.hostname.clone(),
-        port: host.port as u16,
-        connect_timeout: Duration::from_secs(30),
-    };
-    let private_key_pem = host.private_key.expose_secret();
-    let auth = AuthMethod::PrivateKey(private_key_pem);
-
-    let (session, _fingerprint) = crate::ssh_transport::connect_and_authenticate(
-        &config,
-        &host.username,
-        &auth,
-        host.host_key_fingerprint.as_deref(),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-
-    Ok(Arc::new(session))
-}
-
-/// Build a `ConnectionContext` for a remote SSH host.
-///
-/// Injects the SSH host's connection details so that the Docker plugin
-/// (when enabled) can point bollard at the remote Docker daemon via SSH.
-fn build_connection_context(host: &crate::db::entity::ssh_host::Model) -> ConnectionContext {
-    ConnectionContext {
-        docker_host_override: Some(format!(
-            "ssh://{}@{}:{}",
-            host.username, host.hostname, host.port
-        )),
-        // The SSH key is stored as PEM in the database; bollard's SSH connector
-        // needs a file path. When ssh_key_path is None, bollard falls back to
-        // the default SSH key locations (SSH_AUTH_SOCK, ~/.ssh/id_ed25519, etc.).
-        // For full support a key file would need to be written to a temp path,
-        // which is left as a future enhancement.
-        ssh_key_path: None,
-    }
-}
+// ── CheckVersions ─────────────────────────────────────────────────────────────
 
 /// Handle a `CheckVersions` message for the SSH agent.
 ///
-/// Looks up the SSH host by `host_machine_id`, opens a session, and delegates
-/// to the shared `uptrakit_agent_core::handle_check_versions()`.
+/// Looks up the SSH host by `host_machine_id`, acquires a pooled session, and
+/// delegates to the shared `uptrakit_agent_core::handle_check_versions()`.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
 pub(crate) async fn handle_check_versions_ssh(
     payload: CheckVersionsPayload,
     db: &sea_orm::DatabaseConnection,
     conn: &mut ControllerConnection,
+    pool: &SshConnectionPool,
 ) -> Option<LoopOutcome> {
     let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
         Ok(Some(h)) => h,
@@ -214,20 +231,10 @@ pub(crate) async fn handle_check_versions_ssh(
                 host_machine_id = %payload.host_machine_id,
                 "no SSH host found for CheckVersions host_machine_id; returning errors"
             );
-            // Send error results for all assignments.
-            let results = payload
-                .assignments
-                .iter()
-                .map(|a| VersionCheckResult {
-                    software_item_id: a.software_item_id,
-                    installed_version: None,
-                    latest_version: None,
-                    error: Some(format!(
-                        "SSH host with machine_id '{}' not found",
-                        payload.host_machine_id
-                    )),
-                })
-                .collect();
+            let results = error_results_for_check(&payload, &format!(
+                "SSH host with machine_id '{}' not found",
+                payload.host_machine_id
+            ));
             conn.send_best_effort(ServiceMessage::VersionCheckResults(
                 VersionCheckResultsPayload { results },
             ))
@@ -240,16 +247,7 @@ pub(crate) async fn handle_check_versions_ssh(
                 error = %e,
                 "DB error looking up SSH host for CheckVersions"
             );
-            let results = payload
-                .assignments
-                .iter()
-                .map(|a| VersionCheckResult {
-                    software_item_id: a.software_item_id,
-                    installed_version: None,
-                    latest_version: None,
-                    error: Some(format!("DB error: {e}")),
-                })
-                .collect();
+            let results = error_results_for_check(&payload, &format!("DB error: {e}"));
             conn.send_best_effort(ServiceMessage::VersionCheckResults(
                 VersionCheckResultsPayload { results },
             ))
@@ -258,24 +256,19 @@ pub(crate) async fn handle_check_versions_ssh(
         }
     };
 
-    let session = match establish_ssh_session(&host).await {
+    let session = match pool.acquire(&host).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(
                 host_name = %host.name,
                 error = %e,
-                "failed to establish SSH session for CheckVersions"
+                "failed to acquire SSH session for CheckVersions"
             );
-            let results = payload
-                .assignments
-                .iter()
-                .map(|a| VersionCheckResult {
-                    software_item_id: a.software_item_id,
-                    installed_version: None,
-                    latest_version: None,
-                    error: Some(format!("SSH connection failed: {e}")),
-                })
-                .collect();
+            pool.evict(&host.id).await;
+            let results = error_results_for_check(
+                &payload,
+                &format!("SSH connection failed: {e}"),
+            );
             conn.send_best_effort(ServiceMessage::VersionCheckResults(
                 VersionCheckResultsPayload { results },
             ))
@@ -284,32 +277,31 @@ pub(crate) async fn handle_check_versions_ssh(
         }
     };
 
-    let ctx = build_connection_context(&host);
+    let ctx = build_connection_context(&host).await;
     let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
         raw,
         host.resolved_sudo_context(),
     ));
 
-    let outcome = uptrakit_agent_core::handle_check_versions(payload, executor, conn, &ctx).await;
-
-    // Disconnect session after version check completes.
-    if let Ok(owned) = Arc::try_unwrap(session) {
-        owned.disconnect().await;
-    }
-
-    outcome
+    // The session Arc is returned to the pool (it stays alive via the pool's own Arc).
+    // If a channel-open error occurred during version checks, the session may be stale;
+    // the pool will detect this on the next acquire via TTL.
+    uptrakit_agent_core::handle_check_versions(payload, executor, conn, &ctx).await
 }
+
+// ── ExecuteUpdate ─────────────────────────────────────────────────────────────
 
 /// Handle an `ExecuteUpdate` message for the SSH agent.
 ///
-/// Looks up the SSH host by `host_machine_id`, opens a session, and delegates
-/// to the shared `uptrakit_agent_core::handle_execute_update()`.
+/// Looks up the SSH host by `host_machine_id`, acquires a pooled session, and
+/// delegates to the shared `uptrakit_agent_core::handle_execute_update()`.
 pub(crate) async fn handle_execute_update_ssh(
     payload: ExecuteUpdatePayload,
     db: &sea_orm::DatabaseConnection,
     in_flight_update: &mut Option<InFlightUpdate>,
     conn: &mut ControllerConnection,
+    pool: &SshConnectionPool,
 ) {
     let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
         Ok(Some(h)) => h,
@@ -353,15 +345,16 @@ pub(crate) async fn handle_execute_update_ssh(
         }
     };
 
-    let session = match establish_ssh_session(&host).await {
+    let session = match pool.acquire(&host).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(
                 host_name = %host.name,
                 update_id = %payload.update_history_id,
                 error = %e,
-                "failed to establish SSH session for ExecuteUpdate"
+                "failed to acquire SSH session for ExecuteUpdate"
             );
+            pool.evict(&host.id).await;
             conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
                 update_history_id: payload.update_history_id,
                 status: UpdateFinalStatus::Failed,
@@ -375,11 +368,12 @@ pub(crate) async fn handle_execute_update_ssh(
         }
     };
 
-    let ctx = build_connection_context(&host);
+    let ctx = build_connection_context(&host).await;
 
-    // The session is kept alive for the duration of the update via the
-    // SshCommandExecutor Arc. The session will be disconnected when the
-    // executor is dropped after update completion.
+    // The session Arc is shared with the executor that travels into the spawned
+    // update task, keeping the SSH connection alive for the duration of the
+    // update.  The pool's own Arc remains so the session is returned to the
+    // pool after the task completes.
     let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
         raw,
@@ -388,26 +382,21 @@ pub(crate) async fn handle_execute_update_ssh(
 
     uptrakit_agent_core::handle_execute_update(payload, executor, in_flight_update, conn, &ctx)
         .await;
-
-    // Note: the SSH session remains open while the update is in-flight.
-    // It is disconnected when the executor is dropped after the spawned task
-    // completes. This is safe because SshCommandExecutor holds an Arc<SshSession>.
-    // We intentionally do NOT try_unwrap here since the executor Arc was moved
-    // into the spawned task.
 }
+
+// ── DiscoverSoftware ──────────────────────────────────────────────────────────
 
 /// Handle a `DiscoverSoftware` message for the SSH agent.
 ///
-/// Looks up the SSH host by `host_machine_id`, opens a session, and delegates
-/// to the shared `uptrakit_agent_core::handle_discover_software()`. SSH
-/// connection failures are reported as per-plugin errors rather than
-/// aborting the entire run.
+/// Looks up the SSH host by `host_machine_id`, acquires a pooled session, and
+/// delegates to the shared `uptrakit_agent_core::handle_discover_software()`.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
 pub(crate) async fn handle_discover_software_ssh(
     payload: DiscoverSoftwarePayload,
     db: &sea_orm::DatabaseConnection,
     conn: &mut ControllerConnection,
+    pool: &SshConnectionPool,
 ) -> Option<LoopOutcome> {
     let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
         Ok(Some(h)) => h,
@@ -416,19 +405,10 @@ pub(crate) async fn handle_discover_software_ssh(
                 host_machine_id = %payload.host_machine_id,
                 "no SSH host found for DiscoverSoftware host_machine_id; returning errors"
             );
-            let results = payload
-                .plugins
-                .iter()
-                .map(|a| DiscoveryPluginResult {
-                    plugin_config_id: a.plugin_config_id,
-                    plugin_type: a.plugin_type.clone(),
-                    discoveries: vec![],
-                    error: Some(format!(
-                        "SSH host with machine_id '{}' not found",
-                        payload.host_machine_id
-                    )),
-                })
-                .collect();
+            let results = error_results_for_discovery(&payload, &format!(
+                "SSH host with machine_id '{}' not found",
+                payload.host_machine_id
+            ));
             conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
                 host_machine_id: payload.host_machine_id,
                 results,
@@ -442,16 +422,7 @@ pub(crate) async fn handle_discover_software_ssh(
                 error = %e,
                 "DB error looking up SSH host for DiscoverSoftware"
             );
-            let results = payload
-                .plugins
-                .iter()
-                .map(|a| DiscoveryPluginResult {
-                    plugin_config_id: a.plugin_config_id,
-                    plugin_type: a.plugin_type.clone(),
-                    discoveries: vec![],
-                    error: Some(format!("DB error: {e}")),
-                })
-                .collect();
+            let results = error_results_for_discovery(&payload, &format!("DB error: {e}"));
             conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
                 host_machine_id: payload.host_machine_id,
                 results,
@@ -461,24 +432,19 @@ pub(crate) async fn handle_discover_software_ssh(
         }
     };
 
-    let session = match establish_ssh_session(&host).await {
+    let session = match pool.acquire(&host).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(
                 host_name = %host.name,
                 error = %e,
-                "failed to establish SSH session for DiscoverSoftware"
+                "failed to acquire SSH session for DiscoverSoftware"
             );
-            let results = payload
-                .plugins
-                .iter()
-                .map(|a| DiscoveryPluginResult {
-                    plugin_config_id: a.plugin_config_id,
-                    plugin_type: a.plugin_type.clone(),
-                    discoveries: vec![],
-                    error: Some(format!("SSH connection failed: {e}")),
-                })
-                .collect();
+            pool.evict(&host.id).await;
+            let results = error_results_for_discovery(
+                &payload,
+                &format!("SSH connection failed: {e}"),
+            );
             conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
                 host_machine_id: payload.host_machine_id,
                 results,
@@ -488,23 +454,54 @@ pub(crate) async fn handle_discover_software_ssh(
         }
     };
 
-    let ctx = build_connection_context(&host);
+    let ctx = build_connection_context(&host).await;
     let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
         raw,
         host.resolved_sudo_context(),
     ));
 
-    let outcome =
-        uptrakit_agent_core::handle_discover_software(payload, executor, conn, &ctx).await;
-
-    if let Ok(owned) = Arc::try_unwrap(session) {
-        owned.disconnect().await;
-    }
-
-    outcome
+    uptrakit_agent_core::handle_discover_software(payload, executor, conn, &ctx).await
 }
+
+// ── Shared re-exports ─────────────────────────────────────────────────────────
 
 pub(crate) use uptrakit_agent_core::{
     handle_graceful_shutdown, send_update_output, send_update_result,
 };
+
+// ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Build per-assignment error results for a failed `CheckVersions` message.
+fn error_results_for_check(
+    payload: &CheckVersionsPayload,
+    error: &str,
+) -> Vec<VersionCheckResult> {
+    payload
+        .assignments
+        .iter()
+        .map(|a| VersionCheckResult {
+            software_item_id: a.software_item_id,
+            installed_version: None,
+            latest_version: None,
+            error: Some(error.to_string()),
+        })
+        .collect()
+}
+
+/// Build per-plugin error results for a failed `DiscoverSoftware` message.
+fn error_results_for_discovery(
+    payload: &DiscoverSoftwarePayload,
+    error: &str,
+) -> Vec<DiscoveryPluginResult> {
+    payload
+        .plugins
+        .iter()
+        .map(|a| DiscoveryPluginResult {
+            plugin_config_id: a.plugin_config_id,
+            plugin_type: a.plugin_type.clone(),
+            discoveries: vec![],
+            error: Some(error.to_string()),
+        })
+        .collect()
+}
