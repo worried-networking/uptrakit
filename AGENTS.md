@@ -302,8 +302,11 @@ for user review. Key invariants:
         (only `tag_strip_prefix`, `include_prereleases`, `asset_patterns`), and
         `package_identifier: Some("owner/repo")` override.
      2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]`, config with
-        `version_command` (`cat -- "${HOME}/.{package_identifier}"`) and
-        `update_command` (`env PHS_SILENT=1 /usr/bin/update`).
+        `version_command` (`sudo cat -- /root/.{package_identifier}`) and
+        `update_command` (`env PHS_SILENT=1 /usr/bin/update`). `sudo` is embedded
+        in the version command because the Shell plugin uses `CommandSpec::shell()`,
+        where the `privileged` flag has no effect. The `cat` sudoers entry is
+        declared by `ProxmoxHelperScriptsPlugin::required_sudo_commands()`.
      The PHS shell constants live in `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`.
    - APT-managed apps emit a `DiscoveryTarget` with `plugin_type: PackageManagerApt`, empty config `{}`, and
      name `"APT (auto)"`.
