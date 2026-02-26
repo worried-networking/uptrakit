@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{
-    DiscoveredSoftware, HookShell, MqttClientConnectionStatus, MqttTransport, OutputStreamType,
-    PluginRole, PluginType, ReleaseAsset, ReleaseInfo,
+    DiscoveredSoftware, DiscoveryTarget, HookShell, MqttClientConnectionStatus, MqttTransport,
+    OutputStreamType, PluginRole, PluginType, ReleaseAsset, ReleaseInfo,
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
@@ -3123,6 +3123,7 @@ mod tests {
                         package_identifier: "wget".to_string(),
                         name: "Wget".to_string(),
                         installed_version: "1.21.4".to_string(),
+                        targets: vec![],
                         extra: Some(serde_json::json!({"package_type": "formula"})),
                     }],
                     error: None,
@@ -3190,6 +3191,7 @@ mod tests {
                         package_identifier: "wget".to_string(),
                         name: "Wget".to_string(),
                         installed_version: "1.21.4".to_string(),
+                        targets: vec![],
                         extra: None,
                     }],
                     error: None,

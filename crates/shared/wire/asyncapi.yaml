@@ -2420,15 +2420,69 @@ components:
           description: Currently installed version string
           examples:
             - "1.21.4"
+        targets:
+          type: array
+          description: >
+            Target plugin configurations for managing this item.
+            Empty = use the discovering plugin's own config for all roles.
+          items:
+            $ref: "#/components/schemas/discoveryTarget"
+          default: []
         extra:
           type: object
-          description: |
-            Optional provider-specific metadata. Content depends on the provider:
-            - Homebrew: {"package_type":"formula"} or {"package_type":"cask"}
-            - Docker: {"containers":["name1","name2"]}
-            - proxmox_helper_scripts (GitHub-managed app): {"github_owner":"fosrl","github_repo":"pangolin"}
-            - proxmox_helper_scripts (APT-managed app): {"apt_package":"grafana"}
+          description: >
+            Optional informational metadata (not used for config synthesis).
+            Example: Docker's {"containers": ["web-server"]}.
           nullable: true
+
+    discoveryTarget:
+      type: object
+      required:
+        - plugin_type
+        - plugin_config
+        - plugin_config_name
+        - roles
+      properties:
+        plugin_type:
+          type: string
+          description: Target plugin type (may differ from the discovering plugin)
+          examples:
+            - github_releases
+            - apt
+        plugin_config:
+          type: object
+          description: Config JSON for find-or-create of the target plugin config
+        plugin_config_name:
+          type: string
+          description: Display name for auto-created plugin config
+          examples:
+            - "BookLore/BookLore"
+            - "APT (auto)"
+        roles:
+          type: array
+          items:
+            type: string
+          description: Which roles this target covers
+          examples:
+            - - detect_version
+              - fetch_releases
+              - execute_update
+        package_identifier:
+          type: string
+          description: Package identifier override (null = same as parent DiscoveredSoftware)
+          nullable: true
+        config_override:
+          type: object
+          description: Per-assignment config override
+          nullable: true
+        execution_site:
+          type: string
+          description: "Execution site hint: auto, agent, or controller"
+          nullable: true
+          enum:
+            - auto
+            - agent
+            - controller
 
     discoveryPluginAssignment:
       type: object
