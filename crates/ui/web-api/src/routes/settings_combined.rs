@@ -15,21 +15,19 @@ use uptrakit_web_api_types::agents::EnrollmentTokenStatusResponse;
 use uptrakit_web_api_types::settings::RegistrationSettingsResponse;
 use uptrakit_web_api_types::settings_agent_certs::AgentCertificateSettingsResponse;
 use uptrakit_web_api_types::settings_auth::AuthenticationSettingsResponse;
-use uptrakit_web_api_types::settings_combined::{
-    CombinedSettingsResponse, EnrollmentTokenStatusesResponse,
-};
+use uptrakit_web_api_types::settings_combined::CombinedSettingsResponse;
 
 fn build_combined_settings_response(
     registration: RegistrationSettingsResponse,
     authentication: AuthenticationSettingsResponse,
     agent_certificates: AgentCertificateSettingsResponse,
-    enrollment_tokens: EnrollmentTokenStatusesResponse,
+    enrollment_token: EnrollmentTokenStatusResponse,
 ) -> CombinedSettingsResponse {
     CombinedSettingsResponse {
         registration,
         authentication,
         agent_certificates,
-        enrollment_tokens,
+        enrollment_token,
     }
 }
 
@@ -66,7 +64,7 @@ pub async fn get_combined_settings(
         renewal_window_hours: state.settings.renewal_window_hours(),
     };
 
-    let agent_configured = matches!(
+    let configured = matches!(
         load_setting(
             state.db(),
             state.default_tenant_id,
@@ -75,41 +73,13 @@ pub async fn get_combined_settings(
         .await,
         Ok(Some(_))
     );
-    let mqtt_configured = matches!(
-        load_setting(
-            state.db(),
-            state.default_tenant_id,
-            SettingKey::MqttEnrollmentTokenHash
-        )
-        .await,
-        Ok(Some(_))
-    );
-    let ssh_agent_configured = matches!(
-        load_setting(
-            state.db(),
-            state.default_tenant_id,
-            SettingKey::SshAgentEnrollmentTokenHash
-        )
-        .await,
-        Ok(Some(_))
-    );
-    let enrollment_tokens = EnrollmentTokenStatusesResponse {
-        agent: EnrollmentTokenStatusResponse {
-            configured: agent_configured,
-        },
-        mqtt: EnrollmentTokenStatusResponse {
-            configured: mqtt_configured,
-        },
-        ssh_agent: EnrollmentTokenStatusResponse {
-            configured: ssh_agent_configured,
-        },
-    };
+    let enrollment_token = EnrollmentTokenStatusResponse { configured };
 
     let response = build_combined_settings_response(
         registration,
         authentication,
         agent_certificates,
-        enrollment_tokens,
+        enrollment_token,
     );
 
     (StatusCode::OK, Json(response)).into_response()
@@ -117,12 +87,11 @@ pub async fn get_combined_settings(
 
 #[cfg(test)]
 mod tests {
-    use crate::auth::registration::RegistrationMode;
     use uptrakit_web_api_types::agents::EnrollmentTokenStatusResponse;
     use uptrakit_web_api_types::settings::RegistrationSettingsResponse;
     use uptrakit_web_api_types::settings_agent_certs::AgentCertificateSettingsResponse;
-    use uptrakit_web_api_types::settings_auth::AuthenticationSettingsResponse;
-    use uptrakit_web_api_types::settings_combined::EnrollmentTokenStatusesResponse;
+
+    use crate::auth::registration::RegistrationMode;
 
     use super::build_combined_settings_response;
 
@@ -132,24 +101,20 @@ mod tests {
             mode: RegistrationMode::Invite,
             require_token_for_oidc: true,
         };
-        let authentication = AuthenticationSettingsResponse {
+        let authentication = uptrakit_web_api_types::settings_auth::AuthenticationSettingsResponse {
             password_auth_enabled: false,
         };
         let agent_certificates = AgentCertificateSettingsResponse {
             lifetime_days: 14,
             renewal_window_hours: 9,
         };
-        let enrollment_tokens = EnrollmentTokenStatusesResponse {
-            agent: EnrollmentTokenStatusResponse { configured: true },
-            mqtt: EnrollmentTokenStatusResponse { configured: false },
-            ssh_agent: EnrollmentTokenStatusResponse { configured: true },
-        };
+        let enrollment_token = EnrollmentTokenStatusResponse { configured: true };
 
         let combined = build_combined_settings_response(
             registration,
             authentication,
             agent_certificates,
-            enrollment_tokens,
+            enrollment_token,
         );
 
         assert_eq!(combined.registration.mode, RegistrationMode::Invite);
@@ -157,8 +122,6 @@ mod tests {
         assert!(!combined.authentication.password_auth_enabled);
         assert_eq!(combined.agent_certificates.lifetime_days, 14);
         assert_eq!(combined.agent_certificates.renewal_window_hours, 9);
-        assert!(combined.enrollment_tokens.agent.configured);
-        assert!(!combined.enrollment_tokens.mqtt.configured);
-        assert!(combined.enrollment_tokens.ssh_agent.configured);
+        assert!(combined.enrollment_token.configured);
     }
 }

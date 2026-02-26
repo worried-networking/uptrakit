@@ -54,6 +54,8 @@ pub(crate) struct EnrollParams<'a> {
     pub friendly_name: &'a str,
     pub enrollment_token: Option<&'a str>,
     pub ip_address: Option<IpAddr>,
+    /// Serialized JSON capability set for the new service.
+    pub capabilities_json: String,
 }
 
 /// Core enrollment logic: creates agent record, returns model + plaintext secret.
@@ -70,6 +72,7 @@ pub(crate) async fn do_enroll(
         friendly_name,
         enrollment_token,
         ip_address,
+        capabilities_json,
     } = params;
     if hostname.trim().is_empty() {
         bail!(AgentRouteError::BadRequest(
@@ -140,7 +143,7 @@ pub(crate) async fn do_enroll(
     let model = service::ActiveModel {
         id: Set(agent_id),
         tenant_id: Set(tenant_id),
-        service_type: Set(service::ServiceType::Agent),
+        capabilities: Set(capabilities_json),
         hostname: Set(hostname.to_string()),
         friendly_name: Set(friendly_name.to_string()),
         ip_address: Set(ip_str.clone()),

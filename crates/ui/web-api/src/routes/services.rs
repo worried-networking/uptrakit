@@ -18,23 +18,8 @@ use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::services::{
     EnrollmentTokenResponse, EnrollmentTokenStatusResponse, ListServicesQuery, MergeAgentRequest,
-    MessageResponse, ServiceResponse, ServiceStatus, ServiceType, UpdateServiceRequest,
+    MessageResponse, ServiceResponse, ServiceStatus, UpdateServiceRequest,
 };
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Determine the correct `SettingKey` for the enrollment token hash based on
-/// the `type` query parameter.
-fn enrollment_setting_key(type_param: Option<&ServiceType>) -> SettingKey {
-    match type_param {
-        Some(ServiceType::Mqtt) => SettingKey::MqttEnrollmentTokenHash,
-        Some(ServiceType::SshAgent) => SettingKey::SshAgentEnrollmentTokenHash,
-        Some(ServiceType::Agent) | None => SettingKey::EnrollmentTokenHash,
-        Some(_) => SettingKey::EnrollmentTokenHash,
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Endpoints
@@ -45,7 +30,7 @@ fn enrollment_setting_key(type_param: Option<&ServiceType>) -> SettingKey {
     get,
     path = "/api/v1/services",
     params(
-        ("type" = Option<String>, Query, description = "Filter by service type (agent, mqtt)"),
+        ("capability" = Option<String>, Query, description = "Filter by capability (software_discovery, mqtt_bridge, ssh_remote)"),
         ("status" = Option<String>, Query, description = "Filter by status (pending, approved, rejected, deactivated)"),
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
@@ -382,10 +367,10 @@ pub async fn merge_service(
                 "Target service is currently connected",
             );
         }
-        Err(ServiceQueryError::NotAgentType) => {
+        Err(ServiceQueryError::NotMergeable) => {
             return error_response(
                 StatusCode::BAD_REQUEST,
-                "Merge is only supported for agent services",
+                "Merge requires SoftwareDiscovery capability",
             );
         }
         Err(ServiceQueryError::NotApproved) => {
@@ -416,9 +401,6 @@ pub async fn merge_service(
 #[utoipa::path(
     post,
     path = "/api/v1/services/enrollment-token",
-    params(
-        ("type" = Option<String>, Query, description = "Service type (agent, mqtt). Defaults to agent.")
-    ),
     responses(
         (status = 201, description = "Enrollment token generated", body = EnrollmentTokenResponse),
         (status = 401, description = "Not authenticated"),
@@ -431,9 +413,8 @@ pub async fn merge_service(
 pub async fn create_enrollment_token(
     State(state): State<Arc<AppState>>,
     CanManageAgents(_user): CanManageAgents,
-    Query(query): Query<ListServicesQuery>,
 ) -> Response {
-    let setting_key = enrollment_setting_key(query.r#type.as_ref());
+    let setting_key = SettingKey::EnrollmentTokenHash;
 
     let plaintext = match token::generate_secure_token() {
         Ok(t) => t,
@@ -476,9 +457,6 @@ pub async fn create_enrollment_token(
 #[utoipa::path(
     delete,
     path = "/api/v1/services/enrollment-token",
-    params(
-        ("type" = Option<String>, Query, description = "Service type (agent, mqtt). Defaults to agent.")
-    ),
     responses(
         (status = 200, description = "Enrollment token revoked", body = MessageResponse),
         (status = 401, description = "Not authenticated"),
@@ -491,11 +469,14 @@ pub async fn create_enrollment_token(
 pub async fn revoke_enrollment_token(
     State(state): State<Arc<AppState>>,
     CanManageAgents(_user): CanManageAgents,
-    Query(query): Query<ListServicesQuery>,
 ) -> Response {
-    let setting_key = enrollment_setting_key(query.r#type.as_ref());
-
-    if let Err(e) = delete_setting(state.db(), state.default_tenant_id, setting_key).await {
+    if let Err(e) = delete_setting(
+        state.db(),
+        state.default_tenant_id,
+        SettingKey::EnrollmentTokenHash,
+    )
+    .await
+    {
         tracing::error!("Failed to delete enrollment token: {:?}", e);
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
@@ -513,9 +494,6 @@ pub async fn revoke_enrollment_token(
 #[utoipa::path(
     get,
     path = "/api/v1/services/enrollment-token/status",
-    params(
-        ("type" = Option<String>, Query, description = "Service type (agent, mqtt). Defaults to agent.")
-    ),
     responses(
         (status = 200, description = "Enrollment token status", body = EnrollmentTokenStatusResponse),
         (status = 401, description = "Not authenticated"),
@@ -528,12 +506,14 @@ pub async fn revoke_enrollment_token(
 pub async fn enrollment_token_status(
     State(state): State<Arc<AppState>>,
     CanManageAgents(_user): CanManageAgents,
-    Query(query): Query<ListServicesQuery>,
 ) -> Response {
-    let setting_key = enrollment_setting_key(query.r#type.as_ref());
-
     let configured = matches!(
-        load_setting(state.db(), state.default_tenant_id, setting_key).await,
+        load_setting(
+            state.db(),
+            state.default_tenant_id,
+            SettingKey::EnrollmentTokenHash
+        )
+        .await,
         Ok(Some(_))
     );
 
@@ -702,6 +682,16 @@ mod tests {
         })
     }
 
+    fn agent_caps_json() -> String {
+        use std::collections::BTreeSet;
+        use uptrakit_internal_wire::Capability;
+        crate::service_profile::serialize_capabilities(&BTreeSet::from([
+            Capability::GracefulShutdown,
+            Capability::SoftwareDiscovery,
+            Capability::UpdateHooks,
+        ]))
+    }
+
     /// Helper: insert a pair of test services (approved target + pending source).
     async fn insert_target_and_source(
         db: &DatabaseConnection,
@@ -711,7 +701,7 @@ mod tests {
         let target = service::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
             tenant_id: Set(tenant_id),
-            service_type: Set(service::ServiceType::Agent),
+            capabilities: Set(agent_caps_json()),
             hostname: Set("target-host".to_string()),
             friendly_name: Set("Target".to_string()),
             ip_address: Set(None),
@@ -729,7 +719,7 @@ mod tests {
         let source = service::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
             tenant_id: Set(tenant_id),
-            service_type: Set(service::ServiceType::Agent),
+            capabilities: Set(agent_caps_json()),
             hostname: Set("source-host".to_string()),
             friendly_name: Set("Source".to_string()),
             ip_address: Set(None),
@@ -758,7 +748,19 @@ mod tests {
         let (target, source) = insert_target_and_source(&db, tenant_id).await;
 
         // Register the target as connected — merge must be rejected before any DB changes.
-        let (_rx, _token) = state.service_connections.register_agent(target.id).await;
+        let caps = {
+            use std::collections::BTreeSet;
+            use uptrakit_internal_wire::Capability;
+            BTreeSet::from([
+                Capability::GracefulShutdown,
+                Capability::SoftwareDiscovery,
+                Capability::UpdateHooks,
+            ])
+        };
+        let (_rx, _token) = state
+            .service_connections
+            .register(target.id, caps, None, None)
+            .await;
 
         let auth_user = AuthenticatedUser {
             user_id: uuid::Uuid::now_v7(),
