@@ -160,8 +160,14 @@ These endpoints trigger granular per-item version checks. Both require the `Mana
 
 ### `POST /api/v1/software-items/{id}/check-versions`
 
-Trigger a version check for a specific software item across all assigned hosts. The controller identifies all
-hosts linked to the item, resolves their agents, and sends `CheckVersions` wire messages.
+Trigger a version check for a specific software item across all assigned hosts. The controller resolves the
+`execution_site` for each host's plugin assignments and routes work accordingly:
+
+- **Controller-side** (`execution_site = "controller"`, or `"auto"` with `ControllerSideFetchReleases` capability
+  — e.g. GitHub Releases, Docker Registry): `fetch_releases` runs directly on the controller. The
+  `host_software_items` table is updated immediately and MQTT states are pushed to connected clients.
+- **Agent-side** (`execution_site = "agent"`, or `"auto"` without the controller capability): a `CheckVersions`
+  wire message is sent to the host's agent.
 
 **Path parameters**: `id` — software item UUID.
 
@@ -169,20 +175,21 @@ hosts linked to the item, resolves their agents, and sends `CheckVersions` wire 
 
 ```json
 {
-  "agents_notified": 3,
-  "message": "Version check triggered for 3 agent(s)"
+  "agents_notified": 2,
+  "controller_checks_run": 1,
+  "message": "Version check triggered for 2 agent(s), 1 controller-side check(s) run"
 }
 ```
 
 **Error responses**:
 
 - `404` — software item not found or not active.
-- `404` — no hosts assigned to the software item.
+- `404` — no hosts assigned to the software item, or no applicable plugin assignments found.
 
 ### `POST /api/v1/software-items/{id}/hosts/{host_id}/check-versions`
 
-Trigger a version check for a specific software item on a specific host. Validates the item-host link and sends
-a `CheckVersions` message to the host's agent.
+Trigger a version check for a specific software item on a specific host. Resolves `execution_site` for all
+plugin assignments on the host and routes work the same way as the bulk endpoint above.
 
 **Path parameters**: `id` — software item UUID, `host_id` — host UUID.
 
@@ -190,8 +197,9 @@ a `CheckVersions` message to the host's agent.
 
 ```json
 {
-  "agents_notified": 1,
-  "message": "Version check triggered for 1 agent(s)"
+  "agents_notified": 0,
+  "controller_checks_run": 1,
+  "message": "Controller-side check completed"
 }
 ```
 
@@ -200,7 +208,7 @@ a `CheckVersions` message to the host's agent.
 - `404` — software item not found or not active.
 - `404` — host not found.
 - `404` — host is not assigned to this software item.
-- `404` — no agent found for this host.
+- `404` — no agent found for host and no controller-side plugins are configured.
 
 ### Response types
 
@@ -208,7 +216,7 @@ Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
 
 | Type | Fields |
 | --- | --- |
-| `TriggerVersionCheckResponse` | `agents_notified` (u32), `message` (String) |
+| `TriggerVersionCheckResponse` | `agents_notified` (u32), `controller_checks_run` (u32, default `0`), `message` (String) |
 | `SoftwareItemResponse` | `id`, `name`, `plugins` (Vec&lt;String&gt; -- distinct plugin types), `enabled`, `discovery_state`, `last_checked_at`, `host_count`, `latest_version` (Option), `update_available`, `created_at`, `updated_at` |
 | `SoftwareItemDetailResponse` | Extends `SoftwareItemResponse` with `hosts: Vec<SoftwareItemHostSummary>` |
 | `SoftwareItemHostSummary` | `host_id`, `hostname`, `friendly_name`, `plugins` (Vec&lt;HostPluginRoleSummary&gt;), `installed_version`, `installed_version_detected_at`, `latest_version` (Option), `latest_release_metadata` (Option), `update_available`, `last_updated_at`, `linked_at` |
@@ -221,10 +229,13 @@ Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
 
 **`latest_version` and `update_available`** are populated by the controller at read time:
 
-- `latest_version` is stored per-host on `host_software_items.latest_version`. It is populated by
-  agent-side `fetch_releases` plugins (Homebrew, APT) during the `VersionCheckResults` WebSocket
-  handler, and by the controller scheduler for controller-side `fetch_releases` plugins (GitHub
-  Releases, Docker Registry). `null` when no upstream version has been resolved yet.
+- `latest_version` is stored per-host on `host_software_items.latest_version`. It is populated by:
+  - Agent-side `fetch_releases` plugins (Homebrew, APT) via the `VersionCheckResults` WebSocket handler.
+  - The controller scheduler's Phase A for controller-side plugins (GitHub Releases, Docker Registry).
+  - The manual `check-versions` endpoints when a plugin's `execution_site` routes to the controller
+    (either explicitly `"controller"`, or `"auto"` with `ControllerSideFetchReleases` capability).
+
+  `null` when no upstream version has been resolved yet.
 - At the item level (`SoftwareItemResponse`), `latest_version` is derived as the maximum across all
   hosts' per-host `latest_version` values.
 - `update_available` at the item level is `true` if any assigned host has an `installed_version`
