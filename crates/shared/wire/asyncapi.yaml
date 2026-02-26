@@ -2531,6 +2531,6 @@ components:
             - machine-abc-123
         results:
           type: array
-          description: Per-provider discovery results
+          description: Per-plugin discovery results
           items:
-            $ref: "#/components/schemas/discoveryProviderResult"
+            $ref: "#/components/schemas/discoveryPluginResult"
