@@ -3,7 +3,7 @@ use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageHosts, CanManageSoftware, CanViewHosts};
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::hosts as host_queries;
-use crate::routes::service_handler::trigger_discovery_for_agent_host;
+use crate::routes::service_ws::trigger_discovery_for_agent_host;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,

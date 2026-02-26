@@ -26,8 +26,3 @@ pub mod settings_network;
 pub mod software_items;
 pub mod system_alerts;
 pub mod update_history;
-
-// Unified capability-gated WebSocket handler. Replaces the former per-service-type
-// modules (agent_ws, mqtt_ws, ssh_agent_ws) with a single module that dispatches
-// based on persisted capabilities.
-pub(crate) mod service_handler;

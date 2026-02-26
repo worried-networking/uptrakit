@@ -35,9 +35,10 @@ use uptrakit_shared_db::entity::{
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqttClientConnectionStatus;
 
-use super::service_ws::{
-    MessageRateLimiter, WS_MESSAGE_RATE_LIMIT, WS_MESSAGE_RATE_WINDOW, close_with_reason,
-    deserialize_service_msg, record_service_activity, send_pong, serialize_controller_msg,
+use super::protocol::{
+    AuthenticatedContext, MessageRateLimiter, WS_MESSAGE_RATE_LIMIT, WS_MESSAGE_RATE_WINDOW,
+    close_with_reason, deserialize_service_msg, record_service_activity, send_pong,
+    serialize_controller_msg,
 };
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
@@ -104,9 +105,9 @@ pub(crate) async fn handle_authenticated_loop(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
-    ctx: super::service_ws::AuthenticatedContext<'_>,
+    ctx: AuthenticatedContext<'_>,
 ) {
-    let super::service_ws::AuthenticatedContext {
+    let AuthenticatedContext {
         service_id,
         cert,
         last_seen_at,

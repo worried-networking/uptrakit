@@ -1,13 +1,9 @@
 mod connection;
+pub(crate) mod handler;
 mod protocol;
 
-// Re-export protocol items used by service_handler and other modules.
-pub(crate) use protocol::{
-    AuthenticatedContext, MessageRateLimiter, ServiceWsError, ServiceWsResult,
-    WS_MESSAGE_RATE_LIMIT, WS_MESSAGE_RATE_WINDOW, close_with_reason, deserialize_service_msg,
-    record_service_activity, send_pong, serialize_controller_msg,
-};
-use protocol::ConnectionType;
+pub(crate) use handler::trigger_discovery_for_agent_host;
+use protocol::{ConnectionType, ServiceWsError, ServiceWsResult};
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -35,7 +31,7 @@ use crate::extract::{ClientIp, ServiceIdentity};
 ///
 /// Determines the connection type (Authenticated / Enrolled / Anonymous) and
 /// dispatches to the unified capability-gated handler in
-/// [`super::service_handler`].
+/// [`handler`].
 ///
 /// Per-IP rate limiting is applied before the WebSocket upgrade to prevent
 /// connection floods and brute-force bearer secret guessing.
@@ -209,10 +205,16 @@ async fn handle_connection(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use sea_orm::{
-        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Set,
+    use super::protocol::{
+        MessageRateLimiter, ServiceWsError, WS_MESSAGE_RATE_WINDOW, deserialize_service_msg,
+        record_service_activity,
     };
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
+        EntityTrait, Set,
+    };
+    use uptrakit_internal_wire::IncomingSeq;
+    use uptrakit_shared_db::entity::service as service_entity;
 
     #[test]
     fn deserialize_unknown_type_returns_none() {

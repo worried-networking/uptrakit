@@ -221,7 +221,7 @@ pub(super) async fn handle_authenticated(
         out_seq,
         in_seq,
     };
-    crate::routes::service_handler::handle_authenticated_loop(
+    super::handler::handle_authenticated_loop(
         &mut sink,
         &mut stream,
         &state,
@@ -291,7 +291,7 @@ pub(super) async fn handle_enrolled(
     }
 
     // Dispatch to unified enrolled loop.
-    crate::routes::service_handler::handle_enrolled_loop(
+    super::handler::handle_enrolled_loop(
         &mut sink,
         &mut stream,
         &state,
@@ -389,7 +389,7 @@ pub(super) async fn handle_anonymous(
     };
 
     // Dispatch to unified enrolled loop.
-    crate::routes::service_handler::handle_enrolled_loop(
+    super::handler::handle_enrolled_loop(
         &mut sink,
         &mut stream,
         &state,
