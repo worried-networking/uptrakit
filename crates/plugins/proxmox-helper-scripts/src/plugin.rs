@@ -8,22 +8,25 @@ use uptrakit_plugin_core::{
 
 use crate::config::ProxmoxHelperScriptsConfig;
 use crate::discovery::{
-    PHS_DETECT_VERSION_CMD, PHS_INSTALL_CMD, PHS_INSTALL_URL_PREFIX, UPDATE_SCRIPT_PATH,
-    analyze_phs_script, extract_apt_package_candidates, parse_phs_scripts, parse_version_file,
-    slug_to_display_name,
+    UPDATE_SCRIPT_PATH, analyze_phs_script, extract_apt_package_candidates, parse_phs_scripts,
+    parse_version_file, slug_to_display_name,
 };
+
+/// Shell command to detect the installed version of a GitHub-managed PHS app.
+///
+/// `{package_identifier}` is the PHS slug (shell-escaped at runtime by the
+/// Shell plugin's `detect_installed_version()` implementation).
+const PHS_DETECT_VERSION_CMD: &str = r#"cat -- "${HOME}/.{package_identifier}""#;
+
+/// Install command for PHS-managed apps.
+///
+/// Uses the unattended mode (`PHS_SILENT=1`) exactly as the official
+/// `update-apps.sh` PVE tool does via `pct exec`, so the update runs without
+/// interactive prompts and without requiring a network fetch of the script.
+const PHS_INSTALL_CMD: &str = "env PHS_SILENT=1 /usr/bin/update";
 
 /// Capabilities: discovery only — no release-index refresh needed.
 const CAPABILITIES: &[PluginCapability] = &[PluginCapability::DiscoverLocalSoftware];
-
-/// All three standard plugin roles.
-fn all_roles() -> Vec<PluginRole> {
-    vec![
-        PluginRole::DetectVersion,
-        PluginRole::FetchReleases,
-        PluginRole::ExecuteUpdate,
-    ]
-}
 
 /// Plugin for Proxmox Helper Scripts (discovery-only).
 ///
@@ -33,8 +36,10 @@ fn all_roles() -> Vec<PluginRole> {
 ///    to determine whether the app is GitHub-managed or APT-managed.
 /// 3. Emitting `DiscoveredSoftware` items with structured `targets` that tell
 ///    the controller exactly which plugin configs to create:
-///    - GitHub-managed → `DiscoveryTarget` with `GithubReleases` plugin type
-///    - APT-managed → `DiscoveryTarget` with `Apt` plugin type
+///    - GitHub-managed → two `DiscoveryTarget`s: one `GithubReleases`
+///      (FetchReleases only, with `owner/repo` as `package_identifier`) and
+///      one `Shell` (DetectVersion + ExecuteUpdate using PHS conventions).
+///    - APT-managed → one `DiscoveryTarget` with `Apt` plugin type.
 ///
 /// The controller processes targets generically without any PHS-specific logic.
 pub struct ProxmoxHelperScriptsPlugin {
@@ -112,21 +117,39 @@ impl ProxmoxHelperScriptsPlugin {
         if v.is_empty() { None } else { Some(v) }
     }
 
-    /// Build a `DiscoveryTarget` for a GitHub-managed PHS app.
-    fn github_target(owner: &str, repo: &str) -> DiscoveryTarget {
+    /// Build a `DiscoveryTarget` for the GitHub releases role.
+    ///
+    /// The plugin config carries only GitHub-level settings (no `owner`/`repo`).
+    /// The `owner/repo` pair is expressed as the `package_identifier` override
+    /// so the controller routes release queries to the right repo while sharing
+    /// a single plugin config instance across all tracked GitHub repos.
+    fn github_fetch_target(owner: &str, repo: &str) -> DiscoveryTarget {
         DiscoveryTarget {
             plugin_type: PluginType::GithubReleases,
             plugin_config: serde_json::json!({
-                "owner": owner,
-                "repo": repo,
                 "tag_strip_prefix": "v",
                 "include_prereleases": false,
                 "asset_patterns": [],
-                "detect_installed_version_command": PHS_DETECT_VERSION_CMD,
-                "install_command": PHS_INSTALL_CMD,
             }),
-            plugin_config_name: format!("{owner}/{repo}"),
-            roles: all_roles(),
+            plugin_config_name: "GitHub Releases".to_string(),
+            roles: vec![PluginRole::FetchReleases],
+            package_identifier: Some(format!("{owner}/{repo}")),
+            config_override: None,
+            execution_site: None,
+        }
+    }
+
+    /// Build a `DiscoveryTarget` for the Shell plugin covering both
+    /// `DetectVersion` and `ExecuteUpdate` using PHS conventions.
+    fn phs_shell_target() -> DiscoveryTarget {
+        DiscoveryTarget {
+            plugin_type: PluginType::Shell,
+            plugin_config: serde_json::json!({
+                "version_command": PHS_DETECT_VERSION_CMD,
+                "update_command": PHS_INSTALL_CMD,
+            }),
+            plugin_config_name: "PHS Shell".to_string(),
+            roles: vec![PluginRole::DetectVersion, PluginRole::ExecuteUpdate],
             package_identifier: None,
             config_override: None,
             execution_site: None,
@@ -139,7 +162,11 @@ impl ProxmoxHelperScriptsPlugin {
             plugin_type: PluginType::Apt,
             plugin_config: serde_json::json!({}),
             plugin_config_name: "APT (auto)".to_string(),
-            roles: all_roles(),
+            roles: vec![
+                PluginRole::DetectVersion,
+                PluginRole::FetchReleases,
+                PluginRole::ExecuteUpdate,
+            ],
             package_identifier: None,
             config_override: None,
             execution_site: None,
@@ -249,7 +276,10 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     package_identifier: script.slug.clone(),
                     name: display_name,
                     installed_version,
-                    targets: vec![Self::github_target(owner, repo)],
+                    targets: vec![
+                        Self::github_fetch_target(owner, repo),
+                        Self::phs_shell_target(),
+                    ],
                     extra: None,
                 });
             } else if let Some(ref apt_pkg) = analysis.apt_package {
@@ -276,6 +306,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                 });
             } else {
                 // Neither — try install-script fallback.
+                use crate::discovery::PHS_INSTALL_URL_PREFIX;
                 let install_url =
                     format!("{PHS_INSTALL_URL_PREFIX}{}-install.sh", script.slug);
                 let Some(install_body) = self.fetch_text(&install_url).await else {
@@ -375,18 +406,36 @@ mod tests {
     }
 
     #[test]
-    fn github_target_structure() {
-        let target = ProxmoxHelperScriptsPlugin::github_target("BookLore", "BookLore");
+    fn github_fetch_target_structure() {
+        let target = ProxmoxHelperScriptsPlugin::github_fetch_target("BookLore", "BookLore");
         assert_eq!(target.plugin_type, PluginType::GithubReleases);
-        assert_eq!(target.plugin_config_name, "BookLore/BookLore");
-        assert_eq!(target.roles.len(), 3);
-        assert_eq!(target.plugin_config["owner"], "BookLore");
-        assert_eq!(target.plugin_config["repo"], "BookLore");
+        assert_eq!(target.plugin_config_name, "GitHub Releases");
+        // FetchReleases only — no agent-side roles.
+        assert_eq!(target.roles.len(), 1);
+        assert_eq!(target.roles[0], PluginRole::FetchReleases);
+        // No owner/repo in config.
+        assert!(target.plugin_config.get("owner").is_none());
+        assert!(target.plugin_config.get("repo").is_none());
+        // package_identifier carries the "owner/repo" override.
         assert_eq!(
-            target.plugin_config["detect_installed_version_command"],
+            target.package_identifier.as_deref(),
+            Some("BookLore/BookLore")
+        );
+    }
+
+    #[test]
+    fn phs_shell_target_structure() {
+        let target = ProxmoxHelperScriptsPlugin::phs_shell_target();
+        assert_eq!(target.plugin_type, PluginType::Shell);
+        assert_eq!(target.plugin_config_name, "PHS Shell");
+        assert_eq!(target.roles.len(), 2);
+        assert!(target.roles.contains(&PluginRole::DetectVersion));
+        assert!(target.roles.contains(&PluginRole::ExecuteUpdate));
+        assert_eq!(
+            target.plugin_config["version_command"],
             PHS_DETECT_VERSION_CMD
         );
-        assert_eq!(target.plugin_config["install_command"], PHS_INSTALL_CMD);
+        assert_eq!(target.plugin_config["update_command"], PHS_INSTALL_CMD);
         assert!(target.package_identifier.is_none());
     }
 
