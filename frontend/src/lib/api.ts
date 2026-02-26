@@ -21,9 +21,9 @@ import type {
 	MqttClientResponse,
 	MqttLimitResponse,
 	PaginatedResponse,
-	ProviderConfigResponse,
+	PluginConfigResponse,
 	CreateMqttClient,
-	CreateProviderConfigRequest,
+	CreatePluginConfigRequest,
 	CreateSoftwareItemRequest,
 	NetworkSettings,
 	OidcLinkRequest,
@@ -52,7 +52,7 @@ import type {
 	UpdateMqttLimitRequest,
 	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
-	UpdateProviderConfigRequest,
+	UpdatePluginConfigRequest,
 	UpdateRegistrationSettings,
 	UpdateScheduledTaskRequest,
 	UpdateServiceRequest,
@@ -499,15 +499,12 @@ export function renewServerCertificate(): Promise<RenewServerCertResponse> {
 
 // --- Software Items ---
 
-export function getProviderConfigs(
-	page?: number,
-	perPage?: number
-): Promise<PaginatedResponse<ProviderConfigResponse>> {
+export function getPluginConfigs(page?: number, perPage?: number): Promise<PaginatedResponse<PluginConfigResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
 	const query = params.toString();
-	return request(`/provider-configs${query ? `?${query}` : ''}`);
+	return request(`/plugin-configs${query ? `?${query}` : ''}`);
 }
 
 export function getSoftwareItems(
@@ -580,9 +577,9 @@ export function triggerHostDiscovery(hostId: string): Promise<TriggerDiscoveryRe
 	return request(`/hosts/${encodeURIComponent(hostId)}/discover`, { method: 'POST' });
 }
 
-export function discardHostDiscovered(hostId: string, providerConfigId?: string): Promise<DiscardDiscoveredResponse> {
+export function discardHostDiscovered(hostId: string, pluginConfigId?: string): Promise<DiscardDiscoveredResponse> {
 	const params = new URLSearchParams();
-	if (providerConfigId != null) params.set('provider_config_id', providerConfigId);
+	if (pluginConfigId != null) params.set('plugin_config_id', pluginConfigId);
 	const query = params.toString();
 	return request(`/hosts/${encodeURIComponent(hostId)}/discovered${query ? `?${query}` : ''}`, {
 		method: 'DELETE'
@@ -592,12 +589,12 @@ export function discardHostDiscovered(hostId: string, providerConfigId?: string)
 export function getAutodiscoveryIgnores(
 	page?: number,
 	perPage?: number,
-	providerConfigId?: string
+	pluginConfigId?: string
 ): Promise<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
-	if (providerConfigId != null) params.set('provider_config_id', providerConfigId);
+	if (pluginConfigId != null) params.set('plugin_config_id', pluginConfigId);
 	const query = params.toString();
 	return request(`/autodiscovery/ignores${query ? `?${query}` : ''}`);
 }
@@ -679,32 +676,29 @@ export async function triggerSchedulerTask(id: string): Promise<TriggerScheduled
 	return request<TriggerScheduledTaskResponse>(`/scheduler/tasks/${id}/trigger`, { method: 'POST' });
 }
 
-// Provider configs - additional CRUD (list and getProviderConfigs already exist)
-export async function getProviderConfig(id: string): Promise<ProviderConfigResponse> {
-	return request<ProviderConfigResponse>(`/provider-configs/${id}`);
+// Plugin configs - CRUD
+export async function getPluginConfig(id: string): Promise<PluginConfigResponse> {
+	return request<PluginConfigResponse>(`/plugin-configs/${id}`);
 }
 
-export async function createProviderConfig(data: CreateProviderConfigRequest): Promise<ProviderConfigResponse> {
-	return request<ProviderConfigResponse>('/provider-configs', { method: 'POST', body: JSON.stringify(data) });
+export async function createPluginConfig(data: CreatePluginConfigRequest): Promise<PluginConfigResponse> {
+	return request<PluginConfigResponse>('/plugin-configs', { method: 'POST', body: JSON.stringify(data) });
 }
 
-export async function updateProviderConfig(
-	id: string,
-	data: UpdateProviderConfigRequest
-): Promise<ProviderConfigResponse> {
-	return request<ProviderConfigResponse>(`/provider-configs/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export async function updatePluginConfig(id: string, data: UpdatePluginConfigRequest): Promise<PluginConfigResponse> {
+	return request<PluginConfigResponse>(`/plugin-configs/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
-export async function deleteProviderConfig(id: string): Promise<void> {
-	return requestVoid(`/provider-configs/${id}`, { method: 'DELETE' });
+export async function deletePluginConfig(id: string): Promise<void> {
+	return requestVoid(`/plugin-configs/${id}`, { method: 'DELETE' });
 }
 
-export async function triggerProviderConfigDiscovery(id: string): Promise<TriggerDiscoveryResponse> {
-	return request<TriggerDiscoveryResponse>(`/provider-configs/${id}/discover`, { method: 'POST' });
+export async function triggerPluginConfigDiscovery(id: string): Promise<TriggerDiscoveryResponse> {
+	return request<TriggerDiscoveryResponse>(`/plugin-configs/${id}/discover`, { method: 'POST' });
 }
 
-export async function discardProviderConfigDiscovered(id: string): Promise<DiscardDiscoveredResponse> {
-	return request<DiscardDiscoveredResponse>(`/provider-configs/${id}/discovered`, { method: 'DELETE' });
+export async function discardPluginConfigDiscovered(id: string): Promise<DiscardDiscoveredResponse> {
+	return request<DiscardDiscoveredResponse>(`/plugin-configs/${id}/discovered`, { method: 'DELETE' });
 }
 
 // API tokens

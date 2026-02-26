@@ -284,19 +284,38 @@ export interface PaginatedResponse<T> {
 	total_pages: number;
 }
 
-export interface ProviderConfigResponse {
+export interface HostPluginRoleSummary {
+	role: string;
+	plugin_config_id: string;
+	plugin_config_name: string;
+	plugin_type: string;
+	package_identifier: string;
+	config_override: Record<string, unknown> | null;
+	execution_site: string;
+}
+
+export interface HostPluginRoleAssignment {
+	role: string;
+	plugin_config_id?: string;
+	plugin_config?: CreatePluginConfigRequest;
+	package_identifier?: string;
+	config_override?: Record<string, unknown> | null;
+	execution_site?: string;
+}
+
+export interface PluginConfigResponse {
 	id: string;
 	name: string;
-	provider_type: string;
+	plugin_type: string;
 	config: Record<string, unknown>;
 	enabled: boolean;
 	created_at: string;
 	updated_at: string;
 }
 
-export interface CreateProviderConfigRequest {
+export interface CreatePluginConfigRequest {
 	name: string;
-	provider_type: string;
+	plugin_type: string;
 	config: Record<string, unknown>;
 	enabled?: boolean;
 }
@@ -309,7 +328,7 @@ export interface CreateSoftwareItemRequest {
 export interface SoftwareItemResponse {
 	id: string;
 	name: string;
-	provider_types: string[];
+	plugins: string[];
 	enabled: boolean;
 	discovery_state?: 'pending' | 'approved' | null;
 	last_checked_at: string | null;
@@ -324,17 +343,14 @@ export interface SoftwareItemHostSummary {
 	host_id: string;
 	hostname: string;
 	friendly_name: string;
-	provider_config_id: string;
-	provider_config_name: string;
-	provider_type: string;
-	package_identifier: string;
-	config_override: Record<string, unknown> | null;
 	installed_version: string | null;
 	installed_version_detected_at: string | null;
+	latest_version?: string | null;
+	latest_release_metadata?: Record<string, unknown> | null;
+	update_available: boolean;
 	last_updated_at: string | null;
 	linked_at: string;
-	latest_version?: string | null;
-	update_available: boolean;
+	plugins: HostPluginRoleSummary[];
 }
 
 export interface SoftwareItemDetailResponse extends SoftwareItemResponse {
@@ -343,10 +359,7 @@ export interface SoftwareItemDetailResponse extends SoftwareItemResponse {
 
 export interface HostSoftwareAssignment {
 	host_id: string;
-	provider_config_id?: string;
-	provider_config?: CreateProviderConfigRequest;
-	package_identifier?: string;
-	config_override?: Record<string, unknown> | null;
+	plugins: HostPluginRoleAssignment[];
 }
 
 export interface AssignHostsRequest {
@@ -354,8 +367,9 @@ export interface AssignHostsRequest {
 }
 
 export interface UpdateHostAssignmentRequest {
-	provider_config_id?: string;
-	provider_config?: CreateProviderConfigRequest;
+	role: string;
+	plugin_config_id?: string;
+	plugin_config?: CreatePluginConfigRequest;
 	package_identifier?: string;
 	config_override?: Record<string, unknown> | null;
 }
@@ -379,7 +393,7 @@ export interface UpdateOidcProviderRequest {
 }
 
 export interface TriggerDiscoveryResponse {
-	providers_queued: number;
+	plugins_queued: number;
 	message: string;
 }
 
@@ -389,15 +403,15 @@ export interface DiscardDiscoveredResponse {
 
 export interface AutodiscoveryIgnoreResponse {
 	id: string;
-	provider_config_id: string;
-	provider_config_name: string;
-	provider_type: string;
+	plugin_config_id: string;
+	plugin_config_name: string;
+	plugin_type: string;
 	package_identifier: string;
 	created_at: string;
 }
 
 export interface CreateAutodiscoveryIgnoreRequest {
-	provider_config_id: string;
+	plugin_config_id: string;
 	package_identifier: string;
 }
 
@@ -489,7 +503,7 @@ export interface RotateCaResponse {
 	message: string;
 }
 
-export interface UpdateProviderConfigRequest {
+export interface UpdatePluginConfigRequest {
 	name?: string;
 	config?: Record<string, unknown>;
 	enabled?: boolean;
