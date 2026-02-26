@@ -12,11 +12,8 @@
 //! use std::sync::Arc;
 //! use uptrakit_plugin_registry::{PluginRegistry, PluginType, LocalCommandExecutor};
 //!
-//! // Validate configuration
-//! let config = serde_json::json!({
-//!     "owner": "octocat",
-//!     "repo": "hello-world"
-//! });
+//! // Validate configuration (all fields optional — empty config is valid)
+//! let config = serde_json::json!({});
 //! PluginRegistry::validate_config(PluginType::GithubReleases, &config)?;
 //!
 //! // Create a plugin with a local executor
@@ -27,8 +24,8 @@
 //!     executor,
 //! )?;
 //!
-//! // Detect installed version
-//! let version = plugin.detect_installed_version("example").await?;
+//! // Fetch releases (owner/repo is the package_identifier, not config)
+//! let releases = plugin.fetch_releases("octocat/hello-world").await?;
 //! ```
 
 pub mod error;

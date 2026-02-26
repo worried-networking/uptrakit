@@ -238,7 +238,7 @@ mod tests {
                 .unwrap(),
             name: "GitHub Releases".to_string(),
             plugin_type: PluginType::GithubReleases,
-            config: serde_json::json!({"owner": "org", "repo": "app"}),
+            config: serde_json::json!({"tag_strip_prefix": "v"}),
             enabled: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),

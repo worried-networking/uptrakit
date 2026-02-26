@@ -20,6 +20,7 @@ uptrakit-plugin-docker = { path = "../docker" }
 uptrakit-plugin-proxmox-helper-scripts = { path = "../proxmox-helper-scripts" }
 uptrakit-plugin-homebrew = { path = "../homebrew" }
 uptrakit-plugin-apt = { path = "../apt" }
+uptrakit-plugin-shell = { path = "../shell" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 rootcause = { workspace = true }

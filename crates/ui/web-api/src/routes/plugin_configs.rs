@@ -420,20 +420,15 @@ mod tests {
     #[test]
     fn mask_github_auth_token() {
         let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world",
             "auth_token": "ghp_secret123"
         });
         let masked = PluginRegistry::mask_config_secrets_str("github_releases", &config);
         assert_eq!(masked["auth_token"], SECRET_MASK);
-        assert_eq!(masked["owner"], "octocat");
     }
 
     #[test]
     fn mask_null_token_becomes_masked() {
         let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world",
             "auth_token": null
         });
         let masked = PluginRegistry::mask_config_secrets_str("github_releases", &config);
@@ -443,10 +438,7 @@ mod tests {
 
     #[test]
     fn mask_without_token_field_adds_masked() {
-        let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
+        let config = serde_json::json!({});
         let masked = PluginRegistry::mask_config_secrets_str("github_releases", &config);
         // with_secrets_masked always adds auth_token as "***"
         assert_eq!(masked["auth_token"], SECRET_MASK);
@@ -461,51 +453,30 @@ mod tests {
 
     #[test]
     fn restore_masked_token() {
-        let mut incoming = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world",
-            "auth_token": "***"
-        });
-        let existing = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world",
-            "auth_token": "ghp_real_token"
-        });
+        let mut incoming = serde_json::json!({"auth_token": "***"});
+        let existing = serde_json::json!({"auth_token": "ghp_real_token"});
         PluginRegistry::restore_config_secrets_str("github_releases", &mut incoming, &existing);
         assert_eq!(incoming["auth_token"], "ghp_real_token");
     }
 
     #[test]
     fn restore_new_token_not_masked() {
-        let mut incoming = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world",
-            "auth_token": "ghp_new_token"
-        });
-        let existing = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world",
-            "auth_token": "ghp_old_token"
-        });
+        let mut incoming = serde_json::json!({"auth_token": "ghp_new_token"});
+        let existing = serde_json::json!({"auth_token": "ghp_old_token"});
         PluginRegistry::restore_config_secrets_str("github_releases", &mut incoming, &existing);
         assert_eq!(incoming["auth_token"], "ghp_new_token");
     }
 
     #[test]
     fn validate_valid_github_config() {
-        let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
+        let config = serde_json::json!({});
         assert!(PluginRegistry::validate_config_str("github_releases", &config).is_ok());
     }
 
     #[test]
     fn validate_invalid_github_config() {
-        let config = serde_json::json!({
-            "owner": "",
-            "repo": "hello-world"
-        });
+        // Non-https api_base_url fails validation.
+        let config = serde_json::json!({"api_base_url": "http://api.github.com"});
         assert!(PluginRegistry::validate_config_str("github_releases", &config).is_err());
     }
 
@@ -517,10 +488,7 @@ mod tests {
 
     #[test]
     fn parse_known_plugin_types() {
-        let github_config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
+        let github_config = serde_json::json!({});
         assert!(PluginRegistry::validate_config_str("github_releases", &github_config).is_ok());
 
         let proxmox_config = serde_json::json!({

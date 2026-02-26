@@ -72,7 +72,7 @@ mod tests {
         let req = CreatePluginConfigRequest {
             name: "my-github".to_string(),
             plugin_type: PluginType::GithubReleases,
-            config: serde_json::json!({"owner": "org", "repo": "app"}),
+            config: serde_json::json!({"tag_strip_prefix": "v"}),
             enabled: true,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");

@@ -11,6 +11,7 @@ use uptrakit_plugin_homebrew::{HomebrewConfig, HomebrewPlugin};
 use uptrakit_plugin_proxmox_helper_scripts::{
     ProxmoxHelperScriptsConfig, ProxmoxHelperScriptsPlugin,
 };
+use uptrakit_plugin_shell::{ShellConfig, ShellPlugin};
 
 use crate::error::{PluginRegistryError, Result};
 
@@ -243,6 +244,7 @@ register_plugins! {
     ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig,     plugin: ProxmoxHelperScriptsPlugin },
     Homebrew             => { config: HomebrewConfig,                 plugin: HomebrewPlugin },
     Apt                  => { config: AptConfig,                      plugin: AptPlugin },
+    Shell                => { config: ShellConfig,                    plugin: ShellPlugin },
 }
 
 impl PluginRegistry {
@@ -255,6 +257,7 @@ impl PluginRegistry {
         value: &str,
     ) -> std::result::Result<(), String> {
         match plugin_type {
+            PluginType::GithubReleases => uptrakit_plugin_github::validate_identifier(value),
             PluginType::Docker => uptrakit_plugin_docker::validate_identifier(value),
             PluginType::Homebrew => uptrakit_plugin_homebrew::validate_identifier(value),
             PluginType::Apt => uptrakit_plugin_apt::validate_identifier(value),
@@ -330,6 +333,10 @@ mod tests {
             "apt".parse::<PluginType>().ok(),
             Some(PluginType::Apt)
         );
+        assert_eq!(
+            "shell".parse::<PluginType>().ok(),
+            Some(PluginType::Shell)
+        );
         assert!("unknown".parse::<PluginType>().is_err());
         // Old wire string is no longer a known type
         assert!("docker_registry".parse::<PluginType>().is_err());
@@ -337,18 +344,25 @@ mod tests {
 
     #[test]
     fn validate_valid_github_config() {
+        // Empty config is valid — all fields are optional.
+        let config = serde_json::json!({});
+        assert!(PluginRegistry::validate_config(PluginType::GithubReleases, &config).is_ok());
+    }
+
+    #[test]
+    fn validate_valid_github_config_with_token() {
         let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
+            "auth_token": "ghp_test",
+            "include_prereleases": false,
+            "tag_strip_prefix": "v"
         });
         assert!(PluginRegistry::validate_config(PluginType::GithubReleases, &config).is_ok());
     }
 
     #[test]
-    fn validate_invalid_github_config() {
+    fn validate_invalid_github_config_bad_regex() {
         let config = serde_json::json!({
-            "owner": "",
-            "repo": "hello-world"
+            "asset_patterns": ["[invalid"]
         });
         assert!(PluginRegistry::validate_config(PluginType::GithubReleases, &config).is_err());
     }
@@ -377,10 +391,7 @@ mod tests {
 
     #[test]
     fn validate_config_str_valid() {
-        let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
+        let config = serde_json::json!({});
         assert!(PluginRegistry::validate_config_str("github_releases", &config).is_ok());
     }
 
@@ -395,10 +406,7 @@ mod tests {
 
     #[test]
     fn create_plugin_github() {
-        let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
+        let config = serde_json::json!({});
         let plugin = PluginRegistry::create_plugin(
             PluginType::GithubReleases,
             &config,
@@ -584,7 +592,7 @@ mod tests {
 
     #[test]
     fn boxed_plugin_preserves_type() {
-        let github_config = serde_json::json!({"owner": "octocat", "repo": "hello-world"});
+        let github_config = serde_json::json!({});
         let github = PluginRegistry::create_plugin(
             PluginType::GithubReleases,
             &github_config,
@@ -637,21 +645,16 @@ mod tests {
     #[test]
     fn mask_config_secrets_github() {
         let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world",
             "auth_token": "ghp_secret"
         });
         let masked = PluginRegistry::mask_config_secrets(PluginType::GithubReleases, &config);
         assert_eq!(masked["auth_token"], "***");
-        assert_eq!(masked["owner"], "octocat");
     }
 
     #[test]
     fn mask_config_secrets_github_always_shows_field() {
-        let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
+        // Even with no auth_token in input, masked output always includes the field.
+        let config = serde_json::json!({});
         let masked = PluginRegistry::mask_config_secrets(PluginType::GithubReleases, &config);
         assert_eq!(masked["auth_token"], "***");
     }
@@ -659,13 +662,9 @@ mod tests {
     #[test]
     fn restore_config_secrets_github() {
         let mut incoming = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world",
             "auth_token": "***"
         });
         let existing = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world",
             "auth_token": "ghp_real_token"
         });
         PluginRegistry::restore_config_secrets(
@@ -739,6 +738,77 @@ mod tests {
         assert!(
             PluginRegistry::validate_package_identifier(PluginType::Apt, "Nginx").is_err()
         );
+    }
+
+    // ── Shell plugin tests ────────────────────────────────────────────────
+
+    #[test]
+    fn create_plugin_shell_version_only() {
+        let config = serde_json::json!({"version_command": "myapp --version"});
+        let plugin = PluginRegistry::create_plugin(PluginType::Shell, &config, test_executor());
+        assert!(plugin.is_ok());
+    }
+
+    #[test]
+    fn create_plugin_shell_update_only() {
+        let config = serde_json::json!({"update_command": "apt-get install -y myapp"});
+        let plugin = PluginRegistry::create_plugin(PluginType::Shell, &config, test_executor());
+        assert!(plugin.is_ok());
+    }
+
+    #[test]
+    fn create_plugin_shell_both() {
+        let config = serde_json::json!({
+            "version_command": "myapp --version",
+            "update_command": "apt-get install -y myapp"
+        });
+        let plugin = PluginRegistry::create_plugin(PluginType::Shell, &config, test_executor());
+        assert!(plugin.is_ok());
+    }
+
+    #[test]
+    fn validate_config_shell_both_none_fails() {
+        // Empty config — both commands absent — must fail validation.
+        let config = serde_json::json!({});
+        assert!(PluginRegistry::validate_config(PluginType::Shell, &config).is_err());
+    }
+
+    // ── validate_package_identifier GitHub tests ──────────────────────────
+
+    #[test]
+    fn validate_package_identifier_github_valid() {
+        assert!(PluginRegistry::validate_package_identifier(
+            PluginType::GithubReleases,
+            "octocat/hello-world"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn validate_package_identifier_github_no_slash_fails() {
+        assert!(PluginRegistry::validate_package_identifier(
+            PluginType::GithubReleases,
+            "octocat"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn validate_package_identifier_github_traversal_fails() {
+        assert!(PluginRegistry::validate_package_identifier(
+            PluginType::GithubReleases,
+            "octocat/../evil"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn validate_package_identifier_github_empty_repo_fails() {
+        assert!(PluginRegistry::validate_package_identifier(
+            PluginType::GithubReleases,
+            "octocat/"
+        )
+        .is_err());
     }
 
     // ── PluginType::Other(String) behaviour ──────────────────────────────

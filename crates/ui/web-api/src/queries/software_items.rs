@@ -1291,10 +1291,7 @@ mod tests {
 
     #[test]
     fn validate_config_override_valid_merge() {
-        let base = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
+        let base = serde_json::json!({});
         let override_val = serde_json::json!({
             "tag_strip_prefix": "release-"
         });
@@ -1305,13 +1302,10 @@ mod tests {
 
     #[test]
     fn validate_config_override_invalid_merge() {
-        let base = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
-        // Override that clears a required field.
+        let base = serde_json::json!({});
+        // Override that introduces an invalid api_base_url (http, not https).
         let override_val = serde_json::json!({
-            "owner": ""
+            "api_base_url": "http://api.github.com"
         });
 
         let result = validate_config_override("github_releases", &base, &override_val);
@@ -1320,10 +1314,7 @@ mod tests {
 
     #[test]
     fn validate_config_override_non_object_rejected() {
-        let base = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
+        let base = serde_json::json!({});
         let override_val = serde_json::json!("not an object");
 
         let result = validate_config_override("github_releases", &base, &override_val);

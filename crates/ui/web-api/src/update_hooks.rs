@@ -618,8 +618,6 @@ mod tests {
     #[test]
     fn merge_hooks_base_only() {
         let base = json!({
-            "owner": "nodejs",
-            "repo": "node",
             "pre_update_commands": ["systemctl stop app"],
             "post_update_commands": ["systemctl start app"]
         });
@@ -695,8 +693,7 @@ mod tests {
     #[test]
     fn merge_hooks_no_hooks_in_base() {
         let base = json!({
-            "owner": "nodejs",
-            "repo": "node"
+            "tag_strip_prefix": "v"
         });
 
         let (pre, post) = merge_hooks(&base, None);
@@ -721,28 +718,26 @@ mod tests {
     #[test]
     fn merge_config_basic() {
         let base = json!({
-            "owner": "nodejs",
-            "repo": "node",
-            "base_key": "base_value"
+            "tag_strip_prefix": "v",
+            "include_prereleases": false
         });
         let override_config = json!({
-            "owner": "custom-owner",
-            "new_key": "new_value"
+            "tag_strip_prefix": "release-",
+            "asset_patterns": [".*\\.tar\\.gz$"]
         });
 
         let merged = merge_config(&base, Some(&override_config));
 
-        assert_eq!(merged["owner"], "custom-owner");
-        assert_eq!(merged["repo"], "node");
-        assert_eq!(merged["base_key"], "base_value");
-        assert_eq!(merged["new_key"], "new_value");
+        assert_eq!(merged["tag_strip_prefix"], "release-");
+        assert_eq!(merged["include_prereleases"], false);
+        assert_eq!(merged["asset_patterns"][0], ".*\\.tar\\.gz$");
     }
 
     #[test]
     fn merge_config_no_override() {
         let base = json!({
-            "owner": "nodejs",
-            "repo": "node"
+            "tag_strip_prefix": "v",
+            "include_prereleases": false
         });
 
         let merged = merge_config(&base, None);
@@ -753,8 +748,8 @@ mod tests {
     #[test]
     fn merge_config_empty_override() {
         let base = json!({
-            "owner": "nodejs",
-            "repo": "node"
+            "tag_strip_prefix": "v",
+            "include_prereleases": false
         });
         let override_config = json!({});
 

@@ -3273,7 +3273,7 @@ mod tests {
             "--plugin-type",
             "github_releases",
             "--config",
-            r#"{"owner":"org","repo":"app"}"#,
+            r#"{"tag_strip_prefix":"v"}"#,
         ])
         .expect("should parse");
         match args.command {

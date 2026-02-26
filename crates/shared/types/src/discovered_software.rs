@@ -97,14 +97,10 @@ mod tests {
             installed_version: "1.18.5".to_string(),
             targets: vec![DiscoveryTarget {
                 plugin_type: PluginType::GithubReleases,
-                plugin_config: serde_json::json!({"owner": "BookLore", "repo": "BookLore"}),
-                plugin_config_name: "BookLore/BookLore".to_string(),
-                roles: vec![
-                    PluginRole::DetectVersion,
-                    PluginRole::FetchReleases,
-                    PluginRole::ExecuteUpdate,
-                ],
-                package_identifier: None,
+                plugin_config: serde_json::json!({"tag_strip_prefix": "v"}),
+                plugin_config_name: "GitHub Releases".to_string(),
+                roles: vec![PluginRole::FetchReleases],
+                package_identifier: Some("BookLore/BookLore".to_string()),
                 config_override: None,
                 execution_site: None,
             }],

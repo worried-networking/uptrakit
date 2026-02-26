@@ -6551,8 +6551,25 @@ dependencies = [
  "uptrakit-plugin-github",
  "uptrakit-plugin-homebrew",
  "uptrakit-plugin-proxmox-helper-scripts",
+ "uptrakit-plugin-shell",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+]
+
+[[package]]
+name = "uptrakit-plugin-shell"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-command",
+ "uptrakit-plugin-core",
+ "uptrakit-shared-macros",
 ]
 
 [[package]]

@@ -12,23 +12,20 @@ use crate::plugin_types::PluginType;
 ///
 /// # Examples
 ///
-/// PHS plugin discovering a GitHub-managed app:
+/// PHS plugin discovering a GitHub-managed app (fetch releases only; the
+/// `owner/repo` is expressed as the `package_identifier` override):
 ///
 /// ```
 /// # use uptrakit_shared_types::{DiscoveryTarget, PluginType, PluginRole};
 /// let target = DiscoveryTarget {
 ///     plugin_type: PluginType::GithubReleases,
 ///     plugin_config: serde_json::json!({
-///         "owner": "BookLore",
-///         "repo": "BookLore",
+///         "tag_strip_prefix": "v",
+///         "include_prereleases": false,
 ///     }),
-///     plugin_config_name: "BookLore/BookLore".to_string(),
-///     roles: vec![
-///         PluginRole::DetectVersion,
-///         PluginRole::FetchReleases,
-///         PluginRole::ExecuteUpdate,
-///     ],
-///     package_identifier: None,
+///     plugin_config_name: "GitHub Releases".to_string(),
+///     roles: vec![PluginRole::FetchReleases],
+///     package_identifier: Some("BookLore/BookLore".to_string()),
 ///     config_override: None,
 ///     execution_site: None,
 /// };
@@ -88,10 +85,10 @@ mod tests {
     fn serialization_roundtrip() {
         let target = DiscoveryTarget {
             plugin_type: PluginType::GithubReleases,
-            plugin_config: serde_json::json!({"owner": "acme", "repo": "widget"}),
-            plugin_config_name: "acme/widget".to_string(),
-            roles: all_roles(),
-            package_identifier: None,
+            plugin_config: serde_json::json!({"tag_strip_prefix": "v"}),
+            plugin_config_name: "GitHub Releases".to_string(),
+            roles: vec![PluginRole::FetchReleases],
+            package_identifier: Some("acme/widget".to_string()),
             config_override: None,
             execution_site: None,
         };
@@ -139,16 +136,14 @@ mod tests {
 
     #[test]
     fn cross_plugin_target() {
+        // Represents a PHS-discovered GitHub-managed item: the GitHub plugin
+        // covers FetchReleases only; `owner/repo` is the package_identifier override.
         let target = DiscoveryTarget {
             plugin_type: PluginType::GithubReleases,
-            plugin_config: serde_json::json!({
-                "owner": "BookLore",
-                "repo": "BookLore",
-                "tag_strip_prefix": "v",
-            }),
-            plugin_config_name: "BookLore/BookLore".to_string(),
-            roles: all_roles(),
-            package_identifier: Some("booklore".to_string()),
+            plugin_config: serde_json::json!({"tag_strip_prefix": "v"}),
+            plugin_config_name: "GitHub Releases".to_string(),
+            roles: vec![PluginRole::FetchReleases],
+            package_identifier: Some("BookLore/BookLore".to_string()),
             config_override: None,
             execution_site: None,
         };
@@ -157,7 +152,7 @@ mod tests {
         assert_eq!(deserialized.plugin_type, PluginType::GithubReleases);
         assert_eq!(
             deserialized.package_identifier,
-            Some("booklore".to_string())
+            Some("BookLore/BookLore".to_string())
         );
     }
 

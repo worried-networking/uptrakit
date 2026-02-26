@@ -76,13 +76,13 @@ mod tests {
         let req = CreatePluginConfigRequest {
             name: "GitHub Releases".to_string(),
             plugin_type: PluginType::GithubReleases,
-            config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+            config: serde_json::json!({"tag_strip_prefix": "v", "include_prereleases": false}),
             enabled: true,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "GitHub Releases");
         assert_eq!(json["plugin_type"], "github_releases");
-        assert_eq!(json["config"]["owner"], "nodejs");
+        assert_eq!(json["config"]["tag_strip_prefix"], "v");
         assert_eq!(json["enabled"], true);
     }
 

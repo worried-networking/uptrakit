@@ -1719,8 +1719,8 @@ mod tests {
                 name: "Test Software".to_string(),
                 detect_version: Some(PluginAssignment {
                     plugin_type: PluginType::GithubReleases,
-                    package_identifier: "owner/repo".to_string(),
-                    config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
+                    package_identifier: "octocat/hello-world".to_string(),
+                    config: serde_json::json!({}),
                 }),
                 fetch_releases: None,
             }],
@@ -1743,13 +1743,13 @@ mod tests {
             to_version: "20.10.0".to_string(),
             detect_version_plugin: Some(PluginAssignment {
                 plugin_type: PluginType::GithubReleases,
-                package_identifier: "nodejs".to_string(),
-                config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+                package_identifier: "nodejs/node".to_string(),
+                config: serde_json::json!({}),
             }),
             execute_update_plugin: PluginAssignment {
                 plugin_type: PluginType::GithubReleases,
-                package_identifier: "nodejs".to_string(),
-                config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+                package_identifier: "nodejs/node".to_string(),
+                config: serde_json::json!({}),
             },
             pre_update_hooks: vec![HookCommand::Exec {
                 program: "systemctl".to_string(),
@@ -2957,8 +2957,8 @@ mod tests {
                     name: "Test Software".to_string(),
                     detect_version: Some(PluginAssignment {
                         plugin_type: PluginType::GithubReleases,
-                        package_identifier: "owner/repo".to_string(),
-                        config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
+                        package_identifier: "octocat/hello-world".to_string(),
+                        config: serde_json::json!({}),
                     }),
                     fetch_releases: None,
                 }],
@@ -2979,8 +2979,8 @@ mod tests {
                 detect_version_plugin: None,
                 execute_update_plugin: PluginAssignment {
                     plugin_type: PluginType::GithubReleases,
-                    package_identifier: "nodejs".to_string(),
-                    config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+                    package_identifier: "nodejs/node".to_string(),
+                    config: serde_json::json!({}),
                 },
                 pre_update_hooks: vec![],
                 post_update_hooks: vec![],
