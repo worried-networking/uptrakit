@@ -1,16 +1,11 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use regex::Regex;
 use rootcause::prelude::*;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use uptrakit_plugin_core::mpsc;
 
-use uptrakit_plugin_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
 use uptrakit_plugin_core::{
-    OutputStreamType, Plugin, PluginCapability, PluginError, PluginType, ReleaseAsset, ReleaseInfo,
-    UpdateOutputLine, UpstreamRelease, Version,
+    Plugin, PluginCapability, PluginError, PluginType, ReleaseAsset, UpstreamRelease, Version,
 };
 
 use crate::api_types::{GitHubApiError, GitHubRelease};
@@ -18,22 +13,69 @@ use crate::config::GitHubConfig;
 use crate::error::{GitHubError, Result};
 use crate::tag::strip_tag_prefix;
 
+/// Parse `"owner/repo"` from a package identifier string.
+///
+/// Rules:
+/// - Must contain exactly one `/`.
+/// - Both `owner` and `repo` parts must be non-empty.
+/// - Neither part may contain `..` (path traversal guard).
+pub fn parse_owner_repo(package_identifier: &str) -> Result<(&str, &str)> {
+    let slash_count = package_identifier.chars().filter(|&c| c == '/').count();
+    if slash_count != 1 {
+        bail!(GitHubError::Configuration(format!(
+            "package_identifier must be 'owner/repo' (got '{package_identifier}')"
+        )));
+    }
+    let slash = package_identifier.find('/').unwrap();
+    let owner = &package_identifier[..slash];
+    let repo = &package_identifier[slash + 1..];
+    if owner.is_empty() {
+        bail!(GitHubError::Configuration(
+            "package_identifier owner must not be empty".to_string()
+        ));
+    }
+    if repo.is_empty() {
+        bail!(GitHubError::Configuration(
+            "package_identifier repo must not be empty".to_string()
+        ));
+    }
+    if owner.contains("..") {
+        bail!(GitHubError::Configuration(format!(
+            "package_identifier owner must not contain '..': '{owner}'"
+        )));
+    }
+    if repo.contains("..") {
+        bail!(GitHubError::Configuration(format!(
+            "package_identifier repo must not contain '..': '{repo}'"
+        )));
+    }
+    Ok((owner, repo))
+}
+
 /// GitHub Releases plugin implementation.
 ///
 /// Fetches release metadata from the GitHub API and converts it into
 /// `UpstreamRelease` values for the controller.
+///
+/// The `owner` and `repo` are parsed from the `package_identifier` argument
+/// at call time (format: `"owner/repo"`), not stored in the plugin config.
+/// A single plugin instance can therefore serve any number of GitHub repositories.
 pub struct GitHubPlugin {
     client: reqwest::Client,
     config: GitHubConfig,
     asset_filters: Vec<Regex>,
-    executor: Arc<dyn CommandExecutor>,
 }
 
 impl GitHubPlugin {
     /// Create a new `GitHubPlugin` from the given configuration.
     ///
     /// Validates the configuration and pre-compiles asset filter regexes.
-    pub fn new(config: GitHubConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
+    /// The `_executor` parameter is accepted for registry compatibility but unused
+    /// (this plugin is controller-side only).
+    pub fn new(
+        config: GitHubConfig,
+        _executor: std::sync::Arc<dyn uptrakit_plugin_core::CommandExecutor>,
+    ) -> Result<Self> {
         config
             .validate()
             .map_err(|e| report!(GitHubError::Configuration(e.to_string())))?;
@@ -87,17 +129,16 @@ impl GitHubPlugin {
             client,
             config,
             asset_filters,
-            executor,
         })
     }
 
-    /// Build the releases API URL.
-    fn releases_url(&self) -> String {
+    /// Build the releases API URL for the given owner/repo pair.
+    pub(crate) fn releases_url(&self, owner: &str, repo: &str) -> String {
         format!(
             "{}/repos/{}/{}/releases?per_page=100",
             self.config.api_base_url(),
-            self.config.owner,
-            self.config.repo
+            owner,
+            repo,
         )
     }
 
@@ -161,7 +202,11 @@ impl GitHubPlugin {
     }
 
     /// Check rate limit headers and log warnings.
-    fn check_rate_limit(&self, headers: &reqwest::header::HeaderMap) {
+    fn check_rate_limit(
+        &self,
+        headers: &reqwest::header::HeaderMap,
+        package_identifier: &str,
+    ) {
         let remaining = headers
             .get("x-ratelimit-remaining")
             .and_then(|v| v.to_str().ok())
@@ -177,8 +222,7 @@ impl GitHubPlugin {
             tracing::warn!(
                 remaining,
                 reset,
-                owner = %self.config.owner,
-                repo = %self.config.repo,
+                package_identifier,
                 "GitHub API rate limit is low"
             );
         }
@@ -197,9 +241,15 @@ impl Plugin for GitHubPlugin {
 
     async fn fetch_releases(
         &self,
-        _package_identifier: &str,
+        package_identifier: &str,
     ) -> uptrakit_plugin_core::Result<Vec<UpstreamRelease>> {
-        let url = self.releases_url();
+        let (owner, repo) = parse_owner_repo(package_identifier).map_err(|e| {
+            report!(PluginError::Configuration(format!(
+                "invalid package_identifier for GitHub plugin: {e}"
+            )))
+        })?;
+
+        let url = self.releases_url(owner, repo);
         tracing::debug!(url = %url, "fetching GitHub releases");
 
         let response = self.client.get(&url).send().await.map_err(|e| {
@@ -209,7 +259,7 @@ impl Plugin for GitHubPlugin {
         })?;
 
         let status = response.status();
-        self.check_rate_limit(response.headers());
+        self.check_rate_limit(response.headers(), package_identifier);
 
         if !status.is_success() {
             tracing::debug!(status = %status, "GitHub API returned error status");
@@ -265,98 +315,6 @@ impl Plugin for GitHubPlugin {
 
         Ok(upstream_releases)
     }
-
-    async fn detect_installed_version(
-        &self,
-        package_identifier: &str,
-    ) -> uptrakit_plugin_core::Result<Option<Version>> {
-        let Some(ref cmd_template) = self.config.detect_installed_version_command else {
-            return Ok(None);
-        };
-        let cmd = cmd_template
-            .replace("{package_identifier}", &shell_escape(package_identifier));
-        let output = self
-            .executor
-            .execute_quiet(&CommandSpec::shell(&cmd))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "detect_installed_version_command failed: {e}"
-                )))
-            })?;
-        let version = output
-            .output
-            .lines()
-            .map(str::trim)
-            .find(|l| !l.is_empty())
-            .map(|l| Version::new(l.to_string()));
-        Ok(version)
-    }
-
-    async fn execute_update(
-        &self,
-        package_identifier: &str,
-        to_version: &str,
-        release_info: Option<&ReleaseInfo>,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> uptrakit_plugin_core::Result<String> {
-        let mut output = String::new();
-
-        let release_info =
-            release_info.ok_or_else(|| report!(PluginError::MissingReleaseInfo))?;
-
-        send_output(
-            output_tx,
-            &format!(
-                "Downloading release {} from {}",
-                release_info.tag, release_info.release_url
-            ),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        output.push_str(&format!(
-            "Downloading release {} from {}\n",
-            release_info.tag, release_info.release_url
-        ));
-
-        if let Some(ref cmd_str) = self.config.install_command {
-            let cmd = cmd_str
-                .replace("{version}", &shell_escape(to_version))
-                .replace("{tag}", &shell_escape(&release_info.tag))
-                .replace("{package_identifier}", &shell_escape(package_identifier));
-
-            send_output(
-                output_tx,
-                &format!("Running install command: {cmd}"),
-                OutputStreamType::Stdout,
-            )
-            .await;
-
-            tracing::debug!(command = %cmd, "running GitHub update command");
-            match self
-                .executor
-                .execute(&CommandSpec::shell(&cmd), output_tx)
-                .await
-            {
-                Ok(cmd_output) => {
-                    output.push_str(&cmd_output.output);
-                }
-                Err(e) => {
-                    bail!(PluginError::InstallFailed(e.to_string()));
-                }
-            }
-        } else {
-            send_output(
-                output_tx,
-                "No install_command configured, skipping automated installation",
-                OutputStreamType::Stdout,
-            )
-            .await;
-            output.push_str("No install_command configured, skipping automated installation\n");
-        }
-
-        Ok(output)
-    }
 }
 
 #[cfg(test)]
@@ -364,24 +322,13 @@ mod tests {
     use super::*;
     use crate::api_types::{GitHubAsset, GitHubRelease};
     use uptrakit_plugin_core::LocalCommandExecutor;
-    use uptrakit_plugin_core::mpsc;
 
     fn test_config() -> GitHubConfig {
-        GitHubConfig {
-            owner: "octocat".to_string(),
-            repo: "hello-world".to_string(),
-            auth_token: None,
-            api_base_url: None,
-            include_prereleases: false,
-            tag_strip_prefix: "v".to_string(),
-            asset_patterns: vec![],
-            install_command: None,
-            detect_installed_version_command: None,
-        }
+        GitHubConfig::default()
     }
 
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
+    fn test_executor() -> std::sync::Arc<dyn uptrakit_plugin_core::CommandExecutor> {
+        std::sync::Arc::new(LocalCommandExecutor)
     }
 
     fn test_plugin() -> GitHubPlugin {
@@ -400,6 +347,73 @@ mod tests {
             assets: vec![],
         }
     }
+
+    // ── parse_owner_repo tests ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_owner_repo_valid() {
+        let (owner, repo) = parse_owner_repo("octocat/hello-world").expect("valid");
+        assert_eq!(owner, "octocat");
+        assert_eq!(repo, "hello-world");
+    }
+
+    #[test]
+    fn parse_owner_repo_missing_slash() {
+        assert!(parse_owner_repo("octocat").is_err());
+    }
+
+    #[test]
+    fn parse_owner_repo_two_slashes() {
+        assert!(parse_owner_repo("octocat/hello/world").is_err());
+    }
+
+    #[test]
+    fn parse_owner_repo_empty_owner() {
+        assert!(parse_owner_repo("/hello-world").is_err());
+    }
+
+    #[test]
+    fn parse_owner_repo_empty_repo() {
+        assert!(parse_owner_repo("octocat/").is_err());
+    }
+
+    #[test]
+    fn parse_owner_repo_traversal_in_owner() {
+        assert!(parse_owner_repo("../evil/repo").is_err());
+    }
+
+    #[test]
+    fn parse_owner_repo_traversal_in_repo() {
+        assert!(parse_owner_repo("octocat/../evil").is_err());
+    }
+
+    // ── URL construction tests ────────────────────────────────────────────────
+
+    #[test]
+    fn url_construction() {
+        let plugin = test_plugin();
+        let url = plugin.releases_url("octocat", "hello-world");
+        assert_eq!(
+            url,
+            "https://api.github.com/repos/octocat/hello-world/releases?per_page=100"
+        );
+    }
+
+    #[test]
+    fn url_construction_custom_base() {
+        let config = GitHubConfig {
+            api_base_url: Some("https://ghe.corp.com/api/v3".to_string()),
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let url = plugin.releases_url("octocat", "hello-world");
+        assert_eq!(
+            url,
+            "https://ghe.corp.com/api/v3/repos/octocat/hello-world/releases?per_page=100"
+        );
+    }
+
+    // ── convert_release tests ─────────────────────────────────────────────────
 
     #[test]
     fn convert_normal_release() {
@@ -428,8 +442,10 @@ mod tests {
 
     #[test]
     fn include_prerelease_when_configured() {
-        let mut config = test_config();
-        config.include_prereleases = true;
+        let config = GitHubConfig {
+            include_prereleases: true,
+            ..GitHubConfig::default()
+        };
         let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
         let gh = make_release("v1.0.0-beta.1", false, true);
         let release = plugin.convert_release(&gh).expect("should convert");
@@ -455,8 +471,10 @@ mod tests {
 
     #[test]
     fn custom_tag_prefix() {
-        let mut config = test_config();
-        config.tag_strip_prefix = "release-".to_string();
+        let config = GitHubConfig {
+            tag_strip_prefix: "release-".to_string(),
+            ..GitHubConfig::default()
+        };
         let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
         let gh = make_release("release-3.0.0", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
@@ -465,8 +483,10 @@ mod tests {
 
     #[test]
     fn asset_filtering() {
-        let mut config = test_config();
-        config.asset_patterns = vec![r".*\.tar\.gz$".to_string()];
+        let config = GitHubConfig {
+            asset_patterns: vec![r".*\.tar\.gz$".to_string()],
+            ..GitHubConfig::default()
+        };
         let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
 
         let gh = GitHubRelease {
@@ -536,28 +556,6 @@ mod tests {
     }
 
     #[test]
-    fn url_construction() {
-        let plugin = test_plugin();
-        let url = plugin.releases_url();
-        assert_eq!(
-            url,
-            "https://api.github.com/repos/octocat/hello-world/releases?per_page=100"
-        );
-    }
-
-    #[test]
-    fn url_construction_custom_base() {
-        let mut config = test_config();
-        config.api_base_url = Some("https://ghe.corp.com/api/v3".to_string());
-        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
-        let url = plugin.releases_url();
-        assert_eq!(
-            url,
-            "https://ghe.corp.com/api/v3/repos/octocat/hello-world/releases?per_page=100"
-        );
-    }
-
-    #[test]
     fn date_parsing() {
         let plugin = test_plugin();
         let gh = make_release("v1.0.0", false, false);
@@ -586,115 +584,8 @@ mod tests {
     }
 
     #[test]
-    fn plugin_creation_fails_with_invalid_config() {
-        let config = test_config();
-        let config = GitHubConfig {
-            owner: String::new(),
-            repo: "test".to_string(),
-            auth_token: config.auth_token,
-            api_base_url: config.api_base_url,
-            include_prereleases: config.include_prereleases,
-            tag_strip_prefix: config.tag_strip_prefix,
-            asset_patterns: config.asset_patterns,
-            install_command: config.install_command,
-            detect_installed_version_command: config.detect_installed_version_command,
-        };
-        assert!(GitHubPlugin::new(config, test_executor()).is_err());
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_no_command_returns_none() {
-        // When detect_installed_version_command is absent, always returns Ok(None).
-        let plugin = test_plugin();
-        let result = plugin.detect_installed_version("example").await.unwrap();
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_command_returns_version() {
-        // Use `echo` to simulate a command that outputs a version string.
-        let mut config = test_config();
-        config.detect_installed_version_command =
-            Some("echo '3.14.1'".to_string());
-        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
-        let result = plugin
-            .detect_installed_version("any-pkg")
-            .await
-            .expect("should succeed");
-        assert_eq!(result.as_ref().map(|v| v.as_str()), Some("3.14.1"));
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_command_placeholder_replaced() {
-        // The {package_identifier} placeholder must be expanded before execution.
-        let mut config = test_config();
-        config.detect_installed_version_command =
-            Some("echo '{package_identifier}'".to_string());
-        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
-        let result = plugin
-            .detect_installed_version("booklore")
-            .await
-            .expect("should succeed");
-        // The placeholder is shell-escaped; the output is the identifier string.
-        assert!(result.is_some());
-        assert!(result.unwrap().as_str().contains("booklore"));
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_command_empty_output_returns_none() {
-        // An empty output (no non-whitespace lines) should yield None.
-        let mut config = test_config();
-        config.detect_installed_version_command = Some("true".to_string());
-        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
-        let result = plugin
-            .detect_installed_version("pkg")
-            .await
-            .expect("should succeed");
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_command_failure_propagates_error() {
-        // A command that fails (non-zero exit) must propagate an error.
-        let mut config = test_config();
-        config.detect_installed_version_command =
-            Some("false".to_string());
-        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
-        let result = plugin.detect_installed_version("pkg").await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn execute_update_missing_release_info_returns_error() {
-        let plugin = test_plugin();
-        let (tx, _rx) = mpsc::channel(100);
-        let result = plugin
-            .execute_update("octocat/hello-world", "1.0.0", None, &tx)
-            .await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            matches!(err.current_context(), PluginError::MissingReleaseInfo),
-            "Expected MissingReleaseInfo, got: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn execute_update_no_install_command_succeeds() {
-        let plugin = test_plugin();
-        let (tx, mut rx) = mpsc::channel(100);
-        let release_info = ReleaseInfo {
-            tag: "v1.0.0".to_string(),
-            release_url: "https://example.com".to_string(),
-            assets: vec![],
-        };
-        let result = plugin
-            .execute_update("octocat/hello-world", "1.0.0", Some(&release_info), &tx)
-            .await;
-        assert!(result.is_ok());
-        let output = result.unwrap();
-        assert!(output.contains("No install_command configured"));
-        rx.close();
-        while rx.recv().await.is_some() {}
+    fn plugin_creation_succeeds_with_empty_config() {
+        let config = GitHubConfig::default();
+        assert!(GitHubPlugin::new(config, test_executor()).is_ok());
     }
 }

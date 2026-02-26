@@ -155,19 +155,22 @@ mod tests {
         PluginAssignment {
             plugin_type: PluginType::GithubReleases,
             package_identifier: "octocat/hello-world".to_string(),
-            config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
+            // GitHub plugin config no longer contains owner/repo — those are
+            // expressed via package_identifier at the software item level.
+            config: serde_json::json!({}),
         }
     }
 
     #[tokio::test]
-    async fn check_version_github_stub_returns_none() {
+    async fn check_version_github_detect_not_supported() {
+        // The GitHub plugin is fetch-only; using it for detect returns an error.
         let assignment = gh_assignment();
         let outcome =
             check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
-        // Stub implementation returns None for installed_version
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
-        assert!(outcome.error.is_none());
+        // The GitHub plugin's default detect_installed_version returns an error.
+        assert!(outcome.error.is_some());
     }
 
     #[tokio::test]
@@ -202,16 +205,17 @@ mod tests {
 
     #[tokio::test]
     async fn check_version_github_invalid_config() {
+        // A non-https api_base_url fails GitHub config validation.
         let assignment = PluginAssignment {
             plugin_type: PluginType::GithubReleases,
             package_identifier: "octocat/hello-world".to_string(),
-            config: serde_json::json!({"invalid": "config"}),
+            config: serde_json::json!({"api_base_url": "http://api.github.com"}),
         };
         let outcome =
             check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.error.is_some());
-        assert!(outcome.error.unwrap().contains("failed to parse"));
+        assert!(outcome.error.unwrap().contains("https"));
     }
 
     #[tokio::test]
