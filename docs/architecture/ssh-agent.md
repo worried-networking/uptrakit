@@ -108,7 +108,7 @@ Integration points:
 - `Capability` enum (`crates/shared/wire/src/lib.rs`) -- `SshRemote` variant
 - `ServiceProfile::from_capabilities()` -- derives `Agent` profile; `SshRemote` presence distinguishes SSH agents for labeling
 - `SettingKey::EnrollmentTokenHash` -- single shared enrollment token (`service_enrollment.token_hash`)
-- Controller dispatch (`crates/ui/web-api/src/routes/service_ws.rs`) -- routes based on capabilities
+- Controller dispatch (`crates/ui/web-api/src/routes/service_ws/`) -- routes based on capabilities
 - Connection registry (`crates/ui/web-api/src/service_connections.rs`) -- unified `register()` accepting `BTreeSet<Capability>`
 - AsyncAPI spec (`crates/shared/wire/asyncapi.yaml`) -- `ssh_remote` in Capability enum
 

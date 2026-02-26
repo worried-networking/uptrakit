@@ -349,9 +349,13 @@ Agents and MQTT services share a unified wire protocol (`ServiceMessage` / `Cont
 `crates/shared/wire/src/lib.rs`. `ServiceMessage` contains both agent-specific variants (`ReportHosts`,
 `VersionCheckResults`, `UpdateStarted`, `UpdateOutput`, `UpdateResult`) and MQTT-specific variants (`Register`,
 `ReleaseTenants`), plus shared variants (`Enroll`, `RequestCertificate`, `RenewCertificate`, `Ping`, `Disconnecting`).
-`ControllerMessage` is fully shared. The `service_ws.rs` module is the single public WebSocket entry point;
-`service_handler.rs` is the `pub(crate)` internal implementation module containing
-capability-gated message dispatch for all service types.
+`ControllerMessage` is fully shared. The `service_ws/` directory module is the public WebSocket entry point (`service_ws/mod.rs`
+handles routing, dispatch, and connection setup; `service_ws/protocol.rs` provides shared
+serialization, rate limiting, and utility types; `service_ws/connection.rs` manages
+authenticated/enrolled/anonymous connection paths). The `service_ws/handler/` submodule is the
+`pub(crate)` internal implementation containing capability-gated message dispatch for all
+service types, with handlers organized by concern (`handler/messages.rs`, `handler/mqtt.rs`,
+`handler/updates.rs`, `handler/renewal.rs`, `handler/discovery.rs`).
 
 **Enrollment and approval:**
 
@@ -396,8 +400,10 @@ MQTT services use the unified service entity:
 | `crates/ui/web-api/src/mqtt_lease_coordinator.rs` | Centralized lease management logic |
 | `crates/shared/db/src/entity/controller_event.rs` | SeaORM entity for the notification outbox |
 | `crates/ui/web-api/src/routes/settings_mqtt.rs` | MQTT config API route handlers |
-| `crates/ui/web-api/src/routes/service_ws.rs` | Unified WebSocket entry point (`/api/v1/ws/service`) |
-| `crates/ui/web-api/src/routes/service_handler.rs` | Unified capability-gated WebSocket handler (`pub(crate)`) |
+| `crates/ui/web-api/src/routes/service_ws/mod.rs` | Unified WebSocket entry point (`/api/v1/ws/service`), dispatch, and connection setup |
+| `crates/ui/web-api/src/routes/service_ws/protocol.rs` | Shared WS protocol utilities (serialization, rate limiting, types) |
+| `crates/ui/web-api/src/routes/service_ws/connection.rs` | Connection path handlers (authenticated/enrolled/anonymous) |
+| `crates/ui/web-api/src/routes/service_ws/handler/` | Unified capability-gated WebSocket handler (`pub(crate)`) — organized by concern |
 | `crates/ui/web-api/src/routes/services.rs` | Unified service management REST endpoints |
 | `crates/core/mqtt/src/main.rs` | Entry point, enrollment flow, authenticated main loop |
 | `crates/core/mqtt/src/cli.rs` | CLI argument definitions |

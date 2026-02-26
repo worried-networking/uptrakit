@@ -116,7 +116,7 @@ be extended.
 - **No `#[allow(dead_code)]`** annotations anywhere in the crate.
 
 - **`on_message` wildcard arm is benign here.** `main.rs:76-79` uses `_ =>` with a
-  `tracing::debug!` log. Unlike the High-severity wildcards in `service_ws.rs` and `service_handler.rs`
+  `tracing::debug!` log. Unlike the High-severity wildcards in `service_ws/mod.rs` and `service_ws/handler/mod.rs`
   flagged in Phase 1, this pattern is appropriate: the MQTT handler is intentionally narrow and
   new `ControllerMessage` variants (e.g., PKI rotation messages) should be silently forwarded
   to the SDK loop rather than causing a compile error in this crate.

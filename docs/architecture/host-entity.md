@@ -120,8 +120,8 @@ The controller enforces several connection-level limits on the WebSocket endpoin
 | Enrollment response timeout | 60 seconds | Prevents blocking on unresponsive controllers during Enroll/RequestCertificate exchanges |
 | Enrollment approval timeout | 30 minutes | Prevents indefinite blocking while waiting for human approval |
 
-These limits are defined as constants in `service_ws.rs` (`MAX_WS_MESSAGE_SIZE`, `ANONYMOUS_TIMEOUT`),
-`service_handler.rs` (`APPROVAL_POLL_INTERVAL`, `MAX_UPDATE_OUTPUT_BYTES`), and `enrollment/src/ws.rs`
+These limits are defined as constants in `service_ws/connection.rs` (`MAX_WS_MESSAGE_SIZE`, `ANONYMOUS_TIMEOUT`),
+`service_ws/handler/mod.rs` (`APPROVAL_POLL_INTERVAL`, `MAX_UPDATE_OUTPUT_BYTES`), and `enrollment/src/ws.rs`
 (`CONNECT_TIMEOUT`, `RESPONSE_TIMEOUT`, `APPROVAL_TIMEOUT`).
 
 ## Agent graceful shutdown
@@ -163,7 +163,7 @@ Agents report their binary version via the `agent_version` field in `ReportHosts
 in the `services.client_version` column and enforces a minimum version check:
 
 - **Storage**: On `ReportHosts`, the controller stores the agent's version in `services.client_version`
-  via the unified handler in `crates/ui/web-api/src/routes/service_handler.rs`
+  via the unified handler in `crates/ui/web-api/src/routes/service_ws/handler/messages.rs`
 - **API exposure**: The `client_version` field is included in `ServiceResponse` (REST API)
 
 ## Version check wire protocol

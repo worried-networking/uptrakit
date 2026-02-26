@@ -242,7 +242,7 @@ See [Software Item Entity](../architecture/software-item-entity.md) for the full
 | File | Purpose |
 | --- | --- |
 | `crates/ui/web-api/src/routes/software_items.rs` | Route handlers (`check_versions`, `check_versions_host`, `trigger_update`) |
-| `crates/ui/web-api/src/routes/service_handler.rs` | `VersionCheckResults` handler (updates `last_checked_at`) |
+| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` | `VersionCheckResults` handler (updates `last_checked_at`) |
 | `crates/shared/web-api-types/src/software_items.rs` | Response and request types |
 
 ## Scheduler Endpoints
@@ -363,7 +363,7 @@ tuples.
 - **Do not**: `(StatusCode::BAD_REQUEST, "Invalid input").into_response()`
 - **Do not**: construct `Json(serde_json::json!({"error": "..."}))` manually
 - The 404 fallback uses `error_response_with_code` for the JSON path; the HTML path returns a plain-text "Not Found".
-- WebSocket endpoints (`service_ws.rs`) are excluded — they use protocol-level error handling, not JSON responses.
+- WebSocket endpoints (`service_ws/`) are excluded — they use protocol-level error handling, not JSON responses.
 
 ### Frontend integration
 
@@ -401,7 +401,7 @@ The `/api/v1/ws/service` WebSocket endpoint has its own per-IP rate limiting, ap
 
 Unlike the HTTP rate limiter middleware (which fails open), the WebSocket rate limiter **fails closed** on DB errors.
 This prevents bypass under database pressure. The check is in `service_ws()` in
-`crates/ui/web-api/src/routes/service_ws.rs`.
+`crates/ui/web-api/src/routes/service_ws/mod.rs`.
 
 ### Implementation
 

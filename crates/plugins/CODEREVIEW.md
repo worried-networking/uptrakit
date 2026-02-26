@@ -17,7 +17,7 @@ Related shared crate reviewed for cross-cutting issues:
 
 The plugin subsystem is the strongest-structured domain in the codebase. The `Plugin` trait is clean and object-safe, the `register_plugins!` macro eliminates dispatch duplication for the normal code path, secret masking is correctly designed, and dependency injection via `CommandExecutor` makes all plugins unit-testable without spawning real processes. Individual plugin crates are focused, well-tested, and follow consistent patterns.
 
-The discovery-codepath split has been resolved: `PluginType::supports_discovery()` has been removed, the hardcoded slice in the old `agent_ws.rs` is gone, and `create_plugin_for_discovery` is now macro-generated alongside the other five dispatch methods. Adding a new discovery-capable plugin requires only implementing `capabilities()` to include `PluginCapability::DiscoverLocalSoftware` — the registry derives everything else automatically.
+The discovery-codepath split has been resolved: `PluginType::supports_discovery()` has been removed, the hardcoded slice in the old `agent_ws.rs` (now replaced by the unified `service_ws/handler/` module) is gone, and `create_plugin_for_discovery` is now macro-generated alongside the other five dispatch methods. Adding a new discovery-capable plugin requires only implementing `capabilities()` to include `PluginCapability::DiscoverLocalSoftware` — the registry derives everything else automatically.
 
 A secondary concern is that platform-specific plugins (Homebrew for macOS, ProxmoxHelperScripts for Proxmox VE) are compiled unconditionally into all agent binaries, causing Linux agents to accept configuration for `HomebrewPlugin` and fail only at runtime when the `brew` binary is absent.
 
