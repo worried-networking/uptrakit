@@ -20,6 +20,7 @@ use uptrakit_shared_db::entity::{
     service_host, software_item,
 };
 use uptrakit_web_api_types::validation::Validate;
+use uuid::Uuid;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::software_items::{
@@ -132,7 +133,7 @@ pub async fn list_software_items(
 #[utoipa::path(
     get,
     path = "/api/v1/software-items/{id}",
-    params(("id" = String, Path, description = "Software item UUID")),
+    params(("id" = Uuid, Path, description = "Software item UUID")),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Software item details", body = SoftwareItemDetailResponse),
@@ -144,12 +145,8 @@ pub async fn list_software_items(
 pub async fn get_software_item(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
-    Path(id): Path<String>,
+    Path(item_id): Path<Uuid>,
 ) -> Response {
-    let item_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
     match item_queries::get_software_item(&tenant_db, item_id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Software item not found"),
@@ -164,7 +161,7 @@ pub async fn get_software_item(
 #[utoipa::path(
     put,
     path = "/api/v1/software-items/{id}",
-    params(("id" = String, Path, description = "Software item UUID")),
+    params(("id" = Uuid, Path, description = "Software item UUID")),
     request_body = UpdateSoftwareItemRequest,
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -178,13 +175,9 @@ pub async fn get_software_item(
 pub async fn update_software_item(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(item_id): Path<Uuid>,
     Json(req): Json<UpdateSoftwareItemRequest>,
 ) -> Response {
-    let item_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
     match item_queries::update_software_item(&tenant_db, item_id, req).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => query_error_to_response(e),
@@ -196,7 +189,7 @@ pub async fn update_software_item(
     delete,
     path = "/api/v1/software-items/{id}",
     params(
-        ("id" = String, Path, description = "Software item UUID"),
+        ("id" = Uuid, Path, description = "Software item UUID"),
     ),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -209,13 +202,8 @@ pub async fn update_software_item(
 pub async fn delete_software_item(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(item_id): Path<Uuid>,
 ) -> Response {
-    let item_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     match item_queries::delete_software_item(&tenant_db, item_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Software item not found"),
@@ -233,7 +221,7 @@ pub async fn delete_software_item(
 #[utoipa::path(
     post,
     path = "/api/v1/software-items/{id}/approve",
-    params(("id" = String, Path, description = "Software item UUID")),
+    params(("id" = Uuid, Path, description = "Software item UUID")),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Software item approved", body = SoftwareItemResponse),
@@ -246,13 +234,8 @@ pub async fn delete_software_item(
 pub async fn approve_software_item(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(item_id): Path<Uuid>,
 ) -> Response {
-    let item_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     let item = match software_item::Entity::find_by_id(item_id)
         .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(software_item::Column::DeactivatedAt.is_null())
@@ -308,7 +291,7 @@ pub async fn approve_software_item(
 #[utoipa::path(
     post,
     path = "/api/v1/software-items/{id}/hosts",
-    params(("id" = String, Path, description = "Software item UUID")),
+    params(("id" = Uuid, Path, description = "Software item UUID")),
     request_body = AssignHostsRequest,
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -322,14 +305,9 @@ pub async fn approve_software_item(
 pub async fn assign_hosts(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(item_id): Path<Uuid>,
     Json(req): Json<AssignHostsRequest>,
 ) -> Response {
-    let item_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     if req.host_assignments.is_empty() {
         return error_response(
             StatusCode::BAD_REQUEST,
@@ -357,8 +335,8 @@ pub struct DeleteHostAssignmentParams {
     delete,
     path = "/api/v1/software-items/{id}/hosts/{host_id}",
     params(
-        ("id" = String, Path, description = "Software item UUID"),
-        ("host_id" = String, Path, description = "Host UUID"),
+        ("id" = Uuid, Path, description = "Software item UUID"),
+        ("host_id" = Uuid, Path, description = "Host UUID"),
         ("ignore" = Option<bool>, Query, description = "If true, permanently suppress this package/plugin combination from future autodiscovery runs")
     ),
     extensions(("x-required-permission" = json!("manage_software"))),
@@ -372,19 +350,9 @@ pub struct DeleteHostAssignmentParams {
 pub async fn unassign_host(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path((id, host_id_str)): Path<(String, String)>,
+    Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Query(params): Query<DeleteHostAssignmentParams>,
 ) -> Response {
-    let item_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),
-    };
-
-    let host_id = match uuid::Uuid::parse_str(&host_id_str) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
-    };
-
     // If ignore=true, load the detect_version role plugin assignment before
     // deleting so we can capture plugin_config_id + package_identifier for the
     // autodiscovery ignore rule.
@@ -459,8 +427,8 @@ pub async fn unassign_host(
     put,
     path = "/api/v1/software-items/{id}/hosts/{host_id}",
     params(
-        ("id" = String, Path, description = "Software item UUID"),
-        ("host_id" = String, Path, description = "Host UUID")
+        ("id" = Uuid, Path, description = "Software item UUID"),
+        ("host_id" = Uuid, Path, description = "Host UUID")
     ),
     request_body = UpdateHostAssignmentRequest,
     extensions(("x-required-permission" = json!("manage_software"))),
@@ -476,19 +444,9 @@ pub async fn unassign_host(
 pub async fn update_host_assignment(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path((id, host_id_str)): Path<(String, String)>,
+    Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateHostAssignmentRequest>,
 ) -> Response {
-    let item_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),
-    };
-
-    let host_id = match uuid::Uuid::parse_str(&host_id_str) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
-    };
-
     match item_queries::update_host_assignment(&tenant_db, item_id, host_id, req).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => query_error_to_response(e),
@@ -500,8 +458,8 @@ pub async fn update_host_assignment(
     post,
     path = "/api/v1/software-items/{id}/hosts/{host_id}/update",
     params(
-        ("id" = String, Path, description = "Software item UUID"),
-        ("host_id" = String, Path, description = "Host UUID")
+        ("id" = Uuid, Path, description = "Software item UUID"),
+        ("host_id" = Uuid, Path, description = "Host UUID")
     ),
     request_body = TriggerUpdateRequest,
     extensions(("x-required-permission" = json!("manage_software"))),
@@ -518,19 +476,9 @@ pub async fn trigger_update(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(user): CanManageSoftware,
-    Path((id, host_id_str)): Path<(String, String)>,
+    Path((item_id, host_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<TriggerUpdateRequest>,
 ) -> Response {
-    let item_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),
-    };
-
-    let host_id = match uuid::Uuid::parse_str(&host_id_str) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
-    };
-
     // Convert the API release_info type to the wire type before delegating.
     let release_info = req
         .release_info
@@ -627,7 +575,7 @@ pub async fn trigger_update(
 #[utoipa::path(
     post,
     path = "/api/v1/software-items/{id}/check-versions",
-    params(("id" = String, Path, description = "Software item UUID")),
+    params(("id" = Uuid, Path, description = "Software item UUID")),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
@@ -641,13 +589,8 @@ pub async fn check_versions(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(item_id): Path<Uuid>,
 ) -> Response {
-    let item_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     // Verify software item exists and is active
     let item =
         match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
@@ -855,8 +798,8 @@ pub async fn check_versions(
     post,
     path = "/api/v1/software-items/{id}/hosts/{host_id}/check-versions",
     params(
-        ("id" = String, Path, description = "Software item UUID"),
-        ("host_id" = String, Path, description = "Host UUID")
+        ("id" = Uuid, Path, description = "Software item UUID"),
+        ("host_id" = Uuid, Path, description = "Host UUID")
     ),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -871,18 +814,8 @@ pub async fn check_versions_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path((id, host_id_str)): Path<(String, String)>,
+    Path((item_id, host_id)): Path<(Uuid, Uuid)>,
 ) -> Response {
-    let item_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),
-    };
-
-    let host_id = match uuid::Uuid::parse_str(&host_id_str) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
-    };
-
     // Verify software item exists and is active
     let item =
         match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {

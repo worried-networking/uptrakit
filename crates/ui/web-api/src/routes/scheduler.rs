@@ -46,7 +46,7 @@ pub async fn list_scheduled_tasks(
     path = "/api/v1/scheduler/tasks/{id}",
     tag = "Scheduler",
     params(
-        ("id" = String, Path, description = "Task UUID")
+        ("id" = Uuid, Path, description = "Task UUID")
     ),
     responses(
         (status = 200, description = "Scheduled task", body = ScheduledTaskResponse),
@@ -59,13 +59,8 @@ pub async fn list_scheduled_tasks(
 pub async fn get_scheduled_task(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(task_id): Path<Uuid>,
 ) -> Response {
-    let task_id = match Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid task ID"),
-    };
-
     match sched_queries::get_scheduled_task(&tenant_db, task_id).await {
         Ok(Some(task)) => Json(task).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Task not found"),
@@ -82,7 +77,7 @@ pub async fn get_scheduled_task(
     path = "/api/v1/scheduler/tasks/{id}",
     tag = "Scheduler",
     params(
-        ("id" = String, Path, description = "Task UUID")
+        ("id" = Uuid, Path, description = "Task UUID")
     ),
     request_body = UpdateScheduledTaskRequest,
     responses(
@@ -97,17 +92,12 @@ pub async fn get_scheduled_task(
 pub async fn update_scheduled_task(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(task_id): Path<Uuid>,
     Json(req): Json<UpdateScheduledTaskRequest>,
 ) -> Response {
     if let Err(e) = req.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
-
-    let task_id = match Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid task ID"),
-    };
 
     match sched_queries::update_scheduled_task(&tenant_db, task_id, req).await {
         Ok(task) => Json(task).into_response(),
@@ -130,7 +120,7 @@ pub async fn update_scheduled_task(
     path = "/api/v1/scheduler/tasks/{id}/trigger",
     tag = "Scheduler",
     params(
-        ("id" = String, Path, description = "Task UUID")
+        ("id" = Uuid, Path, description = "Task UUID")
     ),
     responses(
         (status = 200, description = "Trigger result", body = TriggerScheduledTaskResponse),
@@ -143,13 +133,8 @@ pub async fn update_scheduled_task(
 pub async fn trigger_scheduled_task(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(task_id): Path<Uuid>,
 ) -> Response {
-    let task_id = match Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid task ID"),
-    };
-
     match sched_queries::trigger_scheduled_task(&tenant_db, task_id).await {
         Ok(true) => Json(TriggerScheduledTaskResponse {
             triggered: true,

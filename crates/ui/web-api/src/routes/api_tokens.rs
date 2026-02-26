@@ -9,6 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
+use uuid::Uuid;
 
 use uptrakit_web_api_types::SecretString;
 pub use uptrakit_web_api_types::api_tokens::{
@@ -95,7 +96,7 @@ pub async fn list_api_tokens(
     delete,
     path = "/api/v1/auth/api-tokens/{id}",
     params(
-        ("id" = String, Path, description = "API token ID")
+        ("id" = Uuid, Path, description = "API token ID")
     ),
     responses(
         (status = 204, description = "API token revoked"),
@@ -108,15 +109,8 @@ pub async fn list_api_tokens(
 pub async fn revoke_api_token(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
-    Path(id): Path<String>,
+    Path(token_id): Path<Uuid>,
 ) -> Response {
-    let token_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => {
-            return error_response(StatusCode::BAD_REQUEST, "Invalid token ID");
-        }
-    };
-
     let service = ApiTokenService::new(state.db().clone());
 
     match service.revoke_token(token_id, auth_user.user_id).await {

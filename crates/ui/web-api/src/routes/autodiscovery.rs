@@ -15,6 +15,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use uuid::Uuid;
 
 pub use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, CreateAutodiscoveryIgnoreRequest,
@@ -174,7 +175,7 @@ pub async fn create_autodiscovery_ignore(
 #[utoipa::path(
     delete,
     path = "/api/v1/autodiscovery/ignores/{id}",
-    params(("id" = String, Path, description = "Ignore rule UUID")),
+    params(("id" = Uuid, Path, description = "Ignore rule UUID")),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 204, description = "Ignore rule deleted"),
@@ -186,13 +187,8 @@ pub async fn create_autodiscovery_ignore(
 pub async fn delete_autodiscovery_ignore(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(rule_id): Path<Uuid>,
 ) -> Response {
-    let rule_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     match autodiscovery_queries::delete_ignore_rule(tenant_db.db(), tenant_db.tenant_id, rule_id)
         .await
     {

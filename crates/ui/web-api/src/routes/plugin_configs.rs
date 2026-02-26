@@ -17,6 +17,7 @@ use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, plugin_config, prelude::*, service, service_host};
 use uptrakit_web_api_types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
 use uptrakit_web_api_types::validation::Validate;
+use uuid::Uuid;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::plugin_configs::{
@@ -94,7 +95,7 @@ pub async fn list_plugin_configs(
 #[utoipa::path(
     get,
     path = "/api/v1/plugin-configs/{id}",
-    params(("id" = String, Path, description = "Plugin config ID")),
+    params(("id" = Uuid, Path, description = "Plugin config ID")),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Plugin config details", body = PluginConfigResponse),
@@ -106,14 +107,9 @@ pub async fn list_plugin_configs(
 pub async fn get_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(config_id): Path<Uuid>,
     CanViewSoftware(_user): CanViewSoftware,
 ) -> Response {
-    let config_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     match pc_queries::get_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Plugin config not found"),
@@ -128,7 +124,7 @@ pub async fn get_plugin_config(
 #[utoipa::path(
     put,
     path = "/api/v1/plugin-configs/{id}",
-    params(("id" = String, Path, description = "Plugin config ID")),
+    params(("id" = Uuid, Path, description = "Plugin config ID")),
     request_body = UpdatePluginConfigRequest,
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -141,15 +137,10 @@ pub async fn get_plugin_config(
 pub async fn update_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(config_id): Path<Uuid>,
     CanManageSoftware(_user): CanManageSoftware,
     Json(req): Json<UpdatePluginConfigRequest>,
 ) -> Response {
-    let config_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     match pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)
         .await
     {
@@ -177,7 +168,7 @@ pub async fn update_plugin_config(
 #[utoipa::path(
     delete,
     path = "/api/v1/plugin-configs/{id}",
-    params(("id" = String, Path, description = "Plugin config ID")),
+    params(("id" = Uuid, Path, description = "Plugin config ID")),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 204, description = "Plugin config deleted"),
@@ -188,14 +179,9 @@ pub async fn update_plugin_config(
 )]
 pub async fn delete_plugin_config(
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(config_id): Path<Uuid>,
     CanManageSoftware(_user): CanManageSoftware,
 ) -> Response {
-    let config_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     match pc_queries::delete_plugin_config(&tenant_db, config_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Plugin config not found"),
@@ -215,7 +201,7 @@ pub async fn delete_plugin_config(
 #[utoipa::path(
     post,
     path = "/api/v1/plugin-configs/{id}/discover",
-    params(("id" = String, Path, description = "Plugin config UUID")),
+    params(("id" = Uuid, Path, description = "Plugin config UUID")),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Discovery triggered", body = TriggerDiscoveryResponse),
@@ -229,13 +215,8 @@ pub async fn discover_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(config_id): Path<Uuid>,
 ) -> Response {
-    let config_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     // Load the plugin config and verify it belongs to the tenant.
     let cfg = match PluginConfig::find_by_id(config_id)
         .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
@@ -347,7 +328,7 @@ pub async fn discover_plugin_config(
 #[utoipa::path(
     delete,
     path = "/api/v1/plugin-configs/{id}/discovered",
-    params(("id" = String, Path, description = "Plugin config UUID")),
+    params(("id" = Uuid, Path, description = "Plugin config UUID")),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Pending items discarded", body = DiscardDiscoveredResponse),
@@ -359,13 +340,8 @@ pub async fn discover_plugin_config(
 pub async fn discard_plugin_config_discovered(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(config_id): Path<Uuid>,
 ) -> Response {
-    let config_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     // Verify plugin config belongs to tenant.
     let exists = match PluginConfig::find_by_id(config_id)
         .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))

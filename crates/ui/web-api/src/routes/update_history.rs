@@ -8,6 +8,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use uuid::Uuid;
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::update_history::{
@@ -54,7 +55,7 @@ pub async fn list_update_history(
 #[utoipa::path(
     get,
     path = "/api/v1/update-history/{id}",
-    params(("id" = String, Path, description = "Update history record UUID")),
+    params(("id" = Uuid, Path, description = "Update history record UUID")),
     responses(
         (status = 200, description = "Update history record", body = UpdateHistoryResponse),
         (status = 401, description = "Not authenticated"),
@@ -68,13 +69,8 @@ pub async fn list_update_history(
 pub async fn get_update_history(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
-    Path(id): Path<String>,
+    Path(record_id): Path<Uuid>,
 ) -> Response {
-    let record_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
-    };
-
     match uh_queries::get_update_history(&tenant_db, record_id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Update history record not found"),

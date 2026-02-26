@@ -14,6 +14,7 @@ use axum::{
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, prelude::*, service_host};
+use uuid::Uuid;
 
 pub use uptrakit_web_api_types::autodiscovery::{
     DiscardDiscoveredResponse, TriggerDiscoveryResponse,
@@ -61,7 +62,7 @@ pub async fn list_hosts(
     get,
     path = "/api/v1/hosts/{id}",
     params(
-        ("id" = String, Path, description = "Host UUID")
+        ("id" = Uuid, Path, description = "Host UUID")
     ),
     responses(
         (status = 200, description = "Host details", body = HostResponse),
@@ -76,13 +77,8 @@ pub async fn list_hosts(
 pub async fn get_host(
     tenant_db: TenantDb,
     CanViewHosts(_user): CanViewHosts,
-    Path(id): Path<String>,
+    Path(host_id): Path<Uuid>,
 ) -> Response {
-    let host_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
-    };
-
     match host_queries::get_active_host(&tenant_db, host_id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Host not found"),
@@ -98,7 +94,7 @@ pub async fn get_host(
     put,
     path = "/api/v1/hosts/{id}",
     params(
-        ("id" = String, Path, description = "Host UUID")
+        ("id" = Uuid, Path, description = "Host UUID")
     ),
     request_body = UpdateHostRequest,
     responses(
@@ -114,14 +110,9 @@ pub async fn get_host(
 pub async fn update_host(
     tenant_db: TenantDb,
     CanManageHosts(_user): CanManageHosts,
-    Path(id): Path<String>,
+    Path(host_id): Path<Uuid>,
     Json(body): Json<UpdateHostRequest>,
 ) -> Response {
-    let host_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
-    };
-
     match host_queries::update_host(&tenant_db, host_id, &body).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Host not found"),
@@ -137,7 +128,7 @@ pub async fn update_host(
     delete,
     path = "/api/v1/hosts/{id}",
     params(
-        ("id" = String, Path, description = "Host UUID")
+        ("id" = Uuid, Path, description = "Host UUID")
     ),
     responses(
         (status = 200, description = "Host deactivated", body = HostMessageResponse),
@@ -152,13 +143,8 @@ pub async fn update_host(
 pub async fn deactivate_host(
     tenant_db: TenantDb,
     CanManageHosts(_user): CanManageHosts,
-    Path(id): Path<String>,
+    Path(host_id): Path<Uuid>,
 ) -> Response {
-    let host_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
-    };
-
     match host_queries::deactivate_host(&tenant_db, host_id).await {
         Ok(true) => (
             StatusCode::OK,
@@ -183,7 +169,7 @@ pub async fn deactivate_host(
 #[utoipa::path(
     post,
     path = "/api/v1/hosts/{id}/discover",
-    params(("id" = String, Path, description = "Host UUID")),
+    params(("id" = Uuid, Path, description = "Host UUID")),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Discovery triggered", body = TriggerDiscoveryResponse),
@@ -196,13 +182,8 @@ pub async fn discover_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(host_id): Path<Uuid>,
 ) -> Response {
-    let host_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
-    };
-
     // Verify host belongs to tenant.
     let host_record = match Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
@@ -262,7 +243,7 @@ pub async fn discover_host(
     delete,
     path = "/api/v1/hosts/{id}/discovered",
     params(
-        ("id" = String, Path, description = "Host UUID"),
+        ("id" = Uuid, Path, description = "Host UUID"),
         ("plugin_config_id" = Option<String>, Query, description = "Filter by plugin config UUID")
     ),
     extensions(("x-required-permission" = json!("manage_software"))),
@@ -276,14 +257,9 @@ pub async fn discover_host(
 pub async fn discard_host_discovered(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Path(id): Path<String>,
+    Path(host_id): Path<Uuid>,
     Query(params): Query<DiscardDiscoveredParams>,
 ) -> Response {
-    let host_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
-    };
-
     // Verify host belongs to tenant.
     let exists = match Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_db.tenant_id))

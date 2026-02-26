@@ -14,6 +14,7 @@ use axum::{
 };
 use std::sync::Arc;
 use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
+use uuid::Uuid;
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::services::{
@@ -63,7 +64,7 @@ pub async fn list_services(
     get,
     path = "/api/v1/services/{id}",
     params(
-        ("id" = String, Path, description = "Service UUID")
+        ("id" = Uuid, Path, description = "Service UUID")
     ),
     responses(
         (status = 200, description = "Service details", body = ServiceResponse),
@@ -78,13 +79,8 @@ pub async fn list_services(
 pub async fn get_service(
     tenant_db: TenantDb,
     CanViewAgents(_user): CanViewAgents,
-    Path(id): Path<String>,
+    Path(service_id): Path<Uuid>,
 ) -> Response {
-    let service_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
-    };
-
     match svc_queries::get_active_service(&tenant_db, service_id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Service not found"),
@@ -100,7 +96,7 @@ pub async fn get_service(
     put,
     path = "/api/v1/services/{id}",
     params(
-        ("id" = String, Path, description = "Service UUID")
+        ("id" = Uuid, Path, description = "Service UUID")
     ),
     request_body = UpdateServiceRequest,
     responses(
@@ -117,14 +113,9 @@ pub async fn get_service(
 pub async fn update_service(
     tenant_db: TenantDb,
     CanManageAgents(_user): CanManageAgents,
-    Path(id): Path<String>,
+    Path(service_id): Path<Uuid>,
     Json(body): Json<UpdateServiceRequest>,
 ) -> Response {
-    let service_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
-    };
-
     match svc_queries::update_service_settings(&tenant_db, service_id, body.ping_interval_seconds)
         .await
     {
@@ -142,7 +133,7 @@ pub async fn update_service(
     post,
     path = "/api/v1/services/{id}/approve",
     params(
-        ("id" = String, Path, description = "Service UUID")
+        ("id" = Uuid, Path, description = "Service UUID")
     ),
     responses(
         (status = 200, description = "Service approved", body = ServiceResponse),
@@ -158,13 +149,8 @@ pub async fn approve_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageAgents(_user): CanManageAgents,
-    Path(id): Path<String>,
+    Path(service_id): Path<Uuid>,
 ) -> Response {
-    let service_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
-    };
-
     let resp = match svc_queries::approve_service(&tenant_db, service_id).await {
         Ok(r) => r,
         Err(ServiceQueryError::NotFound) => {
@@ -200,7 +186,7 @@ pub async fn approve_service(
     post,
     path = "/api/v1/services/{id}/reject",
     params(
-        ("id" = String, Path, description = "Service UUID")
+        ("id" = Uuid, Path, description = "Service UUID")
     ),
     responses(
         (status = 200, description = "Service rejected", body = ServiceResponse),
@@ -216,13 +202,8 @@ pub async fn reject_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageAgents(_user): CanManageAgents,
-    Path(id): Path<String>,
+    Path(service_id): Path<Uuid>,
 ) -> Response {
-    let service_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
-    };
-
     let resp = match svc_queries::reject_service(&tenant_db, service_id).await {
         Ok(r) => r,
         Err(ServiceQueryError::NotFound) => {
@@ -261,7 +242,7 @@ pub async fn reject_service(
     delete,
     path = "/api/v1/services/{id}",
     params(
-        ("id" = String, Path, description = "Service UUID")
+        ("id" = Uuid, Path, description = "Service UUID")
     ),
     responses(
         (status = 200, description = "Service deactivated", body = MessageResponse),
@@ -277,13 +258,8 @@ pub async fn deactivate_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageAgents(_user): CanManageAgents,
-    Path(id): Path<String>,
+    Path(service_id): Path<Uuid>,
 ) -> Response {
-    let service_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
-    };
-
     match svc_queries::deactivate_service(&tenant_db, service_id, state.default_tenant_id).await {
         Ok(true) => {
             state.revocation_notify.notify_one();
@@ -311,7 +287,7 @@ pub async fn deactivate_service(
     post,
     path = "/api/v1/services/{target_id}/merge",
     params(
-        ("target_id" = String, Path, description = "Target service UUID (approved agent)")
+        ("target_id" = Uuid, Path, description = "Target service UUID (approved agent)")
     ),
     request_body = MergeAgentRequest,
     responses(
@@ -329,14 +305,9 @@ pub async fn merge_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageAgents(_user): CanManageAgents,
-    Path(target_id): Path<String>,
+    Path(target_uuid): Path<Uuid>,
     Json(body): Json<MergeAgentRequest>,
 ) -> Response {
-    let target_uuid = match uuid::Uuid::parse_str(&target_id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid target service ID"),
-    };
-
     let source_uuid = body.source_id;
 
     if target_uuid == source_uuid {
@@ -775,7 +746,7 @@ mod tests {
             State(Arc::clone(&state)),
             tenant_db,
             CanManageAgents::new(auth_user),
-            Path(target.id.to_string()),
+            Path(target.id),
             Json(MergeAgentRequest {
                 source_id: source.id,
             }),
@@ -816,7 +787,7 @@ mod tests {
             State(Arc::clone(&state)),
             tenant_db,
             CanManageAgents::new(auth_user),
-            Path(target.id.to_string()),
+            Path(target.id),
             Json(MergeAgentRequest {
                 source_id: source.id,
             }),

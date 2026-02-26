@@ -17,6 +17,7 @@ use time::OffsetDateTime;
 use uptrakit_internal_wire::{ControllerMessage, MqttClientCreatedPayload};
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uptrakit_web_api_types::mqtt_url::MqttUrl;
+use uuid::Uuid;
 
 pub use uptrakit_web_api_types::settings_mqtt::{
     CreateMqttClientRequest, MqttClientConnectionStatus, MqttClientResponse, MqttLimitResponse,
@@ -361,7 +362,7 @@ pub async fn update_mqtt_limit(
     get,
     path = "/api/v1/settings/mqtt/{id}",
     params(
-        ("id" = String, Path, description = "MQTT client ID")
+        ("id" = Uuid, Path, description = "MQTT client ID")
     ),
     extensions(("x-required-permission" = json!("view_settings"))),
     responses(
@@ -377,13 +378,8 @@ pub async fn get_mqtt_settings(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(mqtt_client_id): Path<Uuid>,
 ) -> Response {
-    let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
-    };
-
     match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id, tenant_db.tenant_id)
         .await
     {
@@ -418,7 +414,7 @@ pub async fn get_mqtt_settings(
     put,
     path = "/api/v1/settings/mqtt/{id}",
     params(
-        ("id" = String, Path, description = "MQTT client ID")
+        ("id" = Uuid, Path, description = "MQTT client ID")
     ),
     request_body = UpdateMqttClientRequest,
     extensions(("x-required-permission" = json!("manage_settings"))),
@@ -436,14 +432,9 @@ pub async fn update_mqtt_settings(
     State(state): State<Arc<AppState>>,
     CanManageSettings(_user): CanManageSettings,
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(mqtt_client_id): Path<Uuid>,
     Json(req): Json<UpdateMqttClientRequest>,
 ) -> Response {
-    let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
-    };
-
     let existing = match mqtt_client_store::load_mqtt_client_by_id(
         state.db(),
         mqtt_client_id,
@@ -594,7 +585,7 @@ pub async fn update_mqtt_settings(
     delete,
     path = "/api/v1/settings/mqtt/{id}",
     params(
-        ("id" = String, Path, description = "MQTT client ID")
+        ("id" = Uuid, Path, description = "MQTT client ID")
     ),
     extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
@@ -610,13 +601,8 @@ pub async fn delete_mqtt_settings(
     State(state): State<Arc<AppState>>,
     CanManageSettings(_user): CanManageSettings,
     tenant_db: TenantDb,
-    Path(id): Path<String>,
+    Path(mqtt_client_id): Path<Uuid>,
 ) -> Response {
-    let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
-    };
-
     // Verify tenant ownership
     match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id, tenant_db.tenant_id)
         .await
