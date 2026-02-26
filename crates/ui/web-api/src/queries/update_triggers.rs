@@ -2,9 +2,10 @@
 
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{ControllerMessage, ReleaseInfo};
+use uptrakit_internal_wire::{ControllerMessage, PluginAssignment, ReleaseInfo};
 use uptrakit_shared_db::entity::{
-    host, prelude::*, service, service_host, update_history,
+    host, host_software_item_plugin, plugin_config, prelude::*, service, service_host,
+    update_history,
 };
 use uuid::Uuid;
 
@@ -24,6 +25,9 @@ pub enum TriggerUpdateError {
     /// The host does not have an assignment record for this software item.
     #[error("host is not assigned to this software item")]
     HostNotAssigned,
+    /// No execute_update role plugin assigned for this host-software pair.
+    #[error("no execute_update plugin assigned")]
+    NoExecuteUpdatePlugin,
     /// No `service_host` link exists for the host.
     #[error("no agent linked to host")]
     NoAgent,
@@ -34,7 +38,7 @@ pub enum TriggerUpdateError {
     /// (host_id, software_item_id) pair.
     #[error("an update is already pending or in progress")]
     UpdateAlreadyActive,
-    /// The plugin config referenced by the host assignment was not found.
+    /// The plugin config referenced by the role assignment was not found.
     #[error("plugin config not found")]
     PluginConfigNotFound,
     /// The plugin type stored in the config could not be deserialized.
@@ -66,6 +70,56 @@ pub struct TriggerUpdateParams<'a> {
     /// Optional release metadata supplied by the REST caller.
     /// `None` when triggered from MQTT or a scheduler.
     pub release_info: Option<ReleaseInfo>,
+}
+
+/// Load a role-specific plugin assignment for a host-software pair.
+///
+/// Returns `None` if no assignment with the given role exists.
+async fn load_role_plugin(
+    db: &DatabaseConnection,
+    host_id: Uuid,
+    software_item_id: Uuid,
+    role: &str,
+) -> Result<Option<(host_software_item_plugin::Model, plugin_config::Model)>, TriggerUpdateError> {
+    let assignment = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
+        .filter(host_software_item_plugin::Column::Role.eq(role))
+        .one(db)
+        .await?;
+
+    let Some(assignment) = assignment else {
+        return Ok(None);
+    };
+
+    let config = PluginConfig::find_by_id(assignment.plugin_config_id)
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        .one(db)
+        .await?
+        .ok_or(TriggerUpdateError::PluginConfigNotFound)?;
+
+    Ok(Some((assignment, config)))
+}
+
+/// Build a [`PluginAssignment`] from a role plugin row and its config.
+fn build_plugin_assignment(
+    assignment: &host_software_item_plugin::Model,
+    config: &plugin_config::Model,
+) -> Result<PluginAssignment, TriggerUpdateError> {
+    let plugin_type: uptrakit_internal_wire::PluginType =
+        serde_json::from_value(serde_json::Value::String(config.plugin_type.clone()))
+            .map_err(|_| TriggerUpdateError::UnknownPluginType(config.plugin_type.clone()))?;
+
+    let merged_config = crate::update_hooks::merge_config(
+        &config.config,
+        assignment.config_override.as_ref(),
+    );
+
+    Ok(PluginAssignment {
+        plugin_type,
+        package_identifier: assignment.package_identifier.clone(),
+        config: merged_config,
+    })
 }
 
 /// Core update-trigger logic shared by the REST handler and the MQTT WS handler.
@@ -105,8 +159,8 @@ pub async fn trigger_update_for_host(
         .await?
         .ok_or(TriggerUpdateError::HostNotFound)?;
 
-    // 3. Verify host is assigned to the software item and load per-host plugin info.
-    let link = HostSoftwareItem::find_by_id((host_id, item_id))
+    // 3. Verify host is assigned to the software item.
+    let _link = HostSoftwareItem::find_by_id((host_id, item_id))
         .one(db)
         .await?
         .ok_or(TriggerUpdateError::HostNotAssigned)?;
@@ -144,18 +198,28 @@ pub async fn trigger_update_for_host(
         return Err(TriggerUpdateError::UpdateAlreadyActive);
     }
 
-    // 7. Load plugin config from the host-specific assignment.
-    let plugin_config = uptrakit_shared_db::entity::prelude::PluginConfig::find_by_id(
-        link.plugin_config_id,
-    )
-    .filter(
-        uptrakit_shared_db::entity::plugin_config::Column::DeactivatedAt.is_null(),
-    )
-    .one(db)
-    .await?
-    .ok_or(TriggerUpdateError::PluginConfigNotFound)?;
+    // 7. Load role-specific plugin assignments.
+    let execute_update_data = load_role_plugin(db, host_id, item_id, "execute_update")
+        .await?
+        .ok_or(TriggerUpdateError::NoExecuteUpdatePlugin)?;
 
-    // 8. Create update_history record with status = Pending.
+    let detect_version_data = load_role_plugin(db, host_id, item_id, "detect_version").await?;
+
+    let execute_update_plugin =
+        build_plugin_assignment(&execute_update_data.0, &execute_update_data.1)?;
+
+    let detect_version_plugin = detect_version_data
+        .as_ref()
+        .map(|(a, c)| build_plugin_assignment(a, c))
+        .transpose()?;
+
+    // 8. Resolve hooks from the execute_update plugin config + per-role override.
+    let resolved_hooks = crate::update_hooks::resolve_hooks(
+        &execute_update_data.1.config,
+        execute_update_data.0.config_override.as_ref(),
+    );
+
+    // 9. Create update_history record with status = Pending.
     let now = OffsetDateTime::now_utc();
     let update_history_id = generate_uuid();
     let update_record = update_history::ActiveModel {
@@ -176,32 +240,15 @@ pub async fn trigger_update_for_host(
 
     update_record.insert(db).await?;
 
-    // 9. Resolve hooks from plugin config + per-host config_override.
-    let resolved_hooks = crate::update_hooks::resolve_hooks(
-        &plugin_config.config,
-        link.config_override.as_ref(),
-    );
-
-    // 10. Merge config.
-    let merged_config =
-        crate::update_hooks::merge_config(&plugin_config.config, link.config_override.as_ref());
-
-    // 11. Convert plugin type.
-    let plugin_type: uptrakit_internal_wire::PluginType = serde_json::from_value(
-        serde_json::Value::String(plugin_config.plugin_type.clone()),
-    )
-    .map_err(|_| TriggerUpdateError::UnknownPluginType(plugin_config.plugin_type.clone()))?;
-
-    // 12. Build ExecuteUpdatePayload and dispatch to the agent.
+    // 10. Build ExecuteUpdatePayload and dispatch to the agent.
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
         host_machine_id: host_record.machine_id.clone(),
         update_history_id,
         software_item_id: item_id,
         software_item_name: item.name.clone(),
-        package_identifier: link.package_identifier.clone(),
         to_version,
-        plugin_type,
-        plugin_config: merged_config,
+        detect_version_plugin,
+        execute_update_plugin,
         pre_update_hooks: resolved_hooks.pre_update_hooks,
         post_update_hooks: resolved_hooks.post_update_hooks,
         release_info,

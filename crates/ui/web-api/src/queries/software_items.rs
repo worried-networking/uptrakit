@@ -6,13 +6,16 @@ use std::collections::HashMap;
 use time::OffsetDateTime;
 use uptrakit_plugin_registry::PluginRegistry;
 use uptrakit_shared_db::entity::{
-    available_version, host, host_software_item, plugin_config, prelude::*, software_item,
+    host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
+    software_item,
 };
+use uptrakit_web_api_types::PluginRole;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::software_items::{
-    AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment, ListSoftwareItemsParams,
-    SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse,
-    UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
+    AssignHostsRequest, CreateSoftwareItemRequest, HostPluginRoleAssignment,
+    HostPluginRoleSummary, ListSoftwareItemsParams, SoftwareItemDetailResponse,
+    SoftwareItemHostSummary, SoftwareItemResponse, UpdateHostAssignmentRequest,
+    UpdateSoftwareItemRequest,
 };
 use uuid::Uuid;
 
@@ -33,7 +36,7 @@ pub enum SoftwareItemQueryError {
     HostNotFound(Uuid),
     /// The referenced plugin config does not exist or is inactive.
     PluginConfigNotFound,
-    /// A (host_id, plugin_config_id, package_identifier) combo is already tracked.
+    /// A `(host_id, software_item_id, role, ordinal)` combo already exists.
     DuplicateHostAssignment,
     /// Package identifier failed validation (e.g. Homebrew naming rules).
     InvalidPackageIdentifier(String),
@@ -41,6 +44,8 @@ pub enum SoftwareItemQueryError {
     InvalidConfigOverride(String),
     /// Inline plugin config failed name/config/hook validation.
     InvalidInlinePluginConfig(String),
+    /// Invalid `execution_site` value.
+    InvalidExecutionSite(String),
     /// A database error occurred.
     Db(sea_orm::DbErr),
 }
@@ -121,22 +126,86 @@ async fn count_linked_hosts(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> 
         .unwrap_or(0)
 }
 
-/// Load the distinct plugin types for a software item from its host assignments.
+/// Load the latest version for a single software item across all hosts.
+/// Returns the maximum `latest_version` value among all host assignments.
+async fn load_latest_version_for_item(
+    db: &sea_orm::DatabaseConnection,
+    item_id: Uuid,
+) -> Option<String> {
+    #[derive(Debug, FromQueryResult)]
+    struct LatestVersionRow {
+        latest_version: Option<String>,
+    }
+
+    let rows: Vec<LatestVersionRow> = HostSoftwareItem::find()
+        .select_only()
+        .column(host_software_item::Column::LatestVersion)
+        .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+        .filter(host_software_item::Column::LatestVersion.is_not_null())
+        .into_model::<LatestVersionRow>()
+        .all(db)
+        .await
+        .unwrap_or_default();
+
+    rows.into_iter()
+        .filter_map(|r| r.latest_version)
+        .max()
+}
+
+/// Bulk-load latest versions for multiple software items.
+/// Returns a map of `software_item_id` to the maximum `latest_version` across hosts.
+async fn bulk_load_latest_versions(
+    db: &sea_orm::DatabaseConnection,
+    item_ids: &[Uuid],
+) -> HashMap<Uuid, String> {
+    #[derive(Debug, FromQueryResult)]
+    struct ItemLatestRow {
+        software_item_id: Uuid,
+        latest_version: Option<String>,
+    }
+
+    let rows: Vec<ItemLatestRow> = HostSoftwareItem::find()
+        .select_only()
+        .column(host_software_item::Column::SoftwareItemId)
+        .column(host_software_item::Column::LatestVersion)
+        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.to_vec()))
+        .filter(host_software_item::Column::LatestVersion.is_not_null())
+        .into_model::<ItemLatestRow>()
+        .all(db)
+        .await
+        .unwrap_or_default();
+
+    let mut map: HashMap<Uuid, String> = HashMap::new();
+    for row in rows {
+        if let Some(v) = row.latest_version {
+            map.entry(row.software_item_id)
+                .and_modify(|existing| {
+                    if v > *existing {
+                        *existing = v.clone();
+                    }
+                })
+                .or_insert(v);
+        }
+    }
+    map
+}
+
+/// Load the distinct plugin types for a software item from its host plugin assignments.
 async fn load_plugins(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> Vec<String> {
     #[derive(Debug, FromQueryResult)]
     struct PcRow {
         plugin_type: String,
     }
 
-    // Join host_software_items → plugin_configs to collect distinct plugin types.
-    let rows: Vec<PcRow> = HostSoftwareItem::find()
+    // Join host_software_item_plugins -> plugin_configs to collect distinct plugin types.
+    let rows: Vec<PcRow> = HostSoftwareItemPlugin::find()
         .select_only()
         .column(plugin_config::Column::PluginType)
         .join(
             sea_orm::JoinType::InnerJoin,
-            host_software_item::Relation::PluginConfig.def(),
+            host_software_item_plugin::Relation::PluginConfig.def(),
         )
-        .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
         .into_model::<PcRow>()
         .all(db)
         .await
@@ -152,7 +221,6 @@ async fn load_plugins(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> Vec<St
 async fn load_item_hosts(
     db: &sea_orm::DatabaseConnection,
     item_id: Uuid,
-    latest_version: Option<&str>,
 ) -> Vec<SoftwareItemHostSummary> {
     let links = match HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
@@ -171,10 +239,9 @@ async fn load_item_hosts(
     }
 
     let host_ids: Vec<Uuid> = links.iter().map(|l| l.host_id).collect();
-    let pc_ids: Vec<Uuid> = links.iter().map(|l| l.plugin_config_id).collect();
 
     let hosts: HashMap<Uuid, host::Model> = match Host::find()
-        .filter(host::Column::Id.is_in(host_ids))
+        .filter(host::Column::Id.is_in(host_ids.clone()))
         .filter(host::Column::DeactivatedAt.is_null())
         .all(db)
         .await
@@ -186,6 +253,22 @@ async fn load_item_hosts(
         }
     };
 
+    // Bulk-load all plugin role assignments for this software item.
+    let plugin_rows = match HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
+        .filter(host_software_item_plugin::Column::HostId.is_in(host_ids))
+        .all(db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!("Failed to load host plugin assignments: {e}");
+            return Vec::new();
+        }
+    };
+
+    // Collect all plugin config IDs and bulk-load the configs.
+    let pc_ids: Vec<Uuid> = plugin_rows.iter().map(|r| r.plugin_config_id).collect();
     let plugin_configs: HashMap<Uuid, plugin_config::Model> = match PluginConfig::find()
         .filter(plugin_config::Column::Id.is_in(pc_ids))
         .all(db)
@@ -198,28 +281,58 @@ async fn load_item_hosts(
         }
     };
 
+    // Group plugin rows by host_id.
+    let mut plugins_by_host: HashMap<Uuid, Vec<&host_software_item_plugin::Model>> =
+        HashMap::new();
+    for row in &plugin_rows {
+        plugins_by_host
+            .entry(row.host_id)
+            .or_default()
+            .push(row);
+    }
+
     links
         .into_iter()
         .filter_map(|link| {
             let host = hosts.get(&link.host_id)?;
-            let pc = plugin_configs.get(&link.plugin_config_id)?;
-            let update_avail =
-                host_update_available(link.installed_version.as_deref(), latest_version);
+
+            let host_plugins: Vec<HostPluginRoleSummary> = plugins_by_host
+                .get(&link.host_id)
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|pr| {
+                            let pc = plugin_configs.get(&pr.plugin_config_id)?;
+                            Some(HostPluginRoleSummary {
+                                role: PluginRole::from(pr.role.clone()),
+                                plugin_config_id: pc.id,
+                                plugin_config_name: pc.name.clone(),
+                                plugin_type: pc.plugin_type.clone(),
+                                package_identifier: pr.package_identifier.clone(),
+                                config_override: pr.config_override.clone(),
+                                execution_site: pr.execution_site.clone(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let update_avail = host_update_available(
+                link.installed_version.as_deref(),
+                link.latest_version.as_deref(),
+            );
+
             Some(SoftwareItemHostSummary {
                 host_id: host.id,
                 hostname: host.hostname.clone(),
                 friendly_name: host.friendly_name.clone(),
-                plugin_config_id: pc.id,
-                plugin_config_name: pc.name.clone(),
-                plugin_type: pc.plugin_type.clone(),
-                package_identifier: link.package_identifier,
-                config_override: link.config_override,
+                plugins: host_plugins,
                 installed_version: link.installed_version,
                 installed_version_detected_at: link.installed_version_detected_at,
+                latest_version: link.latest_version,
+                latest_release_metadata: link.latest_release_metadata,
+                update_available: update_avail,
                 last_updated_at: link.last_updated_at,
                 linked_at: link.linked_at,
-                latest_version: latest_version.map(str::to_owned),
-                update_available: update_avail,
             })
         })
         .collect()
@@ -270,12 +383,36 @@ fn validate_config_override(
         .map_err(|e| ConfigOverrideError::PluginValidation(e.to_string()))
 }
 
+/// Validate that `execution_site` is one of the allowed values and that
+/// "controller" is only used with the "fetch_releases" role.
+fn validate_execution_site(
+    execution_site: &str,
+    role: &PluginRole,
+) -> Result<(), SoftwareItemQueryError> {
+    match execution_site {
+        "auto" | "agent" => Ok(()),
+        "controller" => {
+            if *role == PluginRole::FetchReleases {
+                Ok(())
+            } else {
+                Err(SoftwareItemQueryError::InvalidExecutionSite(format!(
+                    "execution_site \"controller\" is only valid for the \"fetch_releases\" role, got \"{}\"",
+                    role,
+                )))
+            }
+        }
+        other => Err(SoftwareItemQueryError::InvalidExecutionSite(format!(
+            "invalid execution_site value \"{other}\"; must be \"auto\", \"agent\", or \"controller\""
+        ))),
+    }
+}
+
 /// Resolve plugin config from either an existing ID or an inline create request,
 /// within a transaction. Returns `(plugin_config_id, plugin_config::Model)`.
 async fn resolve_plugin_config_txn(
     txn: &sea_orm::DatabaseTransaction,
     tenant_id: Uuid,
-    assignment: &HostSoftwareAssignment,
+    assignment: &HostPluginRoleAssignment,
 ) -> Result<(Uuid, plugin_config::Model), SoftwareItemQueryError> {
     match (&assignment.plugin_config_id, &assignment.plugin_config) {
         (Some(pcid), None) => {
@@ -454,16 +591,16 @@ pub async fn list_software_items(
         .map(|row| (row.software_item_id, row.count as u64))
         .collect();
 
-    // Bulk-load plugin types for all items via JOIN (one query).
-    let plugin_type_rows: Vec<ItemPluginType> = HostSoftwareItem::find()
+    // Bulk-load plugin types for all items via JOIN through host_software_item_plugins.
+    let plugin_type_rows: Vec<ItemPluginType> = HostSoftwareItemPlugin::find()
         .select_only()
-        .column(host_software_item::Column::SoftwareItemId)
+        .column(host_software_item_plugin::Column::SoftwareItemId)
         .column(plugin_config::Column::PluginType)
         .join(
             sea_orm::JoinType::InnerJoin,
-            host_software_item::Relation::PluginConfig.def(),
+            host_software_item_plugin::Relation::PluginConfig.def(),
         )
-        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(item_ids.clone()))
         .into_model::<ItemPluginType>()
         .all(tenant_db.db())
         .await?;
@@ -477,38 +614,35 @@ pub async fn list_software_items(
         }
     }
 
-    // Bulk-load latest known versions from available_versions for all items.
-    let latest_versions: HashMap<Uuid, String> = AvailableVersion::find()
-        .filter(available_version::Column::SoftwareItemId.is_in(item_ids.clone()))
-        .all(tenant_db.db())
-        .await?
-        .into_iter()
-        .filter_map(|av| av.version.map(|v| (av.software_item_id, v)))
-        .collect();
+    // Bulk-load latest known versions from host_software_items for all items.
+    let latest_versions = bulk_load_latest_versions(tenant_db.db(), &item_ids).await;
 
     // Bulk-load all host installed_versions for update_available computation.
-    // Map: software_item_id → list of installed_version values (may include None).
+    // Map: software_item_id -> list of (installed_version, latest_version) pairs.
     #[derive(Debug, FromQueryResult)]
     struct InstalledVersionRow {
         software_item_id: Uuid,
         installed_version: Option<String>,
+        latest_version: Option<String>,
     }
 
     let installed_rows: Vec<InstalledVersionRow> = HostSoftwareItem::find()
         .select_only()
         .column(host_software_item::Column::SoftwareItemId)
         .column(host_software_item::Column::InstalledVersion)
+        .column(host_software_item::Column::LatestVersion)
         .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
         .into_model::<InstalledVersionRow>()
         .all(tenant_db.db())
         .await?;
 
-    let mut installed_map: HashMap<Uuid, Vec<Option<String>>> = HashMap::new();
+    type VersionPair = (Option<String>, Option<String>);
+    let mut installed_map: HashMap<Uuid, Vec<VersionPair>> = HashMap::new();
     for row in installed_rows {
         installed_map
             .entry(row.software_item_id)
             .or_default()
-            .push(row.installed_version);
+            .push((row.installed_version, row.latest_version));
     }
 
     let response: Vec<SoftwareItemResponse> = items
@@ -517,16 +651,14 @@ pub async fn list_software_items(
             let plugins = plugins_map.remove(&item.id).unwrap_or_default();
             let host_count = host_counts.get(&item.id).copied().unwrap_or(0);
             let latest_version = latest_versions.get(&item.id).cloned();
-            let update_available = latest_version.as_deref().is_some_and(|lv| {
-                installed_map
-                    .get(&item.id)
-                    .map(|versions| {
-                        versions
-                            .iter()
-                            .any(|iv| iv.as_deref().is_some_and(|iv| iv != lv))
+            let update_available = installed_map
+                .get(&item.id)
+                .map(|pairs| {
+                    pairs.iter().any(|(iv, lv)| {
+                        host_update_available(iv.as_deref(), lv.as_deref())
                     })
-                    .unwrap_or(false)
-            });
+                })
+                .unwrap_or(false);
             build_list_response(
                 item,
                 plugins,
@@ -549,17 +681,12 @@ pub async fn get_software_item(
         return Ok(None);
     };
 
-    // Load latest known version for this item.
-    let latest_version: Option<String> = AvailableVersion::find()
-        .filter(available_version::Column::SoftwareItemId.eq(id))
-        .one(tenant_db.db())
-        .await?
-        .and_then(|av| av.version);
-
-    let hosts = load_item_hosts(tenant_db.db(), id, latest_version.as_deref()).await;
+    let hosts = load_item_hosts(tenant_db.db(), id).await;
     let host_count = hosts.len() as u64;
     let plugins = load_plugins(tenant_db.db(), id).await;
 
+    // Latest version for the item is the max across all hosts.
+    let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
     let update_available = hosts.iter().any(|h| h.update_available);
 
     Ok(Some(build_detail_response(
@@ -572,7 +699,7 @@ pub async fn get_software_item(
     )))
 }
 
-/// Partial update — only `name` and `enabled` are updatable.
+/// Partial update -- only `name` and `enabled` are updatable.
 /// Returns `Err(NotFound)` if the item does not exist or is deactivated.
 pub async fn update_software_item(
     tenant_db: &TenantDb,
@@ -624,13 +751,8 @@ pub async fn update_software_item(
         .map_err(SoftwareItemQueryError::Db)?;
     let plugins = load_plugins(tenant_db.db(), id).await;
     let host_count = count_linked_hosts(tenant_db.db(), id).await;
-    let latest_version: Option<String> = AvailableVersion::find()
-        .filter(available_version::Column::SoftwareItemId.eq(id))
-        .one(tenant_db.db())
-        .await
-        .ok()
-        .flatten()
-        .and_then(|av| av.version);
+    let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
+
     // For update_available we do a quick per-host check.
     let update_available = if latest_version.is_some() {
         HostSoftwareItem::find()
@@ -641,7 +763,10 @@ pub async fn update_software_item(
             .unwrap_or_default()
             .iter()
             .any(|h| {
-                host_update_available(h.installed_version.as_deref(), latest_version.as_deref())
+                host_update_available(
+                    h.installed_version.as_deref(),
+                    h.latest_version.as_deref(),
+                )
             })
     } else {
         false
@@ -670,8 +795,9 @@ pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool
     Ok(true)
 }
 
-/// Assign hosts to a software item. Each host carries its own plugin info.
-/// Returns the updated detail response, or an error if the item or a host is not found.
+/// Assign hosts to a software item. Each host carries its own list of role-specific
+/// plugin assignments. Returns the updated detail response, or an error if the item
+/// or a host is not found.
 pub async fn assign_hosts(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -702,64 +828,100 @@ pub async fn assign_hosts(
             return Err(SoftwareItemQueryError::HostNotFound(host_id));
         }
 
-        let (plugin_config_id, config) =
-            resolve_plugin_config_txn(&txn, tenant_db.tenant_id, assignment).await?;
-
-        let package_identifier = assignment.package_identifier.as_deref().unwrap_or("");
-
-        validate_assignment(
-            &config,
-            package_identifier,
-            assignment.config_override.as_ref(),
-        )?;
-
-        // Check global uniqueness of (host_id, plugin_config_id, package_identifier).
-        // This prevents the same plugin+package appearing under two different software items.
-        let global_conflict = HostSoftwareItem::find()
-            .filter(host_software_item::Column::HostId.eq(host_id))
-            .filter(host_software_item::Column::PluginConfigId.eq(plugin_config_id))
-            .filter(host_software_item::Column::PackageIdentifier.eq(package_identifier))
-            .filter(host_software_item::Column::SoftwareItemId.ne(id))
-            .one(&txn)
-            .await
-            .map_err(SoftwareItemQueryError::Db)?;
-
-        if global_conflict.is_some() {
-            return Err(SoftwareItemQueryError::DuplicateHostAssignment);
-        }
-
+        // Upsert the host_software_item link row (no plugin fields, just the link).
         let existing_link = HostSoftwareItem::find_by_id((host_id, id))
             .one(&txn)
             .await
             .map_err(SoftwareItemQueryError::Db)?;
 
-        match existing_link {
-            Some(link) => {
-                // Update plugin config info on existing link.
-                let mut active: host_software_item::ActiveModel = link.into();
-                active.plugin_config_id = Set(plugin_config_id);
-                active.package_identifier = Set(package_identifier.to_string());
-                active.config_override = Set(assignment.config_override.clone());
-                active
-                    .update(&txn)
-                    .await
-                    .map_err(SoftwareItemQueryError::Db)?;
-            }
-            None => {
-                let link = host_software_item::ActiveModel {
-                    host_id: Set(host_id),
-                    software_item_id: Set(id),
-                    plugin_config_id: Set(plugin_config_id),
-                    package_identifier: Set(package_identifier.to_string()),
-                    config_override: Set(assignment.config_override.clone()),
-                    installed_version: Set(None),
-                    installed_version_detected_at: Set(None),
-                    last_updated_at: Set(None),
-                    linked_at: Set(now),
-                };
-                link.insert(&txn)
-                    .await
-                    .map_err(SoftwareItemQueryError::Db)?;
+        if existing_link.is_none() {
+            let link = host_software_item::ActiveModel {
+                host_id: Set(host_id),
+                software_item_id: Set(id),
+                installed_version: Set(None),
+                installed_version_detected_at: Set(None),
+                latest_version: Set(None),
+                latest_version_fetched_at: Set(None),
+                latest_release_metadata: Set(None),
+                last_updated_at: Set(None),
+                linked_at: Set(now),
+            };
+            link.insert(&txn)
+                .await
+                .map_err(SoftwareItemQueryError::Db)?;
+        }
+
+        // Process each role assignment for this host.
+        for role_assignment in &assignment.plugins {
+            let role = &role_assignment.role;
+            let execution_site = &role_assignment.execution_site;
+
+            // Validate execution_site.
+            validate_execution_site(execution_site, role)?;
+
+            let (plugin_config_id, config) =
+                resolve_plugin_config_txn(&txn, tenant_db.tenant_id, role_assignment).await?;
+
+            validate_assignment(
+                &config,
+                &role_assignment.package_identifier,
+                role_assignment.config_override.as_ref(),
+            )?;
+
+            // Check for existing assignment at the same (host_id, software_item_id, role, ordinal).
+            let existing_plugin = HostSoftwareItemPlugin::find()
+                .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+                .filter(host_software_item_plugin::Column::SoftwareItemId.eq(id))
+                .filter(host_software_item_plugin::Column::Role.eq(role.as_str()))
+                .filter(host_software_item_plugin::Column::Ordinal.eq(0))
+                .one(&txn)
+                .await
+                .map_err(SoftwareItemQueryError::Db)?;
+
+            match existing_plugin {
+                Some(existing) => {
+                    // Update existing plugin assignment for this role.
+                    let mut active: host_software_item_plugin::ActiveModel = existing.into();
+                    active.plugin_config_id = Set(plugin_config_id);
+                    active.package_identifier =
+                        Set(role_assignment.package_identifier.clone());
+                    active.config_override = Set(role_assignment.config_override.clone());
+                    active.execution_site = Set(execution_site.clone());
+                    active.updated_at = Set(now);
+                    active
+                        .update(&txn)
+                        .await
+                        .map_err(SoftwareItemQueryError::Db)?;
+                }
+                None => {
+                    let plugin_row = host_software_item_plugin::ActiveModel {
+                        id: Set(generate_uuid()),
+                        host_id: Set(host_id),
+                        software_item_id: Set(id),
+                        plugin_config_id: Set(plugin_config_id),
+                        role: Set(role.as_str().to_string()),
+                        ordinal: Set(0),
+                        package_identifier: Set(
+                            role_assignment.package_identifier.clone(),
+                        ),
+                        config_override: Set(role_assignment.config_override.clone()),
+                        execution_site: Set(execution_site.clone()),
+                        created_at: Set(now),
+                        updated_at: Set(now),
+                    };
+                    plugin_row.insert(&txn).await.map_err(|e| {
+                        // Check if this is a unique constraint violation
+                        // (host_id, software_item_id, role, ordinal).
+                        if matches!(e, sea_orm::DbErr::Query(..))
+                            || e.to_string().contains("UNIQUE")
+                            || e.to_string().contains("duplicate")
+                        {
+                            SoftwareItemQueryError::DuplicateHostAssignment
+                        } else {
+                            SoftwareItemQueryError::Db(e)
+                        }
+                    })?;
+                }
             }
         }
     }
@@ -770,17 +932,10 @@ pub async fn assign_hosts(
         .await
         .ok_or(SoftwareItemQueryError::NotFound)?;
 
-    let latest_version: Option<String> = AvailableVersion::find()
-        .filter(available_version::Column::SoftwareItemId.eq(id))
-        .one(tenant_db.db())
-        .await
-        .ok()
-        .flatten()
-        .and_then(|av| av.version);
-
-    let hosts = load_item_hosts(tenant_db.db(), id, latest_version.as_deref()).await;
+    let hosts = load_item_hosts(tenant_db.db(), id).await;
     let host_count = hosts.len() as u64;
     let plugins = load_plugins(tenant_db.db(), id).await;
+    let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
     let update_available = hosts.iter().any(|h| h.update_available);
     Ok(build_detail_response(
         item,
@@ -792,7 +947,7 @@ pub async fn assign_hosts(
     ))
 }
 
-/// Update the plugin info for an existing host–software-item assignment.
+/// Update a single role assignment for an existing host-software-item pair.
 pub async fn update_host_assignment(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -803,23 +958,55 @@ pub async fn update_host_assignment(
         .await
         .ok_or(SoftwareItemQueryError::NotFound)?;
 
-    let link = HostSoftwareItem::find_by_id((host_id, id))
+    // Verify the host_software_item link exists.
+    HostSoftwareItem::find_by_id((host_id, id))
         .one(tenant_db.db())
         .await
         .map_err(SoftwareItemQueryError::Db)?
         .ok_or(SoftwareItemQueryError::NotFound)?;
 
-    // Build a synthetic assignment struct so we can reuse resolve_plugin_config_txn.
-    let synthetic = uptrakit_web_api_types::software_items::HostSoftwareAssignment {
-        host_id,
-        plugin_config_id: req.plugin_config_id.or(Some(link.plugin_config_id)),
+    // Load the existing plugin assignment for this role.
+    let existing_plugin = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(id))
+        .filter(host_software_item_plugin::Column::Role.eq(req.role.as_str()))
+        .filter(host_software_item_plugin::Column::Ordinal.eq(0))
+        .one(tenant_db.db())
+        .await
+        .map_err(SoftwareItemQueryError::Db)?;
+
+    // Build a synthetic role assignment to reuse resolve_plugin_config_txn.
+    let (existing_pcid, existing_pkg, existing_override, existing_exec_site) =
+        if let Some(ref ep) = existing_plugin {
+            (
+                Some(ep.plugin_config_id),
+                Some(ep.package_identifier.clone()),
+                ep.config_override.clone(),
+                Some(ep.execution_site.clone()),
+            )
+        } else {
+            (None, None, None, None)
+        };
+
+    let synthetic = HostPluginRoleAssignment {
+        role: req.role.clone(),
+        plugin_config_id: req.plugin_config_id.or(existing_pcid),
         plugin_config: req.plugin_config,
         package_identifier: req
             .package_identifier
             .clone()
-            .or(Some(link.package_identifier.clone())),
-        config_override: req.config_override.clone().or(link.config_override.clone()),
+            .or(existing_pkg.clone())
+            .unwrap_or_default(),
+        config_override: req.config_override.clone().or(existing_override),
+        execution_site: req
+            .execution_site
+            .clone()
+            .or(existing_exec_site)
+            .unwrap_or_else(|| "auto".to_string()),
     };
+
+    // Validate execution_site.
+    validate_execution_site(&synthetic.execution_site, &req.role)?;
 
     let txn = tenant_db
         .db()
@@ -830,45 +1017,58 @@ pub async fn update_host_assignment(
     let (plugin_config_id, config) =
         resolve_plugin_config_txn(&txn, tenant_db.tenant_id, &synthetic).await?;
 
-    let package_identifier = synthetic.package_identifier.as_deref().unwrap_or("");
-
     validate_assignment(
         &config,
-        package_identifier,
+        &synthetic.package_identifier,
         synthetic.config_override.as_ref(),
     )?;
 
-    // Check for conflicts in other software items.
-    let global_conflict = HostSoftwareItem::find()
-        .filter(host_software_item::Column::HostId.eq(host_id))
-        .filter(host_software_item::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(host_software_item::Column::PackageIdentifier.eq(package_identifier))
-        .filter(host_software_item::Column::SoftwareItemId.ne(id))
-        .one(&txn)
-        .await
-        .map_err(SoftwareItemQueryError::Db)?;
+    let now = OffsetDateTime::now_utc();
 
-    if global_conflict.is_some() {
-        return Err(SoftwareItemQueryError::DuplicateHostAssignment);
-    }
+    match existing_plugin {
+        Some(existing) => {
+            let mut active: host_software_item_plugin::ActiveModel = existing.into();
+            active.plugin_config_id = Set(plugin_config_id);
+            active.package_identifier = Set(synthetic.package_identifier);
 
-    let mut active: host_software_item::ActiveModel = link.into();
-    active.plugin_config_id = Set(plugin_config_id);
-    active.package_identifier = Set(package_identifier.to_string());
+            // Handle config_override: explicit null in request clears it.
+            if let Some(ref override_val) = req.config_override {
+                if override_val.is_null() {
+                    active.config_override = Set(None);
+                } else {
+                    active.config_override = Set(Some(override_val.clone()));
+                }
+            }
 
-    // Handle config_override: explicit null in request clears it.
-    if let Some(ref override_val) = req.config_override {
-        if override_val.is_null() {
-            active.config_override = Set(None);
-        } else {
-            active.config_override = Set(Some(override_val.clone()));
+            active.execution_site = Set(synthetic.execution_site);
+            active.updated_at = Set(now);
+
+            active
+                .update(&txn)
+                .await
+                .map_err(SoftwareItemQueryError::Db)?;
+        }
+        None => {
+            // No existing plugin for this role -- create a new one.
+            let plugin_row = host_software_item_plugin::ActiveModel {
+                id: Set(generate_uuid()),
+                host_id: Set(host_id),
+                software_item_id: Set(id),
+                plugin_config_id: Set(plugin_config_id),
+                role: Set(req.role.as_str().to_string()),
+                ordinal: Set(0),
+                package_identifier: Set(synthetic.package_identifier),
+                config_override: Set(synthetic.config_override),
+                execution_site: Set(synthetic.execution_site),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            plugin_row
+                .insert(&txn)
+                .await
+                .map_err(SoftwareItemQueryError::Db)?;
         }
     }
-
-    active
-        .update(&txn)
-        .await
-        .map_err(SoftwareItemQueryError::Db)?;
 
     txn.commit().await.map_err(SoftwareItemQueryError::Db)?;
 
@@ -876,17 +1076,10 @@ pub async fn update_host_assignment(
         .await
         .ok_or(SoftwareItemQueryError::NotFound)?;
 
-    let latest_version: Option<String> = AvailableVersion::find()
-        .filter(available_version::Column::SoftwareItemId.eq(id))
-        .one(tenant_db.db())
-        .await
-        .ok()
-        .flatten()
-        .and_then(|av| av.version);
-
-    let hosts = load_item_hosts(tenant_db.db(), id, latest_version.as_deref()).await;
+    let hosts = load_item_hosts(tenant_db.db(), id).await;
     let host_count = hosts.len() as u64;
     let plugins = load_plugins(tenant_db.db(), id).await;
+    let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
     let update_available = hosts.iter().any(|h| h.update_available);
     Ok(build_detail_response(
         item,
@@ -900,6 +1093,7 @@ pub async fn update_host_assignment(
 
 /// Unassign a host from a software item.
 /// Returns `true` if removed, `false` if the software item or link was not found.
+/// Cascade deletes will remove the associated `host_software_item_plugins` rows.
 pub async fn unassign_host(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -925,8 +1119,8 @@ pub async fn unassign_host(
     }
 }
 
-/// Load the plugin config ID and package identifier for a specific host assignment.
-/// Used by route handlers to resolve plugin info for version checks and updates.
+/// Load the host_software_item link for a specific host assignment.
+/// Used by route handlers to verify the assignment exists.
 pub(crate) async fn load_host_assignment(
     db: &sea_orm::DatabaseConnection,
     host_id: Uuid,
@@ -998,15 +1192,15 @@ mod tests {
 
     #[test]
     fn host_update_available_semantics() {
-        // Both known and differ → true
+        // Both known and differ -> true
         assert!(host_update_available(Some("1.0.0"), Some("2.0.0")));
-        // Same version → false
+        // Same version -> false
         assert!(!host_update_available(Some("2.0.0"), Some("2.0.0")));
-        // Missing installed → false
+        // Missing installed -> false
         assert!(!host_update_available(None, Some("2.0.0")));
-        // Missing latest → false
+        // Missing latest -> false
         assert!(!host_update_available(Some("1.0.0"), None));
-        // Both missing → false
+        // Both missing -> false
         assert!(!host_update_available(None, None));
     }
 
@@ -1028,17 +1222,22 @@ mod tests {
             host_id: uuid::Uuid::now_v7(),
             hostname: "web-01".to_string(),
             friendly_name: "Web Server 1".to_string(),
-            plugin_config_id: uuid::Uuid::now_v7(),
-            plugin_config_name: "GitHub Releases".to_string(),
-            plugin_type: "github_releases".to_string(),
-            package_identifier: "redis/redis".to_string(),
-            config_override: Some(serde_json::json!({"asset_patterns": ["redis.*linux"]})),
+            plugins: vec![HostPluginRoleSummary {
+                role: PluginRole::FetchReleases,
+                plugin_config_id: uuid::Uuid::now_v7(),
+                plugin_config_name: "GitHub Releases".to_string(),
+                plugin_type: "github_releases".to_string(),
+                package_identifier: "redis/redis".to_string(),
+                config_override: Some(serde_json::json!({"asset_patterns": ["redis.*linux"]})),
+                execution_site: "auto".to_string(),
+            }],
             installed_version: Some("7.2.4".to_string()),
             installed_version_detected_at: Some(now),
+            latest_version: Some("7.4.0".to_string()),
+            latest_release_metadata: None,
+            update_available: true,
             last_updated_at: None,
             linked_at: now,
-            latest_version: Some("7.4.0".to_string()),
-            update_available: true,
         }];
 
         let resp = build_detail_response(
@@ -1054,7 +1253,12 @@ mod tests {
         assert_eq!(resp.plugins, vec!["github_releases"]);
         assert_eq!(resp.hosts.len(), 1);
         assert_eq!(resp.hosts[0].hostname, "web-01");
-        assert_eq!(resp.hosts[0].package_identifier, "redis/redis");
+        assert_eq!(resp.hosts[0].plugins.len(), 1);
+        assert_eq!(resp.hosts[0].plugins[0].role, PluginRole::FetchReleases);
+        assert_eq!(
+            resp.hosts[0].plugins[0].package_identifier,
+            "redis/redis"
+        );
         assert_eq!(resp.hosts[0].installed_version, Some("7.2.4".to_string()));
         assert_eq!(resp.hosts[0].latest_version.as_deref(), Some("7.4.0"));
         assert!(resp.hosts[0].update_available);
@@ -1173,5 +1377,33 @@ mod tests {
                 "expected invalid: {case}"
             );
         }
+    }
+
+    #[test]
+    fn validate_execution_site_allows_auto() {
+        assert!(validate_execution_site("auto", &PluginRole::DetectVersion).is_ok());
+        assert!(validate_execution_site("auto", &PluginRole::FetchReleases).is_ok());
+        assert!(validate_execution_site("auto", &PluginRole::ExecuteUpdate).is_ok());
+    }
+
+    #[test]
+    fn validate_execution_site_allows_agent() {
+        assert!(validate_execution_site("agent", &PluginRole::DetectVersion).is_ok());
+        assert!(validate_execution_site("agent", &PluginRole::FetchReleases).is_ok());
+        assert!(validate_execution_site("agent", &PluginRole::ExecuteUpdate).is_ok());
+    }
+
+    #[test]
+    fn validate_execution_site_controller_only_for_fetch_releases() {
+        assert!(validate_execution_site("controller", &PluginRole::FetchReleases).is_ok());
+        assert!(validate_execution_site("controller", &PluginRole::DetectVersion).is_err());
+        assert!(validate_execution_site("controller", &PluginRole::ExecuteUpdate).is_err());
+    }
+
+    #[test]
+    fn validate_execution_site_rejects_invalid() {
+        assert!(validate_execution_site("cloud", &PluginRole::DetectVersion).is_err());
+        assert!(validate_execution_site("", &PluginRole::FetchReleases).is_err());
+        assert!(validate_execution_site("SERVER", &PluginRole::ExecuteUpdate).is_err());
     }
 }

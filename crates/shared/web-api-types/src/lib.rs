@@ -2,6 +2,10 @@
 /// use it without a direct `uptrakit-shared-types` dependency.
 pub use uptrakit_shared_types::SecretString;
 
+/// Re-export `PluginRole` so consumers can construct and match on role values
+/// without a direct `uptrakit-shared-types` dependency.
+pub use uptrakit_shared_types::PluginRole;
+
 pub mod agents;
 pub mod api_tokens;
 pub mod auth;

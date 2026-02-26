@@ -6,15 +6,8 @@ use uptrakit_internal_wire::{
     MqttSoftwareStateHostEntry, MqttSoftwareStateItem, MqttSoftwareStatesPayload,
 };
 use uptrakit_shared_db::SoftwareDiscoveryState;
-use uptrakit_shared_db::entity::{available_version, host, host_software_item, prelude::*, software_item};
+use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, software_item};
 use uuid::Uuid;
-
-/// Lightweight projection used to bulk-load available version data.
-#[derive(Debug, FromQueryResult)]
-struct AvailableVersionRow {
-    software_item_id: Uuid,
-    version: Option<String>,
-}
 
 /// Lightweight projection used to bulk-load host-software-item link data.
 #[derive(Debug, FromQueryResult)]
@@ -22,11 +15,12 @@ struct HostSoftwareItemRow {
     host_id: Uuid,
     software_item_id: Uuid,
     installed_version: Option<String>,
+    latest_version: Option<String>,
 }
 
 /// Load all software state data for a tenant and assemble a [`MqttSoftwareStatesPayload`].
 ///
-/// This function executes four bulk queries (no N+1) and is safe to call on
+/// This function executes three bulk queries (no N+1) and is safe to call on
 /// every version-check result or update completion event.
 ///
 /// # Errors
@@ -63,28 +57,13 @@ pub async fn load_software_states_for_tenant(
 
     let item_ids: Vec<Uuid> = items.iter().map(|i| i.id).collect();
 
-    // 3. Bulk-load available_version rows for all items (one query).
-    let available_version_rows: Vec<AvailableVersionRow> = AvailableVersion::find()
-        .select_only()
-        .column(available_version::Column::SoftwareItemId)
-        .column(available_version::Column::Version)
-        .filter(available_version::Column::SoftwareItemId.is_in(item_ids.clone()))
-        .into_model::<AvailableVersionRow>()
-        .all(db)
-        .await?;
-
-    // Map: software_item_id -> latest_version.
-    let latest_versions: HashMap<Uuid, String> = available_version_rows
-        .into_iter()
-        .filter_map(|r| r.version.map(|v| (r.software_item_id, v)))
-        .collect();
-
-    // 4. Bulk-load host_software_item rows for all items (one query).
+    // 3. Bulk-load host_software_item rows (including per-host latest_version) for all items.
     let hsi_rows: Vec<HostSoftwareItemRow> = HostSoftwareItem::find()
         .select_only()
         .column(host_software_item::Column::HostId)
         .column(host_software_item::Column::SoftwareItemId)
         .column(host_software_item::Column::InstalledVersion)
+        .column(host_software_item::Column::LatestVersion)
         .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
         .into_model::<HostSoftwareItemRow>()
         .all(db)
@@ -100,7 +79,7 @@ pub async fn load_software_states_for_tenant(
             .collect()
     };
 
-    // 5. Bulk-load active host rows for those host_ids (one query).
+    // 4. Bulk-load active host rows for those host_ids (one query).
     let active_hosts: HashMap<Uuid, host::Model> = if host_ids.is_empty() {
         HashMap::new()
     } else {
@@ -120,12 +99,10 @@ pub async fn load_software_states_for_tenant(
         hsi_by_item.entry(row.software_item_id).or_default().push(row);
     }
 
-    // 6. Assemble the payload.
+    // 5. Assemble the payload.
     let mut result_items: Vec<MqttSoftwareStateItem> = Vec::with_capacity(items.len());
 
     for item in &items {
-        let latest_version = latest_versions.get(&item.id).cloned();
-
         let host_entries: Vec<MqttSoftwareStateHostEntry> = hsi_by_item
             .get(&item.id)
             .map(|links| {
@@ -135,7 +112,7 @@ pub async fn load_software_states_for_tenant(
                         let host = active_hosts.get(&link.host_id)?;
                         let update_available = match (
                             link.installed_version.as_deref(),
-                            latest_version.as_deref(),
+                            link.latest_version.as_deref(),
                         ) {
                             (Some(installed), Some(latest)) => installed != latest,
                             _ => false,
@@ -144,7 +121,7 @@ pub async fn load_software_states_for_tenant(
                             host_id: host.id,
                             hostname: host.hostname.clone(),
                             installed_version: link.installed_version.clone(),
-                            latest_version: latest_version.clone(),
+                            latest_version: link.latest_version.clone(),
                             update_available,
                         })
                     })

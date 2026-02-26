@@ -31,7 +31,8 @@ use time::OffsetDateTime;
 use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload, PluginType};
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
-    autodiscovery_ignore, host_software_item, plugin_config, prelude::*, software_item,
+    autodiscovery_ignore, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
+    software_item,
 };
 use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, DiscardDiscoveredResponse,
@@ -201,11 +202,11 @@ pub async fn discard_pending_items(
         .filter(software_item::Column::DiscoveryState.eq("pending"));
 
     // If a plugin config filter is requested, restrict to items that have at
-    // least one host_software_items row with that plugin config ID.
+    // least one host_software_item_plugin row with that plugin config ID.
     let plugin_filtered_item_ids: Option<Vec<Uuid>> =
         if let Some(pc_id) = plugin_config_id_filter {
-            let linked: Vec<Uuid> = HostSoftwareItem::find()
-                .filter(host_software_item::Column::PluginConfigId.eq(pc_id))
+            let linked: Vec<Uuid> = HostSoftwareItemPlugin::find()
+                .filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
                 .all(db)
                 .await?
                 .into_iter()
@@ -744,53 +745,66 @@ async fn process_one_discovery(
         return Ok(());
     }
 
-    // Phase 1: Check if this specific host already tracks (plugin_config_id, package_identifier).
-    let existing_host_link = HostSoftwareItem::find()
-        .filter(host_software_item::Column::HostId.eq(host_id))
-        .filter(host_software_item::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(host_software_item::Column::PackageIdentifier.eq(args.package_identifier))
+    // Phase 1: Check if this specific host already tracks (plugin_config_id, package_identifier)
+    // via the new host_software_item_plugin join table.
+    let existing_plugin_link = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::PluginConfigId.eq(plugin_config_id))
+        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(args.package_identifier))
         .one(db)
         .await?;
 
-    if let Some(link) = existing_host_link {
+    if let Some(plugin_link) = existing_plugin_link {
         // Verify the linked software item is still active.  `discard_pending_items`
         // removes host links together with the soft-delete, but this check guards
         // against any pre-existing orphaned rows so re-discovery always surfaces a
         // fresh pending item for previously discarded packages.
         let linked_item_active = SoftwareItem::find()
-            .filter(software_item::Column::Id.eq(link.software_item_id))
+            .filter(software_item::Column::Id.eq(plugin_link.software_item_id))
             .filter(software_item::Column::DeactivatedAt.is_null())
             .one(db)
             .await?
             .is_some();
 
         if linked_item_active {
-            // Just refresh the installed version — no schema changes needed.
-            let mut active: host_software_item::ActiveModel = link.into();
-            active.installed_version = Set(Some(args.installed_version.to_string()));
-            active.installed_version_detected_at = Set(Some(now));
-            active.update(db).await?;
+            // Just refresh the installed version on the parent host_software_item row.
+            let hsi = HostSoftwareItem::find_by_id((host_id, plugin_link.software_item_id))
+                .one(db)
+                .await?;
+            if let Some(hsi) = hsi {
+                let mut active: host_software_item::ActiveModel = hsi.into();
+                active.installed_version = Set(Some(args.installed_version.to_string()));
+                active.installed_version_detected_at = Set(Some(now));
+                active.update(db).await?;
+            }
             return Ok(());
         }
 
-        // The linked software item was discarded; remove the orphaned host link so
-        // this package is treated as new and phases 2/3 create a fresh pending item.
+        // The linked software item was discarded; remove the orphaned host_software_item
+        // (which cascades to all its plugin rows) so this package is treated as new and
+        // phases 2/3 create a fresh pending item.
         tracing::debug!(
             %plugin_config_id,
             package_identifier = %args.package_identifier,
             "removing orphaned host link for discarded software item; will re-discover"
         );
-        let link_model: host_software_item::ActiveModel = link.into();
-        link_model.delete(db).await?;
+        if let Some(hsi) =
+            HostSoftwareItem::find_by_id((host_id, plugin_link.software_item_id))
+                .one(db)
+                .await?
+        {
+            let hsi_active: host_software_item::ActiveModel = hsi.into();
+            hsi_active.delete(db).await?;
+        }
         // Fall through to phases 2/3.
     }
 
     // Phase 2: Check if any other host in this tenant already has
     // (plugin_config_id, package_identifier). If so, reuse the existing software item
     // so the global catalog stays unified.
-    let candidate_links: Vec<Uuid> = HostSoftwareItem::find()
-        .filter(host_software_item::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(host_software_item::Column::PackageIdentifier.eq(args.package_identifier))
+    let candidate_links: Vec<Uuid> = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::PluginConfigId.eq(plugin_config_id))
+        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(args.package_identifier))
         .all(db)
         .await?
         .into_iter()
@@ -833,20 +847,43 @@ async fn process_one_discovery(
         new_id
     };
 
-    // Insert a new host_software_item link carrying the plugin info.
-    // config_override is always NULL for auto-discovered items.
+    // Insert host_software_item link (no plugin fields in the new schema).
     let link = host_software_item::ActiveModel {
         host_id: Set(host_id),
         software_item_id: Set(software_item_id),
-        plugin_config_id: Set(plugin_config_id),
-        package_identifier: Set(args.package_identifier.to_string()),
-        config_override: Set(None),
         installed_version: Set(Some(args.installed_version.to_string())),
         installed_version_detected_at: Set(Some(now)),
+        latest_version: Set(None),
+        latest_version_fetched_at: Set(None),
+        latest_release_metadata: Set(None),
         last_updated_at: Set(None),
         linked_at: Set(now),
     };
     HostSoftwareItem::insert(link).exec(db).await?;
+
+    // Create role plugin assignments for all applicable roles using the discovery plugin.
+    // For autodiscovery, we assign the same plugin config to all three roles by default.
+    for role in ["detect_version", "fetch_releases", "execute_update"] {
+        let plugin_link = host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            plugin_config_id: Set(plugin_config_id),
+            role: Set(role.to_string()),
+            ordinal: Set(0),
+            package_identifier: Set(args.package_identifier.to_string()),
+            config_override: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        // Use insert; if it conflicts on the UNIQUE constraint, skip silently.
+        if let Err(e) = HostSoftwareItemPlugin::insert(plugin_link).exec(db).await
+            && !is_unique_violation(&e)
+        {
+            return Err(e.into());
+        }
+    }
 
     Ok(())
 }
@@ -972,15 +1009,36 @@ mod tests {
         let link = host_software_item::ActiveModel {
             host_id: Set(host_id),
             software_item_id: Set(software_item_id),
-            plugin_config_id: Set(plugin_config_id),
-            package_identifier: Set(package_identifier.to_string()),
-            config_override: Set(None),
             installed_version: Set(Some("1.0.0".to_string())),
             installed_version_detected_at: Set(Some(now)),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
             last_updated_at: Set(None),
             linked_at: Set(now),
         };
         HostSoftwareItem::insert(link).exec(db).await.expect("insert host_software_item");
+
+        // Also create plugin link rows for all three roles to match the new schema.
+        for role in ["detect_version", "fetch_releases", "execute_update"] {
+            let plugin_link = host_software_item_plugin::ActiveModel {
+                id: Set(Uuid::now_v7()),
+                host_id: Set(host_id),
+                software_item_id: Set(software_item_id),
+                plugin_config_id: Set(plugin_config_id),
+                role: Set(role.to_string()),
+                ordinal: Set(0),
+                package_identifier: Set(package_identifier.to_string()),
+                config_override: Set(None),
+                execution_site: Set("auto".to_string()),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            HostSoftwareItemPlugin::insert(plugin_link)
+                .exec(db)
+                .await
+                .expect("insert host_software_item_plugin");
+        }
     }
 
     // ── tests ─────────────────────────────────────────────────────────────────
@@ -1077,15 +1135,16 @@ mod tests {
             Some(SoftwareDiscoveryState::Pending)
         );
 
-        // A new host link pointing to the new pending item must exist.
-        let new_link_count = HostSoftwareItem::find()
-            .filter(host_software_item::Column::HostId.eq(host_id))
-            .filter(host_software_item::Column::PluginConfigId.eq(pc_id))
-            .filter(host_software_item::Column::PackageIdentifier.eq("curl"))
+        // A new plugin link pointing to the new pending item must exist.
+        let new_link_count = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
+            .filter(host_software_item_plugin::Column::PackageIdentifier.eq("curl"))
             .count(&db)
             .await
             .expect("new link count");
-        assert_eq!(new_link_count, 1, "expected a new host link for the re-discovered item");
+        // Three role rows (detect_version, fetch_releases, execute_update).
+        assert_eq!(new_link_count, 3, "expected plugin link rows for all three roles");
     }
 
     /// `process_one_discovery` must update `installed_version` in place when the
@@ -1226,15 +1285,23 @@ mod tests {
         assert_eq!(cfg_json["detect_installed_version_command"], PHS_DETECT_VERSION_CMD);
         assert_eq!(cfg_json["install_command"], PHS_INSTALL_CMD);
 
-        // A host link must exist.
-        let links = HostSoftwareItem::find()
+        // A host_software_item must exist with the installed version.
+        let hsi_links = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
-            .filter(host_software_item::Column::PackageIdentifier.eq("booklore"))
             .all(&db)
             .await
-            .expect("query links");
-        assert_eq!(links.len(), 1, "expected one host link");
-        assert_eq!(links[0].installed_version.as_deref(), Some("1.18.5"));
+            .expect("query hsi links");
+        assert_eq!(hsi_links.len(), 1, "expected one host_software_item");
+        assert_eq!(hsi_links[0].installed_version.as_deref(), Some("1.18.5"));
+
+        // Plugin link rows must exist with the correct package_identifier.
+        let plugin_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::PackageIdentifier.eq("booklore"))
+            .all(&db)
+            .await
+            .expect("query plugin links");
+        assert_eq!(plugin_links.len(), 3, "expected three role-based plugin links");
     }
 
     /// An APT PHS item must create/reuse a shared `apt` plugin config.
@@ -1263,14 +1330,21 @@ mod tests {
         assert_eq!(configs.len(), 1, "expected one apt config");
         assert_eq!(configs[0].name, "APT (auto)");
 
-        let links = HostSoftwareItem::find()
-            .filter(host_software_item::Column::HostId.eq(host_id))
-            .filter(host_software_item::Column::PackageIdentifier.eq("grafana"))
+        let plugin_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::PackageIdentifier.eq("grafana"))
             .all(&db)
             .await
-            .expect("query links");
-        assert_eq!(links.len(), 1, "expected one host link");
-        assert_eq!(links[0].installed_version.as_deref(), Some("10.2.3"));
+            .expect("query plugin links");
+        assert_eq!(plugin_links.len(), 3, "expected three role-based plugin links");
+
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .all(&db)
+            .await
+            .expect("query hsi");
+        assert_eq!(hsi.len(), 1, "expected one host_software_item");
+        assert_eq!(hsi[0].installed_version.as_deref(), Some("10.2.3"));
     }
 
     /// An install-script fallback APT item (e.g. `influxdb2`) must use the same
@@ -1300,12 +1374,12 @@ mod tests {
             .expect("query configs");
         assert_eq!(configs.len(), 1, "expected shared apt config");
 
-        let links = HostSoftwareItem::find()
-            .filter(host_software_item::Column::PackageIdentifier.eq("influxdb2"))
+        let plugin_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::PackageIdentifier.eq("influxdb2"))
             .all(&db)
             .await
-            .expect("query links");
-        assert_eq!(links.len(), 1);
+            .expect("query plugin links");
+        assert_eq!(plugin_links.len(), 3, "expected three role-based plugin links");
     }
 
     /// A PHS item with no detectable upstream (no `extra` fields) must be skipped.

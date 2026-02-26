@@ -1083,72 +1083,33 @@ impl MigrationTrait for Migration {
         // Role-based plugin assignments: each (host, software_item) pair can have
         // one plugin per role (detect_version, fetch_releases, execute_update).
         // The ordinal column enables future multi-instance roles (e.g. hooks).
-        manager
-            .create_table(
-                Table::create()
-                    .table(HostSoftwareItemPlugins::Table)
-                    .if_not_exists()
-                    .col(
-                        ColumnDef::new(HostSoftwareItemPlugins::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(
-                        ColumnDef::new(HostSoftwareItemPlugins::HostId)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(HostSoftwareItemPlugins::SoftwareItemId)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(HostSoftwareItemPlugins::PluginConfigId)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(string(HostSoftwareItemPlugins::Role))
-                    .col(
-                        ColumnDef::new(HostSoftwareItemPlugins::Ordinal)
-                            .integer()
-                            .not_null()
-                            .default(0),
-                    )
-                    .col(string(HostSoftwareItemPlugins::PackageIdentifier))
-                    .col(json_null(HostSoftwareItemPlugins::ConfigOverride))
-                    .col(
-                        string(HostSoftwareItemPlugins::ExecutionSite)
-                            .default("auto"),
-                    )
-                    .col(timestamp(HostSoftwareItemPlugins::CreatedAt))
-                    .col(timestamp(HostSoftwareItemPlugins::UpdatedAt))
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_hsip_plugin_config")
-                            .from(
-                                HostSoftwareItemPlugins::Table,
-                                HostSoftwareItemPlugins::PluginConfigId,
-                            )
-                            .to(PluginConfigs::Table, PluginConfigs::Id)
-                            .on_delete(ForeignKeyAction::Restrict),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-
-        // Composite FK (host_id, software_item_id) → host_software_items
-        // implemented as raw SQL because sea-orm-migration does not support
-        // composite foreign keys referencing a composite primary key directly.
+        //
+        // Created via raw SQL because sea-orm-migration's `Table::create()` does
+        // not support composite foreign keys referencing a composite primary key.
+        // Using raw SQL also ensures SQLite compatibility (SQLite does not support
+        // ALTER TABLE ... ADD CONSTRAINT).
         manager
             .get_connection()
             .execute_unprepared(
-                "ALTER TABLE host_software_item_plugins \
-                 ADD CONSTRAINT fk_hsip_host_software_item \
-                 FOREIGN KEY (host_id, software_item_id) \
-                 REFERENCES host_software_items(host_id, software_item_id) \
-                 ON DELETE CASCADE",
+                "CREATE TABLE IF NOT EXISTS host_software_item_plugins (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    host_id TEXT NOT NULL,
+                    software_item_id TEXT NOT NULL,
+                    plugin_config_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL DEFAULT 0,
+                    package_identifier TEXT NOT NULL,
+                    config_override JSON,
+                    execution_site TEXT NOT NULL DEFAULT 'auto',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (plugin_config_id)
+                        REFERENCES plugin_configs(id)
+                        ON DELETE RESTRICT,
+                    FOREIGN KEY (host_id, software_item_id)
+                        REFERENCES host_software_items(host_id, software_item_id)
+                        ON DELETE CASCADE
+                )",
             )
             .await?;
 
