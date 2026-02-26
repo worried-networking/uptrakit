@@ -368,12 +368,19 @@ pub async fn logout(
                 return error_response(StatusCode::FORBIDDEN, "Token does not belong to this user");
             }
 
-            // Deny all current access tokens for this user
+            // Deny all current access tokens for this user.
+            //
+            // `iat_cutoff = now` ensures only tokens issued before this logout
+            // are blocked; tokens from a subsequent login (iat >= now) are
+            // allowed immediately. `purge_after = now + ACCESS_TOKEN_EXPIRY_SECS`
+            // keeps the entry alive long enough for pre-logout tokens to expire
+            // naturally (max lifetime = 15 minutes).
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
             state
                 .token_denylist
                 .deny_user(
                     verified.user_id,
+                    now,
                     now + crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS,
                 )
                 .await;

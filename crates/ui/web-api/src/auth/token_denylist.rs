@@ -18,13 +18,28 @@ pub struct TokenDenylist {
     inner: Arc<RwLock<DenylistInner>>,
 }
 
+/// Tracks a user-level token revocation.
+///
+/// `iat_cutoff` is the revocation timestamp: tokens with `iat < iat_cutoff`
+/// are denied. `purge_after` is when this entry can be removed — set to
+/// `iat_cutoff + ACCESS_TOKEN_EXPIRY_SECS` so that pre-revocation tokens
+/// (which can live up to 15 minutes) are still blocked until they naturally
+/// expire.
+#[derive(Clone, Copy)]
+struct UserDenyEntry {
+    /// Deny tokens issued strictly before this unix timestamp.
+    iat_cutoff: i64,
+    /// Remove this entry from the denylist after this unix timestamp.
+    purge_after: i64,
+}
+
 struct DenylistInner {
     /// JTI → expiry timestamp (unix seconds). Token is denied until it would
     /// have expired anyway.
     jti_entries: HashMap<String, i64>,
-    /// "user:{user_id}" → until timestamp. All tokens for this user issued
-    /// before `until` are denied.
-    user_entries: HashMap<Uuid, i64>,
+    /// user_id → revocation entry. All tokens for this user with
+    /// `iat < entry.iat_cutoff` are denied.
+    user_entries: HashMap<Uuid, UserDenyEntry>,
 }
 
 impl Default for TokenDenylist {
@@ -52,16 +67,23 @@ impl TokenDenylist {
             .insert(jti.to_string(), exp);
     }
 
-    /// Deny all tokens for a user issued before `until` (unix timestamp).
+    /// Deny all tokens for a user issued before `iat_cutoff` (unix timestamp).
     ///
-    /// Typically called with `now + ACCESS_TOKEN_EXPIRY_SECS` to revoke all
-    /// currently-valid tokens.
-    pub async fn deny_user(&self, user_id: Uuid, until: i64) {
+    /// `purge_after` controls when this entry is eligible for removal. Callers
+    /// should pass `iat_cutoff + ACCESS_TOKEN_EXPIRY_SECS` so that tokens
+    /// issued just before revocation remain blocked until they expire naturally.
+    ///
+    /// If called multiple times for the same user, the entry with the latest
+    /// `iat_cutoff` wins (monotonically advancing revocation).
+    pub async fn deny_user(&self, user_id: Uuid, iat_cutoff: i64, purge_after: i64) {
         let mut inner = self.inner.write().await;
-        // Keep the latest (furthest into the future) revocation
-        let entry = inner.user_entries.entry(user_id).or_insert(0);
-        if until > *entry {
-            *entry = until;
+        let entry = inner
+            .user_entries
+            .entry(user_id)
+            .or_insert(UserDenyEntry { iat_cutoff: 0, purge_after: 0 });
+        // Keep the most recent revocation (furthest-forward iat_cutoff).
+        if iat_cutoff > entry.iat_cutoff {
+            *entry = UserDenyEntry { iat_cutoff, purge_after };
         }
     }
 
@@ -69,8 +91,8 @@ impl TokenDenylist {
     ///
     /// Returns `true` if:
     /// - The token's JTI is in the denylist, OR
-    /// - The token's user has a user-level revocation with `until > iat`
-    ///   (meaning the token was issued before the revocation).
+    /// - The token's user has a user-level revocation where `iat < iat_cutoff`
+    ///   (the token was issued before the revocation event).
     pub async fn is_denied(&self, jti: &str, user_id: &Uuid, iat: i64) -> bool {
         let inner = self.inner.read().await;
 
@@ -80,8 +102,8 @@ impl TokenDenylist {
         }
 
         // Check user-level denial
-        if let Some(&until) = inner.user_entries.get(user_id)
-            && iat < until
+        if let Some(entry) = inner.user_entries.get(user_id)
+            && iat < entry.iat_cutoff
         {
             return true;
         }
@@ -96,7 +118,7 @@ impl TokenDenylist {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let mut inner = self.inner.write().await;
         inner.jti_entries.retain(|_, exp| *exp > now);
-        inner.user_entries.retain(|_, until| *until > now);
+        inner.user_entries.retain(|_, entry| entry.purge_after > now);
     }
 }
 
@@ -117,19 +139,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deny_user_revokes_tokens_issued_before() {
+    async fn deny_user_revokes_tokens_issued_before_cutoff() {
         let denylist = TokenDenylist::new();
         let user_id = Uuid::from_bytes([1; 16]);
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
 
-        // Deny all tokens for this user issued before now + 900
-        denylist.deny_user(user_id, now + 900).await;
+        // Deny all tokens issued before `now` (logout time), keep entry for 900 s.
+        denylist.deny_user(user_id, now, now + 900).await;
 
-        // Token issued at `now - 60` (before revocation) → denied
-        assert!(denylist.is_denied("jti-1", &user_id, now - 60).await);
+        // Token issued before logout → denied
+        assert!(denylist.is_denied("jti-old", &user_id, now - 60).await);
 
-        // Token issued at `now + 901` (after revocation window) → allowed
-        assert!(!denylist.is_denied("jti-2", &user_id, now + 901).await);
+        // Token issued exactly at logout time → allowed (strict less-than)
+        assert!(!denylist.is_denied("jti-exact", &user_id, now).await);
+
+        // Token issued after logout → allowed
+        assert!(!denylist.is_denied("jti-new", &user_id, now + 1).await);
     }
 
     #[tokio::test]
@@ -138,9 +163,9 @@ mod tests {
         let user_id = Uuid::from_bytes([2; 16]);
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
 
-        denylist.deny_user(user_id, now).await;
+        denylist.deny_user(user_id, now, now + 900).await;
 
-        // Token issued exactly at the revocation time → allowed (iat == until, not <)
+        // Token issued exactly at the revocation time → allowed (iat == iat_cutoff, not <)
         assert!(!denylist.is_denied("jti-new", &user_id, now).await);
 
         // Token issued after → allowed
@@ -151,30 +176,54 @@ mod tests {
     async fn expired_entries_are_purged() {
         let denylist = TokenDenylist::new();
         let user_id = Uuid::from_bytes([3; 16]);
-        let past = time::OffsetDateTime::now_utc().unix_timestamp() - 100;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        // purge_after in the past — entry should be removed on next purge
+        let past_cutoff = now - 1000;
+        let past_purge = now - 100;
 
-        // Add entries that are already expired
-        denylist.deny_token("old-jti", past).await;
-        denylist.deny_user(user_id, past).await;
+        denylist.deny_token("old-jti", past_purge).await;
+        denylist.deny_user(user_id, past_cutoff, past_purge).await;
 
         denylist.purge_expired().await;
 
-        // Both should be removed — no longer denied
+        // JTI entry purged
         assert!(!denylist.is_denied("old-jti", &user_id, 0).await);
-        // User entry also purged (past < now)
-        assert!(!denylist.is_denied("any", &user_id, past - 1).await);
+        // User entry also purged
+        assert!(!denylist.is_denied("any", &user_id, past_cutoff - 1).await);
     }
 
     #[tokio::test]
-    async fn deny_user_keeps_latest_timestamp() {
+    async fn user_entry_not_purged_while_purge_after_is_future() {
+        let denylist = TokenDenylist::new();
+        let user_id = Uuid::from_bytes([5; 16]);
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        // iat_cutoff is in the past but purge_after is in the future
+        let iat_cutoff = now - 5;
+        let purge_after = now + 900;
+
+        denylist.deny_user(user_id, iat_cutoff, purge_after).await;
+        denylist.purge_expired().await;
+
+        // Entry should still be present — tokens before iat_cutoff are still denied
+        assert!(denylist.is_denied("jti-old", &user_id, iat_cutoff - 1).await);
+        // But tokens at or after iat_cutoff are allowed
+        assert!(!denylist.is_denied("jti-new", &user_id, iat_cutoff).await);
+    }
+
+    #[tokio::test]
+    async fn deny_user_keeps_latest_cutoff() {
         let denylist = TokenDenylist::new();
         let user_id = Uuid::from_bytes([4; 16]);
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
 
-        denylist.deny_user(user_id, now + 100).await;
-        denylist.deny_user(user_id, now + 50).await; // earlier — should NOT reduce
+        // First logout at now + 100
+        denylist.deny_user(user_id, now + 100, now + 1000).await;
+        // Second (earlier) logout — should NOT reduce the cutoff
+        denylist.deny_user(user_id, now + 50, now + 950).await;
 
-        // Token issued at now + 99 should still be denied (because until is now + 100)
+        // Token issued at now + 99 should still be denied (cutoff is now + 100)
         assert!(denylist.is_denied("jti", &user_id, now + 99).await);
+        // Token at now + 100 is allowed
+        assert!(!denylist.is_denied("jti2", &user_id, now + 100).await);
     }
 }
