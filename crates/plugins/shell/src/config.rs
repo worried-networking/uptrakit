@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::SecretMasking;
 
 use crate::error::{Result, ShellError};
 

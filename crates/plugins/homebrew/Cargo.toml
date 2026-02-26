@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-plugin-homebrew"
+name = "uptrakit-plugin-package-manager-homebrew"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
@@ -8,7 +8,7 @@ version.workspace = true
 publish = false
 
 [dependencies]
-uptrakit-plugin-core = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true }
 rootcause = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }

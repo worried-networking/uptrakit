@@ -26,8 +26,8 @@ use uptrakit_command::{CommandExecutor, UpdateOutputLine};
 use uptrakit_internal_wire::{
     ExecuteUpdatePayload, HookCommand, OutputStreamType, UpdateFinalStatus, UpdateResultPayload,
 };
-use uptrakit_plugin_core::UpdateHookContext;
-use uptrakit_plugin_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_core::UpdateHookContext;
+use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
 use crate::error::AgentCoreError;
 

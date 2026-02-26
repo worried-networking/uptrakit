@@ -10,7 +10,7 @@
 //!
 //! ```ignore
 //! use std::sync::Arc;
-//! use uptrakit_plugin_registry::{PluginRegistry, PluginType, LocalCommandExecutor};
+//! use uptrakit_plugin_infrastructure_registry::{PluginRegistry, PluginType, LocalCommandExecutor};
 //!
 //! // Validate configuration (all fields optional — empty config is valid)
 //! let config = serde_json::json!({});
@@ -35,7 +35,7 @@ pub use error::{PluginRegistryError, Result};
 pub use registry::PluginRegistry;
 
 // Re-export commonly used types for plugin crate convenience
-pub use uptrakit_plugin_core::{Plugin, PluginCapability, SudoCommandEntry};
+pub use uptrakit_plugin_infrastructure_core::{Plugin, PluginCapability, SudoCommandEntry};
 pub use uptrakit_shared_types::PluginType;
 
 // Re-export executor types for downstream convenience

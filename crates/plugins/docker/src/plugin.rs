@@ -4,10 +4,10 @@ use async_trait::async_trait;
 use regex::Regex;
 use rootcause::prelude::*;
 use serde_json::json;
-use uptrakit_plugin_core::mpsc;
+use uptrakit_plugin_infrastructure_core::mpsc;
 
-use uptrakit_plugin_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
-use uptrakit_plugin_core::{
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
+use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, OutputStreamType, Plugin, PluginCapability, PluginError, PluginType,
     ReleaseInfo, UpdateOutputLine, UpstreamRelease, Version,
 };
@@ -128,11 +128,11 @@ impl Plugin for DockerPlugin {
     async fn fetch_releases(
         &self,
         package_identifier: &str,
-    ) -> uptrakit_plugin_core::Result<Vec<UpstreamRelease>> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<UpstreamRelease>> {
         let ir: ImageRef = package_identifier
             .parse()
             .map_err(|e: crate::image_ref::ParseImageRefError| {
-                uptrakit_plugin_core::PluginError::PluginInternal(e.to_string())
+                uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
             })?;
 
         match self.config.tracking_mode {
@@ -184,7 +184,7 @@ impl Plugin for DockerPlugin {
     async fn detect_installed_version(
         &self,
         package_identifier: &str,
-    ) -> uptrakit_plugin_core::Result<Option<Version>> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<Option<Version>> {
         if self.config.tracking_mode != TrackingMode::DigestTracking {
             return Ok(None);
         }
@@ -208,7 +208,7 @@ impl Plugin for DockerPlugin {
                 Ok(Some(Version::new(&digest_info.digest)))
             }
             Ok(None) => Ok(None),
-            Err(e) => Err(uptrakit_plugin_core::PluginError::PluginInternal(
+            Err(e) => Err(uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(
                 e.to_string(),
             )
             .into()),
@@ -221,7 +221,7 @@ impl Plugin for DockerPlugin {
         to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> uptrakit_plugin_core::Result<String> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<String> {
         let ir: ImageRef = package_identifier
             .parse()
             .map_err(|e: crate::image_ref::ParseImageRefError| {
@@ -325,7 +325,7 @@ impl Plugin for DockerPlugin {
 
     async fn discover_software(
         &self,
-    ) -> uptrakit_plugin_core::Result<Vec<DiscoveredSoftware>> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {
         use std::collections::HashMap;
 
         let containers = self
@@ -333,7 +333,7 @@ impl Plugin for DockerPlugin {
             .list_containers(true)
             .await
             .map_err(|e| {
-                uptrakit_plugin_core::PluginError::PluginInternal(e.to_string())
+                uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
             })?;
 
         // Group container names by full image ref (image:tag).
@@ -417,8 +417,8 @@ mod tests {
     use super::*;
     use crate::config::TrackingMode;
     use crate::docker_client::{LocalContainerInfo, MockDockerClient};
-    use uptrakit_plugin_core::LocalCommandExecutor;
-    use uptrakit_plugin_core::mpsc;
+    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
+    use uptrakit_plugin_infrastructure_core::mpsc;
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
@@ -433,8 +433,8 @@ mod tests {
             &self,
             _spec: &CommandSpec,
             _output_tx: &mpsc::Sender<UpdateOutputLine>,
-        ) -> uptrakit_command::Result<uptrakit_plugin_core::CommandOutput> {
-            Ok(uptrakit_plugin_core::CommandOutput {
+        ) -> uptrakit_command::Result<uptrakit_plugin_infrastructure_core::CommandOutput> {
+            Ok(uptrakit_plugin_infrastructure_core::CommandOutput {
                 output: String::new(),
                 exit_code: 0,
             })
@@ -443,8 +443,8 @@ mod tests {
         async fn execute_quiet(
             &self,
             _spec: &CommandSpec,
-        ) -> uptrakit_command::Result<uptrakit_plugin_core::CommandOutput> {
-            Ok(uptrakit_plugin_core::CommandOutput {
+        ) -> uptrakit_command::Result<uptrakit_plugin_infrastructure_core::CommandOutput> {
+            Ok(uptrakit_plugin_infrastructure_core::CommandOutput {
                 output: String::new(),
                 exit_code: 0,
             })

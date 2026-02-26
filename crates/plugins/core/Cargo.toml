@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-plugin-core"
+name = "uptrakit-plugin-infrastructure-core"
 edition = "2024"
 license.workspace = true
 authors.workspace = true

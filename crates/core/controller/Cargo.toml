@@ -23,8 +23,8 @@ uptrakit-web-api = { path = "../../ui/web-api", default-features = false }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-shared-types = { workspace = true }
 uptrakit-command = { workspace = true }
-uptrakit-plugin-core = { workspace = true }
-uptrakit-plugin-registry = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "sync", "time"] }
 axum = { workspace = true }

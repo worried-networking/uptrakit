@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_core::command::{CommandExecutor, CommandSpec, send_output};
-use uptrakit_plugin_core::mpsc;
-use uptrakit_plugin_core::{
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::mpsc;
+use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
     PluginType, ReleaseInfo, Result, SudoCommandEntry, UpdateHookContext, UpdateOutputLine,
     UpstreamRelease, Version,
@@ -439,7 +439,7 @@ impl Plugin for AptPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_core::{CommandOutput, LocalCommandExecutor};
+    use uptrakit_plugin_infrastructure_core::{CommandOutput, LocalCommandExecutor};
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)

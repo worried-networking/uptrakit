@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-plugin-github"
+name = "uptrakit-plugin-releases-github"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
@@ -8,7 +8,7 @@ version.workspace = true
 publish = false
 
 [dependencies]
-uptrakit-plugin-core = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

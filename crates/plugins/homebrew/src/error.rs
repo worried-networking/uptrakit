@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use thiserror::Error;
-use uptrakit_plugin_core::PluginError;
+use uptrakit_plugin_infrastructure_core::PluginError;
 use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]

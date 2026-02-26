@@ -1,7 +1,7 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
-use uptrakit_plugin_core::{SecretMasking, SecretString};
+use uptrakit_plugin_infrastructure_core::{SecretMasking, SecretString};
 use url::Url;
 
 use crate::error::{GitHubError, Result};

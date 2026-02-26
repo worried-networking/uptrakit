@@ -3,15 +3,15 @@ use std::sync::Arc;
 use rootcause::prelude::*;
 
 use uptrakit_command::CommandExecutor;
-use uptrakit_plugin_core::{Plugin, PluginType, SecretMasking, SudoCommandEntry};
-use uptrakit_plugin_apt::{AptConfig, AptPlugin};
-use uptrakit_plugin_docker::{DockerConfig, DockerPlugin};
-use uptrakit_plugin_github::{GitHubConfig, GitHubPlugin};
-use uptrakit_plugin_homebrew::{HomebrewConfig, HomebrewPlugin};
-use uptrakit_plugin_proxmox_helper_scripts::{
+use uptrakit_plugin_infrastructure_core::{Plugin, PluginType, SecretMasking, SudoCommandEntry};
+use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
+use uptrakit_plugin_releases_docker::{DockerConfig, DockerPlugin};
+use uptrakit_plugin_releases_github::{GitHubConfig, GitHubPlugin};
+use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
+use uptrakit_plugin_discovery_proxmox_helper_scripts::{
     ProxmoxHelperScriptsConfig, ProxmoxHelperScriptsPlugin,
 };
-use uptrakit_plugin_shell::{ShellConfig, ShellPlugin};
+use uptrakit_plugin_generic_shell::{ShellConfig, ShellPlugin};
 
 use crate::error::{PluginRegistryError, Result};
 
@@ -187,7 +187,7 @@ macro_rules! register_plugins {
                     if let Ok(p) = Self::create_plugin_for_discovery(
                         PluginType::$variant, &empty, executor.clone())
                     {
-                        if p.has_capability(uptrakit_plugin_core::PluginCapability::DiscoverLocalSoftware) {
+                        if p.has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware) {
                             result.push(PluginType::$variant);
                         }
                     }
@@ -257,10 +257,10 @@ impl PluginRegistry {
         value: &str,
     ) -> std::result::Result<(), String> {
         match plugin_type {
-            PluginType::ReleasesGithub => uptrakit_plugin_github::validate_identifier(value),
-            PluginType::ReleasesDocker => uptrakit_plugin_docker::validate_identifier(value),
-            PluginType::PackageManagerHomebrew => uptrakit_plugin_homebrew::validate_identifier(value),
-            PluginType::PackageManagerApt => uptrakit_plugin_apt::validate_identifier(value),
+            PluginType::ReleasesGithub => uptrakit_plugin_releases_github::validate_identifier(value),
+            PluginType::ReleasesDocker => uptrakit_plugin_releases_docker::validate_identifier(value),
+            PluginType::PackageManagerHomebrew => uptrakit_plugin_package_manager_homebrew::validate_identifier(value),
+            PluginType::PackageManagerApt => uptrakit_plugin_package_manager_apt::validate_identifier(value),
             _ => Ok(()),
         }
     }
@@ -462,11 +462,11 @@ mod tests {
         .expect("create");
         assert!(
             plugin
-                .has_capability(uptrakit_plugin_core::PluginCapability::DiscoverLocalSoftware)
+                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware)
         );
         assert!(
             !plugin
-                .has_capability(uptrakit_plugin_core::PluginCapability::RefreshPackageIndex)
+                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex)
         );
     }
 
@@ -534,11 +534,11 @@ mod tests {
                 .unwrap();
         assert!(
             plugin
-                .has_capability(uptrakit_plugin_core::PluginCapability::DiscoverLocalSoftware)
+                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware)
         );
         assert!(
             plugin
-                .has_capability(uptrakit_plugin_core::PluginCapability::RefreshPackageIndex)
+                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex)
         );
     }
 
@@ -550,11 +550,11 @@ mod tests {
                 .unwrap();
         assert!(
             plugin
-                .has_capability(uptrakit_plugin_core::PluginCapability::DiscoverLocalSoftware)
+                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware)
         );
         assert!(
             !plugin
-                .has_capability(uptrakit_plugin_core::PluginCapability::RefreshPackageIndex)
+                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex)
         );
     }
 
@@ -711,11 +711,11 @@ mod tests {
                 .unwrap();
         assert!(
             plugin
-                .has_capability(uptrakit_plugin_core::PluginCapability::DiscoverLocalSoftware)
+                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware)
         );
         assert!(
             plugin
-                .has_capability(uptrakit_plugin_core::PluginCapability::RefreshPackageIndex)
+                .has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex)
         );
     }
 

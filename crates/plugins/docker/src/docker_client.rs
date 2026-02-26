@@ -7,9 +7,9 @@
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use rootcause::prelude::*;
-use uptrakit_plugin_core::command::send_output;
-use uptrakit_plugin_core::mpsc;
-use uptrakit_plugin_core::{OutputStreamType, UpdateOutputLine};
+use uptrakit_plugin_infrastructure_core::command::send_output;
+use uptrakit_plugin_infrastructure_core::mpsc;
+use uptrakit_plugin_infrastructure_core::{OutputStreamType, UpdateOutputLine};
 
 use crate::config::DockerAuth;
 use crate::error::{DockerError, Result};

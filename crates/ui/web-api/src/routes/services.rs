@@ -678,7 +678,7 @@ mod tests {
             controller_id: uuid::Uuid::nil(),
             notification_service,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
-            plugin_ops: Arc::new(uptrakit_plugin_registry::PluginRegistry),
+            plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
         })
     }
 

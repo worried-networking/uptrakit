@@ -6196,8 +6196,8 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-plugin-core",
- "uptrakit-plugin-registry",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
  "uuid",
@@ -6236,7 +6236,7 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-plugin-registry",
+ "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
@@ -6330,8 +6330,8 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-plugin-core",
- "uptrakit-plugin-registry",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
@@ -6432,7 +6432,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "uptrakit-plugin-apt"
+name = "uptrakit-plugin-discovery-proxmox-helper-scripts"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "reqwest 0.13.2",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uptrakit-plugin-infrastructure-core",
+]
+
+[[package]]
+name = "uptrakit-plugin-generic-shell"
 version = "0.0.1"
 dependencies = [
  "async-trait",
@@ -6443,12 +6457,12 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
- "uptrakit-plugin-core",
+ "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
 ]
 
 [[package]]
-name = "uptrakit-plugin-core"
+name = "uptrakit-plugin-infrastructure-core"
 version = "0.0.1"
 dependencies = [
  "async-trait",
@@ -6466,7 +6480,60 @@ dependencies = [
 ]
 
 [[package]]
-name = "uptrakit-plugin-docker"
+name = "uptrakit-plugin-infrastructure-registry"
+version = "0.0.1"
+dependencies = [
+ "rootcause",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-command",
+ "uptrakit-plugin-discovery-proxmox-helper-scripts",
+ "uptrakit-plugin-generic-shell",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-plugin-package-manager-apt",
+ "uptrakit-plugin-package-manager-homebrew",
+ "uptrakit-plugin-releases-docker",
+ "uptrakit-plugin-releases-github",
+ "uptrakit-shared-macros",
+ "uptrakit-shared-types",
+]
+
+[[package]]
+name = "uptrakit-plugin-package-manager-apt"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-command",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
+]
+
+[[package]]
+name = "uptrakit-plugin-package-manager-homebrew"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-command",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
+]
+
+[[package]]
+name = "uptrakit-plugin-releases-docker"
 version = "0.0.1"
 dependencies = [
  "async-trait",
@@ -6482,12 +6549,12 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
- "uptrakit-plugin-core",
+ "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
 ]
 
 [[package]]
-name = "uptrakit-plugin-github"
+name = "uptrakit-plugin-releases-github"
 version = "0.0.1"
 dependencies = [
  "async-trait",
@@ -6500,76 +6567,9 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "uptrakit-plugin-core",
+ "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
  "url",
-]
-
-[[package]]
-name = "uptrakit-plugin-homebrew"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "rootcause",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uptrakit-command",
- "uptrakit-plugin-core",
- "uptrakit-shared-macros",
-]
-
-[[package]]
-name = "uptrakit-plugin-proxmox-helper-scripts"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "reqwest 0.13.2",
- "rootcause",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "uptrakit-plugin-core",
-]
-
-[[package]]
-name = "uptrakit-plugin-registry"
-version = "0.0.1"
-dependencies = [
- "rootcause",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uptrakit-command",
- "uptrakit-plugin-apt",
- "uptrakit-plugin-core",
- "uptrakit-plugin-docker",
- "uptrakit-plugin-github",
- "uptrakit-plugin-homebrew",
- "uptrakit-plugin-proxmox-helper-scripts",
- "uptrakit-plugin-shell",
- "uptrakit-shared-macros",
- "uptrakit-shared-types",
-]
-
-[[package]]
-name = "uptrakit-plugin-shell"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "rootcause",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uptrakit-command",
- "uptrakit-plugin-core",
- "uptrakit-shared-macros",
 ]
 
 [[package]]
@@ -6689,7 +6689,7 @@ dependencies = [
  "tracing",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-plugin-registry",
+ "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-web-api-types",

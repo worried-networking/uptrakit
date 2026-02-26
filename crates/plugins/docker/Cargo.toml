@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-plugin-docker"
+name = "uptrakit-plugin-releases-docker"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
@@ -12,7 +12,7 @@ default = []
 ssh = ["bollard/ssh"]
 
 [dependencies]
-uptrakit-plugin-core = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true }
 bollard      = { workspace = true, features = ["ssl"] }
 futures-util = { workspace = true }
 reqwest = { workspace = true }

@@ -30,7 +30,7 @@ impl RegistryClient {
     pub fn new(auth: Option<DockerAuth>, page_size: u32) -> Result<Self> {
         let client = reqwest::Client::builder()
             .user_agent(concat!(
-                "uptrakit-plugin-docker/",
+                "uptrakit-plugin-releases-docker/",
                 env!("CARGO_PKG_VERSION")
             ))
             .build()

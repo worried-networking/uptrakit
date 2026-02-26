@@ -28,7 +28,7 @@ tracing-subscriber = { workspace = true }
 url = { workspace = true }
 uptrakit-agent-core = { path = "../../shared/agent-core", features = ["ssh"] }
 uptrakit-command = { workspace = true }
-uptrakit-plugin-registry = { workspace = true, features = ["ssh"] }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["ssh"] }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-shared-types = { workspace = true }

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_core::command::{CommandExecutor, CommandSpec, send_output};
-use uptrakit_plugin_core::mpsc;
-use uptrakit_plugin_core::{
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::mpsc;
+use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin,
     PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine,
     UpstreamRelease, Version,
@@ -511,7 +511,7 @@ impl Plugin for HomebrewPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_core::{CommandOutput, LocalCommandExecutor};
+    use uptrakit_plugin_infrastructure_core::{CommandOutput, LocalCommandExecutor};
 
     // ── Sample `brew info --json=v2` output for a formula ───────────────
 

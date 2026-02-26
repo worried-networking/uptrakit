@@ -12,8 +12,8 @@ use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
     CheckVersionsPayload, ControllerMessage, PluginAssignment, VersionCheckAssignment,
 };
-use uptrakit_plugin_core::PluginCapability;
-use uptrakit_plugin_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_core::PluginCapability;
+use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, scheduled_task, service,
     service_host, software_item,
@@ -211,7 +211,7 @@ impl VersionCheckExecutor {
             // Determine whether this group should run on the controller.
             // In the "auto" case, instantiate the plugin to check capability; if it
             // should run on the controller we reuse the same instance for fetch_releases.
-            let plugin: Option<Box<dyn uptrakit_plugin_core::Plugin>> =
+            let plugin: Option<Box<dyn uptrakit_plugin_infrastructure_core::Plugin>> =
                 match execution_site.as_str() {
                     "controller" => {
                         // Explicit controller — create the plugin now.

@@ -4,7 +4,7 @@ use sea_orm::{
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
-use uptrakit_plugin_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
     software_item,
@@ -471,7 +471,7 @@ fn validate_assignment(
 ) -> Result<(), SoftwareItemQueryError> {
     if let Ok(pt) = config
         .plugin_type
-        .parse::<uptrakit_plugin_registry::PluginType>()
+        .parse::<uptrakit_plugin_infrastructure_registry::PluginType>()
         && let Err(e) = PluginRegistry::validate_package_identifier(pt, package_identifier)
     {
         return Err(SoftwareItemQueryError::InvalidPackageIdentifier(e));
@@ -1327,7 +1327,7 @@ mod tests {
 
     #[test]
     fn validate_homebrew_package_identifier_accepts_valid() {
-        use uptrakit_plugin_registry::PluginType;
+        use uptrakit_plugin_infrastructure_registry::PluginType;
         let cases = [
             "wget",
             "node@18",
@@ -1348,7 +1348,7 @@ mod tests {
 
     #[test]
     fn validate_homebrew_package_identifier_rejects_invalid() {
-        use uptrakit_plugin_registry::PluginType;
+        use uptrakit_plugin_infrastructure_registry::PluginType;
         let cases = [
             "",
             " ",

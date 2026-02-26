@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use uptrakit_plugin_core::command::{CommandExecutor, CommandSpec};
-use uptrakit_plugin_core::{
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
+use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, DiscoveryTarget, Plugin, PluginCapability, PluginRole, PluginType,
 };
 
@@ -53,15 +53,15 @@ impl ProxmoxHelperScriptsPlugin {
     pub fn new(
         config: ProxmoxHelperScriptsConfig,
         executor: Arc<dyn CommandExecutor>,
-    ) -> uptrakit_plugin_core::Result<Self> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<Self> {
         let client = reqwest::Client::builder()
             .user_agent(concat!(
-                "uptrakit-plugin-proxmox-helper-scripts/",
+                "uptrakit-plugin-discovery-proxmox-helper-scripts/",
                 env!("CARGO_PKG_VERSION")
             ))
             .build()
             .map_err(|e| {
-                rootcause::report!(uptrakit_plugin_core::PluginError::PluginInternal(
+                rootcause::report!(uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(
                     format!("failed to build HTTP client: {e}")
                 ))
             })?;
@@ -186,7 +186,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
 
     async fn discover_software(
         &self,
-    ) -> uptrakit_plugin_core::Result<Vec<DiscoveredSoftware>> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {
         tracing::debug!("reading PHS update script from {UPDATE_SCRIPT_PATH}");
 
         let update_content = match self
@@ -364,7 +364,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_core::LocalCommandExecutor;
+    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)

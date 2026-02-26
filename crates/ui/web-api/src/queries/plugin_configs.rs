@@ -3,7 +3,7 @@ use sea_orm::{
     QuerySelect, Set,
 };
 use time::OffsetDateTime;
-use uptrakit_plugin_registry::PluginOps;
+use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uptrakit_shared_db::entity::plugin_config;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::plugin_configs::{
@@ -35,7 +35,7 @@ fn plugin_config_to_response(
     ops: &dyn PluginOps,
     m: plugin_config::Model,
 ) -> Option<PluginConfigResponse> {
-    let plugin_type: uptrakit_plugin_registry::PluginType = match m.plugin_type.parse() {
+    let plugin_type: uptrakit_plugin_infrastructure_registry::PluginType = match m.plugin_type.parse() {
         Ok(pt) => pt,
         Err(_) => {
             tracing::error!(

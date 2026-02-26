@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-plugin-registry"
+name = "uptrakit-plugin-infrastructure-registry"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
@@ -9,18 +9,18 @@ publish = false
 
 [features]
 default = []
-ssh = ["uptrakit-plugin-docker/ssh"]
+ssh = ["uptrakit-plugin-releases-docker/ssh"]
 
 [dependencies]
 uptrakit-shared-types = { workspace = true }
 uptrakit-command = { workspace = true }
-uptrakit-plugin-core = { workspace = true }
-uptrakit-plugin-github = { path = "../github" }
-uptrakit-plugin-docker = { path = "../docker" }
-uptrakit-plugin-proxmox-helper-scripts = { path = "../proxmox-helper-scripts" }
-uptrakit-plugin-homebrew = { path = "../homebrew" }
-uptrakit-plugin-apt = { path = "../apt" }
-uptrakit-plugin-shell = { path = "../shell" }
+uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-plugin-releases-github = { path = "../github" }
+uptrakit-plugin-releases-docker = { path = "../docker" }
+uptrakit-plugin-discovery-proxmox-helper-scripts = { path = "../proxmox-helper-scripts" }
+uptrakit-plugin-package-manager-homebrew = { path = "../homebrew" }
+uptrakit-plugin-package-manager-apt = { path = "../apt" }
+uptrakit-plugin-generic-shell = { path = "../shell" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 rootcause = { workspace = true }

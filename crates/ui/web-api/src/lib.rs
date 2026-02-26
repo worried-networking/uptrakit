@@ -34,7 +34,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use uptrakit_plugin_registry::PluginOps;
+use uptrakit_plugin_infrastructure_registry::PluginOps;
 
 use auth::device_flow::DeviceFlowStore;
 use auth::jwt::JwtManager;
@@ -211,7 +211,7 @@ pub struct AppState {
     /// Plugin operations abstraction used by plugin-config route handlers.
     ///
     /// Injected via `Arc<dyn PluginOps>` so that route handlers and query
-    /// helpers are decoupled from the concrete [`uptrakit_plugin_registry::PluginRegistry`]
+    /// helpers are decoupled from the concrete [`uptrakit_plugin_infrastructure_registry::PluginRegistry`]
     /// and can be tested with a mock implementation.
     pub plugin_ops: Arc<dyn PluginOps>,
 }
@@ -412,7 +412,7 @@ impl AppStateBuilder {
 
     /// Override the plugin operations implementation.
     ///
-    /// Defaults to [`uptrakit_plugin_registry::PluginRegistry`] when not set.
+    /// Defaults to [`uptrakit_plugin_infrastructure_registry::PluginRegistry`] when not set.
     /// Use this in tests to inject a mock implementation.
     pub fn plugin_ops(mut self, v: Arc<dyn PluginOps>) -> Self {
         self.plugin_ops = Some(v);
@@ -488,7 +488,7 @@ impl AppStateBuilder {
                 .ok_or(AppStateBuildError("token_denylist"))?,
             plugin_ops: self
                 .plugin_ops
-                .unwrap_or_else(|| Arc::new(uptrakit_plugin_registry::PluginRegistry)),
+                .unwrap_or_else(|| Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry)),
         })
     }
 }
@@ -1131,7 +1131,7 @@ mod tests {
             controller_id,
             notification_service,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
-            plugin_ops: Arc::new(uptrakit_plugin_registry::PluginRegistry),
+            plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
             db,
         })
     }

@@ -4,7 +4,7 @@ use rootcause::prelude::*;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use uptrakit_plugin_core::{
+use uptrakit_plugin_infrastructure_core::{
     Plugin, PluginCapability, PluginError, PluginType, ReleaseAsset, UpstreamRelease, Version,
 };
 
@@ -74,7 +74,7 @@ impl GitHubPlugin {
     /// (this plugin is controller-side only).
     pub fn new(
         config: GitHubConfig,
-        _executor: std::sync::Arc<dyn uptrakit_plugin_core::CommandExecutor>,
+        _executor: std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor>,
     ) -> Result<Self> {
         config
             .validate()
@@ -102,7 +102,7 @@ impl GitHubPlugin {
 
         let client = reqwest::Client::builder()
             .user_agent(concat!(
-                "uptrakit-plugin-github/",
+                "uptrakit-plugin-releases-github/",
                 env!("CARGO_PKG_VERSION")
             ))
             .default_headers(headers)
@@ -242,7 +242,7 @@ impl Plugin for GitHubPlugin {
     async fn fetch_releases(
         &self,
         package_identifier: &str,
-    ) -> uptrakit_plugin_core::Result<Vec<UpstreamRelease>> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<Vec<UpstreamRelease>> {
         let (owner, repo) = parse_owner_repo(package_identifier).map_err(|e| {
             report!(PluginError::Configuration(format!(
                 "invalid package_identifier for GitHub plugin: {e}"
@@ -321,13 +321,13 @@ impl Plugin for GitHubPlugin {
 mod tests {
     use super::*;
     use crate::api_types::{GitHubAsset, GitHubRelease};
-    use uptrakit_plugin_core::LocalCommandExecutor;
+    use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
 
     fn test_config() -> GitHubConfig {
         GitHubConfig::default()
     }
 
-    fn test_executor() -> std::sync::Arc<dyn uptrakit_plugin_core::CommandExecutor> {
+    fn test_executor() -> std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor> {
         std::sync::Arc::new(LocalCommandExecutor)
     }
 

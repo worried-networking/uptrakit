@@ -9,7 +9,7 @@ publish = false
 
 [features]
 default = []
-ssh = ["uptrakit-plugin-registry/ssh"]
+ssh = ["uptrakit-plugin-infrastructure-registry/ssh"]
 
 [dependencies]
 async-trait = { workspace = true }
@@ -23,8 +23,8 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
 uptrakit-command = { workspace = true }
 uptrakit-internal-wire = { path = "../wire" }
-uptrakit-plugin-core = { workspace = true }
-uptrakit-plugin-registry = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-service-sdk = { path = "../service-sdk" }
 uptrakit-directories = { path = "../directories" }
 

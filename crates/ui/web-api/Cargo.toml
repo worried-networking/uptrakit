@@ -38,7 +38,7 @@ uuid = { workspace = true, features = ["v7", "serde"] }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
-uptrakit-plugin-registry = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true }
 argon2 = { version = "0.5", features = ["std"] }
 rand = { workspace = true }
 client-ip = { version = "0.2", features = ["forwarded-header"] }

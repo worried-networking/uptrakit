@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_core::{SecretMasking, SecretString};
+use uptrakit_plugin_infrastructure_core::{SecretMasking, SecretString};
 
 use crate::error::{DockerError, Result};
 

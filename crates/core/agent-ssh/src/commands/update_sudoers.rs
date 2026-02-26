@@ -6,7 +6,7 @@
 
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
-use uptrakit_plugin_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
 use crate::commands::sudoers::{
     self, ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,

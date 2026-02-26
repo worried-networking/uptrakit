@@ -1,7 +1,7 @@
 //! Command execution utilities for plugin operations.
 //!
 //! Re-exports the [`CommandExecutor`] abstraction from `uptrakit_command` so
-//! that plugin crates access everything through `uptrakit_plugin_core`.
+//! that plugin crates access everything through `uptrakit_plugin_infrastructure_core`.
 
 use crate::error::PluginError;
 

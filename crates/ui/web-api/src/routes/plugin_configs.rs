@@ -412,7 +412,7 @@ pub async fn discard_plugin_config_discovered(
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_plugin_registry::PluginRegistry;
+    use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
     /// Sentinel value used to indicate a masked secret in API responses.
     const SECRET_MASK: &str = "***";

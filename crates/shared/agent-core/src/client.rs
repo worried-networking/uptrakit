@@ -170,12 +170,12 @@ pub async fn handle_check_versions(
                 let mut effective_config = plugin_assignment.config.clone();
                 ctx.apply_to_config(&plugin_assignment.plugin_type, &mut effective_config);
 
-                if let Ok(plugin) = uptrakit_plugin_registry::PluginRegistry::create_plugin(
+                if let Ok(plugin) = uptrakit_plugin_infrastructure_registry::PluginRegistry::create_plugin(
                     plugin_assignment.plugin_type.clone(),
                     &effective_config,
                     Arc::clone(&executor),
                 ) && plugin.has_capability(
-                    uptrakit_plugin_registry::PluginCapability::RefreshPackageIndex,
+                    uptrakit_plugin_infrastructure_registry::PluginCapability::RefreshPackageIndex,
                 ) {
                     tracing::info!(plugin_type = %plugin_assignment.plugin_type, "refreshing package index");
                     if let Err(e) = plugin.refresh_package_index().await {
@@ -342,7 +342,7 @@ pub async fn handle_discover_software(
         ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
         let result =
-            match uptrakit_plugin_registry::PluginRegistry::create_plugin_for_discovery(
+            match uptrakit_plugin_infrastructure_registry::PluginRegistry::create_plugin_for_discovery(
                 assignment.plugin_type.clone(),
                 &effective_config,
                 Arc::clone(&executor),
@@ -361,7 +361,7 @@ pub async fn handle_discover_software(
                     }
                 }
                 Ok(plugin) => {
-                    use uptrakit_plugin_registry::PluginCapability;
+                    use uptrakit_plugin_infrastructure_registry::PluginCapability;
                     if !plugin.has_capability(PluginCapability::DiscoverLocalSoftware) {
                         tracing::warn!(
                             plugin_type = %assignment.plugin_type,

@@ -7,7 +7,7 @@
 //! be pointed at the right daemon without modifying the user-visible config JSON
 //! stored in the database.
 
-use uptrakit_plugin_registry::PluginType;
+use uptrakit_plugin_infrastructure_registry::PluginType;
 
 /// Runtime connection details injected by the agent into plugin creation.
 ///

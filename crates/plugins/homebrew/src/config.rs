@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::SecretMasking;
 
 /// Homebrew package type: formula (CLI tools, libraries) or cask (GUI applications).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

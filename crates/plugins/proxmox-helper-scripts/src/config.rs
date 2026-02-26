@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_core::SecretMasking;
+use uptrakit_plugin_infrastructure_core::SecretMasking;
 
 /// Configuration for the Proxmox Helper Scripts plugin.
 ///
@@ -26,7 +26,7 @@ impl ProxmoxHelperScriptsConfig {
     /// Validate the configuration.
     ///
     /// Always succeeds — the PHS plugin has no required configuration fields.
-    pub fn validate(&self) -> uptrakit_plugin_core::Result<()> {
+    pub fn validate(&self) -> uptrakit_plugin_infrastructure_core::Result<()> {
         Ok(())
     }
 }

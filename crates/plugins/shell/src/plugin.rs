@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
-use uptrakit_plugin_core::mpsc;
-use uptrakit_plugin_core::{
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
+use uptrakit_plugin_infrastructure_core::mpsc;
+use uptrakit_plugin_infrastructure_core::{
     OutputStreamType, Plugin, PluginCapability, PluginError, PluginType, ReleaseInfo,
     UpdateOutputLine, Version,
 };
@@ -49,7 +49,7 @@ impl Plugin for ShellPlugin {
     async fn detect_installed_version(
         &self,
         package_identifier: &str,
-    ) -> uptrakit_plugin_core::Result<Option<Version>> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<Option<Version>> {
         let Some(ref cmd_template) = self.config.version_command else {
             return Ok(None);
         };
@@ -83,7 +83,7 @@ impl Plugin for ShellPlugin {
         to_version: &str,
         release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> uptrakit_plugin_core::Result<String> {
+    ) -> uptrakit_plugin_infrastructure_core::Result<String> {
         let Some(ref cmd_template) = self.config.update_command else {
             bail!(PluginError::Configuration(
                 "execute_update is not configured: update_command is absent".to_string()
@@ -125,7 +125,7 @@ impl Plugin for ShellPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_core::{LocalCommandExecutor, ReleaseInfo};
+    use uptrakit_plugin_infrastructure_core::{LocalCommandExecutor, ReleaseInfo};
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)

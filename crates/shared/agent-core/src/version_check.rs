@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::PluginAssignment;
-use uptrakit_plugin_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
 use crate::connection_context::ConnectionContext;
 

@@ -1,5 +1,5 @@
 use rootcause::prelude::*;
-use uptrakit_plugin_core::PluginError;
+use uptrakit_plugin_infrastructure_core::PluginError;
 
 /// Well-known path where PHS containers store their update script.
 pub const UPDATE_SCRIPT_PATH: &str = "/usr/bin/update";
@@ -460,7 +460,7 @@ pub fn parse_version_file(content: &str) -> Option<&str> {
 ///
 /// Must be non-empty and match `[a-z0-9][a-z0-9-]*`. This prevents path
 /// traversal and injection when constructing file paths from the identifier.
-pub fn validate_package_identifier(id: &str) -> uptrakit_plugin_core::Result<()> {
+pub fn validate_package_identifier(id: &str) -> uptrakit_plugin_infrastructure_core::Result<()> {
     if id.is_empty() {
         tracing::debug!(identifier = %id, "invalid PHS package identifier");
         bail!(PluginError::Configuration(

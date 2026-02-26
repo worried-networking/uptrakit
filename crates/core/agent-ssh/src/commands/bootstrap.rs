@@ -8,7 +8,7 @@ use std::time::Duration;
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use uptrakit_crypto::EncryptedString;
-use uptrakit_plugin_registry::PluginRegistry;
+use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
 use crate::commands::sudoers::{
     ResolvedSudoCommand, SudoersContent, detect_is_root, resolve_command_path, write_sudoers_file,
