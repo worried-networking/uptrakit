@@ -12,7 +12,7 @@ pub mod hosts;
 pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod pki;
-pub mod provider_configs;
+pub mod plugin_configs;
 pub mod scheduler;
 pub mod services;
 pub mod settings;

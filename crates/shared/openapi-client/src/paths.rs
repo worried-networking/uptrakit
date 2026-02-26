@@ -113,21 +113,21 @@ pub(crate) mod pki {
     pub(crate) const CA_CRL: &str = "/api/v1/pki/ca.crl";
 }
 
-pub(crate) mod provider_configs {
+pub(crate) mod plugin_configs {
     use uuid::Uuid;
-    /// `GET /api/v1/provider-configs` · `POST /api/v1/provider-configs`
-    pub(crate) const BASE: &str = "/api/v1/provider-configs";
-    /// `GET /api/v1/provider-configs/{id}` · `PUT …` · `DELETE …`
+    /// `GET /api/v1/plugin-configs` · `POST /api/v1/plugin-configs`
+    pub(crate) const BASE: &str = "/api/v1/plugin-configs";
+    /// `GET /api/v1/plugin-configs/{id}` · `PUT …` · `DELETE …`
     pub(crate) fn by_id(id: &Uuid) -> String {
-        format!("/api/v1/provider-configs/{id}")
+        format!("/api/v1/plugin-configs/{id}")
     }
-    /// `POST /api/v1/provider-configs/{id}/discover`
+    /// `POST /api/v1/plugin-configs/{id}/discover`
     pub(crate) fn discover(id: &Uuid) -> String {
-        format!("/api/v1/provider-configs/{id}/discover")
+        format!("/api/v1/plugin-configs/{id}/discover")
     }
-    /// `DELETE /api/v1/provider-configs/{id}/discovered`
+    /// `DELETE /api/v1/plugin-configs/{id}/discovered`
     pub(crate) fn discovered(id: &Uuid) -> String {
-        format!("/api/v1/provider-configs/{id}/discovered")
+        format!("/api/v1/plugin-configs/{id}/discovered")
     }
 }
 

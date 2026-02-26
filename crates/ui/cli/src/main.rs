@@ -105,10 +105,10 @@ enum Commands {
         #[command(subcommand)]
         command: SettingsCommands,
     },
-    /// Manage provider configurations
-    ProviderConfigs {
+    /// Manage plugin configurations
+    PluginConfigs {
         #[command(subcommand)]
-        command: ProviderConfigsCommands,
+        command: PluginConfigsCommands,
     },
     /// Autodiscovery management
     Autodiscovery {
@@ -185,9 +185,9 @@ enum HostsCommands {
     DiscardDiscovered {
         /// Host UUID
         id: Uuid,
-        /// Optionally filter by provider config UUID
+        /// Optionally filter by plugin config UUID
         #[arg(long)]
-        provider_config: Option<Uuid>,
+        plugin_config: Option<Uuid>,
     },
 }
 
@@ -244,9 +244,9 @@ enum SoftwareItemsCommands {
         /// Host UUID
         #[arg(long)]
         host: Uuid,
-        /// Provider config UUID
+        /// Plugin config UUID
         #[arg(long)]
-        provider_config: Option<Uuid>,
+        plugin_config: Option<Uuid>,
         /// Package identifier
         #[arg(long)]
         package: Option<String>,
@@ -734,8 +734,8 @@ enum OidcCommands {
 }
 
 #[derive(Debug, Subcommand)]
-enum ProviderConfigsCommands {
-    /// List provider configurations
+enum PluginConfigsCommands {
+    /// List plugin configurations
     List {
         /// Page number
         #[arg(long)]
@@ -744,29 +744,29 @@ enum ProviderConfigsCommands {
         #[arg(long)]
         per_page: Option<u64>,
     },
-    /// Show a provider configuration
+    /// Show a plugin configuration
     Show {
-        /// Provider config UUID
+        /// Plugin config UUID
         id: Uuid,
     },
-    /// Create a new provider configuration
+    /// Create a new plugin configuration
     Create {
         /// Config name
         #[arg(long)]
         name: String,
-        /// Provider type (github_releases, docker, homebrew, proxmox_helper_scripts)
+        /// Plugin type (github_releases, docker, homebrew, proxmox_helper_scripts)
         #[arg(long)]
-        provider_type: String,
-        /// Provider-specific config as JSON string
+        plugin_type: String,
+        /// Plugin-specific config as JSON string
         #[arg(long)]
         config: Option<String>,
         /// Enable on creation
         #[arg(long)]
         enabled: Option<bool>,
     },
-    /// Update a provider configuration
+    /// Update a plugin configuration
     Update {
-        /// Provider config UUID
+        /// Plugin config UUID
         id: Uuid,
         /// New name
         #[arg(long)]
@@ -778,19 +778,19 @@ enum ProviderConfigsCommands {
         #[arg(long)]
         enabled: Option<bool>,
     },
-    /// Delete a provider configuration
+    /// Delete a plugin configuration
     Delete {
-        /// Provider config UUID
+        /// Plugin config UUID
         id: Uuid,
     },
-    /// Trigger autodiscovery for a provider config
+    /// Trigger autodiscovery for a plugin config
     Discover {
-        /// Provider config UUID
+        /// Plugin config UUID
         id: Uuid,
     },
-    /// Discard all pending discovered items for a provider config
+    /// Discard all pending discovered items for a plugin config
     DiscardDiscovered {
-        /// Provider config UUID
+        /// Plugin config UUID
         id: Uuid,
     },
 }
@@ -808,9 +808,9 @@ enum AutodiscoveryCommands {
 enum IgnoresCommands {
     /// List autodiscovery ignore rules
     List {
-        /// Filter by provider config UUID
+        /// Filter by plugin config UUID
         #[arg(long)]
-        provider_config: Option<Uuid>,
+        plugin_config: Option<Uuid>,
         /// Page number
         #[arg(long)]
         page: Option<u64>,
@@ -820,9 +820,9 @@ enum IgnoresCommands {
     },
     /// Create an autodiscovery ignore rule
     Create {
-        /// Provider config UUID
+        /// Plugin config UUID
         #[arg(long)]
-        provider_config: Uuid,
+        plugin_config: Uuid,
         /// Package identifier to suppress
         #[arg(long)]
         package: String,
@@ -1125,12 +1125,12 @@ async fn run(cli: Cli) -> error::Result<()> {
             }
             HostsCommands::DiscardDiscovered {
                 id,
-                provider_config,
+                plugin_config,
             } => {
                 let resp =
                     commands::hosts::discard_discovered(commands::hosts::DiscardDiscoveredParams {
                         id: &id,
-                        provider_config_id: provider_config.as_ref(),
+                        plugin_config_id: plugin_config.as_ref(),
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
                         insecure,
@@ -1218,14 +1218,14 @@ async fn run(cli: Cli) -> error::Result<()> {
             SoftwareItemsCommands::Assign {
                 id,
                 host,
-                provider_config,
+                plugin_config,
                 package,
             } => {
                 let resp =
                     commands::software_items::assign(commands::software_items::AssignParams {
                         id: &id,
                         host_id: &host,
-                        provider_config_id: provider_config.as_ref(),
+                        plugin_config_id: plugin_config.as_ref(),
                         package_identifier: package,
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
@@ -1814,10 +1814,10 @@ async fn run(cli: Cli) -> error::Result<()> {
                 output::print_output(format, &resp)?;
             }
         },
-        Commands::ProviderConfigs { command } => match command {
-            ProviderConfigsCommands::List { page, per_page } => {
+        Commands::PluginConfigs { command } => match command {
+            PluginConfigsCommands::List { page, per_page } => {
                 let resp =
-                    commands::provider_configs::list(commands::provider_configs::ListParams {
+                    commands::plugin_configs::list(commands::plugin_configs::ListParams {
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
                         insecure,
@@ -1828,9 +1828,9 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                 output::print_output(format, &resp)?;
             }
-            ProviderConfigsCommands::Show { id } => {
+            PluginConfigsCommands::Show { id } => {
                 let resp =
-                    commands::provider_configs::show(commands::provider_configs::ShowParams {
+                    commands::plugin_configs::show(commands::plugin_configs::ShowParams {
                         id: &id,
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
@@ -1840,15 +1840,15 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                 output::print_output(format, &resp)?;
             }
-            ProviderConfigsCommands::Create {
+            PluginConfigsCommands::Create {
                 name,
-                provider_type,
+                plugin_type,
                 config,
                 enabled,
             } => {
-                let provider_type: PluginType = provider_type.parse().map_err(|_| {
+                let plugin_type: PluginType = plugin_type.parse().map_err(|_| {
                     report!(error::CliError::Other(format!(
-                        "unknown provider type: {provider_type}"
+                        "unknown plugin type: {plugin_type}"
                     )))
                 })?;
                 let config_value: serde_json::Value = match config {
@@ -1860,9 +1860,9 @@ async fn run(cli: Cli) -> error::Result<()> {
                     None => serde_json::Value::Object(serde_json::Map::new()),
                 };
                 let resp =
-                    commands::provider_configs::create(commands::provider_configs::CreateParams {
+                    commands::plugin_configs::create(commands::plugin_configs::CreateParams {
                         name,
-                        provider_type,
+                        plugin_type,
                         config: config_value,
                         enabled,
                         server: cli.server.as_deref(),
@@ -1873,7 +1873,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                 output::print_output(format, &resp)?;
             }
-            ProviderConfigsCommands::Update {
+            PluginConfigsCommands::Update {
                 id,
                 name,
                 config,
@@ -1888,7 +1888,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                     None => None,
                 };
                 let resp =
-                    commands::provider_configs::update(commands::provider_configs::UpdateParams {
+                    commands::plugin_configs::update(commands::plugin_configs::UpdateParams {
                         id: &id,
                         name,
                         config: config_value,
@@ -1901,9 +1901,9 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                 output::print_output(format, &resp)?;
             }
-            ProviderConfigsCommands::Delete { id } => {
+            PluginConfigsCommands::Delete { id } => {
                 let resp =
-                    commands::provider_configs::delete(commands::provider_configs::DeleteParams {
+                    commands::plugin_configs::delete(commands::plugin_configs::DeleteParams {
                         id: &id,
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
@@ -1913,9 +1913,9 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                 output::print_output(format, &resp)?;
             }
-            ProviderConfigsCommands::Discover { id } => {
-                let resp = commands::provider_configs::discover(
-                    commands::provider_configs::DiscoverParams {
+            PluginConfigsCommands::Discover { id } => {
+                let resp = commands::plugin_configs::discover(
+                    commands::plugin_configs::DiscoverParams {
                         id: &id,
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
@@ -1926,9 +1926,9 @@ async fn run(cli: Cli) -> error::Result<()> {
                 .await?;
                 output::print_output(format, &resp)?;
             }
-            ProviderConfigsCommands::DiscardDiscovered { id } => {
-                let resp = commands::provider_configs::discard_discovered(
-                    commands::provider_configs::DiscardDiscoveredParams {
+            PluginConfigsCommands::DiscardDiscovered { id } => {
+                let resp = commands::plugin_configs::discard_discovered(
+                    commands::plugin_configs::DiscardDiscoveredParams {
                         id: &id,
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
@@ -1943,13 +1943,13 @@ async fn run(cli: Cli) -> error::Result<()> {
         Commands::Autodiscovery { command } => match command {
             AutodiscoveryCommands::Ignores { command } => match command {
                 IgnoresCommands::List {
-                    provider_config,
+                    plugin_config,
                     page,
                     per_page,
                 } => {
                     let resp = commands::autodiscovery::ignores_list(
                         commands::autodiscovery::IgnoresListParams {
-                            provider_config_id: provider_config.as_ref(),
+                            provider_config_id: plugin_config.as_ref(),
                             server: cli.server.as_deref(),
                             token: cli.token.as_deref(),
                             insecure,
@@ -1962,12 +1962,12 @@ async fn run(cli: Cli) -> error::Result<()> {
                     output::print_output(format, &resp)?;
                 }
                 IgnoresCommands::Create {
-                    provider_config,
+                    plugin_config,
                     package,
                 } => {
                     let resp = commands::autodiscovery::ignores_create(
                         commands::autodiscovery::IgnoresCreateParams {
-                            provider_config_id: &provider_config,
+                            provider_config_id: &plugin_config,
                             package_identifier: package,
                             server: cli.server.as_deref(),
                             token: cli.token.as_deref(),
@@ -3069,7 +3069,7 @@ mod tests {
             "hosts",
             "discard-discovered",
             HOST_UUID,
-            "--provider-config",
+            "--plugin-config",
             PC_UUID,
         ])
         .expect("should parse");
@@ -3078,11 +3078,11 @@ mod tests {
                 command:
                     HostsCommands::DiscardDiscovered {
                         id,
-                        provider_config,
+                        plugin_config,
                     },
             }) => {
                 assert_eq!(id, uuid(HOST_UUID));
-                assert_eq!(provider_config, Some(uuid(PC_UUID)));
+                assert_eq!(plugin_config, Some(uuid(PC_UUID)));
             }
             _ => panic!("expected Hosts DiscardDiscovered"),
         }
@@ -3166,7 +3166,7 @@ mod tests {
             ITEM_UUID,
             "--host",
             HOST_UUID,
-            "--provider-config",
+            "--plugin-config",
             PC_UUID,
             "--package",
             "org/app",
@@ -3178,13 +3178,13 @@ mod tests {
                     SoftwareItemsCommands::Assign {
                         id,
                         host,
-                        provider_config,
+                        plugin_config,
                         package,
                     },
             }) => {
                 assert_eq!(id, uuid(ITEM_UUID));
                 assert_eq!(host, uuid(HOST_UUID));
-                assert_eq!(provider_config, Some(uuid(PC_UUID)));
+                assert_eq!(plugin_config, Some(uuid(PC_UUID)));
                 assert_eq!(package.as_deref(), Some("org/app"));
             }
             _ => panic!("expected SoftwareItems Assign"),
@@ -3237,105 +3237,105 @@ mod tests {
     }
 
     #[test]
-    fn provider_configs_list_parses() {
+    fn plugin_configs_list_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit", "provider-configs", "list"]).expect("should parse");
+            Cli::try_parse_from(["uptrakit", "plugin-configs", "list"]).expect("should parse");
         assert!(matches!(
             args.command,
-            Some(Commands::ProviderConfigs {
-                command: ProviderConfigsCommands::List { .. }
+            Some(Commands::PluginConfigs {
+                command: PluginConfigsCommands::List { .. }
             })
         ));
     }
 
     #[test]
-    fn provider_configs_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "provider-configs", "show", PC_UUID])
+    fn plugin_configs_show_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "plugin-configs", "show", PC_UUID])
             .expect("should parse");
         match args.command {
-            Some(Commands::ProviderConfigs {
-                command: ProviderConfigsCommands::Show { id },
+            Some(Commands::PluginConfigs {
+                command: PluginConfigsCommands::Show { id },
             }) => {
                 assert_eq!(id, uuid(PC_UUID));
             }
-            _ => panic!("expected ProviderConfigs Show"),
+            _ => panic!("expected PluginConfigs Show"),
         }
     }
 
     #[test]
-    fn provider_configs_create_parses() {
+    fn plugin_configs_create_parses() {
         let args = Cli::try_parse_from([
             "uptrakit",
-            "provider-configs",
+            "plugin-configs",
             "create",
             "--name",
             "My GitHub",
-            "--provider-type",
+            "--plugin-type",
             "github_releases",
             "--config",
             r#"{"owner":"org","repo":"app"}"#,
         ])
         .expect("should parse");
         match args.command {
-            Some(Commands::ProviderConfigs {
+            Some(Commands::PluginConfigs {
                 command:
-                    ProviderConfigsCommands::Create {
+                    PluginConfigsCommands::Create {
                         name,
-                        provider_type,
+                        plugin_type,
                         ..
                     },
             }) => {
                 assert_eq!(name, "My GitHub");
-                assert_eq!(provider_type, "github_releases");
+                assert_eq!(plugin_type, "github_releases");
             }
-            _ => panic!("expected ProviderConfigs Create"),
+            _ => panic!("expected PluginConfigs Create"),
         }
     }
 
     #[test]
-    fn provider_configs_delete_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "provider-configs", "delete", PC_UUID])
+    fn plugin_configs_delete_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "plugin-configs", "delete", PC_UUID])
             .expect("should parse");
         match args.command {
-            Some(Commands::ProviderConfigs {
-                command: ProviderConfigsCommands::Delete { id },
+            Some(Commands::PluginConfigs {
+                command: PluginConfigsCommands::Delete { id },
             }) => {
                 assert_eq!(id, uuid(PC_UUID));
             }
-            _ => panic!("expected ProviderConfigs Delete"),
+            _ => panic!("expected PluginConfigs Delete"),
         }
     }
 
     #[test]
-    fn provider_configs_discover_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "provider-configs", "discover", PC_UUID])
+    fn plugin_configs_discover_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "plugin-configs", "discover", PC_UUID])
             .expect("should parse");
         match args.command {
-            Some(Commands::ProviderConfigs {
-                command: ProviderConfigsCommands::Discover { id },
+            Some(Commands::PluginConfigs {
+                command: PluginConfigsCommands::Discover { id },
             }) => {
                 assert_eq!(id, uuid(PC_UUID));
             }
-            _ => panic!("expected ProviderConfigs Discover"),
+            _ => panic!("expected PluginConfigs Discover"),
         }
     }
 
     #[test]
-    fn provider_configs_discard_discovered_parses() {
+    fn plugin_configs_discard_discovered_parses() {
         let args = Cli::try_parse_from([
             "uptrakit",
-            "provider-configs",
+            "plugin-configs",
             "discard-discovered",
             PC_UUID,
         ])
         .expect("should parse");
         match args.command {
-            Some(Commands::ProviderConfigs {
-                command: ProviderConfigsCommands::DiscardDiscovered { id },
+            Some(Commands::PluginConfigs {
+                command: PluginConfigsCommands::DiscardDiscovered { id },
             }) => {
                 assert_eq!(id, uuid(PC_UUID));
             }
-            _ => panic!("expected ProviderConfigs DiscardDiscovered"),
+            _ => panic!("expected PluginConfigs DiscardDiscovered"),
         }
     }
 
@@ -3360,7 +3360,7 @@ mod tests {
             "autodiscovery",
             "ignores",
             "create",
-            "--provider-config",
+            "--plugin-config",
             PC_UUID,
             "--package",
             "org/app",
@@ -3372,12 +3372,12 @@ mod tests {
                     AutodiscoveryCommands::Ignores {
                         command:
                             IgnoresCommands::Create {
-                                provider_config,
+                                plugin_config,
                                 package,
                             },
                     },
             }) => {
-                assert_eq!(provider_config, uuid(PC_UUID));
+                assert_eq!(plugin_config, uuid(PC_UUID));
                 assert_eq!(package, "org/app");
             }
             _ => panic!("expected Autodiscovery Ignores Create"),

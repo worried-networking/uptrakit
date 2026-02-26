@@ -4,7 +4,7 @@ use uptrakit_shared_types::SoftwareDiscoveryState;
 use uuid::Uuid;
 
 use crate::pagination::PaginationParams;
-use crate::provider_configs::CreateProviderConfigRequest;
+use crate::plugin_configs::CreatePluginConfigRequest;
 use crate::validation::{Validate, ValidationError};
 
 /// Create a new software item (catalog entry only — no provider coupling).
@@ -31,10 +31,10 @@ pub struct UpdateSoftwareItemRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostSoftwareAssignment {
     pub host_id: Uuid,
-    /// UUID of an existing provider config to use.
-    pub provider_config_id: Option<Uuid>,
-    /// Inline provider config to create (mutually exclusive with `provider_config_id`).
-    pub provider_config: Option<CreateProviderConfigRequest>,
+    /// UUID of an existing plugin config to use.
+    pub plugin_config_id: Option<Uuid>,
+    /// Inline plugin config to create (mutually exclusive with `plugin_config_id`).
+    pub plugin_config: Option<CreatePluginConfigRequest>,
     /// Provider-specific package identifier. Defaults to `""` if omitted.
     pub package_identifier: Option<String>,
     /// Provider-specific overrides merged onto the base config at resolution time.
@@ -52,12 +52,12 @@ pub struct AssignHostsRequest {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHostAssignmentRequest {
-    /// UUID of an existing provider config to use.
-    pub provider_config_id: Option<Uuid>,
-    /// Inline provider config to create (mutually exclusive with `provider_config_id`).
-    pub provider_config: Option<CreateProviderConfigRequest>,
+    /// UUID of an existing plugin config to use.
+    pub plugin_config_id: Option<Uuid>,
+    /// Inline plugin config to create (mutually exclusive with `plugin_config_id`).
+    pub plugin_config: Option<CreatePluginConfigRequest>,
     pub package_identifier: Option<String>,
-    /// Send `null` to clear the override, an object to replace it.
+    /// Send `null` to clear the override, an object to clear it.
     pub config_override: Option<serde_json::Value>,
 }
 
@@ -131,8 +131,8 @@ pub struct SoftwareItemHostSummary {
     pub host_id: Uuid,
     pub hostname: String,
     pub friendly_name: String,
-    pub provider_config_id: Uuid,
-    pub provider_config_name: String,
+    pub plugin_config_id: Uuid,
+    pub plugin_config_name: String,
     pub provider_type: String,
     pub package_identifier: String,
     pub config_override: Option<serde_json::Value>,
@@ -334,17 +334,17 @@ mod tests {
             host_assignments: vec![
                 HostSoftwareAssignment {
                     host_id: sample_uuid(),
-                    provider_config_id: Some(sample_uuid()),
-                    provider_config: None,
+                    plugin_config_id: Some(sample_uuid()),
+                    plugin_config: None,
                     package_identifier: Some("1password".to_string()),
                     config_override: None,
                 },
                 HostSoftwareAssignment {
                     host_id: Uuid::nil(),
-                    provider_config_id: None,
-                    provider_config: Some(crate::provider_configs::CreateProviderConfigRequest {
+                    plugin_config_id: None,
+                    plugin_config: Some(crate::plugin_configs::CreatePluginConfigRequest {
                         name: "Homebrew Casks".to_string(),
-                        provider_type: PluginType::Homebrew,
+                        plugin_type: PluginType::Homebrew,
                         config: serde_json::json!({"package_type": "cask"}),
                         enabled: true,
                     }),
@@ -364,7 +364,7 @@ mod tests {
                 .as_deref(),
             Some("1password")
         );
-        assert!(deserialized.host_assignments[1].provider_config.is_some());
+        assert!(deserialized.host_assignments[1].plugin_config.is_some());
     }
 
     // ── SoftwareItemResponse ─────────────────────────────────────────

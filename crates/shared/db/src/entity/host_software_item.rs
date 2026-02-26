@@ -8,7 +8,8 @@ pub struct Model {
     pub host_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub software_item_id: Uuid,
-    pub provider_config_id: Uuid,
+    #[sea_orm(column_name = "provider_config_id")]
+    pub plugin_config_id: Uuid,
     pub package_identifier: String,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub config_override: Option<serde_json::Value>,
@@ -34,10 +35,10 @@ pub enum Relation {
     SoftwareItem,
     #[sea_orm(
         belongs_to = "super::plugin_config::Entity",
-        from = "Column::ProviderConfigId",
+        from = "Column::PluginConfigId",
         to = "super::plugin_config::Column::Id"
     )]
-    ProviderConfig,
+    PluginConfig,
 }
 
 impl Related<super::host::Entity> for Entity {
@@ -54,7 +55,7 @@ impl Related<super::software_item::Entity> for Entity {
 
 impl Related<super::plugin_config::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::ProviderConfig.def()
+        Relation::PluginConfig.def()
     }
 }
 

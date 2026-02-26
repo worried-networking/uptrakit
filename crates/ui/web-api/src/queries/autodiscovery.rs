@@ -31,8 +31,7 @@ use time::OffsetDateTime;
 use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload, PluginType};
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
-    autodiscovery_ignore, host_software_item, plugin_config as provider_config, prelude::*,
-    software_item,
+    autodiscovery_ignore, host_software_item, plugin_config, prelude::*, software_item,
 };
 use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, DiscardDiscoveredResponse,
@@ -59,7 +58,7 @@ pub async fn create_or_ignore_ignore_rule(
     // Verify the rule does not already exist to avoid the conflict entirely.
     let exists = AutodiscoveryIgnore::find()
         .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
-        .filter(autodiscovery_ignore::Column::ProviderConfigId.eq(provider_config_id))
+        .filter(autodiscovery_ignore::Column::PluginConfigId.eq(provider_config_id))
         .filter(autodiscovery_ignore::Column::PackageIdentifier.eq(package_identifier))
         .count(db)
         .await?;
@@ -71,7 +70,7 @@ pub async fn create_or_ignore_ignore_rule(
     let record = autodiscovery_ignore::ActiveModel {
         id: Set(Uuid::now_v7()),
         tenant_id: Set(tenant_id),
-        provider_config_id: Set(provider_config_id),
+        plugin_config_id: Set(provider_config_id),
         package_identifier: Set(package_identifier.to_string()),
         created_at: Set(OffsetDateTime::now_utc()),
     };
@@ -107,7 +106,7 @@ pub async fn list_ignore_rules(
         AutodiscoveryIgnore::find().filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id));
 
     if let Some(pc_id) = provider_config_id_filter {
-        query = query.filter(autodiscovery_ignore::Column::ProviderConfigId.eq(pc_id));
+        query = query.filter(autodiscovery_ignore::Column::PluginConfigId.eq(pc_id));
     }
 
     let paginator = query
@@ -120,27 +119,27 @@ pub async fn list_ignore_rules(
     // Collect all provider_config IDs we need to join.
     let pc_ids: Vec<Uuid> = items_raw
         .iter()
-        .map(|r| r.provider_config_id)
+        .map(|r| r.plugin_config_id)
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
 
-    let configs = ProviderConfig::find()
-        .filter(provider_config::Column::Id.is_in(pc_ids))
+    let configs = PluginConfig::find()
+        .filter(plugin_config::Column::Id.is_in(pc_ids))
         .all(db)
         .await?;
 
-    let config_map: std::collections::HashMap<Uuid, provider_config::Model> =
+    let config_map: std::collections::HashMap<Uuid, plugin_config::Model> =
         configs.into_iter().map(|c| (c.id, c)).collect();
 
     let items = items_raw
         .into_iter()
         .filter_map(|r| {
-            let cfg = config_map.get(&r.provider_config_id)?;
+            let cfg = config_map.get(&r.plugin_config_id)?;
             Some(AutodiscoveryIgnoreResponse {
                 id: r.id,
-                provider_config_id: r.provider_config_id,
-                provider_config_name: cfg.name.clone(),
+                plugin_config_id: r.plugin_config_id,
+                plugin_config_name: cfg.name.clone(),
                 provider_type: cfg.plugin_type.clone(),
                 package_identifier: r.package_identifier,
                 created_at: r.created_at,
@@ -206,7 +205,7 @@ pub async fn discard_pending_items(
     let provider_filtered_item_ids: Option<Vec<Uuid>> =
         if let Some(pc_id) = provider_config_id_filter {
             let linked: Vec<Uuid> = HostSoftwareItem::find()
-                .filter(host_software_item::Column::ProviderConfigId.eq(pc_id))
+                .filter(host_software_item::Column::PluginConfigId.eq(pc_id))
                 .all(db)
                 .await?
                 .into_iter()
@@ -301,7 +300,7 @@ pub async fn discard_pending_items(
 /// active config with a given `(tenant_id, name)` pair exists at any time. On a
 /// unique-constraint violation (two concurrent auto-creates racing), the function
 /// re-queries and returns the winner's ID.
-pub async fn find_or_create_default_provider_config(
+pub async fn find_or_create_default_plugin_config(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     provider_type: &str,
@@ -310,7 +309,7 @@ pub async fn find_or_create_default_provider_config(
 ) -> Result<Uuid, AutodiscoveryError> {
     // First pass: search for an existing config with matching JSON.
     if let Some(id) =
-        find_matching_provider_config(db, tenant_id, provider_type, config_json).await?
+        find_matching_plugin_config(db, tenant_id, provider_type, config_json).await?
     {
         return Ok(id);
     }
@@ -318,7 +317,7 @@ pub async fn find_or_create_default_provider_config(
     // None found — try to create one.
     let now = OffsetDateTime::now_utc();
     let new_id = Uuid::now_v7();
-    let record = provider_config::ActiveModel {
+    let record = plugin_config::ActiveModel {
         id: Set(new_id),
         tenant_id: Set(tenant_id),
         name: Set(display_name.to_string()),
@@ -330,12 +329,12 @@ pub async fn find_or_create_default_provider_config(
         deactivated_at: Set(None),
     };
 
-    match ProviderConfig::insert(record).exec(db).await {
+    match PluginConfig::insert(record).exec(db).await {
         Ok(_) => Ok(new_id),
         Err(e) if is_unique_violation(&e) => {
             // A concurrent task created this config at the same time.
             // Re-query to get the winner's ID.
-            find_matching_provider_config(db, tenant_id, provider_type, config_json)
+            find_matching_plugin_config(db, tenant_id, provider_type, config_json)
                 .await?
                 .ok_or(AutodiscoveryError::Db(e))
         }
@@ -345,16 +344,16 @@ pub async fn find_or_create_default_provider_config(
 
 /// Query active provider configs for a tenant/type combination and return
 /// the ID of the first one whose JSON config matches `config_json`.
-async fn find_matching_provider_config(
+async fn find_matching_plugin_config(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     provider_type: &str,
     config_json: &serde_json::Value,
 ) -> Result<Option<Uuid>, AutodiscoveryError> {
-    let configs = ProviderConfig::find()
-        .filter(provider_config::Column::TenantId.eq(tenant_id))
-        .filter(provider_config::Column::PluginType.eq(provider_type))
-        .filter(provider_config::Column::DeactivatedAt.is_null())
+    let configs = PluginConfig::find()
+        .filter(plugin_config::Column::TenantId.eq(tenant_id))
+        .filter(plugin_config::Column::PluginType.eq(provider_type))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
         .all(db)
         .await?;
 
@@ -452,7 +451,7 @@ async fn process_provider_result(
         }
         PluginType::Docker => {
             let config_json = serde_json::json!({});
-            let pc_id = find_or_create_default_provider_config(
+            let pc_id = find_or_create_default_plugin_config(
                 db,
                 tenant_id,
                 &provider_type_str,
@@ -477,7 +476,7 @@ async fn process_provider_result(
         }
         PluginType::Apt => {
             let config_json = serde_json::json!({});
-            let pc_id = find_or_create_default_provider_config(
+            let pc_id = find_or_create_default_plugin_config(
                 db,
                 tenant_id,
                 &provider_type_str,
@@ -555,7 +554,7 @@ async fn process_phs_results(
                     "install_command": PHS_INSTALL_CMD,
                 });
                 let display_name = format!("{owner}/{repo}");
-                let pc_id = find_or_create_default_provider_config(
+                let pc_id = find_or_create_default_plugin_config(
                     db,
                     tenant_id,
                     "github_releases",
@@ -576,7 +575,7 @@ async fn process_phs_results(
             (_, _, Some(_apt_pkg)) => {
                 // APT-managed: find-or-create the shared default APT provider config.
                 let config_json = serde_json::json!({});
-                let pc_id = find_or_create_default_provider_config(
+                let pc_id = find_or_create_default_plugin_config(
                     db,
                     tenant_id,
                     "apt",
@@ -643,7 +642,7 @@ async fn process_homebrew_default(
 
     if !formulae.is_empty() {
         let config_json = serde_json::json!({"package_type": "formula"});
-        let pc_id = find_or_create_default_provider_config(
+        let pc_id = find_or_create_default_plugin_config(
             db,
             tenant_id,
             &provider_type_str,
@@ -665,7 +664,7 @@ async fn process_homebrew_default(
 
     if !casks.is_empty() {
         let config_json = serde_json::json!({"package_type": "cask"});
-        let pc_id = find_or_create_default_provider_config(
+        let pc_id = find_or_create_default_plugin_config(
             db,
             tenant_id,
             &provider_type_str,
@@ -708,7 +707,7 @@ async fn load_ignore_set(
 ) -> Result<HashSet<String>, AutodiscoveryError> {
     let rules = AutodiscoveryIgnore::find()
         .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
-        .filter(autodiscovery_ignore::Column::ProviderConfigId.eq(provider_config_id))
+        .filter(autodiscovery_ignore::Column::PluginConfigId.eq(provider_config_id))
         .all(db)
         .await?;
     Ok(rules.into_iter().map(|r| r.package_identifier).collect())
@@ -748,7 +747,7 @@ async fn process_one_discovery(
     // Phase 1: Check if this specific host already tracks (provider_config_id, package_identifier).
     let existing_host_link = HostSoftwareItem::find()
         .filter(host_software_item::Column::HostId.eq(host_id))
-        .filter(host_software_item::Column::ProviderConfigId.eq(provider_config_id))
+        .filter(host_software_item::Column::PluginConfigId.eq(provider_config_id))
         .filter(host_software_item::Column::PackageIdentifier.eq(args.package_identifier))
         .one(db)
         .await?;
@@ -790,7 +789,7 @@ async fn process_one_discovery(
     // (provider_config_id, package_identifier). If so, reuse the existing software item
     // so the global catalog stays unified.
     let candidate_links: Vec<Uuid> = HostSoftwareItem::find()
-        .filter(host_software_item::Column::ProviderConfigId.eq(provider_config_id))
+        .filter(host_software_item::Column::PluginConfigId.eq(provider_config_id))
         .filter(host_software_item::Column::PackageIdentifier.eq(args.package_identifier))
         .all(db)
         .await?
@@ -839,7 +838,7 @@ async fn process_one_discovery(
     let link = host_software_item::ActiveModel {
         host_id: Set(host_id),
         software_item_id: Set(software_item_id),
-        provider_config_id: Set(provider_config_id),
+        plugin_config_id: Set(provider_config_id),
         package_identifier: Set(args.package_identifier.to_string()),
         config_override: Set(None),
         installed_version: Set(Some(args.installed_version.to_string())),
@@ -869,7 +868,7 @@ mod tests {
     use super::*;
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
     use uptrakit_shared_db::SoftwareDiscoveryState;
-    use uptrakit_shared_db::entity::{host, plugin_config as provider_config, tenant};
+    use uptrakit_shared_db::entity::{host, plugin_config, tenant};
 
     async fn setup_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");
@@ -920,12 +919,12 @@ mod tests {
         .expect("insert host");
     }
 
-    async fn insert_provider_config(db: &DatabaseConnection, id: Uuid, tenant_id: Uuid) {
+    async fn insert_plugin_config(db: &DatabaseConnection, id: Uuid, tenant_id: Uuid) {
         let now = time::OffsetDateTime::now_utc();
-        provider_config::ActiveModel {
+        plugin_config::ActiveModel {
             id: Set(id),
             tenant_id: Set(tenant_id),
-            name: Set(format!("Test Provider {id}")),
+            name: Set(format!("Test Plugin Config {id}")),
             plugin_type: Set("homebrew".to_string()),
             config: Set(serde_json::json!({})),
             enabled: Set(true),
@@ -935,7 +934,7 @@ mod tests {
         }
         .insert(db)
         .await
-        .expect("insert provider_config");
+        .expect("insert plugin_config");
     }
 
     // ── query helpers ─────────────────────────────────────────────────────────
@@ -966,14 +965,14 @@ mod tests {
         db: &DatabaseConnection,
         host_id: Uuid,
         software_item_id: Uuid,
-        provider_config_id: Uuid,
+        plugin_config_id: Uuid,
         package_identifier: &str,
     ) {
         let now = time::OffsetDateTime::now_utc();
         let link = host_software_item::ActiveModel {
             host_id: Set(host_id),
             software_item_id: Set(software_item_id),
-            provider_config_id: Set(provider_config_id),
+            plugin_config_id: Set(plugin_config_id),
             package_identifier: Set(package_identifier.to_string()),
             config_override: Set(None),
             installed_version: Set(Some("1.0.0".to_string())),
@@ -999,7 +998,7 @@ mod tests {
 
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
-        insert_provider_config(&db, pc_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
         insert_software_item(&db, item_id, tenant_id, "git", None).await;
         insert_host_link(&db, host_id, item_id, pc_id, "git").await;
 
@@ -1038,7 +1037,7 @@ mod tests {
 
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
-        insert_provider_config(&db, pc_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
 
         // Insert a discarded (deactivated) software item and its orphaned link —
         // the state that existed before this fix.
@@ -1081,7 +1080,7 @@ mod tests {
         // A new host link pointing to the new pending item must exist.
         let new_link_count = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
-            .filter(host_software_item::Column::ProviderConfigId.eq(pc_id))
+            .filter(host_software_item::Column::PluginConfigId.eq(pc_id))
             .filter(host_software_item::Column::PackageIdentifier.eq("curl"))
             .count(&db)
             .await
@@ -1102,7 +1101,7 @@ mod tests {
 
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
-        insert_provider_config(&db, pc_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
 
         // Active software item with an existing host link at version 1.0.0.
         insert_software_item(&db, item_id, tenant_id, "wget", None).await;
@@ -1211,9 +1210,9 @@ mod tests {
             .expect("process_phs_results");
 
         // A github_releases provider config must exist.
-        let configs = ProviderConfig::find()
-            .filter(provider_config::Column::TenantId.eq(tenant_id))
-            .filter(provider_config::Column::PluginType.eq("github_releases"))
+        let configs = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq("github_releases"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1255,9 +1254,9 @@ mod tests {
             .await
             .expect("process_phs_results");
 
-        let configs = ProviderConfig::find()
-            .filter(provider_config::Column::TenantId.eq(tenant_id))
-            .filter(provider_config::Column::PluginType.eq("apt"))
+        let configs = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq("apt"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1293,9 +1292,9 @@ mod tests {
             .await
             .expect("process_phs_results");
 
-        let configs = ProviderConfig::find()
-            .filter(provider_config::Column::TenantId.eq(tenant_id))
-            .filter(provider_config::Column::PluginType.eq("apt"))
+        let configs = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq("apt"))
             .all(&db)
             .await
             .expect("query configs");
@@ -1322,8 +1321,8 @@ mod tests {
             .await
             .expect("process_phs_results");
 
-        let configs = ProviderConfig::find()
-            .filter(provider_config::Column::TenantId.eq(tenant_id))
+        let configs = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
             .all(&db)
             .await
             .expect("query configs");
@@ -1361,9 +1360,9 @@ mod tests {
             .expect("host2");
 
         // Still only one provider config.
-        let config_count = ProviderConfig::find()
-            .filter(provider_config::Column::TenantId.eq(tenant_id))
-            .filter(provider_config::Column::PluginType.eq("github_releases"))
+        let config_count = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq("github_releases"))
             .count(&db)
             .await
             .expect("count configs");

@@ -20,12 +20,12 @@ impl HumanOutput for PaginatedResponse<AutodiscoveryIgnoreResponse> {
         }
         let mut out = format!(
             "{:<38} {:<25} {:<20} PACKAGE\n",
-            "ID", "PROVIDER CONFIG", "TYPE"
+            "ID", "PLUGIN CONFIG", "TYPE"
         );
         for r in &self.items {
             out.push_str(&format!(
                 "{:<38} {:<25} {:<20} {}\n",
-                r.id, r.provider_config_name, r.provider_type, r.package_identifier
+                r.id, r.plugin_config_name, r.provider_type, r.package_identifier
             ));
         }
         out.push_str(&format!(
@@ -41,8 +41,8 @@ impl HumanOutput for AutodiscoveryIgnoreResponse {
         let mut out = String::new();
         out.push_str(&format!("ID:               {}\n", self.id));
         out.push_str(&format!(
-            "Provider Config:  {} ({})\n",
-            self.provider_config_name, self.provider_config_id
+            "Plugin Config:    {} ({})\n",
+            self.plugin_config_name, self.plugin_config_id
         ));
         out.push_str(&format!("Provider Type:    {}\n", self.provider_type));
         out.push_str(&format!("Package:          {}\n", self.package_identifier));
@@ -99,7 +99,7 @@ pub async fn ignores_list(
     let list_params = ListIgnoresParams {
         page: params.page,
         per_page: params.per_page,
-        provider_config_id: params.provider_config_id,
+        plugin_config_id: params.provider_config_id,
     };
     client
         .list_autodiscovery_ignores(&list_params)
@@ -117,7 +117,7 @@ pub async fn ignores_create(
         params.request_timeout,
     )?;
     let req = CreateAutodiscoveryIgnoreRequest {
-        provider_config_id: *params.provider_config_id,
+        plugin_config_id: *params.provider_config_id,
         package_identifier: params.package_identifier,
     };
     client.create_autodiscovery_ignore(&req).await.context_to()
@@ -151,10 +151,10 @@ mod tests {
             id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                 .parse::<Uuid>()
                 .unwrap(),
-            provider_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+            plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                 .parse::<Uuid>()
                 .unwrap(),
-            provider_config_name: "My GitHub".to_string(),
+            plugin_config_name: "My GitHub".to_string(),
             provider_type: "github_releases".to_string(),
             package_identifier: "org/my-app".to_string(),
             created_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -165,7 +165,7 @@ mod tests {
     fn ignore_detail_human_output() {
         let r = sample_ignore();
         let s = r.to_human_string();
-        assert!(s.contains("My GitHub"), "provider config name missing");
+        assert!(s.contains("My GitHub"), "plugin config name missing");
         assert!(s.contains("org/my-app"), "package identifier missing");
     }
 

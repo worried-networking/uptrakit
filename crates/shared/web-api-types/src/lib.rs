@@ -17,7 +17,7 @@ pub mod oidc_providers;
 pub mod pagination;
 pub mod permissions;
 pub mod prelude;
-pub mod provider_configs;
+pub mod plugin_configs;
 pub mod registration;
 pub mod scheduler;
 pub mod server_cert;
@@ -38,7 +38,7 @@ pub mod validation;
 /// Default value for `enabled` fields in create-request types.
 ///
 /// Used as `#[serde(default = "crate::default_enabled")]` in
-/// [`provider_configs::CreateProviderConfigRequest`] and
+/// [`plugin_configs::CreatePluginConfigRequest`] and
 /// [`software_items::CreateSoftwareItemRequest`].
 pub fn default_enabled() -> bool {
     true
@@ -51,7 +51,7 @@ mod tests {
     use crate::error::ErrorResponse;
     use crate::oidc_providers::CreateOidcProviderRequest;
     use crate::permissions::Permission;
-    use crate::provider_configs::CreateProviderConfigRequest;
+    use crate::plugin_configs::CreatePluginConfigRequest;
     use crate::registration::RegistrationMode;
     use crate::software_items::CreateSoftwareItemRequest;
     use crate::update_history::UpdateStatus;
@@ -280,9 +280,9 @@ mod tests {
     {
         let json = serde_json::json!({
             "name": "Node.js",
-            "provider_config": {
+            "plugin_config": {
                 "name": "GitHub Releases",
-                "provider_type": "github_releases",
+                "plugin_type": "github_releases",
                 "config": {}
             }
         });
@@ -292,25 +292,25 @@ mod tests {
     }
 
     #[test]
-    fn create_provider_config_request_default_enabled() {
+    fn create_plugin_config_request_default_enabled() {
         let json = serde_json::json!({
             "name": "GitHub Releases",
-            "provider_type": "github_releases",
+            "plugin_type": "github_releases",
             "config": {}
         });
-        let req: CreateProviderConfigRequest = serde_json::from_value(json).unwrap();
+        let req: CreatePluginConfigRequest = serde_json::from_value(json).unwrap();
         assert!(req.enabled);
     }
 
     #[test]
-    fn create_provider_config_request_explicit_enabled_false() {
+    fn create_plugin_config_request_explicit_enabled_false() {
         let json = serde_json::json!({
             "name": "GitHub Releases",
-            "provider_type": "github_releases",
+            "plugin_type": "github_releases",
             "config": {},
             "enabled": false
         });
-        let req: CreateProviderConfigRequest = serde_json::from_value(json).unwrap();
+        let req: CreatePluginConfigRequest = serde_json::from_value(json).unwrap();
         assert!(!req.enabled);
     }
 
@@ -770,8 +770,8 @@ mod tests {
         let _: SoftwareItemResponse;
         let _ = TriggerUpdateStatus::Pending;
 
-        // Provider configs
-        let _: ProviderConfigResponse;
+        // Plugin configs
+        let _: PluginConfigResponse;
 
         // Update history
         let _ = UpdateStatus::Pending;
@@ -958,12 +958,12 @@ mod tests {
     }
 
     #[test]
-    fn create_provider_config_valid() {
+    fn create_plugin_config_valid() {
         use crate::validation::Validate;
         use uptrakit_shared_types::PluginType;
-        let req = CreateProviderConfigRequest {
+        let req = CreatePluginConfigRequest {
             name: "GitHub Releases".to_string(),
-            provider_type: PluginType::GithubReleases,
+            plugin_type: PluginType::GithubReleases,
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -971,12 +971,12 @@ mod tests {
     }
 
     #[test]
-    fn create_provider_config_empty_name() {
+    fn create_plugin_config_empty_name() {
         use crate::validation::Validate;
         use uptrakit_shared_types::PluginType;
-        let req = CreateProviderConfigRequest {
+        let req = CreatePluginConfigRequest {
             name: "".to_string(),
-            provider_type: PluginType::GithubReleases,
+            plugin_type: PluginType::GithubReleases,
             config: serde_json::json!({}),
             enabled: true,
         };

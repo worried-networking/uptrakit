@@ -257,13 +257,13 @@ pub async fn discover_host(
 
 /// Bulk-discard all pending discovered software items for a host.
 ///
-/// Optionally filter by provider config. No autodiscovery ignore rules are created.
+/// Optionally filter by plugin config. No autodiscovery ignore rules are created.
 #[utoipa::path(
     delete,
     path = "/api/v1/hosts/{id}/discovered",
     params(
         ("id" = String, Path, description = "Host UUID"),
-        ("provider_config_id" = Option<String>, Query, description = "Filter by provider config UUID")
+        ("plugin_config_id" = Option<String>, Query, description = "Filter by plugin config UUID")
     ),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -303,8 +303,8 @@ pub async fn discard_host_discovered(
         return error_response(StatusCode::NOT_FOUND, "Host not found");
     }
 
-    let provider_config_id = params
-        .provider_config_id
+    let plugin_config_id = params
+        .plugin_config_id
         .as_deref()
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
 
@@ -312,7 +312,7 @@ pub async fn discard_host_discovered(
         tenant_db.db(),
         tenant_db.tenant_id,
         Some(host_id),
-        provider_config_id,
+        plugin_config_id,
     )
     .await
     {
@@ -326,5 +326,5 @@ pub async fn discard_host_discovered(
 
 #[derive(serde::Deserialize, Default)]
 pub struct DiscardDiscoveredParams {
-    pub provider_config_id: Option<String>,
+    pub plugin_config_id: Option<String>,
 }

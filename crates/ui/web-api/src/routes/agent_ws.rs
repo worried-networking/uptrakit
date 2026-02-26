@@ -1028,7 +1028,7 @@ async fn deliver_pending_updates(
             }
         };
 
-        let provider_cfg = match provider_config::Entity::find_by_id(link.provider_config_id)
+        let provider_cfg = match provider_config::Entity::find_by_id(link.plugin_config_id)
             .filter(provider_config::Column::DeactivatedAt.is_null())
             .one(state.db())
             .await
@@ -1037,13 +1037,13 @@ async fn deliver_pending_updates(
             Ok(None) => {
                 tracing::warn!(
                     update_id = %update_record.id,
-                    provider_config_id = %link.provider_config_id,
-                    "provider config not found or deactivated, skipping pending update"
+                    plugin_config_id = %link.plugin_config_id,
+                    "plugin config not found or deactivated, skipping pending update"
                 );
                 continue;
             }
             Err(e) => {
-                tracing::warn!(error = %e, "failed to load provider config for pending update");
+                tracing::warn!(error = %e, "failed to load plugin config for pending update");
                 continue;
             }
         };

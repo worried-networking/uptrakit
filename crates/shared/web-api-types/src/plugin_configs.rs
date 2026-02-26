@@ -7,11 +7,11 @@ use crate::validation::{Validate, ValidationError};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct CreateProviderConfigRequest {
+pub struct CreatePluginConfigRequest {
     pub name: String,
-    /// Provider type identifier (e.g. `github_releases`, `proxmox_helper_scripts`).
-    pub provider_type: PluginType,
-    /// Provider-specific configuration blob.
+    /// Plugin type identifier (e.g. `github_releases`, `proxmox_helper_scripts`).
+    pub plugin_type: PluginType,
+    /// Plugin-specific configuration blob.
     pub config: serde_json::Value,
     /// Whether the config is enabled. Defaults to true.
     #[serde(default = "crate::default_enabled")]
@@ -20,7 +20,7 @@ pub struct CreateProviderConfigRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct UpdateProviderConfigRequest {
+pub struct UpdatePluginConfigRequest {
     pub name: Option<String>,
     pub config: Option<serde_json::Value>,
     pub enabled: Option<bool>,
@@ -28,11 +28,11 @@ pub struct UpdateProviderConfigRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ProviderConfigResponse {
+pub struct PluginConfigResponse {
     pub id: Uuid,
     pub name: String,
-    pub provider_type: PluginType,
-    /// Provider-specific configuration with secrets masked.
+    pub plugin_type: PluginType,
+    /// Plugin-specific configuration with secrets masked.
     pub config: serde_json::Value,
     pub enabled: bool,
     #[serde(with = "time::serde::rfc3339")]
@@ -43,7 +43,7 @@ pub struct ProviderConfigResponse {
     pub updated_at: OffsetDateTime,
 }
 
-impl Validate for CreateProviderConfigRequest {
+impl Validate for CreatePluginConfigRequest {
     fn validate(&self) -> Result<(), ValidationError> {
         if self.name.trim().is_empty() {
             return Err(ValidationError {
@@ -65,37 +65,37 @@ mod tests {
             .expect("hard-coded UUID should be valid")
     }
 
-    // ── CreateProviderConfigRequest ──────────────────────────────────
+    // ── CreatePluginConfigRequest ──────────────────────────────────
 
     #[test]
     fn create_request_round_trip() {
-        let req = CreateProviderConfigRequest {
+        let req = CreatePluginConfigRequest {
             name: "my-github".to_string(),
-            provider_type: PluginType::GithubReleases,
+            plugin_type: PluginType::GithubReleases,
             config: serde_json::json!({"owner": "org", "repo": "app"}),
             enabled: true,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
-        let de: CreateProviderConfigRequest =
+        let de: CreatePluginConfigRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.name, "my-github");
-        assert_eq!(de.provider_type, PluginType::GithubReleases);
+        assert_eq!(de.plugin_type, PluginType::GithubReleases);
         assert!(de.enabled);
     }
 
     #[test]
     fn create_request_enabled_defaults_to_true() {
-        let json = r#"{"name":"test","provider_type":"github_releases","config":{}}"#;
-        let de: CreateProviderConfigRequest =
+        let json = r#"{"name":"test","plugin_type":"github_releases","config":{}}"#;
+        let de: CreatePluginConfigRequest =
             serde_json::from_str(json).expect("deserialization should succeed");
         assert!(de.enabled, "enabled should default to true");
     }
 
     #[test]
     fn create_request_validate_rejects_empty_name() {
-        let req = CreateProviderConfigRequest {
+        let req = CreatePluginConfigRequest {
             name: "   ".to_string(),
-            provider_type: PluginType::GithubReleases,
+            plugin_type: PluginType::GithubReleases,
             config: serde_json::json!({}),
             enabled: true,
         };
@@ -107,26 +107,26 @@ mod tests {
 
     #[test]
     fn create_request_validate_accepts_valid() {
-        let req = CreateProviderConfigRequest {
-            name: "my-provider".to_string(),
-            provider_type: PluginType::GithubReleases,
+        let req = CreatePluginConfigRequest {
+            name: "my-plugin".to_string(),
+            plugin_type: PluginType::GithubReleases,
             config: serde_json::json!({}),
             enabled: true,
         };
         assert!(req.validate().is_ok());
     }
 
-    // ── UpdateProviderConfigRequest ──────────────────────────────────
+    // ── UpdatePluginConfigRequest ──────────────────────────────────
 
     #[test]
     fn update_request_round_trip_all_fields() {
-        let req = UpdateProviderConfigRequest {
+        let req = UpdatePluginConfigRequest {
             name: Some("renamed".to_string()),
             config: Some(serde_json::json!({"key": "val"})),
             enabled: Some(false),
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
-        let de: UpdateProviderConfigRequest =
+        let de: UpdatePluginConfigRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.name.as_deref(), Some("renamed"));
         assert_eq!(de.enabled, Some(false));
@@ -134,39 +134,39 @@ mod tests {
 
     #[test]
     fn update_request_round_trip_none_fields() {
-        let req = UpdateProviderConfigRequest {
+        let req = UpdatePluginConfigRequest {
             name: None,
             config: None,
             enabled: None,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
-        let de: UpdateProviderConfigRequest =
+        let de: UpdatePluginConfigRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert!(de.name.is_none());
         assert!(de.config.is_none());
         assert!(de.enabled.is_none());
     }
 
-    // ── ProviderConfigResponse ───────────────────────────────────────
+    // ── PluginConfigResponse ───────────────────────────────────────
 
     #[test]
     fn response_round_trip() {
         use time::macros::datetime;
-        let resp = ProviderConfigResponse {
+        let resp = PluginConfigResponse {
             id: sample_uuid(),
             name: "docker-hub".to_string(),
-            provider_type: PluginType::Docker,
+            plugin_type: PluginType::Docker,
             config: serde_json::json!({}),
             enabled: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-06-01 00:00:00 UTC),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
-        let de: ProviderConfigResponse =
+        let de: PluginConfigResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.id, sample_uuid());
         assert_eq!(de.name, "docker-hub");
-        assert_eq!(de.provider_type, PluginType::Docker);
+        assert_eq!(de.plugin_type, PluginType::Docker);
         assert!(de.enabled);
     }
 }

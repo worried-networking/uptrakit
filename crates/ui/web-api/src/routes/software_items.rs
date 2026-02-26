@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
 use crate::queries::autodiscovery as autodiscovery_queries;
-use crate::queries::provider_configs::find_raw_active_config;
+use crate::queries::plugin_configs::find_raw_active_config;
 use crate::queries::software_items::{self as item_queries, SoftwareItemQueryError};
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -16,8 +16,7 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
-    host, host_software_item, plugin_config as provider_config, prelude::*, service, service_host,
-    software_item,
+    host, host_software_item, plugin_config, prelude::*, service, service_host, software_item,
 };
 use uptrakit_web_api_types::validation::Validate;
 
@@ -39,9 +38,9 @@ fn query_error_to_response(e: SoftwareItemQueryError) -> Response {
         SoftwareItemQueryError::EmptyName => {
             error_response(StatusCode::BAD_REQUEST, "name must not be empty")
         }
-        SoftwareItemQueryError::ProviderConfigNotFound => error_response(
+        SoftwareItemQueryError::PluginConfigNotFound => error_response(
             StatusCode::BAD_REQUEST,
-            "provider_config_id does not reference an active provider config",
+            "plugin_config_id does not reference an active plugin config",
         ),
         SoftwareItemQueryError::DuplicateItem => error_response(
             StatusCode::CONFLICT,
@@ -57,7 +56,7 @@ fn query_error_to_response(e: SoftwareItemQueryError) -> Response {
         ),
         SoftwareItemQueryError::InvalidPackageIdentifier(msg)
         | SoftwareItemQueryError::InvalidConfigOverride(msg)
-        | SoftwareItemQueryError::InvalidInlineProviderConfig(msg) => {
+        | SoftwareItemQueryError::InvalidInlinePluginConfig(msg) => {
             error_response(StatusCode::BAD_REQUEST, msg)
         }
         SoftwareItemQueryError::Db(e) => {
@@ -302,7 +301,7 @@ pub async fn approve_software_item(
 
 /// Assign a software item to additional hosts.
 ///
-/// Each host in `host_assignments` carries its own `provider_config_id`,
+/// Each host in `host_assignments` carries its own `plugin_config_id`,
 /// `package_identifier`, and optional `config_override`.
 #[utoipa::path(
     post,
@@ -390,7 +389,7 @@ pub async fn unassign_host(
             .one(tenant_db.db())
             .await
         {
-            Ok(Some(link)) => Some((link.provider_config_id, link.package_identifier)),
+            Ok(Some(link)) => Some((link.plugin_config_id, link.package_identifier)),
             Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host assignment not found"),
             Err(e) => {
                 tracing::error!("Failed to look up host assignment for ignore: {e}");
@@ -403,11 +402,11 @@ pub async fn unassign_host(
 
     match item_queries::unassign_host(&tenant_db, item_id, host_id).await {
         Ok(true) => {
-            if let Some((provider_config_id, package_identifier)) = ignore_info
+            if let Some((plugin_config_id, package_identifier)) = ignore_info
                 && let Err(e) = autodiscovery_queries::create_or_ignore_ignore_rule(
                     tenant_db.db(),
                     tenant_db.tenant_id,
-                    provider_config_id,
+                    plugin_config_id,
                     &package_identifier,
                 )
                 .await
@@ -566,7 +565,7 @@ pub async fn trigger_update(
             error_response(StatusCode::CONFLICT, "An update is already pending or in progress")
         }
         Err(crate::queries::update_triggers::TriggerUpdateError::ProviderConfigNotFound) => {
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Provider config not found")
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Plugin config not found")
         }
         Err(crate::queries::update_triggers::TriggerUpdateError::UnknownProviderType(pt)) => {
             tracing::error!("Unknown provider type: {pt}");
@@ -636,7 +635,7 @@ pub async fn check_versions(
 
     // Collect IDs for batch loads.
     let host_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.host_id).collect();
-    let config_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.provider_config_id).collect();
+    let config_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.plugin_config_id).collect();
 
     // Batch query 1: Hosts (tenant-scoped).
     let hosts: std::collections::HashMap<uuid::Uuid, host::Model> = match tenant_db
@@ -675,11 +674,11 @@ pub async fn check_versions(
         }
     };
 
-    // Batch query 3: Provider configs (tenant-scoped).
-    let configs: std::collections::HashMap<uuid::Uuid, provider_config::Model> = match tenant_db
-        .find::<provider_config::Entity>()
-        .filter(provider_config::Column::Id.is_in(config_ids))
-        .filter(provider_config::Column::DeactivatedAt.is_null())
+    // Batch query 3: Plugin configs (tenant-scoped).
+    let configs: std::collections::HashMap<uuid::Uuid, plugin_config::Model> = match tenant_db
+        .find::<plugin_config::Entity>()
+        .filter(plugin_config::Column::Id.is_in(config_ids))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
         .all(tenant_db.db())
         .await
     {
@@ -704,7 +703,7 @@ pub async fn check_versions(
         if !seen.insert((service_id, link.host_id)) {
             continue;
         }
-        let Some(prov_config) = configs.get(&link.provider_config_id) else {
+        let Some(prov_config) = configs.get(&link.plugin_config_id) else {
             continue;
         };
 
@@ -857,7 +856,7 @@ pub async fn check_versions_host(
     };
 
     // Load the per-host provider config
-    let provider_config = match find_raw_active_config(&tenant_db, link.provider_config_id).await {
+    let provider_config = match find_raw_active_config(&tenant_db, link.plugin_config_id).await {
         Some(c) => c,
         None => {
             return error_response(

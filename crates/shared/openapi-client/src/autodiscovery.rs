@@ -18,14 +18,14 @@ pub struct ListIgnoresParams<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub per_page: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider_config_id: Option<&'a Uuid>,
+    pub plugin_config_id: Option<&'a Uuid>,
 }
 
 /// Query parameters for `DELETE /api/v1/hosts/{id}/discovered`.
 #[derive(serde::Serialize)]
 struct DiscardDiscoveredQuery<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    provider_config_id: Option<&'a Uuid>,
+    plugin_config_id: Option<&'a Uuid>,
 }
 
 impl UptrakitClient {
@@ -43,33 +43,33 @@ impl UptrakitClient {
             .await
     }
 
-    /// Trigger autodiscovery for a specific provider config across all agents.
-    pub async fn discover_provider_config(&self, id: &Uuid) -> Result<TriggerDiscoveryResponse> {
-        self.post_empty(&crate::paths::provider_configs::discover(id))
+    /// Trigger autodiscovery for a specific plugin config across all agents.
+    pub async fn discover_plugin_config(&self, id: &Uuid) -> Result<TriggerDiscoveryResponse> {
+        self.post_empty(&crate::paths::plugin_configs::discover(id))
             .await
     }
 
     /// Bulk-discard all pending discovered software items for a host.
     ///
-    /// Optionally filter by provider config. No ignore rules are created.
+    /// Optionally filter by plugin config. No ignore rules are created.
     pub async fn discard_host_discovered(
         &self,
         host_id: &Uuid,
-        provider_config_id: Option<&Uuid>,
+        plugin_config_id: Option<&Uuid>,
     ) -> Result<DiscardDiscoveredResponse> {
-        let query = DiscardDiscoveredQuery { provider_config_id };
+        let query = DiscardDiscoveredQuery { plugin_config_id };
         self.delete_with_query_json(&crate::paths::hosts::discovered(host_id), &query)
             .await
     }
 
-    /// Bulk-discard all pending discovered software items for a provider config.
+    /// Bulk-discard all pending discovered software items for a plugin config.
     ///
     /// No ignore rules are created.
-    pub async fn discard_provider_config_discovered(
+    pub async fn discard_plugin_config_discovered(
         &self,
         id: &Uuid,
     ) -> Result<DiscardDiscoveredResponse> {
-        self.delete_json(&crate::paths::provider_configs::discovered(id))
+        self.delete_json(&crate::paths::plugin_configs::discovered(id))
             .await
     }
 

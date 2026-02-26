@@ -26,10 +26,10 @@ pub struct DiscardDiscoveredResponse {
 pub struct AutodiscoveryIgnoreResponse {
     /// Ignore rule UUID.
     pub id: Uuid,
-    /// Provider config UUID this rule applies to.
-    pub provider_config_id: Uuid,
-    /// Display name of the referenced provider config.
-    pub provider_config_name: String,
+    /// Plugin config UUID this rule applies to.
+    pub plugin_config_id: Uuid,
+    /// Display name of the referenced plugin config.
+    pub plugin_config_name: String,
     /// Provider type string (e.g. `"homebrew"`).
     pub provider_type: String,
     /// Package identifier to suppress.
@@ -43,8 +43,8 @@ pub struct AutodiscoveryIgnoreResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateAutodiscoveryIgnoreRequest {
-    /// Provider config UUID the rule applies to.
-    pub provider_config_id: Uuid,
+    /// Plugin config UUID the rule applies to.
+    pub plugin_config_id: Uuid,
     /// Package identifier to permanently suppress from future discoveries.
     pub package_identifier: String,
 }

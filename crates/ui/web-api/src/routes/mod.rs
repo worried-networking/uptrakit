@@ -11,7 +11,7 @@ pub mod ocsp;
 pub mod oidc_auth;
 #[cfg(feature = "oidc")]
 pub mod oidc_providers;
-pub mod provider_configs;
+pub mod plugin_configs;
 pub mod scheduler;
 pub mod server_cert;
 pub mod service_ws;

@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
 use crate::queries::autodiscovery as autodiscovery_queries;
-use crate::queries::provider_configs::{self as pc_queries, UpdateProviderConfigError};
+use crate::queries::plugin_configs::{self as pc_queries, UpdatePluginConfigError};
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -14,97 +14,96 @@ use sea_orm::{
     ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QuerySelect, RelationTrait,
 };
 use std::sync::Arc;
-use uptrakit_shared_db::entity::{host, plugin_config as provider_config, prelude::*, service, service_host};
+use uptrakit_shared_db::entity::{host, plugin_config, prelude::*, service, service_host};
 use uptrakit_web_api_types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
 use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
-pub use uptrakit_web_api_types::provider_configs::{
-    CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
+pub use uptrakit_web_api_types::plugin_configs::{
+    CreatePluginConfigRequest, PluginConfigResponse, UpdatePluginConfigRequest,
 };
 
-/// Create a new provider configuration.
+/// Create a new plugin configuration.
 #[utoipa::path(
     post,
-    path = "/api/v1/provider-configs",
-    request_body = CreateProviderConfigRequest,
+    path = "/api/v1/plugin-configs",
+    request_body = CreatePluginConfigRequest,
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
-        (status = 201, description = "Provider config created", body = ProviderConfigResponse),
+        (status = 201, description = "Plugin config created", body = PluginConfigResponse),
         (status = 400, description = "Invalid input"),
-        (status = 409, description = "A provider config with this name already exists")
+        (status = 409, description = "A plugin config with this name already exists")
     ),
-    tag = "Provider Configs",
+    tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
-pub async fn create_provider_config(
+pub async fn create_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
-    Json(req): Json<CreateProviderConfigRequest>,
+    Json(req): Json<CreatePluginConfigRequest>,
 ) -> Response {
     if let Err(e) = req.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match pc_queries::create_provider_config(state.provider_ops.as_ref(), &tenant_db, req).await {
+    match pc_queries::create_plugin_config(state.provider_ops.as_ref(), &tenant_db, req).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-        Err(pc_queries::CreateProviderConfigError::DuplicateName) => error_response(
+        Err(pc_queries::CreatePluginConfigError::DuplicateName) => error_response(
             StatusCode::CONFLICT,
-            "A provider config with this name already exists",
+            "A plugin config with this name already exists",
         ),
-        Err(pc_queries::CreateProviderConfigError::Db(e)) => {
-            tracing::error!("Failed to create provider config: {e}");
+        Err(pc_queries::CreatePluginConfigError::Db(e)) => {
+            tracing::error!("Failed to create plugin config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
 
-/// List all non-deactivated provider configurations.
+/// List all non-deactivated plugin configurations.
 #[utoipa::path(
     get,
-    path = "/api/v1/provider-configs",
+    path = "/api/v1/plugin-configs",
     params(
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
     ),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
-        (status = 200, description = "Paginated list of provider configs", body = PaginatedResponse<ProviderConfigResponse>),
+        (status = 200, description = "Paginated list of plugin configs", body = PaginatedResponse<PluginConfigResponse>),
     ),
-    tag = "Provider Configs",
+    tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
-pub async fn list_provider_configs(
+pub async fn list_plugin_configs(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    match pc_queries::list_provider_configs(state.provider_ops.as_ref(), &tenant_db, &params).await
-    {
+    match pc_queries::list_plugin_configs(state.provider_ops.as_ref(), &tenant_db, &params).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
-            tracing::error!("Failed to list provider configs: {e}");
+            tracing::error!("Failed to list plugin configs: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
 
-/// Get a specific provider configuration.
+/// Get a specific plugin configuration.
 #[utoipa::path(
     get,
-    path = "/api/v1/provider-configs/{id}",
-    params(("id" = String, Path, description = "Provider config ID")),
+    path = "/api/v1/plugin-configs/{id}",
+    params(("id" = String, Path, description = "Plugin config ID")),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
-        (status = 200, description = "Provider config details", body = ProviderConfigResponse),
-        (status = 404, description = "Provider config not found")
+        (status = 200, description = "Plugin config details", body = PluginConfigResponse),
+        (status = 404, description = "Plugin config not found")
     ),
-    tag = "Provider Configs",
+    tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
-pub async fn get_provider_config(
+pub async fn get_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(id): Path<String>,
@@ -115,44 +114,43 @@ pub async fn get_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match pc_queries::get_provider_config(state.provider_ops.as_ref(), &tenant_db, config_id).await
-    {
+    match pc_queries::get_plugin_config(state.provider_ops.as_ref(), &tenant_db, config_id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
-        Ok(None) => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "Plugin config not found"),
         Err(e) => {
-            tracing::error!("Failed to get provider config: {e}");
+            tracing::error!("Failed to get plugin config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
 
-/// Update a provider configuration (partial update).
+/// Update a plugin configuration (partial update).
 #[utoipa::path(
     put,
-    path = "/api/v1/provider-configs/{id}",
-    params(("id" = String, Path, description = "Provider config ID")),
-    request_body = UpdateProviderConfigRequest,
+    path = "/api/v1/plugin-configs/{id}",
+    params(("id" = String, Path, description = "Plugin config ID")),
+    request_body = UpdatePluginConfigRequest,
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
-        (status = 200, description = "Provider config updated", body = ProviderConfigResponse),
-        (status = 404, description = "Provider config not found")
+        (status = 200, description = "Plugin config updated", body = PluginConfigResponse),
+        (status = 404, description = "Plugin config not found")
     ),
-    tag = "Provider Configs",
+    tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
-pub async fn update_provider_config(
+pub async fn update_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(id): Path<String>,
     CanManageSoftware(_user): CanManageSoftware,
-    Json(req): Json<UpdateProviderConfigRequest>,
+    Json(req): Json<UpdatePluginConfigRequest>,
 ) -> Response {
     let config_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match pc_queries::update_provider_config(
+    match pc_queries::update_plugin_config(
         state.provider_ops.as_ref(),
         &tenant_db,
         config_id,
@@ -161,39 +159,39 @@ pub async fn update_provider_config(
     .await
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(UpdateProviderConfigError::NotFound) => {
-            error_response(StatusCode::NOT_FOUND, "Provider config not found")
+        Err(UpdatePluginConfigError::NotFound) => {
+            error_response(StatusCode::NOT_FOUND, "Plugin config not found")
         }
-        Err(UpdateProviderConfigError::EmptyName) => {
+        Err(UpdatePluginConfigError::EmptyName) => {
             error_response(StatusCode::BAD_REQUEST, "name must not be empty")
         }
-        Err(UpdateProviderConfigError::ConfigValidation(msg)) => {
+        Err(UpdatePluginConfigError::ConfigValidation(msg)) => {
             error_response(StatusCode::BAD_REQUEST, msg)
         }
-        Err(UpdateProviderConfigError::HookValidation(msg)) => {
+        Err(UpdatePluginConfigError::HookValidation(msg)) => {
             error_response(StatusCode::BAD_REQUEST, msg)
         }
-        Err(UpdateProviderConfigError::Db(e)) => {
-            tracing::error!("Failed to update provider config: {e}");
+        Err(UpdatePluginConfigError::Db(e)) => {
+            tracing::error!("Failed to update plugin config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
 
-/// Soft-delete a provider configuration.
+/// Soft-delete a plugin configuration.
 #[utoipa::path(
     delete,
-    path = "/api/v1/provider-configs/{id}",
-    params(("id" = String, Path, description = "Provider config ID")),
+    path = "/api/v1/plugin-configs/{id}",
+    params(("id" = String, Path, description = "Plugin config ID")),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
-        (status = 204, description = "Provider config deleted"),
-        (status = 404, description = "Provider config not found")
+        (status = 204, description = "Plugin config deleted"),
+        (status = 404, description = "Plugin config not found")
     ),
-    tag = "Provider Configs",
+    tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
-pub async fn delete_provider_config(
+pub async fn delete_plugin_config(
     tenant_db: TenantDb,
     Path(id): Path<String>,
     CanManageSoftware(_user): CanManageSoftware,
@@ -203,11 +201,11 @@ pub async fn delete_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match pc_queries::delete_provider_config(&tenant_db, config_id).await {
+    match pc_queries::delete_plugin_config(&tenant_db, config_id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
+        Ok(false) => error_response(StatusCode::NOT_FOUND, "Plugin config not found"),
         Err(e) => {
-            tracing::error!("Failed to delete provider config: {e}");
+            tracing::error!("Failed to delete plugin config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -215,24 +213,24 @@ pub async fn delete_provider_config(
 
 // ── Autodiscovery endpoints ───────────────────────────────────────────────────
 
-/// Trigger autodiscovery for a specific provider configuration.
+/// Trigger autodiscovery for a specific plugin configuration.
 ///
 /// Sends a `DiscoverSoftware` assignment to all connected agents.
-/// Returns an error if the provider type does not support discovery.
+/// Returns an error if the plugin type does not support discovery.
 #[utoipa::path(
     post,
-    path = "/api/v1/provider-configs/{id}/discover",
-    params(("id" = String, Path, description = "Provider config UUID")),
+    path = "/api/v1/plugin-configs/{id}/discover",
+    params(("id" = String, Path, description = "Plugin config UUID")),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Discovery triggered", body = TriggerDiscoveryResponse),
-        (status = 400, description = "Provider type does not support discovery"),
-        (status = 404, description = "Provider config not found")
+        (status = 400, description = "Plugin type does not support discovery"),
+        (status = 404, description = "Plugin config not found")
     ),
-    tag = "Provider Configs",
+    tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
-pub async fn discover_provider_config(
+pub async fn discover_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -243,38 +241,38 @@ pub async fn discover_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    // Load the provider config and verify it belongs to the tenant.
-    let cfg = match ProviderConfig::find_by_id(config_id)
-        .filter(provider_config::Column::TenantId.eq(tenant_db.tenant_id))
-        .filter(provider_config::Column::DeactivatedAt.is_null())
+    // Load the plugin config and verify it belongs to the tenant.
+    let cfg = match PluginConfig::find_by_id(config_id)
+        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
     {
         Ok(Some(c)) => c,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Provider config not found"),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Plugin config not found"),
         Err(e) => {
             tracing::error!("DB error: {e}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    // Validate provider supports discovery.
-    let provider_type: uptrakit_internal_wire::PluginType = match cfg.plugin_type.parse() {
+    // Validate plugin supports discovery.
+    let plugin_type: uptrakit_internal_wire::PluginType = match cfg.plugin_type.parse() {
         Ok(pt) => pt,
         Err(_) => {
-            return error_response(StatusCode::BAD_REQUEST, "Unknown provider type");
+            return error_response(StatusCode::BAD_REQUEST, "Unknown plugin type");
         }
     };
 
     if !state
         .provider_ops
         .discovery_plugin_types()
-        .contains(&provider_type)
+        .contains(&plugin_type)
     {
         return error_response(
             StatusCode::BAD_REQUEST,
             format!(
-                "Provider type '{}' does not support autodiscovery",
+                "Plugin type '{}' does not support autodiscovery",
                 cfg.plugin_type
             ),
         );
@@ -330,7 +328,7 @@ pub async fn discover_provider_config(
                     host_machine_id: machine_id.clone(),
                     providers: vec![uptrakit_internal_wire::DiscoveryPluginAssignment {
                         plugin_config_id: Some(cfg.id),
-                        plugin_type: provider_type.clone(),
+                        plugin_type: plugin_type.clone(),
                         config: cfg.config.clone(),
                     }],
                 },
@@ -344,7 +342,7 @@ pub async fn discover_provider_config(
         Json(TriggerDiscoveryResponse {
             providers_queued: agents_notified,
             message: format!(
-                "Discovery triggered for provider config '{}' on {} agent(s)",
+                "Discovery triggered for plugin config '{}' on {} agent(s)",
                 cfg.name, agents_notified
             ),
         }),
@@ -352,22 +350,22 @@ pub async fn discover_provider_config(
         .into_response()
 }
 
-/// Bulk-discard all pending discovered software items for a provider configuration.
+/// Bulk-discard all pending discovered software items for a plugin configuration.
 ///
 /// No autodiscovery ignore rules are created.
 #[utoipa::path(
     delete,
-    path = "/api/v1/provider-configs/{id}/discovered",
-    params(("id" = String, Path, description = "Provider config UUID")),
+    path = "/api/v1/plugin-configs/{id}/discovered",
+    params(("id" = String, Path, description = "Plugin config UUID")),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Pending items discarded", body = DiscardDiscoveredResponse),
-        (status = 404, description = "Provider config not found")
+        (status = 404, description = "Plugin config not found")
     ),
-    tag = "Provider Configs",
+    tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
-pub async fn discard_provider_config_discovered(
+pub async fn discard_plugin_config_discovered(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Path(id): Path<String>,
@@ -377,10 +375,10 @@ pub async fn discard_provider_config_discovered(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    // Verify provider config belongs to tenant.
-    let exists = match ProviderConfig::find_by_id(config_id)
-        .filter(provider_config::Column::TenantId.eq(tenant_db.tenant_id))
-        .filter(provider_config::Column::DeactivatedAt.is_null())
+    // Verify plugin config belongs to tenant.
+    let exists = match PluginConfig::find_by_id(config_id)
+        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
     {
@@ -393,7 +391,7 @@ pub async fn discard_provider_config_discovered(
     };
 
     if !exists {
-        return error_response(StatusCode::NOT_FOUND, "Provider config not found");
+        return error_response(StatusCode::NOT_FOUND, "Plugin config not found");
     }
 
     match autodiscovery_queries::discard_pending_items(

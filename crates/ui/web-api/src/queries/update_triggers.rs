@@ -145,8 +145,8 @@ pub async fn trigger_update_for_host(
     }
 
     // 7. Load provider config from the host-specific assignment.
-    let provider_config = uptrakit_shared_db::entity::prelude::ProviderConfig::find_by_id(
-        link.provider_config_id,
+    let provider_config = uptrakit_shared_db::entity::prelude::PluginConfig::find_by_id(
+        link.plugin_config_id,
     )
     .filter(
         uptrakit_shared_db::entity::plugin_config::Column::DeactivatedAt.is_null(),

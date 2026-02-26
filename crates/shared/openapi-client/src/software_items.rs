@@ -189,15 +189,15 @@ mod tests {
             host_assignments: vec![
                 HostSoftwareAssignment {
                     host_id: host1,
-                    provider_config_id: Some(pc_id),
-                    provider_config: None,
+                    plugin_config_id: Some(pc_id),
+                    plugin_config: None,
                     package_identifier: Some("nodejs/node".to_string()),
                     config_override: None,
                 },
                 HostSoftwareAssignment {
                     host_id: host2,
-                    provider_config_id: Some(pc_id),
-                    provider_config: None,
+                    plugin_config_id: Some(pc_id),
+                    plugin_config: None,
                     package_identifier: Some("nodejs/node".to_string()),
                     config_override: None,
                 },
@@ -211,7 +211,7 @@ mod tests {
             "11111111-1111-1111-1111-111111111111"
         );
         assert_eq!(
-            assignments[0]["provider_config_id"],
+            assignments[0]["plugin_config_id"],
             "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
         );
         assert_eq!(assignments[0]["package_identifier"], "nodejs/node");
@@ -221,14 +221,14 @@ mod tests {
     fn update_host_assignment_request_serialization() {
         let pc_id = Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").expect("valid uuid");
         let req = UpdateHostAssignmentRequest {
-            provider_config_id: Some(pc_id),
-            provider_config: None,
+            plugin_config_id: Some(pc_id),
+            plugin_config: None,
             package_identifier: Some("homebrew/cask/firefox".to_string()),
             config_override: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(
-            json["provider_config_id"],
+            json["plugin_config_id"],
             "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
         );
         assert_eq!(json["package_identifier"], "homebrew/cask/firefox");

@@ -212,7 +212,7 @@ pub struct ApproveParams<'a> {
 pub struct AssignParams<'a> {
     pub id: &'a Uuid,
     pub host_id: &'a Uuid,
-    pub provider_config_id: Option<&'a Uuid>,
+    pub plugin_config_id: Option<&'a Uuid>,
     pub package_identifier: Option<String>,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
@@ -333,8 +333,8 @@ pub async fn assign(params: AssignParams<'_>) -> Result<SoftwareItemDetailRespon
     let req = AssignHostsRequest {
         host_assignments: vec![HostSoftwareAssignment {
             host_id: *params.host_id,
-            provider_config_id: params.provider_config_id.copied(),
-            provider_config: None,
+            plugin_config_id: params.plugin_config_id.copied(),
+            plugin_config: None,
             package_identifier: params.package_identifier,
             config_override: None,
         }],
@@ -519,10 +519,10 @@ mod tests {
                     .unwrap(),
                 hostname: "server-1.local".to_string(),
                 friendly_name: "Production Server".to_string(),
-                provider_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                     .parse::<Uuid>()
                     .unwrap(),
-                provider_config_name: "Default Config".to_string(),
+                plugin_config_name: "Default Config".to_string(),
                 provider_type: "github_releases".to_string(),
                 package_identifier: "nodejs/node".to_string(),
                 config_override: None,
@@ -568,10 +568,10 @@ mod tests {
                     .unwrap(),
                 hostname: "mac-1".to_string(),
                 friendly_name: "mac-1".to_string(),
-                provider_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                     .parse::<Uuid>()
                     .unwrap(),
-                provider_config_name: "Homebrew".to_string(),
+                plugin_config_name: "Homebrew".to_string(),
                 provider_type: "homebrew".to_string(),
                 package_identifier: "curl".to_string(),
                 config_override: None,

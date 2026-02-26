@@ -7,8 +7,7 @@ use sea_orm::{
 };
 use uptrakit_internal_wire::{CheckVersionsPayload, ControllerMessage, VersionCheckAssignment};
 use uptrakit_shared_db::entity::{
-    host, host_software_item, plugin_config as provider_config, scheduled_task, service,
-    service_host, software_item,
+    host, host_software_item, plugin_config, scheduled_task, service, service_host, software_item,
 };
 use uptrakit_shared_types::PluginType;
 use uptrakit_web_api::notification_service::NotificationService;
@@ -116,7 +115,7 @@ impl VersionCheckExecutor {
         &self,
         tenant_id: Uuid,
     ) -> crate::scheduler::error::Result<Vec<AssignmentRow>> {
-        // software_item -> provider_config (for provider_type + config)
+        // software_item -> plugin_config (for plugin_type + config)
         // software_item -> host_software_item -> host -> service_host -> service (agent)
         //
         // We also select host.machine_id so we can set host_machine_id on
@@ -134,8 +133,8 @@ impl VersionCheckExecutor {
         }
 
         // software_item
-        //   <- host_software_item  (carries provider_config_id, package_identifier, config_override)
-        //   -> provider_config     (via host_software_item::Relation::ProviderConfig)
+        //   <- host_software_item  (carries plugin_config_id, package_identifier, config_override)
+        //   -> plugin_config       (via host_software_item::Relation::PluginConfig)
         //   -> host                (via host_software_item::Relation::Host)
         //   <- service_host
         //   -> service (agent)
@@ -145,12 +144,12 @@ impl VersionCheckExecutor {
             .column_as(host::Column::MachineId, "host_machine_id")
             .column_as(software_item::Column::Id, "software_item_id")
             .column_as(software_item::Column::Name, "name")
-            .column_as(provider_config::Column::PluginType, "plugin_type")
+            .column_as(plugin_config::Column::PluginType, "plugin_type")
             .column_as(
                 host_software_item::Column::PackageIdentifier,
                 "package_identifier",
             )
-            .column_as(provider_config::Column::Config, "config")
+            .column_as(plugin_config::Column::Config, "config")
             .column_as(
                 host_software_item::Column::ConfigOverride,
                 "config_override",
@@ -161,7 +160,7 @@ impl VersionCheckExecutor {
             )
             .join(
                 JoinType::InnerJoin,
-                host_software_item::Relation::ProviderConfig.def(),
+                host_software_item::Relation::PluginConfig.def(),
             )
             .join(
                 JoinType::InnerJoin,
@@ -175,8 +174,8 @@ impl VersionCheckExecutor {
             .filter(software_item::Column::TenantId.eq(tenant_id))
             .filter(software_item::Column::Enabled.eq(true))
             .filter(software_item::Column::DeactivatedAt.is_null())
-            .filter(provider_config::Column::Enabled.eq(true))
-            .filter(provider_config::Column::DeactivatedAt.is_null())
+            .filter(plugin_config::Column::Enabled.eq(true))
+            .filter(plugin_config::Column::DeactivatedAt.is_null())
             .filter(service::Column::DeactivatedAt.is_null())
             // Exclude pending-discovery items; approved items (enabled=true) are included.
             .filter(

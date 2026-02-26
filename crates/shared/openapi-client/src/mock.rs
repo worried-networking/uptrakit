@@ -123,9 +123,9 @@ impl MockApiServer {
         }
     }
 
-    /// Provider configuration endpoints (`/api/v1/provider-configs`).
-    pub fn provider_configs(&self) -> MockProviderConfigs<'_> {
-        MockProviderConfigs {
+    /// Plugin configuration endpoints (`/api/v1/plugin-configs`).
+    pub fn plugin_configs(&self) -> MockPluginConfigs<'_> {
+        MockPluginConfigs {
             server: &self.server,
         }
     }
@@ -501,37 +501,37 @@ impl<'a> MockPki<'a> {
     }
 }
 
-// ── Section: Provider Configs ──────────────────────────────────────────────
+// ── Section: Plugin Configs ────────────────────────────────────────────────
 
-/// Mock helpers for provider configuration endpoints.
-pub struct MockProviderConfigs<'a> {
+/// Mock helpers for plugin configuration endpoints.
+pub struct MockPluginConfigs<'a> {
     server: &'a MockServer,
 }
 
-impl<'a> MockProviderConfigs<'a> {
-    /// Mock `GET /api/v1/provider-configs`.
+impl<'a> MockPluginConfigs<'a> {
+    /// Mock `GET /api/v1/plugin-configs`.
     pub fn on_list(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "GET", paths::provider_configs::BASE)
+        MockEndpoint::new(self.server, "GET", paths::plugin_configs::BASE)
     }
 
-    /// Mock `POST /api/v1/provider-configs`.
+    /// Mock `POST /api/v1/plugin-configs`.
     pub fn on_create(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "POST", paths::provider_configs::BASE)
+        MockEndpoint::new(self.server, "POST", paths::plugin_configs::BASE)
     }
 
-    /// Mock `GET /api/v1/provider-configs/{id}`.
+    /// Mock `GET /api/v1/plugin-configs/{id}`.
     pub fn on_get(&self, id: &Uuid) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "GET", &paths::provider_configs::by_id(id))
+        MockEndpoint::new(self.server, "GET", &paths::plugin_configs::by_id(id))
     }
 
-    /// Mock `PUT /api/v1/provider-configs/{id}`.
+    /// Mock `PUT /api/v1/plugin-configs/{id}`.
     pub fn on_update(&self, id: &Uuid) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "PUT", &paths::provider_configs::by_id(id))
+        MockEndpoint::new(self.server, "PUT", &paths::plugin_configs::by_id(id))
     }
 
-    /// Mock `DELETE /api/v1/provider-configs/{id}`.
+    /// Mock `DELETE /api/v1/plugin-configs/{id}`.
     pub fn on_delete(&self, id: &Uuid) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "DELETE", &paths::provider_configs::by_id(id))
+        MockEndpoint::new(self.server, "DELETE", &paths::plugin_configs::by_id(id))
     }
 }
 

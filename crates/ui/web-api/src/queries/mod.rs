@@ -6,7 +6,7 @@
 pub mod autodiscovery;
 pub mod hosts;
 pub mod mqtt_software_states;
-pub mod provider_configs;
+pub mod plugin_configs;
 pub mod scheduled_tasks;
 pub mod services;
 pub mod software_items;

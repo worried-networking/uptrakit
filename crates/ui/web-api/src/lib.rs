@@ -566,11 +566,11 @@ impl AppState {
         routes::hosts::get_host,
         routes::hosts::update_host,
         routes::hosts::deactivate_host,
-        routes::provider_configs::create_provider_config,
-        routes::provider_configs::list_provider_configs,
-        routes::provider_configs::get_provider_config,
-        routes::provider_configs::update_provider_config,
-        routes::provider_configs::delete_provider_config,
+        routes::plugin_configs::create_plugin_config,
+        routes::plugin_configs::list_plugin_configs,
+        routes::plugin_configs::get_plugin_config,
+        routes::plugin_configs::update_plugin_config,
+        routes::plugin_configs::delete_plugin_config,
         routes::software_items::create_software_item,
         routes::software_items::list_software_items,
         routes::software_items::get_software_item,
@@ -585,8 +585,8 @@ impl AppState {
         routes::software_items::approve_software_item,
         routes::hosts::discover_host,
         routes::hosts::discard_host_discovered,
-        routes::provider_configs::discover_provider_config,
-        routes::provider_configs::discard_provider_config_discovered,
+        routes::plugin_configs::discover_plugin_config,
+        routes::plugin_configs::discard_plugin_config_discovered,
         routes::autodiscovery::list_autodiscovery_ignores,
         routes::autodiscovery::create_autodiscovery_ignore,
         routes::autodiscovery::delete_autodiscovery_ignore,
@@ -648,9 +648,9 @@ impl AppState {
             routes::hosts::HostResponse,
             routes::hosts::HostAgentSummary,
             routes::hosts::UpdateHostRequest,
-            routes::provider_configs::CreateProviderConfigRequest,
-            routes::provider_configs::UpdateProviderConfigRequest,
-            routes::provider_configs::ProviderConfigResponse,
+            routes::plugin_configs::CreatePluginConfigRequest,
+            routes::plugin_configs::UpdatePluginConfigRequest,
+            routes::plugin_configs::PluginConfigResponse,
             routes::software_items::CreateSoftwareItemRequest,
             routes::software_items::UpdateSoftwareItemRequest,
             routes::software_items::AssignHostsRequest,
@@ -676,7 +676,7 @@ impl AppState {
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::hosts::HostResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::software_items::SoftwareItemResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::update_history::UpdateHistoryResponse>,
-            uptrakit_web_api_types::pagination::PaginatedResponse<routes::provider_configs::ProviderConfigResponse>,
+            uptrakit_web_api_types::pagination::PaginatedResponse<routes::plugin_configs::PluginConfigResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::autodiscovery::AutodiscoveryIgnoreResponse>,
         )
     ),
@@ -833,12 +833,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::hosts::update_host))
         .routes(routes!(routes::hosts::deactivate_host))
         .routes(routes!(
-            routes::provider_configs::create_provider_config,
-            routes::provider_configs::list_provider_configs
+            routes::plugin_configs::create_plugin_config,
+            routes::plugin_configs::list_plugin_configs
         ))
-        .routes(routes!(routes::provider_configs::get_provider_config))
-        .routes(routes!(routes::provider_configs::update_provider_config))
-        .routes(routes!(routes::provider_configs::delete_provider_config))
+        .routes(routes!(routes::plugin_configs::get_plugin_config))
+        .routes(routes!(routes::plugin_configs::update_plugin_config))
+        .routes(routes!(routes::plugin_configs::delete_plugin_config))
         .routes(routes!(
             routes::software_items::create_software_item,
             routes::software_items::list_software_items
@@ -864,9 +864,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::software_items::approve_software_item))
         .routes(routes!(routes::hosts::discover_host))
         .routes(routes!(routes::hosts::discard_host_discovered))
-        .routes(routes!(routes::provider_configs::discover_provider_config))
+        .routes(routes!(routes::plugin_configs::discover_plugin_config))
         .routes(routes!(
-            routes::provider_configs::discard_provider_config_discovered
+            routes::plugin_configs::discard_plugin_config_discovered
         ))
         .routes(routes!(
             routes::autodiscovery::list_autodiscovery_ignores,

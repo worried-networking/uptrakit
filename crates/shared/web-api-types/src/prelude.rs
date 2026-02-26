@@ -25,8 +25,8 @@ pub use crate::software_items::{
     TriggerUpdateRequest, TriggerUpdateResponse, TriggerUpdateStatus, TriggerVersionCheckResponse,
 };
 
-// ── Provider configs ─────────────────────────────────────────────────
-pub use crate::provider_configs::{CreateProviderConfigRequest, ProviderConfigResponse};
+// ── Plugin configs ───────────────────────────────────────────────────
+pub use crate::plugin_configs::{CreatePluginConfigRequest, PluginConfigResponse};
 
 // ── Update history ───────────────────────────────────────────────────
 pub use crate::update_history::{UpdateHistoryResponse, UpdateStatus};

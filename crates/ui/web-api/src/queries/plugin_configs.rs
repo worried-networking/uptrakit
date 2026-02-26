@@ -4,24 +4,24 @@ use sea_orm::{
 };
 use time::OffsetDateTime;
 use uptrakit_plugin_registry::PluginOps;
-use uptrakit_shared_db::entity::plugin_config as provider_config;
+use uptrakit_shared_db::entity::plugin_config;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
-use uptrakit_web_api_types::provider_configs::{
-    CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
+use uptrakit_web_api_types::plugin_configs::{
+    CreatePluginConfigRequest, PluginConfigResponse, UpdatePluginConfigRequest,
 };
 use uuid::Uuid;
 
 use crate::auth::token::generate_uuid;
 use crate::tenant_db::TenantDb;
 
-/// Error returned by [`update_provider_config`].
+/// Error returned by [`update_plugin_config`].
 #[derive(Debug)]
-pub enum UpdateProviderConfigError {
-    /// No active provider config with this ID exists for the tenant.
+pub enum UpdatePluginConfigError {
+    /// No active plugin config with this ID exists for the tenant.
     NotFound,
     /// `name` was explicitly set to an empty string.
     EmptyName,
-    /// Provider-specific config validation failed.
+    /// Plugin-specific config validation failed.
     ConfigValidation(String),
     /// Hook parameter validation failed (command-injection prevention).
     HookValidation(String),
@@ -31,26 +31,26 @@ pub enum UpdateProviderConfigError {
 
 // --- Private helpers ---
 
-fn provider_config_to_response(
+fn plugin_config_to_response(
     ops: &dyn PluginOps,
-    m: provider_config::Model,
-) -> Option<ProviderConfigResponse> {
-    let provider_type: uptrakit_plugin_registry::PluginType = match m.plugin_type.parse() {
+    m: plugin_config::Model,
+) -> Option<PluginConfigResponse> {
+    let plugin_type: uptrakit_plugin_registry::PluginType = match m.plugin_type.parse() {
         Ok(pt) => pt,
         Err(_) => {
             tracing::error!(
                 id = %m.id,
                 plugin_type = %m.plugin_type,
-                "provider config has invalid plugin_type in database, skipping"
+                "plugin config has invalid plugin_type in database, skipping"
             );
             return None;
         }
     };
-    let config = ops.mask_config_secrets_str(provider_type.as_str(), &m.config);
-    Some(ProviderConfigResponse {
+    let config = ops.mask_config_secrets_str(plugin_type.as_str(), &m.config);
+    Some(PluginConfigResponse {
         id: m.id,
         name: m.name,
-        provider_type,
+        plugin_type,
         config,
         enabled: m.enabled,
         created_at: m.created_at,
@@ -58,7 +58,7 @@ fn provider_config_to_response(
     })
 }
 
-/// Validate hooks configuration embedded in a provider config or config_override JSON.
+/// Validate hooks configuration embedded in a plugin config or config_override JSON.
 ///
 /// Parses the `"hooks"` key and validates all predefined hook parameters
 /// to reject shell metacharacters. Exposed as `pub(crate)` so other query
@@ -78,15 +78,15 @@ pub(crate) fn validate_hooks_internal(
 
 // --- pub(crate) helpers ---
 
-/// Find a non-deactivated provider config by ID, scoped to a tenant.
+/// Find a non-deactivated plugin config by ID, scoped to a tenant.
 /// Returns the raw model — intended for use when the secrets must remain unmasked.
 pub(crate) async fn find_raw_active_config(
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Option<provider_config::Model> {
+) -> Option<plugin_config::Model> {
     tenant_db
-        .find_by_id::<provider_config::Entity, _>(id)
-        .filter(provider_config::Column::DeactivatedAt.is_null())
+        .find_by_id::<plugin_config::Entity, _>(id)
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
         .ok()
@@ -99,11 +99,11 @@ pub(crate) async fn find_raw_active_config_txn(
     db: &impl ConnectionTrait,
     tenant_id: Uuid,
     id: Uuid,
-) -> Option<provider_config::Model> {
+) -> Option<plugin_config::Model> {
     use sea_orm::EntityTrait;
-    provider_config::Entity::find_by_id(id)
-        .filter(provider_config::Column::TenantId.eq(tenant_id))
-        .filter(provider_config::Column::DeactivatedAt.is_null())
+    plugin_config::Entity::find_by_id(id)
+        .filter(plugin_config::Column::TenantId.eq(tenant_id))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(db)
         .await
         .ok()
@@ -112,28 +112,28 @@ pub(crate) async fn find_raw_active_config_txn(
 
 // --- Public query functions ---
 
-/// Errors returned by [`create_provider_config`].
+/// Errors returned by [`create_plugin_config`].
 #[derive(Debug)]
-pub enum CreateProviderConfigError {
-    /// An active provider config with the same name already exists for the tenant.
+pub enum CreatePluginConfigError {
+    /// An active plugin config with the same name already exists for the tenant.
     DuplicateName,
     /// A database error occurred.
     Db(sea_orm::DbErr),
 }
 
-/// Create a new provider configuration and return the masked response.
-/// Validation (name, provider-specific config, hooks) is the caller's responsibility.
-pub async fn create_provider_config(
+/// Create a new plugin configuration and return the masked response.
+/// Validation (name, plugin-specific config, hooks) is the caller's responsibility.
+pub async fn create_plugin_config(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
-    req: CreateProviderConfigRequest,
-) -> Result<ProviderConfigResponse, CreateProviderConfigError> {
+    req: CreatePluginConfigRequest,
+) -> Result<PluginConfigResponse, CreatePluginConfigError> {
     let now = OffsetDateTime::now_utc();
-    let model = provider_config::ActiveModel {
+    let model = plugin_config::ActiveModel {
         id: Set(generate_uuid()),
         tenant_id: Set(tenant_db.tenant_id),
         name: Set(req.name),
-        plugin_type: Set(req.provider_type.to_string()),
+        plugin_type: Set(req.plugin_type.to_string()),
         config: Set(req.config),
         enabled: Set(req.enabled),
         created_at: Set(now),
@@ -143,13 +143,13 @@ pub async fn create_provider_config(
 
     let inserted = model.insert(tenant_db.db()).await.map_err(|e| {
         if is_unique_name_violation(&e) {
-            CreateProviderConfigError::DuplicateName
+            CreatePluginConfigError::DuplicateName
         } else {
-            CreateProviderConfigError::Db(e)
+            CreatePluginConfigError::Db(e)
         }
     })?;
-    Ok(provider_config_to_response(ops, inserted)
-        .unwrap_or_else(|| unreachable!("provider_type was just validated by the caller")))
+    Ok(plugin_config_to_response(ops, inserted)
+        .unwrap_or_else(|| unreachable!("plugin_type was just validated by the caller")))
 }
 
 fn is_unique_name_violation(e: &sea_orm::DbErr) -> bool {
@@ -158,17 +158,17 @@ fn is_unique_name_violation(e: &sea_orm::DbErr) -> bool {
         && (msg.contains("name") || msg.contains("uq_plugin_configs_active_name"))
 }
 
-pub async fn list_provider_configs(
+pub async fn list_plugin_configs(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     params: &PaginationParams,
-) -> Result<PaginatedResponse<ProviderConfigResponse>, sea_orm::DbErr> {
+) -> Result<PaginatedResponse<PluginConfigResponse>, sea_orm::DbErr> {
     let pagination = params.resolve();
 
     let base_query = tenant_db
-        .find::<provider_config::Entity>()
-        .filter(provider_config::Column::DeactivatedAt.is_null())
-        .order_by_asc(provider_config::Column::Name);
+        .find::<plugin_config::Entity>()
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        .order_by_asc(plugin_config::Column::Name);
 
     let total = base_query.clone().count(tenant_db.db()).await?;
 
@@ -178,71 +178,71 @@ pub async fn list_provider_configs(
         .all(tenant_db.db())
         .await?;
 
-    let items: Vec<ProviderConfigResponse> = configs
+    let items: Vec<PluginConfigResponse> = configs
         .into_iter()
-        .filter_map(|m| provider_config_to_response(ops, m))
+        .filter_map(|m| plugin_config_to_response(ops, m))
         .collect();
 
     Ok(PaginatedResponse::new(items, total, pagination))
 }
 
 /// Returns `None` if the config is not found or is deactivated.
-pub async fn get_provider_config(
+pub async fn get_plugin_config(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Result<Option<ProviderConfigResponse>, sea_orm::DbErr> {
+) -> Result<Option<PluginConfigResponse>, sea_orm::DbErr> {
     let config = match find_raw_active_config(tenant_db, id).await {
         Some(c) => c,
         None => return Ok(None),
     };
-    Ok(provider_config_to_response(ops, config))
+    Ok(plugin_config_to_response(ops, config))
 }
 
-/// Partial update. Handles secret restoration and provider-specific validation internally.
+/// Partial update. Handles secret restoration and plugin-specific validation internally.
 /// Returns the updated response, or an error describing what went wrong.
-pub async fn update_provider_config(
+pub async fn update_plugin_config(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     id: Uuid,
-    req: UpdateProviderConfigRequest,
-) -> Result<ProviderConfigResponse, UpdateProviderConfigError> {
+    req: UpdatePluginConfigRequest,
+) -> Result<PluginConfigResponse, UpdatePluginConfigError> {
     let existing = match find_raw_active_config(tenant_db, id).await {
         Some(c) => c,
-        None => return Err(UpdateProviderConfigError::NotFound),
+        None => return Err(UpdatePluginConfigError::NotFound),
     };
 
-    let provider_type = existing.plugin_type.clone();
+    let plugin_type = existing.plugin_type.clone();
 
     // Validate name if changing.
     if let Some(ref name) = req.name
         && name.is_empty()
     {
-        return Err(UpdateProviderConfigError::EmptyName);
+        return Err(UpdatePluginConfigError::EmptyName);
     }
 
     // Validate new config if provided; restore masked secrets from the existing value.
     if let Some(ref mut new_config) = req.config.clone() {
-        ops.restore_config_secrets_str(&provider_type, new_config, &existing.config);
+        ops.restore_config_secrets_str(&plugin_type, new_config, &existing.config);
 
-        if let Err(e) = ops.validate_config_str(&provider_type, new_config) {
-            return Err(UpdateProviderConfigError::ConfigValidation(e.to_string()));
+        if let Err(e) = ops.validate_config_str(&plugin_type, new_config) {
+            return Err(UpdatePluginConfigError::ConfigValidation(e.to_string()));
         }
 
         if let Err(e) = validate_hooks_internal(new_config) {
-            return Err(UpdateProviderConfigError::HookValidation(e.to_string()));
+            return Err(UpdatePluginConfigError::HookValidation(e.to_string()));
         }
     }
 
     let now = OffsetDateTime::now_utc();
-    let mut model: provider_config::ActiveModel = existing.into();
+    let mut model: plugin_config::ActiveModel = existing.into();
 
     if let Some(name) = req.name {
         model.name = Set(name);
     }
     if let Some(mut config) = req.config {
         // Re-apply secret restoration on the actual value being persisted.
-        ops.restore_config_secrets_str(&provider_type, &mut config, model.config.as_ref());
+        ops.restore_config_secrets_str(&plugin_type, &mut config, model.config.as_ref());
         model.config = Set(config);
     }
     if let Some(enabled) = req.enabled {
@@ -253,18 +253,18 @@ pub async fn update_provider_config(
     let updated = model
         .update(tenant_db.db())
         .await
-        .map_err(UpdateProviderConfigError::Db)?;
+        .map_err(UpdatePluginConfigError::Db)?;
 
-    provider_config_to_response(ops, updated).ok_or_else(|| {
-        UpdateProviderConfigError::ConfigValidation(
-            "updated record has unrecognised provider_type".to_string(),
+    plugin_config_to_response(ops, updated).ok_or_else(|| {
+        UpdatePluginConfigError::ConfigValidation(
+            "updated record has unrecognised plugin_type".to_string(),
         )
     })
 }
 
-/// Soft-delete a provider configuration.
+/// Soft-delete a plugin configuration.
 /// Returns `true` if deleted, `false` if not found.
-pub async fn delete_provider_config(
+pub async fn delete_plugin_config(
     tenant_db: &TenantDb,
     id: Uuid,
 ) -> Result<bool, sea_orm::DbErr> {
@@ -274,7 +274,7 @@ pub async fn delete_provider_config(
     };
 
     let now = OffsetDateTime::now_utc();
-    let mut model: provider_config::ActiveModel = config.into();
+    let mut model: plugin_config::ActiveModel = config.into();
     model.deactivated_at = Set(Some(now));
     model.enabled = Set(false);
     model.updated_at = Set(now);

@@ -145,7 +145,7 @@ pub struct DiscoverParams<'a> {
 
 pub struct DiscardDiscoveredParams<'a> {
     pub id: &'a Uuid,
-    pub provider_config_id: Option<&'a Uuid>,
+    pub plugin_config_id: Option<&'a Uuid>,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -223,7 +223,7 @@ pub async fn discard_discovered(
         params.request_timeout,
     )?;
     client
-        .discard_host_discovered(params.id, params.provider_config_id)
+        .discard_host_discovered(params.id, params.plugin_config_id)
         .await
         .context_to()
 }
