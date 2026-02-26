@@ -30,6 +30,7 @@ pub enum PluginType {
     Docker,
     Homebrew,
     Apt,
+    Shell,
     /// An unknown plugin type received from a newer peer.
     ///
     /// The inner string is the raw snake_case value as it appeared on the wire.
@@ -49,6 +50,7 @@ impl PluginType {
             Self::Docker => "docker",
             Self::Homebrew => "homebrew",
             Self::Apt => "apt",
+            Self::Shell => "shell",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -79,6 +81,7 @@ impl FromStr for PluginType {
             "docker" => Ok(Self::Docker),
             "homebrew" => Ok(Self::Homebrew),
             "apt" => Ok(Self::Apt),
+            "shell" => Ok(Self::Shell),
             _ => Err(ParsePluginTypeError::Invalid),
         }
     }
@@ -109,6 +112,7 @@ impl From<String> for PluginType {
             "docker" => Self::Docker,
             "homebrew" => Self::Homebrew,
             "apt" => Self::Apt,
+            "shell" => Self::Shell,
             _ => Self::Other(s),
         }
     }
@@ -122,6 +126,7 @@ impl From<PluginType> for String {
             PluginType::Docker => "docker".to_string(),
             PluginType::Homebrew => "homebrew".to_string(),
             PluginType::Apt => "apt".to_string(),
+            PluginType::Shell => "shell".to_string(),
             PluginType::Other(s) => s,
         }
     }
@@ -255,6 +260,16 @@ mod tests {
         assert_eq!(deserialized, apt);
     }
 
+    #[test]
+    fn plugin_type_shell_serialization() {
+        let shell = PluginType::Shell;
+        let json = serde_json::to_string(&shell).expect("serialize");
+        assert_eq!(json, r#""shell""#);
+
+        let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, shell);
+    }
+
     /// `Other(String)` must serialize back to its inner string.
     #[test]
     fn plugin_type_other_serializes_to_inner_string() {
@@ -291,6 +306,10 @@ mod tests {
             PluginType::Apt
         );
         assert_eq!(
+            PluginType::from("shell".to_string()),
+            PluginType::Shell
+        );
+        assert_eq!(
             PluginType::from("winget".to_string()),
             PluginType::Other("winget".to_string())
         );
@@ -311,6 +330,7 @@ mod tests {
         assert_eq!(PluginType::Docker.to_string(), "docker");
         assert_eq!(PluginType::Homebrew.to_string(), "homebrew");
         assert_eq!(PluginType::Apt.to_string(), "apt");
+        assert_eq!(PluginType::Shell.to_string(), "shell");
         assert_eq!(
             PluginType::Other("custom_type".to_string()).to_string(),
             "custom_type"
@@ -338,6 +358,10 @@ mod tests {
         assert_eq!(
             "apt".parse::<PluginType>().ok(),
             Some(PluginType::Apt)
+        );
+        assert_eq!(
+            "shell".parse::<PluginType>().ok(),
+            Some(PluginType::Shell)
         );
         // Old wire string must be rejected by FromStr (it becomes Other via serde)
         assert!("docker_registry".parse::<PluginType>().is_err());
@@ -368,6 +392,7 @@ mod tests {
             PluginType::Docker,
             PluginType::Homebrew,
             PluginType::Apt,
+            PluginType::Shell,
         ];
         for pt in &variants {
             let s = pt.to_string();
@@ -386,6 +411,7 @@ mod tests {
             PluginType::Docker,
             PluginType::Homebrew,
             PluginType::Apt,
+            PluginType::Shell,
             PluginType::Other("my_plugin".to_string()),
         ];
         for pt in &variants {
