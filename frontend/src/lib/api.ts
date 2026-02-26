@@ -34,7 +34,6 @@ import type {
 	RenewServerCertResponse,
 	RotateCaResponse,
 	ScheduledTaskResponse,
-	ScheduledTasksListResponse,
 	ServiceResponse,
 	SoftwareItemDetailResponse,
 	SoftwareItemResponse,
@@ -661,8 +660,8 @@ export async function getUpdateHistoryEntry(id: string): Promise<UpdateHistoryRe
 }
 
 // Scheduler tasks
-export async function listSchedulerTasks(): Promise<ScheduledTasksListResponse> {
-	return request<ScheduledTasksListResponse>('/scheduler/tasks');
+export async function listSchedulerTasks(): Promise<ScheduledTaskResponse[]> {
+	return request<ScheduledTaskResponse[]>('/scheduler/tasks');
 }
 
 export async function getSchedulerTask(id: string): Promise<ScheduledTaskResponse> {

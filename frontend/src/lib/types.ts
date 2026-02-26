@@ -494,7 +494,3 @@ export interface UpdateProviderConfigRequest {
 	config?: Record<string, unknown>;
 	enabled?: boolean;
 }
-
-export interface ScheduledTasksListResponse {
-	tasks: ScheduledTaskResponse[];
-}

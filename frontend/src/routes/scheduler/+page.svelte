@@ -27,8 +27,7 @@
 		loading = true;
 		error = null;
 		try {
-			const res = await listSchedulerTasks();
-			tasks = res.tasks;
+			tasks = await listSchedulerTasks();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load scheduler tasks';
 		} finally {
