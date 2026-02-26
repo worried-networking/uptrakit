@@ -8,7 +8,7 @@ info:
     ## Service Lifecycle
 
     1. `HTTP GET /api/v1/pki/ca.crt` — TOFU CA pinning (only HTTP endpoint used by services)
-    2. `WSS /api/v1/ws/service` (no auth) — service sends `Enroll` message with hostname and service_type
+    2. `WSS /api/v1/ws/service` (no auth) — service sends `Enroll` message with hostname and capabilities
     3. Controller generates UUIDv7 `service_id` and responds with `Enrolled` message
     4. Service persists `service_id` + `enrollment_secret`
        (connection promoted in-place — controller now tracks this session)
@@ -208,7 +208,7 @@ operations:
       - $ref: "#/channels/serviceConnection/messages/enroll"
     summary: Service sends an enrollment request
     description: |
-      An anonymous service sends its hostname, friendly name, service_type, and optional
+      An anonymous service sends its hostname, friendly name, capabilities, and optional
       enrollment token. The controller generates a UUIDv7
       `service_id`, creates a service record, and responds with an `Enrolled` message
       containing the service_id and enrollment_secret. The actual keypair generation
@@ -950,7 +950,7 @@ components:
         - type
         - hostname
         - friendly_name
-        - service_type
+        - capabilities
       properties:
         seq:
           type: integer
@@ -971,13 +971,17 @@ components:
           description: Human-readable name for the service
           examples:
             - Production Node 1
-        service_type:
-          type: string
-          enum:
-            - agent
-            - mqtt
-            - ssh_agent
-          description: Type of service enrolling with the controller
+        capabilities:
+          type: array
+          items:
+            type: string
+          description: >-
+            Capabilities this service supports. The controller persists these
+            and derives behavioral defaults from the resulting service profile.
+          examples:
+            - - graceful_shutdown
+              - software_discovery
+              - update_hooks
         enrollment_token:
           type: string
           description: Optional pre-shared enrollment token for auto-approval

@@ -12,7 +12,7 @@ use uuid::Uuid;
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{
     DiscoveredSoftware, HookShell, MqttClientConnectionStatus, MqttTransport, OutputStreamType,
-    PluginRole, PluginType, ReleaseAsset, ReleaseInfo, ServiceType,
+    PluginRole, PluginType, ReleaseAsset, ReleaseInfo,
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
@@ -39,9 +39,8 @@ pub enum Capability {
     /// Service is an MQTT bridge: handles `Register`, `TenantAssignments`,
     /// `ReleaseTenants`, `MqttClientStatus`, etc.
     ///
-    /// Used as a future replacement for `ServiceType::Mqtt` — once all peers
-    /// support capability negotiation, `service_type` in enrollment can be
-    /// inferred from this capability.
+    /// Identifies an MQTT bridge service. The controller uses this capability
+    /// to gate MQTT-specific message handling and lease coordination.
     ///
     /// Wire string: `mqtt_bridge`.
     MqttBridge,
@@ -53,8 +52,8 @@ pub enum Capability {
     SoftwareDiscovery,
     /// Service manages remote hosts over SSH, rather than running locally.
     ///
-    /// Used as a future replacement for `ServiceType::SshAgent` — combined
-    /// with `SoftwareDiscovery`, uniquely identifies an SSH-backed agent.
+    /// Identifies an SSH-backed agent. Combined with `SoftwareDiscovery`,
+    /// uniquely identifies an SSH agent (vs. a local agent).
     ///
     /// Wire string: `ssh_remote`.
     SshRemote,
@@ -311,12 +310,11 @@ pub struct EnrollPayload {
     pub friendly_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enrollment_token: Option<SecretString>,
-    /// Identifies the type of service enrolling.
+    /// Capabilities this service supports.
     ///
-    /// **Deprecation path:** once all peers support capability negotiation,
-    /// the controller will infer service type from the capability set advertised
-    /// in `ReportHosts`/`Register` and this field will no longer be required.
-    pub service_type: ServiceType,
+    /// The controller persists these in the `services.capabilities` column and
+    /// derives behavioral defaults from the resulting [`ServiceProfile`].
+    pub capabilities: BTreeSet<Capability>,
 }
 
 /// Payload for requesting a client certificate after approval.
@@ -1058,19 +1056,46 @@ mod tests {
         assert_eq!(deserialized, ping);
     }
 
+    fn agent_capabilities() -> BTreeSet<Capability> {
+        [
+            Capability::GracefulShutdown,
+            Capability::SoftwareDiscovery,
+            Capability::UpdateHooks,
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    fn mqtt_capabilities() -> BTreeSet<Capability> {
+        [Capability::GracefulShutdown, Capability::MqttBridge]
+            .into_iter()
+            .collect()
+    }
+
+    fn ssh_agent_capabilities() -> BTreeSet<Capability> {
+        [
+            Capability::GracefulShutdown,
+            Capability::SoftwareDiscovery,
+            Capability::SshRemote,
+            Capability::UpdateHooks,
+        ]
+        .into_iter()
+        .collect()
+    }
+
     #[test]
     fn enroll_agent_serialization_roundtrip() {
         let msg = ServiceMessage::Enroll(EnrollPayload {
             hostname: "node-1".to_string(),
             friendly_name: "Node One".to_string(),
             enrollment_token: Some(SecretString::new("tok-123".into())),
-            service_type: ServiceType::Agent,
+            capabilities: agent_capabilities(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
-        assert!(json.contains(r#""service_type":"agent"#));
-        assert!(!json.contains("host_info"));
+        assert!(json.contains(r#""capabilities""#));
+        assert!(json.contains(r#""software_discovery""#));
     }
 
     #[test]
@@ -1079,12 +1104,12 @@ mod tests {
             hostname: "mqtt-service-1".to_string(),
             friendly_name: "MQTT Service Node 1".to_string(),
             enrollment_token: Some(SecretString::new("tok-456".into())),
-            service_type: ServiceType::Mqtt,
+            capabilities: mqtt_capabilities(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"enroll"#));
         assert!(json.contains(r#""hostname":"mqtt-service-1"#));
-        assert!(json.contains(r#""service_type":"mqtt"#));
+        assert!(json.contains(r#""mqtt_bridge""#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -1095,12 +1120,12 @@ mod tests {
             hostname: "ssh-agent-1".to_string(),
             friendly_name: "SSH Agent Node 1".to_string(),
             enrollment_token: Some(SecretString::new("tok-789".into())),
-            service_type: ServiceType::SshAgent,
+            capabilities: ssh_agent_capabilities(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"enroll"#));
         assert!(json.contains(r#""hostname":"ssh-agent-1"#));
-        assert!(json.contains(r#""service_type":"ssh_agent"#));
+        assert!(json.contains(r#""ssh_remote""#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -1111,7 +1136,7 @@ mod tests {
             hostname: "node-2".to_string(),
             friendly_name: "Node Two".to_string(),
             enrollment_token: None,
-            service_type: ServiceType::Agent,
+            capabilities: agent_capabilities(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         // enrollment_token should be omitted when None
@@ -2035,20 +2060,6 @@ mod tests {
     }
 
     #[test]
-    fn service_type_all_variants() {
-        for (svc_type, expected) in [
-            (ServiceType::Agent, "agent"),
-            (ServiceType::Mqtt, "mqtt"),
-            (ServiceType::SshAgent, "ssh_agent"),
-        ] {
-            let json = serde_json::to_string(&svc_type).unwrap();
-            assert_eq!(json, format!(r#""{expected}""#));
-            let deserialized: ServiceType = serde_json::from_str(&json).unwrap();
-            assert_eq!(deserialized, svc_type);
-        }
-    }
-
-    #[test]
     fn hook_shell_all_variants() {
         for (shell, expected) in [
             (HookShell::Bash, "bash"),
@@ -2102,12 +2113,6 @@ mod tests {
     #[test]
     fn enrollment_status_rejects_invalid() {
         let result: std::result::Result<EnrollmentStatus, _> = serde_json::from_str(r#""invalid""#);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn service_type_rejects_invalid() {
-        let result: std::result::Result<ServiceType, _> = serde_json::from_str(r#""invalid""#);
         assert!(result.is_err());
     }
 
@@ -2328,11 +2333,11 @@ mod tests {
     }
 
     #[test]
-    fn enroll_requires_service_type() {
-        // Enrollment without service_type should fail deserialization.
+    fn enroll_requires_capabilities() {
+        // Enrollment without capabilities should fail deserialization.
         let json = r#"{"type":"enroll","hostname":"node-old","friendly_name":"Old Node"}"#;
         let result: std::result::Result<ServiceMessage, _> = serde_json::from_str(json);
-        assert!(result.is_err(), "EnrollPayload requires service_type");
+        assert!(result.is_err(), "EnrollPayload requires capabilities");
     }
 
     // =========================================================================
@@ -2382,7 +2387,7 @@ mod tests {
                 hostname: "test-host".to_string(),
                 friendly_name: "Test".to_string(),
                 enrollment_token: None,
-                service_type: ServiceType::Agent,
+                capabilities: agent_capabilities(),
             }),
         };
         let json = serde_json::to_string(&envelope).unwrap();
@@ -2679,7 +2684,7 @@ mod tests {
             hostname: "node-1".to_string(),
             friendly_name: "Node One".to_string(),
             enrollment_token: Some(SecretString::new("tok-123".into())),
-            service_type: ServiceType::Agent,
+            capabilities: agent_capabilities(),
         }));
         spec.validate("enrollPayload", &json);
     }

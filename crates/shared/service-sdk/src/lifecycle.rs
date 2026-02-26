@@ -12,7 +12,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use rootcause::prelude::*;
-use uptrakit_internal_wire::{Capability, ControllerMessage, ServiceSettingsPayload, ServiceType};
+use uptrakit_internal_wire::{Capability, ControllerMessage, ServiceSettingsPayload};
 use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::Backoff;
@@ -99,13 +99,6 @@ pub trait ServiceHandler: Send {
 
     /// Human-readable label for log messages (e.g. `"uptrakit-agent service"`).
     const SERVICE_LABEL: &'static str;
-
-    /// Whether this is an Agent, SshAgent, or Mqtt service.
-    ///
-    /// **Deprecation path:** once all peers support capability negotiation,
-    /// the controller will derive service type from the capability set returned
-    /// by [`capabilities()`](Self::capabilities) and this constant will no longer be required.
-    const SERVICE_TYPE: ServiceType;
 
     /// Service-specific event type from [`poll_service_event`](Self::poll_service_event).
     ///
@@ -318,7 +311,7 @@ async fn do_enrollment<H: ServiceHandler>(
     port: u16,
     identity: &mut ServiceIdentityState,
     tls_connector: &tokio_rustls::TlsConnector,
-    _handler: &mut H,
+    handler: &mut H,
 ) -> Result<()> {
     if identity.is_enrolled_only() {
         // Resume: reconnect with Bearer header (existing service.json).
@@ -338,7 +331,7 @@ async fn do_enrollment<H: ServiceHandler>(
             hostname: &hostname,
             friendly_name: &friendly_name,
             enrollment_token: args.enrollment_token.as_deref(),
-            service_type: H::SERVICE_TYPE,
+            capabilities: handler.capabilities(),
         })
         .await?;
     }

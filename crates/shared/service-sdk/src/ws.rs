@@ -15,10 +15,12 @@ use rustls::pki_types::ServerName;
 use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use std::collections::BTreeSet;
+
 use uptrakit_internal_wire::{
-    CertificatePayload, ControllerEnvelope, ControllerMessage, EnrollPayload, EnrolledPayload,
-    EnrollmentStatus, IncomingSeq, OutgoingSeq, RequestCertificatePayload, SecretString,
-    ServiceMessage, ServiceType,
+    Capability, CertificatePayload, ControllerEnvelope, ControllerMessage, EnrollPayload,
+    EnrolledPayload, EnrollmentStatus, IncomingSeq, OutgoingSeq, RequestCertificatePayload,
+    SecretString, ServiceMessage,
 };
 
 use crate::error::{EnrollmentError, IdentityError, ProtocolError, Result};
@@ -331,7 +333,7 @@ pub struct EnrollmentParams<'a> {
     pub hostname: &'a str,
     pub friendly_name: &'a str,
     pub enrollment_token: Option<&'a str>,
-    pub service_type: ServiceType,
+    pub capabilities: BTreeSet<Capability>,
 }
 
 /// Run a fresh enrollment flow: enroll → wait for approval → generate CSR → request certificate.
@@ -346,7 +348,7 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
         hostname,
         friendly_name,
         enrollment_token,
-        service_type,
+        capabilities,
     } = params;
     let mut ws = connect_ws(host, port, tls_connector, None).await?;
     let mut out_seq = OutgoingSeq::new();
@@ -360,7 +362,7 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
             hostname: hostname.to_string(),
             friendly_name: friendly_name.to_string(),
             enrollment_token: enrollment_token.map(|s| SecretString::new(s.to_string())),
-            service_type,
+            capabilities,
         },
     )
     .await?;
