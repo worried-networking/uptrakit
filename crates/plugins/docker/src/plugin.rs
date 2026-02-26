@@ -390,6 +390,7 @@ impl Plugin for DockerPlugin {
                 package_identifier: ir.full_ref.clone(),
                 name,
                 installed_version: digest,
+                targets: vec![],
                 extra: Some(json!({ "containers": container_names })),
             });
         }

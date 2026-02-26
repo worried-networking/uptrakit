@@ -291,6 +291,7 @@ impl Plugin for AptPlugin {
                 package_identifier: name.clone(),
                 name,
                 installed_version: version,
+                targets: vec![],
                 extra: None,
             })
             .collect();

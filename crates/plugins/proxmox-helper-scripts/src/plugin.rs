@@ -3,17 +3,27 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uptrakit_plugin_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_core::{
-    DiscoveredSoftware, Plugin, PluginCapability, PluginType,
+    DiscoveredSoftware, DiscoveryTarget, Plugin, PluginCapability, PluginRole, PluginType,
 };
 
 use crate::config::ProxmoxHelperScriptsConfig;
 use crate::discovery::{
-    PHS_INSTALL_URL_PREFIX, UPDATE_SCRIPT_PATH, analyze_phs_script, extract_apt_package_candidates,
-    parse_phs_scripts, parse_version_file, slug_to_display_name,
+    PHS_DETECT_VERSION_CMD, PHS_INSTALL_CMD, PHS_INSTALL_URL_PREFIX, UPDATE_SCRIPT_PATH,
+    analyze_phs_script, extract_apt_package_candidates, parse_phs_scripts, parse_version_file,
+    slug_to_display_name,
 };
 
 /// Capabilities: discovery only — no release-index refresh needed.
 const CAPABILITIES: &[PluginCapability] = &[PluginCapability::DiscoverLocalSoftware];
+
+/// All three standard plugin roles.
+fn all_roles() -> Vec<PluginRole> {
+    vec![
+        PluginRole::DetectVersion,
+        PluginRole::FetchReleases,
+        PluginRole::ExecuteUpdate,
+    ]
+}
 
 /// Plugin for Proxmox Helper Scripts (discovery-only).
 ///
@@ -21,12 +31,12 @@ const CAPABILITIES: &[PluginCapability] = &[PluginCapability::DiscoverLocalSoftw
 /// 1. Reading `/usr/bin/update` and parsing CT script URLs from it.
 /// 2. Fetching each CT script from `raw.githubusercontent.com` and analysing it
 ///    to determine whether the app is GitHub-managed or APT-managed.
-/// 3. Emitting `DiscoveredSoftware` items with `extra` metadata set to one of:
-///    - `{ "github_owner": "…", "github_repo": "…" }` — GitHub-managed
-///    - `{ "apt_package": "…" }` — APT-managed
+/// 3. Emitting `DiscoveredSoftware` items with structured `targets` that tell
+///    the controller exactly which plugin configs to create:
+///    - GitHub-managed → `DiscoveryTarget` with `GithubReleases` plugin type
+///    - APT-managed → `DiscoveryTarget` with `Apt` plugin type
 ///
-/// The controller synthesises the appropriate downstream plugin config
-/// (`github_releases` or `apt`) automatically from the `extra` metadata.
+/// The controller processes targets generically without any PHS-specific logic.
 pub struct ProxmoxHelperScriptsPlugin {
     _config: ProxmoxHelperScriptsConfig,
     executor: Arc<dyn CommandExecutor>,
@@ -100,6 +110,40 @@ impl ProxmoxHelperScriptsPlugin {
             .ok()?;
         let v = output.output.trim().to_string();
         if v.is_empty() { None } else { Some(v) }
+    }
+
+    /// Build a `DiscoveryTarget` for a GitHub-managed PHS app.
+    fn github_target(owner: &str, repo: &str) -> DiscoveryTarget {
+        DiscoveryTarget {
+            plugin_type: PluginType::GithubReleases,
+            plugin_config: serde_json::json!({
+                "owner": owner,
+                "repo": repo,
+                "tag_strip_prefix": "v",
+                "include_prereleases": false,
+                "asset_patterns": [],
+                "detect_installed_version_command": PHS_DETECT_VERSION_CMD,
+                "install_command": PHS_INSTALL_CMD,
+            }),
+            plugin_config_name: format!("{owner}/{repo}"),
+            roles: all_roles(),
+            package_identifier: None,
+            config_override: None,
+            execution_site: None,
+        }
+    }
+
+    /// Build a `DiscoveryTarget` for an APT-managed PHS app.
+    fn apt_target() -> DiscoveryTarget {
+        DiscoveryTarget {
+            plugin_type: PluginType::Apt,
+            plugin_config: serde_json::json!({}),
+            plugin_config_name: "APT (auto)".to_string(),
+            roles: all_roles(),
+            package_identifier: None,
+            config_override: None,
+            execution_site: None,
+        }
     }
 }
 
@@ -205,10 +249,8 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     package_identifier: script.slug.clone(),
                     name: display_name,
                     installed_version,
-                    extra: Some(serde_json::json!({
-                        "github_owner": owner,
-                        "github_repo": repo,
-                    })),
+                    targets: vec![Self::github_target(owner, repo)],
+                    extra: None,
                 });
             } else if let Some(ref apt_pkg) = analysis.apt_package {
                 // APT direct: verify installed via dpkg-query.
@@ -229,7 +271,8 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     package_identifier: apt_pkg.clone(),
                     name: display_name,
                     installed_version,
-                    extra: Some(serde_json::json!({ "apt_package": apt_pkg })),
+                    targets: vec![Self::apt_target()],
+                    extra: None,
                 });
             } else {
                 // Neither — try install-script fallback.
@@ -267,7 +310,8 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         package_identifier: candidate.clone(),
                         name: display_name.clone(),
                         installed_version,
-                        extra: Some(serde_json::json!({ "apt_package": candidate })),
+                        targets: vec![Self::apt_target()],
+                        extra: None,
                     });
                     found_any = true;
                 }
@@ -328,5 +372,31 @@ mod tests {
         let result = plugin.discover_software().await;
         assert!(result.is_ok());
         // No error; result is empty or whatever is found on the test machine.
+    }
+
+    #[test]
+    fn github_target_structure() {
+        let target = ProxmoxHelperScriptsPlugin::github_target("BookLore", "BookLore");
+        assert_eq!(target.plugin_type, PluginType::GithubReleases);
+        assert_eq!(target.plugin_config_name, "BookLore/BookLore");
+        assert_eq!(target.roles.len(), 3);
+        assert_eq!(target.plugin_config["owner"], "BookLore");
+        assert_eq!(target.plugin_config["repo"], "BookLore");
+        assert_eq!(
+            target.plugin_config["detect_installed_version_command"],
+            PHS_DETECT_VERSION_CMD
+        );
+        assert_eq!(target.plugin_config["install_command"], PHS_INSTALL_CMD);
+        assert!(target.package_identifier.is_none());
+    }
+
+    #[test]
+    fn apt_target_structure() {
+        let target = ProxmoxHelperScriptsPlugin::apt_target();
+        assert_eq!(target.plugin_type, PluginType::Apt);
+        assert_eq!(target.plugin_config_name, "APT (auto)");
+        assert_eq!(target.roles.len(), 3);
+        assert_eq!(target.plugin_config, serde_json::json!({}));
+        assert!(target.package_identifier.is_none());
     }
 }

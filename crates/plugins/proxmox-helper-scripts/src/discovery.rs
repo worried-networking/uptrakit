@@ -4,6 +4,19 @@ use uptrakit_plugin_core::PluginError;
 /// Well-known path where PHS containers store their update script.
 pub const UPDATE_SCRIPT_PATH: &str = "/usr/bin/update";
 
+/// Shell command used to detect the installed version of a GitHub-managed PHS app.
+///
+/// `{package_identifier}` is the PHS slug, replaced shell-escaped at runtime by
+/// the GitHub plugin's `detect_installed_version()` implementation.
+pub const PHS_DETECT_VERSION_CMD: &str = r#"cat -- "${HOME}/.{package_identifier}""#;
+
+/// Install command for PHS-managed apps.
+///
+/// Uses the unattended mode (`PHS_SILENT=1`) exactly as the official
+/// `update-apps.sh` PVE tool does via `pct exec`, so the update runs without
+/// interactive prompts and without requiring a network fetch of the script.
+pub const PHS_INSTALL_CMD: &str = "env PHS_SILENT=1 /usr/bin/update";
+
 /// Base URL prefix for PHS community-scripts CT scripts.
 const PHS_CT_URL_PREFIX: &str =
     "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/";

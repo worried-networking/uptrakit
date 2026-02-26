@@ -5,8 +5,9 @@ use rootcause::prelude::*;
 use uptrakit_plugin_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_core::mpsc;
 use uptrakit_plugin_core::{
-    DiscoveredSoftware, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
-    PluginType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
+    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin,
+    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine,
+    UpstreamRelease, Version,
 };
 
 use crate::config::{HomebrewConfig, HomebrewPackageType};
@@ -127,11 +128,12 @@ impl HomebrewPlugin {
     /// Parse installed formulae from `brew info --installed --json=v2` output.
     ///
     /// Emits items only for packages with a known installed version.
-    /// When `tag_extra` is true, annotates each item with
-    /// `extra = {"package_type": "formula"}` for auto-discovery grouping.
+    /// When `emit_targets` is true, each item carries a `DiscoveryTarget` with
+    /// `{"package_type": "formula"}` config so the controller can auto-create
+    /// the correct Homebrew plugin config.
     fn parse_installed_formulae(
         json: &serde_json::Value,
-        tag_extra: bool,
+        emit_targets: bool,
     ) -> Vec<DiscoveredSoftware> {
         let mut result = Vec::new();
         if let Some(formulae) = json.get("formulae").and_then(|f| f.as_array()) {
@@ -155,17 +157,30 @@ impl HomebrewPlugin {
                     continue;
                 };
 
-                let extra = if tag_extra {
-                    Some(serde_json::json!({"package_type": "formula"}))
+                let targets = if emit_targets {
+                    vec![DiscoveryTarget {
+                        plugin_type: PluginType::Homebrew,
+                        plugin_config: serde_json::json!({"package_type": "formula"}),
+                        plugin_config_name: "Homebrew (Formulae)".to_string(),
+                        roles: vec![
+                            PluginRole::DetectVersion,
+                            PluginRole::FetchReleases,
+                            PluginRole::ExecuteUpdate,
+                        ],
+                        package_identifier: None,
+                        config_override: None,
+                        execution_site: None,
+                    }]
                 } else {
-                    None
+                    vec![]
                 };
 
                 result.push(DiscoveredSoftware {
                     package_identifier: name.to_string(),
                     name: full_name.to_string(),
                     installed_version,
-                    extra,
+                    targets,
+                    extra: None,
                 });
             }
         }
@@ -175,9 +190,13 @@ impl HomebrewPlugin {
     /// Parse installed casks from `brew info --installed --json=v2` output.
     ///
     /// Emits items only for packages with a known installed version.
-    /// When `tag_extra` is true, annotates each item with
-    /// `extra = {"package_type": "cask"}` for auto-discovery grouping.
-    fn parse_installed_casks(json: &serde_json::Value, tag_extra: bool) -> Vec<DiscoveredSoftware> {
+    /// When `emit_targets` is true, each item carries a `DiscoveryTarget` with
+    /// `{"package_type": "cask"}` config so the controller can auto-create
+    /// the correct Homebrew plugin config.
+    fn parse_installed_casks(
+        json: &serde_json::Value,
+        emit_targets: bool,
+    ) -> Vec<DiscoveredSoftware> {
         let mut result = Vec::new();
         if let Some(casks) = json.get("casks").and_then(|c| c.as_array()) {
             for cask in casks {
@@ -199,17 +218,30 @@ impl HomebrewPlugin {
                     continue;
                 };
 
-                let extra = if tag_extra {
-                    Some(serde_json::json!({"package_type": "cask"}))
+                let targets = if emit_targets {
+                    vec![DiscoveryTarget {
+                        plugin_type: PluginType::Homebrew,
+                        plugin_config: serde_json::json!({"package_type": "cask"}),
+                        plugin_config_name: "Homebrew (Casks)".to_string(),
+                        roles: vec![
+                            PluginRole::DetectVersion,
+                            PluginRole::FetchReleases,
+                            PluginRole::ExecuteUpdate,
+                        ],
+                        package_identifier: None,
+                        config_override: None,
+                        execution_site: None,
+                    }]
                 } else {
-                    None
+                    vec![]
                 };
 
                 result.push(DiscoveredSoftware {
                     package_identifier: token.to_string(),
                     name: name.to_string(),
                     installed_version,
-                    extra,
+                    targets,
+                    extra: None,
                 });
             }
         }
@@ -659,49 +691,63 @@ mod tests {
     // ── parse_installed_formulae / parse_installed_casks ────────────────
 
     #[test]
-    fn parse_installed_formulae_without_extra_tag() {
+    fn parse_installed_formulae_without_targets() {
         let json = sample_installed_json();
         let packages = HomebrewPlugin::parse_installed_formulae(&json, false);
         assert_eq!(packages.len(), 2);
         assert_eq!(packages[0].package_identifier, "wget");
         assert_eq!(packages[0].name, "wget");
         assert_eq!(packages[0].installed_version, "1.24.4");
-        assert!(packages[0].extra.is_none());
+        assert!(packages[0].targets.is_empty());
         assert_eq!(packages[1].package_identifier, "jq");
         assert_eq!(packages[1].installed_version, "1.7.1");
     }
 
     #[test]
-    fn parse_installed_formulae_with_extra_tag() {
+    fn parse_installed_formulae_with_targets() {
         let json = sample_installed_json();
         let packages = HomebrewPlugin::parse_installed_formulae(&json, true);
         assert_eq!(packages.len(), 2);
+        assert_eq!(packages[0].targets.len(), 1);
+        assert_eq!(packages[0].targets[0].plugin_type, PluginType::Homebrew);
         assert_eq!(
-            packages[0].extra,
-            Some(serde_json::json!({"package_type": "formula"}))
+            packages[0].targets[0].plugin_config,
+            serde_json::json!({"package_type": "formula"})
         );
+        assert_eq!(
+            packages[0].targets[0].plugin_config_name,
+            "Homebrew (Formulae)"
+        );
+        assert_eq!(packages[0].targets[0].roles.len(), 3);
     }
 
     #[test]
-    fn parse_installed_casks_without_extra_tag() {
+    fn parse_installed_casks_without_targets() {
         let json = sample_installed_json();
         let packages = HomebrewPlugin::parse_installed_casks(&json, false);
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].package_identifier, "firefox");
         assert_eq!(packages[0].name, "Mozilla Firefox");
         assert_eq!(packages[0].installed_version, "132.0");
-        assert!(packages[0].extra.is_none());
+        assert!(packages[0].targets.is_empty());
     }
 
     #[test]
-    fn parse_installed_casks_with_extra_tag() {
+    fn parse_installed_casks_with_targets() {
         let json = sample_installed_json();
         let packages = HomebrewPlugin::parse_installed_casks(&json, true);
         assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].targets.len(), 1);
+        assert_eq!(packages[0].targets[0].plugin_type, PluginType::Homebrew);
         assert_eq!(
-            packages[0].extra,
-            Some(serde_json::json!({"package_type": "cask"}))
+            packages[0].targets[0].plugin_config,
+            serde_json::json!({"package_type": "cask"})
         );
+        assert_eq!(
+            packages[0].targets[0].plugin_config_name,
+            "Homebrew (Casks)"
+        );
+        assert_eq!(packages[0].targets[0].roles.len(), 3);
     }
 
     #[test]
