@@ -1,16 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { HostResponse, PaginatedResponse } from '$lib/types';
 import { Permission } from '$lib/types';
 
 vi.mock('$lib/api', () => ({
 	getHosts: vi.fn(),
 	updateHost: vi.fn(),
-	deactivateHost: vi.fn()
+	deactivateHost: vi.fn(),
+	triggerHostDiscovery: vi.fn()
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
 	getUser: vi.fn(() => null)
+}));
+
+vi.mock('$lib/notifications.svelte', () => ({
+	showSuccess: vi.fn(),
+	showError: vi.fn()
 }));
 
 import HostsPage from './+page.svelte';
@@ -26,7 +32,7 @@ const adminUser = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
-	permissions: [Permission.ManageHosts]
+	permissions: [Permission.ManageHosts, Permission.ManageSoftware]
 };
 
 function makePage(items: HostResponse[]): PaginatedResponse<HostResponse> {
@@ -102,5 +108,99 @@ describe('Hosts Page', () => {
 		// At least one em-dash should be present (could be OS, arch, or IP)
 		const dashes = screen.getAllByText('—');
 		expect(dashes.length).toBeGreaterThan(0);
+	});
+
+	it('shows the actions button when the user has ManageHosts permission', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+		expect(screen.getByRole('button', { name: /actions for production server/i })).toBeInTheDocument();
+	});
+
+	it('does not show the actions button when the user lacks ManageHosts permission', async () => {
+		vi.mocked(auth.getUser).mockReturnValue({
+			...adminUser,
+			permissions: [Permission.ManageSoftware]
+		});
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+		expect(screen.queryByRole('button', { name: /actions for/i })).not.toBeInTheDocument();
+	});
+
+	it('opens the context menu with Edit Name and Deactivate options when the actions button is clicked', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		const actionsBtn = screen.getByRole('button', { name: /actions for production server/i });
+		fireEvent.click(actionsBtn);
+
+		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+		expect(screen.getByRole('menuitem', { name: 'Edit Name' })).toBeInTheDocument();
+		expect(screen.getByRole('menuitem', { name: 'Deactivate' })).toBeInTheDocument();
+	});
+
+	it('shows the Trigger Discovery menu item when the user has ManageSoftware permission', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
+
+		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+		expect(screen.getByRole('menuitem', { name: 'Trigger Discovery' })).toBeInTheDocument();
+	});
+
+	it('does not show Trigger Discovery when the user lacks ManageSoftware permission', async () => {
+		vi.mocked(auth.getUser).mockReturnValue({
+			...adminUser,
+			permissions: [Permission.ManageHosts]
+		});
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
+
+		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+		expect(screen.queryByRole('menuitem', { name: 'Trigger Discovery' })).not.toBeInTheDocument();
+	});
+
+	it('calls triggerHostDiscovery and shows a success notification when plugins are queued', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.triggerHostDiscovery).mockResolvedValue({ plugins_queued: 2, message: 'ok' });
+		const { showSuccess } = await import('$lib/notifications.svelte');
+
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
+		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+
+		fireEvent.click(screen.getByRole('menuitem', { name: 'Trigger Discovery' }));
+
+		await waitFor(() => expect(vi.mocked(api.triggerHostDiscovery)).toHaveBeenCalledWith('host-001'));
+		await waitFor(() => expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(
+			expect.stringContaining('2 plugin(s) queued')
+		));
+	});
+
+	it('calls triggerHostDiscovery and shows a no-plugins notification when nothing is queued', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		vi.mocked(api.triggerHostDiscovery).mockResolvedValue({ plugins_queued: 0, message: 'no plugins' });
+		const { showSuccess } = await import('$lib/notifications.svelte');
+
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
+		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+
+		fireEvent.click(screen.getByRole('menuitem', { name: 'Trigger Discovery' }));
+
+		await waitFor(() => expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(
+			expect.stringContaining('no plugins queued')
+		));
 	});
 });
