@@ -2499,17 +2499,12 @@ enum HostSoftwareItems {
 #[derive(DeriveIden)]
 enum HostSoftwareItemPlugins {
     Table,
-    Id,
     HostId,
     SoftwareItemId,
     PluginConfigId,
     Role,
     Ordinal,
-    PackageIdentifier,
-    ConfigOverride,
     ExecutionSite,
-    CreatedAt,
-    UpdatedAt,
 }
 
 #[derive(DeriveIden)]

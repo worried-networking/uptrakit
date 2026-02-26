@@ -22,6 +22,9 @@ uptrakit-shared-db = { path = "../../shared/db", features = ["migration"] }
 uptrakit-web-api = { path = "../../ui/web-api", default-features = false }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-shared-types = { workspace = true }
+uptrakit-command = { path = "../../shared/command" }
+uptrakit-plugin-core = { path = "../../plugins/core" }
+uptrakit-plugin-registry = { path = "../../plugins/registry" }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "sync", "time"] }
 axum = { workspace = true }
