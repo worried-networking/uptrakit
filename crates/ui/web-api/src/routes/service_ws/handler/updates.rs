@@ -1,8 +1,9 @@
-//! Update delivery and ownership validation helpers.
+//! Update delivery, ownership validation, and update-lifecycle message handlers.
 //!
 //! Contains `validate_update_ownership`, `load_linked_host_ids`,
-//! `upsert_available_version`, and `deliver_pending_updates` extracted from the
-//! unified handler module.
+//! `upsert_available_version`, `deliver_pending_updates`, and the per-message
+//! handlers `handle_update_started`, `handle_update_output`, and
+//! `handle_update_result`.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -10,15 +11,19 @@ use std::sync::Arc;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::SinkExt;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::sea_query::{Expr, ExprTrait};
 
 use rootcause::prelude::*;
-use uptrakit_internal_wire::{ControllerMessage, ExecuteUpdatePayload, OutgoingSeq, PluginType};
+use uptrakit_internal_wire::{
+    ControllerMessage, ExecuteUpdatePayload, OutgoingSeq, PluginType,
+    UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
+};
 use uptrakit_shared_db::entity::{
-    available_version, host, host_software_item, plugin_config, service_host, software_item,
-    update_history,
+    available_version, host, host_software_item, plugin_config, service, service_host,
+    software_item, update_history, update_output_line,
 };
 
-use super::{HandlerError, HandlerResult};
+use super::{HandlerError, HandlerResult, LoopAction, MAX_UPDATE_OUTPUT_BYTES};
 use crate::routes::service_ws::protocol::serialize_controller_msg;
 use crate::AppState;
 
@@ -342,4 +347,243 @@ pub(super) async fn deliver_pending_updates(
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// handle_update_started
+// ---------------------------------------------------------------------------
+
+/// Handle an `UpdateStarted` message: validate ownership, set status to
+/// `InProgress`, clear previous output lines.
+pub(super) async fn handle_update_started(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &UpdateStartedPayload,
+    linked_host_ids: &HashSet<uuid::Uuid>,
+) -> LoopAction {
+    tracing::info!(
+        update_id = %payload.update_history_id,
+        from_version = ?payload.from_version,
+        "update started"
+    );
+    let record = match validate_update_ownership(
+        state.db(),
+        service_id,
+        payload.update_history_id,
+        linked_host_ids,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => return LoopAction::Continue,
+    };
+    let mut active: update_history::ActiveModel = record.into();
+    active.status = Set(update_history::UpdateStatus::InProgress);
+    active.started_at = Set(time::OffsetDateTime::now_utc());
+    if payload.from_version.is_some() {
+        active.from_version = Set(payload.from_version.clone());
+    }
+    active.output = Set(String::new());
+    active.output_bytes = Set(0);
+    if let Err(e) = active.update(state.db()).await {
+        tracing::warn!(
+            error = %e,
+            "failed to update update_history status"
+        );
+    }
+    if let Err(e) = update_output_line::Entity::delete_many()
+        .filter(
+            update_output_line::Column::UpdateHistoryId.eq(payload.update_history_id),
+        )
+        .exec(state.db())
+        .await
+    {
+        tracing::warn!(
+            error = %e,
+            "failed to clear update output lines"
+        );
+    }
+
+    LoopAction::Continue
+}
+
+// ---------------------------------------------------------------------------
+// handle_update_output
+// ---------------------------------------------------------------------------
+
+/// Handle an `UpdateOutput` message: validate ownership, append output line
+/// (capped at `MAX_UPDATE_OUTPUT_BYTES`).
+pub(super) async fn handle_update_output(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &UpdateOutputPayload,
+    linked_host_ids: &HashSet<uuid::Uuid>,
+) -> LoopAction {
+    tracing::trace!(
+        update_id = %payload.update_history_id,
+        stream = ?payload.stream,
+        "update output"
+    );
+    if validate_update_ownership(
+        state.db(),
+        service_id,
+        payload.update_history_id,
+        linked_host_ids,
+    )
+    .await
+    .is_err()
+    {
+        return LoopAction::Continue;
+    }
+
+    let output_line = format!("{}\n", payload.output);
+    let line_len = output_line.len() as i64;
+    let updated = update_history::Entity::update_many()
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::col(update_history::Column::OutputBytes).add(line_len),
+        )
+        .filter(update_history::Column::Id.eq(payload.update_history_id))
+        .filter(
+            update_history::Column::OutputBytes.lt(MAX_UPDATE_OUTPUT_BYTES as i64),
+        )
+        .exec(state.db())
+        .await;
+
+    let Ok(updated) = updated else {
+        tracing::warn!(
+            update_id = %payload.update_history_id,
+            "failed to update output bytes"
+        );
+        return LoopAction::Continue;
+    };
+
+    if updated.rows_affected == 0 {
+        tracing::debug!(
+            update_id = %payload.update_history_id,
+            "update output exceeded {MAX_UPDATE_OUTPUT_BYTES} byte cap, dropping"
+        );
+        return LoopAction::Continue;
+    }
+
+    let line = update_output_line::ActiveModel {
+        id: Set(uuid::Uuid::now_v7()),
+        update_history_id: Set(payload.update_history_id),
+        stream: Set(payload.stream),
+        output: Set(output_line),
+        created_at: Set(time::OffsetDateTime::now_utc()),
+    };
+    if let Err(e) = update_output_line::Entity::insert(line)
+        .exec(state.db())
+        .await
+    {
+        tracing::warn!(
+            error = %e,
+            "failed to insert update output line"
+        );
+    }
+
+    LoopAction::Continue
+}
+
+// ---------------------------------------------------------------------------
+// handle_update_result
+// ---------------------------------------------------------------------------
+
+/// Handle an `UpdateResult` message: validate ownership, set final status,
+/// store output, update installed version on success, push software states.
+pub(super) async fn handle_update_result(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: UpdateResultPayload,
+    linked_host_ids: &HashSet<uuid::Uuid>,
+) -> LoopAction {
+    tracing::info!(
+        update_id = %payload.update_history_id,
+        status = ?payload.status,
+        error = ?payload.error,
+        "update result"
+    );
+    let record = match validate_update_ownership(
+        state.db(),
+        service_id,
+        payload.update_history_id,
+        linked_host_ids,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => return LoopAction::Continue,
+    };
+    let mut active: update_history::ActiveModel = record.clone().into();
+    active.status = Set(match payload.status {
+        UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
+        UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
+        _ => update_history::UpdateStatus::Failed,
+    });
+    active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
+    let capped_output = if payload.output.len() > MAX_UPDATE_OUTPUT_BYTES {
+        payload.output[..MAX_UPDATE_OUTPUT_BYTES].to_string()
+    } else {
+        payload.output
+    };
+    active.output = Set(capped_output.clone());
+    active.output_bytes = Set(capped_output.len() as i64);
+    if payload.from_version.is_some() {
+        active.from_version = Set(payload.from_version);
+    }
+    if let Err(e) = active.update(state.db()).await {
+        tracing::warn!(
+            error = %e,
+            "failed to update update_history result"
+        );
+    }
+
+    if let Err(e) = update_output_line::Entity::delete_many()
+        .filter(
+            update_output_line::Column::UpdateHistoryId.eq(payload.update_history_id),
+        )
+        .exec(state.db())
+        .await
+    {
+        tracing::warn!(
+            error = %e,
+            "failed to clear update output lines"
+        );
+    }
+
+    if payload.status == UpdateFinalStatus::Completed
+        && let Some(ref to_version) = payload.to_version
+        && let Ok(Some(link)) = host_software_item::Entity::find_by_id((
+            record.host_id,
+            record.software_item_id,
+        ))
+        .one(state.db())
+        .await
+    {
+        let mut link_active: host_software_item::ActiveModel = link.into();
+        link_active.installed_version = Set(Some(to_version.clone()));
+        link_active.installed_version_detected_at =
+            Set(Some(time::OffsetDateTime::now_utc()));
+        link_active.last_updated_at = Set(Some(time::OffsetDateTime::now_utc()));
+        if let Err(e) = link_active.update(state.db()).await {
+            tracing::warn!(
+                error = %e,
+                "failed to update host_software_item installed_version"
+            );
+        }
+    }
+
+    // Push updated software states to MQTT services.
+    if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        state
+            .notification_service
+            .push_software_states_for_tenant(svc.tenant_id)
+            .await;
+    }
+
+    LoopAction::Continue
 }

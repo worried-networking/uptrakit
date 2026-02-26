@@ -12,41 +12,33 @@
 //!   agent for a specific host (also used by `hosts.rs`).
 
 mod discovery;
+mod messages;
 mod mqtt;
 mod renewal;
 mod updates;
 
 pub(crate) use discovery::trigger_discovery_for_agent_host;
 use mqtt::handle_mqtt_register_phase;
-use renewal::sign_renewal_csr;
-use updates::{
-    deliver_pending_updates, load_linked_host_ids, upsert_available_version,
-    validate_update_ownership,
-};
+use updates::{deliver_pending_updates, load_linked_host_ids};
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-use sea_orm::sea_query::{Expr, ExprTrait};
 use thiserror::Error;
 
 use rootcause::prelude::*;
+use sea_orm::EntityTrait;
+
 use uptrakit_internal_wire::{
     ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage,
     ErrorCode, ErrorPayload, IncomingSeq,
-    MqttClientConnectionStatus as WireMqttClientConnectionStatus,
     MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq,
-    PingPayload, RejectedPayload, ServiceMessage, UpdateFinalStatus,
+    PingPayload, RejectedPayload, ServiceMessage,
 };
-use uptrakit_shared_db::entity::{
-    host, host_software_item, service, service_host, software_item, update_history,
-    update_output_line,
-};
+use uptrakit_shared_db::entity::service;
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqttClientConnectionStatus;
 
 use super::protocol::{
     AuthenticatedContext, MessageRateLimiter, WS_MESSAGE_RATE_LIMIT, WS_MESSAGE_RATE_WINDOW,
@@ -55,7 +47,7 @@ use super::protocol::{
 };
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
-use crate::routes::agents::{do_sign_csr, find_or_create_host_and_link, revoke_certificate};
+use crate::routes::agents::do_sign_csr;
 use crate::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------
@@ -70,6 +62,25 @@ const MAX_UPDATE_OUTPUT_BYTES: usize = 1_048_576;
 
 /// Interval between approval-status DB polls in enrolled loops.
 const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+// ---------------------------------------------------------------------------
+// LoopAction
+// ---------------------------------------------------------------------------
+
+/// Signal returned by message handlers to control the authenticated loop.
+pub(super) enum LoopAction {
+    /// Continue processing messages.
+    Continue,
+    /// Break out of the main loop (normal disconnect or error).
+    Break,
+}
+
+impl LoopAction {
+    /// Returns `true` if this action signals the loop should break.
+    pub(super) fn is_break(&self) -> bool {
+        matches!(self, Self::Break)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -297,29 +308,8 @@ pub(crate) async fn handle_authenticated_loop(
                             // Ping (all capabilities)
                             // -------------------------------------------------
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
-                                let Ok(controller_ts) =
-                                    send_pong(sink, out_seq, service_ts).await
-                                else {
+                                if messages::handle_ping(sink, out_seq, state, service_id, service_ts, lease_coordinator.as_ref()).await.is_break() {
                                     break;
-                                };
-                                tracing::trace!(service_ts, controller_ts, "ping/pong");
-                                if let Err(e) =
-                                    record_service_activity(state.db(), service_id, None).await
-                                {
-                                    tracing::warn!(
-                                        error = %e,
-                                        %service_id,
-                                        "failed to record service activity"
-                                    );
-                                }
-                                // MQTT heartbeat
-                                if let Some(ref lc) = lease_coordinator
-                                    && let Err(e) = lc.record_heartbeat(&service_id).await
-                                {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "failed to record heartbeat"
-                                    );
                                 }
                             }
 
@@ -327,107 +317,8 @@ pub(crate) async fn handle_authenticated_loop(
                             // RenewCertificate (all capabilities)
                             // -------------------------------------------------
                             ServiceMessage::RenewCertificate(payload) => {
-                                // Re-fetch service, verify still approved.
-                                let svc = match service::Entity::find_by_id(service_id)
-                                    .one(state.db())
-                                    .await
-                                {
-                                    Ok(Some(s))
-                                        if s.status == service::ServiceStatus::Approved
-                                            && s.deactivated_at.is_none() =>
-                                    {
-                                        s
-                                    }
-                                    _ => {
-                                        let err = ControllerMessage::Error(ErrorPayload {
-                                            code: ErrorCode::Forbidden,
-                                            message: "service is not approved".to_string(),
-                                        });
-                                        if let Some(json) =
-                                            serialize_controller_msg(out_seq, err)
-                                        {
-                                            let _ =
-                                                sink.send(Message::Text(json.into())).await;
-                                        }
-                                        break;
-                                    }
-                                };
-
-                                match sign_renewal_csr(
-                                    state.cert_signer.as_ref(),
-                                    &state.settings,
-                                    state.db(),
-                                    svc,
-                                    &payload.csr_pem,
-                                )
-                                .await
-                                {
-                                    Ok(bundle) => {
-                                        let cert_msg =
-                                            ControllerMessage::Certificate(CertificatePayload {
-                                                cert_pem: bundle.cert_pem,
-                                                not_after: bundle.not_after,
-                                            });
-                                        if let Some(json) =
-                                            serialize_controller_msg(out_seq, cert_msg)
-                                        {
-                                            let _ =
-                                                sink.send(Message::Text(json.into())).await;
-                                        }
-
-                                        // Revoke old certificate.
-                                        if let Err(e) = revoke_certificate(
-                                            state.db(),
-                                            &cert.serial,
-                                            &cert.ca_fingerprint,
-                                            uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed,
-                                        )
-                                        .await
-                                        {
-                                            tracing::error!(
-                                                error = %e,
-                                                "failed to revoke old certificate"
-                                            );
-                                        }
-
-                                        if let Err(e) =
-                                            crate::settings_store::bump_revocation_version(
-                                                state.db(),
-                                                state.default_tenant_id,
-                                            )
-                                            .await
-                                        {
-                                            tracing::warn!(
-                                                error = ?e,
-                                                "failed to bump revocation version counter"
-                                            );
-                                        }
-                                        state.revocation_notify.notify_one();
-                                        tracing::info!(
-                                            %service_id,
-                                            old_serial = %cert.serial,
-                                            "certificate renewed, old cert revoked"
-                                        );
-                                        let _ = close_with_reason(
-                                            sink,
-                                            CloseReason::CertificateRotated,
-                                        )
-                                        .await;
-                                        break;
-                                    }
-                                    Err(e) => {
-                                        let err = ControllerMessage::Error(ErrorPayload {
-                                            code: ErrorCode::CertificateError,
-                                            message: e.to_string(),
-                                        });
-                                        if let Some(json) =
-                                            serialize_controller_msg(out_seq, err)
-                                        {
-                                            let _ =
-                                                sink.send(Message::Text(json.into())).await;
-                                        }
-                                        break;
-                                    }
+                                if messages::handle_renew_certificate(sink, out_seq, state, service_id, &cert, &payload).await.is_break() {
+                                    break;
                                 }
                             }
 
@@ -435,80 +326,8 @@ pub(crate) async fn handle_authenticated_loop(
                             // ReportHosts (requires SoftwareDiscovery)
                             // -------------------------------------------------
                             ServiceMessage::ReportHosts(payload) if has_software_discovery => {
-                                tracing::debug!(
-                                    %service_id,
-                                    capabilities = ?payload.capabilities,
-                                    "received ReportHosts"
-                                );
-
-                                let service_model =
-                                    match service::Entity::find_by_id(service_id)
-                                        .one(state.db())
-                                        .await
-                                    {
-                                        Ok(Some(s)) => s,
-                                        _ => continue,
-                                    };
-
-                                // Update client_version.
-                                let mut active: service::ActiveModel =
-                                    service_model.clone().into();
-                                active.client_version =
-                                    Set(Some(payload.agent_version.clone()));
-                                active.updated_at =
-                                    Set(time::OffsetDateTime::now_utc());
-                                if let Err(e) = active.update(state.db()).await {
-                                    tracing::error!(
-                                        error = %e,
-                                        "failed to update client_version"
-                                    );
-                                }
-
-                                for host_info in &payload.hosts {
-                                    let host_hostname = host_info
-                                        .hostname
-                                        .as_deref()
-                                        .unwrap_or(&service_model.hostname);
-                                    let host_ip = host_info
-                                        .ip_address
-                                        .as_deref()
-                                        .or(service_model.ip_address.as_deref());
-                                    match find_or_create_host_and_link(
-                                        state.db(),
-                                        service_model.tenant_id,
-                                        service_id,
-                                        host_info,
-                                        host_hostname,
-                                        host_ip,
-                                    )
-                                    .await
-                                    {
-                                        Ok(Some((_host_id, true))) => {
-                                            // New host -- trigger autodiscovery.
-                                            trigger_discovery_for_agent_host(
-                                                state,
-                                                service_id,
-                                                service_model.tenant_id,
-                                                &host_info.machine_id,
-                                            )
-                                            .await;
-                                        }
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                error = %e,
-                                                machine_id = %host_info.machine_id,
-                                                "failed to link host"
-                                            );
-                                        }
-                                    }
-                                }
-
-                                // Refresh cached host IDs.
-                                if let Ok(ids) =
-                                    load_linked_host_ids(state.db(), service_id).await
-                                {
-                                    linked_host_ids = ids;
+                                if messages::handle_report_hosts(sink, out_seq, state, service_id, &payload, &mut linked_host_ids).await.is_break() {
+                                    break;
                                 }
                             }
 
@@ -518,154 +337,8 @@ pub(crate) async fn handle_authenticated_loop(
                             ServiceMessage::VersionCheckResults(payload)
                                 if has_software_discovery && !is_mqtt =>
                             {
-                                tracing::debug!(
-                                    %service_id,
-                                    count = payload.results.len(),
-                                    "received VersionCheckResults"
-                                );
-
-                                let host_ids: Vec<uuid::Uuid> =
-                                    match service_host::Entity::find()
-                                        .filter(
-                                            service_host::Column::ServiceId.eq(service_id),
-                                        )
-                                        .all(state.db())
-                                        .await
-                                    {
-                                        Ok(links) => {
-                                            links.into_iter().map(|l| l.host_id).collect()
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                error = %e,
-                                                "failed to look up service hosts"
-                                            );
-                                            continue;
-                                        }
-                                    };
-
-                                if host_ids.is_empty() {
-                                    tracing::debug!(
-                                        %service_id,
-                                        "no hosts linked, skipping version updates"
-                                    );
-                                    continue;
-                                }
-
-                                let now = time::OffsetDateTime::now_utc();
-
-                                for result in &payload.results {
-                                    if result.error.is_some() {
-                                        tracing::debug!(
-                                            software_item_id = %result.software_item_id,
-                                            error = ?result.error,
-                                            "skipping version result with error"
-                                        );
-                                        continue;
-                                    }
-
-                                    let software_item_id = result.software_item_id;
-
-                                    // Update installed version on host_software_item records.
-                                    if let Some(ref installed_version) =
-                                        result.installed_version
-                                    {
-                                        for &host_id in &host_ids {
-                                            match host_software_item::Entity::find_by_id((
-                                                host_id,
-                                                software_item_id,
-                                            ))
-                                            .one(state.db())
-                                            .await
-                                            {
-                                                Ok(Some(existing)) => {
-                                                    let mut active: host_software_item::ActiveModel = existing.into();
-                                                    active.installed_version = Set(Some(
-                                                        installed_version.clone(),
-                                                    ));
-                                                    active
-                                                        .installed_version_detected_at =
-                                                        Set(Some(now));
-                                                    if let Err(e) =
-                                                        active.update(state.db()).await
-                                                    {
-                                                        tracing::warn!(
-                                                            error = %e,
-                                                            host_id = %host_id,
-                                                            software_item_id = %software_item_id,
-                                                            "failed to update host_software_item"
-                                                        );
-                                                    }
-                                                }
-                                                Ok(None) => {
-                                                    tracing::debug!(
-                                                        host_id = %host_id,
-                                                        software_item_id = %software_item_id,
-                                                        "no host_software_item record found, skipping"
-                                                    );
-                                                }
-                                                Err(e) => {
-                                                    tracing::warn!(
-                                                        error = %e,
-                                                        host_id = %host_id,
-                                                        software_item_id = %software_item_id,
-                                                        "failed to look up host_software_item"
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Upsert available_version if agent reported latest.
-                                    if let Some(ref latest_version) = result.latest_version {
-                                        upsert_available_version(
-                                            state.db(),
-                                            software_item_id,
-                                            latest_version,
-                                            now,
-                                        )
-                                        .await;
-                                    }
-                                }
-
-                                // Batch-update last_checked_at for successful results.
-                                let checked_ids: Vec<uuid::Uuid> = payload
-                                    .results
-                                    .iter()
-                                    .filter(|r| r.error.is_none())
-                                    .map(|r| r.software_item_id)
-                                    .collect::<HashSet<_>>()
-                                    .into_iter()
-                                    .collect();
-
-                                if !checked_ids.is_empty()
-                                    && let Err(e) = software_item::Entity::update_many()
-                                        .filter(
-                                            software_item::Column::Id.is_in(checked_ids),
-                                        )
-                                        .col_expr(
-                                            software_item::Column::LastCheckedAt,
-                                            Expr::value(now),
-                                        )
-                                        .exec(state.db())
-                                        .await
-                                {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "failed to batch-update software_item last_checked_at"
-                                    );
-                                }
-
-                                // Push updated software states to MQTT services.
-                                if let Ok(Some(svc)) =
-                                    service::Entity::find_by_id(service_id)
-                                        .one(state.db())
-                                        .await
-                                {
-                                    state
-                                        .notification_service
-                                        .push_software_states_for_tenant(svc.tenant_id)
-                                        .await;
+                                if messages::handle_version_check_results(state, service_id, &payload).await.is_break() {
+                                    break;
                                 }
                             }
 
@@ -673,51 +346,8 @@ pub(crate) async fn handle_authenticated_loop(
                             // UpdateStarted (requires UpdateHooks)
                             // -------------------------------------------------
                             ServiceMessage::UpdateStarted(payload) if has_update_hooks => {
-                                tracing::info!(
-                                    update_id = %payload.update_history_id,
-                                    from_version = ?payload.from_version,
-                                    "update started"
-                                );
-                                let record = match validate_update_ownership(
-                                    state.db(),
-                                    service_id,
-                                    payload.update_history_id,
-                                    &linked_host_ids,
-                                )
-                                .await
-                                {
-                                    Ok(r) => r,
-                                    Err(_) => continue,
-                                };
-                                let mut active: update_history::ActiveModel = record.into();
-                                active.status =
-                                    Set(update_history::UpdateStatus::InProgress);
-                                active.started_at =
-                                    Set(time::OffsetDateTime::now_utc());
-                                if payload.from_version.is_some() {
-                                    active.from_version = Set(payload.from_version);
-                                }
-                                active.output = Set(String::new());
-                                active.output_bytes = Set(0);
-                                if let Err(e) = active.update(state.db()).await {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "failed to update update_history status"
-                                    );
-                                }
-                                if let Err(e) =
-                                    update_output_line::Entity::delete_many()
-                                        .filter(
-                                            update_output_line::Column::UpdateHistoryId
-                                                .eq(payload.update_history_id),
-                                        )
-                                        .exec(state.db())
-                                        .await
-                                {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "failed to clear update output lines"
-                                    );
+                                if updates::handle_update_started(state, service_id, &payload, &linked_host_ids).await.is_break() {
+                                    break;
                                 }
                             }
 
@@ -725,73 +355,8 @@ pub(crate) async fn handle_authenticated_loop(
                             // UpdateOutput (requires UpdateHooks)
                             // -------------------------------------------------
                             ServiceMessage::UpdateOutput(payload) if has_update_hooks => {
-                                tracing::trace!(
-                                    update_id = %payload.update_history_id,
-                                    stream = ?payload.stream,
-                                    "update output"
-                                );
-                                if validate_update_ownership(
-                                    state.db(),
-                                    service_id,
-                                    payload.update_history_id,
-                                    &linked_host_ids,
-                                )
-                                .await
-                                .is_err()
-                                {
-                                    continue;
-                                }
-
-                                let output_line = format!("{}\n", payload.output);
-                                let line_len = output_line.len() as i64;
-                                let updated = update_history::Entity::update_many()
-                                    .col_expr(
-                                        update_history::Column::OutputBytes,
-                                        Expr::col(update_history::Column::OutputBytes)
-                                            .add(line_len),
-                                    )
-                                    .filter(
-                                        update_history::Column::Id
-                                            .eq(payload.update_history_id),
-                                    )
-                                    .filter(
-                                        update_history::Column::OutputBytes
-                                            .lt(MAX_UPDATE_OUTPUT_BYTES as i64),
-                                    )
-                                    .exec(state.db())
-                                    .await;
-
-                                let Ok(updated) = updated else {
-                                    tracing::warn!(
-                                        update_id = %payload.update_history_id,
-                                        "failed to update output bytes"
-                                    );
-                                    continue;
-                                };
-
-                                if updated.rows_affected == 0 {
-                                    tracing::debug!(
-                                        update_id = %payload.update_history_id,
-                                        "update output exceeded {MAX_UPDATE_OUTPUT_BYTES} byte cap, dropping"
-                                    );
-                                    continue;
-                                }
-
-                                let line = update_output_line::ActiveModel {
-                                    id: Set(uuid::Uuid::now_v7()),
-                                    update_history_id: Set(payload.update_history_id),
-                                    stream: Set(payload.stream),
-                                    output: Set(output_line),
-                                    created_at: Set(time::OffsetDateTime::now_utc()),
-                                };
-                                if let Err(e) = update_output_line::Entity::insert(line)
-                                    .exec(state.db())
-                                    .await
-                                {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "failed to insert update output line"
-                                    );
+                                if updates::handle_update_output(state, service_id, &payload, &linked_host_ids).await.is_break() {
+                                    break;
                                 }
                             }
 
@@ -799,105 +364,8 @@ pub(crate) async fn handle_authenticated_loop(
                             // UpdateResult (requires UpdateHooks)
                             // -------------------------------------------------
                             ServiceMessage::UpdateResult(payload) if has_update_hooks => {
-                                tracing::info!(
-                                    update_id = %payload.update_history_id,
-                                    status = ?payload.status,
-                                    error = ?payload.error,
-                                    "update result"
-                                );
-                                let record = match validate_update_ownership(
-                                    state.db(),
-                                    service_id,
-                                    payload.update_history_id,
-                                    &linked_host_ids,
-                                )
-                                .await
-                                {
-                                    Ok(r) => r,
-                                    Err(_) => continue,
-                                };
-                                let mut active: update_history::ActiveModel =
-                                    record.clone().into();
-                                active.status = Set(match payload.status {
-                                    UpdateFinalStatus::Completed => {
-                                        update_history::UpdateStatus::Completed
-                                    }
-                                    UpdateFinalStatus::Failed => {
-                                        update_history::UpdateStatus::Failed
-                                    }
-                                    _ => update_history::UpdateStatus::Failed,
-                                });
-                                active.completed_at =
-                                    Set(Some(time::OffsetDateTime::now_utc()));
-                                let capped_output =
-                                    if payload.output.len() > MAX_UPDATE_OUTPUT_BYTES {
-                                        payload.output[..MAX_UPDATE_OUTPUT_BYTES].to_string()
-                                    } else {
-                                        payload.output
-                                    };
-                                active.output = Set(capped_output.clone());
-                                active.output_bytes = Set(capped_output.len() as i64);
-                                if payload.from_version.is_some() {
-                                    active.from_version = Set(payload.from_version);
-                                }
-                                if let Err(e) = active.update(state.db()).await {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "failed to update update_history result"
-                                    );
-                                }
-
-                                if let Err(e) = update_output_line::Entity::delete_many()
-                                    .filter(
-                                        update_output_line::Column::UpdateHistoryId
-                                            .eq(payload.update_history_id),
-                                    )
-                                    .exec(state.db())
-                                    .await
-                                {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "failed to clear update output lines"
-                                    );
-                                }
-
-                                if payload.status == UpdateFinalStatus::Completed
-                                    && let Some(ref to_version) = payload.to_version
-                                    && let Ok(Some(link)) = host_software_item::Entity::find_by_id((
-                                        record.host_id,
-                                        record.software_item_id,
-                                    ))
-                                    .one(state.db())
-                                    .await
-                                {
-                                    let mut link_active: host_software_item::ActiveModel =
-                                        link.into();
-                                    link_active.installed_version =
-                                        Set(Some(to_version.clone()));
-                                    link_active.installed_version_detected_at =
-                                        Set(Some(time::OffsetDateTime::now_utc()));
-                                    link_active.last_updated_at =
-                                        Set(Some(time::OffsetDateTime::now_utc()));
-                                    if let Err(e) =
-                                        link_active.update(state.db()).await
-                                    {
-                                        tracing::warn!(
-                                            error = %e,
-                                            "failed to update host_software_item installed_version"
-                                        );
-                                    }
-                                }
-
-                                // Push updated software states to MQTT services.
-                                if let Ok(Some(svc)) =
-                                    service::Entity::find_by_id(service_id)
-                                        .one(state.db())
-                                        .await
-                                {
-                                    state
-                                        .notification_service
-                                        .push_software_states_for_tenant(svc.tenant_id)
-                                        .await;
+                                if updates::handle_update_result(state, service_id, payload, &linked_host_ids).await.is_break() {
+                                    break;
                                 }
                             }
 
@@ -907,66 +375,8 @@ pub(crate) async fn handle_authenticated_loop(
                             ServiceMessage::DiscoveryResults(payload)
                                 if has_software_discovery =>
                             {
-                                tracing::debug!(
-                                    %service_id,
-                                    host_machine_id = %payload.host_machine_id,
-                                    results = payload.results.len(),
-                                    "received DiscoveryResults"
-                                );
-
-                                let links = service_host::Entity::find()
-                                    .filter(
-                                        service_host::Column::ServiceId.eq(service_id),
-                                    )
-                                    .all(state.db())
-                                    .await
-                                    .unwrap_or_default();
-
-                                let mut host_id_opt: Option<uuid::Uuid> = None;
-                                for link in &links {
-                                    if let Ok(Some(h)) =
-                                        host::Entity::find_by_id(link.host_id)
-                                            .filter(
-                                                host::Column::MachineId
-                                                    .eq(&payload.host_machine_id),
-                                            )
-                                            .filter(
-                                                host::Column::DeactivatedAt.is_null(),
-                                            )
-                                            .one(state.db())
-                                            .await
-                                    {
-                                        host_id_opt = Some(h.id);
-                                        break;
-                                    }
-                                }
-
-                                if let Some(host_id) = host_id_opt {
-                                    if let Ok(Some(svc)) =
-                                        service::Entity::find_by_id(service_id)
-                                            .one(state.db())
-                                            .await
-                                        && let Err(e) = crate::queries::autodiscovery::process_discovery_results(
-                                            state.db(),
-                                            service_id,
-                                            svc.tenant_id,
-                                            host_id,
-                                            payload,
-                                        )
-                                        .await
-                                    {
-                                        tracing::warn!(
-                                            error = %e,
-                                            %service_id,
-                                            "failed to process discovery results"
-                                        );
-                                    }
-                                } else {
-                                    tracing::warn!(
-                                        %service_id,
-                                        host_machine_id = %payload.host_machine_id,
-                                        "received DiscoveryResults for unknown host machine_id"
-                                    );
+                                if messages::handle_discovery_results(state, service_id, payload).await.is_break() {
+                                    break;
                                 }
                             }
 
@@ -974,55 +384,17 @@ pub(crate) async fn handle_authenticated_loop(
                             // ReleaseTenants (requires MqttBridge)
                             // -------------------------------------------------
                             ServiceMessage::ReleaseTenants(payload) if is_mqtt => {
-                                if let Some(ref lc) = lease_coordinator
-                                    && let Err(e) = lc
-                                        .release_mqtt_clients(
-                                            &service_id,
-                                            &payload.mqtt_client_ids,
-                                        )
-                                        .await
-                                {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "failed to release mqtt clients"
-                                    );
+                                if mqtt::handle_release_tenants(state, service_id, &payload, lease_coordinator.as_ref()).await.is_break() {
+                                    break;
                                 }
-
-                                tracing::info!(
-                                    %service_id,
-                                    count = payload.mqtt_client_ids.len(),
-                                    "MQTT service released mqtt clients"
-                                );
                             }
 
                             // -------------------------------------------------
                             // MqttClientStatus (requires MqttBridge)
                             // -------------------------------------------------
                             ServiceMessage::MqttClientStatus(payload) if is_mqtt => {
-                                let status = match payload.status {
-                                    WireMqttClientConnectionStatus::Online => {
-                                        ApiMqttClientConnectionStatus::Online
-                                    }
-                                    WireMqttClientConnectionStatus::Offline => {
-                                        ApiMqttClientConnectionStatus::Offline
-                                    }
-                                    WireMqttClientConnectionStatus::Connecting => {
-                                        ApiMqttClientConnectionStatus::Connecting
-                                    }
-                                };
-
-                                if let Err(e) =
-                                    crate::mqtt_client_store::update_mqtt_client_status(
-                                        state.db(),
-                                        payload.mqtt_client_id,
-                                        status,
-                                    )
-                                    .await
-                                {
-                                    tracing::warn!(
-                                        error = %e,
-                                        "failed to update mqtt client status"
-                                    );
+                                if mqtt::handle_mqtt_client_status(state, &payload).await.is_break() {
+                                    break;
                                 }
                             }
 
@@ -1030,77 +402,8 @@ pub(crate) async fn handle_authenticated_loop(
                             // MqttTriggerUpdate (requires MqttBridge)
                             // -------------------------------------------------
                             ServiceMessage::MqttTriggerUpdate(payload) if is_mqtt => {
-                                // Validate tenant is assigned to this MQTT service.
-                                let tenant_assigned = mqtt_context
-                                    .as_ref()
-                                    .map(|mctx| {
-                                        mctx.tenant_configs
-                                            .iter()
-                                            .any(|c| c.tenant_id == payload.tenant_id)
-                                    })
-                                    .unwrap_or(false);
-
-                                if !tenant_assigned {
-                                    let err_msg = ControllerMessage::Error(ErrorPayload {
-                                        code: ErrorCode::BadRequest,
-                                        message:
-                                            "tenant not assigned to this MQTT service"
-                                                .to_string(),
-                                    });
-                                    if let Some(json) =
-                                        serialize_controller_msg(out_seq, err_msg)
-                                    {
-                                        let _ =
-                                            sink.send(Message::Text(json.into())).await;
-                                    }
-                                    continue;
-                                }
-
-                                match crate::queries::update_triggers::trigger_update_for_host(
-                                    state.db(),
-                                    &state.notification_service,
-                                    crate::queries::update_triggers::TriggerUpdateParams {
-                                        tenant_id: payload.tenant_id,
-                                        item_id: payload.software_item_id,
-                                        host_id: payload.host_id,
-                                        to_version: payload.to_version.clone(),
-                                        actor_type: "mqtt",
-                                        actor_id: &payload.mqtt_client_id.to_string(),
-                                        release_info: None,
-                                    },
-                                )
-                                .await
-                                {
-                                    Ok(result) => {
-                                        tracing::info!(
-                                            update_id = %result.update_history_id,
-                                            software_item_id = %payload.software_item_id,
-                                            host_id = %payload.host_id,
-                                            mqtt_client_id = %payload.mqtt_client_id,
-                                            agent_connected = result.agent_connected,
-                                            "MQTT-triggered update dispatched"
-                                        );
-                                    }
-                                    Err(err) => {
-                                        tracing::warn!(
-                                            error = %err,
-                                            software_item_id = %payload.software_item_id,
-                                            host_id = %payload.host_id,
-                                            "MQTT-triggered update failed"
-                                        );
-                                        let err_msg =
-                                            ControllerMessage::Error(ErrorPayload {
-                                                code: ErrorCode::BadRequest,
-                                                message: err.to_string(),
-                                            });
-                                        if let Some(json) =
-                                            serialize_controller_msg(out_seq, err_msg)
-                                        {
-                                            let _ = sink
-                                                .send(Message::Text(json.into()))
-                                                .await;
-                                        }
-                                    }
+                                if mqtt::handle_mqtt_trigger_update(sink, out_seq, state, &payload, mqtt_context.as_ref()).await.is_break() {
+                                    break;
                                 }
                             }
 

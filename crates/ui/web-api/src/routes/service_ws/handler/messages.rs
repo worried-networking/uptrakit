@@ -1,0 +1,466 @@
+//! Common message handlers extracted from the authenticated loop.
+//!
+//! Each function corresponds to one match arm in the main dispatch and returns
+//! a [`LoopAction`] to tell the caller whether to `continue` or `break`.
+
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use axum::extract::ws::{Message, WebSocket};
+use futures_util::SinkExt;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::sea_query::Expr;
+
+use uptrakit_internal_wire::{
+    CertificatePayload, CloseReason, ControllerMessage, DiscoveryResultsPayload, ErrorCode,
+    ErrorPayload, OutgoingSeq, ReportHostsPayload, VersionCheckResultsPayload,
+};
+use uptrakit_shared_db::entity::{
+    host, host_software_item, service, service_host, software_item,
+};
+
+use super::LoopAction;
+use super::discovery::trigger_discovery_for_agent_host;
+use super::renewal::sign_renewal_csr;
+use super::updates::{load_linked_host_ids, upsert_available_version};
+use crate::AppState;
+use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
+use crate::routes::agents::{find_or_create_host_and_link, revoke_certificate};
+use crate::routes::service_ws::protocol::{
+    CertIdentity, close_with_reason, record_service_activity, send_pong, serialize_controller_msg,
+};
+
+// ---------------------------------------------------------------------------
+// handle_ping
+// ---------------------------------------------------------------------------
+
+/// Handle a `Ping` message: send pong, record activity, optional MQTT heartbeat.
+pub(super) async fn handle_ping(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    service_ts: i64,
+    lease_coordinator: Option<&MqttLeaseCoordinator>,
+) -> LoopAction {
+    let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else {
+        return LoopAction::Break;
+    };
+    tracing::trace!(service_ts, controller_ts, "ping/pong");
+    if let Err(e) = record_service_activity(state.db(), service_id, None).await {
+        tracing::warn!(
+            error = %e,
+            %service_id,
+            "failed to record service activity"
+        );
+    }
+    // MQTT heartbeat
+    if let Some(lc) = lease_coordinator
+        && let Err(e) = lc.record_heartbeat(&service_id).await
+    {
+        tracing::warn!(
+            error = %e,
+            "failed to record heartbeat"
+        );
+    }
+    LoopAction::Continue
+}
+
+// ---------------------------------------------------------------------------
+// handle_renew_certificate
+// ---------------------------------------------------------------------------
+
+/// Handle a `RenewCertificate` message: verify approved, sign renewal CSR,
+/// revoke old cert.
+pub(super) async fn handle_renew_certificate(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    cert: &CertIdentity,
+    payload: &uptrakit_internal_wire::RenewCertificatePayload,
+) -> LoopAction {
+    // Re-fetch service, verify still approved.
+    let svc = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(s))
+            if s.status == service::ServiceStatus::Approved && s.deactivated_at.is_none() =>
+        {
+            s
+        }
+        _ => {
+            let err = ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::Forbidden,
+                message: "service is not approved".to_string(),
+            });
+            if let Some(json) = serialize_controller_msg(out_seq, err) {
+                let _ = sink.send(Message::Text(json.into())).await;
+            }
+            return LoopAction::Break;
+        }
+    };
+
+    match sign_renewal_csr(
+        state.cert_signer.as_ref(),
+        &state.settings,
+        state.db(),
+        svc,
+        &payload.csr_pem,
+    )
+    .await
+    {
+        Ok(bundle) => {
+            let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+                cert_pem: bundle.cert_pem,
+                not_after: bundle.not_after,
+            });
+            if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
+                let _ = sink.send(Message::Text(json.into())).await;
+            }
+
+            // Revoke old certificate.
+            if let Err(e) = revoke_certificate(
+                state.db(),
+                &cert.serial,
+                &cert.ca_fingerprint,
+                uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed,
+            )
+            .await
+            {
+                tracing::error!(
+                    error = %e,
+                    "failed to revoke old certificate"
+                );
+            }
+
+            if let Err(e) = crate::settings_store::bump_revocation_version(
+                state.db(),
+                state.default_tenant_id,
+            )
+            .await
+            {
+                tracing::warn!(
+                    error = ?e,
+                    "failed to bump revocation version counter"
+                );
+            }
+            state.revocation_notify.notify_one();
+            tracing::info!(
+                %service_id,
+                old_serial = %cert.serial,
+                "certificate renewed, old cert revoked"
+            );
+            let _ = close_with_reason(sink, CloseReason::CertificateRotated).await;
+            LoopAction::Break
+        }
+        Err(e) => {
+            let err = ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::CertificateError,
+                message: e.to_string(),
+            });
+            if let Some(json) = serialize_controller_msg(out_seq, err) {
+                let _ = sink.send(Message::Text(json.into())).await;
+            }
+            LoopAction::Break
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// handle_report_hosts
+// ---------------------------------------------------------------------------
+
+/// Handle a `ReportHosts` message: update `client_version`, find/create hosts,
+/// trigger discovery, refresh `linked_host_ids`.
+pub(super) async fn handle_report_hosts(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &ReportHostsPayload,
+    linked_host_ids: &mut HashSet<uuid::Uuid>,
+) -> LoopAction {
+    // Suppress unused-variable warnings -- sink and out_seq are part of the
+    // standard handler signature but not needed for ReportHosts.
+    let _ = (sink, out_seq);
+
+    tracing::debug!(
+        %service_id,
+        capabilities = ?payload.capabilities,
+        "received ReportHosts"
+    );
+
+    let service_model = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(s)) => s,
+        _ => return LoopAction::Continue,
+    };
+
+    // Update client_version.
+    let mut active: service::ActiveModel = service_model.clone().into();
+    active.client_version = Set(Some(payload.agent_version.clone()));
+    active.updated_at = Set(time::OffsetDateTime::now_utc());
+    if let Err(e) = active.update(state.db()).await {
+        tracing::error!(
+            error = %e,
+            "failed to update client_version"
+        );
+    }
+
+    for host_info in &payload.hosts {
+        let host_hostname = host_info
+            .hostname
+            .as_deref()
+            .unwrap_or(&service_model.hostname);
+        let host_ip = host_info
+            .ip_address
+            .as_deref()
+            .or(service_model.ip_address.as_deref());
+        match find_or_create_host_and_link(
+            state.db(),
+            service_model.tenant_id,
+            service_id,
+            host_info,
+            host_hostname,
+            host_ip,
+        )
+        .await
+        {
+            Ok(Some((_host_id, true))) => {
+                // New host -- trigger autodiscovery.
+                trigger_discovery_for_agent_host(
+                    state,
+                    service_id,
+                    service_model.tenant_id,
+                    &host_info.machine_id,
+                )
+                .await;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    machine_id = %host_info.machine_id,
+                    "failed to link host"
+                );
+            }
+        }
+    }
+
+    // Refresh cached host IDs.
+    if let Ok(ids) = load_linked_host_ids(state.db(), service_id).await {
+        *linked_host_ids = ids;
+    }
+
+    LoopAction::Continue
+}
+
+// ---------------------------------------------------------------------------
+// handle_version_check_results
+// ---------------------------------------------------------------------------
+
+/// Handle a `VersionCheckResults` message: update installed versions, upsert
+/// available versions, batch update `last_checked_at`, push software states.
+pub(super) async fn handle_version_check_results(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &VersionCheckResultsPayload,
+) -> LoopAction {
+    tracing::debug!(
+        %service_id,
+        count = payload.results.len(),
+        "received VersionCheckResults"
+    );
+
+    let host_ids: Vec<uuid::Uuid> = match service_host::Entity::find()
+        .filter(service_host::Column::ServiceId.eq(service_id))
+        .all(state.db())
+        .await
+    {
+        Ok(links) => links.into_iter().map(|l| l.host_id).collect(),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "failed to look up service hosts"
+            );
+            return LoopAction::Continue;
+        }
+    };
+
+    if host_ids.is_empty() {
+        tracing::debug!(
+            %service_id,
+            "no hosts linked, skipping version updates"
+        );
+        return LoopAction::Continue;
+    }
+
+    let now = time::OffsetDateTime::now_utc();
+
+    for result in &payload.results {
+        if result.error.is_some() {
+            tracing::debug!(
+                software_item_id = %result.software_item_id,
+                error = ?result.error,
+                "skipping version result with error"
+            );
+            continue;
+        }
+
+        let software_item_id = result.software_item_id;
+
+        // Update installed version on host_software_item records.
+        if let Some(ref installed_version) = result.installed_version {
+            for &host_id in &host_ids {
+                match host_software_item::Entity::find_by_id((host_id, software_item_id))
+                    .one(state.db())
+                    .await
+                {
+                    Ok(Some(existing)) => {
+                        let mut active: host_software_item::ActiveModel = existing.into();
+                        active.installed_version = Set(Some(installed_version.clone()));
+                        active.installed_version_detected_at = Set(Some(now));
+                        if let Err(e) = active.update(state.db()).await {
+                            tracing::warn!(
+                                error = %e,
+                                host_id = %host_id,
+                                software_item_id = %software_item_id,
+                                "failed to update host_software_item"
+                            );
+                        }
+                    }
+                    Ok(None) => {
+                        tracing::debug!(
+                            host_id = %host_id,
+                            software_item_id = %software_item_id,
+                            "no host_software_item record found, skipping"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            host_id = %host_id,
+                            software_item_id = %software_item_id,
+                            "failed to look up host_software_item"
+                        );
+                    }
+                }
+            }
+        }
+
+        // Upsert available_version if agent reported latest.
+        if let Some(ref latest_version) = result.latest_version {
+            upsert_available_version(state.db(), software_item_id, latest_version, now).await;
+        }
+    }
+
+    // Batch-update last_checked_at for successful results.
+    let checked_ids: Vec<uuid::Uuid> = payload
+        .results
+        .iter()
+        .filter(|r| r.error.is_none())
+        .map(|r| r.software_item_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    if !checked_ids.is_empty()
+        && let Err(e) = software_item::Entity::update_many()
+            .filter(software_item::Column::Id.is_in(checked_ids))
+            .col_expr(
+                software_item::Column::LastCheckedAt,
+                Expr::value(now),
+            )
+            .exec(state.db())
+            .await
+    {
+        tracing::warn!(
+            error = %e,
+            "failed to batch-update software_item last_checked_at"
+        );
+    }
+
+    // Push updated software states to MQTT services.
+    if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        state
+            .notification_service
+            .push_software_states_for_tenant(svc.tenant_id)
+            .await;
+    }
+
+    LoopAction::Continue
+}
+
+// ---------------------------------------------------------------------------
+// handle_discovery_results
+// ---------------------------------------------------------------------------
+
+/// Handle a `DiscoveryResults` message: find host, process results.
+pub(super) async fn handle_discovery_results(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: DiscoveryResultsPayload,
+) -> LoopAction {
+    tracing::debug!(
+        %service_id,
+        host_machine_id = %payload.host_machine_id,
+        results = payload.results.len(),
+        "received DiscoveryResults"
+    );
+
+    let links = service_host::Entity::find()
+        .filter(service_host::Column::ServiceId.eq(service_id))
+        .all(state.db())
+        .await
+        .unwrap_or_default();
+
+    let mut host_id_opt: Option<uuid::Uuid> = None;
+    for link in &links {
+        if let Ok(Some(h)) = host::Entity::find_by_id(link.host_id)
+            .filter(host::Column::MachineId.eq(&payload.host_machine_id))
+            .filter(host::Column::DeactivatedAt.is_null())
+            .one(state.db())
+            .await
+        {
+            host_id_opt = Some(h.id);
+            break;
+        }
+    }
+
+    if let Some(host_id) = host_id_opt {
+        if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+            && let Err(e) =
+                crate::queries::autodiscovery::process_discovery_results(
+                    state.db(),
+                    service_id,
+                    svc.tenant_id,
+                    host_id,
+                    payload,
+                )
+                .await
+        {
+            tracing::warn!(
+                error = %e,
+                %service_id,
+                "failed to process discovery results"
+            );
+        }
+    } else {
+        tracing::warn!(
+            %service_id,
+            host_machine_id = %payload.host_machine_id,
+            "received DiscoveryResults for unknown host machine_id"
+        );
+    }
+
+    LoopAction::Continue
+}
