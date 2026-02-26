@@ -1,11 +1,15 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uptrakit_shared_types::SoftwareDiscoveryState;
+use uptrakit_shared_types::{PluginRole, SoftwareDiscoveryState};
 use uuid::Uuid;
 
 use crate::pagination::PaginationParams;
 use crate::plugin_configs::CreatePluginConfigRequest;
 use crate::validation::{Validate, ValidationError};
+
+fn default_execution_site() -> String {
+    "auto".to_string()
+}
 
 /// Create a new software item (catalog entry only — no plugin coupling).
 #[derive(Serialize, Deserialize)]
@@ -27,18 +31,38 @@ pub struct UpdateSoftwareItemRequest {
 }
 
 /// Per-host plugin assignment used when assigning hosts to a software item.
+///
+/// Each host assignment contains a list of role-specific plugin assignments.
+/// At minimum, a `detect_version` role should be provided for version tracking.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostSoftwareAssignment {
     pub host_id: Uuid,
+    /// Role-specific plugin assignments for this host-software pair.
+    pub plugins: Vec<HostPluginRoleAssignment>,
+}
+
+/// A plugin assignment for a specific role on a host-software pair.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HostPluginRoleAssignment {
+    /// The role this plugin serves (e.g. `detect_version`, `fetch_releases`, `execute_update`).
+    pub role: PluginRole,
     /// UUID of an existing plugin config to use.
     pub plugin_config_id: Option<Uuid>,
     /// Inline plugin config to create (mutually exclusive with `plugin_config_id`).
     pub plugin_config: Option<CreatePluginConfigRequest>,
-    /// Plugin-specific package identifier. Defaults to `""` if omitted.
-    pub package_identifier: Option<String>,
+    /// Plugin-specific package identifier.
+    pub package_identifier: String,
     /// Plugin-specific overrides merged onto the base config at resolution time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_override: Option<serde_json::Value>,
+    /// Controls where this plugin's operation is executed.
+    /// - `"auto"`: system decides based on plugin capabilities (default)
+    /// - `"agent"`: always run on the agent
+    /// - `"controller"`: always run on the controller (only valid for `fetch_releases`)
+    #[serde(default = "default_execution_site")]
+    pub execution_site: String,
 }
 
 /// Assign one or more hosts to a software item, each with its own plugin info.
@@ -48,17 +72,22 @@ pub struct AssignHostsRequest {
     pub host_assignments: Vec<HostSoftwareAssignment>,
 }
 
-/// Update the plugin info for an existing host–software-item assignment.
+/// Update a single role assignment for an existing host–software-item pair.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHostAssignmentRequest {
+    /// The role to update (e.g. `detect_version`, `fetch_releases`, `execute_update`).
+    pub role: PluginRole,
     /// UUID of an existing plugin config to use.
     pub plugin_config_id: Option<Uuid>,
     /// Inline plugin config to create (mutually exclusive with `plugin_config_id`).
     pub plugin_config: Option<CreatePluginConfigRequest>,
     pub package_identifier: Option<String>,
-    /// Send `null` to clear the override, an object to clear it.
+    /// Send `null` to clear the override, an object to set it.
     pub config_override: Option<serde_json::Value>,
+    /// Controls where this plugin's operation is executed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_site: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -76,15 +105,13 @@ pub struct SoftwareItemResponse {
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_checked_at: Option<OffsetDateTime>,
     pub host_count: u64,
-    /// Latest known version from the `available_versions` table.
-    /// Populated for agent-side plugins (Homebrew, PHS) that report upstream versions.
-    /// `None` for controller-side plugins (GitHub Releases, Docker) until upstream
-    /// resolution is available.
+    /// Latest known version derived as the maximum across all hosts'
+    /// `latest_version` values. `None` when no host has a known latest version yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_version: Option<String>,
     /// `true` when at least one assigned host has an `installed_version` that differs
-    /// from `latest_version` (and both values are known). Uses string equality — no
-    /// semver parsing — because version formats are plugin-specific.
+    /// from its per-host `latest_version` (and both values are known). Uses string
+    /// equality — no semver parsing — because version formats are plugin-specific.
     pub update_available: bool,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
@@ -109,12 +136,11 @@ pub struct SoftwareItemDetailResponse {
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_checked_at: Option<OffsetDateTime>,
     pub host_count: u64,
-    /// Latest known version from the `available_versions` table. See `SoftwareItemResponse`
-    /// for full semantics.
+    /// Latest known version derived as the maximum across all hosts' `latest_version` values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_version: Option<String>,
     /// `true` when any assigned host has a known `installed_version` that differs from
-    /// `latest_version`.
+    /// its per-host `latest_version`.
     pub update_available: bool,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
@@ -131,27 +157,41 @@ pub struct SoftwareItemHostSummary {
     pub host_id: Uuid,
     pub hostname: String,
     pub friendly_name: String,
-    pub plugin_config_id: Uuid,
-    pub plugin_config_name: String,
-    pub plugin_type: String,
-    pub package_identifier: String,
-    pub config_override: Option<serde_json::Value>,
+    /// Role-specific plugin assignments for this host-software pair.
+    pub plugins: Vec<HostPluginRoleSummary>,
     pub installed_version: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub installed_version_detected_at: Option<OffsetDateTime>,
+    /// Per-host latest known version (from the `fetch_releases` role plugin).
+    /// `None` when no upstream version has been resolved yet for this host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
+    /// Rich release metadata (notes, date, assets) from the latest fetch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_release_metadata: Option<serde_json::Value>,
+    /// `true` when `installed_version` and `latest_version` are both `Some` and differ.
+    pub update_available: bool,
     #[serde(with = "time::serde::rfc3339::option")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_updated_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub linked_at: OffsetDateTime,
-    /// Latest known version for this software item (denormalized from the item level).
-    /// `None` when no upstream version has been resolved yet.
+}
+
+/// Summary of a plugin role assignment on a host-software pair (read-only).
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HostPluginRoleSummary {
+    pub role: PluginRole,
+    pub plugin_config_id: Uuid,
+    pub plugin_config_name: String,
+    pub plugin_type: String,
+    pub package_identifier: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub latest_version: Option<String>,
-    /// `true` when `installed_version` and `latest_version` are both `Some` and differ.
-    pub update_available: bool,
+    pub config_override: Option<serde_json::Value>,
+    pub execution_site: String,
 }
 
 /// Status returned when triggering an update.
@@ -334,22 +374,40 @@ mod tests {
             host_assignments: vec![
                 HostSoftwareAssignment {
                     host_id: sample_uuid(),
-                    plugin_config_id: Some(sample_uuid()),
-                    plugin_config: None,
-                    package_identifier: Some("1password".to_string()),
-                    config_override: None,
+                    plugins: vec![
+                        HostPluginRoleAssignment {
+                            role: PluginRole::DetectVersion,
+                            plugin_config_id: Some(sample_uuid()),
+                            plugin_config: None,
+                            package_identifier: "1password".to_string(),
+                            config_override: None,
+                            execution_site: "auto".to_string(),
+                        },
+                        HostPluginRoleAssignment {
+                            role: PluginRole::FetchReleases,
+                            plugin_config_id: Some(sample_uuid()),
+                            plugin_config: None,
+                            package_identifier: "1password".to_string(),
+                            config_override: None,
+                            execution_site: "auto".to_string(),
+                        },
+                    ],
                 },
                 HostSoftwareAssignment {
                     host_id: Uuid::nil(),
-                    plugin_config_id: None,
-                    plugin_config: Some(crate::plugin_configs::CreatePluginConfigRequest {
-                        name: "Homebrew Casks".to_string(),
-                        plugin_type: PluginType::Homebrew,
-                        config: serde_json::json!({"package_type": "cask"}),
-                        enabled: true,
-                    }),
-                    package_identifier: Some("1password-cli".to_string()),
-                    config_override: None,
+                    plugins: vec![HostPluginRoleAssignment {
+                        role: PluginRole::ExecuteUpdate,
+                        plugin_config_id: None,
+                        plugin_config: Some(crate::plugin_configs::CreatePluginConfigRequest {
+                            name: "Homebrew Casks".to_string(),
+                            plugin_type: PluginType::Homebrew,
+                            config: serde_json::json!({"package_type": "cask"}),
+                            enabled: true,
+                        }),
+                        package_identifier: "1password-cli".to_string(),
+                        config_override: None,
+                        execution_site: "agent".to_string(),
+                    }],
                 },
             ],
         };
@@ -358,13 +416,45 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.host_assignments.len(), 2);
         assert_eq!(deserialized.host_assignments[0].host_id, sample_uuid());
+        assert_eq!(deserialized.host_assignments[0].plugins.len(), 2);
         assert_eq!(
-            deserialized.host_assignments[0]
-                .package_identifier
-                .as_deref(),
-            Some("1password")
+            deserialized.host_assignments[0].plugins[0].package_identifier,
+            "1password"
         );
-        assert!(deserialized.host_assignments[1].plugin_config.is_some());
+        assert_eq!(deserialized.host_assignments[1].plugins.len(), 1);
+        assert!(deserialized.host_assignments[1].plugins[0]
+            .plugin_config
+            .is_some());
+    }
+
+    #[test]
+    fn host_plugin_role_assignment_defaults_execution_site() {
+        let json = serde_json::json!({
+            "role": "detect_version",
+            "plugin_config_id": sample_uuid(),
+            "package_identifier": "nginx"
+        });
+        let assignment: HostPluginRoleAssignment =
+            serde_json::from_value(json).expect("deserialization should succeed");
+        assert_eq!(assignment.execution_site, "auto");
+        assert_eq!(assignment.role, PluginRole::DetectVersion);
+    }
+
+    #[test]
+    fn update_host_assignment_request_round_trip() {
+        let req = UpdateHostAssignmentRequest {
+            role: PluginRole::FetchReleases,
+            plugin_config_id: Some(sample_uuid()),
+            plugin_config: None,
+            package_identifier: Some("nginx".to_string()),
+            config_override: None,
+            execution_site: Some("controller".to_string()),
+        };
+        let json = serde_json::to_string(&req).expect("serialization should succeed");
+        let deserialized: UpdateHostAssignmentRequest =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(deserialized.role, PluginRole::FetchReleases);
+        assert_eq!(deserialized.execution_site.as_deref(), Some("controller"));
     }
 
     // ── SoftwareItemResponse ─────────────────────────────────────────
