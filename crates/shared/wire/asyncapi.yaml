@@ -1470,14 +1470,36 @@ components:
             $ref: "#/components/schemas/versionCheckAssignment"
           description: List of software items to check
 
+    pluginAssignment:
+      type: object
+      required:
+        - plugin_type
+        - package_identifier
+        - config
+      properties:
+        plugin_type:
+          type: string
+          description: Plugin type identifier
+          examples:
+            - github_releases
+            - docker
+            - homebrew
+            - apt
+        package_identifier:
+          type: string
+          description: Package identifier for this role's plugin
+          examples:
+            - prometheus/prometheus
+            - nginx:latest
+        config:
+          type: object
+          description: Merged plugin configuration (base + override)
+
     versionCheckAssignment:
       type: object
       required:
         - software_item_id
         - name
-        - plugin_type
-        - package_identifier
-        - config
       properties:
         software_item_id:
           type: string
@@ -1490,24 +1512,16 @@ components:
           description: Human-readable name for logging
           examples:
             - Prometheus
-        plugin_type:
-          type: string
-          description: Plugin type identifier
-          examples:
-            - github_releases
-            - docker
-            - proxmox_helper_scripts
-            - homebrew
-            - apt
-        package_identifier:
-          type: string
-          description: Package identifier for the plugin
-          examples:
-            - prometheus/prometheus
-            - nginx:latest
-        config:
-          type: object
-          description: Plugin-specific configuration
+        detect_version:
+          $ref: "#/components/schemas/pluginAssignment"
+          description: |
+            Plugin for the detect_version role.
+            Absent if no detect_version plugin is configured.
+        fetch_releases:
+          $ref: "#/components/schemas/pluginAssignment"
+          description: |
+            Plugin for the fetch_releases role (agent-side only).
+            Absent for controller-side fetch_releases plugins.
 
     versionCheckResultsPayload:
       type: object
@@ -1560,16 +1574,6 @@ components:
           description: Error message if detection failed
           examples:
             - "unsupported plugin type"
-
-    updatePluginType:
-      type: string
-      enum:
-        - github_releases
-        - proxmox_helper_scripts
-        - docker
-        - homebrew
-        - apt
-      description: Plugin type for update execution
 
     outputStreamType:
       type: string
@@ -1725,10 +1729,8 @@ components:
         - update_history_id
         - software_item_id
         - software_item_name
-        - package_identifier
         - to_version
-        - plugin_type
-        - plugin_config
+        - execute_update_plugin
       properties:
         seq:
           type: integer
@@ -1764,21 +1766,19 @@ components:
           description: Display name of the software item
           examples:
             - Node.js
-        package_identifier:
-          type: string
-          description: Plugin-specific package identifier
-          examples:
-            - nodejs/node
         to_version:
           type: string
           description: Target version to update to
           examples:
             - v20.0.0
-        plugin_type:
-          $ref: "#/components/schemas/updatePluginType"
-        plugin_config:
-          type: object
-          description: Merged plugin configuration (base + override)
+        detect_version_plugin:
+          $ref: "#/components/schemas/pluginAssignment"
+          description: |
+            Plugin for the detect_version role (before/after installed-version
+            detection). Absent when no detect_version plugin is configured.
+        execute_update_plugin:
+          $ref: "#/components/schemas/pluginAssignment"
+          description: Plugin for the execute_update role
         pre_update_hooks:
           type: array
           items:

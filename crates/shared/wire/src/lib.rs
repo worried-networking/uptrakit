@@ -12,7 +12,7 @@ use uuid::Uuid;
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{
     DiscoveredSoftware, HookShell, MqttClientConnectionStatus, MqttTransport, OutputStreamType,
-    PluginType, ReleaseAsset, ReleaseInfo, ServiceType,
+    PluginRole, PluginType, ReleaseAsset, ReleaseInfo, ServiceType,
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
@@ -515,19 +515,33 @@ pub struct CheckVersionsPayload {
     pub assignments: Vec<VersionCheckAssignment>,
 }
 
-/// A single software item to check for installed version.
+/// A plugin assignment for a specific role in a version check or update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginAssignment {
+    /// The plugin type (e.g. github_releases, apt, homebrew).
+    pub plugin_type: PluginType,
+    /// Package identifier for this role's plugin.
+    pub package_identifier: String,
+    /// Merged plugin config (base + override).
+    pub config: serde_json::Value,
+}
+
+/// A single software item to check for installed version and/or latest version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionCheckAssignment {
     /// Software item ID.
     pub software_item_id: Uuid,
     /// Human-readable name for logging.
     pub name: String,
-    /// Plugin type.
-    pub plugin_type: PluginType,
-    /// Package identifier for the plugin.
-    pub package_identifier: String,
-    /// Plugin-specific configuration.
-    pub config: serde_json::Value,
+    /// Plugin for the detect_version role.
+    /// None if no detect_version plugin is configured for this host-software pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detect_version: Option<PluginAssignment>,
+    /// Plugin for the fetch_releases role — only included for agent-side plugins
+    /// (i.e., plugins without ControllerSideFetchReleases or with execution_site = agent).
+    /// Controller-side fetch_releases is handled by the scheduler, not sent to the agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetch_releases: Option<PluginAssignment>,
 }
 
 /// Payload for version check results from the agent.
@@ -585,11 +599,13 @@ pub struct ExecuteUpdatePayload {
     pub update_history_id: Uuid,
     pub software_item_id: Uuid,
     pub software_item_name: String,
-    pub package_identifier: String,
     pub to_version: String,
-    pub plugin_type: PluginType,
-    /// Merged plugin config (base + override).
-    pub plugin_config: serde_json::Value,
+    /// Plugin for the detect_version role (for before/after installed-version detection).
+    /// Absent when no detect_version plugin is configured for this assignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detect_version_plugin: Option<PluginAssignment>,
+    /// Plugin for the execute_update role.
+    pub execute_update_plugin: PluginAssignment,
     /// Pre-update hook commands to execute before the update.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pre_update_hooks: Vec<HookCommand>,
@@ -1676,9 +1692,12 @@ mod tests {
             assignments: vec![VersionCheckAssignment {
                 software_item_id: TEST_UUID_1,
                 name: "Test Software".to_string(),
-                plugin_type: PluginType::GithubReleases,
-                package_identifier: "owner/repo".to_string(),
-                config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
+                detect_version: Some(PluginAssignment {
+                    plugin_type: PluginType::GithubReleases,
+                    package_identifier: "owner/repo".to_string(),
+                    config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
+                }),
+                fetch_releases: None,
             }],
         });
         let json = serde_json::to_string(&msg).unwrap();
@@ -1696,10 +1715,17 @@ mod tests {
             update_history_id: Uuid::parse_str("01936a1e-7e8c-7f00-8000-000000000001").unwrap(),
             software_item_id: Uuid::parse_str("01936a1e-7e8c-7f00-8000-000000000002").unwrap(),
             software_item_name: "Node.js".to_string(),
-            package_identifier: "nodejs".to_string(),
             to_version: "20.10.0".to_string(),
-            plugin_type: PluginType::GithubReleases,
-            plugin_config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+            detect_version_plugin: Some(PluginAssignment {
+                plugin_type: PluginType::GithubReleases,
+                package_identifier: "nodejs".to_string(),
+                config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+            }),
+            execute_update_plugin: PluginAssignment {
+                plugin_type: PluginType::GithubReleases,
+                package_identifier: "nodejs".to_string(),
+                config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+            },
             pre_update_hooks: vec![HookCommand::Exec {
                 program: "systemctl".to_string(),
                 args: vec!["stop".to_string(), "myapp".to_string()],
@@ -1737,10 +1763,13 @@ mod tests {
             update_history_id: TEST_UUID_1,
             software_item_id: TEST_UUID_2,
             software_item_name: "Redis".to_string(),
-            package_identifier: "redis-server".to_string(),
             to_version: "7.2.0".to_string(),
-            plugin_type: PluginType::ProxmoxHelperScripts,
-            plugin_config: serde_json::json!({}),
+            detect_version_plugin: None,
+            execute_update_plugin: PluginAssignment {
+                plugin_type: PluginType::ProxmoxHelperScripts,
+                package_identifier: "redis-server".to_string(),
+                config: serde_json::json!({}),
+            },
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
             release_info: None,
@@ -1751,6 +1780,8 @@ mod tests {
         assert!(!json.contains("pre_update_hooks"));
         assert!(!json.contains("post_update_hooks"));
         assert!(!json.contains("release_info"));
+        // detect_version_plugin should be omitted when None
+        assert!(!json.contains("detect_version_plugin"));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -1763,10 +1794,12 @@ mod tests {
             "update_history_id": "550e8400-e29b-41d4-a716-446655440000",
             "software_item_id": "550e8400-e29b-41d4-a716-446655440001",
             "software_item_name": "Test",
-            "package_identifier": "test",
             "to_version": "1.0.0",
-            "plugin_type": "github_releases",
-            "plugin_config": {}
+            "execute_update_plugin": {
+                "plugin_type": "github_releases",
+                "package_identifier": "test",
+                "config": {}
+            }
         }"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         if let ControllerMessage::ExecuteUpdate(payload) = msg {
@@ -1785,10 +1818,13 @@ mod tests {
             update_history_id: TEST_UUID_1,
             software_item_id: TEST_UUID_2,
             software_item_name: "Test".to_string(),
-            package_identifier: "test".to_string(),
             to_version: "1.0.0".to_string(),
-            plugin_type: PluginType::GithubReleases,
-            plugin_config: serde_json::json!({}),
+            detect_version_plugin: None,
+            execute_update_plugin: PluginAssignment {
+                plugin_type: PluginType::GithubReleases,
+                package_identifier: "test".to_string(),
+                config: serde_json::json!({}),
+            },
             pre_update_hooks: vec![HookCommand::Shell {
                 command: "echo hello".to_string(),
                 shell: HookShell::Sh,
@@ -1827,10 +1863,12 @@ mod tests {
             "update_history_id": "550e8400-e29b-41d4-a716-446655440000",
             "software_item_id": "550e8400-e29b-41d4-a716-446655440001",
             "software_item_name": "Test",
-            "package_identifier": "test",
             "to_version": "1.0.0",
-            "plugin_type": "github_releases",
-            "plugin_config": {},
+            "execute_update_plugin": {
+                "plugin_type": "github_releases",
+                "package_identifier": "test",
+                "config": {}
+            },
             "unknown_field": "ignored"
         }"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
@@ -2181,9 +2219,12 @@ mod tests {
         let assignment = VersionCheckAssignment {
             software_item_id: TEST_UUID_1,
             name: "Docker Image".to_string(),
-            plugin_type: PluginType::Docker,
-            package_identifier: "nginx:latest".to_string(),
-            config: serde_json::json!({}),
+            detect_version: Some(PluginAssignment {
+                plugin_type: PluginType::Docker,
+                package_identifier: "nginx:latest".to_string(),
+                config: serde_json::json!({}),
+            }),
+            fetch_releases: None,
         };
         let json = serde_json::to_string(&assignment).unwrap();
         assert!(json.contains(r#""plugin_type":"docker""#));
@@ -2213,14 +2254,16 @@ mod tests {
         let json = serde_json::json!({
             "software_item_id": "00000000-0000-0000-0000-000000000001",
             "name": "My App",
-            "plugin_type": "winget",
-            "package_identifier": "my-app",
-            "config": {}
+            "detect_version": {
+                "plugin_type": "winget",
+                "package_identifier": "my-app",
+                "config": {}
+            }
         });
         let assignment: VersionCheckAssignment =
             serde_json::from_value(json).expect("should deserialize");
         assert_eq!(
-            assignment.plugin_type,
+            assignment.detect_version.as_ref().unwrap().plugin_type,
             PluginType::Other("winget".to_string())
         );
     }
@@ -2231,13 +2274,18 @@ mod tests {
         let json = serde_json::json!({
             "software_item_id": "00000000-0000-0000-0000-000000000001",
             "name": "nginx",
-            "plugin_type": "apt",
-            "package_identifier": "nginx",
-            "config": {}
+            "detect_version": {
+                "plugin_type": "apt",
+                "package_identifier": "nginx",
+                "config": {}
+            }
         });
         let assignment: VersionCheckAssignment =
             serde_json::from_value(json).expect("should deserialize");
-        assert_eq!(assignment.plugin_type, PluginType::Apt);
+        assert_eq!(
+            assignment.detect_version.as_ref().unwrap().plugin_type,
+            PluginType::Apt
+        );
     }
 
     #[test]
@@ -2902,9 +2950,12 @@ mod tests {
                 assignments: vec![VersionCheckAssignment {
                     software_item_id: TEST_UUID_1,
                     name: "Test Software".to_string(),
-                    plugin_type: PluginType::GithubReleases,
-                    package_identifier: "owner/repo".to_string(),
-                    config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
+                    detect_version: Some(PluginAssignment {
+                        plugin_type: PluginType::GithubReleases,
+                        package_identifier: "owner/repo".to_string(),
+                        config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
+                    }),
+                    fetch_releases: None,
                 }],
             }));
         spec.validate("checkVersionsPayload", &json);
@@ -2919,10 +2970,13 @@ mod tests {
                 update_history_id: TEST_UUID_1,
                 software_item_id: TEST_UUID_2,
                 software_item_name: "Node.js".to_string(),
-                package_identifier: "nodejs".to_string(),
                 to_version: "20.10.0".to_string(),
-                plugin_type: PluginType::GithubReleases,
-                plugin_config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+                detect_version_plugin: None,
+                execute_update_plugin: PluginAssignment {
+                    plugin_type: PluginType::GithubReleases,
+                    package_identifier: "nodejs".to_string(),
+                    config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+                },
                 pre_update_hooks: vec![],
                 post_update_hooks: vec![],
                 release_info: None,
