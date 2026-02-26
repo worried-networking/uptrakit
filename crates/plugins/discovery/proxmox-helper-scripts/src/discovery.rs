@@ -68,6 +68,21 @@ pub struct PhsScriptAnalysis {
     pub apt_package: Option<String>,
     /// Human-readable application name extracted from `APP=` assignment.
     pub app_name: Option<String>,
+    /// Version file basename when it differs from the container slug.
+    ///
+    /// PHS stores the installed version in `/root/.<key>` where `<key>` is the
+    /// first argument passed to `check_for_gh_release`. When this key differs
+    /// from the container slug (the `.sh` filename without extension), this
+    /// field holds the key so the version helper script is invoked with the
+    /// correct argument.
+    ///
+    /// Example: `paperless-ngx.sh` calls
+    /// `check_for_gh_release "paperless" "paperless-ngx/paperless-ngx"`, so
+    /// `version_file_basename = Some("paperless")` and the installed version
+    /// lives in `/root/.paperless`, not `/root/.paperless-ngx`.
+    ///
+    /// When `None`, the container slug is used as the version file basename.
+    pub version_file_basename: Option<String>,
 }
 
 /// A discovered PHS script reference extracted from the update script.
@@ -106,7 +121,7 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
             .find(|(key, _, _)| slug_matches(key, slug))
             .or_else(|| p1_matches.first());
 
-        if let Some((_, owner, repo)) = best
+        if let Some((best_key, owner, repo)) = best
             && is_valid_gh_component(owner)
             && is_valid_gh_component(repo)
         {
@@ -115,6 +130,7 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
                 github_repo: Some(repo.clone()),
                 apt_package: None,
                 app_name,
+                version_file_basename: derive_version_file_basename(best_key, slug),
             };
         }
     }
@@ -129,6 +145,7 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
             github_repo: Some(repo),
             apt_package: None,
             app_name,
+            version_file_basename: None,
         };
     }
 
@@ -138,6 +155,7 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
         github_repo: None,
         apt_package: extract_apt_package(content),
         app_name,
+        version_file_basename: None,
     }
 }
 
@@ -166,6 +184,25 @@ pub fn extract_apt_package_candidates(content: &str) -> Vec<String> {
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Derive the version file basename from a `check_for_gh_release` key.
+///
+/// PHS writes the installed version to `/root/.<key>` where `<key>` is the
+/// first argument to `check_for_gh_release`. When that key is a valid PHS slug
+/// (`[a-z0-9][a-z0-9-]*`) and differs from the container slug, we return
+/// `Some(key)` so callers can read the correct file.
+///
+/// Returns `None` when:
+/// - The key equals the slug (no override needed).
+/// - The key contains uppercase or other characters outside `[a-z0-9-]`
+///   (we cannot safely map those to a predictable version file path).
+fn derive_version_file_basename(key: &str, slug: &str) -> Option<String> {
+    if is_valid_slug(key) && key != slug {
+        Some(key.to_string())
+    } else {
+        None
+    }
+}
 
 /// Extract all `apt install <pkg>` package names from `content`.
 ///
@@ -575,6 +612,44 @@ fetch_and_deploy_gh_release "AdGuardHome" "AdGuardTeam/AdGuardHome"
         // No key matches slug "adguard", so fallback to first match.
         assert_eq!(result.github_owner.as_deref(), Some("AdGuardTeam"));
         assert_eq!(result.github_repo.as_deref(), Some("AdGuardHome"));
+        // Key "AdGuardHome" has uppercase → not a valid slug → no version file
+        // override; the agent will fall back to reading /root/.adguard.
+        assert!(result.version_file_basename.is_none());
+    }
+
+    #[test]
+    fn analyze_paperless_ngx_version_file_override() {
+        // Paperless-ngx: slug is "paperless-ngx" but the check_for_gh_release
+        // key is "paperless", so the installed version lives in /root/.paperless.
+        let content = r#"
+APP="Paperless-ngx"
+check_for_gh_release "paperless" "paperless-ngx/paperless-ngx"
+"#;
+        let result = analyze_phs_script("paperless-ngx", content);
+        assert_eq!(result.github_owner.as_deref(), Some("paperless-ngx"));
+        assert_eq!(result.github_repo.as_deref(), Some("paperless-ngx"));
+        assert_eq!(result.app_name.as_deref(), Some("Paperless-ngx"));
+        // Key "paperless" is a valid lowercase slug and differs from slug
+        // "paperless-ngx", so the version file basename must be set.
+        assert_eq!(result.version_file_basename.as_deref(), Some("paperless"));
+    }
+
+    #[test]
+    fn analyze_version_file_same_as_slug_no_override() {
+        // When the key exactly matches the slug, no override is needed.
+        let content = r#"check_for_gh_release "booklore" "BookLore/BookLore""#;
+        let result = analyze_phs_script("booklore", content);
+        assert_eq!(result.github_owner.as_deref(), Some("BookLore"));
+        assert!(result.version_file_basename.is_none());
+    }
+
+    #[test]
+    fn analyze_gh_repo_var_no_version_file_override() {
+        // The GH_REPO= path has no explicit key; version_file_basename is None.
+        let content = r#"GH_REPO="someorg/someapp""#;
+        let result = analyze_phs_script("someapp", content);
+        assert_eq!(result.github_owner.as_deref(), Some("someorg"));
+        assert!(result.version_file_basename.is_none());
     }
 
     #[test]

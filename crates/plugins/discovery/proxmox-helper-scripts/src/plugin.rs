@@ -116,19 +116,28 @@ impl ProxmoxHelperScriptsPlugin {
         response.text().await.ok()
     }
 
-    /// Run the PHS version helper script for a slug.
+    /// Run the PHS version helper script with `version_file_basename`.
     ///
-    /// The helper script (`uptrakit-phs-version`) validates the slug before
-    /// reading `/root/.<slug>`, so this call is both correct and safe — no
-    /// path traversal is possible.
+    /// The helper script (`uptrakit-phs-version`) validates the argument before
+    /// reading `/root/.<version_file_basename>`, so this call is both correct
+    /// and safe — no path traversal is possible.
+    ///
+    /// The `version_file_basename` is normally the container slug, but for apps
+    /// where the `check_for_gh_release` key differs from the slug (e.g.
+    /// Paperless-ngx uses key `"paperless"` for slug `"paperless-ngx"`), it
+    /// must be the key instead.
     ///
     /// Returns the installed version string, or `None` if the helper is not
     /// installed, the version file does not exist, or the output is unparseable.
-    async fn phs_version(&self, slug: &str) -> Option<String> {
+    async fn phs_version(&self, version_file_basename: &str) -> Option<String> {
         let output = self
             .executor
             .execute_quiet(
-                &CommandSpec::exec(PHS_VERSION_HELPER_PATH, [slug.to_string()]).privileged(),
+                &CommandSpec::exec(
+                    PHS_VERSION_HELPER_PATH,
+                    [version_file_basename.to_string()],
+                )
+                .privileged(),
             )
             .await
             .ok()?;
@@ -179,7 +188,24 @@ impl ProxmoxHelperScriptsPlugin {
 
     /// Build a `DiscoveryTarget` for the Shell plugin covering both
     /// `DetectVersion` and `ExecuteUpdate` using PHS conventions.
-    fn phs_shell_target() -> DiscoveryTarget {
+    ///
+    /// When `version_file_basename` is `Some`, it is set as the
+    /// `package_identifier` override on the target. The Shell plugin expands
+    /// `{package_identifier}` in the `version_command` at runtime, so the
+    /// helper script will be invoked as:
+    ///
+    /// ```text
+    /// sudo /usr/local/bin/uptrakit-phs-version <version_file_basename>
+    /// ```
+    ///
+    /// which reads `/root/.<version_file_basename>` — the correct version file
+    /// for apps like Paperless-ngx where the `check_for_gh_release` key
+    /// (`"paperless"`) differs from the container slug (`"paperless-ngx"`).
+    ///
+    /// When `None`, `{package_identifier}` resolves to the software item's own
+    /// `package_identifier` (the container slug), which is correct for the
+    /// common case where key == slug.
+    fn phs_shell_target(version_file_basename: Option<&str>) -> DiscoveryTarget {
         DiscoveryTarget {
             plugin_type: PluginType::GenericShell,
             plugin_config: serde_json::json!({
@@ -188,7 +214,7 @@ impl ProxmoxHelperScriptsPlugin {
             }),
             plugin_config_name: "PHS Shell".to_string(),
             roles: vec![PluginRole::DetectVersion, PluginRole::ExecuteUpdate],
-            package_identifier: None,
+            package_identifier: version_file_basename.map(str::to_string),
             config_override: None,
             execution_site: None,
         }
@@ -279,8 +305,14 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
 
             if let (Some(owner), Some(repo)) = (&analysis.github_owner, &analysis.github_repo) {
                 // GitHub-managed: read version via the helper script.
-                // The helper validates the slug and reads /root/.<slug>.
-                let Some(installed_version) = self.phs_version(&script.slug).await else {
+                // Use the version file basename from the analysis (which may differ
+                // from the slug when the check_for_gh_release key differs, e.g.
+                // Paperless-ngx uses key "paperless" → /root/.paperless).
+                let vfb = analysis
+                    .version_file_basename
+                    .as_deref()
+                    .unwrap_or(&script.slug);
+                let Some(installed_version) = self.phs_version(vfb).await else {
                     tracing::debug!(slug = %script.slug,
                         "PHS version helper absent or version file absent; skipping GitHub item");
                     continue;
@@ -288,6 +320,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
 
                 tracing::debug!(
                     slug = %script.slug,
+                    version_file_basename = %vfb,
                     version = %installed_version,
                     owner = %owner,
                     repo = %repo,
@@ -300,7 +333,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     installed_version,
                     targets: vec![
                         Self::github_fetch_target(owner, repo),
-                        Self::phs_shell_target(),
+                        Self::phs_shell_target(analysis.version_file_basename.as_deref()),
                     ],
                     extra: None,
                 });
@@ -443,7 +476,7 @@ mod tests {
 
     #[test]
     fn phs_shell_target_structure() {
-        let target = ProxmoxHelperScriptsPlugin::phs_shell_target();
+        let target = ProxmoxHelperScriptsPlugin::phs_shell_target(None);
         assert_eq!(target.plugin_type, PluginType::GenericShell);
         assert_eq!(target.plugin_config_name, "PHS Shell");
         assert_eq!(target.roles.len(), 2);
@@ -466,7 +499,29 @@ mod tests {
             "version_command must use sudo for shell-mode execution, got: {version_cmd}"
         );
         assert_eq!(target.plugin_config["update_command"], PHS_INSTALL_CMD);
+        // Without an override, the software item's own package_identifier
+        // (the container slug) is used at runtime.
         assert!(target.package_identifier.is_none());
+    }
+
+    #[test]
+    fn phs_shell_target_with_version_file_override() {
+        // Paperless-ngx: version file basename "paperless" differs from slug.
+        // The target must carry a package_identifier override so the Shell
+        // plugin calls `uptrakit-phs-version paperless` instead of
+        // `uptrakit-phs-version paperless-ngx`.
+        let target = ProxmoxHelperScriptsPlugin::phs_shell_target(Some("paperless"));
+        assert_eq!(target.plugin_type, PluginType::GenericShell);
+        assert_eq!(
+            target.plugin_config["version_command"],
+            PHS_DETECT_VERSION_CMD
+        );
+        assert_eq!(target.plugin_config["update_command"], PHS_INSTALL_CMD);
+        assert_eq!(
+            target.package_identifier.as_deref(),
+            Some("paperless"),
+            "package_identifier must be the version file basename override"
+        );
     }
 
     #[test]
