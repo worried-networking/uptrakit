@@ -7,10 +7,10 @@
 		getHosts,
 		assignHostsToSoftwareItem,
 		unassignHostFromSoftwareItem,
-		getProviderConfigs
+		getPluginConfigs
 	} from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
-	import type { HostResponse, ProviderConfigResponse } from '$lib/types';
+	import type { HostResponse, PluginConfigResponse, HostPluginRoleAssignment } from '$lib/types';
 
 	let {
 		softwareItemId,
@@ -24,6 +24,16 @@
 		onsuccess: () => void;
 	} = $props();
 
+	type RoleKey = 'detect_version' | 'fetch_releases' | 'execute_update';
+
+	const ROLE_LABELS: Record<RoleKey, string> = {
+		detect_version: 'Detect Version',
+		fetch_releases: 'Fetch Releases',
+		execute_update: 'Execute Update'
+	};
+
+	const ALL_ROLES: RoleKey[] = ['detect_version', 'fetch_releases', 'execute_update'];
+
 	let allHosts: HostResponse[] = $state([]);
 	const originalAssignedIds = new SvelteSet<string>();
 	const selectedIds = new SvelteSet<string>();
@@ -31,10 +41,14 @@
 	let loadError: string | null = $state(null);
 	let submitting: boolean = $state(false);
 
-	let providerConfigs: ProviderConfigResponse[] = $state([]);
-	let selectedProviderConfigId: string = $state('');
-	let packageIdentifier: string = $state('');
-	let configsLoading: boolean = $state(true);
+	let pluginConfigs: PluginConfigResponse[] = $state([]);
+
+	let roleAssignments: Record<RoleKey, { enabled: boolean; plugin_config_id: string; package_identifier: string }> =
+		$state({
+			detect_version: { enabled: true, plugin_config_id: '', package_identifier: '' },
+			fetch_releases: { enabled: false, plugin_config_id: '', package_identifier: '' },
+			execute_update: { enabled: false, plugin_config_id: '', package_identifier: '' }
+		});
 
 	const toAdd = $derived([...selectedIds].filter((id) => !originalAssignedIds.has(id)));
 
@@ -43,20 +57,24 @@
 			const [detail, hostsResult, configsResult] = await Promise.all([
 				getSoftwareItem(softwareItemId),
 				getHosts(1, 200),
-				getProviderConfigs(1, 500)
+				getPluginConfigs(1, 500)
 			]);
 			allHosts = hostsResult.items;
 			for (const h of detail.hosts) {
 				originalAssignedIds.add(h.host_id);
 				selectedIds.add(h.host_id);
 			}
-			providerConfigs = configsResult.items;
-			selectedProviderConfigId = configsResult.items[0]?.id ?? '';
+			pluginConfigs = configsResult.items;
+			const firstId = configsResult.items[0]?.id ?? '';
+			roleAssignments = {
+				detect_version: { enabled: true, plugin_config_id: firstId, package_identifier: '' },
+				fetch_releases: { enabled: false, plugin_config_id: firstId, package_identifier: '' },
+				execute_update: { enabled: false, plugin_config_id: firstId, package_identifier: '' }
+			};
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to load data.';
 		} finally {
 			loading = false;
-			configsLoading = false;
 		}
 	});
 
@@ -82,13 +100,17 @@
 		try {
 			const tasks: Promise<unknown>[] = [];
 			if (toAdd.length > 0) {
+				const plugins: HostPluginRoleAssignment[] = ALL_ROLES.filter(
+					(role) => roleAssignments[role].enabled && roleAssignments[role].plugin_config_id
+				).map((role) => ({
+					role,
+					plugin_config_id: roleAssignments[role].plugin_config_id || undefined,
+					package_identifier: roleAssignments[role].package_identifier.trim() || undefined
+				}));
+
 				tasks.push(
 					assignHostsToSoftwareItem(softwareItemId, {
-						host_assignments: toAdd.map((host_id) => ({
-							host_id,
-							provider_config_id: selectedProviderConfigId || undefined,
-							package_identifier: packageIdentifier.trim() || undefined
-						}))
+						host_assignments: toAdd.map((host_id) => ({ host_id, plugins }))
 					})
 				);
 			}
@@ -108,7 +130,7 @@
 
 <ModalBackdrop {onclose}>
 	<div
-		class="card bg-surface-50 dark:bg-surface-900 w-full max-w-lg max-h-[80vh] flex flex-col space-y-4 p-6 shadow-xl"
+		class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl max-h-[85vh] flex flex-col space-y-4 p-6 shadow-xl"
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="assign-host-title"
@@ -154,24 +176,52 @@
 
 			{#if toAdd.length > 0}
 				<div class="space-y-3 border-t border-surface-200 dark:border-surface-700 pt-3">
-					<p class="text-sm font-medium">Provider config for new assignments</p>
-					{#if configsLoading}
-						<p class="text-sm text-surface-500">Loading provider configs...</p>
-					{:else}
-						<label class="label">
-							<span>Provider config</span>
-							<select class="select" bind:value={selectedProviderConfigId}>
-								<option value="">None</option>
-								{#each providerConfigs as config (config.id)}
-									<option value={config.id}>{config.name} ({config.provider_type})</option>
+					<p class="text-sm font-medium">Role assignments for new hosts</p>
+					<div class="table-wrap">
+						<table class="table text-sm">
+							<thead>
+								<tr>
+									<th class="w-36">Role</th>
+									<th>Plugin Config</th>
+									<th>Package Identifier</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each ALL_ROLES as role (role)}
+									{@const a = roleAssignments[role]}
+									<tr>
+										<td>
+											<label class="flex items-center gap-2 cursor-pointer">
+												<input class="checkbox" type="checkbox" bind:checked={roleAssignments[role].enabled} />
+												<span class="whitespace-nowrap">{ROLE_LABELS[role]}</span>
+											</label>
+										</td>
+										<td>
+											<select
+												class="select text-sm"
+												bind:value={roleAssignments[role].plugin_config_id}
+												disabled={!a.enabled}
+											>
+												<option value="">— none —</option>
+												{#each pluginConfigs as config (config.id)}
+													<option value={config.id}>{config.name}</option>
+												{/each}
+											</select>
+										</td>
+										<td>
+											<input
+												class="input text-sm"
+												type="text"
+												placeholder="e.g. owner/repo"
+												bind:value={roleAssignments[role].package_identifier}
+												disabled={!a.enabled}
+											/>
+										</td>
+									</tr>
 								{/each}
-							</select>
-						</label>
-						<label class="label">
-							<span>Package identifier <span class="text-surface-400">(optional)</span></span>
-							<input class="input" bind:value={packageIdentifier} placeholder="e.g. firefox" />
-						</label>
-					{/if}
+							</tbody>
+						</table>
+					</div>
 				</div>
 			{/if}
 		{/if}
