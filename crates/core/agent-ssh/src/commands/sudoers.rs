@@ -128,9 +128,12 @@ pub async fn write_sudoers_file(
     let escaped_content = shell_escape(&sudoers_text);
     let sudo_prefix = if privileged { "sudo " } else { "" };
 
-    // Write the file and chmod 440.
+    // Write the file and chmod 440.  Use `printf '%s'` rather than `echo`
+    // so that (a) no extra trailing newline is appended (the generated
+    // content already ends with '\n') and (b) backslash sequences are not
+    // interpreted by the shell built-in `echo` on some platforms.
     let write_cmd = format!(
-        "echo {escaped_content} | {sudo_prefix}tee {escaped_file} > /dev/null && \
+        "printf '%s' {escaped_content} | {sudo_prefix}tee {escaped_file} > /dev/null && \
          {sudo_prefix}chmod 440 {escaped_file}"
     );
     let write_result = session.exec_command(&write_cmd).await?;

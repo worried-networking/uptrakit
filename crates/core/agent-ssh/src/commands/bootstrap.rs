@@ -432,11 +432,16 @@ async fn verify_remote(session: &SshSession, target_username: &str) -> Result<()
         )));
     }
 
-    // Verify sudo.
-    let sudo_check = session.exec_command("sudo -n true").await?;
+    // Verify sudo. We use `sudo -n -l` (list allowed commands without
+    // prompting) rather than `sudo -n true` because the sudoers file may
+    // only grant specific commands (e.g. `/usr/bin/apt-get`), not the
+    // ability to run arbitrary executables. `-n -l` exits 0 whenever the
+    // user has at least one NOPASSWD entry, which is exactly what we want
+    // to confirm here.
+    let sudo_check = session.exec_command("sudo -n -l").await?;
     if sudo_check.exit_code != 0 {
         bail!(Error::BootstrapVerification(format!(
-            "sudo -n true failed (exit code {}). Sudoers may not be \
+            "sudo -n -l failed (exit code {}). Sudoers may not be \
              configured correctly. The remote host has been partially configured.",
             sudo_check.exit_code
         )));
