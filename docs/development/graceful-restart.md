@@ -19,7 +19,9 @@ to start accepting connections while the old process drains existing ones.
 1. New process starts accepting connections immediately
 1. New process sends SIGUSR1 to old process
 1. Old process stops accepting new connections
-1. Old process scatters `ServerRestarting` notifications to agents over 5 seconds (avoids thundering herd)
+1. Old process scatters `ServerRestarting` notifications to agents over 5 seconds (avoids thundering herd), then
+   waits **up to 30 s** for all services to disconnect. If every service disconnects before the timeout, shutdown
+   proceeds immediately. If the timeout is reached, the remaining services are forcibly dropped.
 1. Old process cancels background tasks and waits for drain timeout
 1. Old process exits cleanly
 1. New process serves all traffic
@@ -56,7 +58,7 @@ in each service. See [Service Lifecycle](service-lifecycle.md) for the full reco
 | File | Purpose |
 | --- | --- |
 | `crates/core/controller/src/tasks.rs` | `BackgroundTasks` struct with coordinated shutdown sequence |
-| `crates/core/controller/src/durations.rs` | `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` (5s), `RESTART_NOTIFICATION_SCATTER` (5s) |
+| `crates/core/controller/src/durations.rs` | `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` (5s), `RESTART_NOTIFICATION_SCATTER` (5s), `SERVICE_DRAIN_POLL_INTERVAL` (250ms) |
 | `crates/core/controller/src/main.rs` | Signal handler setup (SIGTERM, SIGINT, SIGUSR1) and server event loop |
 | `crates/shared/service-sdk/src/lifecycle.rs` | `ShutdownCause` enum and `ServiceHandler::on_shutdown` trait method |
 | `crates/shared/service-sdk/src/event_loop.rs` | `ServerRestarting` handler — calls `on_shutdown` with `ShutdownCause::ServerRestarting` |
