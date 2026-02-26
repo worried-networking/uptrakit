@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -7,22 +7,22 @@ use std::cmp::Ordering;
 use time::OffsetDateTime;
 use tokio::sync::{RwLock, mpsc};
 use tokio_util::sync::CancellationToken;
+use uptrakit_internal_wire::Capability;
 use uptrakit_internal_wire::ControllerMessage;
-use uptrakit_shared_db::entity::service::ServiceType;
 use uuid::Uuid;
 
 /// Channel buffer size for push messages to connected services.
 const PUSH_CHANNEL_CAPACITY: usize = 32;
 
-/// Per-connection state for a connected service (agent or MQTT).
+/// Per-connection state for a connected service.
 struct ServiceConnection {
     /// Channel for pushing messages to the connected service.
     sender: mpsc::Sender<ControllerMessage>,
     /// Token cancelled when this connection is superseded by a new registration
     /// for the same `service_id`, signalling the old WebSocket handler to exit.
     cancel_token: CancellationToken,
-    /// Type of service (Agent or Mqtt).
-    service_type: ServiceType,
+    /// Set of capabilities advertised by this service.
+    capabilities: BTreeSet<Capability>,
     /// Instance ID provided during registration (MQTT only).
     instance_id: Option<String>,
     /// Maximum tenants this instance is willing to handle, 0 = unlimited (MQTT only).
@@ -37,9 +37,9 @@ struct ServiceConnection {
 
 /// Interior state protected by the `RwLock`.
 struct RegistryInner {
-    /// Primary map: service_id → connection state.
+    /// Primary map: service_id -> connection state.
     connections: HashMap<Uuid, ServiceConnection>,
-    /// Reverse index: mqtt_client_id → service_id for O(1) lookup.
+    /// Reverse index: mqtt_client_id -> service_id for O(1) lookup.
     mqtt_client_index: HashMap<Uuid, Uuid>,
 }
 
@@ -91,95 +91,49 @@ impl ServiceConnectionRegistry {
     // Registration
     // ---------------------------------------------------------------
 
-    /// Register a connected agent and return a receiver for push messages
-    /// plus a cancellation token that is triggered if the same `service_id`
-    /// registers again (connection deduplication).
-    pub async fn register_agent(
-        &self,
-        service_id: Uuid,
-    ) -> (mpsc::Receiver<ControllerMessage>, CancellationToken) {
-        let (tx, rx) = mpsc::channel(PUSH_CHANNEL_CAPACITY);
-        let cancel_token = CancellationToken::new();
-        let conn = ServiceConnection {
-            sender: tx,
-            cancel_token: cancel_token.clone(),
-            service_type: ServiceType::Agent,
-            instance_id: None,
-            max_tenants: None,
-            assigned_mqtt_clients: HashSet::new(),
-            last_heartbeat: None,
-            connected_at: OffsetDateTime::now_utc(),
-        };
-        let mut guard = self.inner.write().await;
-        if let Some(old) = guard.connections.remove(&service_id) {
-            old.cancel_token.cancel();
-            tracing::info!(%service_id, "cancelled superseded agent connection");
-        }
-        guard.connections.insert(service_id, conn);
-        (rx, cancel_token)
-    }
-
-    /// Register a connected SSH agent and return a receiver for push messages
-    /// plus a cancellation token that is triggered if the same `service_id`
-    /// registers again (connection deduplication).
-    pub async fn register_ssh_agent(
-        &self,
-        service_id: Uuid,
-    ) -> (mpsc::Receiver<ControllerMessage>, CancellationToken) {
-        let (tx, rx) = mpsc::channel(PUSH_CHANNEL_CAPACITY);
-        let cancel_token = CancellationToken::new();
-        let conn = ServiceConnection {
-            sender: tx,
-            cancel_token: cancel_token.clone(),
-            service_type: ServiceType::SshAgent,
-            instance_id: None,
-            max_tenants: None,
-            assigned_mqtt_clients: HashSet::new(),
-            last_heartbeat: None,
-            connected_at: OffsetDateTime::now_utc(),
-        };
-        let mut guard = self.inner.write().await;
-        if let Some(old) = guard.connections.remove(&service_id) {
-            old.cancel_token.cancel();
-            tracing::info!(%service_id, "cancelled superseded SSH agent connection");
-        }
-        guard.connections.insert(service_id, conn);
-        (rx, cancel_token)
-    }
-
-    /// Register a connected MQTT service and return a receiver for push messages
+    /// Register a connected service and return a receiver for push messages
     /// plus a cancellation token that is triggered if the same `service_id`
     /// registers again (connection deduplication).
     ///
-    /// The `service_id` is the database ID of the MQTT service. The `instance_id`
-    /// and `max_tenants` come from the Register message sent by the service after
-    /// connecting.
-    pub async fn register_mqtt(
+    /// The `capabilities` set describes what the service can do.  For MQTT
+    /// bridge services (those with `Capability::MqttBridge`), `instance_id`
+    /// and `max_tenants` should be provided; for all other services they
+    /// can be `None`.
+    pub async fn register(
         &self,
         service_id: Uuid,
-        instance_id: String,
-        max_tenants: u32,
+        capabilities: BTreeSet<Capability>,
+        instance_id: Option<String>,
+        max_tenants: Option<u32>,
     ) -> (mpsc::Receiver<ControllerMessage>, CancellationToken) {
         let (tx, rx) = mpsc::channel(PUSH_CHANNEL_CAPACITY);
         let cancel_token = CancellationToken::new();
+
+        let is_mqtt = capabilities.contains(&Capability::MqttBridge);
+
         let conn = ServiceConnection {
             sender: tx,
             cancel_token: cancel_token.clone(),
-            service_type: ServiceType::Mqtt,
-            instance_id: Some(instance_id),
-            max_tenants: Some(max_tenants),
+            capabilities,
+            instance_id,
+            max_tenants,
             assigned_mqtt_clients: HashSet::new(),
-            last_heartbeat: Some(Instant::now()),
+            last_heartbeat: if is_mqtt {
+                Some(Instant::now())
+            } else {
+                None
+            },
             connected_at: OffsetDateTime::now_utc(),
         };
+
         let mut guard = self.inner.write().await;
         if let Some(old) = guard.connections.remove(&service_id) {
             old.cancel_token.cancel();
-            // Clean up reverse index for superseded MQTT connection.
+            // Clean up reverse index for superseded connection.
             for client_id in &old.assigned_mqtt_clients {
                 guard.mqtt_client_index.remove(client_id);
             }
-            tracing::info!(%service_id, "cancelled superseded MQTT connection");
+            tracing::info!(%service_id, "cancelled superseded connection");
         }
         guard.connections.insert(service_id, conn);
         (rx, cancel_token)
@@ -188,7 +142,7 @@ impl ServiceConnectionRegistry {
     /// Remove a service from the registry on disconnect.
     ///
     /// Returns the set of MQTT client IDs that were assigned to this service
-    /// (empty for agents), so the lease coordinator can release them.
+    /// (empty for non-MQTT services), so the lease coordinator can release them.
     pub async fn unregister(&self, service_id: &Uuid) -> Option<HashSet<Uuid>> {
         let mut guard = self.inner.write().await;
         guard.connections.remove(service_id).map(|c| {
@@ -253,16 +207,21 @@ impl ServiceConnectionRegistry {
         }
     }
 
-    /// Broadcast a message to all connected services of a specific type.
+    /// Broadcast a message to all connected services that advertise the given
+    /// capability.
     ///
     /// Snapshots the senders under the lock and releases it before sending.
-    pub async fn broadcast_by_type(&self, service_type: ServiceType, msg: ControllerMessage) {
+    pub async fn broadcast_by_capability(
+        &self,
+        capability: &Capability,
+        msg: ControllerMessage,
+    ) {
         let senders: Vec<mpsc::Sender<ControllerMessage>> = {
             let guard = self.inner.read().await;
             guard
                 .connections
                 .values()
-                .filter(|c| c.service_type == service_type)
+                .filter(|c| c.capabilities.contains(capability))
                 .map(|c| c.sender.clone())
                 .collect()
         };
@@ -466,7 +425,7 @@ impl ServiceConnectionRegistry {
         let mut loads = Vec::new();
 
         for (service_id, conn) in guard.connections.iter() {
-            if conn.service_type != ServiceType::Mqtt {
+            if !conn.capabilities.contains(&Capability::MqttBridge) {
                 continue;
             }
 
@@ -524,14 +483,23 @@ fn compare_mqtt_service_load(a: &MqttServiceLoad, b: &MqttServiceLoad) -> Orderi
 mod tests {
     use super::*;
 
+    /// Helper: build a capability set for an MQTT bridge service.
+    fn mqtt_caps() -> BTreeSet<Capability> {
+        BTreeSet::from([Capability::MqttBridge, Capability::GracefulShutdown])
+    }
+
     #[tokio::test]
     async fn least_busy_prefers_lower_utilization_ratio() {
         let registry = ServiceConnectionRegistry::new();
         let svc_a = Uuid::now_v7();
         let svc_b = Uuid::now_v7();
 
-        let _ = registry.register_mqtt(svc_a, "a".to_string(), 4).await;
-        let _ = registry.register_mqtt(svc_b, "b".to_string(), 2).await;
+        let _ = registry
+            .register(svc_a, mqtt_caps(), Some("a".to_string()), Some(4))
+            .await;
+        let _ = registry
+            .register(svc_b, mqtt_caps(), Some("b".to_string()), Some(2))
+            .await;
 
         let _ = registry.assign_mqtt_client(&svc_a, Uuid::now_v7()).await;
         let _ = registry.assign_mqtt_client(&svc_b, Uuid::now_v7()).await;
@@ -548,10 +516,20 @@ mod tests {
         let svc_idle = Uuid::now_v7();
 
         let _ = registry
-            .register_mqtt(svc_unlimited, "unlimited".to_string(), 0)
+            .register(
+                svc_unlimited,
+                mqtt_caps(),
+                Some("unlimited".to_string()),
+                Some(0),
+            )
             .await;
         let _ = registry
-            .register_mqtt(svc_idle, "idle".to_string(), 10)
+            .register(
+                svc_idle,
+                mqtt_caps(),
+                Some("idle".to_string()),
+                Some(10),
+            )
             .await;
 
         for _ in 0..3 {
