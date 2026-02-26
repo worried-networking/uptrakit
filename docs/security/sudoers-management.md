@@ -38,18 +38,68 @@ uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 ## How entries are generated
 
 Sudoers entries come from the `required_sudo_commands()` method on each
-registered `Plugin`. Each entry carries a command name and a human-readable
-explanation.
+registered `Plugin`. Each entry carries a command name, a human-readable
+explanation, and an optional `SudoHelperScript`.
 
 During bootstrap or `update-sudoers`:
 
 1. `PluginRegistry::all_required_sudo_commands()` collects declarations from all registered plugins.
-2. For each declared command, `command -v <name>` is run on the remote host to resolve the absolute path.
+2. For each entry:
+   - **With `helper_script`**: the script is written to `install_path` on the remote host
+     with mode `0755`, and its path is used directly as the sudoers command.
+   - **Without `helper_script`**: `command -v <name>` is run on the remote host to resolve
+     the absolute path. Commands not found are skipped with a warning (non-fatal).
 3. Resolved entries become `<username> ALL=(root) NOPASSWD: <absolute-path>` lines.
-4. Commands not found on the remote host are skipped with a warning (non-fatal).
-5. The file is written with permissions `440` and validated with `visudo -cf`.
+4. The file is written with permissions `440` and validated with `visudo -cf`.
 
 If no commands resolve (all plugin tools are missing), the command fails unless `--allow-all` is passed.
+
+## Helper scripts
+
+Some operations cannot be safely restricted using sudoers wildcards. In sudoers, `*`
+matches `/`, so a pattern like `NOPASSWD: /usr/bin/cat /root/.*` would still allow
+reading `/root/.ssh/id_rsa`. The `SudoHelperScript` mechanism solves this.
+
+When a `SudoCommandEntry` includes a `helper_script`, bootstrap installs a small
+shell script on the managed host. The sudoers entry covers only that specific script
+path — no wildcards — and the script validates its own arguments before acting.
+
+**Example: PHS version detection.** The Proxmox Helper Scripts plugin reads version
+files from `/root/.<slug>`. Rather than granting `NOPASSWD: /usr/bin/cat` (which
+allows reading any file), bootstrap installs `/usr/local/bin/uptrakit-phs-version`.
+The script accepts a single slug argument, rejects anything outside `[a-z0-9][a-z0-9-]*`
+(no `/`, no `.`, no special characters), then reads `/root/.<slug>`. The resulting
+sudoers line is:
+
+```text
+uptrakit ALL=(root) NOPASSWD: /usr/local/bin/uptrakit-phs-version
+```
+
+This restricts root access to exactly one path pattern — PHS dot-files in `/root/` —
+and argument injection is prevented by the script's `case` guard.
+
+### Implementing a helper script in a plugin
+
+Override `required_sudo_commands()` and supply a `SudoHelperScript`:
+
+```rust
+fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
+    vec![SudoCommandEntry {
+        command: "my-helper".into(),
+        explanation: "Short description of why root access is needed".into(),
+        helper_script: Some(SudoHelperScript {
+            install_path: "/usr/local/bin/my-helper",
+            content: include_str!("my_helper.sh"),
+        }),
+    }]
+}
+```
+
+The helper script **must**:
+
+- Validate every argument that influences a file path or command before use.
+- Exit non-zero with a clear error message on invalid input.
+- Be self-contained (no external dependencies beyond POSIX shell and `cat`/`printf`).
 
 ## The `--allow-all` fallback
 

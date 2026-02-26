@@ -302,11 +302,14 @@ for user review. Key invariants:
         (only `tag_strip_prefix`, `include_prereleases`, `asset_patterns`), and
         `package_identifier: Some("owner/repo")` override.
      2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]`, config with
-        `version_command` (`sudo cat -- /root/.{package_identifier}`) and
-        `update_command` (`env PHS_SILENT=1 /usr/bin/update`). `sudo` is embedded
-        in the version command because the Shell plugin uses `CommandSpec::shell()`,
-        where the `privileged` flag has no effect. The `cat` sudoers entry is
-        declared by `ProxmoxHelperScriptsPlugin::required_sudo_commands()`.
+        `version_command` (`sudo /usr/local/bin/uptrakit-phs-version {package_identifier}`) and
+        `update_command` (`env PHS_SILENT=1 /usr/bin/update`). `sudo` is embedded in
+        the version command because the Shell plugin uses `CommandSpec::shell()`, where
+        the `privileged` flag has no effect. The corresponding sudoers entry covers only
+        the specific helper script (no wildcards); the script validates its slug argument
+        to prevent path traversal before reading `/root/.<slug>`.
+        Declared via `ProxmoxHelperScriptsPlugin::required_sudo_commands()` using
+        `SudoHelperScript { install_path, content }` — bootstrap installs the script.
      The PHS shell constants live in `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`.
    - APT-managed apps emit a `DiscoveryTarget` with `plugin_type: PackageManagerApt`, empty config `{}`, and
      name `"APT (auto)"`.
@@ -339,10 +342,16 @@ for user review. Key invariants:
 
 7. **Plugins declare required sudo commands via `required_sudo_commands()`.** Any plugin that needs root-level
    command execution must override `required_sudo_commands() -> Vec<SudoCommandEntry>` on its `Plugin` impl.
-   Each `SudoCommandEntry` carries a bare command name (e.g. `"apt-get"`) and a human-readable explanation.
-   **Never hardcode absolute paths** — they are resolved on the target host via `command -v` at bootstrap time.
-   **Never hardcode `sudo` in `CommandSpec`** — instead call `.privileged()` on the spec. `PluginRegistry::all_required_sudo_commands()`
-   aggregates all declarations for use by the SSH agent's sudoers generation logic. See
+   Each `SudoCommandEntry` carries a bare command name (or display identifier for helper scripts) and a human-readable
+   explanation. For most commands, **never hardcode absolute paths** — they are resolved on the target host via
+   `command -v` at bootstrap time. When a simple sudoers command would be too broad (e.g. granting `cat` would allow
+   reading any file), use `SudoCommandEntry::helper_script: Some(SudoHelperScript { install_path, content })` instead.
+   Bootstrap installs the script at `install_path` with mode `0755` and uses that path as the sudoers command; the
+   script itself validates arguments to enforce the least-privilege contract that sudoers wildcards cannot safely
+   express (`*` matches `/` in sudoers). **Never hardcode `sudo` in `CommandSpec`** — instead call `.privileged()`
+   on the spec. Shell-mode commands (`CommandSpec::shell`) must embed `sudo` in the command string directly because
+   `.privileged()` has no effect on shell mode. `PluginRegistry::all_required_sudo_commands()` aggregates all
+   declarations for use by the SSH agent's sudoers generation logic. See
    [Plugin Guidelines](docs/development/plugin-guidelines.md) and [Sudoers Management](docs/security/sudoers-management.md).
 
 8. **Plugin capabilities.** The `PluginCapability` enum (in `crates/plugins/infrastructure/core/src/types.rs`) has six variants:
