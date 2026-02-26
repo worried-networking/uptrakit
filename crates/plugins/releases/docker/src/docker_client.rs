@@ -103,13 +103,18 @@ impl BollardDockerClient {
             Some(h) if h.starts_with("ssh://") => {
                 #[cfg(feature = "ssh")]
                 {
-                    let _ = ssh_key_path; // ssh_key_path passed to BollardDockerClient::new
-                    // Bollard resolves SSH connection from DOCKER_HOST env or URI.
-                    // We set the env variable before connecting.
-                    // SAFETY: This is called once during plugin construction,
-                    // before any threads that read DOCKER_HOST are spawned.
-                    unsafe { std::env::set_var("DOCKER_HOST", h) };
-                    bollard::Docker::connect_with_defaults().context_to::<DockerError>()
+                    // Use bollard's first-class SSH connector (openssh crate, system ssh
+                    // binary with docker system dial-stdio).  Pass the key path directly
+                    // so the stored per-host key is used rather than relying on default
+                    // ~/.ssh/ locations.  When ssh_key_path is None bollard falls back to
+                    // SSH agent or default key files.
+                    bollard::Docker::connect_with_ssh(
+                        h,
+                        TIMEOUT,
+                        API_DEFAULT_VERSION,
+                        ssh_key_path.map(str::to_string),
+                    )
+                    .context_to::<DockerError>()
                 }
                 #[cfg(not(feature = "ssh"))]
                 {
