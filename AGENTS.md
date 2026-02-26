@@ -64,9 +64,10 @@ uptrakit/
 │   ├── plugins/
 │   │   ├── core/                       # uptrakit-plugin-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult
 │   │   ├── docker/                     # uptrakit-plugin-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; ssh feature gates bollard/ssh
-│   │   ├── github/                     # uptrakit-plugin-github                 (lib)  — GitHub Releases plugin
+│   │   ├── github/                     # uptrakit-plugin-github                 (lib)  — GitHub Releases plugin: controller-side fetch_releases only; owner/repo parsed from package_identifier at call time (format "owner/repo"); exports validate_identifier
+│   │   ├── shell/                      # uptrakit-plugin-shell                  (lib)  — generic agent-side plugin: version_command (detect_installed_version) + update_command (execute_update); supports {package_identifier}, {version}, {tag} placeholders; at least one field required
 │   │   ├── homebrew/                   # uptrakit-plugin-homebrew               (lib)  — Homebrew formulae/cask plugin; implements DetectHostCompatibility (checks `which brew`)
-│   │   ├── proxmox-helper-scripts/     # uptrakit-plugin-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/APT upstream, emits DiscoveryTarget values for generic controller processing)
+│   │   ├── proxmox-helper-scripts/     # uptrakit-plugin-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/APT upstream, emits two DiscoveryTarget values per GitHub-managed item: GithubReleases/FetchReleases + Shell/[DetectVersion,ExecuteUpdate])
 │   │   ├── apt/                        # uptrakit-plugin-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required)
 │   │   └── registry/                   # uptrakit-plugin-registry               (lib)  — plugin dispatch & validation; ssh feature propagates to uptrakit-plugin-docker/ssh → bollard/ssh
 │   ├── shared/
@@ -289,10 +290,14 @@ for user review. Key invariants:
 
    **PHS (Proxmox Helper Scripts)** always emits `DiscoveryTarget` values. During discovery, it
    fetches each container's CT script from `raw.githubusercontent.com` and analyzes it:
-   - GitHub-managed apps emit a `DiscoveryTarget` with `plugin_type: GithubReleases`, config
-     containing `owner`, `repo`, `detect_installed_version_command` (reads `$HOME/.{slug}`), and
-     `install_command` (`env PHS_SILENT=1 /usr/bin/update`). The PHS constants live in
-     `crates/plugins/proxmox-helper-scripts/src/discovery.rs`.
+   - GitHub-managed apps emit **two** `DiscoveryTarget` values:
+     1. `plugin_type: GithubReleases`, roles `[FetchReleases]`, config without `owner`/`repo`
+        (only `tag_strip_prefix`, `include_prereleases`, `asset_patterns`), and
+        `package_identifier: Some("owner/repo")` override.
+     2. `plugin_type: Shell`, roles `[DetectVersion, ExecuteUpdate]`, config with
+        `version_command` (`cat -- "${HOME}/.{package_identifier}"`) and
+        `update_command` (`env PHS_SILENT=1 /usr/bin/update`).
+     The PHS shell constants live in `crates/plugins/proxmox-helper-scripts/src/plugin.rs`.
    - APT-managed apps emit a `DiscoveryTarget` with `plugin_type: Apt`, empty config `{}`, and
      name `"APT (auto)"`.
    - Apps whose scripts contain neither GitHub patterns nor a specific `apt install` line are skipped.

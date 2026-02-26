@@ -52,8 +52,11 @@ an APT plugin for `detect_version`, a GitHub plugin for `fetch_releases`, and a 
 plugin for `execute_update` — all for the same software item.
 
 A **plugin config** (`plugin_configs` table) stores the serialized configuration for a specific
-plugin type (e.g. a GitHub Releases config with `owner` and `repo`, or a Homebrew config with
-`package_type`). Multiple plugin assignments can share the same plugin config.
+plugin type (e.g. a GitHub Releases config with `auth_token` and `tag_strip_prefix`, or a Homebrew
+config with `package_type`). Multiple plugin assignments can share the same plugin config.
+The `owner/repo` identifying a GitHub repository is **not** part of the plugin config — it is the
+`package_identifier` on the software item host assignment, allowing one GitHub config to serve
+all tracked repositories.
 
 ### Plugin Role Enum
 
@@ -137,11 +140,12 @@ The plugin registry uses a macro to generate all dispatch methods from a single 
 
 ```rust
 register_plugins! {
-    GithubReleases => { config: GitHubConfig, plugin: GitHubPlugin },
-    Docker => { config: DockerConfig, plugin: DockerPlugin },
-    ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, plugin: ProxmoxHelperScriptsPlugin },
-    Homebrew => { config: HomebrewConfig, plugin: HomebrewPlugin },
-    Apt => { config: AptConfig, plugin: AptPlugin },
+    GithubReleases       => { config: GitHubConfig,                   plugin: GitHubPlugin },
+    Docker               => { config: DockerConfig,                   plugin: DockerPlugin },
+    ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig,     plugin: ProxmoxHelperScriptsPlugin },
+    Homebrew             => { config: HomebrewConfig,                 plugin: HomebrewPlugin },
+    Apt                  => { config: AptConfig,                      plugin: AptPlugin },
+    Shell                => { config: ShellConfig,                    plugin: ShellPlugin },
 }
 ```
 
@@ -262,10 +266,18 @@ The `UpdateHookContext` passed to plugin hooks contains `package_identifier`, `t
 | Plugin type | Crate | Host compat | Pre-hook | Post-hook | Discovery | Controller-side fetch |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
 | `github_releases` | `uptrakit-plugin-github` | No | No | No | No | Yes |
+| `shell` | `uptrakit-plugin-shell` | No | No | No | No | No |
 | `docker` | `uptrakit-plugin-docker` | No | No | No | Yes | Yes |
 | `homebrew` | `uptrakit-plugin-homebrew` | Yes | No | No | Yes | No |
 | `proxmox_helper_scripts` | `uptrakit-plugin-proxmox-helper-scripts` | No | No | No | Yes | No |
 | `apt` | `uptrakit-plugin-apt` | Yes | No | Yes | Yes | No |
+
+**Shell plugin** (`uptrakit-plugin-shell`): agent-side plugin with two independently-optional
+shell commands. `version_command` detects the installed version (first non-empty trimmed stdout
+line). `update_command` executes an update. Both commands support `{package_identifier}`,
+`{version}`, and `{tag}` placeholders (shell-escaped). At least one field must be set.
+The Shell plugin has **no** `ControllerSideFetchReleases` capability — all operations run
+agent-side.
 
 ## Future Roadmap
 
@@ -273,8 +285,9 @@ The `UpdateHookContext` passed to plugin hooks contains `package_identifier`, `t
   Hosts and Software dashboards.
 - **RebootRequired event system** — post-update events (e.g. APT `PostUpdateHook` detecting
   `/var/run/reboot-required`) surfaced as controller-side notifications or Home Assistant entities.
-- **"Run arbitrary commands" plugin type** — a plugin that executes user-provided shell scripts for
-  both version detection and updates, enabling one-off integrations without writing a Rust crate.
+- **~~"Run arbitrary commands" plugin type~~** — completed. The `shell` plugin (`uptrakit-plugin-shell`)
+  provides agent-side version detection and update execution via user-supplied shell commands,
+  enabling one-off integrations without writing a Rust crate.
 - **~~Formal multi-plugin-config-synthesis protocol~~** — completed. Plugins now emit structured
   `DiscoveryTarget` values via `DiscoveredSoftware.targets`. The controller processes them
   generically without plugin-specific synthesis logic.

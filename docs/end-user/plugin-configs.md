@@ -11,26 +11,53 @@ same plugin config.
 
 ## Plugin Types
 
-Uptrakit ships with five built-in plugin types:
+Uptrakit ships with six built-in plugin types:
 
 | Plugin type | Description | Autodiscovery |
 | --- | --- | --- |
-| `github_releases` | Tracks releases published on GitHub. Resolves the latest release tag and optionally filters by asset or pre-release status. | No |
+| `github_releases` | Fetches releases published on GitHub. Controller-side only — does not detect installed versions or execute updates directly. | No |
+| `shell` | Generic agent-side plugin: detects the installed version via a configurable shell command and/or executes updates via a configurable shell command. | No |
 | `docker` | Tracks image tags or SHA digests in a Docker/OCI registry. Can pull images via the local or remote Docker daemon, and discovers running/stopped containers. | Yes |
 | `homebrew` | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host. | Yes |
-| `proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream `github_releases` or `apt` plugin configs automatically. Does not perform version detection or updates directly. | Yes |
+| `proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream `github_releases` + `shell` plugin configs automatically. Does not perform version detection or updates directly. | Yes |
 | `apt` | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh. | Yes |
 
 ### `github_releases` configuration fields
 
+The GitHub Releases plugin is **controller-side only**. It fetches upstream release metadata via
+the GitHub REST API. The `owner` and `repo` are **not** configuration fields — they are expressed
+as the `package_identifier` of the software item (format: `"owner/repo"`). A single
+`github_releases` config can therefore serve any number of tracked GitHub repositories.
+
 | Field | Required | Description |
 | --- | --- | --- |
-| `owner` | Yes | GitHub repository owner (username or organisation) |
-| `repo` | Yes | GitHub repository name |
-| `asset_pattern` | No | Regex pattern to match a release asset name |
-| `include_prereleases` | No | Include pre-release tags when resolving latest (default: `false`) |
-| `detect_installed_version_command` | No | Shell command run on the agent to detect the installed version. The first non-empty line of stdout is used. Supports `{package_identifier}` placeholder. Auto-set on PHS-synthesized configs. |
-| `install_command` | No | Shell command to execute after an update. Supports `{version}`, `{tag}`, `{asset_url}`, `{asset_name}` placeholders. Auto-set on PHS-synthesized configs. |
+| `auth_token` | No | Personal access token for authentication. Increases API rate limits. Stored encrypted at rest. |
+| `api_base_url` | No | Custom API base URL for GitHub Enterprise (must use HTTPS). Defaults to `https://api.github.com`. |
+| `include_prereleases` | No | Include pre-release tags when resolving latest (default: `false`). |
+| `tag_strip_prefix` | No | Prefix to strip from tag names when extracting version strings (default: `"v"`). |
+| `asset_patterns` | No | List of regex patterns to filter release assets. Only assets whose names match at least one pattern are included. An empty list includes all assets. |
+
+**Package identifier:** The software item's `package_identifier` for a GitHub-tracked package
+must be set to `"owner/repo"` (e.g. `"octocat/hello-world"`). This value is validated when
+a software item is saved.
+
+### `shell` configuration fields
+
+The Shell plugin provides generic agent-side operations using user-supplied shell commands.
+Both fields are independently optional, but at least one must be set.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `version_command` | Conditionally | Shell command run on the agent to detect the installed version. The first non-empty trimmed line of stdout is used as the version string. If absent, `detect_version` is not supported. Supports `{package_identifier}` placeholder (shell-escaped). |
+| `update_command` | Conditionally | Shell command run on the agent to execute an update. If absent, `execute_update` is not supported. Supports `{version}`, `{tag}`, and `{package_identifier}` placeholders (all shell-escaped). `{tag}` falls back to `{version}` when no release metadata is available. |
+
+**Placeholder reference:**
+
+| Placeholder | Replaced with |
+| --- | --- |
+| `{package_identifier}` | The software item's package identifier (shell-escaped). |
+| `{version}` | The target version string (shell-escaped). |
+| `{tag}` | The release tag (e.g. `v1.2.3`). Falls back to `{version}` when no release info is available. |
 
 ### `docker` configuration fields
 
@@ -63,13 +90,16 @@ supporting agent connects.
 
 **Important:** The PHS plugin is discovery-only. It does not track installed or upstream
 versions itself, and it does not execute updates. Instead, when a PHS container is discovered,
-the controller automatically creates one of the following plugin configs for version tracking
-and update execution:
+the plugin emits structured `DiscoveryTarget` values that the controller processes to create
+plugin configs automatically:
 
-- A `github_releases` config for each `(owner, repo)` pair found in the CT script — pre-configured
-  with the installed-version detection command and the unattended update command.
-- A shared `APT (auto)` config for containers whose scripts install software via APT (e.g.
-  Grafana, Plex).
+- For **GitHub-managed containers** (CT script sources a GitHub release), two configs are created:
+  - A `github_releases` config for `FetchReleases` — keyed on the GitHub settings only
+    (no `owner`/`repo` in the config); the `owner/repo` is expressed as the software item's
+    `package_identifier`.
+  - A `shell` config for `DetectVersion` and `ExecuteUpdate` — pre-configured with the
+    PHS-standard version-file read command and the unattended update command.
+- For **APT-managed containers**, a shared `APT (auto)` config is created for all three roles.
 
 You may rename or adjust these synthesized configs as needed. Re-running discovery will reuse
 existing configs if they already exist.
@@ -157,11 +187,24 @@ uptrakit plugin-configs list
 # Show details for a specific plugin config
 uptrakit plugin-configs show <PLUGIN_CONFIG_ID>
 
-# Create a GitHub Releases plugin config
+# Create a GitHub Releases plugin config (owner/repo goes in the software item's
+# package_identifier, not here; this config covers all your GitHub-tracked repos)
 uptrakit plugin-configs create \
-  --name "my-app GitHub Releases" \
+  --name "GitHub Releases" \
   --type github_releases \
-  --config '{"owner":"example","repo":"my-app"}'
+  --config '{}'
+
+# Create a GitHub Releases config with an auth token (for higher rate limits)
+uptrakit plugin-configs create \
+  --name "GitHub Releases (authenticated)" \
+  --type github_releases \
+  --config '{"auth_token":"ghp_yourtoken"}'
+
+# Create a Shell plugin config for version detection and updates
+uptrakit plugin-configs create \
+  --name "My App Shell" \
+  --type shell \
+  --config '{"version_command":"my-app --version","update_command":"apt-get install -y my-app={version}"}'
 
 # Create a Docker plugin config (semver tags)
 uptrakit plugin-configs create \
@@ -180,7 +223,7 @@ uptrakit plugin-configs update <PLUGIN_CONFIG_ID> --name "New Name"
 
 # Update configuration fields
 uptrakit plugin-configs update <PLUGIN_CONFIG_ID> \
-  --config '{"owner":"example","repo":"updated-repo"}'
+  --config '{"tag_strip_prefix":"release-","include_prereleases":true}'
 
 # Delete a plugin config
 uptrakit plugin-configs delete <PLUGIN_CONFIG_ID>
@@ -202,9 +245,10 @@ automatically creates one. Auto-created configs are named:
 - `APT`
 
 **PHS auto-created configs:** In addition to the `"Proxmox Helper Scripts"` config used as a
-discovery anchor, the PHS plugin triggers creation of downstream `github_releases` and
-`APT (auto)` configs during discovery (see [PHS configuration](#proxmox_helper_scripts-configuration-fields)
-for details). These synthesized configs are what appear as parent configs on your approved PHS software items.
+discovery anchor, the PHS plugin triggers creation of downstream `github_releases`, `shell`, and
+`APT (auto)` configs during discovery (see
+[PHS configuration](#proxmox_helper_scripts-configuration-fields) for details). These synthesized
+configs are what appear as parent configs on your approved PHS software items.
 
 ### Triggering discovery
 
