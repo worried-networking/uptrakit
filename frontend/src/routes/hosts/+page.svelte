@@ -137,10 +137,10 @@
 		discoveringHostIds = new Set([...discoveringHostIds, host.id]);
 		try {
 			const result = await triggerHostDiscovery(host.id);
-			if (result.providers_queued > 0) {
-				showSuccess(`Discovery triggered — ${result.providers_queued} provider(s) queued for "${host.friendly_name}"`);
+			if (result.plugins_queued > 0) {
+				showSuccess(`Discovery triggered — ${result.plugins_queued} plugin(s) queued for "${host.friendly_name}"`);
 			} else {
-				showSuccess(`Discovery triggered — no providers queued for "${host.friendly_name}"`);
+				showSuccess(`Discovery triggered — no plugins queued for "${host.friendly_name}"`);
 			}
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger discovery.');

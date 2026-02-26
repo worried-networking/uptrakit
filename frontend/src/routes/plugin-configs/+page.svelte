@@ -4,12 +4,12 @@
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
-		getProviderConfigs,
-		createProviderConfig,
-		updateProviderConfig,
-		deleteProviderConfig,
-		triggerProviderConfigDiscovery,
-		discardProviderConfigDiscovered,
+		getPluginConfigs,
+		createPluginConfig,
+		updatePluginConfig,
+		deletePluginConfig,
+		triggerPluginConfigDiscovery,
+		discardPluginConfigDiscovered,
 		getAutodiscoveryIgnores,
 		createAutodiscoveryIgnore,
 		deleteAutodiscoveryIgnore
@@ -20,19 +20,19 @@
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission } from '$lib/types';
-	import type { ProviderConfigResponse, AutodiscoveryIgnoreResponse } from '$lib/types';
+	import type { PluginConfigResponse, AutodiscoveryIgnoreResponse } from '$lib/types';
 
 	type ActiveTab = 'configs' | 'ignores';
 	const ACTIVE_TAB_VALUES = ['configs', 'ignores'] as const satisfies readonly ActiveTab[];
 
 	let activeTab: ActiveTab = $state(parseUrlParam(page.url, 'tab', ACTIVE_TAB_VALUES, 'configs'));
 
-	// Provider configs state
-	let configs: ProviderConfigResponse[] = $state([]);
+	// Plugin configs state
+	let configs: PluginConfigResponse[] = $state([]);
 	let configsLoading: boolean = $state(true);
 	let showConfigModal: boolean = $state(false);
-	let editingConfig: ProviderConfigResponse | null = $state(null);
-	let configForm = $state({ name: '', provider_type: 'releases_github', config: '{}', enabled: true });
+	let editingConfig: PluginConfigResponse | null = $state(null);
+	let configForm = $state({ name: '', plugin_type: 'releases_github', config: '{}', enabled: true });
 	let configDeleteConfirm: { id: string; name: string } | null = $state(null);
 	let discoveringId: string | null = $state(null);
 	let discardingId: string | null = $state(null);
@@ -43,7 +43,7 @@
 	let ignoresPage: number = $state(page.url.searchParams.get('tab') === 'ignores' ? parseUrlPage(page.url) : 1);
 	let ignoresTotalPages: number = $state(1);
 	let showIgnoreModal: boolean = $state(false);
-	let ignoreForm = $state({ provider_config_id: '', package_identifier: '' });
+	let ignoreForm = $state({ plugin_config_id: '', package_identifier: '' });
 	let ignoreDeleteConfirm: { id: string; pkg: string } | null = $state(null);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
@@ -77,10 +77,10 @@
 	async function loadConfigs() {
 		configsLoading = true;
 		try {
-			const res = await getProviderConfigs();
+			const res = await getPluginConfigs();
 			configs = res.items;
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to load provider configs');
+			showError(e instanceof Error ? e.message : 'Failed to load plugin configs');
 		} finally {
 			configsLoading = false;
 		}
@@ -102,15 +102,15 @@
 
 	function openCreateConfig() {
 		editingConfig = null;
-		configForm = { name: '', provider_type: 'releases_github', config: '{}', enabled: true };
+		configForm = { name: '', plugin_type: 'releases_github', config: '{}', enabled: true };
 		showConfigModal = true;
 	}
 
-	function openEditConfig(config: ProviderConfigResponse) {
+	function openEditConfig(config: PluginConfigResponse) {
 		editingConfig = config;
 		configForm = {
 			name: config.name,
-			provider_type: config.provider_type,
+			plugin_type: config.plugin_type,
 			config: JSON.stringify(config.config, null, 2),
 			enabled: config.enabled
 		};
@@ -133,26 +133,26 @@
 
 		try {
 			if (editingConfig) {
-				const updated = await updateProviderConfig(editingConfig.id, {
+				const updated = await updatePluginConfig(editingConfig.id, {
 					name: configForm.name || undefined,
 					config: parsedConfig,
 					enabled: configForm.enabled
 				});
 				configs = configs.map((c) => (c.id === editingConfig!.id ? updated : c));
-				showSuccess('Provider config updated.');
+				showSuccess('Plugin config updated.');
 			} else {
-				const created = await createProviderConfig({
+				const created = await createPluginConfig({
 					name: configForm.name,
-					provider_type: configForm.provider_type,
+					plugin_type: configForm.plugin_type,
 					config: parsedConfig,
 					enabled: configForm.enabled
 				});
 				configs = [...configs, created];
-				showSuccess('Provider config created.');
+				showSuccess('Plugin config created.');
 			}
 			closeConfigModal();
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to save provider config');
+			showError(e instanceof Error ? e.message : 'Failed to save plugin config');
 		}
 	}
 
@@ -161,19 +161,19 @@
 		const { id } = configDeleteConfirm;
 		configDeleteConfirm = null;
 		try {
-			await deleteProviderConfig(id);
+			await deletePluginConfig(id);
 			configs = configs.filter((c) => c.id !== id);
-			showSuccess('Provider config deleted.');
+			showSuccess('Plugin config deleted.');
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to delete provider config');
+			showError(e instanceof Error ? e.message : 'Failed to delete plugin config');
 		}
 	}
 
-	async function triggerDiscover(config: ProviderConfigResponse) {
+	async function triggerDiscover(config: PluginConfigResponse) {
 		discoveringId = config.id;
 		try {
-			const res = await triggerProviderConfigDiscovery(config.id);
-			showSuccess(`Discovery triggered — ${res.providers_queued} provider(s) queued`);
+			const res = await triggerPluginConfigDiscovery(config.id);
+			showSuccess(`Discovery triggered — ${res.plugins_queued} plugin(s) queued`);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger discovery');
 		} finally {
@@ -181,10 +181,10 @@
 		}
 	}
 
-	async function triggerDiscard(config: ProviderConfigResponse) {
+	async function triggerDiscard(config: PluginConfigResponse) {
 		discardingId = config.id;
 		try {
-			const res = await discardProviderConfigDiscovered(config.id);
+			const res = await discardPluginConfigDiscovered(config.id);
 			showSuccess(`Discarded ${res.discarded_count} item(s).`);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to discard discovered items');
@@ -194,7 +194,7 @@
 	}
 
 	function openCreateIgnore() {
-		ignoreForm = { provider_config_id: '', package_identifier: '' };
+		ignoreForm = { plugin_config_id: '', package_identifier: '' };
 		showIgnoreModal = true;
 	}
 
@@ -203,13 +203,13 @@
 	}
 
 	async function saveIgnore() {
-		if (!ignoreForm.provider_config_id || !ignoreForm.package_identifier.trim()) {
-			showError('Provider config and package identifier are required');
+		if (!ignoreForm.plugin_config_id || !ignoreForm.package_identifier.trim()) {
+			showError('Plugin config and package identifier are required');
 			return;
 		}
 		try {
 			await createAutodiscoveryIgnore({
-				provider_config_id: ignoreForm.provider_config_id,
+				plugin_config_id: ignoreForm.plugin_config_id,
 				package_identifier: ignoreForm.package_identifier.trim()
 			});
 			showSuccess('Ignore rule created.');
@@ -246,11 +246,11 @@
 />
 
 {#if getUser()}
-	<h1 class="h1 mb-4">Provider Configs</h1>
+	<h1 class="h1 mb-4">Plugin Configs</h1>
 
 	{#if !canView}
 		<aside class="rounded-lg p-4 preset-filled-error-500">
-			<p>You do not have permission to view provider configurations.</p>
+			<p>You do not have permission to view plugin configurations.</p>
 		</aside>
 	{:else}
 		<!-- Tabs -->
@@ -294,7 +294,7 @@
 							{#each configs as config (config.id)}
 								<tr>
 									<td>{config.name}</td>
-									<td><span class="badge preset-tonal">{config.provider_type}</span></td>
+									<td><span class="badge preset-tonal">{config.plugin_type}</span></td>
 									<td>
 										{#if config.enabled}
 											<span class="badge preset-filled-success-500">Enabled</span>
@@ -334,10 +334,8 @@
 							{:else}
 								<tr>
 									<td colspan={canManage ? 5 : 4} class="py-8 text-center">
-										<p class="text-lg font-medium">No provider configs</p>
-										<p class="mt-1 text-sm text-surface-500">
-											Add a provider configuration to enable version tracking.
-										</p>
+										<p class="text-lg font-medium">No plugin configs</p>
+										<p class="mt-1 text-sm text-surface-500">Add a plugin configuration to enable version tracking.</p>
 									</td>
 								</tr>
 							{/each}
@@ -360,7 +358,7 @@
 					<table class="table">
 						<thead>
 							<tr>
-								<th>Provider Config</th>
+								<th>Plugin Config</th>
 								<th>Package Identifier</th>
 								<th>Created</th>
 								{#if canManage}<th class="w-24">Actions</th>{/if}
@@ -370,8 +368,8 @@
 							{#each ignores as ignore (ignore.id)}
 								<tr>
 									<td>
-										<span class="font-medium">{ignore.provider_config_name}</span>
-										<span class="ml-2 badge preset-tonal text-xs">{ignore.provider_type}</span>
+										<span class="font-medium">{ignore.plugin_config_name}</span>
+										<span class="ml-2 badge preset-tonal text-xs">{ignore.plugin_type}</span>
 									</td>
 									<td><code class="text-sm">{ignore.package_identifier}</code></td>
 									<td>{formatDate(ignore.created_at)}</td>
@@ -405,7 +403,7 @@
 	{/if}
 {/if}
 
-<!-- Provider config modal -->
+<!-- Plugin config modal -->
 {#if showConfigModal}
 	<ModalBackdrop onclose={closeConfigModal}>
 		<div
@@ -413,7 +411,7 @@
 			role="dialog"
 			aria-modal="true"
 		>
-			<h3 class="h3">{editingConfig ? 'Edit Provider Config' : 'Add Provider Config'}</h3>
+			<h3 class="h3">{editingConfig ? 'Edit Plugin Config' : 'Add Plugin Config'}</h3>
 
 			<label class="label">
 				<span>Name</span>
@@ -422,8 +420,8 @@
 
 			{#if !editingConfig}
 				<label class="label">
-					<span>Provider Type</span>
-					<select class="select" bind:value={configForm.provider_type}>
+					<span>Plugin Type</span>
+					<select class="select" bind:value={configForm.plugin_type}>
 						<option value="releases_github">GitHub Releases</option>
 						<option value="releases_docker">Docker Registry</option>
 						<option value="package_manager_homebrew">Homebrew</option>
@@ -465,11 +463,11 @@
 			<h3 class="h3">Add Ignore Rule</h3>
 
 			<label class="label">
-				<span>Provider Config</span>
-				<select class="select" bind:value={ignoreForm.provider_config_id}>
+				<span>Plugin Config</span>
+				<select class="select" bind:value={ignoreForm.plugin_config_id}>
 					<option value="">— select —</option>
 					{#each configs as config (config.id)}
-						<option value={config.id}>{config.name} ({config.provider_type})</option>
+						<option value={config.id}>{config.name} ({config.plugin_type})</option>
 					{/each}
 				</select>
 			</label>
@@ -489,7 +487,7 @@
 				<button
 					class="btn preset-filled-primary-500"
 					onclick={saveIgnore}
-					disabled={!ignoreForm.provider_config_id || !ignoreForm.package_identifier.trim()}
+					disabled={!ignoreForm.plugin_config_id || !ignoreForm.package_identifier.trim()}
 				>
 					Create
 				</button>
@@ -501,7 +499,7 @@
 <!-- Delete confirm dialogs -->
 {#if configDeleteConfirm}
 	<ConfirmDialog
-		title="Delete Provider Config"
+		title="Delete Plugin Config"
 		messagePrefix="Are you sure you want to delete"
 		entityName={configDeleteConfirm.name}
 		confirmLabel="Delete"

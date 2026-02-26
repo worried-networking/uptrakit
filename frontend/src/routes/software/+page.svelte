@@ -270,7 +270,7 @@
 				<thead>
 					<tr>
 						<th>Name</th>
-						<th>Providers</th>
+						<th>Plugins</th>
 						<th>Status</th>
 						<th>Hosts</th>
 						<th>Last Checked</th>
@@ -290,7 +290,7 @@
 								<td>
 									<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
 								</td>
-								<td>{item.provider_types.join(', ') || '\u2014'}</td>
+								<td>{item.plugins.join(', ') || '\u2014'}</td>
 								<td class="flex flex-wrap items-center gap-1">
 									{#if item.enabled}
 										<span class="badge preset-filled-success-500">Enabled</span>

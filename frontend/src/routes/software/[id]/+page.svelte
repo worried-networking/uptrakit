@@ -168,8 +168,8 @@
 					{#if item.update_available}
 						<span class="badge preset-filled-warning-500">Update Available</span>
 					{/if}
-					{#if item.provider_types.length > 0}
-						<span class="text-sm text-surface-500">{item.provider_types.join(', ')}</span>
+					{#if item.plugins.length > 0}
+						<span class="text-sm text-surface-500">{item.plugins.join(', ')}</span>
 					{/if}
 				</div>
 				<div class="mt-2 space-y-1 text-sm text-surface-500">

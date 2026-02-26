@@ -77,7 +77,7 @@
 		{ href: '/software', label: 'Software', permission: Permission.ViewSoftware },
 		{ href: '/history', label: 'History', permission: Permission.ViewSoftware },
 		{ href: '/scheduler', label: 'Scheduler', permission: Permission.ManageSoftware },
-		{ href: '/provider-configs', label: 'Provider Configs', permission: Permission.ViewSoftware },
+		{ href: '/plugin-configs', label: 'Plugin Configs', permission: Permission.ViewSoftware },
 		{ href: '/hosts', label: 'Hosts' },
 		{ href: '/settings', label: 'Settings', permission: Permission.ViewSettings },
 		{ href: '/settings/global', label: 'Global Settings', permission: Permission.ManageGlobalSettings }
