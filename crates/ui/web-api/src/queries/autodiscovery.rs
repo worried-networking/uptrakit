@@ -572,6 +572,10 @@ async fn load_ignore_set(
 /// 2. If *any other* host in the tenant has the same assignment backed by an active
 ///    software item, reuse it and insert a new `host_software_item` link for this host.
 /// 3. Otherwise create a new pending `software_item` and `host_software_item`.
+///    If the insert hits a `(tenant_id, name)` unique-constraint violation (e.g.
+///    a second `DiscoveryTarget` for the same `DiscoveredSoftware` item races
+///    through Phase 3 first), fall back to a `(tenant_id, name)` lookup so both
+///    targets end up sharing the same `software_item` row.
 async fn find_or_create_software_item(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -667,12 +671,37 @@ async fn find_or_create_software_item(
             updated_at: Set(now),
             deactivated_at: Set(None),
         };
-        SoftwareItem::insert(new_item).exec(db).await?;
-        tracing::debug!(
-            package_identifier = %package_identifier,
-            "created pending software item from discovery"
-        );
-        new_id
+        match SoftwareItem::insert(new_item).exec(db).await {
+            Ok(_) => {
+                tracing::debug!(
+                    package_identifier = %package_identifier,
+                    "created pending software item from discovery"
+                );
+                new_id
+            }
+            Err(e) if is_unique_violation(&e) => {
+                // Another target for the same DiscoveredSoftware (or a concurrent
+                // request) already created a software_item with this name.
+                tracing::debug!(
+                    package_identifier = %package_identifier,
+                    name = %name,
+                    "software_item name collision on insert; reusing existing item"
+                );
+                SoftwareItem::find()
+                    .filter(software_item::Column::TenantId.eq(tenant_id))
+                    .filter(software_item::Column::Name.eq(name))
+                    .filter(software_item::Column::DeactivatedAt.is_null())
+                    .one(db)
+                    .await?
+                    .ok_or_else(|| {
+                        AutodiscoveryError::Db(sea_orm::DbErr::RecordNotFound(format!(
+                            "software_item with name '{name}' not found after collision"
+                        )))
+                    })?
+                    .id
+            }
+            Err(e) => return Err(e.into()),
+        }
     };
 
     // Insert host_software_item link.
@@ -687,7 +716,11 @@ async fn find_or_create_software_item(
         last_updated_at: Set(None),
         linked_at: Set(now),
     };
-    HostSoftwareItem::insert(link).exec(db).await?;
+    if let Err(e) = HostSoftwareItem::insert(link).exec(db).await
+        && !is_unique_violation(&e)
+    {
+        return Err(e.into());
+    }
 
     Ok(Some(software_item_id))
 }
@@ -996,6 +1029,58 @@ mod tests {
                 name: pkg_id.to_string(),
                 installed_version: "1.0.0".to_string(),
                 targets: vec![],
+                extra: None,
+            }],
+        }
+    }
+
+    /// Mirrors the *actual* PHS plugin output for a GitHub-managed LXC container:
+    /// - Target 1: `ReleasesGithub`, `FetchReleases` only,
+    ///   `package_identifier = Some("owner/repo")`
+    /// - Target 2: `GenericShell`, `[DetectVersion, ExecuteUpdate]`,
+    ///   `package_identifier = None` (falls back to `pkg_id`)
+    fn phs_result_with_two_targets(
+        pkg_id: &str,
+        name: &str,
+        version: &str,
+        owner: &str,
+        repo: &str,
+    ) -> DiscoveryPluginResult {
+        DiscoveryPluginResult {
+            plugin_type: PluginType::DiscoveryProxmoxHelperScripts,
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: pkg_id.to_string(),
+                name: name.to_string(),
+                installed_version: version.to_string(),
+                targets: vec![
+                    DiscoveryTarget {
+                        plugin_type: PluginType::ReleasesGithub,
+                        plugin_config: serde_json::json!({
+                            "tag_strip_prefix": "v",
+                            "include_prereleases": false,
+                            "asset_patterns": [],
+                        }),
+                        plugin_config_name: "GitHub Releases".to_string(),
+                        roles: vec![PluginRole::FetchReleases],
+                        package_identifier: Some(format!("{owner}/{repo}")),
+                        config_override: None,
+                        execution_site: None,
+                    },
+                    DiscoveryTarget {
+                        plugin_type: PluginType::GenericShell,
+                        plugin_config: serde_json::json!({
+                            "version_command": "phs-app --version",
+                            "update_command": "phs-update",
+                        }),
+                        plugin_config_name: "PHS Shell".to_string(),
+                        roles: vec![PluginRole::DetectVersion, PluginRole::ExecuteUpdate],
+                        package_identifier: None,
+                        config_override: None,
+                        execution_site: None,
+                    },
+                ],
                 extra: None,
             }],
         }
@@ -1436,5 +1521,118 @@ mod tests {
             .await
             .expect("count");
         assert_eq!(wget_links, 0, "ignored item must not be created");
+    }
+
+    /// Regression test: a PHS item with both a GitHub `FetchReleases` target and
+    /// a Shell `[DetectVersion, ExecuteUpdate]` target must produce exactly one
+    /// `software_items` row, one `host_software_items` row, two `plugin_configs`,
+    /// and three `host_software_item_plugins` rows (one per role).
+    ///
+    /// This exercises the Phase 3 name-collision fallback introduced to fix the
+    /// `(tenant_id, name)` unique-index violation that previously aborted the
+    /// entire processing loop when the Shell target tried to insert a
+    /// `software_items` row whose name already existed from the GitHub target.
+    #[tokio::test]
+    async fn target_based_phs_two_targets_share_one_software_item() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let result = phs_result_with_two_targets(
+            "booklore",
+            "BookLore",
+            "1.18.5",
+            "BookLore",
+            "BookLore",
+        );
+
+        process_plugin_result(&db, tenant_id, host_id, now, &result)
+            .await
+            .expect("process_plugin_result must not fail on name collision");
+
+        // Exactly one software_items row.
+        let items = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .all(&db)
+            .await
+            .expect("query software_items");
+        assert_eq!(items.len(), 1, "expected exactly one software_items row");
+        assert_eq!(items[0].name, "BookLore");
+
+        // Exactly one host_software_items link.
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .all(&db)
+            .await
+            .expect("query host_software_items");
+        assert_eq!(hsi.len(), 1, "expected exactly one host_software_items link");
+
+        // Exactly two plugin_configs: releases_github + generic_shell.
+        let configs = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .all(&db)
+            .await
+            .expect("query plugin_configs");
+        assert_eq!(configs.len(), 2, "expected two plugin_configs");
+        let config_types: std::collections::HashSet<String> =
+            configs.iter().map(|c| c.plugin_type.clone()).collect();
+        assert!(
+            config_types.contains("releases_github"),
+            "expected a releases_github config"
+        );
+        assert!(
+            config_types.contains("generic_shell"),
+            "expected a generic_shell config"
+        );
+
+        // Exactly three host_software_item_plugins rows.
+        let plugin_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .all(&db)
+            .await
+            .expect("query host_software_item_plugins");
+        assert_eq!(
+            plugin_links.len(),
+            3,
+            "expected three host_software_item_plugins rows"
+        );
+
+        // Validate individual role assignments.
+        let github_config_id = configs
+            .iter()
+            .find(|c| c.plugin_type == "releases_github")
+            .unwrap()
+            .id;
+        let shell_config_id = configs
+            .iter()
+            .find(|c| c.plugin_type == "generic_shell")
+            .unwrap()
+            .id;
+
+        let fetch = plugin_links
+            .iter()
+            .find(|l| l.role == "fetch_releases")
+            .expect("fetch_releases role must exist");
+        assert_eq!(fetch.plugin_config_id, github_config_id);
+        assert_eq!(fetch.package_identifier, "BookLore/BookLore");
+
+        let detect = plugin_links
+            .iter()
+            .find(|l| l.role == "detect_version")
+            .expect("detect_version role must exist");
+        assert_eq!(detect.plugin_config_id, shell_config_id);
+        assert_eq!(detect.package_identifier, "booklore");
+
+        let update = plugin_links
+            .iter()
+            .find(|l| l.role == "execute_update")
+            .expect("execute_update role must exist");
+        assert_eq!(update.plugin_config_id, shell_config_id);
+        assert_eq!(update.package_identifier, "booklore");
     }
 }
