@@ -1,9 +1,8 @@
 //! Update delivery, ownership validation, and update-lifecycle message handlers.
 //!
 //! Contains `validate_update_ownership`, `load_linked_host_ids`,
-//! `upsert_available_version`, `deliver_pending_updates`, and the per-message
-//! handlers `handle_update_started`, `handle_update_output`, and
-//! `handle_update_result`.
+//! `deliver_pending_updates`, and the per-message handlers
+//! `handle_update_started`, `handle_update_output`, and `handle_update_result`.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -15,11 +14,11 @@ use sea_orm::sea_query::{Expr, ExprTrait};
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
-    ControllerMessage, ExecuteUpdatePayload, OutgoingSeq, PluginType,
+    ControllerMessage, ExecuteUpdatePayload, OutgoingSeq, PluginAssignment,
     UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
 };
 use uptrakit_shared_db::entity::{
-    available_version, host, host_software_item, plugin_config, service, service_host,
+    host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
     software_item, update_history, update_output_line,
 };
 
@@ -82,86 +81,6 @@ pub(super) async fn validate_update_ownership(
     }
 
     Ok(record)
-}
-
-// ---------------------------------------------------------------------------
-// upsert_available_version
-// ---------------------------------------------------------------------------
-
-/// Upsert an `available_version` record for a software item.
-///
-/// If an existing record with the same version already exists for this software
-/// item, its `updated_at` timestamp is refreshed. Otherwise, old records for
-/// this software item are deleted and a new one is inserted.
-pub(super) async fn upsert_available_version(
-    db: &sea_orm::DatabaseConnection,
-    software_item_id: uuid::Uuid,
-    version: &str,
-    now: time::OffsetDateTime,
-) {
-    // Check if a record with this version already exists.
-    let existing = available_version::Entity::find()
-        .filter(available_version::Column::SoftwareItemId.eq(software_item_id))
-        .filter(available_version::Column::Version.eq(version))
-        .one(db)
-        .await;
-
-    match existing {
-        Ok(Some(record)) => {
-            // Version already recorded -- just refresh the timestamp.
-            let mut active: available_version::ActiveModel = record.into();
-            active.updated_at = Set(now);
-            if let Err(e) = active.update(db).await {
-                tracing::warn!(
-                    error = %e,
-                    software_item_id = %software_item_id,
-                    version,
-                    "failed to update available_version timestamp"
-                );
-            }
-        }
-        Ok(None) => {
-            // Delete any previous available_version records for this item
-            // and insert the new one.
-            if let Err(e) = available_version::Entity::delete_many()
-                .filter(available_version::Column::SoftwareItemId.eq(software_item_id))
-                .exec(db)
-                .await
-            {
-                tracing::warn!(
-                    error = %e,
-                    software_item_id = %software_item_id,
-                    "failed to delete old available_version records"
-                );
-            }
-
-            let record = available_version::ActiveModel {
-                id: Set(uuid::Uuid::now_v7()),
-                software_item_id: Set(software_item_id),
-                version: Set(Some(version.to_string())),
-                release_date: Set(None),
-                release_notes: Set(None),
-                extra: Set(None),
-                created_at: Set(now),
-                updated_at: Set(now),
-            };
-            if let Err(e) = available_version::Entity::insert(record).exec(db).await {
-                tracing::warn!(
-                    error = %e,
-                    software_item_id = %software_item_id,
-                    version,
-                    "failed to insert available_version"
-                );
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                software_item_id = %software_item_id,
-                "failed to query available_version"
-            );
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -231,68 +150,70 @@ pub(super) async fn deliver_pending_updates(
             }
         };
 
-        // Load per-host plugin info from the host_software_item link.
-        let link = match host_software_item::Entity::find_by_id((update_record.host_id, item.id))
-            .one(state.db())
-            .await
+        // Load role-specific plugin assignments for this host-software pair.
+        let execute_update_assignment = match load_role_plugin(
+            state.db(),
+            update_record.host_id,
+            item.id,
+            "execute_update",
+        )
+        .await
         {
-            Ok(Some(l)) => l,
+            Ok(Some(data)) => data,
             Ok(None) => {
                 tracing::warn!(
                     update_id = %update_record.id,
                     host_id = %update_record.host_id,
                     software_item_id = %item.id,
-                    "host-software-item link not found, skipping pending update"
+                    "no execute_update plugin assigned, skipping pending update"
                 );
                 continue;
             }
             Err(e) => {
                 tracing::warn!(
                     error = %e,
-                    "failed to load host-software-item link for pending update"
+                    "failed to load execute_update plugin for pending update"
                 );
                 continue;
             }
         };
 
-        let plugin_cfg = match plugin_config::Entity::find_by_id(link.plugin_config_id)
-            .filter(plugin_config::Column::DeactivatedAt.is_null())
-            .one(state.db())
-            .await
-        {
-            Ok(Some(c)) => c,
-            Ok(None) => {
-                tracing::warn!(
-                    update_id = %update_record.id,
-                    plugin_config_id = %link.plugin_config_id,
-                    "plugin config not found or deactivated, skipping pending update"
-                );
-                continue;
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to load plugin config for pending update");
-                continue;
-            }
-        };
+        let detect_version_assignment =
+            match load_role_plugin(state.db(), update_record.host_id, item.id, "detect_version")
+                .await
+            {
+                Ok(data) => data,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to load detect_version plugin for pending update"
+                    );
+                    None
+                }
+            };
 
-        let plugin_type: PluginType = match serde_json::from_value(serde_json::Value::String(
-            plugin_cfg.plugin_type.clone(),
-        )) {
-            Ok(pt) => pt,
-            Err(_) => {
-                tracing::warn!(
-                    update_id = %update_record.id,
-                    plugin_type = %plugin_cfg.plugin_type,
-                    "unknown plugin type, skipping pending update"
-                );
-                continue;
-            }
-        };
+        let execute_update_plugin =
+            match build_plugin_assignment(&execute_update_assignment.0, &execute_update_assignment.1)
+            {
+                Some(a) => a,
+                None => {
+                    tracing::warn!(
+                        update_id = %update_record.id,
+                        "unknown plugin type for execute_update, skipping pending update"
+                    );
+                    continue;
+                }
+            };
 
-        let resolved_hooks =
-            crate::update_hooks::resolve_hooks(&plugin_cfg.config, link.config_override.as_ref());
-        let merged_config =
-            crate::update_hooks::merge_config(&plugin_cfg.config, link.config_override.as_ref());
+        let detect_version_plugin = detect_version_assignment
+            .as_ref()
+            .and_then(|(a, c)| build_plugin_assignment(a, c));
+
+        // Resolve hooks from the execute_update plugin config + per-role override.
+        let resolved_hooks = crate::update_hooks::resolve_hooks(
+            &execute_update_assignment.1.config,
+            execute_update_assignment.0.config_override.as_ref(),
+        );
 
         // Look up the host's machine_id so the agent can route correctly.
         let host_machine_id = match host::Entity::find_by_id(update_record.host_id)
@@ -319,10 +240,9 @@ pub(super) async fn deliver_pending_updates(
             update_history_id: update_record.id,
             software_item_id: item.id,
             software_item_name: item.name.clone(),
-            package_identifier: link.package_identifier.clone(),
             to_version: update_record.to_version.clone(),
-            plugin_type,
-            plugin_config: merged_config,
+            detect_version_plugin,
+            execute_update_plugin,
             pre_update_hooks: resolved_hooks.pre_update_hooks,
             post_update_hooks: resolved_hooks.post_update_hooks,
             release_info: None,
@@ -586,4 +506,67 @@ pub(super) async fn handle_update_result(
     }
 
     LoopAction::Continue
+}
+
+// ---------------------------------------------------------------------------
+// Role-based plugin helpers
+// ---------------------------------------------------------------------------
+
+/// Load a role-specific plugin assignment for a host-software pair.
+///
+/// Returns `None` if no assignment with the given role exists.
+async fn load_role_plugin(
+    db: &sea_orm::DatabaseConnection,
+    host_id: uuid::Uuid,
+    software_item_id: uuid::Uuid,
+    role: &str,
+) -> HandlerResult<Option<(host_software_item_plugin::Model, plugin_config::Model)>> {
+    let assignment = host_software_item_plugin::Entity::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
+        .filter(host_software_item_plugin::Column::Role.eq(role))
+        .one(db)
+        .await
+        .context_to::<HandlerError>()?;
+
+    let Some(assignment) = assignment else {
+        return Ok(None);
+    };
+
+    let config = plugin_config::Entity::find_by_id(assignment.plugin_config_id)
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        .one(db)
+        .await
+        .context_to::<HandlerError>()?;
+
+    let Some(config) = config else {
+        tracing::warn!(
+            plugin_config_id = %assignment.plugin_config_id,
+            role,
+            "plugin config not found or deactivated"
+        );
+        return Ok(None);
+    };
+
+    Ok(Some((assignment, config)))
+}
+
+/// Build a [`PluginAssignment`] from a role plugin row and its plugin config.
+///
+/// Returns `None` if the plugin type string cannot be deserialized.
+fn build_plugin_assignment(
+    assignment: &host_software_item_plugin::Model,
+    config: &plugin_config::Model,
+) -> Option<PluginAssignment> {
+    let plugin_type: uptrakit_internal_wire::PluginType =
+        serde_json::from_value(serde_json::Value::String(config.plugin_type.clone())).ok()?;
+
+    let merged_config =
+        crate::update_hooks::merge_config(&config.config, assignment.config_override.as_ref());
+
+    Some(PluginAssignment {
+        plugin_type,
+        package_identifier: assignment.package_identifier.clone(),
+        config: merged_config,
+    })
 }

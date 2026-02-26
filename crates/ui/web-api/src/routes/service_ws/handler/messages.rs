@@ -22,7 +22,7 @@ use uptrakit_shared_db::entity::{
 use super::LoopAction;
 use super::discovery::trigger_discovery_for_agent_host;
 use super::renewal::sign_renewal_csr;
-use super::updates::{load_linked_host_ids, upsert_available_version};
+use super::updates::load_linked_host_ids;
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use crate::routes::agents::{find_or_create_host_and_link, revoke_certificate};
@@ -313,48 +313,47 @@ pub(super) async fn handle_version_check_results(
 
         let software_item_id = result.software_item_id;
 
-        // Update installed version on host_software_item records.
-        if let Some(ref installed_version) = result.installed_version {
-            for &host_id in &host_ids {
-                match host_software_item::Entity::find_by_id((host_id, software_item_id))
-                    .one(state.db())
-                    .await
-                {
-                    Ok(Some(existing)) => {
-                        let mut active: host_software_item::ActiveModel = existing.into();
+        // Update installed version and latest version on host_software_item records.
+        for &host_id in &host_ids {
+            match host_software_item::Entity::find_by_id((host_id, software_item_id))
+                .one(state.db())
+                .await
+            {
+                Ok(Some(existing)) => {
+                    let mut active: host_software_item::ActiveModel = existing.into();
+                    if let Some(ref installed_version) = result.installed_version {
                         active.installed_version = Set(Some(installed_version.clone()));
                         active.installed_version_detected_at = Set(Some(now));
-                        if let Err(e) = active.update(state.db()).await {
-                            tracing::warn!(
-                                error = %e,
-                                host_id = %host_id,
-                                software_item_id = %software_item_id,
-                                "failed to update host_software_item"
-                            );
-                        }
                     }
-                    Ok(None) => {
-                        tracing::debug!(
-                            host_id = %host_id,
-                            software_item_id = %software_item_id,
-                            "no host_software_item record found, skipping"
-                        );
+                    if let Some(ref latest_version) = result.latest_version {
+                        active.latest_version = Set(Some(latest_version.clone()));
+                        active.latest_version_fetched_at = Set(Some(now));
                     }
-                    Err(e) => {
+                    if let Err(e) = active.update(state.db()).await {
                         tracing::warn!(
                             error = %e,
                             host_id = %host_id,
                             software_item_id = %software_item_id,
-                            "failed to look up host_software_item"
+                            "failed to update host_software_item"
                         );
                     }
                 }
+                Ok(None) => {
+                    tracing::debug!(
+                        host_id = %host_id,
+                        software_item_id = %software_item_id,
+                        "no host_software_item record found, skipping"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        host_id = %host_id,
+                        software_item_id = %software_item_id,
+                        "failed to look up host_software_item"
+                    );
+                }
             }
-        }
-
-        // Upsert available_version if agent reported latest.
-        if let Some(ref latest_version) = result.latest_version {
-            upsert_available_version(state.db(), software_item_id, latest_version, now).await;
         }
     }
 
