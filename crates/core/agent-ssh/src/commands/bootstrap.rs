@@ -11,7 +11,8 @@ use uptrakit_crypto::EncryptedString;
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
 use crate::commands::sudoers::{
-    ResolvedSudoCommand, SudoersContent, detect_is_root, resolve_command_path, write_sudoers_file,
+    ResolvedSudoCommand, SudoersContent, detect_is_root, install_helper_script,
+    resolve_command_path, write_sudoers_file,
 };
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
@@ -311,23 +312,37 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
 
     for (_plugin_type, entries) in &plugin_sudo_cmds {
         for entry in entries {
-            match resolve_command_path(&session, &entry.command).await? {
-                Some(path) => {
-                    tracing::debug!(command = %entry.command, path = %path, "resolved command path");
-                    resolved.push(ResolvedSudoCommand {
-                        command_path: path,
-                        explanation: entry.explanation.clone(),
-                    });
-                }
-                None => {
-                    tracing::warn!(
-                        command = %entry.command,
-                        "command not found on remote host, skipping"
-                    );
-                    println!(
-                        "  WARNING: command '{}' not found on remote host, skipping.",
-                        entry.command
-                    );
+            if let Some(helper) = &entry.helper_script {
+                // Install the helper script then use its known path directly
+                // as the sudoers command — no `command -v` resolution needed.
+                println!(
+                    "  Installing helper script '{}'...",
+                    helper.install_path
+                );
+                install_helper_script(&session, helper, use_sudo).await?;
+                resolved.push(ResolvedSudoCommand {
+                    command_path: helper.install_path.to_string(),
+                    explanation: entry.explanation.clone(),
+                });
+            } else {
+                match resolve_command_path(&session, &entry.command).await? {
+                    Some(path) => {
+                        tracing::debug!(command = %entry.command, path = %path, "resolved command path");
+                        resolved.push(ResolvedSudoCommand {
+                            command_path: path,
+                            explanation: entry.explanation.clone(),
+                        });
+                    }
+                    None => {
+                        tracing::warn!(
+                            command = %entry.command,
+                            "command not found on remote host, skipping"
+                        );
+                        println!(
+                            "  WARNING: command '{}' not found on remote host, skipping.",
+                            entry.command
+                        );
+                    }
                 }
             }
         }

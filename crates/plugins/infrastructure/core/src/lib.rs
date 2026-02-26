@@ -9,7 +9,8 @@ pub mod version;
 pub use error::{PluginError, Result};
 pub use secrets::SecretMasking;
 pub use traits::{
-    HostCompatibility, Plugin, PreUpdateHookResult, SudoCommandEntry, UpdateHookContext,
+    HostCompatibility, Plugin, PreUpdateHookResult, SudoCommandEntry, SudoHelperScript,
+    UpdateHookContext,
 };
 pub use types::{
     DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole, PluginType, ReleaseAsset,

@@ -6,6 +6,7 @@
 
 use rootcause::prelude::*;
 use uptrakit_command::shell_escape;
+use uptrakit_plugin_infrastructure_registry::SudoHelperScript;
 
 use crate::error::{Error, Result};
 use crate::ssh_transport::SshSession;
@@ -45,6 +46,43 @@ pub enum SudoersContent {
     AllCommands,
     /// Write one entry per resolved command — minimal, specific permissions.
     SpecificCommands(Vec<ResolvedSudoCommand>),
+}
+
+/// Install a helper script on the remote host at `helper.install_path`.
+///
+/// The script is written with mode `0755`. If a file already exists at the
+/// path it is overwritten — the content is deterministic so idempotency is
+/// preserved.
+///
+/// `privileged` controls whether write commands are prefixed with `sudo`:
+/// - `true` when the auth user is non-root and has passwordless sudo.
+/// - `false` when the auth user is root.
+pub async fn install_helper_script(
+    session: &SshSession,
+    helper: &SudoHelperScript,
+    privileged: bool,
+) -> Result<()> {
+    let sudo_prefix = if privileged { "sudo " } else { "" };
+    let escaped_path = shell_escape(helper.install_path);
+    let escaped_content = shell_escape(helper.content);
+
+    // Write the script and make it executable.  `printf '%s'` avoids the
+    // backslash interpretation that some `echo` implementations apply.
+    let cmd = format!(
+        "printf '%s' {escaped_content} | {sudo_prefix}tee {escaped_path} > /dev/null && \
+         {sudo_prefix}chmod 755 {escaped_path}"
+    );
+    let result = session.exec_command(&cmd).await?;
+    if result.exit_code != 0 {
+        bail!(Error::SshCommand(format!(
+            "failed to install helper script '{}': {}",
+            helper.install_path,
+            result.stderr.trim()
+        )));
+    }
+
+    tracing::debug!(path = helper.install_path, "installed sudo helper script");
+    Ok(())
 }
 
 /// Resolve a command name to its absolute path on the remote host via

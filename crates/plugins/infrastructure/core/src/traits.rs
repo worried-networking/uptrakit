@@ -41,6 +41,35 @@ pub struct PreUpdateHookResult {
     pub abort_reason: Option<String>,
 }
 
+/// A helper script installed by the bootstrap process on the managed host.
+///
+/// Enables argument-validated sudo commands — something sudoers wildcards
+/// cannot express safely, because `*` in sudoers matches `/`, making
+/// path-based wildcard restrictions ineffective (e.g. `/usr/bin/cat /root/.*`
+/// would still allow reading `/root/.ssh/id_rsa`).
+///
+/// The script must validate its own arguments before acting, making the
+/// corresponding sudoers entry unconditional (no argument wildcard needed):
+///
+/// ```text
+/// uptrakit ALL=(root) NOPASSWD: /usr/local/bin/my-helper
+/// ```
+///
+/// # Contract
+///
+/// - `install_path` must be an absolute path (e.g. `/usr/local/bin/my-helper`).
+/// - `content` must be a complete, self-contained shell script that validates
+///   its arguments and exits non-zero on invalid input.
+/// - The script is installed with mode `0755` and owned by root.
+pub struct SudoHelperScript {
+    /// Absolute path where the script is installed on the managed host.
+    ///
+    /// Used directly as the sudoers command (no `command -v` resolution).
+    pub install_path: &'static str,
+    /// Complete shell script content installed verbatim at `install_path`.
+    pub content: &'static str,
+}
+
 /// Describes a single command that a plugin needs to run with passwordless sudo.
 ///
 /// Plugins return a [`Vec<SudoCommandEntry>`] from
@@ -51,18 +80,37 @@ pub struct PreUpdateHookResult {
 ///
 /// # Contract
 ///
+/// When `helper_script` is `None`:
 /// - `command` must be a **bare command name** (e.g. `"apt-get"`), never an
 ///   absolute path. The agent resolves it to an absolute path on the target
 ///   host at sudoers-generation time using `command -v`.
-/// - `explanation` is shown as a comment in the generated sudoers file and in
-///   CLI output for human reviewers.
+///
+/// When `helper_script` is `Some`:
+/// - `command` is used only as a display name (not resolved via `command -v`).
+/// - Bootstrap installs the script at `helper_script.install_path`, sets
+///   permissions to `0755`, and uses that path as the sudoers command.
+///   The script's own argument validation enforces restrictions that sudoers
+///   wildcards cannot safely express.
+///
+/// In both cases `explanation` is shown as a comment in the generated sudoers
+/// file and in CLI output for human reviewers.
 pub struct SudoCommandEntry {
-    /// Bare command name (e.g. `"apt-get"`).
+    /// Bare command name (e.g. `"apt-get"`) or a short display identifier for
+    /// helper scripts.
     ///
-    /// Must not contain path separators or shell metacharacters.
+    /// When `helper_script` is `None`, this is resolved to an absolute path
+    /// via `command -v` on the target host. When `helper_script` is `Some`,
+    /// this field is used only for logging and display purposes; the sudoers
+    /// entry uses `helper_script.install_path`.
     pub command: String,
     /// Human-readable explanation shown in sudoers comments and CLI output.
     pub explanation: String,
+    /// Optional helper script to install on the managed host during bootstrap.
+    ///
+    /// When `Some`, bootstrap installs this script before writing the sudoers
+    /// entry. The sudoers entry uses the install path directly. The script must
+    /// validate its own arguments to enforce the least-privilege contract.
+    pub helper_script: Option<SudoHelperScript>,
 }
 
 /// A unified plugin trait for both remote and local operations.

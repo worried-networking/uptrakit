@@ -35,7 +35,9 @@ pub use error::{PluginRegistryError, Result};
 pub use registry::PluginRegistry;
 
 // Re-export commonly used types for plugin crate convenience
-pub use uptrakit_plugin_infrastructure_core::{Plugin, PluginCapability, SudoCommandEntry};
+pub use uptrakit_plugin_infrastructure_core::{
+    Plugin, PluginCapability, SudoCommandEntry, SudoHelperScript,
+};
 pub use uptrakit_shared_types::PluginType;
 
 // Re-export executor types for downstream convenience
