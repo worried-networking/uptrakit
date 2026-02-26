@@ -31,10 +31,6 @@ pub use uptrakit_web_api_types as types;
 /// since it appears in `DeviceAuthPollResponse::status`.
 pub use uptrakit_shared_types::DeviceAuthStatus;
 
-/// Re-export `ServiceType` from `uptrakit-shared-types` for convenience,
-/// since it is used by the enrollment token API.
-pub use uptrakit_shared_types::ServiceType;
-
 /// Re-export `Uuid` so that downstream crates can use the exact same type
 /// without adding a direct `uuid` dependency.
 pub use uuid::Uuid;
@@ -387,21 +383,6 @@ impl UptrakitClient {
             .put(&url)
             .bearer_auth(self.token_or_err()?)
             .json(body);
-        let resp = self.send_with_retry(req).await?;
-        self.handle_response(resp).await
-    }
-
-    async fn post_empty_with_query<T: DeserializeOwned>(
-        &self,
-        path: &str,
-        query: &impl Serialize,
-    ) -> Result<T> {
-        let url = format!("{}{}", self.base_url, path);
-        let req = self
-            .http
-            .post(&url)
-            .bearer_auth(self.token_or_err()?)
-            .query(query);
         let resp = self.send_with_retry(req).await?;
         self.handle_response(resp).await
     }

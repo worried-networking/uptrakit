@@ -8,7 +8,7 @@ use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::services::{
     ListServicesQuery, MergeAgentRequest, MessageResponse, ParseServiceStatusError,
-    ParseServiceTypeError, ServiceResponse, UpdateServiceRequest,
+    ServiceResponse, UpdateServiceRequest,
 };
 
 // ── Local wrapper types ───────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ impl HumanOutput for PaginatedResponse<ServiceResponse> {
         }
         let mut out = format!(
             "{:<38} {:<12} {:<20} {:<25} {:<12} LAST SEEN\n",
-            "ID", "TYPE", "HOSTNAME", "FRIENDLY NAME", "STATUS"
+            "ID", "LABEL", "HOSTNAME", "FRIENDLY NAME", "STATUS"
         );
         for s in &self.items {
             let last_seen = s
@@ -42,7 +42,7 @@ impl HumanOutput for PaginatedResponse<ServiceResponse> {
             out.push_str(&format!(
                 "{:<38} {:<12} {:<20} {:<25} {:<12} {}\n",
                 s.id,
-                s.service_type,
+                s.service_label,
                 s.hostname,
                 s.friendly_name,
                 s.status,
@@ -61,7 +61,7 @@ impl HumanOutput for ServiceResponse {
     fn to_human_string(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("ID:            {}\n", self.id));
-        out.push_str(&format!("Type:          {}\n", self.service_type));
+        out.push_str(&format!("Label:         {}\n", self.service_label));
         out.push_str(&format!("Hostname:      {}\n", self.hostname));
         out.push_str(&format!("Friendly Name: {}\n", self.friendly_name));
         if let Some(ref ip) = self.ip_address {
@@ -102,7 +102,7 @@ impl HumanOutput for MergeServiceOutput {
             "Service {} merged into {}.\n",
             self.source_id, self.inner.id
         );
-        out.push_str(&format!("Type:     {}\n", self.inner.service_type));
+        out.push_str(&format!("Label:    {}\n", self.inner.service_label));
         out.push_str(&format!("Hostname: {}\n", self.inner.hostname));
         out.push_str(&format!("Status:   {}\n", self.inner.status));
         out
@@ -123,7 +123,7 @@ pub struct ListParams<'a> {
     pub token: Option<&'a str>,
     pub insecure: bool,
     pub request_timeout: Option<std::time::Duration>,
-    pub service_type: Option<&'a str>,
+    pub capability: Option<&'a str>,
     pub status: Option<&'a str>,
     pub page: Option<u64>,
     pub per_page: Option<u64>,
@@ -139,19 +139,14 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<ServiceRes
         params.insecure,
         params.request_timeout,
     )?;
-    let query =
-        ListServicesQuery {
-            r#type: params
-                .service_type
-                .map(|s| s.parse())
-                .transpose()
-                .map_err(|e: ParseServiceTypeError| Report::new(CliError::Other(e.to_string())))?,
-            status: params.status.map(|s| s.parse()).transpose().map_err(
-                |e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())),
-            )?,
-            page: params.page,
-            per_page: params.per_page,
-        };
+    let query = ListServicesQuery {
+        capability: params.capability.map(|s| s.to_string()),
+        status: params.status.map(|s| s.parse()).transpose().map_err(
+            |e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())),
+        )?,
+        page: params.page,
+        per_page: params.per_page,
+    };
     client.list_services(&query).await.context_to()
 }
 
@@ -251,7 +246,12 @@ mod tests {
             id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                 .parse::<Uuid>()
                 .unwrap(),
-            service_type: "agent".parse().unwrap(),
+            capabilities: vec![
+                "graceful_shutdown".to_string(),
+                "software_discovery".to_string(),
+                "update_hooks".to_string(),
+            ],
+            service_label: "Agent".to_string(),
             hostname: "agent-host.local".to_string(),
             friendly_name: "Test Agent".to_string(),
             ip_address: None,

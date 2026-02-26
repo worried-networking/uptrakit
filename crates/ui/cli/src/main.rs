@@ -337,9 +337,9 @@ enum HistoryCommands {
 enum ServicesCommands {
     /// List all services
     List {
-        /// Filter by type (agent, mqtt, ssh_agent)
+        /// Filter by capability (software_discovery, mqtt_bridge, ssh_remote)
         #[arg(long)]
-        r#type: Option<String>,
+        capability: Option<String>,
         /// Filter by status (pending, approved, rejected, deactivated)
         #[arg(long)]
         status: Option<String>,
@@ -975,7 +975,7 @@ async fn run(cli: Cli) -> error::Result<()> {
         }
         Commands::Services { command } => match command {
             ServicesCommands::List {
-                r#type,
+                capability,
                 status,
                 page,
                 per_page,
@@ -984,7 +984,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
                     insecure,
-                    service_type: r#type.as_deref(),
+                    capability: capability.as_deref(),
                     status: status.as_deref(),
                     page,
                     per_page,
@@ -2340,8 +2340,8 @@ mod tests {
             "uptrakit",
             "services",
             "list",
-            "--type",
-            "agent",
+            "--capability",
+            "software_discovery",
             "--status",
             "pending",
             "--page",
@@ -2354,13 +2354,13 @@ mod tests {
             Some(Commands::Services {
                 command:
                     ServicesCommands::List {
-                        r#type,
+                        capability,
                         status,
                         page,
                         per_page,
                     },
             }) => {
-                assert_eq!(r#type.as_deref(), Some("agent"));
+                assert_eq!(capability.as_deref(), Some("software_discovery"));
                 assert_eq!(status.as_deref(), Some("pending"));
                 assert_eq!(page, Some(2));
                 assert_eq!(per_page, Some(50));

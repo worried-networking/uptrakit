@@ -73,14 +73,10 @@ impl HumanOutput for CombinedSettingsResponse {
             "  Renewal Window (hours):  {}\n",
             self.agent_certificates.renewal_window_hours
         ));
-        out.push_str("\nEnrollment Tokens:\n");
+        out.push_str("\nEnrollment Token:\n");
         out.push_str(&format!(
-            "  Agent Token Configured:  {}\n",
-            self.enrollment_tokens.agent.configured
-        ));
-        out.push_str(&format!(
-            "  MQTT Token Configured:   {}\n",
-            self.enrollment_tokens.mqtt.configured
+            "  Configured:              {}\n",
+            self.enrollment_token.configured
         ));
         out
     }
@@ -795,7 +791,6 @@ mod tests {
     use super::*;
     use uptrakit_openapi_client::types::agents::EnrollmentTokenStatusResponse;
     use uptrakit_openapi_client::types::registration::RegistrationMode;
-    use uptrakit_openapi_client::types::settings_combined::EnrollmentTokenStatusesResponse;
     use uptrakit_openapi_client::types::system_alerts::{AlertSeverity, SystemAlert};
 
     #[test]
@@ -851,11 +846,7 @@ mod tests {
                 lifetime_days: 365,
                 renewal_window_hours: 168,
             },
-            enrollment_tokens: EnrollmentTokenStatusesResponse {
-                agent: EnrollmentTokenStatusResponse { configured: true },
-                mqtt: EnrollmentTokenStatusResponse { configured: false },
-                ssh_agent: EnrollmentTokenStatusResponse { configured: false },
-            },
+            enrollment_token: EnrollmentTokenStatusResponse { configured: true },
         };
         let s = resp.to_human_string();
         assert!(s.contains("Registration"), "registration section missing");

@@ -57,7 +57,12 @@ fn paginated_host() -> PaginatedResponse<HostResponse> {
 fn sample_service() -> ServiceResponse {
     ServiceResponse {
         id: service_id(),
-        service_type: "agent".parse().unwrap(),
+        capabilities: vec![
+            "graceful_shutdown".to_string(),
+            "software_discovery".to_string(),
+            "update_hooks".to_string(),
+        ],
+        service_label: "Agent".to_string(),
         hostname: "agent-host.local".to_string(),
         friendly_name: "Test Agent".to_string(),
         ip_address: None,
@@ -222,7 +227,7 @@ async fn services_list_success() {
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
         insecure: false,
-        service_type: None,
+        capability: None,
         status: None,
         page: None,
         per_page: None,
