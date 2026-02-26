@@ -208,6 +208,63 @@ pub async fn list_hosts(
 
 See also: [Authentication and Authorization](../security/auth-and-authorization.md).
 
+## Typed Path Extractors
+
+Route handlers that accept UUID path parameters must use `Path<Uuid>` (or `Path<(Uuid, Uuid)>` for
+multi-param routes) instead of `Path<String>` with manual `Uuid::parse_str`. Axum returns a typed
+422 response automatically on malformed input.
+
+### Required pattern
+
+```rust
+use uuid::Uuid;
+
+pub async fn get_host(
+    tenant_db: TenantDb,
+    CanViewHosts(_user): CanViewHosts,
+    Path(host_id): Path<Uuid>,        // Axum validates the UUID
+) -> Response {
+    // use host_id directly — no parse_str needed
+}
+```
+
+For multi-param routes:
+
+```rust
+pub async fn unassign_host(
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Path((item_id, host_id)): Path<(Uuid, Uuid)>,
+) -> Response { ... }
+```
+
+### utoipa annotations
+
+Path parameters must declare `Uuid` type (not `String`) so the OpenAPI schema emits `format: uuid`:
+
+```rust
+#[utoipa::path(
+    get,
+    path = "/api/v1/hosts/{id}",
+    params(("id" = Uuid, Path, description = "Host UUID")),
+    ...
+)]
+```
+
+### Anti-pattern
+
+```rust
+// WRONG — do not manually parse UUIDs from path parameters
+Path(id): Path<String>,
+let host_id = match uuid::Uuid::parse_str(&id) {
+    Ok(id) => id,
+    Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
+};
+```
+
+**Exception:** `Path<String>` is correct for non-UUID path parameters (e.g., base64-encoded OCSP
+requests in `ocsp.rs`).
+
 ## Tenant-Safe Database Queries
 
 All database queries in route handlers and query helpers **must** enforce tenant isolation. Failure to do so can leak

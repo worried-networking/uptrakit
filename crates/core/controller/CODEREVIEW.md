@@ -60,33 +60,6 @@ by unit tests. One issue requires immediate attention: the CRL manager was previ
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/core/controller/Cargo.toml:50-51` — `chrono` and `cron` not in workspace dependencies
-
-`cron = "0.15"` and `chrono = { version = "0.4" }` are declared inline. The
-workspace uses `time = "0.3"` as its primary date-time crate (workspace-pinned).
-`chrono` is pulled in solely because `cron` requires it. During the `2.0.0-rc`
-series of sea-orm, patch versions arrive frequently; independent inline pins risk
-divergence. Both should be added to `[workspace.dependencies]`.
-
-**[SEVERITY: Medium]** `crates/core/controller/Cargo.toml:45` — `sea-orm-migration` not in workspace dependencies
-
-```
-sea-orm-migration = { version = "2.0.0-rc.32", default-features = false, … }
-```
-
-`sea-orm` is workspace-pinned but `sea-orm-migration` is not. Both crates must
-stay at matching RC versions; an independent bump of either during the RC series
-will cause runtime migration failures or type-level incompatibilities. Add to
-`[workspace.dependencies]` alongside `sea-orm`. `crates/core/agent-ssh` has the
-same issue.
-
-**[SEVERITY: Low]** `crates/core/controller/Cargo.toml:64` — `base64 = "0.22"` in dev-dependencies is not workspace-pinned
-
-`base64` is used in several other crates and is already a transitive dependency.
-An independent version here risks subtle encoding differences if the workspace-
-transitive version and the explicitly declared version diverge. Add to
-`[workspace.dependencies]`.
-
 #### 2026-02-24 Review
 
 **[SEVERITY: Medium]** `crates/core/controller/src/db/config.rs:13,23,42-45,48,53,58` — Non-additive feature flag pattern: 6 `#[cfg(not(feature))]` usages in database configuration
@@ -488,15 +461,6 @@ from `string_uniq` is sufficient. The same pattern appears for `users.email`.
 - **All domain-significant duration constants are centralized with documentation.** `src/durations.rs` — No magic numeric literals for time values.
 
 ### Issues
-
-**[SEVERITY: Medium]** `crates/core/controller/Cargo.toml:45,50-51` — `sea-orm-migration`, `cron`, and `chrono` not in `[workspace.dependencies]`
-
-Restated here from Architecture: three direct dependencies are declared with
-inline version strings, bypassing workspace-level version governance. During the
-RC series of `sea-orm`, even a patch-level drift between `sea-orm` and
-`sea-orm-migration` can cause runtime migration errors. `cron`'s indirect
-`chrono` requirement introduces a second date-time library into the binary without
-a workspace-pinned constraint.
 
 **[SEVERITY: Low]** `crates/core/controller/src/scheduler/mod.rs:18` — `DEFAULT_POLL_INTERVAL_SECS` is a module-private constant that duplicates domain knowledge in `durations.rs`
 

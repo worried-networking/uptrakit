@@ -4,9 +4,7 @@
 
 The Uptrakit backend is a well-structured Rust workspace of 24 crates spanning four clearly separated domains: `core/` (binaries), `plugins/` (pluggable detection and update drivers), `shared/` (libraries), and `ui/` (HTTP API and CLI). The codebase consistently applies Rust 2024 edition and resolver version 3 across every crate, uses workspace-pinned dependency versions for all major libraries, and leans on strong type-system patterns — typed permission extractors, `SecretString` at API boundaries, `Zeroizing<>` on key material — that enforce security invariants at compile time rather than by convention. The release profile is production-hardened (`lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`), and the overall dependency DAG is sound with one well-defined layering violation.
 
-The primary architectural concern at workspace level is that `uptrakit-crypto`, a foundational crate that any agent-side consumer will eventually need, unconditionally pulls in `sea-orm`. This couples a cryptographic primitive to the ORM layer and contradicts the clean split that `uptrakit-shared-types` already achieves through its `sea-orm` feature flag. A related concern is that `sea-orm-migration` is declared inline in two crates at an RC version, creating version-drift risk between it and the workspace-pinned `sea-orm` during the RC series. Beyond dependency hygiene, the workspace has no `[workspace.lints]` table, so only one of the 24 crates (`uptrakit-internal-wire`) actually enforces `warnings = "deny"` and `clippy::all = "deny"` — the remaining 23 rely solely on CI configuration.
-
-Several high-severity operational issues span the workspace. The `AGENTS.md` invariant document references a `crates/shared/core/` (`uptrakit-core`) crate that does not exist, which misleads any agent or developer reading the canonical layout map. The mTLS configuration in `uptrakit-controller` uses `.allow_unauthenticated()`, which is intentional for reverse-proxy deployments — this is documented in `pki.rs` and `mtls_acceptor.rs`.
+The mTLS configuration in `uptrakit-controller` uses `.allow_unauthenticated()`, which is intentional for reverse-proxy deployments — this is documented in `pki.rs` and `mtls_acceptor.rs`.
 
 The extensibility seam for plugins is well-designed at the `Plugin` trait and `register_plugins!` macro level. Discovery-capable plugin support is now fully registry-driven — `discovery_plugins()` is auto-generated from the macro, and `create_plugin_for_discovery` is macro-generated too; no manual sync is needed. Package-identifier validation is handled through `PluginRegistry::validate_package_identifier`, completing the plugin extensibility story.
 
@@ -22,41 +20,13 @@ The extensibility seam for plugins is well-designed at the `Plugin` trait and `r
 - `[workspace.package]` carries `license`, `authors`, `repository`, and `version` so every crate can use `*.workspace = true`, ensuring metadata consistency across all published artifacts.
 - The four-domain layout (`core/`, `plugins/`, `shared/`, `ui/`) enforces a natural dependency gradient: plugins never import from `ui/`, binaries import from `shared/` and `ui/`, `shared/` libraries only import each other in a defined order. This makes cross-cutting concerns auditable.
 - `uptrakit-shared-types/Cargo.toml:9-13`: `sea-orm` and `openapi` features correctly gate optional ORM and OpenAPI dependencies — the correct pattern for workspace-wide shared type crates.
-- `uptrakit-internal-wire/Cargo.toml:21-25`: The only crate that enforces `[lints.rust] warnings = "deny"` and `[lints.clippy] all = "deny"` locally, demonstrating the correct pattern for the rest of the workspace to adopt via `[workspace.lints]`.
+- `Cargo.toml` (workspace root): `[workspace.lints]` enforces `warnings = "deny"` and `clippy::all = "deny"` across all 26 crates via `[lints] workspace = true`.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/shared/crypto/Cargo.toml:14` — `uptrakit-crypto` unconditionally depends on `sea-orm`
-
-`sea-orm = { workspace = true }` is a non-optional production dependency of what should be a foundational cryptographic primitive. The sole reason is to implement `sea_orm::sea_query::ValueType` and `TryGetable` for `EncryptedString`. Every future consumer of `uptrakit-crypto` — including any agent-side or tooling crate — will transitively compile all of SeaORM's async runtime machinery. `uptrakit-shared-types` already demonstrates the correct pattern: `sea-orm = { workspace = true, optional = true }` behind a `sea-orm` feature flag. `uptrakit-crypto` should adopt the same approach, with the `ValueType`/`TryGetable` impls gated behind an opt-in `sea-orm` feature. `uptrakit-shared-db` — the only crate that actually needs both crypto and ORM — would then enable `uptrakit-crypto/sea-orm`.
-
-**[SEVERITY: High]** `AGENTS.md:72` — Canonical codebase layout map references a non-existent crate
-
-`crates/shared/core/` is listed as `uptrakit-core (lib) — shared domain models` in the layout tree. No such directory or crate exists in the workspace (confirmed: `members = ["crates/*/*"]` resolves 24 crates, none named `uptrakit-core`). AGENTS.md is the primary reference document for AI coding agents and new contributors. A ghost entry in the layout map causes agents to look for `uptrakit-core` as a dependency target, confuses cross-crate import planning, and silently invalidates every document section that refers to the layout map as authoritative.
-
-**[SEVERITY: Medium]** `crates/core/controller/Cargo.toml:45` and `crates/core/agent-ssh/Cargo.toml:37` — `sea-orm-migration` declared inline, not in `[workspace.dependencies]`
-
-Both crates pin `sea-orm-migration = { version = "2.0.0-rc.32", ... }` inline and independently. The workspace pins `sea-orm = { version = "2.0.0-rc.32", ... }`. During an RC series, patch versions of `sea-orm` and `sea-orm-migration` must match exactly. With two separate inline declarations there is no single place to update both simultaneously: a `dependabot` or manual bump of one will not automatically bump the other, and the mismatch will produce a compile error or silent behavioral difference. Both should be moved to `[workspace.dependencies]` with the same version and feature baseline.
-
-**[SEVERITY: Medium]** `Cargo.toml` (workspace root) — No `[workspace.lints]` table; lint enforcement covers only 1 of 24 crates
-
-Only `uptrakit-internal-wire` declares `[lints.rust] warnings = "deny"` and `[lints.clippy] all = "deny"`. The other 23 crates accumulate warnings silently outside CI. AGENTS.md invariant 13 prohibits `#[allow()]` additions without approval, but without enforced deny-by-default, violations can accumulate undetected between CI runs. Adding a `[workspace.lints]` table to the root `Cargo.toml` would propagate the same policy to all crates via `lints.workspace = true`, consistent with how `edition`, `license`, and `version` are already inherited.
-
-**[SEVERITY: Medium]** `crates/ui/web-api/Cargo.toml:22-23` and `crates/core/controller/Cargo.toml:50-51` — Dual datetime crates (`time` + `chrono`) introduced by `cron`, not in workspace
-
-`time = "0.3"` is workspace-pinned and used as the canonical datetime type throughout all entities, wire types, and database code. `chrono = { version = "0.4" }` and `cron = "0.15"` are added inline in both `uptrakit-web-api` and `uptrakit-controller` because the `cron` crate requires `chrono`. Neither `chrono` nor `cron` appear in `[workspace.dependencies]`. Two independent inline declarations create the same patch-drift risk as `sea-orm-migration`. Additionally, the dual datetime crates make clock-source inconsistencies possible: code using `chrono::Utc::now()` versus `time::OffsetDateTime::now_utc()` may behave differently at DST boundaries or on hosts with non-UTC local time.
-
-**[SEVERITY: Medium]** `crates/shared/service-sdk/Cargo.toml:34` — `tracing-subscriber` is a production dependency of a shared library
-
-`tracing-subscriber = { workspace = true }` appears in `[dependencies]`, not `[dev-dependencies]`. The subscriber initialization call in `service-sdk/src/main_helper.rs` (`tracing_subscriber::fmt().init()`) configures the global tracing dispatcher. A library must never configure the global dispatcher — that is the binary's responsibility. Any crate that calls `init_tracing()` twice (e.g., an integration test that imports two binaries) will panic. The call should be moved to each binary's `main.rs`, and `tracing-subscriber` moved to `[dev-dependencies]` in `uptrakit-service-sdk`. The binary crates (`uptrakit-controller`, `uptrakit-agent`, `uptrakit-agent-ssh`, `uptrakit-mqtt`) all already have `tracing-subscriber = { workspace = true }` in their own `[dependencies]`, so the move is purely a removal from the library.
 
 **[SEVERITY: Low]** `Cargo.toml` (workspace root) — No `rust-version` MSRV declared
 
 `AGENTS.md:109` states "Some specify `rust-version = \"1.91\"`", but zero crates in the workspace actually set `rust-version`. The workspace `[workspace.package]` section has no `rust-version` field. Without an MSRV declaration, `cargo check` on any Rust version will succeed, and edition-2024 features may silently break older toolchains used by downstream packagers or CI matrix jobs. The correct fix is a single `rust-version = "1.85"` (or whichever minimum is validated) in `[workspace.package]` and updating AGENTS.md to reflect the actual state.
-
-**[SEVERITY: Low]** `crates/ui/cli/Cargo.toml:30` and `crates/shared/wire/Cargo.toml` (dev) — `serde_yaml_ng` and `rumqttc` not in `[workspace.dependencies]`
-
-`serde_yaml_ng = "0.10"` appears inline in `uptrakit-cli` (production) and in `uptrakit-internal-wire` dev-dependencies. `rumqttc = { version = "0.25.1" }` appears inline in `uptrakit-mqtt`. As sole consumers, neither creates immediate drift risk, but the inconsistency with the otherwise comprehensive workspace dependency table makes auditing harder. Both should be promoted to `[workspace.dependencies]` for uniformity.
 
 #### 2026-02-24 Review
 
@@ -142,13 +112,6 @@ This single function mixes HTTP client construction, PKCE code exchange, ID toke
 
 Both `oidc_complete_registration` and `oidc_link` reconstruct "fake claims" using identical logic including the same `// first path segment only` limitation comment. A shared `fn build_claims_for_role_sync(provider, mapped_roles) -> serde_json::Value` would eliminate the duplication and ensure the limitation is fixed in one place.
 
-**[SEVERITY: Medium]** Multiple route files — Pervasive `Path<String>` + manual `uuid::Uuid::parse_str` pattern (43 occurrences)
-
-Axum's extractor system supports `Path(id): Path<Uuid>` directly, returning a typed 422 on malformed input. The manual `parse_str` pattern produces inconsistent error responses (varies by handler), increases per-function complexity, and duplicates UUID validation logic. Key files: `crates/ui/web-api/src/routes/hosts.rs:77`, `services.rs:98`, `software_items.rs:146`, `api_tokens.rs:111`, `plugin_configs.rs:106`. This is a workspace-wide pattern problem touching at least 10 route files.
-
-**[SEVERITY: Medium]** `crates/shared/service-sdk/src/main_helper.rs:37-38,42-43` — `expect()` calls in a shared library outside approved exception list
-
-`expect()` is used to unwrap results in `init_tracing()`. AGENTS.md lists approved `unwrap()` exceptions as `Mutex::lock()`, `RwLock::read()`, and `RwLock::write()` only. These `expect()` calls do not qualify. In addition, since `init_tracing()` must be removed from the library entirely (see Architecture issue above), this is a compound fix.
 
 #### 2026-02-24 Review
 
@@ -325,10 +288,6 @@ Issues N_tenants x 6 individual INSERT statements. Should use a single multi-row
 
 `create_api_token`, `list_api_tokens`, `revoke_api_token`, `logout`, and `me` use `Extension<AuthenticatedUser>` directly (appropriate for user-scoped endpoints not governed by the RBAC permission model), but none carry a `x-required-permission` annotation. AGENTS.md invariant 18 requires every protected endpoint to carry the matching annotation. User-identity endpoints should carry a documented sentinel value (e.g., `"authenticated"`) so the OpenAPI spec is consistent and automated permission-audit tooling does not treat them as unprotected.
 
-**[SEVERITY: Medium]** Multiple route files — 43 `Path<String>` + manual `uuid::Uuid::parse_str` occurrences violate the `FromStr` invariant
-
-AGENTS.md invariant 14 requires `FromStr` for all string-to-type conversions. Axum's `Path<Uuid>` extractor uses `FromStr<Uuid>` internally and produces a typed 422 on malformed input. The manual `parse_str` pattern is a partial re-implementation of what the framework already provides, produces inconsistent error response shapes, and violates the spirit of the standard conversion pattern. This affects at least 10 route files across `crates/ui/web-api/src/routes/`.
-
 **[SEVERITY: Medium]** `crates/ui/web-api/src/routes/hosts.rs:141`, `services.rs:282`, `services.rs:483` — Three `DELETE` endpoints return `200 OK` with a body
 
 Soft-delete endpoints that use the `DELETE` HTTP method should return `204 No Content`. Returning `200 OK` with a response body on a `DELETE` is inconsistent with the REST conventions applied elsewhere in the API (other delete endpoints correctly return `204`) and violates the principle of least surprise for API consumers. The fix is either to return `204` with no body, or to rename the endpoint to `POST /{id}/deactivate` if a body is semantically necessary.
@@ -336,10 +295,6 @@ Soft-delete endpoints that use the `DELETE` HTTP method should return `204 No Co
 **[SEVERITY: Medium]** `crates/ui/web-api/src/routes/autodiscovery.rs:154,159` — `create_autodiscovery_ignore` returns `201 Created` for pre-existing records
 
 The idempotent upsert path returns `201` regardless of whether a new row was inserted or an existing row was found. Standard REST convention: return `201 Created` for newly created resources, `200 OK` for pre-existing ones. The handler should distinguish between insert and no-op outcomes and set the status code accordingly.
-
-**[SEVERITY: Low]** All `#[utoipa::path]` annotations with UUID path parameters declare `String` type instead of `Uuid` — 43 occurrences
-
-The OpenAPI schema emitted by `utoipa` for these parameters will declare `type: string` without `format: uuid`. API clients and OpenAPI linters use `format: uuid` to enable UUID validation, code generation, and documentation accuracy. Each annotation should use `schema(value_type = Uuid)` or the equivalent `utoipa` attribute for the path parameter.
 
 #### 2026-02-24 Review
 

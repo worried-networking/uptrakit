@@ -82,21 +82,10 @@ dependency management gap shared with the controller crate.
 
 ### Issues
 
-**[SEVERITY: Medium]** `Cargo.toml:37` — `sea-orm-migration` not in workspace dependencies
+**[SEVERITY: Low]** `Cargo.toml:12` — `dirs` not in workspace dependencies
 
-Both `uptrakit-agent-ssh` and `uptrakit-controller` declare
-`sea-orm-migration = { version = "2.0.0-rc.32" }` inline. During the RC series
-`sea-orm` and `sea-orm-migration` must stay on the same RC patch. Any
-independent version bump in one crate (e.g., `2.0.0-rc.33`) will silently
-diverge from the other. Add to `[workspace.dependencies]` alongside the
-`sea-orm` entry.
-
-**[SEVERITY: Low]** `Cargo.toml:10` — `base64` and `dirs` not in workspace dependencies
-
-`base64 = "0.22"` and `dirs = "6"` are declared inline. `base64` is used
-elsewhere in the workspace; a diverging major version in one consumer will not
-be caught until link time. `dirs` appears to be a sole consumer here so the
-risk is lower, but workspace pinning is the established convention.
+`dirs = "6"` is declared inline. As a sole consumer the risk is lower, but
+workspace pinning is the established convention.
 
 ---
 

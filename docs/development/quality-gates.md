@@ -8,13 +8,15 @@ Run all relevant quality gates for the areas touched by your change.
 cargo fmt --all                                                      # Format
 cargo check --workspace --no-default-features --features db-sqlite   # Lint with minimal features-set
 cargo check --workspace --all-features                               # Lint
-cargo clippy --workspace --all-targets --no-default-features --features db-sqlite -- -D warnings # Lint with Clippy over minimal features-set
-cargo clippy --workspace --all-targets --all-features -- -D warnings # Lint with Clippy
+cargo clippy --workspace --all-targets --no-default-features --features db-sqlite # Lint with Clippy over minimal features-set
+cargo clippy --workspace --all-targets --all-features                # Lint with Clippy
 cargo test --all-features                                            # Tests
 cargo deny check                                                     # Validate new dependencies
 ```
 
-There shouldn't even be any warnings in the output of these commands.
+Workspace lints (`[workspace.lints]` in root `Cargo.toml`) enforce `warnings = "deny"` and
+`clippy::all = "deny"` across all 26 crates. The `-- -D warnings` flag is no longer needed on
+clippy commands — it is inherited automatically via `[lints] workspace = true` in each crate.
 
 **Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/` to exist.
 Build the frontend first (`cd frontend && npm ci && npm run build`) before running `--all-features` checks.

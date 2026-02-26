@@ -45,18 +45,6 @@ Several Medium-severity schema decisions (soft-delete naming inconsistency, dual
 
 ### Issues
 
-**[SEVERITY: High]** `crates/shared/crypto/Cargo.toml:14` — `uptrakit-crypto` unconditionally
-depends on `sea-orm`, which propagates into this crate.
-
-`uptrakit-shared-db` depends on `uptrakit-crypto`, and `uptrakit-crypto` carries an
-unconditional `sea-orm` dependency solely to implement `ValueType`/`TryGetable` for
-`EncryptedString`. The correct fix belongs in `uptrakit-crypto`: gate the ORM impls behind a
-`sea-orm` Cargo feature, mirroring how `uptrakit-shared-types` already does it. Until that
-is resolved, any future non-ORM consumer of `uptrakit-crypto` (CLI tooling, key management
-utilities, agent-side code) will pay the full `sea-orm` compilation cost and pull in the
-entire ORM runtime. The issue is reported in the Architecture section of Phase 1 findings
-and cross-cuts into this crate.
-
 ---
 
 ## Security & Safety
@@ -128,24 +116,6 @@ findings) is owned by `uptrakit-crypto`, not this crate; it is cross-referenced 
 **[SEVERITY: Low]** `crates/ui/web-api/src/queries/plugin_configs.rs:155-158` — Second instance of string-based unique violation detection duplicated from autodiscovery.rs
 
 Two independent copies of the same fragile detection logic. Should be consolidated into `uptrakit-shared-db` using backend-specific error codes.
-
-**[SEVERITY: Medium]** `crates/shared/db/src/entity/oidc_provider.rs:89` — Soft-delete column
-named `deleted_at` instead of `deactivated_at`.
-
-All other soft-deletable entities in this crate (`hosts`, `services`, `software_items`,
-`plugin_configs`, `ca_certificates`, `tenants`, `users`) use `deactivated_at`. The OIDC
-plugin entity uses `deleted_at`. This inconsistency prevents a generic soft-delete utility
-from working across all entities, forces consumers to remember which column name to use per
-entity type, and risks bugs when filtering in new query helpers. The column name should be
-migrated to `deactivated_at` to match the established convention.
-
-```
-// entity/oidc_provider.rs:89 — current
-pub deleted_at: Option<OffsetDateTime>,
-
-// should be
-pub deactivated_at: Option<OffsetDateTime>,
-```
 
 **[SEVERITY: Medium]** `crates/shared/db/src/entity/update_history.rs:28` — Dual output
 storage: `output` column (inline Text) and the `update_output_lines` child table.
@@ -280,13 +250,6 @@ Frequent check requires index intersections without a composite index.
 Unlike `plugin_configs` and `software_items`, OIDC provider slugs cannot be reused after soft-deletion.
 
 ### Issues
-
-**[SEVERITY: Medium]** `crates/shared/db/src/entity/oidc_provider.rs:89` — Soft-delete
-column name inconsistency (also reported in Code Quality).
-
-See Code Quality section. The DB impact is that any generic query helper that filters
-`WHERE deactivated_at IS NULL` across all soft-deletable entities must special-case
-`oidc_providers`. The migration column name and the entity field must be changed together.
 
 **[SEVERITY: Medium]** `crates/core/agent-ssh/src/db/entity/ssh_host.rs:71-72` — Integer
 epoch timestamps instead of typed TIMESTAMP columns in agent-ssh local DB.

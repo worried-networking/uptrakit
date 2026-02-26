@@ -408,10 +408,6 @@ DB outage causes items to report zero linked hosts silently.
 
 `create_api_token`, `list_api_tokens`, `revoke_api_token`, `logout`, and `me` use raw `Extension<AuthenticatedUser>` directly (appropriate for user-scoped resources) but lack the `x-required-permission` OpenAPI extension. The OpenAPI spec consequently omits the permission requirement from generated clients, and the automated permission-coverage check cannot verify these endpoints. Add `x-required-permission: "self"` or an equivalent sentinel value to document that these endpoints require only authentication, not a specific resource permission.
 
-**[SEVERITY: Medium]** Pervasive `Path<String>` + manual `uuid::Uuid::parse_str` pattern — 43 occurrences across 10 route files
-
-Axum natively supports `Path(id): Path<Uuid>` which performs the same parse and returns a typed 422 on failure. All 43 occurrences use the manual pattern (e.g., `hosts.rs:77`, `services.rs:98`, `software_items.rs:146`, `api_tokens.rs:111`, `plugin_configs.rs:106`). Replace with typed extraction throughout: eliminates boilerplate, produces consistent error responses, and removes 43 instances of hand-written UUID validation.
-
 **[SEVERITY: Medium]** `src/routes/services.rs:282` and `src/routes/hosts.rs:141` — Soft-delete `DELETE` endpoints return `200 OK` with body instead of `204 No Content`
 
 REST convention: `DELETE` that has no meaningful response body should return `204`. Returning `200` with a body is inconsistent with the other delete endpoints in this crate that correctly return `204`, and inconsistent with what REST clients expect. Standardize to `204 No Content` or rename to `POST /deactivate` if a body is required.
@@ -419,14 +415,6 @@ REST convention: `DELETE` that has no meaningful response body should return `20
 **[SEVERITY: Medium]** `src/routes/autodiscovery.rs:154,159` — `create_autodiscovery_ignore` returns `201 Created` for both new and pre-existing records
 
 When the ignore entry already exists, the endpoint returns `201 Created`. Standard REST: `201` for new creation, `200` (or `204`) for an idempotent update/pre-existing resource. Return `200 OK` when the record is found to already exist.
-
-**[SEVERITY: Low]** All utoipa path-parameter annotations declare `String` type instead of `Uuid` — 43 occurrences
-
-```rust
-("id" = String, Path, description = "...")
-```
-
-The generated OpenAPI schema should declare `format: uuid`. Update all 43 path param annotations to `Uuid` type. This affects every endpoint with UUID path params and makes the generated client code produce UUID-typed parameters rather than raw strings.
 
 #### 2026-02-24 Review
 

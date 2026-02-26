@@ -78,7 +78,6 @@ uptrakit/
 │   ├── shared/
 │   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, handle_check_versions/execute_update/graceful_shutdown
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag
-│   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption (EncryptedString, init_master_key)
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities; `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`; re-exports uptrakit-crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
@@ -212,10 +211,13 @@ These are non-negotiable design constraints. Do not violate them.
    `UPTRAKIT_BUILD_ENABLED_FEATURES`; do not hardcode feature lists per binary.
 1. **Do not add any `#[allow()]`** without explicit confirmation. There are currently no approved exceptions in the
    codebase; all previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead
-   code removal.
+   code removal. Workspace lints (`[workspace.lints]` in root `Cargo.toml`) enforce `warnings = "deny"` and
+   `clippy::all = "deny"` across all crates via `[lints] workspace = true`.
 1. **Use `FromStr` for all string-to-type conversions.** Do not add ad-hoc `parse(&str)` methods. Follow the pattern in
    [docs/development/coding-standards.md](docs/development/coding-standards.md) (section "String-to-Type Conversions"):
-   typed `Parse{TypeName}Error`, `impl FromStr`, and `s.parse::<MyType>()` at call sites.
+   typed `Parse{TypeName}Error`, `impl FromStr`, and `s.parse::<MyType>()` at call sites. Route handlers accepting
+   UUID path parameters must use `Path<Uuid>` (not `Path<String>` with manual `Uuid::parse_str`). See
+   [Coding Standards](docs/development/coding-standards.md) (section "Typed Path Extractors").
 1. **Keep the openapi-client in sync with web-api endpoints.** Any web-api endpoint addition or change
    must be reflected in the `uptrakit-openapi-client` crate: new endpoints get client methods, changed
    signatures/response types are updated, removed endpoints have their client methods removed. Excluded
