@@ -3,24 +3,14 @@
 //! Covers:
 //! - Ignore rule management (create / list / delete)
 //! - Pending-item bulk-discard
-//! - Auto-creation of default plugin configs from discovery `extra` metadata
+//! - Auto-creation of default plugin configs from discovery targets
 //! - Processing incoming `DiscoveryResults` payloads (creating pending software
 //!   items and upserting host-software-item links)
-
-// ── PHS synthesis constants ───────────────────────────────────────────────────
-
-/// Shell command used to detect the installed version of a GitHub-managed PHS app.
-///
-/// `{package_identifier}` is the PHS slug, replaced shell-escaped at runtime by
-/// the GitHub plugin's `detect_installed_version()` implementation.
-const PHS_DETECT_VERSION_CMD: &str = r#"cat -- "${HOME}/.{package_identifier}""#;
-
-/// Install command for PHS-managed apps.
-///
-/// Uses the unattended mode (`PHS_SILENT=1`) exactly as the official
-/// `update-apps.sh` PVE tool does via `pct exec`, so the update runs without
-/// interactive prompts and without requiring a network fetch of the script.
-const PHS_INSTALL_CMD: &str = "env PHS_SILENT=1 /usr/bin/update";
+//!
+//! The controller is completely generic: plugins return structured
+//! [`DiscoveryTarget`](uptrakit_shared_types::DiscoveryTarget) values that
+//! specify exactly which plugin configs and roles to create — no plugin-specific
+//! synthesis logic lives here.
 
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -28,7 +18,8 @@ use sea_orm::{
 };
 use std::collections::HashSet;
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload, PluginType};
+use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload};
+use uptrakit_internal_wire::DiscoveryTarget;
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
     autodiscovery_ignore, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
@@ -368,11 +359,13 @@ async fn find_matching_plugin_config(
 
 /// Process a `DiscoveryResultsPayload` received from an agent.
 ///
-/// For each result:
-/// 1. Resolves (or auto-creates) the target `plugin_config_id`.
-/// 2. Skips items on the ignore list.
-/// 3. Upserts `host_software_item` for existing active items.
-/// 4. Creates a new `pending` `SoftwareItem` + `HostSoftwareItem` for new discoveries.
+/// For each plugin result, delegates to one of two generic processing paths:
+///
+/// 1. **Target-based**: Items with non-empty `targets` are processed via
+///    [`process_targets_discovery`] — each target drives plugin-config
+///    find-or-create and role-assignment creation.
+/// 2. **Config-ID-based**: Items with empty `targets` use the pre-existing
+///    `plugin_config_id` from the result for all three standard roles.
 pub async fn process_discovery_results(
     db: &sea_orm::DatabaseConnection,
     agent_id: Uuid,
@@ -402,14 +395,17 @@ pub async fn process_discovery_results(
             continue;
         }
 
-        // Resolve or auto-create plugin configs, grouped by their "config key"
-        // derived from the extra metadata on each discovery item.
         process_plugin_result(db, tenant_id, host_id, now, &result).await?;
     }
 
     Ok(())
 }
 
+/// Process a single plugin's discovery results.
+///
+/// Routes each item to the correct processing path based on its `targets` field
+/// and the result's `plugin_config_id`. This function is fully generic — no
+/// plugin-type-specific branching.
 async fn process_plugin_result(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -417,90 +413,41 @@ async fn process_plugin_result(
     now: OffsetDateTime,
     result: &DiscoveryPluginResult,
 ) -> Result<(), AutodiscoveryError> {
-    let plugin_type_str = result.plugin_type.to_string();
-
-    // If the assignment already had a plugin_config_id, use it directly for
-    // all discoveries in this result. Otherwise, group by config key.
-    if let Some(existing_pc_id) = result.plugin_config_id {
-        let ignore_set = load_ignore_set(db, tenant_id, existing_pc_id).await?;
-        for item in &result.discoveries {
-            let args = ProcessDiscoveryArgs {
-                package_identifier: &item.package_identifier,
-                name: &item.name,
-                installed_version: &item.installed_version,
-                plugin_type_str: &plugin_type_str,
-            };
+    for item in &result.discoveries {
+        let item_info = DiscoveredItemInfo {
+            package_identifier: &item.package_identifier,
+            name: &item.name,
+            installed_version: &item.installed_version,
+        };
+        if !item.targets.is_empty() {
+            // Target-based: each target specifies its own plugin config and roles.
+            process_targets_discovery(
+                db,
+                tenant_id,
+                host_id,
+                &item_info,
+                &item.targets,
+                now,
+            )
+            .await?;
+        } else if let Some(existing_pc_id) = result.plugin_config_id {
+            // Config-ID-based: use the pre-existing plugin config for all roles.
+            let ignore_set = load_ignore_set(db, tenant_id, existing_pc_id).await?;
             process_one_discovery(
                 db,
                 tenant_id,
                 host_id,
                 existing_pc_id,
-                args,
+                item_info,
                 &ignore_set,
                 now,
             )
             .await?;
-        }
-        return Ok(());
-    }
-
-    // Default/auto assignment (no pre-existing config) — group by config key
-    // derived from the `extra` metadata on each discovery item.
-    match result.plugin_type {
-        PluginType::Homebrew => {
-            process_homebrew_default(db, tenant_id, host_id, now, result).await?;
-        }
-        PluginType::Docker => {
-            let config_json = serde_json::json!({});
-            let pc_id = find_or_create_default_plugin_config(
-                db,
-                tenant_id,
-                &plugin_type_str,
-                &config_json,
-                "Docker",
-            )
-            .await?;
-            let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
-            for item in &result.discoveries {
-                let args = ProcessDiscoveryArgs {
-                    package_identifier: &item.package_identifier,
-                    name: &item.name,
-                    installed_version: &item.installed_version,
-                    plugin_type_str: &plugin_type_str,
-                };
-                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now)
-                    .await?;
-            }
-        }
-        PluginType::ProxmoxHelperScripts => {
-            process_phs_results(db, tenant_id, host_id, now, result).await?;
-        }
-        PluginType::Apt => {
-            let config_json = serde_json::json!({});
-            let pc_id = find_or_create_default_plugin_config(
-                db,
-                tenant_id,
-                &plugin_type_str,
-                &config_json,
-                "APT",
-            )
-            .await?;
-            let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
-            for item in &result.discoveries {
-                let args = ProcessDiscoveryArgs {
-                    package_identifier: &item.package_identifier,
-                    name: &item.name,
-                    installed_version: &item.installed_version,
-                    plugin_type_str: &plugin_type_str,
-                };
-                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now)
-                    .await?;
-            }
-        }
-        _ => {
+        } else {
             tracing::warn!(
                 plugin_type = %result.plugin_type,
-                "received discovery results for a plugin type that does not support auto-config creation; skipping"
+                package_identifier = %item.package_identifier,
+                "discovery item has no targets and no plugin_config_id; skipping"
             );
         }
     }
@@ -508,193 +455,111 @@ async fn process_plugin_result(
     Ok(())
 }
 
-/// Process PHS discovery results by dispatching on the `extra` metadata set by
-/// the PHS plugin.
-///
-/// Each discovered item carries one of:
-/// - `{ "github_owner": "…", "github_repo": "…" }` — GitHub-managed app.
-///   A `github_releases` plugin config is found-or-created per `(owner, repo)`
-///   pair, pre-populated with the PHS detect-version command and install command.
-/// - `{ "apt_package": "…" }` — APT-managed app (direct or install-script fallback).
-///   A shared `apt` plugin config (`{}`) is found-or-created for the tenant.
-/// - Neither — logged as a warning and skipped.
-async fn process_phs_results(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    host_id: Uuid,
-    now: OffsetDateTime,
-    result: &DiscoveryPluginResult,
-) -> Result<(), AutodiscoveryError> {
-    for item in &result.discoveries {
-        let github_owner = item
-            .extra
-            .as_ref()
-            .and_then(|e| e.get("github_owner"))
-            .and_then(|v| v.as_str());
-        let github_repo = item
-            .extra
-            .as_ref()
-            .and_then(|e| e.get("github_repo"))
-            .and_then(|v| v.as_str());
-        let apt_package = item
-            .extra
-            .as_ref()
-            .and_then(|e| e.get("apt_package"))
-            .and_then(|v| v.as_str());
-
-        match (github_owner, github_repo, apt_package) {
-            (Some(owner), Some(repo), _) => {
-                // GitHub-managed: synthesize a GithubReleases plugin config.
-                let config_json = serde_json::json!({
-                    "owner": owner,
-                    "repo": repo,
-                    "tag_strip_prefix": "v",
-                    "include_prereleases": false,
-                    "asset_patterns": [],
-                    "detect_installed_version_command": PHS_DETECT_VERSION_CMD,
-                    "install_command": PHS_INSTALL_CMD,
-                });
-                let display_name = format!("{owner}/{repo}");
-                let pc_id = find_or_create_default_plugin_config(
-                    db,
-                    tenant_id,
-                    "github_releases",
-                    &config_json,
-                    &display_name,
-                )
-                .await?;
-                let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
-                let args = ProcessDiscoveryArgs {
-                    package_identifier: &item.package_identifier,
-                    name: &item.name,
-                    installed_version: &item.installed_version,
-                    plugin_type_str: "github_releases",
-                };
-                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now)
-                    .await?;
-            }
-            (_, _, Some(_apt_pkg)) => {
-                // APT-managed: find-or-create the shared default APT plugin config.
-                let config_json = serde_json::json!({});
-                let pc_id = find_or_create_default_plugin_config(
-                    db,
-                    tenant_id,
-                    "apt",
-                    &config_json,
-                    "APT (auto)",
-                )
-                .await?;
-                let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
-                let args = ProcessDiscoveryArgs {
-                    package_identifier: &item.package_identifier,
-                    name: &item.name,
-                    installed_version: &item.installed_version,
-                    plugin_type_str: "apt",
-                };
-                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now)
-                    .await?;
-            }
-            _ => {
-                tracing::warn!(
-                    package_identifier = %item.package_identifier,
-                    "PHS item has no detectable upstream; skipping"
-                );
-            }
-        }
-    }
-
-    Ok(())
-}
-
-async fn process_homebrew_default(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
-    host_id: Uuid,
-    now: OffsetDateTime,
-    result: &DiscoveryPluginResult,
-) -> Result<(), AutodiscoveryError> {
-    let plugin_type_str = result.plugin_type.to_string();
-
-    // Split items by package_type from their extra metadata.
-    let mut formulae = Vec::new();
-    let mut casks = Vec::new();
-    let mut unknown = Vec::new();
-
-    for item in &result.discoveries {
-        let pkg_type = item
-            .extra
-            .as_ref()
-            .and_then(|e| e.get("package_type"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        match pkg_type {
-            "formula" => formulae.push(item),
-            "cask" => casks.push(item),
-            _ => {
-                tracing::warn!(
-                    package_identifier = %item.package_identifier,
-                    "Homebrew discovery item missing package_type in extra metadata; skipping"
-                );
-                unknown.push(item);
-            }
-        }
-    }
-
-    if !formulae.is_empty() {
-        let config_json = serde_json::json!({"package_type": "formula"});
-        let pc_id = find_or_create_default_plugin_config(
-            db,
-            tenant_id,
-            &plugin_type_str,
-            &config_json,
-            "Homebrew (Formulae)",
-        )
-        .await?;
-        let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
-        for item in formulae {
-            let args = ProcessDiscoveryArgs {
-                package_identifier: &item.package_identifier,
-                name: &item.name,
-                installed_version: &item.installed_version,
-                plugin_type_str: &plugin_type_str,
-            };
-            process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now).await?;
-        }
-    }
-
-    if !casks.is_empty() {
-        let config_json = serde_json::json!({"package_type": "cask"});
-        let pc_id = find_or_create_default_plugin_config(
-            db,
-            tenant_id,
-            &plugin_type_str,
-            &config_json,
-            "Homebrew (Casks)",
-        )
-        .await?;
-        let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
-        for item in casks {
-            let args = ProcessDiscoveryArgs {
-                package_identifier: &item.package_identifier,
-                name: &item.name,
-                installed_version: &item.installed_version,
-                plugin_type_str: &plugin_type_str,
-            };
-            process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now).await?;
-        }
-    }
-
-    let _ = unknown; // already warned above
-    Ok(())
-}
-
-/// Grouped arguments for a single discovered software item.
-struct ProcessDiscoveryArgs<'a> {
+/// Grouped arguments for a discovered item's identity fields.
+struct DiscoveredItemInfo<'a> {
     package_identifier: &'a str,
     name: &'a str,
     installed_version: &'a str,
-    plugin_type_str: &'a str,
+}
+
+/// Process a discovered item that carries explicit `DiscoveryTarget` values.
+///
+/// For each target:
+/// 1. Find-or-create a plugin config matching the target's type and JSON config.
+/// 2. Check the ignore list.
+/// 3. Upsert or create the software item and host link.
+/// 4. Create role assignments per the target's `roles` list.
+async fn process_targets_discovery(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    item: &DiscoveredItemInfo<'_>,
+    targets: &[DiscoveryTarget],
+    now: OffsetDateTime,
+) -> Result<(), AutodiscoveryError> {
+    for target in targets {
+        let target_plugin_type_str = target.plugin_type.to_string();
+
+        // Use the target's package_identifier override, or fall back to the item's.
+        let pkg_id = target
+            .package_identifier
+            .as_deref()
+            .unwrap_or(item.package_identifier);
+
+        let execution_site = target
+            .execution_site
+            .as_deref()
+            .unwrap_or("auto");
+
+        // Find-or-create plugin config for this target.
+        let pc_id = find_or_create_default_plugin_config(
+            db,
+            tenant_id,
+            &target_plugin_type_str,
+            &target.plugin_config,
+            &target.plugin_config_name,
+        )
+        .await?;
+
+        let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
+
+        // Check ignore list.
+        if ignore_set.contains(pkg_id) {
+            tracing::debug!(
+                %pc_id,
+                package_identifier = %pkg_id,
+                "skipping ignored autodiscovery item"
+            );
+            continue;
+        }
+
+        // Build target-specific item info (may override package_identifier).
+        let target_item = DiscoveredItemInfo {
+            package_identifier: pkg_id,
+            name: item.name,
+            installed_version: item.installed_version,
+        };
+
+        // Find-or-create the software item and host link.
+        let software_item_id = find_or_create_software_item(
+            db,
+            tenant_id,
+            host_id,
+            pc_id,
+            &target_item,
+            now,
+        )
+        .await?;
+
+        // If None, the item already existed and was updated in-place.
+        let Some(software_item_id) = software_item_id else {
+            continue;
+        };
+
+        // Create role assignments from the target's role list.
+        for role in &target.roles {
+            let plugin_link = host_software_item_plugin::ActiveModel {
+                id: Set(Uuid::now_v7()),
+                host_id: Set(host_id),
+                software_item_id: Set(software_item_id),
+                plugin_config_id: Set(pc_id),
+                role: Set(role.as_str().to_string()),
+                ordinal: Set(0),
+                package_identifier: Set(pkg_id.to_string()),
+                config_override: Set(target.config_override.clone()),
+                execution_site: Set(execution_site.to_owned()),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            if let Err(e) = HostSoftwareItemPlugin::insert(plugin_link).exec(db).await
+                && !is_unique_violation(&e)
+            {
+                return Err(e.into());
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Pre-load the ignore set for a specific `(tenant_id, plugin_config_id)` pair.
@@ -714,51 +579,39 @@ async fn load_ignore_set(
     Ok(rules.into_iter().map(|r| r.package_identifier).collect())
 }
 
-/// Process a single discovered software item: check ignore list, upsert or create.
+/// Find-or-create a software item + host link. Returns the software_item_id if a
+/// new link was created (caller must then create role assignments), or `None` if
+/// the existing link was updated in-place.
 ///
 /// Three-phase lookup:
-/// 1. If this host already has a `host_software_item` row for
+/// 1. If this host already has a `host_software_item_plugin` row for
 ///    `(plugin_config_id, package_identifier)`, update `installed_version` in place
-///    **if** the linked `software_item` is still active.  If the item has been
+///    **if** the linked `software_item` is still active. If the item has been
 ///    discarded (soft-deleted), the orphaned link is removed and the function falls
 ///    through to phases 2/3 so a fresh pending item is created.
 /// 2. If *any other* host in the tenant has the same assignment backed by an active
 ///    software item, reuse it and insert a new `host_software_item` link for this host.
-/// 3. Otherwise create a new pending `software_item` (name only) and a new
-///    `host_software_item` with the plugin info.
-async fn process_one_discovery(
+/// 3. Otherwise create a new pending `software_item` and `host_software_item`.
+async fn find_or_create_software_item(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,
     plugin_config_id: Uuid,
-    args: ProcessDiscoveryArgs<'_>,
-    ignore_set: &HashSet<String>,
+    item: &DiscoveredItemInfo<'_>,
     now: OffsetDateTime,
-) -> Result<(), AutodiscoveryError> {
-    // 1. Check ignore list (O(1) lookup into pre-loaded set).
-    if ignore_set.contains(args.package_identifier) {
-        tracing::debug!(
-            %plugin_config_id,
-            package_identifier = %args.package_identifier,
-            "skipping ignored autodiscovery item"
-        );
-        return Ok(());
-    }
-
+) -> Result<Option<Uuid>, AutodiscoveryError> {
+    let package_identifier = item.package_identifier;
+    let name = item.name;
+    let installed_version = item.installed_version;
     // Phase 1: Check if this specific host already tracks (plugin_config_id, package_identifier)
-    // via the new host_software_item_plugin join table.
     let existing_plugin_link = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(args.package_identifier))
+        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(package_identifier))
         .one(db)
         .await?;
 
     if let Some(plugin_link) = existing_plugin_link {
-        // Verify the linked software item is still active.  `discard_pending_items`
-        // removes host links together with the soft-delete, but this check guards
-        // against any pre-existing orphaned rows so re-discovery always surfaces a
-        // fresh pending item for previously discarded packages.
         let linked_item_active = SoftwareItem::find()
             .filter(software_item::Column::Id.eq(plugin_link.software_item_id))
             .filter(software_item::Column::DeactivatedAt.is_null())
@@ -773,19 +626,17 @@ async fn process_one_discovery(
                 .await?;
             if let Some(hsi) = hsi {
                 let mut active: host_software_item::ActiveModel = hsi.into();
-                active.installed_version = Set(Some(args.installed_version.to_string()));
+                active.installed_version = Set(Some(installed_version.to_string()));
                 active.installed_version_detected_at = Set(Some(now));
                 active.update(db).await?;
             }
-            return Ok(());
+            return Ok(None);
         }
 
-        // The linked software item was discarded; remove the orphaned host_software_item
-        // (which cascades to all its plugin rows) so this package is treated as new and
-        // phases 2/3 create a fresh pending item.
+        // The linked software item was discarded; remove the orphaned link.
         tracing::debug!(
             %plugin_config_id,
-            package_identifier = %args.package_identifier,
+            package_identifier = %package_identifier,
             "removing orphaned host link for discarded software item; will re-discover"
         );
         if let Some(hsi) =
@@ -800,11 +651,10 @@ async fn process_one_discovery(
     }
 
     // Phase 2: Check if any other host in this tenant already has
-    // (plugin_config_id, package_identifier). If so, reuse the existing software item
-    // so the global catalog stays unified.
+    // (plugin_config_id, package_identifier).
     let candidate_links: Vec<Uuid> = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(args.package_identifier))
+        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(package_identifier))
         .all(db)
         .await?
         .into_iter()
@@ -825,12 +675,12 @@ async fn process_one_discovery(
     let software_item_id = if let Some(item) = existing_item {
         item.id
     } else {
-        // Phase 3: Create a new pending software item — identity only, no plugin fields.
+        // Phase 3: Create a new pending software item.
         let new_id = Uuid::now_v7();
         let new_item = software_item::ActiveModel {
             id: Set(new_id),
             tenant_id: Set(tenant_id),
-            name: Set(args.name.to_string()),
+            name: Set(name.to_string()),
             enabled: Set(false),
             discovery_state: Set(Some(SoftwareDiscoveryState::Pending)),
             last_checked_at: Set(None),
@@ -840,18 +690,17 @@ async fn process_one_discovery(
         };
         SoftwareItem::insert(new_item).exec(db).await?;
         tracing::debug!(
-            package_identifier = %args.package_identifier,
-            plugin_type_str = %args.plugin_type_str,
+            package_identifier = %package_identifier,
             "created pending software item from discovery"
         );
         new_id
     };
 
-    // Insert host_software_item link (no plugin fields in the new schema).
+    // Insert host_software_item link.
     let link = host_software_item::ActiveModel {
         host_id: Set(host_id),
         software_item_id: Set(software_item_id),
-        installed_version: Set(Some(args.installed_version.to_string())),
+        installed_version: Set(Some(installed_version.to_string())),
         installed_version_detected_at: Set(Some(now)),
         latest_version: Set(None),
         latest_version_fetched_at: Set(None),
@@ -861,8 +710,48 @@ async fn process_one_discovery(
     };
     HostSoftwareItem::insert(link).exec(db).await?;
 
-    // Create role plugin assignments for all applicable roles using the discovery plugin.
-    // For autodiscovery, we assign the same plugin config to all three roles by default.
+    Ok(Some(software_item_id))
+}
+
+/// Process a single discovered software item using the config-ID path.
+///
+/// Used when items have no targets and the enclosing result has a pre-existing
+/// `plugin_config_id`. Creates all three standard role assignments.
+async fn process_one_discovery(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    plugin_config_id: Uuid,
+    args: DiscoveredItemInfo<'_>,
+    ignore_set: &HashSet<String>,
+    now: OffsetDateTime,
+) -> Result<(), AutodiscoveryError> {
+    // Check ignore list (O(1) lookup into pre-loaded set).
+    if ignore_set.contains(args.package_identifier) {
+        tracing::debug!(
+            %plugin_config_id,
+            package_identifier = %args.package_identifier,
+            "skipping ignored autodiscovery item"
+        );
+        return Ok(());
+    }
+
+    let software_item_id = find_or_create_software_item(
+        db,
+        tenant_id,
+        host_id,
+        plugin_config_id,
+        &args,
+        now,
+    )
+    .await?;
+
+    // If None, the item already existed and was updated in-place.
+    let Some(software_item_id) = software_item_id else {
+        return Ok(());
+    };
+
+    // Create role plugin assignments for all three standard roles.
     for role in ["detect_version", "fetch_releases", "execute_update"] {
         let plugin_link = host_software_item_plugin::ActiveModel {
             id: Set(Uuid::now_v7()),
@@ -877,7 +766,6 @@ async fn process_one_discovery(
             created_at: Set(now),
             updated_at: Set(now),
         };
-        // Use insert; if it conflicts on the UNIQUE constraint, skip silently.
         if let Err(e) = HostSoftwareItemPlugin::insert(plugin_link).exec(db).await
             && !is_unique_violation(&e)
         {
@@ -904,6 +792,10 @@ fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
 mod tests {
     use super::*;
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+    use uptrakit_internal_wire::{
+        DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
+        PluginRole, PluginType,
+    };
     use uptrakit_shared_db::SoftwareDiscoveryState;
     use uptrakit_shared_db::entity::{host, plugin_config, tenant};
 
@@ -1041,11 +933,100 @@ mod tests {
         }
     }
 
+    // ── Helper: make DiscoveryPluginResult with targets ───────────────────────
+
+    fn all_roles() -> Vec<PluginRole> {
+        vec![
+            PluginRole::DetectVersion,
+            PluginRole::FetchReleases,
+            PluginRole::ExecuteUpdate,
+        ]
+    }
+
+    fn phs_result_with_github_target(
+        pkg_id: &str,
+        name: &str,
+        version: &str,
+        owner: &str,
+        repo: &str,
+    ) -> DiscoveryPluginResult {
+        DiscoveryPluginResult {
+            plugin_type: PluginType::ProxmoxHelperScripts,
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: pkg_id.to_string(),
+                name: name.to_string(),
+                installed_version: version.to_string(),
+                targets: vec![DiscoveryTarget {
+                    plugin_type: PluginType::GithubReleases,
+                    plugin_config: serde_json::json!({
+                        "owner": owner,
+                        "repo": repo,
+                        "tag_strip_prefix": "v",
+                        "include_prereleases": false,
+                        "asset_patterns": [],
+                        "detect_installed_version_command":
+                            r#"cat -- "${HOME}/.{package_identifier}""#,
+                        "install_command": "env PHS_SILENT=1 /usr/bin/update",
+                    }),
+                    plugin_config_name: format!("{owner}/{repo}"),
+                    roles: all_roles(),
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }],
+                extra: None,
+            }],
+        }
+    }
+
+    fn phs_result_with_apt_target(
+        pkg_id: &str,
+        name: &str,
+        version: &str,
+    ) -> DiscoveryPluginResult {
+        DiscoveryPluginResult {
+            plugin_type: PluginType::ProxmoxHelperScripts,
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: pkg_id.to_string(),
+                name: name.to_string(),
+                installed_version: version.to_string(),
+                targets: vec![DiscoveryTarget {
+                    plugin_type: PluginType::Apt,
+                    plugin_config: serde_json::json!({}),
+                    plugin_config_name: "APT (auto)".to_string(),
+                    roles: all_roles(),
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }],
+                extra: None,
+            }],
+        }
+    }
+
+    fn phs_result_no_targets(pkg_id: &str) -> DiscoveryPluginResult {
+        DiscoveryPluginResult {
+            plugin_type: PluginType::ProxmoxHelperScripts,
+            plugin_config_id: None,
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: pkg_id.to_string(),
+                name: pkg_id.to_string(),
+                installed_version: "1.0.0".to_string(),
+                targets: vec![],
+                extra: None,
+            }],
+        }
+    }
+
     // ── tests ─────────────────────────────────────────────────────────────────
 
     /// `discard_pending_items` must remove the `host_software_items` rows for
-    /// every discarded software item so that future discovery runs do not find
-    /// an orphaned link and return early without creating a new pending item.
+    /// every discarded software item.
     #[tokio::test]
     async fn discard_pending_items_removes_host_links() {
         let db = setup_db().await;
@@ -1060,7 +1041,6 @@ mod tests {
         insert_software_item(&db, item_id, tenant_id, "git", None).await;
         insert_host_link(&db, host_id, item_id, pc_id, "git").await;
 
-        // Sanity: one host link exists before discard.
         let links_before = HostSoftwareItem::find()
             .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
             .count(&db)
@@ -1072,7 +1052,6 @@ mod tests {
             discard_pending_items(&db, tenant_id, None, None).await.expect("discard");
         assert_eq!(result.discarded_count, 1);
 
-        // The host link must be gone after discard.
         let links_after = HostSoftwareItem::find()
             .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
             .count(&db)
@@ -1081,9 +1060,9 @@ mod tests {
         assert_eq!(links_after, 0, "host link must be deleted when software item is discarded");
     }
 
-    /// When `process_one_discovery` encounters a `host_software_item` row that
-    /// points to a deactivated (discarded) software item, it must delete the
-    /// orphaned link and create a fresh pending item instead of returning early.
+    /// When `find_or_create_software_item` encounters a host link pointing to a
+    /// deactivated software item, it must delete the orphaned link and create a
+    /// fresh pending item.
     #[tokio::test]
     async fn process_one_discovery_orphaned_link_creates_new_pending() {
         let db = setup_db().await;
@@ -1096,17 +1075,13 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
         insert_plugin_config(&db, pc_id, tenant_id).await;
-
-        // Insert a discarded (deactivated) software item and its orphaned link —
-        // the state that existed before this fix.
         insert_software_item(&db, old_item_id, tenant_id, "curl", Some(now)).await;
         insert_host_link(&db, host_id, old_item_id, pc_id, "curl").await;
 
-        let args = ProcessDiscoveryArgs {
+        let args = DiscoveredItemInfo {
             package_identifier: "curl",
             name: "curl",
             installed_version: "8.0.0",
-            plugin_type_str: "homebrew",
         };
         let ignore_set = HashSet::new();
 
@@ -1114,7 +1089,6 @@ mod tests {
             .await
             .expect("process_one_discovery");
 
-        // The orphaned link must be gone.
         let orphan_count = HostSoftwareItem::find()
             .filter(host_software_item::Column::SoftwareItemId.eq(old_item_id))
             .count(&db)
@@ -1122,7 +1096,6 @@ mod tests {
             .expect("orphan count");
         assert_eq!(orphan_count, 0, "orphaned host link must be deleted");
 
-        // A new active pending software item must have been created.
         let active_items = SoftwareItem::find()
             .filter(software_item::Column::TenantId.eq(tenant_id))
             .filter(software_item::Column::DeactivatedAt.is_null())
@@ -1135,7 +1108,6 @@ mod tests {
             Some(SoftwareDiscoveryState::Pending)
         );
 
-        // A new plugin link pointing to the new pending item must exist.
         let new_link_count = HostSoftwareItemPlugin::find()
             .filter(host_software_item_plugin::Column::HostId.eq(host_id))
             .filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
@@ -1143,12 +1115,11 @@ mod tests {
             .count(&db)
             .await
             .expect("new link count");
-        // Three role rows (detect_version, fetch_releases, execute_update).
         assert_eq!(new_link_count, 3, "expected plugin link rows for all three roles");
     }
 
     /// `process_one_discovery` must update `installed_version` in place when the
-    /// existing host link points to an active (non-discarded) software item.
+    /// existing host link points to an active software item.
     #[tokio::test]
     async fn process_one_discovery_active_link_updates_version() {
         let db = setup_db().await;
@@ -1161,16 +1132,13 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
         insert_plugin_config(&db, pc_id, tenant_id).await;
-
-        // Active software item with an existing host link at version 1.0.0.
         insert_software_item(&db, item_id, tenant_id, "wget", None).await;
         insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
 
-        let args = ProcessDiscoveryArgs {
+        let args = DiscoveredItemInfo {
             package_identifier: "wget",
             name: "wget",
             installed_version: "2.0.0",
-            plugin_type_str: "homebrew",
         };
         let ignore_set = HashSet::new();
 
@@ -1178,7 +1146,6 @@ mod tests {
             .await
             .expect("process_one_discovery");
 
-        // The original item must still be active and the link updated.
         let items = SoftwareItem::find()
             .filter(software_item::Column::TenantId.eq(tenant_id))
             .filter(software_item::Column::DeactivatedAt.is_null())
@@ -1202,58 +1169,11 @@ mod tests {
         );
     }
 
-    // ── PHS result processing ─────────────────────────────────────────────────
+    // ── Target-based processing tests ─────────────────────────────────────────
 
-    use uptrakit_internal_wire::{DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, PluginType};
-
-    fn phs_result_with_github(pkg_id: &str, name: &str, version: &str, owner: &str, repo: &str) -> DiscoveryPluginResult {
-        DiscoveryPluginResult {
-            plugin_type: PluginType::ProxmoxHelperScripts,
-            plugin_config_id: None,
-            error: None,
-            discoveries: vec![WireDiscoveredSoftware {
-                package_identifier: pkg_id.to_string(),
-                name: name.to_string(),
-                installed_version: version.to_string(),
-                extra: Some(serde_json::json!({
-                    "github_owner": owner,
-                    "github_repo": repo,
-                })),
-            }],
-        }
-    }
-
-    fn phs_result_with_apt(pkg_id: &str, name: &str, version: &str, apt_pkg: &str) -> DiscoveryPluginResult {
-        DiscoveryPluginResult {
-            plugin_type: PluginType::ProxmoxHelperScripts,
-            plugin_config_id: None,
-            error: None,
-            discoveries: vec![WireDiscoveredSoftware {
-                package_identifier: pkg_id.to_string(),
-                name: name.to_string(),
-                installed_version: version.to_string(),
-                extra: Some(serde_json::json!({ "apt_package": apt_pkg })),
-            }],
-        }
-    }
-
-    fn phs_result_no_extra(pkg_id: &str) -> DiscoveryPluginResult {
-        DiscoveryPluginResult {
-            plugin_type: PluginType::ProxmoxHelperScripts,
-            plugin_config_id: None,
-            error: None,
-            discoveries: vec![WireDiscoveredSoftware {
-                package_identifier: pkg_id.to_string(),
-                name: pkg_id.to_string(),
-                installed_version: "1.0.0".to_string(),
-                extra: None,
-            }],
-        }
-    }
-
-    /// A GitHub PHS item must create a `github_releases` plugin config and link the item.
+    /// A GitHub PHS item (with target) must create a `github_releases` plugin config.
     #[tokio::test]
-    async fn process_phs_results_github_creates_plugin_config() {
+    async fn target_based_github_creates_plugin_config() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -1262,13 +1182,14 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
 
-        let result = phs_result_with_github("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
+        let result = phs_result_with_github_target(
+            "booklore", "BookLore", "1.18.5", "BookLore", "BookLore",
+        );
 
-        process_phs_results(&db, tenant_id, host_id, now, &result)
+        process_plugin_result(&db, tenant_id, host_id, now, &result)
             .await
-            .expect("process_phs_results");
+            .expect("process_plugin_result");
 
-        // A github_releases plugin config must exist.
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
             .filter(plugin_config::Column::PluginType.eq("github_releases"))
@@ -1278,14 +1199,10 @@ mod tests {
         assert_eq!(configs.len(), 1, "expected one github_releases config");
         assert_eq!(configs[0].name, "BookLore/BookLore");
 
-        // The config JSON must carry the PHS constants.
         let cfg_json = &configs[0].config;
         assert_eq!(cfg_json["owner"], "BookLore");
         assert_eq!(cfg_json["repo"], "BookLore");
-        assert_eq!(cfg_json["detect_installed_version_command"], PHS_DETECT_VERSION_CMD);
-        assert_eq!(cfg_json["install_command"], PHS_INSTALL_CMD);
 
-        // A host_software_item must exist with the installed version.
         let hsi_links = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
             .all(&db)
@@ -1294,7 +1211,6 @@ mod tests {
         assert_eq!(hsi_links.len(), 1, "expected one host_software_item");
         assert_eq!(hsi_links[0].installed_version.as_deref(), Some("1.18.5"));
 
-        // Plugin link rows must exist with the correct package_identifier.
         let plugin_links = HostSoftwareItemPlugin::find()
             .filter(host_software_item_plugin::Column::HostId.eq(host_id))
             .filter(host_software_item_plugin::Column::PackageIdentifier.eq("booklore"))
@@ -1304,9 +1220,9 @@ mod tests {
         assert_eq!(plugin_links.len(), 3, "expected three role-based plugin links");
     }
 
-    /// An APT PHS item must create/reuse a shared `apt` plugin config.
+    /// An APT PHS item (with target) must create/reuse a shared `apt` plugin config.
     #[tokio::test]
-    async fn process_phs_results_apt_creates_apt_plugin_config() {
+    async fn target_based_apt_creates_apt_plugin_config() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
@@ -1315,11 +1231,11 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
 
-        let result = phs_result_with_apt("grafana", "Grafana", "10.2.3", "grafana");
+        let result = phs_result_with_apt_target("grafana", "Grafana", "10.2.3");
 
-        process_phs_results(&db, tenant_id, host_id, now, &result)
+        process_plugin_result(&db, tenant_id, host_id, now, &result)
             .await
-            .expect("process_phs_results");
+            .expect("process_plugin_result");
 
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
@@ -1347,53 +1263,21 @@ mod tests {
         assert_eq!(hsi[0].installed_version.as_deref(), Some("10.2.3"));
     }
 
-    /// An install-script fallback APT item (e.g. `influxdb2`) must use the same
-    /// shared `apt` config path as a direct APT item.
+    /// An item with no targets and no plugin_config_id must be skipped.
     #[tokio::test]
-    async fn process_phs_results_apt_install_fallback_uses_apt_config() {
+    async fn no_targets_no_config_id_skips_item() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host_id = Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
+        let result = phs_result_no_targets("n8n");
 
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
 
-        // The PHS plugin emits `apt_package: "influxdb2"` for install-script items too.
-        let result = phs_result_with_apt("influxdb2", "InfluxDB", "2.7.6", "influxdb2");
-
-        process_phs_results(&db, tenant_id, host_id, now, &result)
+        process_plugin_result(&db, tenant_id, host_id, now, &result)
             .await
-            .expect("process_phs_results");
-
-        let configs = PluginConfig::find()
-            .filter(plugin_config::Column::TenantId.eq(tenant_id))
-            .filter(plugin_config::Column::PluginType.eq("apt"))
-            .all(&db)
-            .await
-            .expect("query configs");
-        assert_eq!(configs.len(), 1, "expected shared apt config");
-
-        let plugin_links = HostSoftwareItemPlugin::find()
-            .filter(host_software_item_plugin::Column::PackageIdentifier.eq("influxdb2"))
-            .all(&db)
-            .await
-            .expect("query plugin links");
-        assert_eq!(plugin_links.len(), 3, "expected three role-based plugin links");
-    }
-
-    /// A PHS item with no detectable upstream (no `extra` fields) must be skipped.
-    #[tokio::test]
-    async fn process_phs_results_no_extra_skips_item() {
-        let db = setup_db().await;
-        let tenant_id = Uuid::now_v7();
-        let host_id = Uuid::now_v7();
-        let now = time::OffsetDateTime::now_utc();
-        let result = phs_result_no_extra("n8n");
-
-        process_phs_results(&db, tenant_id, host_id, now, &result)
-            .await
-            .expect("process_phs_results");
+            .expect("process_plugin_result");
 
         let configs = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
@@ -1412,7 +1296,7 @@ mod tests {
 
     /// Two hosts discovering the same GitHub PHS app must share one plugin config.
     #[tokio::test]
-    async fn process_phs_results_two_hosts_share_github_config() {
+    async fn target_based_two_hosts_share_github_config() {
         let db = setup_db().await;
         let tenant_id = Uuid::now_v7();
         let host1 = Uuid::now_v7();
@@ -1423,17 +1307,20 @@ mod tests {
         insert_host(&db, host1, tenant_id).await;
         insert_host(&db, host2, tenant_id).await;
 
-        let result1 = phs_result_with_github("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
-        let result2 = phs_result_with_github("booklore", "BookLore", "1.18.5", "BookLore", "BookLore");
+        let result1 = phs_result_with_github_target(
+            "booklore", "BookLore", "1.18.5", "BookLore", "BookLore",
+        );
+        let result2 = phs_result_with_github_target(
+            "booklore", "BookLore", "1.18.5", "BookLore", "BookLore",
+        );
 
-        process_phs_results(&db, tenant_id, host1, now, &result1)
+        process_plugin_result(&db, tenant_id, host1, now, &result1)
             .await
             .expect("host1");
-        process_phs_results(&db, tenant_id, host2, now, &result2)
+        process_plugin_result(&db, tenant_id, host2, now, &result2)
             .await
             .expect("host2");
 
-        // Still only one plugin config.
         let config_count = PluginConfig::find()
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
             .filter(plugin_config::Column::PluginType.eq("github_releases"))
@@ -1442,7 +1329,6 @@ mod tests {
             .expect("count configs");
         assert_eq!(config_count, 1, "both hosts must share a single plugin config");
 
-        // Each host has its own link.
         let host1_links = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host1))
             .count(&db)
@@ -1455,5 +1341,96 @@ mod tests {
             .expect("host2 links");
         assert_eq!(host1_links, 1);
         assert_eq!(host2_links, 1);
+    }
+
+    /// Config-ID-based path: items with empty targets and a pre-existing
+    /// plugin_config_id must use that config for all roles.
+    #[tokio::test]
+    async fn config_id_path_uses_existing_config() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+        insert_plugin_config(&db, pc_id, tenant_id).await;
+
+        let result = DiscoveryPluginResult {
+            plugin_type: PluginType::Homebrew,
+            plugin_config_id: Some(pc_id),
+            error: None,
+            discoveries: vec![WireDiscoveredSoftware {
+                package_identifier: "wget".to_string(),
+                name: "Wget".to_string(),
+                installed_version: "1.21.4".to_string(),
+                targets: vec![],
+                extra: None,
+            }],
+        };
+
+        process_plugin_result(&db, tenant_id, host_id, now, &result)
+            .await
+            .expect("process_plugin_result");
+
+        let plugin_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
+            .all(&db)
+            .await
+            .expect("query plugin links");
+        assert_eq!(plugin_links.len(), 3, "expected three role-based plugin links");
+
+        for link in &plugin_links {
+            assert_eq!(link.package_identifier, "wget");
+        }
+    }
+
+    /// Target-based ignore rules work correctly: items on the ignore list
+    /// for a target's plugin config are skipped.
+    #[tokio::test]
+    async fn target_based_ignore_rules_work() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        // First, create the apt config by processing a normal item.
+        let result1 = phs_result_with_apt_target("curl", "cURL", "8.0.0");
+        process_plugin_result(&db, tenant_id, host_id, now, &result1)
+            .await
+            .expect("first process");
+
+        // Find the auto-created apt config.
+        let apt_config = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq("apt"))
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("apt config must exist");
+
+        // Add "wget" to the ignore list for that config.
+        create_or_ignore_ignore_rule(&db, tenant_id, apt_config.id, "wget")
+            .await
+            .expect("create ignore rule");
+
+        // Now try to discover "wget" via the same apt target path.
+        let result2 = phs_result_with_apt_target("wget", "Wget", "1.21.4");
+        process_plugin_result(&db, tenant_id, host_id, now, &result2)
+            .await
+            .expect("second process");
+
+        // wget must NOT have been created.
+        let wget_links = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::PackageIdentifier.eq("wget"))
+            .count(&db)
+            .await
+            .expect("count");
+        assert_eq!(wget_links, 0, "ignored item must not be created");
     }
 }
