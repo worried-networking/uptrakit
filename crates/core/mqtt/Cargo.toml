@@ -21,7 +21,7 @@ futures-util = { workspace = true }
 hostname = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
-rumqttc = { version = "0.25.1" }
+rumqttc = { workspace = true }
 serde_json = { workspace = true }
 rustls = { workspace = true }
 thiserror = { workspace = true }
@@ -42,3 +42,6 @@ tokio-tungstenite = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { path = "../../shared/build-info" }
+
+[lints]
+workspace = true

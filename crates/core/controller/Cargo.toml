@@ -49,8 +49,8 @@ uuid = { workspace = true, features = ["v7", "serde"] }
 sha2 = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
-cron = "0.15"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
+cron = { workspace = true }
+chrono = { workspace = true }
 nix = { version = "0.31", default-features = false, features = ["signal", "process"] }
 tokio-util = { workspace = true }
 zeroize = { workspace = true }
@@ -63,7 +63,7 @@ tempfile = { workspace = true }
 testcontainers = "0.27"
 reqwest = { workspace = true }
 serde = { workspace = true }
-base64 = "0.22"
+base64 = { workspace = true }
 x509-ocsp = { workspace = true }
 der = { workspace = true }
 spki = { workspace = true }
@@ -75,3 +75,6 @@ sea-orm = { workspace = true, features = ["mock"] }
 
 [build-dependencies]
 uptrakit-build-info = { path = "../../shared/build-info" }
+
+[lints]
+workspace = true

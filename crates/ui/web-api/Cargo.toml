@@ -19,8 +19,8 @@ db-mysql = ["sea-orm/sqlx-mysql"]
 [dependencies]
 axum = { workspace = true }
 async-trait = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = ["std"] }
-cron = "0.15"
+chrono = { workspace = true }
+cron = { workspace = true }
 futures-util = { workspace = true }
 http = { workspace = true }
 ipnet = { workspace = true }
@@ -43,7 +43,7 @@ argon2 = { version = "0.5", features = ["std"] }
 rand = { workspace = true }
 client-ip = { version = "0.2", features = ["forwarded-header"] }
 x509-parser = { workspace = true }
-base64 = "0.22"
+base64 = { workspace = true }
 sha2 = { workspace = true }
 uptrakit-web-api-types = { path = "../../shared/web-api-types", features = ["openapi"] }
 utoipa = { workspace = true, features = ["axum_extras"] }
@@ -72,3 +72,6 @@ tower = { workspace = true }
 http-body-util = "0.1"
 strum = { workspace = true }
 uptrakit-shared-db = { path = "../../shared/db", features = ["migration", "db-sqlite"] }
+
+[lints]
+workspace = true

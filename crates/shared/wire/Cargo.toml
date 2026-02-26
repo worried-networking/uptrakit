@@ -16,10 +16,7 @@ uuid = { workspace = true, features = ["serde"] }
 uptrakit-shared-types = { workspace = true }
 
 [dev-dependencies]
-serde_yaml_ng = "0.10"
+serde_yaml_ng = { workspace = true }
 
-[lints.rust]
-warnings = "deny"
-
-[lints.clippy]
-all = "deny"
+[lints]
+workspace = true

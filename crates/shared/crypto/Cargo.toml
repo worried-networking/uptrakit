@@ -20,3 +20,6 @@ tracing = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 zeroize = { workspace = true }
+
+[lints]
+workspace = true

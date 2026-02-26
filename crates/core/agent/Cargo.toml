@@ -28,3 +28,6 @@ tokio-tungstenite = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { path = "../../shared/build-info" }
+
+[lints]
+workspace = true

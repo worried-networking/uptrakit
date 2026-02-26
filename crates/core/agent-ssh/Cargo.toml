@@ -7,7 +7,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-base64 = "0.22"
+base64 = { workspace = true }
 clap = { workspace = true }
 dirs = "6"
 futures-util = { workspace = true }
@@ -35,7 +35,7 @@ uptrakit-shared-types = { workspace = true }
 uptrakit-crypto = { path = "../../shared/crypto", features = ["sea-orm"] }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
-sea-orm-migration = { version = "2.0.0-rc.34", default-features = false, features = ["runtime-tokio-rustls", "sqlx-sqlite"] }
+sea-orm-migration = { workspace = true, features = ["sqlx-sqlite"] }
 uuid = { workspace = true, features = ["v7", "serde"] }
 async-trait = { workspace = true }
 zeroize = { workspace = true }
@@ -47,3 +47,6 @@ rcgen = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { path = "../../shared/build-info" }
+
+[lints]
+workspace = true

@@ -59,12 +59,23 @@ bollard = { version = "0.20", default-features = false, features = ["http", "pip
 tempfile = "3"
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect"] }
 zeroize = { version = "1", features = ["derive"] }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+cron = "0.15"
+rumqttc = { version = "0.25.1" }
+serde_yaml_ng = "0.10"
 uptrakit-shared-macros = { path = "crates/shared/macros" }
 uptrakit-shared-types = { path = "crates/shared/types" }
 uptrakit-openapi-client = { path = "crates/shared/openapi-client" }
 uptrakit-command = { path = "crates/shared/command" }
 uptrakit-plugin-infrastructure-core = { path = "crates/plugins/infrastructure/core" }
 uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructure/registry" }
+
+[workspace.lints.rust]
+warnings = "deny"
+
+[workspace.lints.clippy]
+all = "deny"
 
 [profile.release]
 opt-level = 3

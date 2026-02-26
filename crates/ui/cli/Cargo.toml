@@ -27,7 +27,7 @@ hostname = { workspace = true }
 time = { workspace = true }
 uptrakit-openapi-client = { path = "../../shared/openapi-client" }
 uuid = { workspace = true }
-serde_yaml_ng = "0.10"
+serde_yaml_ng = { workspace = true }
 uptrakit-build-info = { path = "../../shared/build-info" }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-shared-types = { workspace = true }
@@ -39,3 +39,6 @@ serde_json = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { path = "../../shared/build-info" }
+
+[lints]
+workspace = true

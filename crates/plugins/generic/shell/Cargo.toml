@@ -20,3 +20,6 @@ uptrakit-shared-macros = { workspace = true }
 [dev-dependencies]
 tokio          = { workspace = true, features = ["macros", "rt"] }
 uptrakit-command = { workspace = true }
+
+[lints]
+workspace = true

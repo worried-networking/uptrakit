@@ -32,3 +32,6 @@ zeroize = { workspace = true }
 [dev-dependencies]
 sea-orm = { workspace = true, features = ["mock"] }
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
