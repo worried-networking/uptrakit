@@ -108,12 +108,13 @@
 
 <div
 	bind:this={menuEl}
-	class="card fixed z-50 w-40 overflow-hidden bg-surface-50 dark:bg-surface-900 p-0 shadow-xl"
+	class="card fixed z-[70] w-40 overflow-hidden bg-surface-50 dark:bg-surface-900 p-0 shadow-xl"
 	class:invisible={!visible}
 	style="top: {adjustedTop}px; left: {adjustedLeft}px;"
 	role="menu"
 	tabindex="-1"
 	onkeydown={handleKeydown}
+	onclick={(e) => e.stopPropagation()}
 >
 	<nav>
 		<ul class="space-y-0.5 p-1">
