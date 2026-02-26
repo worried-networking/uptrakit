@@ -10,7 +10,6 @@ mod plugin_role;
 mod plugin_types;
 mod secret_string;
 mod service_status;
-mod service_type;
 mod session_token_type;
 mod software_discovery_state;
 
@@ -27,6 +26,5 @@ pub use plugin_role::{ParsePluginRoleError, PluginRole};
 pub use plugin_types::{ParsePluginTypeError, PluginType, ReleaseAsset, ReleaseInfo};
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
-pub use service_type::{ParseServiceTypeError, ServiceType};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};
 pub use software_discovery_state::{ParseSoftwareDiscoveryStateError, SoftwareDiscoveryState};
