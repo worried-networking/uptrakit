@@ -8,13 +8,12 @@ pub struct Model {
     pub host_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub software_item_id: Uuid,
-    #[sea_orm(column_name = "plugin_config_id")]
-    pub plugin_config_id: Uuid,
-    pub package_identifier: String,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub config_override: Option<serde_json::Value>,
     pub installed_version: Option<String>,
     pub installed_version_detected_at: Option<OffsetDateTime>,
+    pub latest_version: Option<String>,
+    pub latest_version_fetched_at: Option<OffsetDateTime>,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub latest_release_metadata: Option<serde_json::Value>,
     pub last_updated_at: Option<OffsetDateTime>,
     pub linked_at: OffsetDateTime,
 }
@@ -33,12 +32,8 @@ pub enum Relation {
         to = "super::software_item::Column::Id"
     )]
     SoftwareItem,
-    #[sea_orm(
-        belongs_to = "super::plugin_config::Entity",
-        from = "Column::PluginConfigId",
-        to = "super::plugin_config::Column::Id"
-    )]
-    PluginConfig,
+    #[sea_orm(has_many = "super::host_software_item_plugin::Entity")]
+    HostSoftwareItemPlugins,
 }
 
 impl Related<super::host::Entity> for Entity {
@@ -53,9 +48,9 @@ impl Related<super::software_item::Entity> for Entity {
     }
 }
 
-impl Related<super::plugin_config::Entity> for Entity {
+impl Related<super::host_software_item_plugin::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::PluginConfig.def()
+        Relation::HostSoftwareItemPlugins.def()
     }
 }
 

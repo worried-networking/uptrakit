@@ -4,11 +4,13 @@ pub use super::auth_method::AuthMethod;
 pub use super::autodiscovery_ignore::{
     Entity as AutodiscoveryIgnore, Model as AutodiscoveryIgnoreModel,
 };
-pub use super::available_version::{Entity as AvailableVersion, Model as AvailableVersionModel};
 pub use super::ca_certificate::{Entity as CaCertificate, Model as CaCertificateModel};
 pub use super::controller_event::{Entity as ControllerEvent, Model as ControllerEventModel};
 pub use super::host::{Entity as Host, Model as HostModel};
 pub use super::host_software_item::{Entity as HostSoftwareItem, Model as HostSoftwareItemModel};
+pub use super::host_software_item_plugin::{
+    Entity as HostSoftwareItemPlugin, Model as HostSoftwareItemPluginModel,
+};
 pub use super::mqtt_client::{Entity as MqttClient, Model as MqttClientModel};
 pub use super::mqtt_lease::{Entity as MqttLease, Model as MqttLeaseModel};
 pub use super::oidc_provider::{Entity as OidcProvider, Model as OidcProviderModel, RoleMapping};
