@@ -46,14 +46,14 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 
 ## Services and Software Items
 
-- `GET /api/v1/services`: list services with optional type/status filters.
+- `GET /api/v1/services`: list services with optional capability/status filters.
 - `GET /api/v1/services/{id}`: get a single service by UUID.
 - `PUT /api/v1/services/{id}`: update a service's configurable settings. See details below.
 - `POST /api/v1/services/{id}/approve`: approve a pending service.
 - `POST /api/v1/services/{id}/reject`: reject a pending service.
 - `DELETE /api/v1/services/{id}`: deactivate (soft-delete) a service.
 - `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
-- `/api/v1/services/enrollment-token`: manage enrollment tokens for agents or MQTT services.
+- `/api/v1/services/enrollment-token`: manage the single shared enrollment token for all service types.
 - `/api/v1/software-items`: CRUD endpoints for software items. A software item is a named catalog
   entry; plugin configs and package identifiers live on role-specific plugin assignments
   (`host_software_item_plugins`), not on the item itself.
@@ -77,7 +77,11 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `/api/v1/autodiscovery/ignores`: CRUD for permanent suppression rules. See [docs/api/autodiscovery.md](autodiscovery.md) for full details.
 
 `ServiceResponse` includes an optional `ping_interval_seconds` field (`Option<u32>`) that reports the per-service
-ping interval override. When `null`, the service uses its type default (300s for agents/SSH agents, 15s for MQTT).
+ping interval override. When `null`, the service uses its profile default (300s for agents/SSH agents, 15s for MQTT).
+
+`ServiceResponse` uses `capabilities: Vec<String>` and `service_label: String` instead of the former `service_type`
+field. The `service_label` is a human-readable display name derived from the service's capability set via
+`ServiceProfile` (e.g. "Agent", "SSH Agent", "MQTT Bridge").
 
 ### `PUT /api/v1/services/{id}`
 
@@ -94,7 +98,7 @@ Update a service's configurable settings. Requires the `ManageAgents` permission
 ```
 
 - `ping_interval_seconds`: optional `u32`. Omit the field (or set to `null`) to keep the current value. Set to `0`
-  to clear the override and revert to the service-type default. Set to a positive value to override the default ping
+  to clear the override and revert to the service-profile default. Set to a positive value to override the default ping
   interval in seconds.
 
 **Response** (`200`): `ServiceResponse`
@@ -102,7 +106,8 @@ Update a service's configurable settings. Requires the `ManageAgents` permission
 ```json
 {
   "id": "019...",
-  "service_type": "agent",
+  "capabilities": ["software_discovery", "update_hooks", "graceful_shutdown"],
+  "service_label": "Agent",
   "hostname": "host-1.local",
   "friendly_name": "My Agent",
   "ip_address": "10.0.0.1",
@@ -126,7 +131,7 @@ Types are defined in `crates/shared/web-api-types/src/services.rs`:
 | Type | Fields |
 | --- | --- |
 | `UpdateServiceRequest` | `ping_interval_seconds` (`Option<u32>`) |
-| `ServiceResponse` | `id`, `service_type`, `hostname`, `friendly_name`, `ip_address`, `status`, `client_version`, `last_seen_at`, `created_at`, `updated_at`, `ping_interval_seconds` |
+| `ServiceResponse` | `id`, `capabilities`, `service_label`, `hostname`, `friendly_name`, `ip_address`, `status`, `client_version`, `last_seen_at`, `created_at`, `updated_at`, `ping_interval_seconds` |
 
 ### Key files
 
@@ -452,7 +457,7 @@ All paginated endpoints return a `PaginatedResponse<T>`:
 
 | Endpoint | Query struct | Notes |
 | --- | --- | --- |
-| `GET /api/v1/services` | `ListServicesQuery` (includes `page`/`per_page`) | Filterable by `type`, `status` |
+| `GET /api/v1/services` | `ListServicesQuery` (includes `page`/`per_page`) | Filterable by `capability`, `status` |
 | `GET /api/v1/hosts` | `PaginationParams` | |
 | `GET /api/v1/software-items` | `PaginationParams` | |
 | `GET /api/v1/update-history` | `UpdateHistoryQuery` (includes `page`/`per_page`) | Filterable by `host_id`, `software_item_id`, `status` |

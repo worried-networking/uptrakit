@@ -74,7 +74,7 @@ These two calls appear in a `#[test]` function (`expand_tilde_works_without_home
 
 - **`RetryConfig` documentation.** The retry logic in `uptrakit-openapi-client` is clearly documented: which status codes trigger retry, how exponential backoff is computed (doubling, capped at `max_delay`), and which codes are never retried (4xx, network errors, auth failures). The `Retry-After` header parsing path is documented as numeric-seconds-only. This level of documentation on a retry implementation is uncommon and highly valuable.
 
-- **Typed errors throughout `uptrakit-shared-types`.** Every domain type with a `FromStr` implementation pairs it with a dedicated error type (e.g., `ParsePluginTypeError`, `ParseHookShellError`, `ParseServiceTypeError`). No `FromStr` implementation returns `String` as its error type. This is correct Rust idiom and enables callers to match on specific failure cases.
+- **Typed errors throughout `uptrakit-shared-types`.** Every domain type with a `FromStr` implementation pairs it with a dedicated error type (e.g., `ParsePluginTypeError`, `ParseHookShellError`). No `FromStr` implementation returns `String` as its error type. This is correct Rust idiom and enables callers to match on specific failure cases.
 
 #### 2026-02-24 Review
 
@@ -227,9 +227,9 @@ AGENTS.md restricts `as_u16()` to documented serialization sites only. Both call
 
 #### Issues
 
-**[SEVERITY: Medium]** `crates/shared/types/src/service_type.rs:11,61-66` — `ServiceType` has `#[non_exhaustive]` but no `Other(String)` forward-compatibility variant
+**[RESOLVED]** ~~`ServiceType` has `#[non_exhaustive]` but no `Other(String)` forward-compatibility variant~~
 
-Unlike `Capability` which uses `Other(String)`, `ServiceType` fails deserialization on unknown strings. Adding `Other(String)` would make the pattern consistent.
+The `ServiceType` enum has been removed entirely. Service identity is now determined by `BTreeSet<Capability>` advertised during enrollment and capability negotiation. The `Capability` enum already uses the `Other(String)` forward-compatibility pattern, so the inconsistency no longer exists.
 
 **[SEVERITY: Low]** `crates/shared/web-api-types/src/permissions.rs:9` and others — Several public API-facing enums lack `#[non_exhaustive]` unlike wire-protocol enums
 
@@ -237,7 +237,7 @@ Unlike `Capability` which uses `Other(String)`, `ServiceType` fails deserializat
 
 **[SEVERITY: Low]** `crates/shared/types/src/` — Six shared-types domain enums lack `#[non_exhaustive]` despite being cross-crate types
 
-Inconsistent: `PluginType`, `ServiceType`, `HookShell` have it, but `SoftwareDiscoveryState`, `MqttTransport`, `MqttClientConnectionStatus`, `DeviceAuthStatus`, `OutputStreamType`, `ServiceStatus` do not.
+Inconsistent: `PluginType` and `HookShell` have it, but `SoftwareDiscoveryState`, `MqttTransport`, `MqttClientConnectionStatus`, `DeviceAuthStatus`, `OutputStreamType`, `ServiceStatus` do not. (Note: `ServiceType` has been removed; service identity is now capability-based.)
 
 ### Issues
 

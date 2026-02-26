@@ -28,10 +28,10 @@ boundary.
   migration crate, and no raw SQL.  The agent is stateless between connections;
   all persistent state lives on the controller side.
 
-- **`ServiceHandler` trait correctly implemented.**  The three associated constants
-  (`DIR_NAME`, `SERVICE_LABEL`, `SERVICE_TYPE`) match the agent domain, and
-  `capabilities()` is consistent with the free function `agent_capabilities()` used
-  in `on_connected`.
+- **`ServiceHandler` trait correctly implemented.**  The two associated constants
+  (`DIR_NAME`, `SERVICE_LABEL`) match the agent domain, and
+  `capabilities()` returns a `BTreeSet<Capability>` consistent with the free
+  function `agent_capabilities()` used in `on_connected`.
 
 - **`in_flight_update` enforces one-update-at-a-time.**  `AgentHandler` holds a
   single `Option<InFlightUpdate>`.  A second `ExecuteUpdate` message while one is
@@ -266,9 +266,10 @@ explicit rather than silent.
   the same free function.  Adding or removing a capability requires a single edit.
 
 - **`ServiceHandler` trait makes adding a new agent type straightforward.**  The
-  pattern is demonstrated here: implement four async methods, declare three
-  constants, and pass to `run_lifecycle_and_handle_errors`.  The SSH agent
-  (`uptrakit-agent-ssh`) follows the identical pattern.
+  pattern is demonstrated here: implement the async methods, declare two
+  constants (`DIR_NAME`, `SERVICE_LABEL`), implement `capabilities()` returning
+  a `BTreeSet<Capability>`, and pass to `run_lifecycle_and_handle_errors`.
+  The SSH agent (`uptrakit-agent-ssh`) follows the identical pattern.
 
 - **`client.rs` shim layer is a clean extension point.**  Each handler function in
   `client.rs` constructs a `LocalCommandExecutor` and forwards to

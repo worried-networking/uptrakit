@@ -319,9 +319,9 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 
 1. **CA bootstrap**: Cached CA → `--ca-cert` file → `--pki-addr` fetch → `--tofu` TOFU (with optional
    `--tofu-fingerprint` SHA-256 pinning) → system trust (via `uptrakit_service_sdk::ca::bootstrap_ca`)
-1. **Enrollment**: Connect to `/api/v1/ws/service` anonymously, send `Enroll` with `service_type: "mqtt"`,
-   hostname/friendly_name/enrollment_token, receive `Enrolled` with service_id and enrollment_secret
-   (saved to state dir) (via `uptrakit_service_sdk::ws::run_enrollment`)
+1. **Enrollment**: Connect to `/api/v1/ws/service` anonymously, send `Enroll` with
+   capabilities/hostname/friendly_name/enrollment_token, receive `Enrolled` with service_id and
+   enrollment_secret (saved to state dir) (via `uptrakit_service_sdk::ws::run_enrollment`)
 1. **Certificate issuance**: Reconnect with bearer token (enrollment_secret), send CSR, receive signed certificate
    (saved to state dir) (via `uptrakit_service_sdk::ws::resume_enrollment`)
 1. **Authenticated operation**: Reconnect with mTLS using shared `ControllerConnection`, send `Register`,
@@ -356,10 +356,10 @@ Agents and MQTT services share a unified wire protocol (`ServiceMessage` / `Cont
 
 MQTT services use the unified service entity:
 
-- Single `services` table with `service_type` column (`Agent`/`Mqtt`)
+- Single `services` table with `capabilities` column (JSON array of capability strings)
 - Single `service_certificates` table for all service types
-- MQTT enrollment tokens are settings-based (key `mqtt_enrollment.token_hash` via
-  `SettingKey::MqttEnrollmentTokenHash`), separate from agent enrollment tokens
+- A single enrollment token is shared by all service types (DB key `service_enrollment.token_hash`
+  via `SettingKey::EnrollmentTokenHash`)
 - Approval via unified REST API: `POST /api/v1/services/{id}/approve` (permission: `ManageAgents`)
 - If a valid enrollment token is provided, the service is auto-approved
 
@@ -367,13 +367,13 @@ MQTT services use the unified service entity:
 
 | Method | Path | Permission | Description |
 | --- | --- | --- | --- |
-| GET | `/api/v1/services?type=mqtt&status=...` | ViewAgents | List MQTT services |
+| GET | `/api/v1/services?capability=mqtt_bridge&status=...` | ViewAgents | List MQTT services (filter by capability) |
 | POST | `/api/v1/services/{id}/approve` | ManageAgents | Approve a pending service |
 | POST | `/api/v1/services/{id}/reject` | ManageAgents | Reject a pending service |
 | DELETE | `/api/v1/services/{id}` | ManageAgents | Deactivate a service |
-| POST | `/api/v1/services/enrollment-token?type=mqtt` | ManageAgents | Create MQTT enrollment token |
-| DELETE | `/api/v1/services/enrollment-token?type=mqtt` | ManageAgents | Revoke MQTT enrollment token |
-| GET | `/api/v1/services/enrollment-token/status?type=mqtt` | ManageAgents | Check MQTT enrollment token status |
+| POST | `/api/v1/services/enrollment-token` | ManageAgents | Create enrollment token (shared by all service types) |
+| DELETE | `/api/v1/services/enrollment-token` | ManageAgents | Revoke enrollment token |
+| GET | `/api/v1/services/enrollment-token/status` | ManageAgents | Check enrollment token status |
 
 **Key files:**
 

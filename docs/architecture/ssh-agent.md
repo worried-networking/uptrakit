@@ -1,14 +1,15 @@
 # SSH-Backed Agent Architecture
 
-The SSH-backed agent (`uptrakit-agent-ssh`) is a service type that connects to the controller over WebSocket (like the regular agent) but will
-execute version detection and updates on remote hosts over SSH instead of locally.
+The SSH-backed agent (`uptrakit-agent-ssh`) is a service that connects to the controller over WebSocket (like the regular agent) but executes
+version detection and updates on remote hosts over SSH instead of locally. It is identified by its capability set, which includes
+`SshRemote` alongside `SoftwareDiscovery`, `UpdateHooks`, and `GracefulShutdown`.
 
 ## Current Scope
 
 The SSH agent is feature-complete for version checks and updates. The implementation provides:
 
-- A new `ServiceType::SshAgent` variant in the shared type system
-- Controller-side enrollment and WebSocket dispatch for SSH agents
+- The `SshRemote` capability in the `Capability` enum (wire string: `ssh_remote`)
+- Controller-side enrollment and WebSocket dispatch for SSH agents (identified by `Capability::SshRemote`)
 - A standalone binary (`uptrakit-agent-ssh`) with the `ServiceHandler` trait
 - A local SQLite database for storing SSH host credentials (encrypted at rest)
 - CLI subcommands for managing SSH host entries locally (`host add/list/show/update/remove/bootstrap/update-sudoers`)
@@ -90,16 +91,26 @@ The three sudo columns are populated by `host bootstrap` and `host update-sudoer
 `Model::resolved_sudo_context()` applies backward-compatible defaults (`sudo_available = true`,
 `is_root = false`, `policy = auto`) so hosts enrolled before the sudo tracking migration continue to work.
 
-## Service Type Registration
+## Capability Registration
 
-The `SshAgent` variant is registered in:
+The SSH agent is identified by its capability set rather than a dedicated `ServiceType` variant. The
+relevant capabilities are:
 
-- `ServiceType` enum (`crates/shared/types/src/service_type.rs`) — serializes as `"ssh_agent"`
-- `SettingKey::SshAgentEnrollmentTokenHash` — per-tenant enrollment token setting
-- Controller dispatch (`crates/ui/web-api/src/routes/service_ws.rs`) — routes to `ssh_agent_ws`
-- Connection registry (`crates/ui/web-api/src/service_connections.rs`) — `register_ssh_agent()`
-- Services API (`crates/ui/web-api/src/routes/services.rs`) — enrollment token key resolution
-- AsyncAPI spec (`crates/shared/wire/asyncapi.yaml`) — `ssh_agent` in ServiceType enum
+| Capability | Wire string | Purpose |
+| --- | --- | --- |
+| `SshRemote` | `ssh_remote` | Identifies this service as SSH-backed (vs. local agent) |
+| `SoftwareDiscovery` | `software_discovery` | Supports `CheckVersions` / `DiscoverSoftware` flows |
+| `UpdateHooks` | `update_hooks` | Supports pre-/post-update hook commands |
+| `GracefulShutdown` | `graceful_shutdown` | Participates in the graceful-shutdown protocol |
+
+Integration points:
+
+- `Capability` enum (`crates/shared/wire/src/lib.rs`) -- `SshRemote` variant
+- `ServiceProfile::from_capabilities()` -- derives `Agent` profile; `SshRemote` presence distinguishes SSH agents for labeling
+- `SettingKey::EnrollmentTokenHash` -- single shared enrollment token (`service_enrollment.token_hash`)
+- Controller dispatch (`crates/ui/web-api/src/routes/service_ws.rs`) -- routes based on capabilities
+- Connection registry (`crates/ui/web-api/src/service_connections.rs`) -- unified `register()` accepting `BTreeSet<Capability>`
+- AsyncAPI spec (`crates/shared/wire/asyncapi.yaml`) -- `ssh_remote` in Capability enum
 
 ## CLI Host Management
 
@@ -465,7 +476,7 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 - [Service Lifecycle](../development/service-lifecycle.md) — `ServiceHandler` trait
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) — secret storage, SSH session lifecycle, and threat model
 - [Sudoers Management](../security/sudoers-management.md) — sudoers generation, sudo policy, and operator guidance
-- [Wire Protocol](../api/wire-protocol.md) — `SshAgent` service type in enrollment; `host_machine_id` routing field
+- [Wire Protocol](../api/wire-protocol.md) — `ssh_remote` capability in enrollment; `host_machine_id` routing field
 - [Services and Operations](../api/services-operations.md) — shared service management API
 - [Command Executor](../development/command-executor.md) — `CommandExecutor` trait, `privileged` flag, and `SudoAwareCommandExecutor`
 - [Plugin Guidelines](../development/plugin-guidelines.md) — `required_sudo_commands()` contract

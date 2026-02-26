@@ -68,8 +68,11 @@ registered, OIDC OpenAPI schemas are omitted, and disabling password authenticat
 an error stating OIDC support is not available. Password-based and device authorization
 flows remain fully functional regardless of the feature flag.
 
-## MQTT Enrollment
+## Service Enrollment
 
-- MQTT services enroll via `/api/v1/services/enrollment-token?type=mqtt`.
-- Enrollment tokens live in settings (`mqtt_enrollment.token_hash`) and can expire or be limited by use count.
-- MQTT services follow the same CSR/mTLS issuance flow as agents.
+- All service types (agents, SSH agents, MQTT) share a single enrollment token managed via
+  `/api/v1/services/enrollment-token` (DB key `service_enrollment.token_hash`).
+- Services send `Enroll` with their `capabilities: BTreeSet<Capability>` over the WebSocket.
+  The controller persists capabilities in the `services.capabilities` column and derives the
+  `ServiceProfile` (behavioral defaults) from them.
+- All services follow the same CSR/mTLS issuance flow.

@@ -241,7 +241,7 @@ The `register_plugins!` invocation at `registry.rs` is the single authoritative 
 `crates/shared/types/src/plugin_types.rs:10`. Unknown capability variants from a newer binary are preserved through the `Other(String)` case in the wire protocol and excluded from capability intersection, rather than causing deserialization errors. New capabilities can be added in a future release without breaking older agents.
 
 **`ServiceHandler` trait externalizes the entire service-specific surface.**
-The `ServiceHandler` trait in `service-sdk` means adding a new service type (agent, SSH agent, MQTT broker) requires only a new `ServiceHandler` implementor. Plugin crates are decoupled from service lifecycle concerns.
+The `ServiceHandler` trait in `service-sdk` means adding a new service role (agent, SSH agent, MQTT broker) requires only a new `ServiceHandler` implementor. The `capabilities()` method returns a `BTreeSet<Capability>` that identifies the service role, replacing the former `ServiceType` constant. Plugin crates are decoupled from service lifecycle concerns.
 
 **`CloseReason::Unknown(String)` and `Capability::Other(String)` establish a consistent forward-compatibility pattern.**
 Both wire enums use the same `Unknown`/`Other` string-preserving variant. New plugin capability or close reason additions are forward-compatible across versions.
@@ -256,11 +256,11 @@ The correct fix for `HomebrewPlugin` is conditional compilation with `#[cfg(targ
 
 **[SEVERITY: Medium]** `crates/shared/wire/src/lib.rs:214-234` — `ServiceMessage` and `ControllerMessage` mix agent and MQTT concerns
 
-MQTT-specific message variants are deserializable on agent WebSocket connections. `ServiceHandler` implementors must mentally classify each variant to know which ones apply to their connection type. This makes the trait surface larger than necessary for new implementors, and creates a risk of an agent responding to an MQTT-targeted message. Splitting into `AgentMessage`/`MqttMessage` union types, or introducing a `MessageTarget` discriminant, would clarify the intended receiver.
+MQTT-specific message variants are deserializable on agent WebSocket connections. `ServiceHandler` implementors must mentally classify each variant to know which ones apply to their capability set. This makes the trait surface larger than necessary for new implementors, and creates a risk of an agent responding to an MQTT-targeted message. Splitting into capability-scoped message sub-enums, or introducing a `MessageTarget` discriminant, would clarify the intended receiver.
 
-**[SEVERITY: Low]** `crates/shared/wire/src/lib.rs:316-318` — `EnrollPayload.service_type` deprecation is documented but unenforced
+**[RESOLVED]** ~~`EnrollPayload.service_type` deprecation is documented but unenforced~~
 
-The comment states that `service_type` will eventually be inferred from capabilities. There is no `#[deprecated]` attribute, no compiler warning, and no tracking issue. New consumers of `EnrollPayload` will use the field without knowing it is intended for removal.
+The `service_type` field has been removed from `EnrollPayload`. Service identity is now determined by the `BTreeSet<Capability>` advertised during enrollment. Enrollment uses a single `register()` call and a single enrollment token, replacing the former per-service-type tokens and `register_agent`/`register_mqtt`/`register_ssh_agent` functions.
 
 **[SEVERITY: Low]** `crates/plugins/proxmox-helper-scripts/src/config.rs:67-74` — No shared abstraction for "config valid for discovery but not update"
 

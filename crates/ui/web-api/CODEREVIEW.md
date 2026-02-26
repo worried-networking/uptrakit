@@ -154,9 +154,9 @@ Both `oidc_complete_registration` and `oidc_link` contain the same ~30-line bloc
 
 ~20 identical lines of `IssuerUrl::new` + `CoreProviderMetadata::discover_async` + `CoreClient::from_provider_metadata` + `set_redirect_uri`. Error handling is inconsistent: `oidc_authorize` returns `BAD_GATEWAY` (correct), while `oidc_callback` redirects to `/login?error=oidc_discovery_failed` (inconsistent semantics for what is an outbound HTTP failure). Extract `async fn build_oidc_client(provider, redirect_url) -> Result<CoreClient, Response>`.
 
-**[SEVERITY: Medium]** `src/routes/service_ws.rs:973-1189` — `enroll_agent`, `enroll_mqtt`, `enroll_ssh_agent` share an identical 47-line post-enrollment shape
+**[RESOLVED]** ~~`enroll_agent`, `enroll_mqtt`, `enroll_ssh_agent` share an identical 47-line post-enrollment shape~~
 
-All three functions execute the same sequence: map status to wire enum, build `EnrolledPayload`, serialize and send, log, check `approved`, conditionally send `ApprovedPayload`. Differences are only in the result type and log message. The three functions are 67, 62, and 62 lines respectively, of which ~47 lines are identical. Extract `fn send_enrollment_result(service_id, enrollment_secret, status, sink, out_seq) -> Option<(Uuid, bool)>`.
+The three separate enrollment functions have been unified into a single `register()` call. Enrollment now uses a single enrollment token (replacing the former per-service-type tokens), and the controller infers the service role from the `BTreeSet<Capability>` advertised during enrollment.
 
 **[SEVERITY: Medium]** `src/routes/oidc_auth.rs:66` and `src/routes/oidc_auth.rs:352` — `unwrap_or_default()` on DB queries silently returns empty results
 
@@ -209,7 +209,7 @@ Relies on an invariant not enforced by the type system. Should return a proper e
 
 - **`is_mqtt_tenant_message` test comprehensively covers credential-bearing variant filtering.** `src/notification_service.rs:273-314` — Exercises all three credential-bearing variants.
 - **Backlog delivery test exercises both positive and negative filtering.** `src/notification_service.rs:316-399` — Validates eligible messages are delivered and ineligible types are filtered.
-- **`skips_non_matching_service_type_backlog` verifies cross-service-type filtering.** `src/notification_service.rs:401-440` — Confirms SQL condition correctly filters by service type.
+- **`skips_non_matching_capability_backlog` verifies cross-capability filtering.** `src/notification_service.rs:401-440` — Confirms SQL condition correctly filters by capability.
 - **Lease coordinator tests cover all three outcome branches with DB verification.** `src/mqtt_lease_coordinator.rs:782-890`.
 - **Rate limiter test suite covers seven distinct scenarios.** `src/auth/rate_limit.rs:174-362` — Including window expiry and key isolation.
 
@@ -306,9 +306,9 @@ Consuming the first tick with `.await` suspends the enrolled loop before enterin
 
 Every controller instance polls `controller_events` once per second regardless of activity. Should be configurable or adaptive.
 
-**[SEVERITY: Medium]** `src/notification_service.rs:117-122` — `unreachable!` on unknown ServiceType variant will panic on new service types
+**[RESOLVED]** ~~`unreachable!` on unknown ServiceType variant will panic on new service types~~
 
-Should be replaced with a handled default that logs a warning.
+The `ServiceType` enum has been removed. Service routing now uses capability-based identification via `BTreeSet<Capability>`, and message dispatch uses `broadcast_by_capability` which handles unknown capabilities gracefully without panicking.
 
 **[SEVERITY: Low]** `src/middleware/rate_limit.rs:114-152` — In-memory fallback rate limiter uses `std::sync::Mutex` with no poisoning recovery and no size bound
 
@@ -444,8 +444,8 @@ These are pragmatic uses but each should carry an inline comment explaining why 
 - **OIDC feature-gate** — The entire OIDC subsystem (15+ files) is compilable out. Deployments that do not need OIDC are not burdened with its code surface.
 - **`swagger-ui` feature gate** — `Cargo.toml:13`. Swagger UI can be excluded from production builds.
 - **`db-sqlite` / `db-postgres` / `db-mysql` feature gates** — `Cargo.toml:14-17`. DB backend is selected at compile time, not at runtime, enabling minimal binary sizes.
-- **`ServiceConnectionRegistry` type-erased service dispatch** — `broadcast_by_type`, `send`, `is_connected` work uniformly across agent, MQTT, and SSH-agent connection types. Adding a new service type requires only extending the registry's service-type routing.
-- **Event poller's `deliver_event` is forward-compatible** — Unknown `target_service_type` values produce a broadcast (safe default) rather than a hard error. New service types introduced by newer controller versions are handled gracefully by older peer instances.
+- **`ServiceConnectionRegistry` type-erased service dispatch** — `broadcast_by_capability`, `send`, `is_connected` work uniformly across agent, MQTT, and SSH-agent connection types. Adding a new service role requires only extending the registry's capability-based routing.
+- **Event poller's `deliver_event` is forward-compatible** — Unknown `target_capability` values produce a broadcast (safe default) rather than a hard error. New capabilities introduced by newer controller versions are handled gracefully by older peer instances.
 
 #### 2026-02-24 Review
 
@@ -463,13 +463,13 @@ Additional claim retrieval (groups, department, cost center) requires custom sco
 
 #### 2026-02-24 Review
 
-**[SEVERITY: Medium]** `src/routes/service_ws.rs:640-681,744-783,916-962` — Three `match service_type` dispatch blocks require manual extension for every new service type
+**[RESOLVED]** ~~Three `match service_type` dispatch blocks require manual extension for every new service type~~
 
-No compile-time forcing function guides developers to all three locations. A trait-based dispatch would reduce to a single registration point.
+The `ServiceType`-based dispatch has been replaced by capability-based routing. The controller now infers service roles from the `BTreeSet<Capability>` advertised during enrollment, and message dispatch uses `broadcast_by_capability` rather than matching on a service type enum.
 
-**[SEVERITY: Medium]** `src/routes/service_ws.rs:853-896` — Enrollment dispatch triplication with near-identical 70-line functions
+**[RESOLVED]** ~~Enrollment dispatch triplication with near-identical 70-line functions~~
 
-Three `enroll_*` functions share near-identical structure. A generic `enroll_service` function would eliminate the duplication.
+The three `enroll_*` functions (`enroll_agent`, `enroll_mqtt`, `enroll_ssh_agent`) have been unified into a single `register()` call. Enrollment now uses a single enrollment token and the controller infers the service role from the advertised `BTreeSet<Capability>`.
 
 **[SEVERITY: Medium]** `src/routes/service_ws.rs:168-178` — `controller_capabilities()` is a hardcoded array
 

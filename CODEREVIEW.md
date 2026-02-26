@@ -369,7 +369,7 @@ The enum has 9 variants and will grow with new features. Adding `#[non_exhaustiv
 - `crates/shared/wire/src/lib.rs:32` and `crates/shared/types/src/plugin_types.rs:17`: `#[non_exhaustive]` on `PluginCapability`, `ServiceMessage`, `ControllerMessage`, and related wire enums — downstream consumers cannot write exhaustive matches that break on new variants.
 - `crates/shared/wire/src/lib.rs:71`: `Capability::Other(String)` forward-compatibility catch-all — unknown capabilities from newer peers are preserved and excluded from intersection without causing a deserialization error.
 - `crates/shared/wire/src/close_reason.rs:49`: `CloseReason::Unknown(String)` mirrors the same forward-compat pattern for close reason codes.
-- `crates/shared/service-sdk/src/lifecycle.rs:76-160`: `ServiceHandler` trait externalizes the entire service-specific surface — new service types plug in without modifying the SDK lifecycle machinery.
+- `crates/shared/service-sdk/src/lifecycle.rs:76-160`: `ServiceHandler` trait externalizes the entire service-specific surface — new service roles plug in without modifying the SDK lifecycle machinery.
 - `crates/plugins/core/src/secrets.rs:9-17`: `SecretMasking` trait with no-op defaults — plugins that have no secrets do not need to implement masking.
 
 ### Issues
@@ -380,15 +380,15 @@ The enum has 9 variants and will grow with new features. Adding `#[non_exhaustiv
 
 **[SEVERITY: Medium]** `crates/shared/wire/src/lib.rs:214-234` — `ServiceMessage` and `ControllerMessage` mix agent-specific and MQTT-specific variants
 
-MQTT-specific wire variants are deserializable on agent connections and vice versa. Implementors of `ServiceHandler` must mentally classify each variant to understand which are relevant to their service type. A per-service message type (achieved through enums that each contain only the variants relevant to that service) or a discriminated wrapper would make the extension surface explicit for new service types.
+MQTT-specific wire variants are deserializable on agent connections and vice versa. Implementors of `ServiceHandler` must mentally classify each variant to understand which are relevant to their capability set. A per-capability message type (achieved through enums that each contain only the variants relevant to that capability) or a discriminated wrapper would make the extension surface explicit for new service roles.
 
 **[SEVERITY: Medium]** `crates/shared/service-sdk/src/lifecycle.rs:79,89` — `ServiceHandler` is not object-safe due to associated constants; no documentation or `where Self: Sized` guards
 
-`DIR_NAME`, `SERVICE_LABEL`, and `SERVICE_TYPE` are `const` items on the trait. Object safety requires that no associated constants be present without a `where Self: Sized` bound. If anyone attempts `Box<dyn ServiceHandler>` or `Arc<dyn ServiceHandler>`, the compiler error is non-obvious. The trait should either document that it is not intended as a trait object, or add `where Self: Sized` to the constant items to produce a clear diagnostic.
+`DIR_NAME` and `SERVICE_LABEL` are `const` items on the trait. Object safety requires that no associated constants be present without a `where Self: Sized` bound. If anyone attempts `Box<dyn ServiceHandler>` or `Arc<dyn ServiceHandler>`, the compiler error is non-obvious. The trait should either document that it is not intended as a trait object, or add `where Self: Sized` to the constant items to produce a clear diagnostic.
 
-**[SEVERITY: Low]** `crates/shared/wire/src/lib.rs:316-318` — `EnrollPayload.service_type` deprecation is undocumented in code
+**[RESOLVED]** ~~`EnrollPayload.service_type` deprecation is undocumented in code~~
 
-The comment states service type will eventually be inferred from capabilities, but there is no `#[deprecated]` attribute, no tracking issue reference, and no compiler warning. Contributors adding new service types will not be guided toward the capability-based path. Adding `#[deprecated = "service_type will be inferred from capabilities; see EnrollPayload docs"]` with a tracking issue reference makes the migration intent visible at compile time.
+The `ServiceType` enum and `EnrollPayload.service_type` field have been removed. Service identity is now determined by `BTreeSet<Capability>` advertised during enrollment and capability negotiation. The controller infers the service role from the agreed capability set. Enrollment uses a single `register()` call (replacing the former `register_agent`/`register_mqtt`/`register_ssh_agent` triple), and routing uses `broadcast_by_capability` instead of the former `broadcast_by_type`.
 
 #### 2026-02-24 Review
 

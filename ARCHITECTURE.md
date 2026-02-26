@@ -1,8 +1,10 @@
 # Architecture Overview
 
-Uptrakit is an agent-based toolkit: the **controller** orchestrates scheduling, hosts a Web UI/API, and checks upstream versions; **agents** run
-outbound-only, unprivileged daemons that report installed versions and execute user-approved updates; the **MQTT service** integrates with Home
-Assistant via MQTT; the **SSH agent** manages remote hosts over SSH (see [SSH Agent Architecture](docs/architecture/ssh-agent.md)).
+Uptrakit is an agent-based toolkit: the **controller** orchestrates scheduling, hosts a Web UI/API, and checks upstream versions; **services** are
+outbound-only, unprivileged daemons whose behavior is defined by a set of **capabilities** (`BTreeSet<Capability>`) rather than a fixed type enum.
+The three current service profiles -- local agent, MQTT bridge, and SSH agent -- are all instances of the same unified service model, differentiated
+only by the capabilities they advertise during enrollment (see [Capability-Based Service Identity](#capability-based-service-identity) below, and
+[SSH Agent Architecture](docs/architecture/ssh-agent.md)).
 
 A centralised [DB-backed scheduler](docs/architecture/scheduler.md) coordinates periodic tasks (version checks, cleanup, CA rotation checks,
 certificate renewal) across controller instances using optimistic locking for HA-safe exactly-once execution.
@@ -73,9 +75,64 @@ Each assignment carries an `execution_site` column (`auto` | `agent` | `controll
 Plugins with a local package index (`homebrew`, `proxmox_helper_scripts`, `apt`) resolve both installed and latest versions on the agent.
 All other plugins resolve upstream versions on the controller via `ControllerSideFetchReleases`.
 
+## Capability-based service identity
+
+Services are identified by the capabilities they advertise, not by a fixed type enum. The former `ServiceType` enum has been removed entirely.
+
+### Capability set replaces ServiceType
+
+Each service sends a `BTreeSet<Capability>` in its `EnrollPayload` during enrollment. The controller persists this set as a JSON text column
+(`services.capabilities`) and uses it for all routing and behavioral decisions. There is no stored "service type" anywhere in the system.
+
+| Capability | Wire string | Description |
+| --- | --- | --- |
+| `SoftwareDiscovery` | `software_discovery` | Supports `discover_software` / `discovery_results` flow |
+| `UpdateHooks` | `update_hooks` | Pre/post-update hook execution |
+| `GracefulShutdown` | `graceful_shutdown` | Supports coordinated shutdown |
+| `MqttBridge` | `mqtt_bridge` | MQTT bridge: handles `register`, `tenant_assignments`, `release_tenants`, etc. |
+| `SshRemote` | `ssh_remote` | Manages remote hosts over SSH |
+
+### ServiceProfile (derived, never stored)
+
+`ServiceProfile` is a runtime-only enum derived from a service's capability set via `ServiceProfile::from_capabilities()`. It drives
+controller-side behavioral defaults (ping interval, shutdown timeout, human-readable label) but is never persisted to the database.
+
+| Profile | Key capability | Typical services | Default ping | Shutdown timeout |
+| --- | --- | --- | --- | --- |
+| `MqttBridge` | `MqttBridge` | MQTT service | 15 s | None |
+| `Agent` | `SoftwareDiscovery` | Local agent, SSH agent | 300 s | 120 s |
+| `Unknown` | (none of the above) | Future services | 300 s | 120 s |
+
+`MqttBridge` takes precedence if both `MqttBridge` and `SoftwareDiscovery` are present. For `Agent` profiles, the `SshRemote` capability
+distinguishes SSH-backed agents from local agents in UI labels (`service_label`).
+
+### Unified enrollment token
+
+A single enrollment token covers all service profiles. The separate per-type token endpoints (`?type=mqtt`, `?type=ssh_agent`) and per-type
+settings keys (`MqttEnrollmentTokenHash`, `SshAgentEnrollmentTokenHash`) have been replaced by a single endpoint at
+`/api/v1/services/enrollment-token` and a single settings key. If a valid enrollment token is provided during enrollment, the service is
+auto-approved regardless of its capability set.
+
+### Service connection registry
+
+`service_connections.rs` provides a `ServiceConnectionRegistry` with a unified `register()` method that accepts any capability set, and a
+`broadcast_by_capability()` method that sends a `ControllerMessage` to all connected services holding a given capability. This replaces the
+former per-type registration and broadcast paths.
+
+### Database schema
+
+- `services.capabilities` -- JSON text column holding a serialized `Vec<Capability>` (e.g. `["software_discovery","update_hooks","graceful_shutdown"]`).
+- `controller_events.target_capability` -- replaces the former `target_service_type` column; stores the snake_case capability string used to
+  route the event to the correct set of connected services.
+
+### REST API
+
+`ServiceResponse` returns `capabilities` (list of snake_case strings) and `service_label` (human-readable, derived from `ServiceProfile`).
+Filtering uses `?capability=software_discovery` on the list endpoint. There is no `service_type` field in any request or response.
+
 ## Wire protocol
 
-Agents, SSH agents, and MQTT services connect to `/api/v1/ws/service` over mTLS and exchange shared `ServiceMessage`/`ControllerMessage` enums. The
+All services connect to `/api/v1/ws/service` over mTLS and exchange shared `ServiceMessage`/`ControllerMessage` enums. The
 AsyncAPI definition lives at `crates/shared/wire/asyncapi.yaml` and is described in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 
 ## OpenAPI Client
@@ -115,8 +172,9 @@ Key design decisions:
 The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared infrastructure for building Uptrakit services:
 
 - **Lifecycle**: The `ServiceHandler` trait and `run_service_lifecycle()` function encapsulate the full bootstrap-enrollment-reconnect flow. New
-  services declare three associated constants (`DIR_NAME`, `SERVICE_LABEL`, `SERVICE_TYPE`) and implement callbacks (`on_connected`, `on_message`,
-  `on_shutdown`, etc.) to get directory setup, identity management, CA bootstrap, enrollment with backoff, and reconnection with backoff for free.
+  services declare two associated constants (`DIR_NAME`, `SERVICE_LABEL`) and override the `capabilities()` method to return their
+  `BTreeSet<Capability>`. The SDK sends this capability set in `EnrollPayload` during enrollment. Callbacks (`on_connected`, `on_message`,
+  `on_shutdown`, etc.) provide directory setup, identity management, CA bootstrap, enrollment with backoff, and reconnection with backoff for free.
   See [Service Lifecycle](docs/development/service-lifecycle.md).
 - **Event Loop**: The SDK owns the unified `tokio::select!` loop that handles ping/pong, certificate renewal, CA staleness checks, signal handling,
   and close-reason dispatch. Services inject custom behaviour through `ServiceHandler` callbacks (`poll_service_event`, `on_service_event`).
@@ -127,8 +185,8 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
 - **Identity**: Service identity state management (service ID, enrollment secret, certificate, private key).
 - **TLS/CA**: TLS connector builders (server-only and mTLS), CA bootstrap (cached, file, PKI endpoint, TOFU, system trust), CA staleness checks.
 - **ControllerConnection**: Shared authenticated WebSocket connection with envelope serialization, sequence validation, Ping/Pong handling, and
-  close-frame reason tracking. Used by all service types. Sequence validation is performed before full message deserialization to ensure
-  unrecognized messages do not cause sequence mismatches.
+  close-frame reason tracking. Used by all services regardless of capability set. Sequence validation is performed before
+  full message deserialization to ensure unrecognized messages do not cause sequence mismatches.
 - **CertificateRenewalHandler**: Handles certificate lifecycle messages (`CaBundleUpdated`, `RequestCertRenewal`, `Certificate`) automatically in the
   event loop. Also provides shared renewal timer helpers (`create_renewal_sleep`, `update_renewal_schedule`, `compute_renewal_delay`).
 - **Backoff**: Exponential backoff with jitter for reconnection delays.

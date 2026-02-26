@@ -373,7 +373,7 @@ Key invariants:
    `software_states`) to MQTT services whenever version data changes (version check completed, update
    result received). The MQTT service stores the states in memory and publishes to the broker.
 3. **`SoftwareStates` is safe for the outbox.** It contains no credentials and is written to the
-   cross-controller outbox with `target_service_type = "mqtt"` so only MQTT services receive it.
+   cross-controller outbox with `target_capability = "mqtt_bridge"` so only MQTT services receive it.
 4. **Reconnect resilience.** On every `ConnAck` the MQTT service emits a `Reconnected` event, causing
    `TenantManager` to republish all discovery configs and state topics from the in-memory cache.
 5. **HA restart resilience.** HA publishes `"online"` to `{ha_discovery_prefix}/status` on startup
@@ -422,8 +422,9 @@ All topics use the MQTT client's `topic_prefix` field.
 ### Service ping interval
 
 The ping interval is controller-managed and per-service configurable. The `services` DB table has a nullable
-`ping_interval_seconds INTEGER` column. The controller reads this value per-service and falls back to service-type
-defaults (300s for agent/SSH agent, 15s for MQTT) when the column is `NULL`.
+`ping_interval_seconds INTEGER` column. The controller reads this value per-service and falls back to
+profile-based defaults (300s for `Agent` profile, 15s for `MqttBridge` profile) when the column is `NULL`.
+Defaults are provided by `ServiceProfile::default_ping_interval_secs()`.
 
 Key integration points:
 
@@ -437,53 +438,92 @@ Key integration points:
 - **CLI**: `uptrakit services update <id> --ping-interval <seconds>`.
 - **OpenAPI client**: `update_service(&self, id: &Uuid, req: &UpdateServiceRequest) -> Result<ServiceResponse>`.
 - **Frontend**: Service page context menu includes "Edit Ping Interval" dialog.
-- **`ServiceResponse`**: Includes `ping_interval_seconds: Option<u32>` (`None` means service-type default is used).
+- **`ServiceResponse`**: Includes `ping_interval_seconds: Option<u32>` (`None` means the profile-based default is used).
 
-### Wire protocol capability negotiation
+### Capability-based service identity
 
-The agent-controller protocol uses **capability-based negotiation** rather than version numbers. Both sides advertise
-the features they support; each side independently computes the agreed set (intersection of typed variants).
+Services are identified by their **capability set** rather than a fixed type enum. The former `ServiceType` enum
+(`Agent`, `Mqtt`, `SshAgent`) and its backing file `crates/shared/types/src/service_type.rs` have been removed.
 
-#### How it works
+#### Capability set
+
+Each service declares a `BTreeSet<Capability>` at enrollment time. The set is persisted as a JSON array string in the
+`services.capabilities` DB column.
+
+| Capability | Wire String | Agent | SSH Agent | MQTT | Controller |
+| --- | --- | :---: | :---: | :---: | :---: |
+| `SoftwareDiscovery` | `software_discovery` | yes | yes | -- | yes |
+| `UpdateHooks` | `update_hooks` | yes | yes | -- | yes |
+| `GracefulShutdown` | `graceful_shutdown` | yes | yes | yes | yes |
+| `MqttBridge` | `mqtt_bridge` | -- | -- | yes | yes |
+| `SshRemote` | `ssh_remote` | -- | yes | -- | yes |
+| `Other(String)` | *(unknown)* | -- | -- | -- | -- |
+
+`Other(String)` is a forward-compat catch-all received from newer peers; it never participates in intersection
+(`Capability::is_known()` returns `false` for it).
+
+#### ServiceProfile (derived, never stored)
+
+`ServiceProfile` is a runtime-only enum derived from capabilities via `ServiceProfile::from_capabilities()`. It drives
+behavioral defaults (ping interval, shutdown timeout, human-readable label). It is **never persisted** in the database.
+
+| Profile | Key capability | Services | Default ping | Shutdown timeout |
+| --- | --- | --- | --- | --- |
+| `MqttBridge` | `Capability::MqttBridge` | MQTT service | 15 s | None |
+| `Agent` | `Capability::SoftwareDiscovery` | Local agent, SSH agent | 300 s | 120 s |
+| `Unknown` | (none of the above) | Unrecognized | 300 s | 120 s |
+
+`ServiceProfile::service_label(has_ssh_remote)` provides the human-readable label: "Agent", "SSH Agent",
+"MQTT Bridge", or "Unknown".
+
+#### Capability negotiation (wire protocol)
 
 1. Controller sends `service_settings` with `capabilities: [...]` after mTLS authentication.
 2. Service sends `report_hosts` / `register` with its own `capabilities: [...]`.
 3. Each side computes `agreed = intersection(controller_caps, service_caps)` excluding `Other` values.
 4. The agreed set is stored on the connection via `ControllerConnection::set_agreed_capabilities()`.
 
-#### Defined capabilities and service-type fingerprints
+#### Unified enrollment token
 
-| Capability | Wire String | Agent | SSH Agent | MQTT | Controller |
-| --- | --- | :---: | :---: | :---: | :---: |
-| `SoftwareDiscovery` | `software_discovery` | ✓ | ✓ | — | ✓ |
-| `UpdateHooks` | `update_hooks` | ✓ | ✓ | — | ✓ |
-| `GracefulShutdown` | `graceful_shutdown` | ✓ | ✓ | ✓ | ✓ |
-| `MqttBridge` | `mqtt_bridge` | — | — | ✓ | ✓ |
-| `SshRemote` | `ssh_remote` | — | ✓ | — | ✓ |
-| `Other(String)` | *(unknown)* | — | — | — | — |
+The three separate enrollment tokens (agent, MQTT, SSH agent) have been replaced by a single unified enrollment token.
+`SettingKey::EnrollmentTokenHash` maps to DB key `service_enrollment.token_hash`. The former per-type keys
+(`MqttEnrollmentTokenHash`, `SshAgentEnrollmentTokenHash`, `agent_enrollment.token_hash`) no longer exist.
 
-`Other(String)` is a forward-compat catch-all received from newer peers; it never participates in intersection
-(`Capability::is_known()` returns `false` for it).
+#### Wire protocol changes
 
-Each service type has a unique capability fingerprint (future path to replace `service_type` in enrollment):
+`EnrollPayload` carries `capabilities: BTreeSet<Capability>` instead of the former `service_type: ServiceType`.
+The `ServiceHandler::SERVICE_TYPE` constant has been removed from the service SDK trait.
 
-| Fingerprint | `ServiceType` |
-| --- | --- |
-| Has `MqttBridge` | `Mqtt` |
-| Has `SshRemote` | `SshAgent` |
-| Has `SoftwareDiscovery`, no `MqttBridge`, no `SshRemote` | `Agent` |
+#### Service connections
 
-`EnrollPayload.service_type` and `ServiceHandler::SERVICE_TYPE` are **not** removed yet — routing still uses them.
-They will be inferred from capabilities once all peers support capability negotiation.
+`service_connections.rs` provides a single `register()` method (replacing `register_agent()`,
+`register_ssh_agent()`, `register_mqtt()`) and `broadcast_by_capability()` (replacing `broadcast_by_type()`).
+
+#### Controller events
+
+The `controller_events` table column `target_service_type` has been renamed to `target_capability`.
+
+#### REST API
+
+`ServiceResponse` contains `capabilities: Vec<String>` and `service_label: String` instead of the former
+`service_type: ServiceType`. The list endpoint filter parameter is `?capability=` instead of `?type=`.
+
+#### Frontend
+
+The frontend filters services by capability instead of type and displays `service_label` instead of `service_type`.
 
 #### Key files
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/wire/src/lib.rs` | `Capability` enum, serde, `is_known()` |
+| `crates/shared/wire/src/lib.rs` | `Capability` enum, serde, `is_known()`, `EnrollPayload` with `capabilities` field |
+| `crates/ui/web-api/src/service_profile.rs` | `ServiceProfile` enum, `from_capabilities()`, `parse_capabilities()`, `serialize_capabilities()` |
+| `crates/ui/web-api/src/service_connections.rs` | `register()`, `broadcast_by_capability()` |
+| `crates/ui/web-api/src/setting_key.rs` | `SettingKey::EnrollmentTokenHash` (`service_enrollment.token_hash`) |
 | `crates/shared/service-sdk/src/connection.rs` | `agreed_capabilities` field + accessors |
 | `crates/shared/service-sdk/src/event_loop.rs` | Capability intersection in `ServiceSettings` handler |
 | `crates/ui/web-api/src/routes/service_ws.rs` | `controller_capabilities()`, `ServiceSettingsPayload` construction |
+| `crates/shared/db/src/entity/controller_event.rs` | `target_capability` column |
 | `crates/shared/wire/asyncapi.yaml` | Schema for `capabilities` arrays in messages |
 | `docs/api/wire-protocol.md` | Full capability negotiation documentation |
 

@@ -315,8 +315,12 @@ pub struct Model {
 
 | Entity | Column | Enum | | --- | --- | --- | | `mqtt_client` | `transport` | `MqttTransport` | | `mqtt_client` | `connection_status` |
 `MqttClientConnectionStatus` | | `session` | `token_type` | `SessionTokenType` | | `update_output_line` | `stream` | `OutputStreamType` | |
-`pending_device_flow` | `status` | `DeviceAuthStatus` | | `service` | `service_type` | `ServiceType` | | `service` | `status` | `ServiceStatus` | |
+`pending_device_flow` | `status` | `DeviceAuthStatus` | | `service` | `status` | `ServiceStatus` | |
 `update_history` | `status` | `UpdateStatus` |
+
+Note: the `service` entity stores capabilities as a JSON text column (`services.capabilities`) rather
+than a typed enum column. The capability set is parsed into `BTreeSet<Capability>` at read time. See
+[Service Lifecycle -- Capability-based enrollment](service-lifecycle.md#capability-based-enrollment).
 
 ### Re-exports
 
@@ -472,18 +476,18 @@ inherit an arbitrary default.
 Extend the `#[non_exhaustive]` rule from the "Public Enum Extensibility" section:
 
 - **Closed enum**: remove the wildcard entirely. The compiler enforces exhaustiveness at compile time.
-- **`#[non_exhaustive]` enum** (e.g., `ServiceType`, `UpdateFinalStatus`): a wildcard is required in external
+- **`#[non_exhaustive]` enum** (e.g., `Capability`, `UpdateFinalStatus`): a wildcard is required in external
   crates, but it must never be silent. Replace `_ => some_default` with a `tracing::warn!` + a documented safe
   fallback, and replace `_ => unreachable!()` with `tracing::warn!` + early return. Never use `unreachable!()` on
   values that come from wire or database state.
 
 ```rust
-// ✓ Correct — unknown variant logged; safe fallback chosen explicitly
-match service_type {
-    ServiceType::Agent | ServiceType::SshAgent => Some(AGENT_SHUTDOWN_TIMEOUT_SECS),
-    ServiceType::Mqtt => None,
+// ✓ Correct — unknown profile logged; safe fallback chosen explicitly
+match profile {
+    ServiceProfile::Agent | ServiceProfile::Unknown => Some(AGENT_SHUTDOWN_TIMEOUT_SECS),
+    ServiceProfile::MqttBridge => None,
     _ => {
-        tracing::warn!(?service_type, "unknown ServiceType for shutdown timeout; using agent default");
+        tracing::warn!(?profile, "unknown ServiceProfile for shutdown timeout; using agent default");
         Some(AGENT_SHUTDOWN_TIMEOUT_SECS)
     }
 }
@@ -492,7 +496,7 @@ match service_type {
 _ => Some(120),
 
 // ✗ Wrong — panics when a new wire variant arrives
-_ => unreachable!("unknown ServiceType variant"),
+_ => unreachable!("unknown ServiceProfile variant"),
 ```
 
 ## Parameter Struct Pattern

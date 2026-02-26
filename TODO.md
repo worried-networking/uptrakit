@@ -412,10 +412,10 @@ Ways users interact with the system.
   - [x] Controller-side lease coordinator (centralized tenant assignment)
   - [x] Unified ServiceConnectionRegistry (track connected service instances)
   - [x] Push-based tenant config (controller pushes config changes to instances)
-  - [x] Settings-based MQTT enrollment tokens (managed via unified services API)
+  - [x] Single unified enrollment token for all service types (managed via services API)
   - [x] Unified REST API for service management (`/api/v1/services` — list, approve, reject, deactivate)
   - [x] Unified REST API for service enrollment tokens (`/api/v1/services/enrollment-tokens` — create, list, delete)
-  - [x] Unified database entity (`services` table with `service_type` column, `service_certificates`)
+  - [x] Unified database entity (`services` table with `capabilities` JSON column, `service_certificates`)
 - [x] Implement MQTT auto-discovery for Home Assistant
   - [x] HA `update` entity discovery per `(software item, host)` pair
   - [x] Discovery republished on reconnect and HA restart (birth message)

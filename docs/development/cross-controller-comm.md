@@ -16,8 +16,8 @@ pattern solves this: push messages are written to a `controller_events` DB table
    (`source_controller_id != self`), using a cursor-based approach (`id > last_seen_id`). The cursor only advances past
    events that were successfully delivered (or permanently skipped after 3 failed retries), providing at-least-once
    delivery semantics under backpressure.
-1. Events are routed based on `target_service_id` (specific service) and `target_service_type` (`ServiceType` enum
-   serialized as `"agent"`, `"mqtt"`, or `null` for broadcast).
+1. Events are routed based on `target_service_id` (specific service) and `target_capability` (a `Capability`
+   string such as `"software_discovery"`, `"mqtt_bridge"`, or `null` for broadcast to all services).
 1. Old events (>1 hour) are cleaned up every 5 minutes.
 
 **Design rules:**
@@ -37,7 +37,7 @@ pattern solves this: push messages are written to a `controller_events` DB table
 | `id` | BIGINT AUTO_INCREMENT PK | Cursor for polling |
 | `source_controller_id` | UUID NOT NULL | Controller that wrote the event |
 | `target_service_id` | UUID NULL | NULL = broadcast |
-| `target_service_type` | TEXT NULL | `"agent"`, `"mqtt"`, or NULL = all |
+| `target_capability` | TEXT NULL | `"software_discovery"`, `"mqtt_bridge"`, etc., or NULL = all |
 | `message_json` | TEXT NOT NULL | Serialized `ControllerMessage` |
 | `created_at` | TIMESTAMP NOT NULL | For cleanup |
 

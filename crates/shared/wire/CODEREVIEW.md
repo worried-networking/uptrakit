@@ -19,11 +19,12 @@ consistently to `Capability` and `CloseReason`. Tests cover every message
 variant, the full sequence-counter state machine, all serde edge cases, and
 spec-conformance against `asyncapi.yaml`.
 
-Two issues require attention before the next protocol version increment:
+One issue requires attention before the next protocol version increment:
 `ServiceMessage` and `ControllerMessage` mix agent and MQTT
 concerns in a single enum without documented segregation guidance for
-`ServiceHandler` implementors; and `EnrollPayload.service_type` deprecation is
-documented in a comment but not enforced by the compiler. `PluginType` now
+`ServiceHandler` implementors. The former `EnrollPayload.service_type` field
+has been removed; service identity is now determined entirely by the
+`BTreeSet<Capability>` advertised during enrollment. `PluginType` now
 correctly uses `Other(String)` for forward-compatibility, matching the pattern
 established by `Capability` and `CloseReason`.
 
@@ -117,7 +118,7 @@ deserialises on an MQTT connection. The handler code in `service_ws.rs` must
 mentally classify variants and discard unexpected ones, which is easy to get
 wrong silently. The `#[non_exhaustive]` attribute mitigates compile-time
 exhaustion but does not communicate to a `ServiceHandler` author which variants
-are relevant to their service type.
+are relevant to their capability set.
 
 Recommended direction: introduce marker types or a sub-enum split
 (`AgentServiceMessage`, `MqttServiceMessage`, `SharedServiceMessage`) that can
@@ -335,24 +336,9 @@ Not applicable.
 
 ### Issues
 
-**[SEVERITY: Low]** `src/lib.rs:307–318` — `EnrollPayload.service_type`
-deprecation is documented in a comment but is not enforced by the compiler
+**[RESOLVED]** ~~`EnrollPayload.service_type` deprecation is documented in a comment but is not enforced by the compiler~~
 
-The doc comment on `service_type` describes the intended deprecation path
-(`"once all peers support capability negotiation, the controller will infer
-service type from the capability set"`), but no `#[deprecated]` attribute is
-present. As a result:
-
-1. No compiler warning is emitted when code constructs or reads
-   `EnrollPayload.service_type`.
-2. There is no tracking issue reference in the comment.
-3. The removal timeline is undefined.
-
-Adding `#[deprecated(since = "TBD", note = "will be inferred from capabilities; see issue #NNN")]`
-would make the migration intent visible in IDE tooling and `cargo doc` output,
-and would surface usages that need updating when the field is eventually
-removed.
-(`src/lib.rs:313–317`)
+The `service_type` field has been removed from `EnrollPayload`. Service identity is now determined entirely by the `BTreeSet<Capability>` advertised during enrollment. The controller infers the service role from the agreed capability set. Enrollment uses a single `register()` call and a single enrollment token.
 
 ---
 
@@ -411,24 +397,21 @@ creating an incomplete trait surface for `ServiceHandler` implementors
 
 (Repeated from Architecture/Issues for emphasis in the extensibility context.)
 
-When a new service type is implemented as a `ServiceHandler`, the developer
-faces a flat enum of 13 `ServiceMessage` variants and 15 `ControllerMessage`
-variants, with no type-level guidance about which are relevant. The agent
-handles `ReportHosts`, `VersionCheckResults`, `UpdateStarted`, `UpdateOutput`,
-`UpdateResult`, and `DiscoveryResults`. The MQTT service handles `Register`,
-`ReleaseTenants`, and `MqttClientStatus`. The shared set is `Ping`, `Enroll`,
-`RequestCertificate`, `RenewCertificate`, and `Disconnecting`.
+When a new service role is implemented as a `ServiceHandler`, the developer
+faces a flat enum of `ServiceMessage` variants and `ControllerMessage`
+variants, with no type-level guidance about which are relevant to a given
+capability set. The agent handles `ReportHosts`, `VersionCheckResults`,
+`UpdateStarted`, `UpdateOutput`, `UpdateResult`, and `DiscoveryResults`. The
+MQTT service handles `Register`, `ReleaseTenants`, and `MqttClientStatus`.
+The shared set is `Ping`, `Enroll`, `RequestCertificate`,
+`RenewCertificate`, and `Disconnecting`.
 
-A new `ServiceHandler` author writing a custom service type will receive all 13
-variants at their dispatch point and must manually identify which to handle and
-which to reject. There is no trait method signature or associated type that
-communicates the expected message surface. This is a latent correctness hazard
-as new service types are added.
+A new `ServiceHandler` author writing a custom service role will receive all
+variants at their dispatch point and must manually identify which to handle
+and which to reject. There is no trait method signature or associated type
+that communicates the expected message surface. This is a latent correctness
+hazard as new service roles are added.
 
-**[SEVERITY: Low]** `src/lib.rs:307–318` — `EnrollPayload.service_type`
-deprecation undocumented to the compiler
+**[RESOLVED]** ~~`EnrollPayload.service_type` deprecation undocumented to the compiler~~
 
-(Repeated from Coding Standards/Issues.) The field is on the deprecation path
-toward removal, but without `#[deprecated]` the compiler cannot warn consumers
-who still write code that depends on it. As the crate gains consumers, the cost
-of the eventual migration increases.
+The `service_type` field has been removed from `EnrollPayload`. Service identity is now determined by the `BTreeSet<Capability>` advertised during enrollment, eliminating the need for the deprecated field.

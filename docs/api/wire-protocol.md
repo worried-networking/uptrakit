@@ -1,7 +1,7 @@
 # Wire Protocol
 
 Agent, SSH agent, and MQTT service communication with the controller happens over a secure WebSocket (`/api/v1/ws/service`). All
-service types share the same `ServiceMessage`/`ControllerMessage` enums, with variants enabled per service type.
+services share the same `ServiceMessage`/`ControllerMessage` enums, with variants enabled per capability set.
 
 ## Connection Types
 
@@ -25,7 +25,7 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ## Agent Lifecycle
 
-1. Connect anonymously and send `enroll` with hostname, service type, and optional enrollment token.
+1. Connect anonymously and send `enroll` with hostname, capabilities, and optional enrollment token.
 1. Controller assigns UUIDv7 `service_id` and responds with `enrolled` (includes enrollment secret).
 1. Agent generates an ECDSA P-256 keypair locally and submits a CSR (`request_certificate`).
 1. Controller validates the CSR, signs it, and returns `certificate`.
@@ -345,11 +345,11 @@ authenticated connection is established. It carries runtime configuration for th
 | `ca_bundle_hash` | `String` | `#[serde(default)]` | Hash of the current CA bundle for staleness detection |
 | `capabilities` | `BTreeSet<Capability>` | `#[serde(default, skip_serializing_if = "BTreeSet::is_empty")]` | Set of capabilities advertised by the controller; used for capability negotiation |
 | `shutdown_timeout_seconds` | `Option<u32>` | `#[serde(default, skip_serializing_if)]` | Max seconds to wait during shutdown; present for agents, absent for MQTT |
-| `ping_interval` | `Duration` | `#[serde(with = "duration_seconds")]` | Controller-managed ping interval; derived from per-service DB override or service-type default (300s agent/SSH agent, 15s MQTT) |
+| `ping_interval` | `Duration` | `#[serde(with = "duration_seconds")]` | Controller-managed ping interval; derived from per-service DB override or service-profile default (300s agent/SSH agent, 15s MQTT) |
 
 The `ping_interval` field is serialized as a `u32` number of seconds on the wire (e.g. `"ping_interval": 300`)
 using the `duration_seconds` serde module. The controller reads `ping_interval_seconds` from the `services` table
-for each service and falls back to service-type defaults when no override is set.
+for each service and falls back to `ServiceProfile` defaults when no override is set.
 
 ### `duration_seconds` serde module
 
@@ -400,8 +400,8 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | `SoftwareDiscovery` | `software_discovery` | Service supports `discover_software` → `discovery_results` flow. Controller gates autodiscovery requests on this capability. |
 | `UpdateHooks` | `update_hooks` | Service supports pre-/post-update hook commands in `execute_update`. Controller omits hooks when absent. |
 | `GracefulShutdown` | `graceful_shutdown` | Service sends `disconnecting` before clean exit and honours `shutdown_timeout_seconds`. |
-| `MqttBridge` | `mqtt_bridge` | Service is an MQTT bridge: handles `register`, `tenant_assignments`, `release_tenants`, `mqtt_client_status`, etc. Future replacement for `ServiceType::Mqtt`. |
-| `SshRemote` | `ssh_remote` | Service manages remote hosts over SSH. Future replacement for `ServiceType::SshAgent`. |
+| `MqttBridge` | `mqtt_bridge` | Service is an MQTT bridge: handles `register`, `tenant_assignments`, `release_tenants`, `mqtt_client_status`, etc. Maps to `ServiceProfile::MqttBridge`. |
+| `SshRemote` | `ssh_remote` | Service manages remote hosts over SSH. Combined with `SoftwareDiscovery`, maps to `ServiceProfile::Agent` with SSH label. |
 | `Other(String)` | *(any unknown string)* | Forward-compatible catch-all. Never participates in intersection. |
 
 ### Advertised Sets per Component
@@ -415,18 +415,22 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 
 The controller advertises all known capabilities so every service can compute its agreed set regardless of its type.
 
-### Service-Type Identification via Capabilities (future path)
+### Service-Profile Derivation from Capabilities
 
-Each service type has a unique capability fingerprint that will eventually replace the `service_type` enrollment field:
+The controller derives a `ServiceProfile` from each service's persisted capability set. The profile drives
+behavioral defaults (ping interval, shutdown timeout, human-readable label). `ServiceProfile` is never
+stored -- it is always computed from capabilities.
 
-| Capability set | Current `ServiceType` |
-| --- | --- |
-| Has `mqtt_bridge` | `Mqtt` |
-| Has `ssh_remote` | `SshAgent` |
-| Has `software_discovery`, no `mqtt_bridge`, no `ssh_remote` | `Agent` |
+| Capability set | `ServiceProfile` | Label |
+| --- | --- | --- |
+| Has `mqtt_bridge` | `MqttBridge` | "MQTT Bridge" |
+| Has `ssh_remote` + `software_discovery` | `Agent` | "SSH Agent" |
+| Has `software_discovery`, no `mqtt_bridge`, no `ssh_remote` | `Agent` | "Agent" |
+| Unrecognized combination | `Unknown` | "Unknown" |
 
-`EnrollPayload.service_type` and `ServiceHandler::SERVICE_TYPE` are retained for now; once all peers use
-capability negotiation, routing will be derived from the capability fingerprint instead.
+`EnrollPayload.capabilities` is a required `BTreeSet<Capability>` field. The controller persists the
+capabilities in the `services.capabilities` column (JSON array of snake_case strings) and derives
+the `ServiceProfile` at read time.
 
 ## Forward Compatibility
 
@@ -453,9 +457,9 @@ The `MqttTenantConfig` struct is used in `tenant_assignments` and `tenant_config
 | `host` | String | MQTT broker hostname |
 | `port` | u16 | MQTT broker port |
 | `client_id` | String | MQTT client ID for broker connection |
-| `username` | Option&lt;SecretString&gt; | Broker authentication username |
-| `password` | Option&lt;SecretString&gt; | Broker authentication password |
-| `ca_pem` | Option&lt;SecretString&gt; | Custom CA certificate in PEM format for private brokers |
+| `username` | `Option<SecretString>` | Broker authentication username |
+| `password` | `Option<SecretString>` | Broker authentication password |
+| `ca_pem` | `Option<SecretString>` | Custom CA certificate in PEM format for private brokers |
 | `topic_prefix` | String | MQTT topic prefix |
 | `ha_discovery` | bool | Whether to publish Home Assistant MQTT discovery topics (`#[serde(default)]`) |
 | `ha_discovery_prefix` | String | HA MQTT discovery topic prefix (default `"homeassistant"`) |

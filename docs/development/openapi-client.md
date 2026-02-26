@@ -28,10 +28,10 @@ generate code that doesn't follow the project's strict coding standards
 (rootcause errors, no unwrap, no `#[allow]`).
 
 **Re-exports all types:** The crate re-exports `uptrakit-web-api-types` as
-`types`, `DeviceAuthStatus` and `ServiceType` from `uptrakit-shared-types`,
-`uuid::Uuid`, `reqwest::Error` as `ReqwestError`, and `reqwest::StatusCode`.
-Downstream crates (e.g. the CLI) depend only on `uptrakit-openapi-client`
-and import types via `uptrakit_openapi_client::types::*`,
+`types`, `DeviceAuthStatus` from `uptrakit-shared-types`, `uuid::Uuid`,
+`reqwest::Error` as `ReqwestError`, and `reqwest::StatusCode`. Downstream
+crates (e.g. the CLI) depend only on `uptrakit-openapi-client` and import
+types via `uptrakit_openapi_client::types::*`,
 `uptrakit_openapi_client::Uuid`, `uptrakit_openapi_client::StatusCode`, and
 `uptrakit_openapi_client::ReqwestError`.
 
@@ -232,9 +232,9 @@ directly. `Option::None` fields are automatically skipped by
 - `reject_service(&self, id: &Uuid) -> Result<ServiceResponse>`
 - `remove_service(&self, id: &Uuid) -> Result<MessageResponse>`
 - `merge_service(&self, target_id: &Uuid, req) -> Result<ServiceResponse>`
-- `create_enrollment_token(&self, service_type) -> Result<EnrollmentTokenResponse>`
-- `revoke_enrollment_token(&self, service_type) -> Result<()>`
-- `enrollment_token_status(&self, service_type) -> Result<EnrollmentTokenStatusResponse>`
+- `create_enrollment_token(&self) -> Result<EnrollmentTokenResponse>`
+- `revoke_enrollment_token(&self) -> Result<()>`
+- `enrollment_token_status(&self) -> Result<EnrollmentTokenStatusResponse>`
 
 ### Settings (`settings.rs`)
 

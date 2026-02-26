@@ -32,7 +32,7 @@ to this crate.
 **Clean `ServiceHandler` trait + `run_service_lifecycle` driver.**
 `lifecycle.rs` defines a single generic entry point
 `run_service_lifecycle<H: ServiceHandler>`. All service-specific behaviour is
-injected through eight trait methods (`on_connected`, `on_message`,
+injected through trait methods (`on_connected`, `on_message`,
 `on_settings`, `on_service_event`, `on_shutdown`, `poll_service_event`,
 `capabilities`). This means every lifecycle correctness fix — expiry fallback,
 cert-rotation reconnect, backoff reset — is inherited by all three consumers
@@ -321,10 +321,12 @@ to decide what to do next.
 ### Strengths
 
 **`ServiceHandler` externalises the entire service-specific surface.**
-The trait provides eight well-defined extension points. Adding a new service
-type requires implementing the trait — nothing inside the SDK needs to change.
-The default implementations of `on_settings` and `capabilities` keep
-simple services concise.
+The trait provides well-defined extension points. Adding a new service
+role requires implementing the trait — nothing inside the SDK needs to change.
+The `capabilities()` method returns a `BTreeSet<Capability>` that identifies
+the service role, replacing the former `SERVICE_TYPE` constant. The default
+implementations of `on_settings` and `capabilities` keep simple services
+concise.
 
 **`ServiceEvent` associated type supports heterogeneous event sources.**
 The `type ServiceEvent: Send` associated type, combined with
@@ -361,7 +363,6 @@ object-safe due to associated constants; this is undocumented.
 ```rust
 const DIR_NAME: &'static str;
 const SERVICE_LABEL: &'static str;
-const SERVICE_TYPE: ServiceType;
 ```
 
 Associated constants prevent `dyn ServiceHandler` from being used as a trait
@@ -372,10 +373,11 @@ A future implementor who attempts to store a `Box<dyn ServiceHandler>` or
 the `const` items rather than a clear explanation.
 
 The fix is either to add a `// Note: ServiceHandler is not object-safe due to
-associated constants DIR_NAME, SERVICE_LABEL, and SERVICE_TYPE.` comment
-directly above the trait definition, or — if object-safety is ever required —
-to convert the constants to `fn` methods returning `&'static str` /
-`ServiceType` (which are object-safe).
+associated constants DIR_NAME and SERVICE_LABEL.` comment directly above the
+trait definition, or -- if object-safety is ever required -- to convert the
+constants to `fn` methods returning `&'static str` (which are object-safe).
+The former `SERVICE_TYPE` constant has been replaced by the `capabilities()`
+method, which returns a `BTreeSet<Capability>` to identify the service role.
 
 **[SEVERITY: Low]** `lifecycle.rs:142` — `poll_service_event` cancellation
 safety requirement is undocumented.

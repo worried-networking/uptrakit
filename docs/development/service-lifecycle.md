@@ -1,13 +1,14 @@
 # Service Lifecycle
 
 The `uptrakit-service-sdk` crate provides a `ServiceHandler` trait and `run_service_lifecycle()` function that encapsulate the entire
-bootstrap-enrollment-reconnect flow shared by all Uptrakit services (agent, SSH agent, MQTT, and any future service types).
+bootstrap-enrollment-reconnect flow shared by all Uptrakit services (agent, SSH agent, MQTT, and any future capability combinations).
 
 ## Overview
 
-Building a new Uptrakit service requires implementing a set of callbacks on the `ServiceHandler` trait plus three associated constants. The SDK owns the
-entire event loop (`tokio::select!`) and handles all common plumbing: CLI argument parsing, directory resolution, identity management, CA bootstrap,
-enrollment with backoff, certificate renewal, ping/pong keepalive, signal handling, CA staleness checks, and reconnection with exponential backoff.
+Building a new Uptrakit service requires implementing a set of callbacks on the `ServiceHandler` trait plus two associated constants and a
+`capabilities()` method. The SDK owns the entire event loop (`tokio::select!`) and handles all common plumbing: CLI argument parsing, directory
+resolution, identity management, CA bootstrap, enrollment with backoff, certificate renewal, ping/pong keepalive, signal handling, CA staleness
+checks, and reconnection with exponential backoff.
 
 ## The `ServiceHandler` trait
 
@@ -16,9 +17,12 @@ enrollment with backoff, certificate renewal, ping/pong keepalive, signal handli
 pub trait ServiceHandler: Send {
     const DIR_NAME: &'static str;
     const SERVICE_LABEL: &'static str;
-    const SERVICE_TYPE: ServiceType;
 
     type ServiceEvent: Send;
+
+    fn capabilities(&self) -> BTreeSet<Capability> {
+        BTreeSet::new()
+    }
 
     async fn on_connected(
         &mut self,
@@ -45,7 +49,7 @@ pub trait ServiceHandler: Send {
     async fn on_shutdown(
         &mut self,
         conn: &mut ControllerConnection,
-        signal: Signal,
+        cause: ShutdownCause,
         shutdown_timeout_seconds: u32,
     ) -> LoopOutcome;
 }
@@ -57,7 +61,19 @@ pub trait ServiceHandler: Send {
 | --- | --- |
 | `DIR_NAME` | Directory name for platform-specific resolution (e.g. `"agent"`, `"mqtt"`). |
 | `SERVICE_LABEL` | Human-readable label for log messages (e.g. `"uptrakit-agent service"`). |
-| `SERVICE_TYPE` | `ServiceType::Agent`, `ServiceType::Mqtt`, or `ServiceType::SshAgent`. |
+
+### `capabilities()` method
+
+Returns the `BTreeSet<Capability>` that this service advertises during enrollment and in `ReportHosts`. The
+SDK intersects this set with the controller's advertised capabilities (from `ServiceSettings`) to compute
+the agreed capability set. Only typed (known) variants participate in the intersection.
+
+The default implementation returns an empty set. Services should override this to advertise their actual
+capabilities. For example, the local agent returns `{GracefulShutdown, SoftwareDiscovery, UpdateHooks}`.
+
+On the controller side, the persisted capability set is used to derive a `ServiceProfile` (Agent,
+MqttBridge, or Unknown) which drives behavioral defaults such as ping interval, shutdown timeout, and
+human-readable `service_label`. See [ServiceProfile derivation](#serviceprofile-derivation) below.
 
 ### `ServiceEvent` associated type
 
@@ -78,7 +94,7 @@ is delegated to this callback. Return `Ok(Some(outcome))` to break the loop, `Ok
 
 #### `on_settings`
 
-Called after the SDK processes the shared `ServiceSettings` fields (protocol version check, renewal
+Called after the SDK processes the shared `ServiceSettings` fields (capability negotiation, renewal
 schedule, shutdown timeout, CA staleness). Override for service-specific settings processing.
 Default is a no-op.
 
@@ -94,8 +110,9 @@ Handle a resolved service event from `poll_service_event`. Return `Ok(Some(outco
 
 #### `on_shutdown`
 
-Graceful shutdown handler. Called when an OS signal is received. Send `Disconnecting` and drain in-flight work. The `signal` parameter distinguishes
-`Signal::Hangup` (restart) from `Signal::Interrupt`/`Signal::Terminate` (shutdown). `shutdown_timeout_seconds` comes from the latest `ServiceSettings`.
+Graceful shutdown handler. Called when an OS signal or `ServerRestarting` message is received. Send `Disconnecting` and drain in-flight work. The
+`cause` parameter is a `ShutdownCause` enum that distinguishes OS signals (`Signal::Hangup` for restart, `Signal::Interrupt`/`Signal::Terminate` for
+shutdown) from controller-initiated restarts. `shutdown_timeout_seconds` comes from the latest `ServiceSettings`.
 
 ### `LoopOutcome`
 
@@ -147,8 +164,8 @@ different interval, the timer is replaced.
 
 This design means the ping interval is fully controller-managed. The `ServiceHandler` trait no longer
 exposes a `ping_interval()` method. The controller derives the interval from a per-service database
-override (`services.ping_interval_seconds`) or falls back to service-type defaults (300s for agent/SSH
-agent, 15s for MQTT).
+override (`services.ping_interval_seconds`) or falls back to `ServiceProfile`-based defaults (300s for
+Agent profile, 15s for MqttBridge profile).
 
 ### `EventLoopContext`
 
@@ -204,11 +221,12 @@ The SDK provides shared initialization and error-handling functions to reduce bo
 ## Example: minimal service
 
 ```rust
+use std::collections::BTreeSet;
 use async_trait::async_trait;
-use uptrakit_internal_wire::{ControllerMessage, ServiceType};
+use uptrakit_internal_wire::{Capability, ControllerMessage};
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler,
-    ServiceIdentityState, Signal,
+    ControllerConnection, LoopOutcome, LoopResult, ServiceHandler,
+    ServiceIdentityState, ShutdownCause,
 };
 
 struct MyHandler;
@@ -217,9 +235,14 @@ struct MyHandler;
 impl ServiceHandler for MyHandler {
     const DIR_NAME: &'static str = "my-service";
     const SERVICE_LABEL: &'static str = "uptrakit-my-service";
-    const SERVICE_TYPE: ServiceType = ServiceType::Agent;
 
     type ServiceEvent = std::convert::Infallible;
+
+    fn capabilities(&self) -> BTreeSet<Capability> {
+        [Capability::GracefulShutdown, Capability::SoftwareDiscovery]
+            .into_iter()
+            .collect()
+    }
 
     async fn on_connected(
         &mut self,
@@ -252,7 +275,7 @@ impl ServiceHandler for MyHandler {
     async fn on_shutdown(
         &mut self,
         _conn: &mut ControllerConnection,
-        _signal: Signal,
+        _cause: ShutdownCause,
         _shutdown_timeout_seconds: u32,
     ) -> LoopOutcome {
         LoopOutcome::Shutdown
@@ -316,7 +339,7 @@ The SDK provides shared helper functions for proactive certificate renewal timer
 | `compute_renewal_delay(cert_not_after_ts, window_hours)` | Computes the delay until the renewal window opens. |
 | `handle_renewal_timer(identity, conn, renewal_sleep)` | Initiates renewal, sends CSR, and resets timer. |
 
-All three service types (agent, SSH agent, MQTT) use these helpers for consistent renewal behavior.
+All services (agent, SSH agent, MQTT) use these helpers for consistent renewal behavior.
 
 ### Internal state
 
@@ -350,6 +373,48 @@ When the event loop returns to the lifecycle, the lifecycle uses `.context_trans
 
 Top-level variants (`Io`, `Json`, `WebSocket`, `HttpUri`, `Directory`) remain directly on `EnrollmentError`. Services can match on categories (e.g.,
 `EnrollmentError::Tls(_)`) instead of individual variants for coarse-grained error handling.
+
+## Capability-based enrollment
+
+Services no longer carry a `ServiceType` enum. Instead, each service advertises a `BTreeSet<Capability>`
+during enrollment (in `EnrollPayload.capabilities`) and on every authenticated connect (in
+`ReportHostsPayload.capabilities`). The controller persists these capabilities in the
+`services.capabilities` column as a JSON array of snake_case strings (e.g.
+`["graceful_shutdown","software_discovery","update_hooks"]`).
+
+A single enrollment token (`service_enrollment.token_hash` in the settings table) is shared across all
+service kinds. The previous per-type tokens (`agent_enrollment.token_hash`,
+`mqtt_enrollment.token_hash`, `ssh_agent_enrollment.token_hash`) have been consolidated into this
+single key.
+
+The connection registry exposes a unified `register()` method that accepts a `BTreeSet<Capability>`
+parameter. The previous type-specific methods (`register_agent()`, `register_mqtt()`,
+`register_ssh_agent()`) have been removed.
+
+## ServiceProfile derivation
+
+`ServiceProfile` is a controller-side enum that is **never persisted** in the database. It is always
+derived from the service's persisted capability set via `ServiceProfile::from_capabilities()`.
+
+| Profile | Key capability | Example services |
+| --- | --- | --- |
+| `MqttBridge` | `Capability::MqttBridge` | MQTT service |
+| `Agent` | `Capability::SoftwareDiscovery` | Local agent, SSH agent |
+| `Unknown` | (fallback) | Unrecognized combinations |
+
+`MqttBridge` takes precedence if both `MqttBridge` and `SoftwareDiscovery` are present.
+
+The profile drives behavioral defaults:
+
+| Default | MqttBridge | Agent | Unknown |
+| --- | --- | --- | --- |
+| `default_ping_interval_secs` | 15 | 300 | 300 |
+| `shutdown_timeout_secs` | None | Some(120) | Some(120) |
+| `service_label(false)` | "MQTT Bridge" | "Agent" | "Unknown" |
+| `service_label(true)` | "MQTT Bridge" | "SSH Agent" | "Unknown" |
+
+The `service_label` column in API responses (`ServiceResponse.service_label`) is derived at query time
+from the profile and the presence of `Capability::SshRemote`. It is not stored in the database.
 
 ## Related documentation
 
