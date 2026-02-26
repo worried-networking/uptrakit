@@ -12,9 +12,9 @@ default = []
 ssh = ["uptrakit-plugin-docker/ssh"]
 
 [dependencies]
-uptrakit-shared-types = { path = "../../shared/types" }
-uptrakit-command = { path = "../../shared/command" }
-uptrakit-plugin-core = { path = "../core" }
+uptrakit-shared-types = { workspace = true }
+uptrakit-command = { workspace = true }
+uptrakit-plugin-core = { workspace = true }
 uptrakit-plugin-github = { path = "../github" }
 uptrakit-plugin-docker = { path = "../docker" }
 uptrakit-plugin-proxmox-helper-scripts = { path = "../proxmox-helper-scripts" }

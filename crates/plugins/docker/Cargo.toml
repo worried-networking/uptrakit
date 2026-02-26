@@ -12,7 +12,7 @@ default = []
 ssh = ["bollard/ssh"]
 
 [dependencies]
-uptrakit-plugin-core = { path = "../core" }
+uptrakit-plugin-core = { workspace = true }
 bollard      = { workspace = true, features = ["ssl"] }
 futures-util = { workspace = true }
 reqwest = { workspace = true }
@@ -28,4 +28,4 @@ async-trait = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
-uptrakit-command = { path = "../../shared/command" }
+uptrakit-command = { workspace = true }

@@ -21,10 +21,10 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
-uptrakit-command = { path = "../command" }
+uptrakit-command = { workspace = true }
 uptrakit-internal-wire = { path = "../wire" }
-uptrakit-plugin-core = { path = "../../plugins/core" }
-uptrakit-plugin-registry = { path = "../../plugins/registry" }
+uptrakit-plugin-core = { workspace = true }
+uptrakit-plugin-registry = { workspace = true }
 uptrakit-service-sdk = { path = "../service-sdk" }
 uptrakit-directories = { path = "../directories" }
 

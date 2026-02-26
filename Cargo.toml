@@ -59,6 +59,9 @@ zeroize = { version = "1", features = ["derive"] }
 uptrakit-shared-macros = { path = "crates/shared/macros" }
 uptrakit-shared-types = { path = "crates/shared/types" }
 uptrakit-openapi-client = { path = "crates/shared/openapi-client" }
+uptrakit-command = { path = "crates/shared/command" }
+uptrakit-plugin-core = { path = "crates/plugins/core" }
+uptrakit-plugin-registry = { path = "crates/plugins/registry" }
 
 [profile.release]
 opt-level = 3
