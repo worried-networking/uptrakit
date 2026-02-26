@@ -1,11 +1,12 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter,
-    QuerySelect, RelationTrait, Set,
+    QuerySelect, RelationTrait, Set, prelude::Expr,
 };
 use time::OffsetDateTime;
 use uptrakit_command::CommandExecutor;
@@ -140,6 +141,10 @@ impl VersionCheckExecutor {
 
     /// Execute controller-side fetch_releases for eligible plugins and store
     /// the latest version on all matching `host_software_items` rows.
+    ///
+    /// After updating `host_software_items`, batch-updates `software_item.last_checked_at`
+    /// and pushes MQTT software states so that controller-only items receive the
+    /// same post-check notifications as agent-backed items.
     async fn run_controller_side_fetch_releases(
         &self,
         tenant_id: Uuid,
@@ -179,6 +184,10 @@ impl VersionCheckExecutor {
             });
             entry.3.push((row.host_id, row.software_item_id));
         }
+
+        let now = OffsetDateTime::now_utc();
+        // Collect software_item_ids that were successfully updated.
+        let mut updated_item_ids: HashSet<Uuid> = HashSet::new();
 
         // For each group, determine if we should run controller-side, instantiate
         // the plugin, call fetch_releases, and store results.
@@ -280,7 +289,6 @@ impl VersionCheckExecutor {
 
             let latest_version_str = latest.version.to_string();
             let release_metadata = serde_json::to_value(latest).unwrap_or(serde_json::Value::Null);
-            let now = OffsetDateTime::now_utc();
 
             tracing::debug!(
                 plugin_type = %plugin_type,
@@ -307,8 +315,31 @@ impl VersionCheckExecutor {
                         error = %e,
                         "failed to update host_software_item with latest version"
                     );
+                } else {
+                    updated_item_ids.insert(*software_item_id);
                 }
             }
+        }
+
+        if !updated_item_ids.is_empty() {
+            // Batch-update software_item.last_checked_at for all items with successful fetches.
+            let item_ids: Vec<Uuid> = updated_item_ids.into_iter().collect();
+            if let Err(e) = software_item::Entity::update_many()
+                .filter(software_item::Column::Id.is_in(item_ids))
+                .col_expr(software_item::Column::LastCheckedAt, Expr::value(now))
+                .exec(&self.db)
+                .await
+            {
+                tracing::warn!(
+                    error = %e,
+                    "controller-side fetch: failed to batch-update last_checked_at"
+                );
+            }
+
+            // Push updated software states to MQTT services.
+            self.notification_service
+                .push_software_states_for_tenant(tenant_id)
+                .await;
         }
 
         Ok(())
