@@ -4,7 +4,8 @@ use uptrakit_plugin_infrastructure_core::SecretMasking;
 /// Configuration for the Proxmox Helper Scripts plugin.
 ///
 /// PHS is discovery-only: it reads `/usr/bin/update`, fetches each referenced
-/// CT script from `raw.githubusercontent.com`, and analyses the script to
+/// CT script from `raw.githubusercontent.com` (or `github.com/…/raw/…`, which
+/// is normalised to the same host), and analyses the script to
 /// determine whether the app is GitHub-managed or APT-managed.  The resulting
 /// `DiscoveredSoftware` items carry `github_owner`/`github_repo` or
 /// `apt_package` in their `extra` field so the controller can synthesize the

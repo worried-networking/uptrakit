@@ -4,9 +4,18 @@ use uptrakit_plugin_infrastructure_core::PluginError;
 /// Well-known path where PHS containers store their update script.
 pub const UPDATE_SCRIPT_PATH: &str = "/usr/bin/update";
 
-/// Base URL prefix for PHS community-scripts CT scripts.
+/// Base URL prefix for PHS community-scripts CT scripts (canonical form).
 const PHS_CT_URL_PREFIX: &str =
     "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/";
+
+/// Alternative GitHub URL prefix for PHS community-scripts CT scripts.
+///
+/// Some `/usr/bin/update` scripts use the `github.com/…/raw/…` redirect form
+/// instead of `raw.githubusercontent.com`. Both URLs serve identical content;
+/// this prefix is recognised during detection and the resulting slug is always
+/// fetched via the canonical [`PHS_CT_URL_PREFIX`] URL.
+const PHS_CT_URL_PREFIX_ALT: &str =
+    "https://github.com/community-scripts/ProxmoxVE/raw/main/ct/";
 
 /// Base URL prefix for PHS community-scripts install scripts.
 pub const PHS_INSTALL_URL_PREFIX: &str =
@@ -385,35 +394,43 @@ fn is_valid_deb_package(pkg: &str) -> bool {
 
 /// Parse PHS script references from the content of `/usr/bin/update`.
 ///
-/// Scans each line for occurrences of the community-scripts CT URL prefix,
+/// Scans each line for occurrences of the community-scripts CT URL prefix in
+/// both known forms (`raw.githubusercontent.com` and `github.com/…/raw/…`),
 /// extracts the slug from the URL path, validates it, and deduplicates by slug.
+/// The `script_url` in every returned [`PhsScript`] always uses the canonical
+/// `raw.githubusercontent.com` form regardless of which prefix was matched.
 pub fn parse_phs_scripts(content: &str) -> Vec<PhsScript> {
     let mut seen = std::collections::HashSet::new();
     let mut scripts = Vec::new();
 
+    const PREFIXES: &[&str] = &[PHS_CT_URL_PREFIX, PHS_CT_URL_PREFIX_ALT];
+
     for line in content.lines() {
-        let mut search_from = 0;
-        while let Some(prefix_start) = line[search_from..].find(PHS_CT_URL_PREFIX) {
-            let abs_start = search_from + prefix_start + PHS_CT_URL_PREFIX.len();
-            search_from = abs_start;
+        for &prefix in PREFIXES {
+            let mut search_from = 0;
+            while let Some(prefix_start) = line[search_from..].find(prefix) {
+                let abs_start = search_from + prefix_start + prefix.len();
+                search_from = abs_start;
 
-            let remaining = &line[abs_start..];
-            let Some(dot_sh_pos) = remaining.find(".sh") else {
-                continue;
-            };
+                let remaining = &line[abs_start..];
+                let Some(dot_sh_pos) = remaining.find(".sh") else {
+                    continue;
+                };
 
-            let slug = &remaining[..dot_sh_pos];
-            if !is_valid_slug(slug) {
-                tracing::trace!(slug, "skipping invalid PHS slug");
-                continue;
-            }
+                let slug = &remaining[..dot_sh_pos];
+                if !is_valid_slug(slug) {
+                    tracing::trace!(slug, "skipping invalid PHS slug");
+                    continue;
+                }
 
-            if seen.insert(slug.to_string()) {
-                let script_url = format!("{PHS_CT_URL_PREFIX}{slug}.sh");
-                scripts.push(PhsScript {
-                    slug: slug.to_string(),
-                    script_url,
-                });
+                if seen.insert(slug.to_string()) {
+                    // Always normalise to the canonical raw.githubusercontent.com URL.
+                    let script_url = format!("{PHS_CT_URL_PREFIX}{slug}.sh");
+                    scripts.push(PhsScript {
+                        slug: slug.to_string(),
+                        script_url,
+                    });
+                }
             }
         }
     }
@@ -778,6 +795,69 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
         assert_eq!(scripts.len(), 2);
         assert_eq!(scripts[0].slug, "foo");
         assert_eq!(scripts[1].slug, "bar");
+    }
+
+    #[test]
+    fn parse_alt_url_prefix_single_script() {
+        // github.com/…/raw/… form is detected just like the canonical URL.
+        let content = r#"bash -c "$(curl -fsSL https://github.com/community-scripts/ProxmoxVE/raw/main/ct/booklore.sh)""#;
+        let scripts = parse_phs_scripts(content);
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].slug, "booklore");
+        // script_url is always normalised to the canonical form.
+        assert_eq!(
+            scripts[0].script_url,
+            "https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/booklore.sh"
+        );
+    }
+
+    #[test]
+    fn parse_alt_url_prefix_multiple_scripts() {
+        let content = r#"
+bash -c "$(curl -fsSL https://github.com/community-scripts/ProxmoxVE/raw/main/ct/booklore.sh)"
+bash -c "$(curl -fsSL https://github.com/community-scripts/ProxmoxVE/raw/main/ct/crafty-controller.sh)"
+"#;
+        let scripts = parse_phs_scripts(content);
+        assert_eq!(scripts.len(), 2);
+        assert_eq!(scripts[0].slug, "booklore");
+        assert_eq!(scripts[1].slug, "crafty-controller");
+    }
+
+    #[test]
+    fn parse_mixed_url_prefixes_deduplicates_by_slug() {
+        // Same slug appearing with the canonical and alternative prefix on
+        // different lines must be reported only once.
+        let content = r#"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/booklore.sh)"
+bash -c "$(curl -fsSL https://github.com/community-scripts/ProxmoxVE/raw/main/ct/booklore.sh)"
+"#;
+        let scripts = parse_phs_scripts(content);
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].slug, "booklore");
+    }
+
+    #[test]
+    fn parse_mixed_url_prefixes_different_slugs() {
+        // One slug per URL form — both should be returned.
+        let content = r#"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/foo.sh)"
+bash -c "$(curl -fsSL https://github.com/community-scripts/ProxmoxVE/raw/main/ct/bar.sh)"
+"#;
+        let scripts = parse_phs_scripts(content);
+        assert_eq!(scripts.len(), 2);
+        let slugs: Vec<&str> = scripts.iter().map(|s| s.slug.as_str()).collect();
+        assert!(slugs.contains(&"foo"));
+        assert!(slugs.contains(&"bar"));
+        // Both script URLs are normalised to the canonical form.
+        for script in &scripts {
+            assert!(
+                script
+                    .script_url
+                    .starts_with("https://raw.githubusercontent.com/"),
+                "expected canonical URL, got: {}",
+                script.script_url
+            );
+        }
     }
 
     // ── slug_to_display_name ────────────────────────────────────────
