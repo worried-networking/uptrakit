@@ -145,9 +145,11 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
+    use uptrakit_shared_types::PluginRole;
     use uptrakit_web_api_types::software_items::{
-        AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment, ReleaseInfoRequest,
-        TriggerUpdateRequest, UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
+        AssignHostsRequest, CreateSoftwareItemRequest, HostPluginRoleAssignment,
+        HostSoftwareAssignment, ReleaseInfoRequest, TriggerUpdateRequest,
+        UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
     };
     use uuid::Uuid;
 
@@ -189,17 +191,25 @@ mod tests {
             host_assignments: vec![
                 HostSoftwareAssignment {
                     host_id: host1,
-                    plugin_config_id: Some(pc_id),
-                    plugin_config: None,
-                    package_identifier: Some("nodejs/node".to_string()),
-                    config_override: None,
+                    plugins: vec![HostPluginRoleAssignment {
+                        role: PluginRole::DetectVersion,
+                        plugin_config_id: Some(pc_id),
+                        plugin_config: None,
+                        package_identifier: "nodejs/node".to_string(),
+                        config_override: None,
+                        execution_site: "auto".to_string(),
+                    }],
                 },
                 HostSoftwareAssignment {
                     host_id: host2,
-                    plugin_config_id: Some(pc_id),
-                    plugin_config: None,
-                    package_identifier: Some("nodejs/node".to_string()),
-                    config_override: None,
+                    plugins: vec![HostPluginRoleAssignment {
+                        role: PluginRole::DetectVersion,
+                        plugin_config_id: Some(pc_id),
+                        plugin_config: None,
+                        package_identifier: "nodejs/node".to_string(),
+                        config_override: None,
+                        execution_site: "auto".to_string(),
+                    }],
                 },
             ],
         };
@@ -210,21 +220,26 @@ mod tests {
             assignments[0]["host_id"],
             "11111111-1111-1111-1111-111111111111"
         );
+        let plugins = assignments[0]["plugins"].as_array().expect("plugins array");
+        assert_eq!(plugins.len(), 1);
         assert_eq!(
-            assignments[0]["plugin_config_id"],
+            plugins[0]["plugin_config_id"],
             "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
         );
-        assert_eq!(assignments[0]["package_identifier"], "nodejs/node");
+        assert_eq!(plugins[0]["package_identifier"], "nodejs/node");
+        assert_eq!(plugins[0]["role"], "detect_version");
     }
 
     #[test]
     fn update_host_assignment_request_serialization() {
         let pc_id = Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").expect("valid uuid");
         let req = UpdateHostAssignmentRequest {
+            role: PluginRole::ExecuteUpdate,
             plugin_config_id: Some(pc_id),
             plugin_config: None,
             package_identifier: Some("homebrew/cask/firefox".to_string()),
             config_override: None,
+            execution_site: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(
@@ -232,6 +247,7 @@ mod tests {
             "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
         );
         assert_eq!(json["package_identifier"], "homebrew/cask/firefox");
+        assert_eq!(json["role"], "execute_update");
     }
 
     #[test]

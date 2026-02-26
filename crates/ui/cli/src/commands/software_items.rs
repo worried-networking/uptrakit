@@ -7,10 +7,11 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::software_items::{
-    AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment, ListSoftwareItemsParams,
-    SoftwareItemDetailResponse, SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
-    UpdateSoftwareItemRequest,
+    AssignHostsRequest, CreateSoftwareItemRequest, HostPluginRoleAssignment,
+    HostSoftwareAssignment, ListSoftwareItemsParams, SoftwareItemDetailResponse,
+    SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse, UpdateSoftwareItemRequest,
 };
+use uptrakit_shared_types::PluginRole;
 
 // ── Human output ────────────────────────────────────────────────────────────
 
@@ -101,12 +102,24 @@ impl HumanOutput for SoftwareItemDetailResponse {
                 } else {
                     "—"
                 };
+                // Summarise plugin info from role assignments. Show the first
+                // plugin_type and package_identifier found, or "-" if none.
+                let plugin_type = h
+                    .plugins
+                    .first()
+                    .map(|p| p.plugin_type.as_str())
+                    .unwrap_or("-");
+                let package_identifier = h
+                    .plugins
+                    .first()
+                    .map(|p| p.package_identifier.as_str())
+                    .unwrap_or("-");
                 out.push_str(&format!(
                     "  {:<38} {:<20} {:<20} {:<30} {:<15} {:<15} {:<16} {}\n",
                     h.host_id,
                     h.hostname,
-                    h.plugin_type,
-                    h.package_identifier,
+                    plugin_type,
+                    package_identifier,
                     h.installed_version.as_deref().unwrap_or("-"),
                     h.latest_version.as_deref().unwrap_or("-"),
                     status,
@@ -330,13 +343,29 @@ pub async fn assign(params: AssignParams<'_>) -> Result<SoftwareItemDetailRespon
         params.insecure,
         params.request_timeout,
     )?;
+    // Build a role assignment for each of the three lifecycle roles using the
+    // same plugin config and package identifier. Users who need finer-grained
+    // per-role configuration can use the HTTP API directly.
+    let roles = [
+        PluginRole::DetectVersion,
+        PluginRole::FetchReleases,
+        PluginRole::ExecuteUpdate,
+    ];
+    let plugins: Vec<HostPluginRoleAssignment> = roles
+        .into_iter()
+        .map(|role| HostPluginRoleAssignment {
+            role,
+            plugin_config_id: params.plugin_config_id.copied(),
+            plugin_config: None,
+            package_identifier: params.package_identifier.clone().unwrap_or_default(),
+            config_override: None,
+            execution_site: "auto".to_string(),
+        })
+        .collect();
     let req = AssignHostsRequest {
         host_assignments: vec![HostSoftwareAssignment {
             host_id: *params.host_id,
-            plugin_config_id: params.plugin_config_id.copied(),
-            plugin_config: None,
-            package_identifier: params.package_identifier,
-            config_override: None,
+            plugins,
         }],
     };
     client.assign_hosts(params.id, &req).await.context_to()
@@ -418,7 +447,7 @@ mod tests {
     use super::*;
     use time::macros::datetime;
     use uptrakit_openapi_client::types::software_items::{
-        SoftwareItemHostSummary, SoftwareItemResponse,
+        HostPluginRoleSummary, SoftwareItemHostSummary, SoftwareItemResponse,
     };
 
     fn sample_item() -> SoftwareItemResponse {
@@ -519,19 +548,24 @@ mod tests {
                     .unwrap(),
                 hostname: "server-1.local".to_string(),
                 friendly_name: "Production Server".to_string(),
-                plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
-                    .parse::<Uuid>()
-                    .unwrap(),
-                plugin_config_name: "Default Config".to_string(),
-                plugin_type: "github_releases".to_string(),
-                package_identifier: "nodejs/node".to_string(),
-                config_override: None,
+                plugins: vec![HostPluginRoleSummary {
+                    role: PluginRole::DetectVersion,
+                    plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                        .parse::<Uuid>()
+                        .unwrap(),
+                    plugin_config_name: "Default Config".to_string(),
+                    plugin_type: "github_releases".to_string(),
+                    package_identifier: "nodejs/node".to_string(),
+                    config_override: None,
+                    execution_site: "auto".to_string(),
+                }],
                 installed_version: Some("20.0.0".to_string()),
                 installed_version_detected_at: None,
+                latest_version: Some("22.0.0".to_string()),
+                latest_release_metadata: None,
+                update_available: true,
                 last_updated_at: None,
                 linked_at: datetime!(2025-01-01 00:00:00 UTC),
-                latest_version: Some("22.0.0".to_string()),
-                update_available: true,
             }],
         };
         let s = detail.to_human_string();
@@ -568,19 +602,24 @@ mod tests {
                     .unwrap(),
                 hostname: "mac-1".to_string(),
                 friendly_name: "mac-1".to_string(),
-                plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
-                    .parse::<Uuid>()
-                    .unwrap(),
-                plugin_config_name: "Homebrew".to_string(),
-                plugin_type: "homebrew".to_string(),
-                package_identifier: "curl".to_string(),
-                config_override: None,
+                plugins: vec![HostPluginRoleSummary {
+                    role: PluginRole::DetectVersion,
+                    plugin_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                        .parse::<Uuid>()
+                        .unwrap(),
+                    plugin_config_name: "Homebrew".to_string(),
+                    plugin_type: "homebrew".to_string(),
+                    package_identifier: "curl".to_string(),
+                    config_override: None,
+                    execution_site: "auto".to_string(),
+                }],
                 installed_version: Some("8.7.0".to_string()),
                 installed_version_detected_at: None,
+                latest_version: Some("8.7.0".to_string()),
+                latest_release_metadata: None,
+                update_available: false,
                 last_updated_at: None,
                 linked_at: datetime!(2025-01-01 00:00:00 UTC),
-                latest_version: Some("8.7.0".to_string()),
-                update_available: false,
             }],
         };
         let s = detail.to_human_string();
