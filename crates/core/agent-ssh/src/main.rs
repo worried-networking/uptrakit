@@ -15,7 +15,7 @@ use clap::Parser;
 use rootcause::prelude::*;
 use std::collections::BTreeSet;
 
-use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectReason, ServiceType};
+use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectReason};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     ShutdownCause, Signal,
@@ -82,7 +82,6 @@ struct SshAgentHandler {
 impl ServiceHandler for SshAgentHandler {
     const DIR_NAME: &'static str = "agent-ssh";
     const SERVICE_LABEL: &'static str = "uptrakit-agent-ssh service";
-    const SERVICE_TYPE: ServiceType = ServiceType::SshAgent;
 
     type ServiceEvent = client::UpdateEvent;
 

@@ -8,7 +8,6 @@ use std::collections::BTreeSet;
 
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, DisconnectReason, ReportHostsPayload, ServiceMessage,
-    ServiceType,
 };
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
@@ -59,7 +58,6 @@ struct AgentHandler {
 impl ServiceHandler for AgentHandler {
     const DIR_NAME: &'static str = "agent";
     const SERVICE_LABEL: &'static str = "uptrakit-agent service";
-    const SERVICE_TYPE: ServiceType = ServiceType::Agent;
 
     type ServiceEvent = client::UpdateEvent;
 

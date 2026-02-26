@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, DisconnectReason, DisconnectingPayload, MqttClientStatusPayload,
-    MqttRegisterPayload, ServiceMessage, ServiceType,
+    MqttRegisterPayload, ServiceMessage,
 };
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
@@ -60,7 +60,6 @@ struct MqttHandler {
 impl ServiceHandler for MqttHandler {
     const DIR_NAME: &'static str = "mqtt";
     const SERVICE_LABEL: &'static str = "uptrakit-mqtt service";
-    const SERVICE_TYPE: ServiceType = ServiceType::Mqtt;
 
     type ServiceEvent = Option<crate::mqtt_client::MqttServiceEvent>;
 
