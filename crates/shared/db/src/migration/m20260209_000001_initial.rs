@@ -1033,9 +1033,9 @@ impl MigrationTrait for Migration {
             .await?;
 
         // --- host_software_items ---
-        // Plugin coupling (plugin_config_id, package_identifier, config_override)
-        // lives here so one SoftwareItem can be tracked via different plugins/packages
-        // across different hosts.
+        // Links a host to a software item. Per-host version tracking lives here;
+        // plugin coupling (role, plugin_config, package_identifier) is in the
+        // separate host_software_item_plugins table.
         manager
             .create_table(
                 Table::create()
@@ -1047,17 +1047,13 @@ impl MigrationTrait for Migration {
                             .uuid()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(HostSoftwareItems::PluginConfigId)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(string(HostSoftwareItems::PackageIdentifier).default(""))
-                    .col(json_null(HostSoftwareItems::ConfigOverride))
                     .col(string_null(HostSoftwareItems::InstalledVersion))
                     .col(timestamp_null(
                         HostSoftwareItems::InstalledVersionDetectedAt,
                     ))
+                    .col(string_null(HostSoftwareItems::LatestVersion))
+                    .col(timestamp_null(HostSoftwareItems::LatestVersionFetchedAt))
+                    .col(json_null(HostSoftwareItems::LatestReleaseMetadata))
                     .col(timestamp_null(HostSoftwareItems::LastUpdatedAt))
                     .col(timestamp(HostSoftwareItems::LinkedAt))
                     .primary_key(
@@ -1079,12 +1075,61 @@ impl MigrationTrait for Migration {
                             .to(SoftwareItems::Table, SoftwareItems::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
+                    .to_owned(),
+            )
+            .await?;
+
+        // --- host_software_item_plugins ---
+        // Role-based plugin assignments: each (host, software_item) pair can have
+        // one plugin per role (detect_version, fetch_releases, execute_update).
+        // The ordinal column enables future multi-instance roles (e.g. hooks).
+        manager
+            .create_table(
+                Table::create()
+                    .table(HostSoftwareItemPlugins::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::HostId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::SoftwareItemId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::PluginConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(string(HostSoftwareItemPlugins::Role))
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::Ordinal)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .col(string(HostSoftwareItemPlugins::PackageIdentifier))
+                    .col(json_null(HostSoftwareItemPlugins::ConfigOverride))
+                    .col(
+                        string(HostSoftwareItemPlugins::ExecutionSite)
+                            .default("auto"),
+                    )
+                    .col(timestamp(HostSoftwareItemPlugins::CreatedAt))
+                    .col(timestamp(HostSoftwareItemPlugins::UpdatedAt))
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_host_software_items_plugin_config")
+                            .name("fk_hsip_plugin_config")
                             .from(
-                                HostSoftwareItems::Table,
-                                HostSoftwareItems::PluginConfigId,
+                                HostSoftwareItemPlugins::Table,
+                                HostSoftwareItemPlugins::PluginConfigId,
                             )
                             .to(PluginConfigs::Table, PluginConfigs::Id)
                             .on_delete(ForeignKeyAction::Restrict),
@@ -1093,22 +1138,64 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Prevent the same (host, plugin, package) combo appearing under two different
-        // software items.
+        // Composite FK (host_id, software_item_id) → host_software_items
+        // implemented as raw SQL because sea-orm-migration does not support
+        // composite foreign keys referencing a composite primary key directly.
         manager
             .get_connection()
             .execute_unprepared(
-                "CREATE UNIQUE INDEX uq_host_software_items_active \
-                 ON host_software_items(host_id, plugin_config_id, package_identifier)",
+                "ALTER TABLE host_software_item_plugins \
+                 ADD CONSTRAINT fk_hsip_host_software_item \
+                 FOREIGN KEY (host_id, software_item_id) \
+                 REFERENCES host_software_items(host_id, software_item_id) \
+                 ON DELETE CASCADE",
+            )
+            .await?;
+
+        // One plugin per role per (host, software_item) pair (ordinal for future
+        // multi-instance roles).
+        manager
+            .create_index(
+                Index::create()
+                    .name("uq_hsip_host_item_role_ordinal")
+                    .table(HostSoftwareItemPlugins::Table)
+                    .col(HostSoftwareItemPlugins::HostId)
+                    .col(HostSoftwareItemPlugins::SoftwareItemId)
+                    .col(HostSoftwareItemPlugins::Role)
+                    .col(HostSoftwareItemPlugins::Ordinal)
+                    .unique()
+                    .to_owned(),
             )
             .await?;
 
         manager
             .create_index(
                 Index::create()
-                    .name("idx_host_software_items_plugin_config_id")
-                    .table(HostSoftwareItems::Table)
-                    .col(HostSoftwareItems::PluginConfigId)
+                    .name("idx_hsip_plugin_config_id")
+                    .table(HostSoftwareItemPlugins::Table)
+                    .col(HostSoftwareItemPlugins::PluginConfigId)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_hsip_host_item")
+                    .table(HostSoftwareItemPlugins::Table)
+                    .col(HostSoftwareItemPlugins::HostId)
+                    .col(HostSoftwareItemPlugins::SoftwareItemId)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_hsip_role_exec")
+                    .table(HostSoftwareItemPlugins::Table)
+                    .col(HostSoftwareItemPlugins::Role)
+                    .col(HostSoftwareItemPlugins::ExecutionSite)
                     .to_owned(),
             )
             .await?;
@@ -1171,58 +1258,9 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // --- available_versions ---
-        manager
-            .create_table(
-                Table::create()
-                    .table(AvailableVersions::Table)
-                    .if_not_exists()
-                    .col(
-                        ColumnDef::new(AvailableVersions::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(
-                        ColumnDef::new(AvailableVersions::SoftwareItemId)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(string_null(AvailableVersions::Version))
-                    .col(timestamp_null(AvailableVersions::ReleaseDate))
-                    .col(
-                        ColumnDef::new(AvailableVersions::ReleaseNotes)
-                            .text()
-                            .null(),
-                    )
-                    .col(json_null(AvailableVersions::Extra))
-                    .col(timestamp(AvailableVersions::CreatedAt))
-                    .col(timestamp(AvailableVersions::UpdatedAt))
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_available_versions_software_item")
-                            .from(AvailableVersions::Table, AvailableVersions::SoftwareItemId)
-                            .to(SoftwareItems::Table, SoftwareItems::Id)
-                            .on_delete(ForeignKeyAction::Cascade),
-                    )
-                    .check(
-                        Expr::col(AvailableVersions::Version)
-                            .is_not_null()
-                            .or(Expr::col(AvailableVersions::ReleaseDate).is_not_null()),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_available_versions_software_item_id")
-                    .table(AvailableVersions::Table)
-                    .col(AvailableVersions::SoftwareItemId)
-                    .to_owned(),
-            )
-            .await?;
+        // NOTE: available_versions table has been removed. Latest version
+        // tracking is now per-host, stored directly in host_software_items
+        // (latest_version, latest_version_fetched_at, latest_release_metadata).
 
         // ============================================================
         // 9. MQTT
@@ -2052,8 +2090,8 @@ impl MigrationTrait for Migration {
             UpdateHistory::Table,
             MqttLeases::Table,
             MqttClients::Table,
-            AvailableVersions::Table,
             AutodiscoveryIgnores::Table,
+            HostSoftwareItemPlugins::Table,
             HostSoftwareItems::Table,
             SoftwareItems::Table,
             PluginConfigs::Table,
@@ -2488,24 +2526,27 @@ enum HostSoftwareItems {
     Table,
     HostId,
     SoftwareItemId,
-    PluginConfigId,
-    PackageIdentifier,
-    ConfigOverride,
     InstalledVersion,
     InstalledVersionDetectedAt,
+    LatestVersion,
+    LatestVersionFetchedAt,
+    LatestReleaseMetadata,
     LastUpdatedAt,
     LinkedAt,
 }
 
 #[derive(DeriveIden)]
-enum AvailableVersions {
+enum HostSoftwareItemPlugins {
     Table,
     Id,
+    HostId,
     SoftwareItemId,
-    Version,
-    ReleaseDate,
-    ReleaseNotes,
-    Extra,
+    PluginConfigId,
+    Role,
+    Ordinal,
+    PackageIdentifier,
+    ConfigOverride,
+    ExecutionSite,
     CreatedAt,
     UpdatedAt,
 }
