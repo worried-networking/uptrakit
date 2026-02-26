@@ -11,7 +11,7 @@ use uptrakit_internal_wire::{
     OutgoingSeq, PingPayload, PluginType, RejectedPayload, ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
-    available_version, host, host_software_item, plugin_config, service_host,
+    host, host_software_item, host_software_item_plugin, plugin_config, service_host,
     software_item, update_history,
 };
 
@@ -330,16 +330,38 @@ pub(crate) async fn handle_agent_authenticated(
                                     }
 
                                     // If the agent reported a latest_version (agent-side
-                                    // resolution, e.g. Homebrew), upsert an available_version
-                                    // record for this software item.
+                                    // resolution, e.g. Homebrew), update the per-host
+                                    // latest_version on host_software_items.
                                     if let Some(ref latest_version) = result.latest_version {
-                                        upsert_available_version(
-                                            state.db(),
-                                            software_item_id,
-                                            latest_version,
-                                            now,
-                                        )
-                                        .await;
+                                        for &host_id in &host_ids {
+                                            match uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((host_id, software_item_id))
+                                                .one(state.db())
+                                                .await
+                                            {
+                                                Ok(Some(existing)) => {
+                                                    let mut active: uptrakit_shared_db::entity::host_software_item::ActiveModel = existing.into();
+                                                    active.latest_version = Set(Some(latest_version.clone()));
+                                                    active.latest_version_fetched_at = Set(Some(now));
+                                                    if let Err(e) = active.update(state.db()).await {
+                                                        tracing::warn!(
+                                                            error = %e,
+                                                            host_id = %host_id,
+                                                            software_item_id = %software_item_id,
+                                                            "failed to update host_software_item latest_version"
+                                                        );
+                                                    }
+                                                }
+                                                Ok(None) => {} // no link for this host
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        error = %e,
+                                                        host_id = %host_id,
+                                                        software_item_id = %software_item_id,
+                                                        "failed to look up host_software_item for latest_version update"
+                                                    );
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
@@ -1007,8 +1029,8 @@ async fn deliver_pending_updates(
             }
         };
 
-        // Load per-host plugin info from the host_software_item link.
-        let link = match host_software_item::Entity::find_by_id((update_record.host_id, item.id))
+        // Verify the host-software-item link exists before proceeding.
+        let _link = match host_software_item::Entity::find_by_id((update_record.host_id, item.id))
             .one(state.db())
             .await
         {
@@ -1028,7 +1050,29 @@ async fn deliver_pending_updates(
             }
         };
 
-        let plugin_cfg = match plugin_config::Entity::find_by_id(link.plugin_config_id)
+        // Load execute_update role plugin assignment for this host-software pair.
+        let execute_plugin = match host_software_item_plugin::Entity::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(update_record.host_id))
+            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item.id))
+            .filter(host_software_item_plugin::Column::Role.eq("execute_update"))
+            .one(state.db())
+            .await
+        {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                tracing::warn!(
+                    update_id = %update_record.id,
+                    "no execute_update plugin found, skipping pending update"
+                );
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load execute_update plugin for pending update");
+                continue;
+            }
+        };
+
+        let execute_cfg = match plugin_config::Entity::find_by_id(execute_plugin.plugin_config_id)
             .filter(plugin_config::Column::DeactivatedAt.is_null())
             .one(state.db())
             .await
@@ -1037,7 +1081,7 @@ async fn deliver_pending_updates(
             Ok(None) => {
                 tracing::warn!(
                     update_id = %update_record.id,
-                    plugin_config_id = %link.plugin_config_id,
+                    plugin_config_id = %execute_plugin.plugin_config_id,
                     "plugin config not found or deactivated, skipping pending update"
                 );
                 continue;
@@ -1048,24 +1092,57 @@ async fn deliver_pending_updates(
             }
         };
 
-        let plugin_type: PluginType = match serde_json::from_value(serde_json::Value::String(
-            plugin_cfg.plugin_type.clone(),
+        let execute_plugin_type: PluginType = match serde_json::from_value(serde_json::Value::String(
+            execute_cfg.plugin_type.clone(),
         )) {
             Ok(pt) => pt,
             Err(_) => {
                 tracing::warn!(
                     update_id = %update_record.id,
-                    plugin_type = %plugin_cfg.plugin_type,
+                    plugin_type = %execute_cfg.plugin_type,
                     "unknown plugin type, skipping pending update"
                 );
                 continue;
             }
         };
 
+        // Optionally load detect_version role plugin.
+        let detect_version_plugin = match host_software_item_plugin::Entity::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(update_record.host_id))
+            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item.id))
+            .filter(host_software_item_plugin::Column::Role.eq("detect_version"))
+            .one(state.db())
+            .await
+        {
+            Ok(Some(dp)) => {
+                if let Ok(Some(dc)) = plugin_config::Entity::find_by_id(dp.plugin_config_id)
+                    .filter(plugin_config::Column::DeactivatedAt.is_null())
+                    .one(state.db())
+                    .await
+                {
+                    if let Ok(dpt) = serde_json::from_value::<PluginType>(
+                        serde_json::Value::String(dc.plugin_type.clone()),
+                    ) {
+                        let merged = crate::update_hooks::merge_config(&dc.config, dp.config_override.as_ref());
+                        Some(uptrakit_internal_wire::PluginAssignment {
+                            plugin_type: dpt,
+                            package_identifier: dp.package_identifier.clone(),
+                            config: merged,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
         let resolved_hooks =
-            crate::update_hooks::resolve_hooks(&plugin_cfg.config, link.config_override.as_ref());
+            crate::update_hooks::resolve_hooks(&execute_cfg.config, execute_plugin.config_override.as_ref());
         let merged_config =
-            crate::update_hooks::merge_config(&plugin_cfg.config, link.config_override.as_ref());
+            crate::update_hooks::merge_config(&execute_cfg.config, execute_plugin.config_override.as_ref());
 
         // Look up the host's machine_id so the agent can route correctly.
         let host_machine_id = match host::Entity::find_by_id(update_record.host_id)
@@ -1087,15 +1164,20 @@ async fn deliver_pending_updates(
             }
         };
 
+        let execute_update_plugin = uptrakit_internal_wire::PluginAssignment {
+            plugin_type: execute_plugin_type,
+            package_identifier: execute_plugin.package_identifier.clone(),
+            config: merged_config,
+        };
+
         let execute_payload = ExecuteUpdatePayload {
             host_machine_id,
             update_history_id: update_record.id,
             software_item_id: item.id,
             software_item_name: item.name.clone(),
-            package_identifier: link.package_identifier.clone(),
             to_version: update_record.to_version.clone(),
-            plugin_type,
-            plugin_config: merged_config,
+            detect_version_plugin,
+            execute_update_plugin,
             pre_update_hooks: resolved_hooks.pre_update_hooks,
             post_update_hooks: resolved_hooks.post_update_hooks,
             release_info: None,
@@ -1173,82 +1255,6 @@ async fn validate_update_ownership(
     }
 
     Ok(record)
-}
-
-/// Upsert an `available_version` record for a software item.
-///
-/// If an existing record with the same version already exists for this software
-/// item, its `updated_at` timestamp is refreshed. Otherwise, old records for
-/// this software item are deleted and a new one is inserted.
-async fn upsert_available_version(
-    db: &sea_orm::DatabaseConnection,
-    software_item_id: uuid::Uuid,
-    version: &str,
-    now: time::OffsetDateTime,
-) {
-    // Check if a record with this version already exists.
-    let existing = available_version::Entity::find()
-        .filter(available_version::Column::SoftwareItemId.eq(software_item_id))
-        .filter(available_version::Column::Version.eq(version))
-        .one(db)
-        .await;
-
-    match existing {
-        Ok(Some(record)) => {
-            // Version already recorded — just refresh the timestamp.
-            let mut active: available_version::ActiveModel = record.into();
-            active.updated_at = Set(now);
-            if let Err(e) = active.update(db).await {
-                tracing::warn!(
-                    error = %e,
-                    software_item_id = %software_item_id,
-                    version,
-                    "failed to update available_version timestamp"
-                );
-            }
-        }
-        Ok(None) => {
-            // Delete any previous available_version records for this item
-            // and insert the new one.
-            if let Err(e) = available_version::Entity::delete_many()
-                .filter(available_version::Column::SoftwareItemId.eq(software_item_id))
-                .exec(db)
-                .await
-            {
-                tracing::warn!(
-                    error = %e,
-                    software_item_id = %software_item_id,
-                    "failed to delete old available_version records"
-                );
-            }
-
-            let record = available_version::ActiveModel {
-                id: Set(uuid::Uuid::now_v7()),
-                software_item_id: Set(software_item_id),
-                version: Set(Some(version.to_string())),
-                release_date: Set(None),
-                release_notes: Set(None),
-                extra: Set(None),
-                created_at: Set(now),
-                updated_at: Set(now),
-            };
-            if let Err(e) = available_version::Entity::insert(record).exec(db).await {
-                tracing::warn!(
-                    error = %e,
-                    software_item_id = %software_item_id,
-                    version,
-                    "failed to insert available_version"
-                );
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                software_item_id = %software_item_id,
-                "failed to query available_version"
-            );
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

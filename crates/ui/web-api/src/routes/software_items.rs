@@ -16,7 +16,8 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
-    host, host_software_item, plugin_config, prelude::*, service, service_host, software_item,
+    host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
+    service_host, software_item,
 };
 use uptrakit_web_api_types::validation::Validate;
 
@@ -56,7 +57,8 @@ fn query_error_to_response(e: SoftwareItemQueryError) -> Response {
         ),
         SoftwareItemQueryError::InvalidPackageIdentifier(msg)
         | SoftwareItemQueryError::InvalidConfigOverride(msg)
-        | SoftwareItemQueryError::InvalidInlinePluginConfig(msg) => {
+        | SoftwareItemQueryError::InvalidInlinePluginConfig(msg)
+        | SoftwareItemQueryError::InvalidExecutionSite(msg) => {
             error_response(StatusCode::BAD_REQUEST, msg)
         }
         SoftwareItemQueryError::Db(e) => {
@@ -383,14 +385,47 @@ pub async fn unassign_host(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
     };
 
-    // If ignore=true, load the assignment before deleting to capture plugin info.
+    // If ignore=true, load the detect_version role plugin assignment before
+    // deleting so we can capture plugin_config_id + package_identifier for the
+    // autodiscovery ignore rule.
     let ignore_info: Option<(uuid::Uuid, String)> = if params.ignore.unwrap_or(false) {
-        match host_software_item::Entity::find_by_id((host_id, item_id))
+        // Load the detect_version role plugin assignment for ignore rule creation.
+        match HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
+            .filter(host_software_item_plugin::Column::Role.eq("detect_version"))
             .one(tenant_db.db())
             .await
         {
-            Ok(Some(link)) => Some((link.plugin_config_id, link.package_identifier)),
-            Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host assignment not found"),
+            Ok(Some(plugin)) => Some((plugin.plugin_config_id, plugin.package_identifier)),
+            Ok(None) => {
+                // No detect_version plugin -- try any role to get plugin info
+                match HostSoftwareItemPlugin::find()
+                    .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+                    .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
+                    .one(tenant_db.db())
+                    .await
+                {
+                    Ok(Some(plugin)) => {
+                        Some((plugin.plugin_config_id, plugin.package_identifier))
+                    }
+                    Ok(None) => {
+                        return error_response(
+                            StatusCode::NOT_FOUND,
+                            "Host assignment not found",
+                        )
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to look up host assignment for ignore: {e}"
+                        );
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error",
+                        );
+                    }
+                }
+            }
             Err(e) => {
                 tracing::error!("Failed to look up host assignment for ignore: {e}");
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
@@ -564,6 +599,12 @@ pub async fn trigger_update(
         Err(crate::queries::update_triggers::TriggerUpdateError::UpdateAlreadyActive) => {
             error_response(StatusCode::CONFLICT, "An update is already pending or in progress")
         }
+        Err(crate::queries::update_triggers::TriggerUpdateError::NoExecuteUpdatePlugin) => {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                "No execute_update plugin assigned for this host",
+            )
+        }
         Err(crate::queries::update_triggers::TriggerUpdateError::PluginConfigNotFound) => {
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Plugin config not found")
         }
@@ -633,11 +674,28 @@ pub async fn check_versions(
         );
     }
 
-    // Collect IDs for batch loads.
-    let host_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.host_id).collect();
-    let config_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.plugin_config_id).collect();
+    // Load all plugin role assignments for all hosts of this software item.
+    let plugin_assignments = match HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
+        .filter(
+            host_software_item_plugin::Column::Role.is_in(["detect_version", "fetch_releases"]),
+        )
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(pas) => pas,
+        Err(e) => {
+            tracing::error!("Failed to load plugin assignments: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
-    // Batch query 1: Hosts (tenant-scoped).
+    // Collect distinct config IDs and host IDs.
+    let host_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.host_id).collect();
+    let config_ids: Vec<uuid::Uuid> =
+        plugin_assignments.iter().map(|p| p.plugin_config_id).collect();
+
+    // Batch query: Hosts (tenant-scoped).
     let hosts: std::collections::HashMap<uuid::Uuid, host::Model> = match tenant_db
         .find::<host::Entity>()
         .filter(host::Column::Id.is_in(host_ids.clone()))
@@ -652,8 +710,7 @@ pub async fn check_versions(
         }
     };
 
-    // Batch query 2: service_host → service JOIN (tenant-scoped, approved services only).
-    // Uses find_via_tenant_join to enforce tenant isolation without a separate service query.
+    // Batch query: service_host -> service JOIN.
     let service_hosts: std::collections::HashMap<uuid::Uuid, uuid::Uuid> = match tenant_db
         .find_via_tenant_join::<service_host::Entity, service::Entity>(
             service_host::Relation::Service.def(),
@@ -674,23 +731,58 @@ pub async fn check_versions(
         }
     };
 
-    // Batch query 3: Plugin configs (tenant-scoped).
-    let configs: std::collections::HashMap<uuid::Uuid, plugin_config::Model> = match tenant_db
-        .find::<plugin_config::Entity>()
-        .filter(plugin_config::Column::Id.is_in(config_ids))
-        .filter(plugin_config::Column::DeactivatedAt.is_null())
-        .all(tenant_db.db())
-        .await
-    {
-        Ok(cs) => cs.into_iter().map(|c| (c.id, c)).collect(),
-        Err(e) => {
-            tracing::error!("Failed to load plugin configs: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    // Batch query: Plugin configs (tenant-scoped).
+    let configs: std::collections::HashMap<uuid::Uuid, plugin_config::Model> =
+        if config_ids.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            match tenant_db
+                .find::<plugin_config::Entity>()
+                .filter(plugin_config::Column::Id.is_in(config_ids))
+                .filter(plugin_config::Column::DeactivatedAt.is_null())
+                .all(tenant_db.db())
+                .await
+            {
+                Ok(cs) => cs.into_iter().map(|c| (c.id, c)).collect(),
+                Err(e) => {
+                    tracing::error!("Failed to load plugin configs: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+        };
+
+    // Index plugin assignments by (host_id, role).
+    let mut plugin_by_host_role: std::collections::HashMap<
+        (uuid::Uuid, String),
+        &host_software_item_plugin::Model,
+    > = std::collections::HashMap::new();
+    for pa in &plugin_assignments {
+        plugin_by_host_role.insert((pa.host_id, pa.role.clone()), pa);
+    }
+
+    // Helper to build a PluginAssignment from a plugin row and its config.
+    let build_assignment =
+        |plugin: &host_software_item_plugin::Model| -> Option<uptrakit_internal_wire::PluginAssignment> {
+            let config_model = configs.get(&plugin.plugin_config_id)?;
+            let plugin_type: uptrakit_internal_wire::PluginType = serde_json::from_value(
+                serde_json::Value::String(config_model.plugin_type.clone()),
+            )
+            .ok()?;
+            let merged = crate::update_hooks::merge_config(
+                &config_model.config,
+                plugin.config_override.as_ref(),
+            );
+            Some(uptrakit_internal_wire::PluginAssignment {
+                plugin_type,
+                package_identifier: plugin.package_identifier.clone(),
+                config: merged,
+            })
+        };
 
     let mut agents_notified: u32 = 0;
-    // Deduplicate by (service_id, host_id) — each pair gets exactly one CheckVersions message.
     let mut seen = std::collections::HashSet::new();
 
     for link in &links {
@@ -703,26 +795,33 @@ pub async fn check_versions(
         if !seen.insert((service_id, link.host_id)) {
             continue;
         }
-        let Some(prov_config) = configs.get(&link.plugin_config_id) else {
+
+        let detect_version = plugin_by_host_role
+            .get(&(link.host_id, "detect_version".to_string()))
+            .and_then(|p| build_assignment(p));
+
+        let fetch_releases = plugin_by_host_role
+            .get(&(link.host_id, "fetch_releases".to_string()))
+            .and_then(|p| {
+                // "controller" -> skip, handled by scheduler
+                // "auto" or "agent" -> include in agent message
+                if p.execution_site == "controller" {
+                    None
+                } else {
+                    build_assignment(p)
+                }
+            });
+
+        // Skip if no role plugins at all for this host.
+        if detect_version.is_none() && fetch_releases.is_none() {
             continue;
-        };
-
-        let plugin_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
-            serde_json::Value::String(prov_config.plugin_type.clone()),
-        ) {
-            Ok(pt) => pt,
-            Err(_) => continue,
-        };
-
-        let config =
-            crate::update_hooks::merge_config(&prov_config.config, link.config_override.as_ref());
+        }
 
         let assignment = uptrakit_internal_wire::VersionCheckAssignment {
             software_item_id: item_id,
             name: item.name.clone(),
-            plugin_type,
-            package_identifier: link.package_identifier.clone(),
-            config,
+            detect_version,
+            fetch_releases,
         };
 
         let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
@@ -807,8 +906,8 @@ pub async fn check_versions_host(
         }
     };
 
-    // Verify host is assigned and load per-host plugin info
-    let link = match item_queries::load_host_assignment(tenant_db.db(), host_id, item_id).await {
+    // Verify host is assigned
+    let _link = match item_queries::load_host_assignment(tenant_db.db(), host_id, item_id).await {
         Some(l) => l,
         None => {
             return error_response(
@@ -855,36 +954,66 @@ pub async fn check_versions_host(
         }
     };
 
-    // Load the per-host plugin config
-    let plugin_config = match find_raw_active_config(&tenant_db, link.plugin_config_id).await {
-        Some(c) => c,
-        None => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Plugin config not found",
-            );
+    // Load role-specific plugin assignments for this host
+    let role_plugins = match HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
+        .filter(
+            host_software_item_plugin::Column::Role.is_in(["detect_version", "fetch_releases"]),
+        )
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(ps) => ps,
+        Err(e) => {
+            tracing::error!("Failed to load role plugins: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    let plugin_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
-        serde_json::Value::String(plugin_config.plugin_type.clone()),
-    ) {
-        Ok(pt) => pt,
-        Err(_) => {
-            tracing::error!("Unknown plugin type: {}", plugin_config.plugin_type);
-            return error_response(StatusCode::BAD_REQUEST, "Unknown plugin type");
-        }
-    };
+    // Build assignment from role plugins
+    let mut detect_version: Option<uptrakit_internal_wire::PluginAssignment> = None;
+    let mut fetch_releases: Option<uptrakit_internal_wire::PluginAssignment> = None;
 
-    let config =
-        crate::update_hooks::merge_config(&plugin_config.config, link.config_override.as_ref());
+    for plugin in &role_plugins {
+        let Some(config) = find_raw_active_config(&tenant_db, plugin.plugin_config_id).await
+        else {
+            continue;
+        };
+        let Ok(plugin_type) = serde_json::from_value::<uptrakit_internal_wire::PluginType>(
+            serde_json::Value::String(config.plugin_type.clone()),
+        ) else {
+            tracing::error!("Unknown plugin type: {}", config.plugin_type);
+            continue;
+        };
+        let merged =
+            crate::update_hooks::merge_config(&config.config, plugin.config_override.as_ref());
+        let pa = uptrakit_internal_wire::PluginAssignment {
+            plugin_type,
+            package_identifier: plugin.package_identifier.clone(),
+            config: merged,
+        };
+        match plugin.role.as_str() {
+            "detect_version" => detect_version = Some(pa),
+            "fetch_releases" if plugin.execution_site != "controller" => {
+                fetch_releases = Some(pa);
+            }
+            _ => {}
+        }
+    }
+
+    if detect_version.is_none() && fetch_releases.is_none() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "No detect_version or fetch_releases plugin assigned",
+        );
+    }
 
     let assignment = uptrakit_internal_wire::VersionCheckAssignment {
         software_item_id: item_id,
         name: item.name.clone(),
-        plugin_type,
-        package_identifier: link.package_identifier.clone(),
-        config,
+        detect_version,
+        fetch_releases,
     };
 
     let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
