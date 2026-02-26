@@ -7,13 +7,28 @@ use sea_orm::{
 use time::OffsetDateTime;
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::{
-    ControllerMessage, MqttClientCreatedPayload, MqttTenantRevokedPayload,
+    Capability, ControllerMessage, MqttClientCreatedPayload, MqttTenantRevokedPayload,
 };
 use uptrakit_shared_db::entity::controller_event;
 use uuid::Uuid;
 
 use crate::mqtt_lease_coordinator::{LeaseCoordinatorError, MqttLeaseCoordinator};
 use crate::service_connections::ServiceConnectionRegistry;
+
+/// Parse a capability string back to a typed `Capability` variant.
+///
+/// Returns `None` for unrecognised strings so the caller can fall back to
+/// broadcast-to-all semantics.
+fn parse_capability_str(s: &str) -> Option<Capability> {
+    match s {
+        "software_discovery" => Some(Capability::SoftwareDiscovery),
+        "update_hooks" => Some(Capability::UpdateHooks),
+        "graceful_shutdown" => Some(Capability::GracefulShutdown),
+        "mqtt_bridge" => Some(Capability::MqttBridge),
+        "ssh_remote" => Some(Capability::SshRemote),
+        _ => None,
+    }
+}
 
 /// Maximum number of delivery retries before an event is skipped.
 const MAX_DELIVERY_RETRIES: u8 = 3;
@@ -150,7 +165,7 @@ impl EventPoller {
             let delivered = self
                 .deliver_event(
                     event.target_service_id,
-                    event.target_service_type.as_deref(),
+                    event.target_capability.as_deref(),
                     msg,
                 )
                 .await;
@@ -189,29 +204,15 @@ impl EventPoller {
     async fn deliver_event(
         &self,
         target_service_id: Option<Uuid>,
-        target_service_type: Option<&str>,
+        target_capability: Option<&str>,
         msg: ControllerMessage,
     ) -> bool {
         // Controller-targeted events are handled locally (not forwarded to services)
-        if target_service_id.is_none() && target_service_type == Some("controller") {
+        if target_service_id.is_none() && target_capability == Some("controller") {
             return self.deliver_controller_event(msg).await;
         }
 
-        let parsed_service_type =
-            target_service_type.and_then(|service_type| match service_type
-                .parse::<uptrakit_internal_wire::ServiceType>(
-            ) {
-                Ok(parsed) => Some(parsed),
-                Err(_) => {
-                    tracing::warn!(
-                        value = %service_type,
-                        "unknown target_service_type in outbox event"
-                    );
-                    None
-                }
-            });
-
-        match (target_service_id, parsed_service_type) {
+        match (target_service_id, target_capability) {
             // Targeted to a specific service
             (Some(id), _) => {
                 if self.registry.is_connected(&id).await {
@@ -221,34 +222,23 @@ impl EventPoller {
                     true
                 }
             }
-            // Targeted to MQTT services
-            (None, Some(uptrakit_internal_wire::ServiceType::Mqtt)) => {
-                self.deliver_mqtt_event(msg).await
-            }
-            // Targeted to agent services
-            (None, Some(uptrakit_internal_wire::ServiceType::Agent)) => {
-                self.registry
-                    .broadcast_by_type(uptrakit_shared_db::entity::service::ServiceType::Agent, msg)
-                    .await;
-                true
-            }
-            // Targeted to SSH agent services
-            (None, Some(uptrakit_internal_wire::ServiceType::SshAgent)) => {
-                self.registry
-                    .broadcast_by_type(
-                        uptrakit_shared_db::entity::service::ServiceType::SshAgent,
-                        msg,
-                    )
-                    .await;
-                true
-            }
-            // Broadcast to all services (no type filter or unknown type)
+            // Targeted to services with a specific capability
+            (None, Some(cap_str)) => match cap_str {
+                "mqtt_bridge" => self.deliver_mqtt_event(msg).await,
+                _ => {
+                    // For any known capability, broadcast to services with that capability
+                    if let Some(capability) = parse_capability_str(cap_str) {
+                        self.registry
+                            .broadcast_by_capability(&capability, msg)
+                            .await;
+                    } else {
+                        self.registry.broadcast(msg).await;
+                    }
+                    true
+                }
+            },
+            // No filter — broadcast to all
             (None, None) => {
-                self.registry.broadcast(msg).await;
-                true
-            }
-            // Unknown future service type — treat as broadcast.
-            (None, Some(_)) => {
                 self.registry.broadcast(msg).await;
                 true
             }
@@ -297,7 +287,7 @@ impl EventPoller {
             _ => {
                 // Other MQTT messages: broadcast to all local MQTT services
                 self.registry
-                    .broadcast_by_type(uptrakit_shared_db::entity::service::ServiceType::Mqtt, msg)
+                    .broadcast_by_capability(&Capability::MqttBridge, msg)
                     .await;
                 true
             }
@@ -361,6 +351,7 @@ impl EventPoller {
 mod tests {
     use super::*;
     use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, Set};
+    use std::collections::BTreeSet;
     use uptrakit_shared_db::entity::controller_event;
 
     async fn setup_test_db() -> DatabaseConnection {
@@ -380,7 +371,7 @@ mod tests {
             let event = controller_event::ActiveModel {
                 source_controller_id: Set(Uuid::now_v7()),
                 target_service_id: Set(None),
-                target_service_type: Set(Some("agent".to_string())),
+                target_capability: Set(Some("software_discovery".to_string())),
                 message_json: Set(serde_json::json!({"type": "ping"})),
                 created_at: Set(now),
                 ..Default::default()
@@ -398,13 +389,24 @@ mod tests {
         let db = setup_test_db().await;
         let registry = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
-        let (mut rx, _token) = registry.register_agent(service_id).await;
+        let (mut rx, _token) = registry
+            .register(
+                service_id,
+                BTreeSet::from([
+                    Capability::SoftwareDiscovery,
+                    Capability::UpdateHooks,
+                    Capability::GracefulShutdown,
+                ]),
+                None,
+                None,
+            )
+            .await;
 
         let old_time = OffsetDateTime::now_utc() - time::Duration::seconds(30);
         let event = controller_event::ActiveModel {
             source_controller_id: Set(Uuid::now_v7()),
             target_service_id: Set(Some(service_id)),
-            target_service_type: Set(Some("agent".to_string())),
+            target_capability: Set(Some("software_discovery".to_string())),
             message_json: Set(serde_json::json!({"type": "ping"})),
             created_at: Set(old_time),
             ..Default::default()
