@@ -373,4 +373,76 @@ mod tests {
         );
         assert_eq!(deserialized.created_at, envelope.created_at);
     }
+
+    /// Integration test: connect to NATS, publish, consume.
+    ///
+    /// Requires a running NATS server with JetStream enabled.
+    /// Run: `cargo test -p uptrakit-web-api --features nats nats_connect_publish_consume -- --ignored`
+    #[tokio::test]
+    #[ignore = "requires running NATS server (nats-server -js)"]
+    async fn nats_connect_publish_consume() {
+        let controller_a = Uuid::now_v7();
+        let controller_b = Uuid::now_v7();
+
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+
+        // Controller A publishes
+        let transport_a = NatsTransport::connect(&nats_url, controller_a)
+            .await
+            .expect("failed to connect controller A");
+
+        // Controller B consumes
+        let transport_b = NatsTransport::connect(&nats_url, controller_b)
+            .await
+            .expect("failed to connect controller B");
+
+        // Create consumer for B first so it doesn't miss the message
+        let consumer_b = transport_b
+            .create_consumer()
+            .await
+            .expect("failed to create consumer for B");
+
+        // Small delay to let consumer be ready
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // Publish from A
+        let msg = ControllerMessage::CaBundleUpdated(
+            uptrakit_internal_wire::CaBundleUpdatedPayload {
+                ca_bundle_pem: "test-pem".to_string(),
+            },
+        );
+        transport_a
+            .publish(controller_a, None, None, msg.clone())
+            .await;
+
+        // Give JetStream a moment to persist
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Consume on B
+        let messages = consumer_b
+            .fetch()
+            .max_messages(10)
+            .expires(Duration::from_secs(3))
+            .messages()
+            .await
+            .expect("fetch failed");
+
+        use futures_util::StreamExt;
+        let mut messages = std::pin::pin!(messages);
+        let mut found = false;
+
+        while let Some(Ok(msg)) = messages.next().await {
+            let envelope: NatsEventEnvelope =
+                serde_json::from_slice(&msg.payload).expect("deserialize failed");
+            if envelope.source_controller_id == controller_a {
+                found = true;
+                let _ = msg.ack().await;
+                break;
+            }
+            let _ = msg.ack().await;
+        }
+
+        assert!(found, "controller B should have received A's message");
+    }
 }

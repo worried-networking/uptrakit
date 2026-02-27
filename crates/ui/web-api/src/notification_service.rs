@@ -237,4 +237,30 @@ mod tests {
         let result = svc.send(&service_id, msg).await;
         assert!(!result);
     }
+
+    #[tokio::test]
+    async fn broadcast_delivers_locally_without_nats() {
+        let registry = ServiceConnectionRegistry::new();
+        let controller_id = Uuid::now_v7();
+        let svc = NotificationService::new(registry, controller_id);
+
+        // Broadcast to an empty registry should not panic.
+        svc.broadcast(ControllerMessage::Approved(ApprovedPayload {
+            service_id: Uuid::nil(),
+        }))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn publish_controller_event_noop_without_nats() {
+        let registry = ServiceConnectionRegistry::new();
+        let controller_id = Uuid::now_v7();
+        let svc = NotificationService::new(registry, controller_id);
+
+        // Should be a no-op (no NATS configured).
+        svc.publish_controller_event(ControllerMessage::Approved(ApprovedPayload {
+            service_id: Uuid::nil(),
+        }))
+        .await;
+    }
 }
