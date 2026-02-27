@@ -1,6 +1,8 @@
 pub mod api_rate_limit;
 pub mod api_token;
 pub mod autodiscovery_ignore;
+pub mod host_discovery_allowlist;
+pub mod tenant_discovery_allowlist;
 pub mod ca_certificate;
 pub mod enrollment_token;
 pub mod host;

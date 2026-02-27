@@ -3,6 +3,12 @@ pub use super::api_token::{Entity as ApiToken, Model as ApiTokenModel};
 pub use super::autodiscovery_ignore::{
     Entity as AutodiscoveryIgnore, Model as AutodiscoveryIgnoreModel,
 };
+pub use super::host_discovery_allowlist::{
+    Entity as HostDiscoveryAllowlist, Model as HostDiscoveryAllowlistModel,
+};
+pub use super::tenant_discovery_allowlist::{
+    Entity as TenantDiscoveryAllowlist, Model as TenantDiscoveryAllowlistModel,
+};
 pub use super::ca_certificate::{Entity as CaCertificate, Model as CaCertificateModel};
 pub use super::enrollment_token::{Entity as EnrollmentToken, Model as EnrollmentTokenModel};
 pub use super::host::{Entity as Host, Model as HostModel};
