@@ -52,17 +52,25 @@ pub const SYSTEM_APT_PACKAGES: &[&str] = &[
     "apt-utils",
 ];
 
+/// npm package manager infrastructure packages that are never a PHS "main application".
+///
+/// Used by [`extract_npm_package`] to filter out tooling when extracting the
+/// npm package name from install scripts.
+pub const SYSTEM_NPM_PACKAGES: &[&str] = &["npm", "n", "nvm", "yarn", "pnpm", "corepack"];
+
 /// Result of analysing a PHS CT script for upstream source type.
 ///
-/// Exactly one of `github_owner`+`github_repo` or `apt_package` will be set
-/// for a successfully-classified script; both being `None` means the script
-/// could not be classified (e.g. update via `npm`).
+/// Exactly one of `github_owner`+`github_repo`, `npm_package`, or `apt_package`
+/// will be set for a successfully-classified script; all being `None` means the
+/// script could not be classified.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PhsScriptAnalysis {
     /// GitHub repository owner, if the app is GitHub-managed.
     pub github_owner: Option<String>,
     /// GitHub repository name, if the app is GitHub-managed.
     pub github_repo: Option<String>,
+    /// npm package name, if the app is npm-managed.
+    pub npm_package: Option<String>,
     /// Debian package name, if the app is APT-managed.
     pub apt_package: Option<String>,
     /// Human-readable application name extracted from `APP=` assignment.
@@ -103,7 +111,10 @@ pub struct PhsScript {
 ///    optional hyphen normalisation).
 /// 2. Bare `GH_REPO="owner/repo"` or `GH_REPO='owner/repo'` variable assignment.
 /// 3. First `check_for_gh_release` / `fetch_and_deploy_gh_release` match, ignoring key.
-/// 4. APT `install` with a non-system package name (only when GitHub detection yields nothing).
+/// 4. npm global install (`npm install -g <pkg>` / `npm i -g <pkg>` /
+///    `npm install --global <pkg>`) with a non-system package name.
+/// 5. APT `install` with a non-system package name (only when GitHub and npm
+///    detection yield nothing).
 ///
 /// `app_name` is always extracted from the first `APP="…"` or `APP='…'` line.
 pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
@@ -127,6 +138,7 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
             return PhsScriptAnalysis {
                 github_owner: Some(owner.clone()),
                 github_repo: Some(repo.clone()),
+                npm_package: None,
                 apt_package: None,
                 app_name,
                 version_file_basename: derive_version_file_basename(best_key, slug),
@@ -142,16 +154,30 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
         return PhsScriptAnalysis {
             github_owner: Some(owner),
             github_repo: Some(repo),
+            npm_package: None,
             apt_package: None,
             app_name,
             version_file_basename: None,
         };
     }
 
-    // ── APT detection (only when no GitHub upstream found) ───────────────────
+    // ── npm detection (priority over APT) ─────────────────────────────────────
+    if let Some(npm_pkg) = extract_npm_package(content) {
+        return PhsScriptAnalysis {
+            github_owner: None,
+            github_repo: None,
+            npm_package: Some(npm_pkg),
+            apt_package: None,
+            app_name,
+            version_file_basename: None,
+        };
+    }
+
+    // ── APT detection (only when no GitHub or npm upstream found) ───────────
     PhsScriptAnalysis {
         github_owner: None,
         github_repo: None,
+        npm_package: None,
         apt_package: extract_apt_package(content),
         app_name,
         version_file_basename: None,
@@ -180,6 +206,152 @@ pub fn extract_apt_package_candidates(content: &str) -> Vec<String> {
     }
 
     candidates
+}
+
+/// Parse a single shell line for an `npm install -g <pkg>` pattern.
+///
+/// Detects:
+/// - `npm install -g <pkg>`
+/// - `npm install --global <pkg>`
+/// - `npm i -g <pkg>`
+///
+/// Strips a `@version` suffix from the package name (handles `n8n@latest`,
+/// `n8n@${VAR}`, `n8n@1.2.3`, and `@scope/name@ver`).
+///
+/// Returns `None` if the line does not match.
+pub fn parse_npm_install_global_line(line: &str) -> Option<String> {
+    let line = line.trim();
+    // Strip common shell variable prefixes ($STD, DEBIAN_FRONTEND=..., etc.)
+    let line = strip_shell_prefixes(line);
+
+    // Must start with `npm`.
+    let after_npm = line.strip_prefix("npm")?;
+    if !after_npm.is_empty() && !after_npm.starts_with([' ', '\t']) {
+        return None;
+    }
+
+    // Walk through tokens looking for the subcommand and the `-g`/`--global` flag.
+    let mut tokens = after_npm.split_whitespace().peekable();
+    let mut found_global = false;
+    let mut found_install = false;
+
+    for tok in &mut tokens {
+        if found_install && found_global {
+            // This token should be the package name.
+            if tok.starts_with('-') {
+                // Another flag — keep looking.
+                continue;
+            }
+            // Strip optional @version suffix.
+            let pkg = strip_npm_version_suffix(tok);
+            if !pkg.is_empty() {
+                return Some(pkg.to_string());
+            }
+            return None;
+        }
+
+        match tok {
+            "install" | "i" => found_install = true,
+            "-g" | "--global" => found_global = true,
+            _ if tok.starts_with('-') => {
+                // Other flag — skip.
+            }
+            _ => {
+                // Non-flag token before install — could be an env var value; skip.
+            }
+        }
+    }
+
+    None
+}
+
+/// Strip an `@version` suffix from an npm package name token.
+///
+/// Handles:
+/// - `n8n@1.2.3` → `n8n`
+/// - `n8n@latest` → `n8n`
+/// - `n8n@${VAR}` → `n8n`
+/// - `@scope/name@ver` → `@scope/name`
+/// - `n8n` (no suffix) → `n8n`
+fn strip_npm_version_suffix(token: &str) -> &str {
+    if token.starts_with('@') {
+        // Scoped package: find the second `@` (if any) after the `/`.
+        if let Some(slash_pos) = token.find('/') {
+            let after_slash = &token[slash_pos + 1..];
+            if let Some(at_pos) = after_slash.find('@') {
+                return &token[..slash_pos + 1 + at_pos];
+            }
+        }
+        // No slash or no second `@` → return whole token.
+        token
+    } else {
+        // Plain package: strip at the first `@`.
+        match token.find('@') {
+            Some(pos) => &token[..pos],
+            None => token,
+        }
+    }
+}
+
+/// Validate an npm package identifier (plain or scoped) for use in PHS detection.
+///
+/// Mirrors the rules in `uptrakit-plugin-package-manager-npm::validate_identifier`
+/// but is defined here to avoid a circular dependency between the PHS discovery
+/// plugin and the npm plugin crate.
+fn is_valid_npm_identifier(pkg: &str) -> bool {
+    if pkg.is_empty() || pkg.len() > 214 {
+        return false;
+    }
+    if let Some(without_at) = pkg.strip_prefix('@') {
+        let Some(slash) = without_at.find('/') else {
+            return false;
+        };
+        let scope = &without_at[..slash];
+        let name = &without_at[slash + 1..];
+        is_valid_npm_name_part(scope) && is_valid_npm_name_part(name)
+    } else {
+        is_valid_npm_name_part(pkg)
+    }
+}
+
+/// Validate a single npm name component (scope or package name).
+fn is_valid_npm_name_part(part: &str) -> bool {
+    if part.is_empty() || part.len() > 214 {
+        return false;
+    }
+    let first = match part.chars().next() {
+        Some(c) => c,
+        None => return false,
+    };
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return false;
+    }
+    if part.contains("..") {
+        return false;
+    }
+    part.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '.' | '_'))
+}
+
+/// Extract the npm package from the first matching `npm install -g <pkg>` line.
+///
+/// Iterates all lines, calls [`parse_npm_install_global_line`], filters out
+/// system npm packages and validates with [`is_valid_npm_identifier`]. Returns
+/// the first match.
+pub fn extract_npm_package(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let Some(pkg) = parse_npm_install_global_line(line) else {
+            continue;
+        };
+        if SYSTEM_NPM_PACKAGES.contains(&pkg.as_str()) {
+            continue;
+        }
+        if !is_valid_npm_identifier(&pkg) {
+            continue;
+        }
+        return Some(pkg);
+    }
+    None
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
@@ -564,6 +736,7 @@ check_for_gh_release "booklore" "BookLore/BookLore"
         let result = analyze_phs_script("booklore", content);
         assert_eq!(result.github_owner.as_deref(), Some("BookLore"));
         assert_eq!(result.github_repo.as_deref(), Some("BookLore"));
+        assert!(result.npm_package.is_none());
         assert!(result.apt_package.is_none());
         assert_eq!(result.app_name.as_deref(), Some("BookLore"));
     }
@@ -1009,5 +1182,191 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
         assert!(!is_valid_slug("UPPER"));
         assert!(!is_valid_slug("has space"));
         assert!(!is_valid_slug("path/traversal"));
+    }
+
+    // ── parse_npm_install_global_line ───────────────────────────────
+
+    #[test]
+    fn npm_install_g_plain() {
+        assert_eq!(
+            parse_npm_install_global_line("npm install -g n8n"),
+            Some("n8n".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_install_global_long_flag() {
+        assert_eq!(
+            parse_npm_install_global_line("npm install --global n8n"),
+            Some("n8n".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_i_g_abbreviation() {
+        assert_eq!(
+            parse_npm_install_global_line("npm i -g n8n"),
+            Some("n8n".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_install_g_with_version_suffix() {
+        assert_eq!(
+            parse_npm_install_global_line("npm install -g n8n@1.2.3"),
+            Some("n8n".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_install_g_with_latest_suffix() {
+        assert_eq!(
+            parse_npm_install_global_line("npm install -g n8n@latest"),
+            Some("n8n".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_install_g_with_var_suffix() {
+        assert_eq!(
+            parse_npm_install_global_line("npm install -g n8n@${N8N_VERSION}"),
+            Some("n8n".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_install_g_scoped_package() {
+        assert_eq!(
+            parse_npm_install_global_line("npm install -g @angular/cli"),
+            Some("@angular/cli".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_install_g_scoped_with_version() {
+        assert_eq!(
+            parse_npm_install_global_line("npm install -g @angular/cli@17.0.0"),
+            Some("@angular/cli".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_install_g_with_std_prefix() {
+        // Common PHS prefix $STD
+        assert_eq!(
+            parse_npm_install_global_line("$STD npm install -g n8n"),
+            Some("n8n".to_string())
+        );
+    }
+
+    #[test]
+    fn npm_install_no_global_flag_returns_none() {
+        assert_eq!(parse_npm_install_global_line("npm install n8n"), None);
+    }
+
+    #[test]
+    fn apt_install_line_returns_none() {
+        assert_eq!(
+            parse_npm_install_global_line("apt install -y nodejs"),
+            None
+        );
+    }
+
+    #[test]
+    fn empty_line_returns_none() {
+        assert_eq!(parse_npm_install_global_line(""), None);
+    }
+
+    // ── extract_npm_package ─────────────────────────────────────────
+
+    #[test]
+    fn extract_npm_package_simple() {
+        let content = "npm install -g n8n\n";
+        assert_eq!(extract_npm_package(content), Some("n8n".to_string()));
+    }
+
+    #[test]
+    fn extract_npm_package_filters_system_packages() {
+        // npm itself is a system package and must be filtered.
+        let content = "npm install -g npm\n";
+        assert_eq!(extract_npm_package(content), None);
+    }
+
+    #[test]
+    fn extract_npm_package_filters_yarn() {
+        let content = "npm install -g yarn\n";
+        assert_eq!(extract_npm_package(content), None);
+    }
+
+    #[test]
+    fn extract_npm_package_first_non_system_wins() {
+        let content = "npm install -g npm\nnpm install -g n8n\n";
+        assert_eq!(extract_npm_package(content), Some("n8n".to_string()));
+    }
+
+    #[test]
+    fn extract_npm_package_no_match_returns_none() {
+        let content = "apt install -y nodejs\n";
+        assert_eq!(extract_npm_package(content), None);
+    }
+
+    // ── analyze_phs_script with npm ─────────────────────────────────
+
+    #[test]
+    fn analyze_n8n_npm_detected() {
+        let content = r#"
+APP="n8n"
+apt-get install -y curl wget gnupg build-essential nodejs npm git
+npm install -g n8n
+"#;
+        let result = analyze_phs_script("n8n", content);
+        assert!(result.github_owner.is_none());
+        assert!(result.github_repo.is_none());
+        assert_eq!(result.npm_package.as_deref(), Some("n8n"));
+        assert!(result.apt_package.is_none());
+        assert_eq!(result.app_name.as_deref(), Some("n8n"));
+    }
+
+    #[test]
+    fn analyze_npm_with_version_suffix() {
+        let content = "npm install -g n8n@${N8N_VERSION}\n";
+        let result = analyze_phs_script("n8n", content);
+        assert_eq!(result.npm_package.as_deref(), Some("n8n"));
+    }
+
+    #[test]
+    fn analyze_github_preferred_over_npm() {
+        // GitHub detection wins over npm.
+        let content = r#"
+check_for_gh_release "myapp" "myorg/myapp"
+npm install -g myapp
+"#;
+        let result = analyze_phs_script("myapp", content);
+        assert_eq!(result.github_owner.as_deref(), Some("myorg"));
+        assert!(result.npm_package.is_none());
+    }
+
+    #[test]
+    fn analyze_npm_preferred_over_apt() {
+        // npm detection wins over APT.
+        let content = r#"
+npm install -g n8n
+apt install -y somepackage
+"#;
+        let result = analyze_phs_script("n8n", content);
+        assert_eq!(result.npm_package.as_deref(), Some("n8n"));
+        assert!(result.apt_package.is_none());
+    }
+
+    #[test]
+    fn analyze_npm_system_package_falls_through_to_apt() {
+        // Only system npm package → should fall through to APT.
+        let content = r#"
+npm install -g npm
+apt install -y grafana
+"#;
+        let result = analyze_phs_script("grafana", content);
+        assert!(result.npm_package.is_none());
+        assert_eq!(result.apt_package.as_deref(), Some("grafana"));
     }
 }

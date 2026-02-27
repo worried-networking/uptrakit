@@ -241,6 +241,59 @@ impl ProxmoxHelperScriptsPlugin {
         }
     }
 
+    /// Build a `DiscoveryTarget` for an npm-managed PHS app.
+    fn npm_target(package: &str) -> DiscoveryTarget {
+        DiscoveryTarget {
+            plugin_type: PluginType::PackageManagerNpm,
+            plugin_config: serde_json::json!({}),
+            plugin_config_name: "NPM (auto)".to_string(),
+            roles: vec![
+                PluginRole::DetectVersion,
+                PluginRole::FetchReleases,
+                PluginRole::ExecuteUpdate,
+            ],
+            package_identifier: Some(package.to_string()),
+            config_override: None,
+            execution_site: None,
+        }
+    }
+
+    /// Run `npm list -g <package> --depth=0 --json` to detect the installed
+    /// version of a globally-installed npm package.
+    ///
+    /// Returns the version string, or `None` if the package is not installed
+    /// or the command fails.
+    async fn npm_global_version(&self, package: &str) -> Option<String> {
+        let output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "npm",
+                [
+                    "list".to_string(),
+                    "-g".to_string(),
+                    package.to_string(),
+                    "--depth=0".to_string(),
+                    "--json".to_string(),
+                ],
+            ))
+            .await
+            .ok()?;
+
+        if output.exit_code != 0 {
+            return None;
+        }
+
+        // Parse {"dependencies":{"<package>":{"version":"X.Y.Z"}}}
+        let json: serde_json::Value = serde_json::from_str(&output.output).ok()?;
+        let version = json
+            .get("dependencies")?
+            .get(package)?
+            .get("version")?
+            .as_str()?
+            .to_string();
+        if version.is_empty() { None } else { Some(version) }
+    }
+
     /// Build a `DiscoveryTarget` for an APT-managed PHS app.
     fn apt_target() -> DiscoveryTarget {
         DiscoveryTarget {
@@ -369,6 +422,28 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         Self::github_fetch_target(owner, repo),
                         Self::phs_shell_target(analysis.version_file_basename.as_deref()),
                     ],
+                    extra: None,
+                });
+            } else if let Some(ref npm_pkg) = analysis.npm_package {
+                // npm-managed: verify installed via `npm list -g`.
+                let Some(installed_version) = self.npm_global_version(npm_pkg).await else {
+                    tracing::debug!(slug = %script.slug, package = %npm_pkg,
+                        "npm package not installed globally; skipping");
+                    continue;
+                };
+
+                tracing::debug!(
+                    slug = %script.slug,
+                    package = %npm_pkg,
+                    version = %installed_version,
+                    "discovered npm-managed PHS software"
+                );
+
+                discovered.push(DiscoveredSoftware {
+                    package_identifier: npm_pkg.clone(),
+                    name: display_name,
+                    installed_version,
+                    targets: vec![Self::npm_target(npm_pkg)],
                     extra: None,
                 });
             } else if let Some(ref apt_pkg) = analysis.apt_package {
@@ -635,5 +710,29 @@ mod tests {
         assert_eq!(target.roles.len(), 3);
         assert_eq!(target.plugin_config, serde_json::json!({}));
         assert!(target.package_identifier.is_none());
+    }
+
+    #[test]
+    fn npm_target_structure() {
+        let target = ProxmoxHelperScriptsPlugin::npm_target("n8n");
+        assert_eq!(target.plugin_type, PluginType::PackageManagerNpm);
+        assert_eq!(target.plugin_config_name, "NPM (auto)");
+        assert_eq!(target.roles.len(), 3);
+        assert!(target.roles.contains(&PluginRole::DetectVersion));
+        assert!(target.roles.contains(&PluginRole::FetchReleases));
+        assert!(target.roles.contains(&PluginRole::ExecuteUpdate));
+        assert_eq!(target.plugin_config, serde_json::json!({}));
+        // The npm package name is carried as the package_identifier override.
+        assert_eq!(target.package_identifier.as_deref(), Some("n8n"));
+    }
+
+    #[test]
+    fn npm_target_scoped_package() {
+        let target = ProxmoxHelperScriptsPlugin::npm_target("@angular/cli");
+        assert_eq!(target.plugin_type, PluginType::PackageManagerNpm);
+        assert_eq!(
+            target.package_identifier.as_deref(),
+            Some("@angular/cli")
+        );
     }
 }
