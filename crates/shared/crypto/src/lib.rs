@@ -758,16 +758,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_is_plaintext_mode_default_false() {
-        // PLAINTEXT_MODE starts as false; individual tests may toggle it temporarily
-        // but always restore it. This just documents the expected default.
-        // We do NOT acquire TEST_LOCK here since we are only reading and not
-        // touching MASTER_KEY or PLAINTEXT_MODE (no write).
-        // The AtomicBool load is safe to call concurrently.
-        let mode = is_plaintext_mode();
-        // Cannot assert false here because other tests in the suite may have toggled
-        // the flag momentarily; we just assert the function is callable.
-        let _ = mode;
-    }
 }
