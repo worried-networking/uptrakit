@@ -208,10 +208,24 @@ async fn run(args: cli::Args) -> Result<()> {
     let service_connections =
         uptrakit_web_api::service_connections::ServiceConnectionRegistry::new();
     let controller_id = uuid::Uuid::now_v7();
-    let notification_service = uptrakit_web_api::notification_service::NotificationService::new(
+    #[cfg_attr(not(feature = "nats"), allow(unused_mut))]
+    let mut notification_service = uptrakit_web_api::notification_service::NotificationService::new(
         service_connections.clone(),
         controller_id,
     );
+
+    // NATS transport (optional, feature-gated)
+    #[cfg(feature = "nats")]
+    let nats_transport = if let Some(ref url) = args.nats_url {
+        let nats = uptrakit_web_api::nats_transport::NatsTransport::connect(url, controller_id)
+            .await
+            .context_transform(|_| AppError::Config("NATS connection failed".to_string()))?;
+        notification_service = notification_service.with_nats(nats.clone());
+        Some(nats)
+    } else {
+        None
+    };
+
     let token_denylist = Arc::new(uptrakit_web_api::auth::token_denylist::TokenDenylist::new());
 
     let builder = AppState::builder()
@@ -351,6 +365,18 @@ async fn run(args: cli::Args) -> Result<()> {
             Arc::clone(&crl_manager),
         );
         bg.track("server-cert-renewal", h);
+    }
+
+    // NATS consumer (cross-controller event delivery)
+    #[cfg(feature = "nats")]
+    if let Some(ref nats) = nats_transport {
+        let h = tasks::spawn_nats_consumer(
+            bg.child_token(),
+            nats.clone(),
+            service_connections.clone(),
+            app_state.db().clone(),
+        );
+        bg.track("nats-consumer", h);
     }
 
     // Set up signal handlers

@@ -506,6 +506,20 @@ pub fn spawn_server_cert_renewal(
     })
 }
 
+/// NATS consumer for cross-controller event delivery.
+///
+/// Pulls messages from JetStream, filters self-originated events, and delivers
+/// to local services via the shared event delivery routing logic.
+#[cfg(feature = "nats")]
+pub fn spawn_nats_consumer(
+    token: CancellationToken,
+    nats: uptrakit_web_api::nats_transport::NatsTransport,
+    registry: uptrakit_web_api::service_connections::ServiceConnectionRegistry,
+    db: sea_orm::DatabaseConnection,
+) -> JoinHandle<()> {
+    tokio::spawn(nats.run_consumer(registry, db, token))
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

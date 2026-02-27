@@ -160,6 +160,14 @@ pub struct Args {
     #[arg(long, default_value = "30")]
     pub shutdown_timeout_secs: u64,
 
+    /// NATS server URL for cross-controller messaging.
+    /// When set, NATS JetStream is used for inter-controller event delivery.
+    /// Without this, the controller runs in single-instance mode.
+    /// Example: nats://localhost:4222
+    #[cfg(feature = "nats")]
+    #[arg(long, env = "UPTRAKIT_NATS_URL")]
+    pub nats_url: Option<String>,
+
     /// Increase log verbosity (-v for own-crate debug, -vv for uptrakit=debug, -vvv for uptrakit=trace).
     /// Use RUST_LOG to enable logging for other crates (e.g. `RUST_LOG=tokio=info`).
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
