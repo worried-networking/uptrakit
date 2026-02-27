@@ -4,7 +4,7 @@
 //! `deliver_pending_updates`, and the per-message handlers
 //! `handle_update_started`, `handle_update_output`, and `handle_update_result`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -91,6 +91,9 @@ pub(super) async fn validate_update_ownership(
 ///
 /// On service reconnect, we check for any `update_history` records with
 /// `status = Pending` for hosts linked to this service and send them.
+///
+/// All auxiliary data (software items, hosts, plugin assignments, plugin configs)
+/// is loaded in four batched queries and joined in memory to avoid N+1 round-trips.
 pub(super) async fn deliver_pending_updates(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -112,7 +115,7 @@ pub(super) async fn deliver_pending_updates(
 
     // 2. Query pending update_history records for those hosts.
     let pending_updates = update_history::Entity::find()
-        .filter(update_history::Column::HostId.is_in(host_ids))
+        .filter(update_history::Column::HostId.is_in(host_ids.clone()))
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
         .all(state.db())
         .await
@@ -128,70 +131,109 @@ pub(super) async fn deliver_pending_updates(
         "delivering pending updates on reconnect"
     );
 
-    // 3. Build ExecuteUpdatePayload for each and send.
-    for update_record in pending_updates {
-        let item = match software_item::Entity::find_by_id(update_record.software_item_id)
+    // Collect unique IDs needed for batch queries.
+    let sw_ids: Vec<uuid::Uuid> = pending_updates
+        .iter()
+        .map(|u| u.software_item_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    // Batch 1: software items.
+    let sw_items_map: HashMap<uuid::Uuid, software_item::Model> =
+        software_item::Entity::find()
+            .filter(software_item::Column::Id.is_in(sw_ids.clone()))
             .filter(software_item::Column::DeactivatedAt.is_null())
-            .one(state.db())
+            .all(state.db())
             .await
-        {
-            Ok(Some(i)) => i,
-            Ok(None) => {
-                tracing::warn!(
-                    update_id = %update_record.id,
-                    software_item_id = %update_record.software_item_id,
-                    "software item not found or deactivated, skipping pending update"
-                );
-                continue;
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to load software item for pending update");
-                continue;
-            }
+            .context_to::<HandlerError>()?
+            .into_iter()
+            .map(|i| (i.id, i))
+            .collect();
+
+    // Batch 2: hosts.
+    let hosts_map: HashMap<uuid::Uuid, host::Model> = host::Entity::find()
+        .filter(host::Column::Id.is_in(host_ids.clone()))
+        .all(state.db())
+        .await
+        .context_to::<HandlerError>()?
+        .into_iter()
+        .map(|h| (h.id, h))
+        .collect();
+
+    // Batch 3: plugin assignments for the two relevant roles across all
+    // (host_id, software_item_id) combinations that appear in pending_updates.
+    // The cross-product filter may include extra rows for pairs not in
+    // pending_updates; those are silently ignored during the join below.
+    let assignments: Vec<host_software_item_plugin::Model> =
+        host_software_item_plugin::Entity::find()
+            .filter(host_software_item_plugin::Column::HostId.is_in(host_ids))
+            .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(sw_ids))
+            .filter(
+                host_software_item_plugin::Column::Role
+                    .is_in(["execute_update", "detect_version"]),
+            )
+            .all(state.db())
+            .await
+            .context_to::<HandlerError>()?;
+
+    // Index assignments by (host_id, software_item_id, role).
+    let assignments_map: HashMap<(uuid::Uuid, uuid::Uuid, String), host_software_item_plugin::Model> =
+        assignments
+            .into_iter()
+            .map(|a| ((a.host_id, a.software_item_id, a.role.clone()), a))
+            .collect();
+
+    // Batch 4: plugin configs referenced by the assignments above.
+    let plugin_config_ids: Vec<uuid::Uuid> = assignments_map
+        .values()
+        .map(|a| a.plugin_config_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let configs_map: HashMap<uuid::Uuid, plugin_config::Model> = plugin_config::Entity::find()
+        .filter(plugin_config::Column::Id.is_in(plugin_config_ids))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        .all(state.db())
+        .await
+        .context_to::<HandlerError>()?
+        .into_iter()
+        .map(|c| (c.id, c))
+        .collect();
+
+    // 3. Build ExecuteUpdatePayload for each pending update using HashMap lookups.
+    for update_record in pending_updates {
+        let Some(item) = sw_items_map.get(&update_record.software_item_id) else {
+            tracing::warn!(
+                update_id = %update_record.id,
+                software_item_id = %update_record.software_item_id,
+                "software item not found or deactivated, skipping pending update"
+            );
+            continue;
         };
 
-        // Load role-specific plugin assignments for this host-software pair.
-        let execute_update_assignment =
-            match load_role_plugin(state.db(), update_record.host_id, item.id, "execute_update")
-                .await
-            {
-                Ok(Some(data)) => data,
-                Ok(None) => {
-                    tracing::warn!(
-                        update_id = %update_record.id,
-                        host_id = %update_record.host_id,
-                        software_item_id = %item.id,
-                        "no execute_update plugin assigned, skipping pending update"
-                    );
-                    continue;
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "failed to load execute_update plugin for pending update"
-                    );
-                    continue;
-                }
-            };
+        // Resolve execute_update assignment.
+        let exec_key = (update_record.host_id, item.id, "execute_update".to_string());
+        let Some(exec_assignment) = assignments_map.get(&exec_key) else {
+            tracing::warn!(
+                update_id = %update_record.id,
+                host_id = %update_record.host_id,
+                software_item_id = %item.id,
+                "no execute_update plugin assigned, skipping pending update"
+            );
+            continue;
+        };
+        let Some(exec_config) = configs_map.get(&exec_assignment.plugin_config_id) else {
+            tracing::warn!(
+                update_id = %update_record.id,
+                plugin_config_id = %exec_assignment.plugin_config_id,
+                "execute_update plugin config not found or deactivated, skipping"
+            );
+            continue;
+        };
 
-        let detect_version_assignment =
-            match load_role_plugin(state.db(), update_record.host_id, item.id, "detect_version")
-                .await
-            {
-                Ok(data) => data,
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "failed to load detect_version plugin for pending update"
-                    );
-                    None
-                }
-            };
-
-        let execute_update_plugin = match build_plugin_assignment(
-            &execute_update_assignment.0,
-            &execute_update_assignment.1,
-        ) {
+        let execute_update_plugin = match build_plugin_assignment(exec_assignment, exec_config) {
             Some(a) => a,
             None => {
                 tracing::warn!(
@@ -202,38 +244,30 @@ pub(super) async fn deliver_pending_updates(
             }
         };
 
-        let detect_version_plugin = detect_version_assignment
-            .as_ref()
+        // Resolve optional detect_version assignment.
+        let detect_key = (update_record.host_id, item.id, "detect_version".to_string());
+        let detect_version_plugin = assignments_map
+            .get(&detect_key)
+            .and_then(|a| configs_map.get(&a.plugin_config_id).map(|c| (a, c)))
             .and_then(|(a, c)| build_plugin_assignment(a, c));
 
         // Resolve hooks from the execute_update plugin config + per-role override.
         let resolved_hooks = uptrakit_update_hooks::resolve_hooks(
-            &execute_update_assignment.1.config,
-            execute_update_assignment.0.config_override.as_ref(),
+            &exec_config.config,
+            exec_assignment.config_override.as_ref(),
         );
 
-        // Look up the host's machine_id so the agent can route correctly.
-        let host_machine_id = match host::Entity::find_by_id(update_record.host_id)
-            .one(state.db())
-            .await
-        {
-            Ok(Some(h)) => h.machine_id,
-            Ok(None) => {
-                tracing::warn!(
-                    update_id = %update_record.id,
-                    host_id = %update_record.host_id,
-                    "host not found for pending update, skipping"
-                );
-                continue;
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to load host for pending update");
-                continue;
-            }
+        let Some(host) = hosts_map.get(&update_record.host_id) else {
+            tracing::warn!(
+                update_id = %update_record.id,
+                host_id = %update_record.host_id,
+                "host not found for pending update, skipping"
+            );
+            continue;
         };
 
         let execute_payload = ExecuteUpdatePayload {
-            host_machine_id,
+            host_machine_id: host.machine_id.clone(),
             update_history_id: update_record.id,
             software_item_id: item.id,
             software_item_name: item.name.clone(),
@@ -568,45 +602,6 @@ pub(super) async fn handle_update_result(
 // ---------------------------------------------------------------------------
 // Role-based plugin helpers
 // ---------------------------------------------------------------------------
-
-/// Load a role-specific plugin assignment for a host-software pair.
-///
-/// Returns `None` if no assignment with the given role exists.
-async fn load_role_plugin(
-    db: &sea_orm::DatabaseConnection,
-    host_id: uuid::Uuid,
-    software_item_id: uuid::Uuid,
-    role: &str,
-) -> HandlerResult<Option<(host_software_item_plugin::Model, plugin_config::Model)>> {
-    let assignment = host_software_item_plugin::Entity::find()
-        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
-        .filter(host_software_item_plugin::Column::Role.eq(role))
-        .one(db)
-        .await
-        .context_to::<HandlerError>()?;
-
-    let Some(assignment) = assignment else {
-        return Ok(None);
-    };
-
-    let config = plugin_config::Entity::find_by_id(assignment.plugin_config_id)
-        .filter(plugin_config::Column::DeactivatedAt.is_null())
-        .one(db)
-        .await
-        .context_to::<HandlerError>()?;
-
-    let Some(config) = config else {
-        tracing::warn!(
-            plugin_config_id = %assignment.plugin_config_id,
-            role,
-            "plugin config not found or deactivated"
-        );
-        return Ok(None);
-    };
-
-    Ok(Some((assignment, config)))
-}
 
 /// Build a [`PluginAssignment`] from a role plugin row and its plugin config.
 ///
