@@ -151,14 +151,16 @@ mod tests {
     // ── resolved_sudo_context ────────────────────────────────────────────
 
     fn stub_model(sudo_available: Option<bool>, is_root: Option<bool>, sudo_policy: &str) -> Model {
-        use uptrakit_crypto::EncryptedString;
+        use uptrakit_crypto::{EncryptedString, init_master_key};
+        // Ensure a test master key is set (no-op if already initialized).
+        let _ = init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
         Model {
             id: "test".to_string(),
             name: "test".to_string(),
             hostname: "127.0.0.1".to_string(),
             port: 22,
             username: "uptrakit".to_string(),
-            private_key: EncryptedString::new("key".to_string()).expect("encrypt"),
+            private_key: EncryptedString::new("key".to_string()).expect("master key initialized above"),
             key_type: SshKeyType::Ed25519,
             host_key_fingerprint: None,
             machine_id: String::new(),

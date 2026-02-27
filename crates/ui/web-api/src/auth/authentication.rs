@@ -490,10 +490,12 @@ mod tests {
         role_mapping: HashMap<String, String>,
     ) -> oidc_provider::Model {
         use time::OffsetDateTime;
-        use uptrakit_shared_db::crypto::EncryptedString;
+        use uptrakit_shared_db::crypto::{EncryptedString, init_master_key};
 
+        // Ensure a test master key is set (no-op if already initialized).
+        let _ = init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
         let client_secret = EncryptedString::new("test-secret".to_string())
-            .expect("EncryptedString::new should succeed without master key in test mode");
+            .expect("master key initialized above");
 
         oidc_provider::Model {
             id: uuid::Uuid::nil(),

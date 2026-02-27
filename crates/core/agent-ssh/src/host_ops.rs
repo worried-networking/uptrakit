@@ -314,7 +314,10 @@ mod tests {
     }
 
     fn test_encrypted_key() -> uptrakit_crypto::EncryptedString {
-        uptrakit_crypto::EncryptedString::new("test-key-content".to_string()).expect("encrypt")
+        // Ensure a test master key is set (no-op if already initialized).
+        let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
+        uptrakit_crypto::EncryptedString::new("test-key-content".to_string())
+            .expect("master key initialized above")
     }
 
     fn add_params(

@@ -121,6 +121,9 @@ pub fn is_encrypted(s: &str) -> bool {
 ///
 /// Returns `"ENC:v1:<hex(nonce || ciphertext || tag)>"`.
 ///
+/// Requires the master key to be initialized via [`init_master_key`]; returns
+/// `Err(CryptoError::NotInitialized)` otherwise.
+///
 /// # Nonce collision safety
 ///
 /// AES-256-GCM uses a random 96-bit nonce generated via `rand::rng()`. The
@@ -130,7 +133,20 @@ pub fn is_encrypted(s: &str) -> bool {
 /// use case (database field encryption with infrequent writes). Key rotation
 /// via the `ENC:v1:` version prefix provides a migration path if usage
 /// patterns ever approach this bound.
-pub fn encrypt_value(plaintext: &str) -> Result<String> {
+pub fn encrypt_str(plaintext: &str) -> Result<String> {
+    encrypt_value(plaintext)
+}
+
+/// Decrypt a stored encrypted string.
+///
+/// Strips the `"ENC:v1:"` prefix, hex-decodes, extracts the nonce, and
+/// decrypts the ciphertext. Requires the master key to be initialized via
+/// [`init_master_key`]; returns `Err(CryptoError::NotInitialized)` otherwise.
+pub fn decrypt_str(stored: &str) -> Result<String> {
+    decrypt_value(stored)
+}
+
+fn encrypt_value(plaintext: &str) -> Result<String> {
     let key_bytes = MASTER_KEY
         .get()
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
@@ -162,11 +178,7 @@ pub fn encrypt_value(plaintext: &str) -> Result<String> {
     ))
 }
 
-/// Decrypt a stored encrypted string.
-///
-/// Strips the `"ENC:v1:"` prefix, hex-decodes, extracts the nonce,
-/// and decrypts the ciphertext.
-pub fn decrypt_value(stored: &str) -> Result<String> {
+fn decrypt_value(stored: &str) -> Result<String> {
     let key_bytes = MASTER_KEY
         .get()
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
@@ -202,14 +214,15 @@ pub fn decrypt_value(stored: &str) -> Result<String> {
 /// A string that is transparently encrypted when written to the database
 /// and decrypted when read back.
 ///
-/// Encryption is performed eagerly at construction time. The pre-computed
-/// database representation is stored alongside the plaintext so that
-/// `From<EncryptedString> for sea_orm::Value` is infallible.
+/// Encryption is performed eagerly at construction time via [`EncryptedString::new`].
+/// The pre-computed database representation is stored alongside the plaintext
+/// so that `From<EncryptedString> for sea_orm::Value` is infallible.
 ///
-/// When no master key is configured (development mode), the plaintext is
-/// stored as the DB value. Construction fails if the master key is present
-/// but encryption fails — this prevents silent plaintext fallback in
-/// production.
+/// Construction **requires** the master key to be initialized via
+/// [`init_master_key`]. If the key is absent, [`EncryptedString::new`] returns
+/// `Err(CryptoError::NotInitialized)`. There is no plaintext fallback — a
+/// missing key is always treated as a hard error to prevent silent secret
+/// exposure in misconfigured deployments.
 pub struct EncryptedString {
     /// Plaintext value (for `expose_secret`).
     plaintext: SecretString,
@@ -237,18 +250,16 @@ impl PartialEq for EncryptedString {
 impl EncryptedString {
     /// Create a new `EncryptedString` from a plaintext value.
     ///
-    /// Encrypts immediately if a master key is available. Returns `Err` if
-    /// encryption fails. When no master key is configured, stores plaintext
-    /// as the DB value (development mode).
+    /// Encrypts the value immediately using the initialized master key.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(CryptoError::NotInitialized)` if the master key has not
+    /// been initialized via [`init_master_key`]. Returns `Err` on any other
+    /// encryption failure. There is no plaintext fallback — a missing key is
+    /// always a hard error.
     pub fn new(plaintext: String) -> Result<Self> {
-        let db_value = if master_key_available() {
-            encrypt_value(&plaintext)?
-        } else {
-            tracing::warn!(
-                "master key not configured; storing value as plaintext (development mode)"
-            );
-            plaintext.clone()
-        };
+        let db_value = encrypt_value(&plaintext)?;
         Ok(Self {
             plaintext: SecretString::new(plaintext),
             db_value,
