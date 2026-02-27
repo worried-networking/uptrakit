@@ -14,8 +14,9 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use openidconnect::{
-    AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
-    PkceCodeChallenge, RedirectUrl, Scope, TokenResponse,
+    AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
+    EndpointMaybeSet, EndpointNotSet, EndpointSet,
+    IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
     reqwest,
 };
@@ -46,6 +47,16 @@ pub struct OidcCallbackParams {
     pub code: Option<String>,
     pub state: Option<String>,
     pub error: Option<String>,
+}
+
+/// Claims extracted from the OIDC ID token after successful code exchange.
+struct ExtractedOidcClaims {
+    sub: String,
+    email: String,
+    email_verified: Option<bool>,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    additional_claims: serde_json::Value,
 }
 
 /// Get available auth methods (public)
@@ -137,30 +148,10 @@ pub async fn oidc_authorize(
         };
 
     // Build OIDC client via discovery
-    let issuer_url = match IssuerUrl::new(provider.issuer_url.clone()) {
-        Ok(u) => u,
-        Err(e) => {
-            tracing::error!("Invalid issuer URL for provider {}: {e}", provider.slug);
-            return error_response(StatusCode::BAD_GATEWAY, "Invalid OIDC issuer URL");
-        }
+    let client = match build_oidc_client(&provider, redirect_url).await {
+        Some(c) => c,
+        None => return error_response(StatusCode::BAD_GATEWAY, "OIDC provider unavailable"),
     };
-    let http_client = reqwest::Client::default();
-    let provider_metadata =
-        match CoreProviderMetadata::discover_async(issuer_url, &http_client).await {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::error!("OIDC discovery failed for provider {}: {e}", provider.slug);
-                return error_response(StatusCode::BAD_GATEWAY, "OIDC provider discovery failed");
-            }
-        };
-    let client = CoreClient::from_provider_metadata(
-        provider_metadata,
-        ClientId::new(provider.client_id.clone()),
-        Some(ClientSecret::new(
-            provider.client_secret.expose_secret().to_string(),
-        )),
-    );
-    let client = client.set_redirect_uri(redirect_url);
 
     // Generate PKCE challenge
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -267,87 +258,32 @@ pub async fn oidc_callback(
         }
     };
 
-    // Build OIDC client
-    let issuer_url = match IssuerUrl::new(provider.issuer_url.clone()) {
-        Ok(u) => u,
-        Err(e) => {
-            tracing::error!("Invalid issuer URL during callback: {e}");
-            return Redirect::to("/login?error=oidc_discovery_failed").into_response();
-        }
+    // Build OIDC client via discovery
+    let client = match build_oidc_client(&provider, redirect_url.clone()).await {
+        Some(c) => c,
+        None => return Redirect::to("/login?error=oidc_discovery_failed").into_response(),
     };
-    let http_client = reqwest::Client::default();
-    let provider_metadata =
-        match CoreProviderMetadata::discover_async(issuer_url, &http_client).await {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::error!("OIDC discovery failed during callback: {e}");
-                return Redirect::to("/login?error=oidc_discovery_failed").into_response();
-            }
-        };
-    let client = CoreClient::from_provider_metadata(
-        provider_metadata,
-        ClientId::new(provider.client_id.clone()),
-        Some(ClientSecret::new(
-            provider.client_secret.expose_secret().to_string(),
-        )),
-    );
-    let client = client.set_redirect_uri(redirect_url.clone());
 
-    // Exchange code for tokens
-    let token_request = match client.exchange_code(AuthorizationCode::new(code)) {
-        Ok(req) => req,
-        Err(e) => {
-            tracing::error!("OIDC token endpoint not configured: {e}");
-            return Redirect::to("/login?error=oidc_token_exchange_failed").into_response();
-        }
-    };
-    let token_response = match token_request
-        .set_redirect_uri(std::borrow::Cow::Owned(redirect_url))
-        .set_pkce_verifier(flow.pkce_verifier)
-        .request_async(&http_client)
-        .await
+    // Exchange code for tokens and extract claims
+    let ExtractedOidcClaims {
+        sub,
+        email,
+        email_verified,
+        first_name,
+        last_name,
+        additional_claims,
+    } = match exchange_code_for_claims(
+        &client,
+        code,
+        flow.pkce_verifier,
+        flow.nonce,
+        redirect_url,
+    )
+    .await
     {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("OIDC token exchange failed: {e}");
-            return Redirect::to("/login?error=oidc_token_exchange_failed").into_response();
-        }
-    };
-
-    // Extract ID token and validate
-    let id_token = match token_response.id_token() {
-        Some(t) => t,
-        None => return Redirect::to("/login?error=oidc_no_id_token").into_response(),
-    };
-
-    let id_token_verifier = client.id_token_verifier();
-    let claims = match id_token.claims(&id_token_verifier, &flow.nonce) {
         Ok(c) => c,
-        Err(e) => {
-            tracing::error!("OIDC ID token validation failed: {e}");
-            return Redirect::to("/login?error=oidc_token_validation_failed").into_response();
-        }
+        Err(response) => return response,
     };
-
-    // Extract standard claims
-    let sub = claims.subject().to_string();
-    let email = claims.email().map(|e| e.to_string()).unwrap_or_default();
-    let email_verified = claims.email_verified();
-    let first_name = claims
-        .given_name()
-        .and_then(|n| n.get(None))
-        .map(|n| n.to_string());
-    let last_name = claims
-        .family_name()
-        .and_then(|n| n.get(None))
-        .map(|n| n.to_string());
-
-    if email.is_empty() {
-        return Redirect::to("/login?error=oidc_no_email").into_response();
-    }
-
-    // Get additional claims as JSON for role mapping
-    let additional_claims = serde_json::to_value(claims.additional_claims()).unwrap_or_default();
 
     // Pre-check: if registration mode is Invite and auto_create is enabled,
     // check whether this would create a new user requiring a registration token.
@@ -663,72 +599,7 @@ pub async fn oidc_exchange(
         }
     };
 
-    // Create refresh token
-    let session_service = SessionService::new(state.db().clone());
-    let refresh_token = match session_service
-        .create_refresh_token(
-            pending.user_id,
-            AuthMethod::Oidc {
-                provider_id: pending.provider_id,
-            },
-            None,
-            None,
-        )
-        .await
-    {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("Failed to create refresh token during OIDC exchange: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    // Get user info
-    let user = match User::find_by_id(pending.user_id).one(state.db()).await {
-        Ok(Some(u)) => u,
-        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
-    };
-
-    let permissions =
-        super::auth::get_user_permissions(state.db(), state.default_tenant_id, pending.user_id)
-            .await
-            .unwrap_or_default();
-
-    // Create JWT access token
-    let access_token = match state.jwt.create_access_token(
-        pending.user_id,
-        &permissions,
-        "oidc",
-        Some(pending.provider_id),
-    ) {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("Failed to create access token during OIDC exchange: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    let cookie = set_refresh_token_cookie(&refresh_token);
-    let response = AuthResponse {
-        access_token: SecretString::new(access_token),
-        refresh_token: SecretString::new(refresh_token),
-        expires_in: state.jwt.expires_in(),
-        token_type: "Bearer".to_string(),
-        user: super::auth::UserResponse {
-            id: user.id,
-            email: user.email.expose_email().to_string(),
-            first_name: user.first_name,
-            last_name: user.last_name,
-            permissions,
-        },
-    };
-
-    (
-        StatusCode::OK,
-        [(header::SET_COOKIE, cookie)],
-        Json(response),
-    )
-        .into_response()
+    mint_oidc_auth_response(&state, pending.user_id, pending.provider_id).await
 }
 
 /// Complete OIDC registration with a registration token (public).
@@ -868,37 +739,13 @@ pub async fn oidc_complete_registration(
         && let Some(provider) =
             find_active_provider(&txn, state.default_tenant_id, pending.provider_id).await
     {
-        let mut fake_claims = serde_json::Map::new();
-        if let Some(ref path) = provider.role_claim_path {
-            let reverse_mapped: Vec<String> = pending
-                .mapped_roles
-                .iter()
-                .filter_map(|local_name| {
-                    provider
-                        .role_mapping
-                        .0
-                        .iter()
-                        .find(|(_, v)| v.as_str() == local_name)
-                        .map(|(k, _)| k.clone())
-                })
-                .collect();
-            let first_segment = path.split('.').next().unwrap_or(path);
-            fake_claims.insert(
-                first_segment.to_string(),
-                serde_json::Value::Array(
-                    reverse_mapped
-                        .into_iter()
-                        .map(serde_json::Value::String)
-                        .collect(),
-                ),
-            );
-        }
+        let fake_claims = build_fake_claims_for_sync(&provider, &pending.mapped_roles);
         let _ = sync_oidc_roles(
             &txn,
             state.default_tenant_id,
             user_id,
             &provider,
-            &serde_json::Value::Object(fake_claims),
+            &fake_claims,
         )
         .await;
     }
@@ -908,74 +755,8 @@ pub async fn oidc_complete_registration(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
-    // 9. Create session + JWT (same pattern as oidc_exchange)
-    let session_service = SessionService::new(state.db().clone());
-    let refresh_token = match session_service
-        .create_refresh_token(
-            user_id,
-            AuthMethod::Oidc {
-                provider_id: pending.provider_id,
-            },
-            None,
-            None,
-        )
-        .await
-    {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!(
-                "Failed to create refresh token during OIDC complete-registration: {e:?}"
-            );
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    let permissions =
-        super::auth::get_user_permissions(state.db(), state.default_tenant_id, user_id)
-            .await
-            .unwrap_or_default();
-
-    let access_token = match state.jwt.create_access_token(
-        user_id,
-        &permissions,
-        "oidc",
-        Some(pending.provider_id),
-    ) {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!(
-                "Failed to create access token during OIDC complete-registration: {e:?}"
-            );
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    let user = match User::find_by_id(user_id).one(state.db()).await {
-        Ok(Some(u)) => u,
-        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
-    };
-
-    let cookie = set_refresh_token_cookie(&refresh_token);
-    let response = AuthResponse {
-        access_token: SecretString::new(access_token),
-        refresh_token: SecretString::new(refresh_token),
-        expires_in: state.jwt.expires_in(),
-        token_type: "Bearer".to_string(),
-        user: super::auth::UserResponse {
-            id: user.id,
-            email: user.email.expose_email().to_string(),
-            first_name: user.first_name,
-            last_name: user.last_name,
-            permissions,
-        },
-    };
-
-    (
-        StatusCode::OK,
-        [(header::SET_COOKIE, cookie)],
-        Json(response),
-    )
-        .into_response()
+    // 9. Create session + JWT
+    mint_oidc_auth_response(&state, user_id, pending.provider_id).await
 }
 
 /// Link a pending OIDC account (public)
@@ -1079,58 +860,189 @@ pub async fn oidc_link(
     }
 
     // Sync roles if we have mapped roles
-    if !pending.mapped_roles.is_empty() {
-        // Load provider for role sync
-        if let Some(provider) =
+    if !pending.mapped_roles.is_empty()
+        && let Some(provider) =
             find_active_provider(state.db(), state.default_tenant_id, pending.provider_id).await
-        {
-            // Build a minimal claims object just for role sync
-            // We already have the mapped roles, so we build fake claims matching the mapping
-            let mut fake_claims = serde_json::Map::new();
-            if let Some(ref path) = provider.role_claim_path {
-                let reverse_mapped: Vec<String> = pending
-                    .mapped_roles
-                    .iter()
-                    .filter_map(|local_name| {
-                        provider
-                            .role_mapping
-                            .0
-                            .iter()
-                            .find(|(_, v)| v.as_str() == local_name)
-                            .map(|(k, _)| k.clone())
-                    })
-                    .collect();
-                // Set at the first path segment for simplicity
-                let first_segment = path.split('.').next().unwrap_or(path);
-                fake_claims.insert(
-                    first_segment.to_string(),
-                    serde_json::Value::Array(
-                        reverse_mapped
-                            .into_iter()
-                            .map(serde_json::Value::String)
-                            .collect(),
-                    ),
-                );
-            }
-            let _ = sync_oidc_roles(
-                state.db(),
-                state.default_tenant_id,
-                pending.user_id,
-                &provider,
-                &serde_json::Value::Object(fake_claims),
-            )
-            .await;
-        }
+    {
+        let fake_claims = build_fake_claims_for_sync(&provider, &pending.mapped_roles);
+        let _ = sync_oidc_roles(
+            state.db(),
+            state.default_tenant_id,
+            pending.user_id,
+            &provider,
+            &fake_claims,
+        )
+        .await;
     }
 
-    // Create refresh token
+    mint_oidc_auth_response(&state, pending.user_id, pending.provider_id).await
+}
+
+// Helper functions
+
+/// Concrete type of a `CoreClient` returned by OIDC discovery: auth URL is set,
+/// token and user-info URLs may be set (depending on provider metadata),
+/// device-auth, introspection and revocation are not set.
+type DiscoveredCoreClient = CoreClient<
+    EndpointSet,
+    EndpointNotSet,
+    EndpointNotSet,
+    EndpointNotSet,
+    EndpointMaybeSet,
+    EndpointMaybeSet,
+>;
+
+/// Build an OIDC `CoreClient` for the given provider via OIDC discovery.
+///
+/// Returns `None` if the issuer URL is invalid or if discovery fails.
+async fn build_oidc_client(
+    provider: &oidc_provider::Model,
+    redirect_url: RedirectUrl,
+) -> Option<DiscoveredCoreClient> {
+    let issuer_url = IssuerUrl::new(provider.issuer_url.clone())
+        .map_err(|e| tracing::error!("Invalid OIDC issuer URL for provider {}: {e}", provider.id))
+        .ok()?;
+    let http_client = reqwest::Client::default();
+    let provider_metadata = CoreProviderMetadata::discover_async(issuer_url, &http_client)
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "OIDC provider discovery failed for provider {}: {e}",
+                provider.id
+            );
+        })
+        .ok()?;
+    Some(
+        CoreClient::from_provider_metadata(
+            provider_metadata,
+            ClientId::new(provider.client_id.clone()),
+            Some(ClientSecret::new(
+                provider.client_secret.expose_secret().to_string(),
+            )),
+        )
+        .set_redirect_uri(redirect_url),
+    )
+}
+
+/// Exchange an authorization code for tokens, validate the ID token, and
+/// extract claims into [`ExtractedOidcClaims`].
+///
+/// On any error returns `Err(Response)` with an appropriate redirect so the
+/// caller can propagate it directly.
+async fn exchange_code_for_claims(
+    client: &DiscoveredCoreClient,
+    code: String,
+    pkce_verifier: PkceCodeVerifier,
+    nonce: Nonce,
+    redirect_url: RedirectUrl,
+) -> Result<ExtractedOidcClaims, Response> {
+    let http_client = reqwest::Client::default();
+    let token_request = client
+        .exchange_code(AuthorizationCode::new(code))
+        .map_err(|e| {
+            tracing::error!("OIDC token endpoint not configured: {e}");
+            Redirect::to("/login?error=oidc_token_exchange_failed").into_response()
+        })?;
+    let token_response = token_request
+        .set_redirect_uri(std::borrow::Cow::Owned(redirect_url))
+        .set_pkce_verifier(pkce_verifier)
+        .request_async(&http_client)
+        .await
+        .map_err(|e| {
+            tracing::error!("OIDC token exchange failed: {e}");
+            Redirect::to("/login?error=oidc_token_exchange_failed").into_response()
+        })?;
+
+    let id_token = token_response
+        .id_token()
+        .ok_or_else(|| Redirect::to("/login?error=oidc_no_id_token").into_response())?;
+
+    let id_token_verifier = client.id_token_verifier();
+    let claims = id_token
+        .claims(&id_token_verifier, &nonce)
+        .map_err(|e| {
+            tracing::error!("OIDC ID token validation failed: {e}");
+            Redirect::to("/login?error=oidc_token_validation_failed").into_response()
+        })?;
+
+    let sub = claims.subject().to_string();
+    let email = claims.email().map(|e| e.to_string()).unwrap_or_default();
+    let email_verified = claims.email_verified();
+    let first_name = claims
+        .given_name()
+        .and_then(|n| n.get(None))
+        .map(|n| n.to_string());
+    let last_name = claims
+        .family_name()
+        .and_then(|n| n.get(None))
+        .map(|n| n.to_string());
+
+    if email.is_empty() {
+        return Err(Redirect::to("/login?error=oidc_no_email").into_response());
+    }
+
+    let additional_claims =
+        serde_json::to_value(claims.additional_claims()).unwrap_or_default();
+
+    Ok(ExtractedOidcClaims {
+        sub,
+        email,
+        email_verified,
+        first_name,
+        last_name,
+        additional_claims,
+    })
+}
+
+/// Build a synthetic `serde_json::Value` that re-maps stored `mapped_roles`
+/// back to the provider's original role-claim keys, suitable for passing to
+/// [`sync_oidc_roles`].
+///
+/// This is needed in flows where the original OIDC token is no longer
+/// available (e.g., deferred registration completion or account linking).
+fn build_fake_claims_for_sync(
+    provider: &oidc_provider::Model,
+    mapped_roles: &[String],
+) -> serde_json::Value {
+    let mut fake_claims = serde_json::Map::new();
+    if let Some(ref path) = provider.role_claim_path {
+        let reverse_mapped: Vec<String> = mapped_roles
+            .iter()
+            .filter_map(|local_name| {
+                provider
+                    .role_mapping
+                    .0
+                    .iter()
+                    .find(|(_, v)| v.as_str() == local_name)
+                    .map(|(k, _)| k.clone())
+            })
+            .collect();
+        let first_segment = path.split('.').next().unwrap_or(path);
+        fake_claims.insert(
+            first_segment.to_string(),
+            serde_json::Value::Array(
+                reverse_mapped
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    serde_json::Value::Object(fake_claims)
+}
+
+/// Create an OIDC refresh token, access token, and return a complete
+/// [`AuthResponse`].
+///
+/// This is the shared session-creation step used by [`oidc_exchange`],
+/// [`oidc_complete_registration`], and [`oidc_link`] after any provider-
+/// specific work (user creation, linking, role sync) has been committed.
+async fn mint_oidc_auth_response(state: &AppState, user_id: Uuid, provider_id: Uuid) -> Response {
     let session_service = SessionService::new(state.db().clone());
     let refresh_token = match session_service
         .create_refresh_token(
-            pending.user_id,
-            AuthMethod::Oidc {
-                provider_id: pending.provider_id,
-            },
+            user_id,
+            AuthMethod::Oidc { provider_id },
             None,
             None,
         )
@@ -1138,32 +1050,28 @@ pub async fn oidc_link(
     {
         Ok(t) => t,
         Err(e) => {
-            tracing::error!("Failed to create refresh token: {e:?}");
+            tracing::error!("Failed to create OIDC refresh token: {e:?}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    // Get user info for response
-    let user = match User::find_by_id(pending.user_id).one(state.db()).await {
+    let user = match User::find_by_id(user_id).one(state.db()).await {
         Ok(Some(u)) => u,
         _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
     };
 
     let permissions =
-        super::auth::get_user_permissions(state.db(), state.default_tenant_id, pending.user_id)
+        super::auth::get_user_permissions(state.db(), state.default_tenant_id, user_id)
             .await
             .unwrap_or_default();
 
-    // Create JWT access token
-    let access_token = match state.jwt.create_access_token(
-        pending.user_id,
-        &permissions,
-        "oidc",
-        Some(pending.provider_id),
-    ) {
+    let access_token = match state
+        .jwt
+        .create_access_token(user_id, &permissions, "oidc", Some(provider_id))
+    {
         Ok(t) => t,
         Err(e) => {
-            tracing::error!("Failed to create access token: {e:?}");
+            tracing::error!("Failed to create OIDC access token: {e:?}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -1190,8 +1098,6 @@ pub async fn oidc_link(
     )
         .into_response()
 }
-
-// Helper functions
 
 async fn find_active_provider(
     db: &impl ConnectionTrait,
