@@ -207,7 +207,7 @@ pub(super) async fn deliver_pending_updates(
             .and_then(|(a, c)| build_plugin_assignment(a, c));
 
         // Resolve hooks from the execute_update plugin config + per-role override.
-        let resolved_hooks = crate::update_hooks::resolve_hooks(
+        let resolved_hooks = uptrakit_update_hooks::resolve_hooks(
             &execute_update_assignment.1.config,
             execute_update_assignment.0.config_override.as_ref(),
         );
@@ -619,7 +619,7 @@ fn build_plugin_assignment(
         serde_json::from_value(serde_json::Value::String(config.plugin_type.clone())).ok()?;
 
     let merged_config =
-        crate::update_hooks::merge_config(&config.config, assignment.config_override.as_ref());
+        uptrakit_update_hooks::merge_config(&config.config, assignment.config_override.as_ref());
 
     Some(PluginAssignment {
         plugin_type,

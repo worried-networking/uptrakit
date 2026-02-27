@@ -1,0 +1,16 @@
+[package]
+name = "uptrakit-update-hooks"
+publish = false
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+uptrakit-internal-wire = { path = "../wire" }
+uptrakit-web-api-types = { path = "../web-api-types" }
+
+[lints]
+workspace = true

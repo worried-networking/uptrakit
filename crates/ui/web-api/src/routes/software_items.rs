@@ -900,7 +900,7 @@ pub async fn check_versions(
                 serde_json::Value::String(config_model.plugin_type.clone()),
             )
             .ok()?;
-            let merged = crate::update_hooks::merge_config(
+            let merged = uptrakit_update_hooks::merge_config(
                 &config_model.config,
                 plugin.config_override.as_ref(),
             );
@@ -927,7 +927,7 @@ pub async fn check_versions(
             continue;
         };
         let merged =
-            crate::update_hooks::merge_config(&config_model.config, pa.config_override.as_ref());
+            uptrakit_update_hooks::merge_config(&config_model.config, pa.config_override.as_ref());
         if is_controller_fetch_site(&pa.execution_site, &plugin_type, &merged) {
             let key = (pa.plugin_config_id, pa.package_identifier.clone());
             controller_job_map
@@ -979,7 +979,7 @@ pub async fn check_versions(
                     config_model.plugin_type.clone(),
                 ))
                 .ok()?;
-                let merged = crate::update_hooks::merge_config(
+                let merged = uptrakit_update_hooks::merge_config(
                     &config_model.config,
                     p.config_override.as_ref(),
                 );
@@ -1167,7 +1167,7 @@ pub async fn check_versions_host(
             continue;
         };
         let merged =
-            crate::update_hooks::merge_config(&config.config, plugin.config_override.as_ref());
+            uptrakit_update_hooks::merge_config(&config.config, plugin.config_override.as_ref());
         let pa = uptrakit_internal_wire::PluginAssignment {
             plugin_type: plugin_type.clone(),
             package_identifier: plugin.package_identifier.clone(),

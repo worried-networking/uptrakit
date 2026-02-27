@@ -6870,6 +6870,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-update-hooks"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "uptrakit-internal-wire",
+ "uptrakit-web-api-types",
+]
+
+[[package]]
 name = "uptrakit-web-api"
 version = "0.0.1"
 dependencies = [
@@ -6920,6 +6929,7 @@ dependencies = [
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-update-hooks",
  "uptrakit-web-api-types",
  "url",
  "utoipa",

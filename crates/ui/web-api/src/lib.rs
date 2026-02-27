@@ -18,7 +18,6 @@ pub mod setting_key;
 pub mod settings;
 pub mod settings_store;
 pub mod tenant_db;
-pub mod update_hooks;
 pub mod update_output_broadcaster;
 
 pub use setting_key::SettingKey;

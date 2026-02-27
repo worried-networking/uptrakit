@@ -111,7 +111,7 @@ fn build_plugin_assignment(
             .map_err(|_| TriggerUpdateError::UnknownPluginType(config.plugin_type.clone()))?;
 
     let merged_config =
-        crate::update_hooks::merge_config(&config.config, assignment.config_override.as_ref());
+        uptrakit_update_hooks::merge_config(&config.config, assignment.config_override.as_ref());
 
     Ok(PluginAssignment {
         plugin_type,
@@ -212,7 +212,7 @@ pub async fn trigger_update_for_host(
         .transpose()?;
 
     // 8. Resolve hooks from the execute_update plugin config + per-role override.
-    let resolved_hooks = crate::update_hooks::resolve_hooks(
+    let resolved_hooks = uptrakit_update_hooks::resolve_hooks(
         &execute_update_data.1.config,
         execute_update_data.0.config_override.as_ref(),
     );
