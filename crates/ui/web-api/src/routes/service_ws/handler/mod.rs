@@ -116,7 +116,6 @@ pub(crate) async fn handle_authenticated_loop(
     let AuthenticatedContext {
         service_id,
         cert,
-        last_seen_at,
         out_seq,
         in_seq,
     } = ctx;
@@ -218,7 +217,7 @@ pub(crate) async fn handle_authenticated_loop(
                 if seen_tenants.insert(cfg.tenant_id) {
                     state
                         .notification_service
-                        .push_software_states_for_tenant(cfg.tenant_id)
+                        .push_software_states_for_tenant(state.db(), cfg.tenant_id)
                         .await;
                 }
             }
@@ -229,17 +228,6 @@ pub(crate) async fn handle_authenticated_loop(
             instance_id = %mctx.instance_id,
             "MQTT service registered"
         );
-    }
-
-    // ------------------------------------------------------------------
-    // Deliver notification backlog
-    // ------------------------------------------------------------------
-    let delivered = state
-        .notification_service
-        .deliver_backlog_for_authenticated_service(service_id, &capabilities, last_seen_at)
-        .await;
-    if delivered > 0 {
-        tracing::info!(%service_id, delivered, "delivered outbox backlog to service");
     }
 
     // ------------------------------------------------------------------

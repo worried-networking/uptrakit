@@ -255,7 +255,6 @@ pub(crate) struct CertIdentity {
 pub(crate) struct AuthenticatedContext<'a> {
     pub service_id: uuid::Uuid,
     pub cert: CertIdentity,
-    pub last_seen_at: Option<time::OffsetDateTime>,
     pub out_seq: &'a mut OutgoingSeq,
     pub in_seq: &'a mut IncomingSeq,
 }

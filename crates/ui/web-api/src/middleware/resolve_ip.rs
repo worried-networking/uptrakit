@@ -209,7 +209,6 @@ mod tests {
         settings.set_real_ip_header(header.to_string()).await;
 
         let notification_service = crate::notification_service::NotificationService::new(
-            db.clone(),
             crate::service_connections::ServiceConnectionRegistry::new(),
             uuid::Uuid::nil(),
         );

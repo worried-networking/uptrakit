@@ -209,7 +209,6 @@ async fn run(args: cli::Args) -> Result<()> {
         uptrakit_web_api::service_connections::ServiceConnectionRegistry::new();
     let controller_id = uuid::Uuid::now_v7();
     let notification_service = uptrakit_web_api::notification_service::NotificationService::new(
-        db_conn.clone(),
         service_connections.clone(),
         controller_id,
     );
@@ -275,9 +274,6 @@ async fn run(args: cli::Args) -> Result<()> {
         bg.track("ca-reload", h);
     }
 
-    let h = tasks::spawn_event_poller(bg.child_token(), Arc::clone(&app_state));
-    bg.track("event-poller", h);
-
     // Centralised task scheduler (HA-safe via optimistic locking)
     {
         use scheduler::executors::*;
@@ -308,12 +304,6 @@ async fn run(args: cli::Args) -> Result<()> {
             Box::new(stale_lease_cleanup::StaleLeaseCleanupExecutor::new(
                 app_state.db().clone(),
                 service_connections.clone(),
-            )),
-        );
-        sched.register(
-            ScheduledTaskType::EventCleanup,
-            Box::new(event_cleanup::EventCleanupExecutor::new(
-                app_state.db().clone(),
             )),
         );
         if ca_managed {

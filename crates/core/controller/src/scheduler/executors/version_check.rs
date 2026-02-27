@@ -338,7 +338,7 @@ impl VersionCheckExecutor {
 
             // Push updated software states to MQTT services.
             self.notification_service
-                .push_software_states_for_tenant(tenant_id)
+                .push_software_states_for_tenant(&self.db, tenant_id)
                 .await;
         }
 

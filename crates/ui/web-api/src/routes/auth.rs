@@ -531,7 +531,6 @@ mod tests {
         };
 
         let notification_service = crate::notification_service::NotificationService::new(
-            db.clone(),
             crate::service_connections::ServiceConnectionRegistry::new(),
             uuid::Uuid::nil(),
         );

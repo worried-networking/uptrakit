@@ -299,16 +299,6 @@ pub fn spawn_ca_reload(
     })
 }
 
-/// Cross-controller notification delivery via event polling.
-pub fn spawn_event_poller(token: CancellationToken, app_state: Arc<AppState>) -> JoinHandle<()> {
-    let event_poller = uptrakit_web_api::event_poller::EventPoller::new(
-        app_state.db().clone(),
-        app_state.service_connections.clone(),
-        app_state.controller_id,
-    );
-    tokio::spawn(event_poller.run(token))
-}
-
 /// Trigger-based CA rotation for managed CAs.
 ///
 /// Periodic CA rotation checking is handled by the centralised scheduler

@@ -489,7 +489,7 @@ pub(super) async fn handle_update_result(
     {
         state
             .notification_service
-            .push_software_states_for_tenant(svc.tenant_id)
+            .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
     }
 

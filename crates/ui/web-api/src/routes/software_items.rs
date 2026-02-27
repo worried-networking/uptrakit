@@ -251,7 +251,7 @@ async fn run_controller_fetch_jobs(
 
         // Push updated software states to MQTT services.
         notification_service
-            .push_software_states_for_tenant(tenant_id)
+            .push_software_states_for_tenant(db, tenant_id)
             .await;
     }
 

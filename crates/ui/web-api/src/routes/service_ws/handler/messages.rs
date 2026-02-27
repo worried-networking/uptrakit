@@ -383,7 +383,7 @@ pub(super) async fn handle_version_check_results(
     {
         state
             .notification_service
-            .push_software_states_for_tenant(svc.tenant_id)
+            .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
     }
 

@@ -2,11 +2,12 @@ pub mod auth;
 pub mod cert_signer;
 pub mod error_response;
 pub mod event_delivery;
-pub mod event_poller;
 pub mod extract;
 pub mod middleware;
 pub mod mqtt_client_store;
 pub mod mqtt_lease_coordinator;
+#[cfg(feature = "nats")]
+pub mod nats_transport;
 pub mod notification_service;
 pub mod ocsp;
 pub mod pki_utils;
@@ -1095,7 +1096,6 @@ mod tests {
         let service_connections = crate::service_connections::ServiceConnectionRegistry::new();
         let controller_id = uuid::Uuid::nil();
         let notification_service = crate::notification_service::NotificationService::new(
-            db.clone(),
             service_connections.clone(),
             controller_id,
         );

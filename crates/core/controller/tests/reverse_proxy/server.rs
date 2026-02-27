@@ -187,7 +187,6 @@ async fn build_state(
         uptrakit_web_api::service_connections::ServiceConnectionRegistry::new();
     let controller_id = uuid::Uuid::nil();
     let notification_service = uptrakit_web_api::notification_service::NotificationService::new(
-        db.clone(),
         service_connections.clone(),
         controller_id,
     );

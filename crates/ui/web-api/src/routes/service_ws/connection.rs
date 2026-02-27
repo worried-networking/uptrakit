@@ -172,7 +172,6 @@ pub(super) async fn handle_authenticated(
         ca_fingerprint: cert_record.ca_fingerprint.clone(),
     };
 
-    let previous_last_seen_at = service.last_seen_at;
     let now = time::OffsetDateTime::now_utc();
 
     if let Err(e) = record_service_activity(state.db(), service_id, client_ip).await {
@@ -216,7 +215,6 @@ pub(super) async fn handle_authenticated(
     let ctx = AuthenticatedContext {
         service_id,
         cert: cert_id,
-        last_seen_at: previous_last_seen_at,
         out_seq,
         in_seq,
     };

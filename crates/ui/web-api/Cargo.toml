@@ -11,6 +11,7 @@ publish = false
 default = ["oidc"]
 oidc = ["dep:openidconnect"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
+nats = ["dep:async-nats"]
 db-all = ["db-sqlite", "db-postgres", "db-mysql"]
 db-sqlite = ["sea-orm/sqlx-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres"]
@@ -66,6 +67,7 @@ const-oid = { workspace = true }
 aws-lc-rs = { workspace = true }
 tokio-util = { workspace = true }
 zeroize = { workspace = true }
+async-nats = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

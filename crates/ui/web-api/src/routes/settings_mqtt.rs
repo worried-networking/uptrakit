@@ -240,11 +240,11 @@ pub async fn create_mqtt_settings(
                     });
                     state
                         .notification_service
-                        .write_outbox_event(None, Some("controller"), &msg)
+                        .publish_controller_event(msg)
                         .await;
                     tracing::info!(
                         mqtt_client_id = %model.id,
-                        "no local MQTT service available; queued outbox lease event"
+                        "no local MQTT service available; published cross-controller lease event"
                     );
                 }
                 Ok(LeaseOutcome::AlreadyLeased) => {
