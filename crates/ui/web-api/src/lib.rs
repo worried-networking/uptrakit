@@ -20,6 +20,7 @@ pub mod settings;
 pub mod settings_store;
 pub mod tenant_db;
 pub mod update_hooks;
+pub mod update_output_broadcaster;
 
 pub use setting_key::SettingKey;
 
@@ -235,6 +236,8 @@ pub struct AppState {
     pub plugin_ops: Arc<dyn PluginOps>,
     /// Credential sources for services with credential capabilities.
     pub credential_sources: ServiceCredentialSources,
+    /// Per-update broadcast channels for real-time output streaming via SSE.
+    pub update_output_broadcaster: update_output_broadcaster::UpdateOutputBroadcaster,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -282,6 +285,7 @@ pub struct AppStateBuilder {
     token_denylist: Option<Arc<auth::token_denylist::TokenDenylist>>,
     plugin_ops: Option<Arc<dyn PluginOps>>,
     credential_sources: Option<ServiceCredentialSources>,
+    update_output_broadcaster: Option<update_output_broadcaster::UpdateOutputBroadcaster>,
 }
 
 impl AppStateBuilder {
@@ -315,6 +319,7 @@ impl AppStateBuilder {
             token_denylist: None,
             plugin_ops: None,
             credential_sources: None,
+            update_output_broadcaster: None,
         }
     }
 
@@ -522,6 +527,9 @@ impl AppStateBuilder {
             }),
             credential_sources: self
                 .credential_sources
+                .unwrap_or_default(),
+            update_output_broadcaster: self
+                .update_output_broadcaster
                 .unwrap_or_default(),
         })
     }
@@ -1175,6 +1183,7 @@ mod tests {
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
             db,
             credential_sources: ServiceCredentialSources::default(),
+            update_output_broadcaster: crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
         })
     }
 

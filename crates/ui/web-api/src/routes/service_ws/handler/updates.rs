@@ -319,6 +319,12 @@ pub(super) async fn handle_update_started(
         );
     }
 
+    // Create a broadcast channel so SSE subscribers can receive live output.
+    state
+        .update_output_broadcaster
+        .create_channel(payload.update_history_id)
+        .await;
+
     LoopAction::Continue
 }
 
@@ -379,12 +385,14 @@ pub(super) async fn handle_update_output(
         return LoopAction::Continue;
     }
 
+    let line_id = uuid::Uuid::now_v7();
+    let created_at = time::OffsetDateTime::now_utc();
     let line = update_output_line::ActiveModel {
-        id: Set(uuid::Uuid::now_v7()),
+        id: Set(line_id),
         update_history_id: Set(payload.update_history_id),
         stream: Set(payload.stream),
-        output: Set(output_line),
-        created_at: Set(time::OffsetDateTime::now_utc()),
+        output: Set(output_line.clone()),
+        created_at: Set(created_at),
     };
     if let Err(e) = update_output_line::Entity::insert(line)
         .exec(state.db())
@@ -395,6 +403,18 @@ pub(super) async fn handle_update_output(
             "failed to insert update output line"
         );
     }
+
+    // Fan out to SSE subscribers.
+    state
+        .update_output_broadcaster
+        .send_line(
+            payload.update_history_id,
+            line_id,
+            output_line,
+            payload.stream,
+            created_at,
+        )
+        .await;
 
     LoopAction::Continue
 }
@@ -482,6 +502,23 @@ pub(super) async fn handle_update_result(
             error = %e,
             "failed to update update_history result"
         );
+    }
+
+    // Notify SSE subscribers that this update has completed.
+    {
+        let status_str = match payload.status {
+            UpdateFinalStatus::Completed => "completed",
+            UpdateFinalStatus::Failed => "failed",
+            _ => "failed",
+        };
+        state
+            .update_output_broadcaster
+            .send_completed(
+                payload.update_history_id,
+                status_str.to_string(),
+                payload.error.clone(),
+            )
+            .await;
     }
 
     if let Err(e) = update_output_line::Entity::delete_many()
