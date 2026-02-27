@@ -35,10 +35,14 @@ One task per type per tenant |
 
 ### Task types
 
-| Value | Default cron | Description | | --- | --- | --- | | `auth_cleanup` | `*/5 * * * *` | Clean expired auth flow state from DB | |
-`stale_lease_cleanup` | `*/5 * * * *` | Release stale MQTT client leases | | `event_cleanup` | `0 * * * *` | Legacy (no executor registered; kept for DB compat) |
-| `ca_rotation_check` | `0 3 * * *` | Check if managed CA needs rotation | | `version_check` | `0 */6 * * *` | Trigger version detection on agents | |
-`service_cert_check` | `0 */12 * * *` | Proactive certificate renewal for services |
+| Value | Default cron | Description |
+| --- | --- | --- |
+| `auth_cleanup` | `*/5 * * * *` | Clean expired auth flow state from DB |
+| `stale_lease_cleanup` | `*/5 * * * *` | Release stale MQTT client leases |
+| `event_cleanup` | `0 * * * *` | Legacy (no executor registered; kept for DB compat) |
+| `ca_rotation_check` | `0 3 * * *` | Check if managed CA needs rotation |
+| `version_check` | `0 */6 * * *` | Trigger version detection on agents |
+| `service_cert_check` | `0 */12 * * *` | Proactive certificate renewal for services |
 
 All six rows are seeded during the migration with `next_run_at = now`. The `event_cleanup` task type exists in
 the database for backward compatibility but has no registered executor — the `controller_events` table has been

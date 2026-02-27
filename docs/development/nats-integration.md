@@ -25,7 +25,7 @@ in `uptrakit-web-api`. It provides the NATS client, JetStream API, and consumer 
 
 ### Module structure
 
-```
+```text
 crates/ui/web-api/src/
 ├── notification_service.rs   # NotificationService (local + optional NATS)
 ├── nats_transport.rs         # NatsTransport (connect, publish, consumer)
