@@ -155,6 +155,44 @@ uptrakit-agent-ssh host update-sudoers my-server \
 
 For the security model, see [Sudoers Management](../security/sudoers-management.md).
 
+## Dynamic Reload: No Restart Required
+
+When the SSH agent daemon is running and connected to the controller, changes made
+via `host add`, `host bootstrap`, `host update`, or `host remove` are picked up
+**automatically within 10 seconds** — no daemon restart is needed.
+
+### How it works
+
+The daemon polls the local `ssh_hosts` table every 10 seconds. When it detects a change
+(new host, removed host, or updated `updated_at` timestamp), it:
+
+1. Evicts the affected SSH sessions from the connection pool.
+2. Sends an updated `ReportHosts` message to the controller, connecting via SSH to any
+   new or changed hosts to discover their `machine_id` and OS information.
+
+The controller processes `ReportHosts` idempotently, so sending it mid-session is safe.
+
+### Adding or updating a host
+
+After `host add`, `host bootstrap`, or `host update`, the running daemon will SSH into the
+affected host within 10 seconds, collect its `machine_id`, and report it to the controller.
+The host will appear in the controller UI without restarting the daemon.
+
+For `host update`, if the SSH credentials, hostname, or port changed, the old pool session
+is evicted and a new connection is established on the next tick.
+
+### Removing a host
+
+After `host remove`, the daemon evicts the pool session within 10 seconds and stops
+reporting the host in future `ReportHosts` messages. The host is no longer serviceable by
+this agent instance.
+
+> **Important:** Removing a host locally does not automatically delete it from the
+> controller's database. The controller will not route new `CheckVersions` or
+> `ExecuteUpdate` messages to a host it no longer has an active agent link for, but the
+> host record itself remains until an operator deletes it via the web UI or the
+> `DELETE /api/v1/hosts/{id}` API endpoint.
+
 ## Supported Key Types
 
 | Key Type | PEM Format | Notes |

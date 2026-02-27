@@ -49,6 +49,12 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 `report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`
 
+> **Note:** For the SSH agent, `report_hosts` is sent both at connect time and dynamically during a
+> session whenever the local `ssh_hosts` database changes (host added, removed, or updated). The
+> controller's `handle_report_hosts` is idempotent — repeated calls upsert hosts by `machine_id`
+> and are safe to process at any point during an authenticated session. See
+> [Dynamic Host Reload](../architecture/ssh-agent.md#dynamic-host-reload) for the full mechanism.
+
 ### MQTT-specific (service -> controller)
 
 `register`, `release_tenants`, `mqtt_client_status`, `mqtt_trigger_update`

@@ -21,6 +21,9 @@ The SSH agent is feature-complete for version checks and updates. The implementa
 - Runtime `SudoAwareCommandExecutor` wrapping that applies `sudo` based on stored host context — no hard-coded `sudo` in plugin commands
 - Host reporting via `ReportHosts` — on authenticated connect, the SSH agent collects system info
   from each enrolled host over SSH and reports it to the controller
+- Dynamic host reload — when the local `ssh_hosts` database changes (host added, updated, or
+  removed via CLI), the running daemon detects the change within 10 seconds and sends an updated
+  `ReportHosts` without requiring a restart (see [Dynamic Host Reload](#dynamic-host-reload))
 - Full version check and update execution over SSH, with in-flight update tracking and graceful shutdown (see [Version Check and Update Execution](#version-check-and-update-execution))
 
 UI configuration beyond the existing services API is not yet implemented.
@@ -404,9 +407,12 @@ A SIGHUP signal triggers a graceful restart (drain + reconnect) rather than a ha
 
 ## Host Reporting
 
-On authenticated WebSocket connect, the SSH agent reports host information for all enrolled SSH hosts to the controller via the `ReportHosts` message.
+The SSH agent sends `ReportHosts` to the controller in two situations:
 
-### Collection flow
+- **On connect** — immediately after the authenticated WebSocket session is established.
+- **On host-config change** — within 10 seconds of a local `ssh_hosts` database change (see [Dynamic Host Reload](#dynamic-host-reload)).
+
+### Collection flow (on connect)
 
 1. The SSH agent iterates over all hosts in its local SQLite database.
 2. For each host, it acquires a session from `SshConnectionPool` (establishing a new connection if none is
@@ -418,18 +424,87 @@ On authenticated WebSocket connect, the SSH agent reports host information for a
    - `hostname` — `hostname` command on the remote host
 3. `ip_address` is set to the SSH target's hostname/address from the local database (not collected via a remote command).
 4. The collected `HostInfo` structs are assembled into a `ReportHostsPayload` and sent to the controller as a `ReportHosts` message.
+5. A lightweight snapshot of `(id, updated_at)` pairs is saved to `host_snapshot` for change detection, and the periodic reload ticker is started.
 
 ### Controller processing
 
 - The controller calls `find_or_create_host_and_link()` for each `HostInfo` in the payload.
 - Host entities are created or updated (matched by `machine_id`) and linked to the SSH agent service via the `service_hosts` junction table.
 - The `ip_address` and `hostname` fields on the `Host` entity are populated from the `HostInfo` if present.
+- The operation is **idempotent** — sending `ReportHosts` multiple times during a session is safe and does not duplicate records.
 
 ### Error handling
 
 Errors connecting to or collecting info from individual hosts are logged and skipped. A failure
 on one host does not prevent reporting for the remaining hosts. If all hosts fail, the agent
 sends a `ReportHosts` message with an empty host list.
+
+## Dynamic Host Reload
+
+When the local `ssh_hosts` database changes (host added, removed, or updated via CLI), the
+running daemon detects the change within 10 seconds and sends an updated `ReportHosts` message
+to the controller — without requiring a restart or reconnection.
+
+### Mechanism
+
+A `reload_ticker` (`tokio::time::Interval`, 10 s, first tick deferred by 10 s after connect) is
+stored on `SshAgentHandler`. On each tick, the daemon queries the `ssh_hosts` table for
+`(id, updated_at)` pairs and compares them to a stored `host_snapshot`. Any difference (new
+row, removed row, or updated `updated_at`) triggers the reload sequence.
+
+The ticker is implemented as `SshAgentEvent::HostConfigChanged`, an arm in the same
+`poll_service_event` / `on_service_event` loop that drives in-flight update events:
+
+```rust
+enum SshAgentEvent {
+    Update(client::UpdateEvent),    // existing update events
+    HostConfigChanged,              // reload tick fired
+}
+```
+
+Two static helper methods (`poll_update`, `poll_reload_tick`) borrow separate fields of
+`SshAgentHandler` so the `select!` can poll both without a double-borrow of `self`.
+
+### Reload sequence
+
+When the snapshot differs:
+
+1. Compute the diff: `deleted_ids` (in previous snapshot but not current), `changed_ids`
+   (new or same id with updated `updated_at`).
+2. `pool.evict(host_id)` for each deleted or changed host — forces a fresh SSH connection on
+   next use, discarding stale sessions.
+3. Update `self.host_snapshot` to the current state.
+4. Load the full host list from the database.
+5. Call `client::build_reload_host_infos()` to build `Vec<HostInfo>`:
+   - **Known unchanged hosts** (non-empty `machine_id`, not in `changed_ids`): built
+     directly from DB values (`machine_id`, `ip_address = hostname`). No SSH needed.
+   - **New or changed hosts** (`machine_id` empty or in `changed_ids`): SSH-connect via
+     pool, collect OS info, persist `machine_id`, include in list. Hosts that fail SSH are
+     skipped with a warning.
+6. Send `ReportHosts` to the controller via the existing `conn.send()` path.
+
+### Timing
+
+The first reload tick fires `HOST_RELOAD_INTERVAL` (10 s) after `on_connected` completes, so
+it never overlaps with the initial full report. On reconnect, `on_connected` resets the ticker.
+
+### Host deletion on the controller side
+
+The controller's `handle_report_hosts` function only **adds/updates** hosts from the reported
+list — it does **not** remove `service_host` junction-table entries for hosts absent from the
+new payload. After the agent removes a host locally:
+
+- The pool session for that host is evicted immediately.
+- The agent's next `ReportHosts` no longer includes the deleted host, so the agent will not
+  service future `CheckVersions`/`ExecuteUpdate` messages for it (returning graceful errors
+  if the controller routes them anyway).
+- **The host record in the controller's database is not automatically deleted.** The operator
+  must separately delete the host via `DELETE /api/v1/hosts/{id}` (web UI or API) to fully
+  deactivate it on the controller side.
+
+This is intentional separation of concerns: the agent's local database and the controller's
+database are independent. The dynamic reload makes the agent "forget" the host quickly; the
+controller-side cleanup is a separate operator action.
 
 ## Crate Structure
 
@@ -441,10 +516,14 @@ crates/core/agent-ssh/
 ├── Cargo.toml
 ├── build.rs
 └── src/
-    ├── main.rs          # SshAgentHandler (ServiceHandler impl, in_flight_update field), entry point, master key init
+    ├── main.rs          # SshAgentHandler (ServiceHandler impl, in_flight_update, reload_ticker,
+    │                    # host_snapshot), SshAgentEvent enum, diff_host_snapshots(), entry point,
+    │                    # master key init
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
     ├── client.rs        # Authenticated loop; handle_check_versions_ssh(), handle_execute_update_ssh(),
-    │                    # handle_discover_software_ssh() — all wrap SshCommandExecutor with SudoAwareCommandExecutor
+    │                    # handle_discover_software_ssh(), build_reload_host_infos(),
+    │                    # report_hosts_after_config_change() — all wrap SshCommandExecutor with
+    │                    # SudoAwareCommandExecutor
     ├── error.rs         # Error types (rootcause + thiserror)
     ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
     ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH)
@@ -452,7 +531,8 @@ crates/core/agent-ssh/
     ├── ssh_target.rs    # SshTarget type with FromStr (parses [user@]host[:port] and ssh:// URLs, validates hostname syntax)
     ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command, LineBuffer
     ├── host_info.rs     # Remote host info collection over SSH (machine_id, os_type, os_version, architecture, hostname)
-    ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove, update_host_sudo_state, ...)
+    ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove,
+    │                    # update_host_sudo_state, list_host_snapshots, ...)
     ├── commands/
     │   ├── mod.rs         # Command module declarations
     │   ├── host.rs        # Host subcommand handlers (dispatch, SSH config resolution, formatting)
@@ -491,12 +571,12 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 
 ## Related Documentation
 
-- [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for CLI host management
+- [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for CLI host management, including dynamic reload behaviour
 - [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — detailed bootstrap workflow and troubleshooting
 - [Service Lifecycle](../development/service-lifecycle.md) — `ServiceHandler` trait
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) — secret storage, SSH session lifecycle, and threat model
 - [Sudoers Management](../security/sudoers-management.md) — sudoers generation, sudo policy, and operator guidance
-- [Wire Protocol](../api/wire-protocol.md) — `ssh_remote` capability in enrollment; `host_machine_id` routing field
+- [Wire Protocol](../api/wire-protocol.md) — `ssh_remote` capability in enrollment; `host_machine_id` routing field; `ReportHosts` mid-session semantics
 - [Services and Operations](../api/services-operations.md) — shared service management API
 - [Command Executor](../development/command-executor.md) — `CommandExecutor` trait, `privileged` flag, and `SudoAwareCommandExecutor`
 - [Plugin Guidelines](../development/plugin-guidelines.md) — `required_sudo_commands()` contract
