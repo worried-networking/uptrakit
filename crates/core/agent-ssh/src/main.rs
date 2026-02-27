@@ -14,7 +14,8 @@ mod ssh_transport;
 
 use clap::Parser;
 use rootcause::prelude::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
+use std::time::Duration;
 
 use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectReason};
 use uptrakit_service_sdk::{
@@ -23,6 +24,9 @@ use uptrakit_service_sdk::{
 };
 
 use cli::{Args, Commands};
+
+/// How often the daemon polls the local `ssh_hosts` table for changes.
+const HOST_RELOAD_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Initialize `tracing_subscriber` with a verbosity-aware filter.
 ///
@@ -73,11 +77,81 @@ enum InitError {
 
 type InitResult<T> = std::result::Result<T, rootcause::Report<InitError>>;
 
+// ---------------------------------------------------------------------------
+// Service event enum
+// ---------------------------------------------------------------------------
+
+/// Events produced by the SSH agent's service loop.
+///
+/// Extends the original `client::UpdateEvent` with a host-config-changed
+/// trigger so both sources of internal events flow through the same
+/// `poll_service_event` / `on_service_event` contract.
+enum SshAgentEvent {
+    /// Progress from an in-flight update task (output line or completion).
+    Update(client::UpdateEvent),
+    /// The host-config reload ticker fired; the handler will diff the DB
+    /// snapshot and send `ReportHosts` if anything changed.
+    HostConfigChanged,
+}
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
 struct SshAgentHandler {
     state_dir: std::path::PathBuf,
     local_db: Option<sea_orm::DatabaseConnection>,
     in_flight_update: Option<client::InFlightUpdate>,
     pool: ssh_pool::SshConnectionPool,
+    /// Periodic ticker for host-config change detection.
+    ///
+    /// `None` until the first successful `on_connected`; reset on every
+    /// reconnect so the first tick fires `HOST_RELOAD_INTERVAL` after connect,
+    /// not sooner.
+    reload_ticker: Option<tokio::time::Interval>,
+    /// Last-known snapshot of `(id, updated_at)` pairs from `ssh_hosts`.
+    ///
+    /// Used to detect additions, removals, and updates without a full model
+    /// load on every tick.  Populated in `on_connected` after
+    /// `report_enrolled_hosts` completes.
+    host_snapshot: Vec<host_ops::HostSnapshot>,
+}
+
+impl SshAgentHandler {
+    /// Drive an in-flight update to completion or the next output line.
+    ///
+    /// Returns `pending()` when no update is in flight, so the `select!` in
+    /// `poll_service_event` can safely poll this arm alongside the reload
+    /// ticker without a double-borrow of `self`.
+    async fn poll_update(
+        in_flight: &mut Option<client::InFlightUpdate>,
+    ) -> client::UpdateEvent {
+        if let Some(update) = in_flight {
+            tokio::select! {
+                biased;
+                Some(output_msg) = update.output_rx.recv() => {
+                    client::UpdateEvent::Output(output_msg)
+                }
+                result = &mut update.handle => {
+                    client::UpdateEvent::Completed(result)
+                }
+            }
+        } else {
+            std::future::pending::<client::UpdateEvent>().await
+        }
+    }
+
+    /// Wait for the next reload ticker tick.
+    ///
+    /// Returns `pending()` when the ticker has not yet been initialized (i.e.
+    /// before the first `on_connected`).
+    async fn poll_reload_tick(ticker: &mut Option<tokio::time::Interval>) -> tokio::time::Instant {
+        if let Some(t) = ticker {
+            t.tick().await
+        } else {
+            std::future::pending::<tokio::time::Instant>().await
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -85,7 +159,7 @@ impl ServiceHandler for SshAgentHandler {
     const DIR_NAME: &'static str = "agent-ssh";
     const SERVICE_LABEL: &'static str = "uptrakit-agent-ssh service";
 
-    type ServiceEvent = client::UpdateEvent;
+    type ServiceEvent = SshAgentEvent;
 
     async fn on_connected(
         &mut self,
@@ -100,8 +174,30 @@ impl ServiceHandler for SshAgentHandler {
         })?;
         tracing::debug!("local SSH host database initialized");
 
-        // Report enrolled hosts to controller.
+        // Report enrolled hosts to controller (full SSH-based report).
         client::report_enrolled_hosts(&local_db, conn, &self.pool).await;
+
+        // Initialize the host snapshot AFTER reporting so any machine_id
+        // updates written by report_enrolled_hosts are captured.
+        self.host_snapshot = match host_ops::list_host_snapshots(&local_db).await {
+            Ok(snapshot) => snapshot,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "failed to initialize host snapshot; dynamic reload will trigger \
+                     a full re-report on the first tick"
+                );
+                Vec::new()
+            }
+        };
+
+        // Start (or restart) the reload ticker.  First tick fires
+        // HOST_RELOAD_INTERVAL after connect so we do not double-report
+        // immediately after the initial report_enrolled_hosts.
+        let start = tokio::time::Instant::now() + HOST_RELOAD_INTERVAL;
+        let mut ticker = tokio::time::interval_at(start, HOST_RELOAD_INTERVAL);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        self.reload_ticker = Some(ticker);
 
         self.local_db = Some(local_db);
         Ok(())
@@ -144,18 +240,16 @@ impl ServiceHandler for SshAgentHandler {
     }
 
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {
-        if let Some(ref mut update) = self.in_flight_update {
-            tokio::select! {
-                biased;
-                Some(output_msg) = update.output_rx.recv() => {
-                    client::UpdateEvent::Output(output_msg)
-                }
-                result = &mut update.handle => {
-                    client::UpdateEvent::Completed(result)
-                }
+        // Borrow separate fields by name — Rust's field-projection rules allow
+        // both borrows simultaneously, sidestepping a double-borrow of `self`.
+        tokio::select! {
+            biased;
+            event = Self::poll_update(&mut self.in_flight_update) => {
+                SshAgentEvent::Update(event)
             }
-        } else {
-            std::future::pending::<Self::ServiceEvent>().await
+            _ = Self::poll_reload_tick(&mut self.reload_ticker) => {
+                SshAgentEvent::HostConfigChanged
+            }
         }
     }
 
@@ -164,22 +258,31 @@ impl ServiceHandler for SshAgentHandler {
         event: Self::ServiceEvent,
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
-        let Some(ref update) = self.in_flight_update else {
-            tracing::error!("received update event but no in-flight update exists");
-            return Ok(None);
-        };
-        let update_history_id = update.update_history_id;
-
         match event {
-            client::UpdateEvent::Output(output_msg) => {
-                client::send_update_output(conn, update_history_id, output_msg).await;
+            SshAgentEvent::Update(update_event) => {
+                let Some(ref update) = self.in_flight_update else {
+                    tracing::error!("received update event but no in-flight update exists");
+                    return Ok(None);
+                };
+                let update_history_id = update.update_history_id;
+
+                match update_event {
+                    client::UpdateEvent::Output(output_msg) => {
+                        client::send_update_output(conn, update_history_id, output_msg).await;
+                    }
+                    client::UpdateEvent::Completed(result) => {
+                        client::send_update_result(conn, update_history_id, result).await;
+                        self.in_flight_update = None;
+                    }
+                }
+                Ok(None)
             }
-            client::UpdateEvent::Completed(result) => {
-                client::send_update_result(conn, update_history_id, result).await;
-                self.in_flight_update = None;
+
+            SshAgentEvent::HostConfigChanged => {
+                self.handle_host_config_changed(conn).await;
+                Ok(None)
             }
         }
-        Ok(None)
     }
 
     fn capabilities(&self) -> BTreeSet<Capability> {
@@ -210,6 +313,139 @@ impl ServiceHandler for SshAgentHandler {
     }
 }
 
+impl SshAgentHandler {
+    /// React to a host-config reload tick.
+    ///
+    /// Queries the current `ssh_hosts` snapshot, diffs it against the stored
+    /// snapshot, evicts stale pool entries, and sends an updated `ReportHosts`
+    /// message if anything changed.  Returns without sending if the snapshot
+    /// is unchanged.
+    async fn handle_host_config_changed(&mut self, conn: &mut ControllerConnection) {
+        let db = match self.local_db.as_ref() {
+            Some(db) => db,
+            None => {
+                // Defensive: reload_ticker is None until on_connected, so this
+                // branch should never be reached in practice.
+                tracing::warn!(
+                    "host config reload tick fired before DB was initialized; skipping"
+                );
+                return;
+            }
+        };
+
+        let current_snapshot = match host_ops::list_host_snapshots(db).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "failed to list host snapshots during reload check; skipping"
+                );
+                return;
+            }
+        };
+
+        if current_snapshot == self.host_snapshot {
+            // Nothing changed — no-op.
+            return;
+        }
+
+        // Compute what changed.  Collect into owned Strings immediately so the
+        // borrows of `self.host_snapshot` and `current_snapshot` are released
+        // before we update the snapshot and call async methods.
+        let (deleted_ids, changed_ids) = {
+            let (d, c) = diff_host_snapshots(&self.host_snapshot, &current_snapshot);
+            let deleted: HashSet<String> = d.into_iter().map(str::to_string).collect();
+            let changed: HashSet<String> = c.into_iter().map(str::to_string).collect();
+            (deleted, changed)
+        };
+
+        // Evict pool entries for deleted and updated/new hosts so the next
+        // acquire establishes a fresh connection rather than reusing a stale
+        // or wrong-host session.
+        for id in &deleted_ids {
+            self.pool.evict(id).await;
+        }
+        for id in &changed_ids {
+            self.pool.evict(id).await;
+        }
+
+        // Commit the new snapshot before the async send so that a send failure
+        // does not cause us to re-send on the very next tick.
+        self.host_snapshot = current_snapshot;
+
+        // Load the full host list for building HostInfo.
+        let hosts = match host_ops::list_hosts(db).await {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "failed to list hosts for dynamic reload; skipping ReportHosts send"
+                );
+                return;
+            }
+        };
+
+        tracing::info!(
+            total_hosts = hosts.len(),
+            changed = changed_ids.len(),
+            deleted = deleted_ids.len(),
+            "host configuration changed — sending updated ReportHosts"
+        );
+
+        // Convert to &str for the client call.
+        let changed_ref: HashSet<&str> = changed_ids.iter().map(String::as_str).collect();
+        client::report_hosts_after_config_change(db, conn, &hosts, &changed_ref, &self.pool)
+            .await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot diff helper
+// ---------------------------------------------------------------------------
+
+/// Compute the difference between two host snapshots.
+///
+/// Returns `(deleted_ids, changed_ids)`:
+/// - `deleted_ids`: host IDs present in `prev` but absent from `curr`
+/// - `changed_ids`: host IDs that are new in `curr`, or present in both but
+///   with a different `updated_at`
+fn diff_host_snapshots<'a>(
+    prev: &'a [host_ops::HostSnapshot],
+    curr: &'a [host_ops::HostSnapshot],
+) -> (Vec<&'a str>, HashSet<&'a str>) {
+    let prev_map: std::collections::HashMap<&str, i64> = prev
+        .iter()
+        .map(|s| (s.id.as_str(), s.updated_at))
+        .collect();
+    let curr_ids: HashSet<&str> = curr.iter().map(|s| s.id.as_str()).collect();
+
+    let deleted: Vec<&str> = prev
+        .iter()
+        .filter(|s| !curr_ids.contains(s.id.as_str()))
+        .map(|s| s.id.as_str())
+        .collect();
+
+    let mut changed: HashSet<&str> = HashSet::new();
+    for snap in curr {
+        match prev_map.get(snap.id.as_str()) {
+            Some(&prev_ts) if prev_ts != snap.updated_at => {
+                changed.insert(snap.id.as_str());
+            }
+            None => {
+                // New host — needs SSH to discover machine_id.
+                changed.insert(snap.id.as_str());
+            }
+            _ => {}
+        }
+    }
+
+    (deleted, changed)
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown resolution
+// ---------------------------------------------------------------------------
+
 /// Map a [`ShutdownCause`] to the appropriate [`DisconnectReason`] and
 /// [`LoopOutcome`] for this service.
 ///
@@ -225,6 +461,10 @@ fn resolve_shutdown(cause: ShutdownCause) -> (DisconnectReason, LoopOutcome) {
         ShutdownCause::ServerRestarting => (DisconnectReason::Restart, LoopOutcome::Disconnected),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() {
@@ -293,6 +533,8 @@ async fn main() {
         local_db: None,
         in_flight_update: None,
         pool: ssh_pool::SshConnectionPool::new(),
+        reload_ticker: None,
+        host_snapshot: Vec::new(),
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent-ssh",
@@ -396,7 +638,7 @@ fn parse_master_key_hex(key_hex: &str) -> InitResult<[u8; 32]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_master_key_hex, read_master_key_hex};
+    use super::{diff_host_snapshots, host_ops, parse_master_key_hex, read_master_key_hex};
     use std::io::Write;
 
     #[test]
@@ -466,5 +708,64 @@ mod tests {
         let (reason, outcome) = resolve_shutdown(ShutdownCause::ServerRestarting);
         assert_eq!(reason, DisconnectReason::Restart);
         assert_eq!(outcome, LoopOutcome::Disconnected);
+    }
+
+    // ── snapshot diff tests ──────────────────────────────────────────────────
+
+    fn snap(id: &str, updated_at: i64) -> host_ops::HostSnapshot {
+        host_ops::HostSnapshot {
+            id: id.to_string(),
+            updated_at,
+        }
+    }
+
+    #[test]
+    fn snapshot_diff_no_change_is_noop() {
+        let prev = vec![snap("A", 100), snap("B", 200)];
+        let curr = prev.clone();
+        let (deleted, changed) = diff_host_snapshots(&prev, &curr);
+        assert!(deleted.is_empty(), "expected no deletions, got: {deleted:?}");
+        assert!(changed.is_empty(), "expected no changes, got: {changed:?}");
+    }
+
+    #[test]
+    fn snapshot_diff_detects_added_host() {
+        let prev = vec![snap("A", 100)];
+        let curr = vec![snap("A", 100), snap("B", 200)];
+        let (deleted, changed) = diff_host_snapshots(&prev, &curr);
+        assert!(deleted.is_empty(), "expected no deletions");
+        assert_eq!(changed.len(), 1, "expected one addition");
+        assert!(changed.contains("B"), "expected B in changed set");
+    }
+
+    #[test]
+    fn snapshot_diff_detects_removed_host() {
+        let prev = vec![snap("A", 100), snap("B", 200)];
+        let curr = vec![snap("A", 100)];
+        let (deleted, changed) = diff_host_snapshots(&prev, &curr);
+        assert_eq!(deleted.len(), 1, "expected one deletion");
+        assert!(deleted.contains(&"B"), "expected B in deleted set");
+        assert!(changed.is_empty(), "expected no additions or updates");
+    }
+
+    #[test]
+    fn snapshot_diff_detects_updated_host() {
+        let prev = vec![snap("A", 100), snap("B", 200)];
+        let curr = vec![snap("A", 100), snap("B", 999)];
+        let (deleted, changed) = diff_host_snapshots(&prev, &curr);
+        assert!(deleted.is_empty(), "expected no deletions");
+        assert_eq!(changed.len(), 1, "expected one update");
+        assert!(changed.contains("B"), "expected B in changed set");
+    }
+
+    #[test]
+    fn snapshot_diff_add_and_remove_simultaneously() {
+        let prev = vec![snap("A", 100), snap("B", 200)];
+        let curr = vec![snap("A", 100), snap("C", 300)];
+        let (deleted, changed) = diff_host_snapshots(&prev, &curr);
+        assert_eq!(deleted.len(), 1, "expected B deleted");
+        assert!(deleted.contains(&"B"));
+        assert_eq!(changed.len(), 1, "expected C added");
+        assert!(changed.contains("C"));
     }
 }
