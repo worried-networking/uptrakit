@@ -79,7 +79,8 @@ This directory holds audience-specific documentation split into five sections, p
 | [AI Guidelines](development/ai-guidelines.md) | Responsible AI usage policy for contributors and assistants. |
 | [CLI Output](development/cli-output.md) | CLI output formatting conventions and standards. |
 | [Commit Messages](development/commit-messages.md) | Conventional Commits format and examples. |
-| [Cross-Controller Communication](development/cross-controller-comm.md) | HA controller-to-controller event propagation. |
+| [Cross-Controller Communication](development/cross-controller-comm.md) | HA controller-to-controller event propagation via NATS JetStream. |
+| [NATS Integration](development/nats-integration.md) | NATS JetStream development guide: feature flags, architecture, testing. |
 | [Graceful Restart](development/graceful-restart.md) | Zero-downtime restart and shutdown behavior. |
 | [Quality Gates](development/quality-gates.md) | CI quality gate requirements for all changes. |
 | [Update Hooks](development/update-hooks.md) | Pre/post-update hook execution and configuration. |
@@ -100,6 +101,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Envoy](end-user/deployment/envoy.md) | Envoy reverse proxy configuration guidance. |
 | [HAProxy](end-user/deployment/haproxy.md) | HAProxy reverse proxy configuration guidance. |
 | [Caddy](end-user/deployment/caddy.md) | Caddy reverse proxy configuration guidance. |
+| [NATS](end-user/deployment/nats.md) | NATS JetStream deployment for multi-controller HA setups. |
 
 ## Additional Resources
 

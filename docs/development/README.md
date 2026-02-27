@@ -19,7 +19,8 @@ Uptrakit.
 | [CLI Output](cli-output.md) | CLI output formatting conventions and standards. |
 | [Commit Messages](commit-messages.md) | Conventional Commits format and examples. |
 | [Database Migrations](database-migrations.md) | Migration authoring guide: naming, skeleton, registration, testing, and backend feature flags. |
-| [Cross-Controller Communication](cross-controller-comm.md) | HA controller-to-controller event propagation. |
+| [Cross-Controller Communication](cross-controller-comm.md) | HA controller-to-controller event propagation via NATS JetStream. |
+| [NATS Integration](nats-integration.md) | NATS JetStream development guide: feature flags, architecture, testing. |
 | [Graceful Restart](graceful-restart.md) | Zero-downtime restart and shutdown behavior. |
 | [Quality Gates](quality-gates.md) | CI quality gate requirements for all changes. |
 | [Update Hooks](update-hooks.md) | Pre/post-update hook execution and configuration. |

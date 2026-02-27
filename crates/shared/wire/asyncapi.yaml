@@ -167,11 +167,12 @@ channels:
       mqttTriggerUpdate:
         $ref: "#/components/messages/mqttTriggerUpdate"
 
-  controllerOutbox:
-    address: controller_events
+  controllerEvents:
+    address: uptrakit.events.controller
     description: |
-      Cross-controller outbox channel backed by the `controller_events` table.
-      Not a WebSocket transport; used for controller-to-controller fanout.
+      Cross-controller event channel. When NATS JetStream is configured, events
+      are published to the `uptrakit.events.controller` subject for
+      controller-to-controller fanout. Without NATS, these events are local-only.
     messages:
       mqttClientCreated:
         $ref: "#/components/messages/mqttClientCreated"
@@ -547,25 +548,25 @@ operations:
   sendControllerOutboxMqttClientCreated:
     action: send
     channel:
-      $ref: "#/channels/controllerOutbox"
+      $ref: "#/channels/controllerEvents"
     messages:
-      - $ref: "#/channels/controllerOutbox/messages/mqttClientCreated"
-    summary: Controller writes outbox event for new MQTT client leases
+      - $ref: "#/channels/controllerEvents/messages/mqttClientCreated"
+    summary: Controller publishes event for new MQTT client leases
     description: |
       When a new MQTT client is created and no local MQTT service is connected,
-      the controller writes an outbox event so another controller instance can
-      lease the client.
+      the controller publishes an event to NATS (when configured) so another
+      controller instance can lease the client.
 
   receiveControllerOutboxMqttClientCreated:
     action: receive
     channel:
-      $ref: "#/channels/controllerOutbox"
+      $ref: "#/channels/controllerEvents"
     messages:
-      - $ref: "#/channels/controllerOutbox/messages/mqttClientCreated"
-    summary: Controller receives outbox event for new MQTT client leases
+      - $ref: "#/channels/controllerEvents/messages/mqttClientCreated"
+    summary: Controller receives event for new MQTT client leases
     description: |
-      A controller polls the outbox table and consumes this event to attempt
-      leasing the newly created MQTT client to its least busy local instance.
+      A controller consumes this event from NATS to attempt leasing the newly
+      created MQTT client to its least busy local instance.
 
   receiveSoftwareStates:
     action: receive
@@ -580,7 +581,7 @@ operations:
       items of the tenant. The MQTT service uses this to publish Home Assistant
       discovery topics and state topics for the broker.
 
-      Safe to write to the outbox (contains no credentials).
+      Safe for cross-controller delivery via NATS (contains no credentials).
 
   sendMqttTriggerUpdate:
     action: send
@@ -852,7 +853,7 @@ components:
     mqttClientCreated:
       name: mqtt_client_created
       title: MQTT Client Created Message
-      summary: Controller outbox event for new MQTT client leases
+      summary: Controller event for new MQTT client leases
       contentType: application/json
       payload:
         $ref: "#/components/schemas/mqttClientCreatedPayload"

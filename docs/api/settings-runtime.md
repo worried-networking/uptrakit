@@ -395,10 +395,10 @@ MQTT services use the unified service entity:
 | `crates/shared/service-sdk/` | `uptrakit-service-sdk` crate: shared service SDK — enrollment, identity, TLS (`TofuVerifier`), CA bootstrap (with `ca_pem_fingerprint()` and `--tofu-fingerprint` pinning), WebSocket protocol, `ControllerConnection`, `Backoff`, and CLI args |
 | `crates/ui/web-api/src/mqtt_client_store.rs` | MQTT client config CRUD store |
 | `crates/ui/web-api/src/service_connections.rs` | `ServiceConnectionRegistry` for all connected services (with `CancellationToken`-based connection deduplication) |
-| `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — cross-controller notification outbox |
-| `crates/ui/web-api/src/event_poller.rs` | `EventPoller` — background poller for cross-controller events |
+| `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — local delivery + optional NATS cross-controller publish |
+| `crates/ui/web-api/src/nats_transport.rs` | `NatsTransport` — NATS JetStream transport (feature-gated) |
+| `crates/ui/web-api/src/event_delivery.rs` | Shared delivery routing logic |
 | `crates/ui/web-api/src/mqtt_lease_coordinator.rs` | Centralized lease management logic |
-| `crates/shared/db/src/entity/controller_event.rs` | SeaORM entity for the notification outbox |
 | `crates/ui/web-api/src/routes/settings_mqtt.rs` | MQTT config API route handlers |
 | `crates/ui/web-api/src/routes/service_ws/mod.rs` | Unified WebSocket entry point (`/api/v1/ws/service`), dispatch, and connection setup |
 | `crates/ui/web-api/src/routes/service_ws/protocol.rs` | Shared WS protocol utilities (serialization, rate limiting, types) |

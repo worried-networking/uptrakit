@@ -413,8 +413,8 @@ Key invariants:
 2. **State push is controller-initiated.** The controller sends `SoftwareStates` (wire type
    `software_states`) to MQTT services whenever version data changes (version check completed, update
    result received). The MQTT service stores the states in memory and publishes to the broker.
-3. **`SoftwareStates` is safe for the outbox.** It contains no credentials and is written to the
-   cross-controller outbox with `target_capability = "mqtt_bridge"` so only MQTT services receive it.
+3. **`SoftwareStates` is safe for cross-controller delivery.** It contains no credentials and is published
+   to NATS (when configured) with `target_capability = "mqtt_bridge"` so only MQTT services receive it.
 4. **Reconnect resilience.** On every `ConnAck` the MQTT service emits a `Reconnected` event, causing
    `TenantManager` to republish all discovery configs and state topics from the in-memory cache.
 5. **HA restart resilience.** HA publishes `"online"` to `{ha_discovery_prefix}/status` on startup
@@ -452,7 +452,7 @@ All topics use the MQTT client's `topic_prefix` field.
 | `crates/core/mqtt/src/mqtt_client.rs` | `MqttServiceEvent` enum, `publish_retained`, `subscribe_topic`, HA status topic handling |
 | `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler |
 | `crates/ui/web-api/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items with per-host version data |
-| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + outbox write) |
+| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish) |
 | `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` handler; states push after `TenantAssignments`, `VersionCheckResults`, and `UpdateResult` |
 | `crates/ui/web-api/src/queries/update_triggers.rs` | `trigger_update_for_host` shared by REST and MQTT WS handlers |
 | `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide |
@@ -541,7 +541,9 @@ The `ServiceHandler::SERVICE_TYPE` constant has been removed from the service SD
 
 #### Controller events
 
-The `controller_events` table column `target_service_type` has been renamed to `target_capability`.
+The `controller_events` DB table has been dropped. Cross-controller event routing now uses NATS JetStream
+(feature-gated behind the `nats` Cargo feature). When NATS is not configured, the controller operates in
+single-instance mode with local-only delivery.
 
 #### REST API
 
@@ -563,7 +565,8 @@ The frontend filters services by capability instead of type and displays `servic
 | `crates/shared/service-sdk/src/connection.rs` | `agreed_capabilities` field + accessors |
 | `crates/shared/service-sdk/src/event_loop.rs` | Capability intersection in `ServiceSettings` handler |
 | `crates/ui/web-api/src/routes/service_ws/protocol.rs` | `controller_capabilities()`, `ServiceSettingsPayload` construction |
-| `crates/shared/db/src/entity/controller_event.rs` | `target_capability` column |
+| `crates/ui/web-api/src/nats_transport.rs` | NATS JetStream transport (feature-gated) |
+| `crates/ui/web-api/src/event_delivery.rs` | Shared delivery routing logic |
 | `crates/shared/wire/asyncapi.yaml` | Schema for `capabilities` arrays in messages |
 | `docs/api/wire-protocol.md` | Full capability negotiation documentation |
 
@@ -775,6 +778,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [CLI Output Formatting](docs/development/cli-output.md)
 - [Graceful Restart](docs/development/graceful-restart.md)
 - [Cross-Controller Communication](docs/development/cross-controller-comm.md)
+- [NATS Integration](docs/development/nats-integration.md)
 - [Coding Standards](docs/development/coding-standards.md)
 - [Error Handling](docs/development/error-handling.md)
 - [Testing Expectations](docs/development/testing.md)

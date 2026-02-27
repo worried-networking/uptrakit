@@ -503,8 +503,8 @@ fields are included in the config hash computation for change detection.
 ## `software_states` Payload
 
 The controller pushes this message to all locally connected MQTT services for a tenant whenever version
-data changes (e.g. after a version check or an update completes). It is also written to the outbox for
-cross-controller delivery (contains no credentials). MQTT services filter by `tenant_id`.
+data changes (e.g. after a version check or an update completes). It is also published to NATS (when
+configured) for cross-controller delivery (contains no credentials). MQTT services filter by `tenant_id`.
 
 ```json
 {

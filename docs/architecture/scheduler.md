@@ -36,11 +36,13 @@ One task per type per tenant |
 ### Task types
 
 | Value | Default cron | Description | | --- | --- | --- | | `auth_cleanup` | `*/5 * * * *` | Clean expired auth flow state from DB | |
-`stale_lease_cleanup` | `*/5 * * * *` | Release stale MQTT client leases | | `event_cleanup` | `0 * * * *` | Delete old controller events (24h TTL) |
+`stale_lease_cleanup` | `*/5 * * * *` | Release stale MQTT client leases | | `event_cleanup` | `0 * * * *` | Legacy (no executor registered; kept for DB compat) |
 | `ca_rotation_check` | `0 3 * * *` | Check if managed CA needs rotation | | `version_check` | `0 */6 * * *` | Trigger version detection on agents | |
 `service_cert_check` | `0 */12 * * *` | Proactive certificate renewal for services |
 
-All six rows are seeded during the migration with `next_run_at = now`.
+All six rows are seeded during the migration with `next_run_at = now`. The `event_cleanup` task type exists in
+the database for backward compatibility but has no registered executor — the `controller_events` table has been
+dropped in favour of [NATS JetStream](../development/cross-controller-comm.md).
 
 ## HA Claim Mechanism
 
@@ -69,7 +71,6 @@ crates/core/controller/src/scheduler/
         mod.rs
         auth_cleanup.rs
         stale_lease_cleanup.rs
-        event_cleanup.rs
         ca_rotation_check.rs
         version_check.rs
         service_cert_check.rs
@@ -103,11 +104,6 @@ Calls `cleanup_expired()` on all DB-backed auth flow stores: `OidcFlowStore`, `A
 Creates a `MqttLeaseCoordinator` and calls `cleanup_stale_leases()` to release MQTT client leases that have been held without heartbeat for longer
 than the stale threshold.
 
-### EventCleanupExecutor
-
-Deletes controller events older than 24 hours (`EVENT_CLEANUP_TTL_HOURS`). This logic was extracted from `EventPoller::cleanup_old_events()` -- the
-event poller itself only handles polling now.
-
 ### CaRotationCheckExecutor
 
 Checks `pki::should_rotate_ca()` against the current CA snapshot. If rotation is needed, fires the existing `ca_rotation_trigger` (`Arc<Notify>`). The
@@ -129,14 +125,14 @@ messages to the owning services via `NotificationService`.
 ### Moved to the scheduler (runs on exactly one controller at a time)
 
 | Task | Previously | Now | | --- | --- | --- | | Auth state cleanup | Inline 5-min interval in `main.rs` | `AuthCleanupExecutor` | | MQTT stale lease
-cleanup | No dedicated loop | `StaleLeaseCleanupExecutor` | | Controller event cleanup | Inside `EventPoller::run()` | `EventCleanupExecutor` | | CA
+cleanup | No dedicated loop | `StaleLeaseCleanupExecutor` | | CA
 rotation check | Inline 24h interval in `main.rs` | `CaRotationCheckExecutor` | | Version checking | Not implemented | `VersionCheckExecutor` | |
 Service cert renewal check | Not implemented | `ServiceCertCheckExecutor` |
 
 ### Stays as per-controller intervals (must run on every controller)
 
 | Task | Reason | | --- | --- | | Settings version check (30s) | In-memory cache sync | | CA state reload (30s) | CA cache sync | | CRL manager (60s +
-event-driven) | Security-critical TLS config | | Event poller (1s) | Cross-controller messaging backbone | | Server cert renewal (24h) |
+event-driven) | Security-critical TLS config | | NATS consumer (when configured) | Cross-controller messaging backbone | | Server cert renewal (24h) |
 Per-controller disk cert | | Token denylist purge (5min) | In-memory, per-instance | | Ping/pong (agent/MQTT) | Connection keepalive | | CA rotation
 execution | Listens on `ca_rotation_trigger`, needs local key store |
 
@@ -161,7 +157,7 @@ All endpoints require the `ManageSoftware` permission.
 
 ## Related Documentation
 
-- [Cross-Controller Communication](../development/cross-controller-comm.md) -- outbox pattern used by `NotificationService`
+- [Cross-Controller Communication](../development/cross-controller-comm.md) -- NATS-based cross-controller messaging
 - [HTTP Web API](../api/http-web-api.md) -- REST endpoint documentation
 - [Services and Operations](../api/services-operations.md) -- version check and cert renewal flows
 - [Security Architecture](../security/security-architecture.md) -- defense-in-depth principles

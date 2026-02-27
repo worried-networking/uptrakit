@@ -124,8 +124,8 @@ former per-type registration and broadcast paths.
 ### Database schema
 
 - `services.capabilities` -- JSON text column holding a serialized `Vec<Capability>` (e.g. `["software_discovery","update_hooks","graceful_shutdown"]`).
-- `controller_events.target_capability` -- replaces the former `target_service_type` column; stores the snake_case capability string used to
-  route the event to the correct set of connected services.
+- Cross-controller event routing uses capability strings (`"software_discovery"`, `"mqtt_bridge"`, etc.) via NATS
+  JetStream subjects when NATS is configured. See [Cross-Controller Communication](docs/development/cross-controller-comm.md).
 
 ### REST API
 
