@@ -18,4 +18,8 @@
 
 set -eu
 
-exec env PHS_SILENT=1 /usr/bin/update
+# TERM=xterm ensures terminal commands like `clear` succeed over a
+# non-interactive SSH channel (no TERM set → tput fails; TERM=dumb →
+# no clear capability → exit 1 under set -e).  The escape codes are
+# harmless in the captured output.
+exec env PHS_SILENT=1 TERM=xterm /usr/bin/update
