@@ -219,7 +219,6 @@ pub async fn update_host_machine_id(
 
     let mut model: ActiveModel = host.into();
     model.machine_id = Set(machine_id.to_string());
-    model.updated_at = Set(now_unix_timestamp());
     model.update(db).await.context_to::<Error>()?;
     Ok(())
 }
@@ -613,6 +612,49 @@ mod tests {
             .await
             .expect("find_host_by_machine_id");
         assert!(result.is_none());
+    }
+
+    /// Regression test: `update_host_machine_id()` must NOT bump `updated_at`.
+    ///
+    /// The `machine_id` is runtime-discovered metadata (read from the remote
+    /// host's `/etc/machine-id`), not user configuration. Bumping `updated_at`
+    /// here caused the dynamic-reload loop to re-detect the host as "changed"
+    /// every tick, leading to infinite reconnect cycles.
+    #[tokio::test]
+    async fn update_host_machine_id_does_not_change_updated_at() {
+        let (_dir, db) = setup_db().await;
+
+        let host = add_host(
+            &db,
+            add_params("mid-ts", "10.0.0.50", 22, "root", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add_host");
+
+        let before = list_host_snapshots(&db)
+            .await
+            .expect("snapshots")
+            .into_iter()
+            .find(|s| s.id == host.id)
+            .expect("snapshot present");
+
+        // Set machine_id — this must NOT change updated_at.
+        update_host_machine_id(&db, &host.id, "machine-id-value")
+            .await
+            .expect("update_host_machine_id");
+
+        let after = list_host_snapshots(&db)
+            .await
+            .expect("snapshots")
+            .into_iter()
+            .find(|s| s.id == host.id)
+            .expect("snapshot present");
+
+        assert_eq!(
+            before.updated_at, after.updated_at,
+            "update_host_machine_id() must not bump updated_at — it is runtime metadata, \
+             not user configuration; bumping it causes infinite reload loops"
+        );
     }
 
     #[tokio::test]
