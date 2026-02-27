@@ -1052,7 +1052,13 @@ mod tests {
 
         match &args.command {
             Some(Commands::Host {
-                command: HostCommands::UpdateSudoers { name_or_id, allow_all, dry_run, .. },
+                command:
+                    HostCommands::UpdateSudoers {
+                        name_or_id,
+                        allow_all,
+                        dry_run,
+                        ..
+                    },
             }) => {
                 assert_eq!(name_or_id, "my-server");
                 assert!(!allow_all);
@@ -1119,7 +1125,10 @@ mod tests {
 
         match &args.command {
             Some(Commands::Host {
-                command: HostCommands::UpdateSudoers { allow_all, dry_run, .. },
+                command:
+                    HostCommands::UpdateSudoers {
+                        allow_all, dry_run, ..
+                    },
             }) => {
                 assert!(*allow_all);
                 assert!(*dry_run);

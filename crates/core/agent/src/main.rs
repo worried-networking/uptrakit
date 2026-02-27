@@ -6,9 +6,7 @@ use clap::Parser;
 use rootcause::prelude::*;
 use std::collections::BTreeSet;
 
-use uptrakit_internal_wire::{
-    Capability, ControllerMessage, ReportHostsPayload, ServiceMessage,
-};
+use uptrakit_internal_wire::{Capability, ControllerMessage, ReportHostsPayload, ServiceMessage};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     ShutdownCause, default_resolve_shutdown,
@@ -197,4 +195,3 @@ async fn main() {
     )
     .await;
 }
-

@@ -260,9 +260,9 @@ mod tests {
         let msg =
             ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
                 ca_bundle_pem: "pem".to_string(),
-            },
-        );
-        let result = deliver_event(&registry, &db, None, None, Some("software_discovery"), msg).await;
+            });
+        let result =
+            deliver_event(&registry, &db, None, None, Some("software_discovery"), msg).await;
         assert!(result);
     }
 }

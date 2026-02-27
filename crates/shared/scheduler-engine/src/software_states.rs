@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use uptrakit_internal_wire::{
     MqttSoftwareStateHostEntry, MqttSoftwareStateItem, MqttSoftwareStatesPayload,
 };
-use uptrakit_shared_types::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, software_item};
+use uptrakit_shared_types::SoftwareDiscoveryState;
 use uuid::Uuid;
 
 /// Lightweight projection used to bulk-load host-software-item link data.

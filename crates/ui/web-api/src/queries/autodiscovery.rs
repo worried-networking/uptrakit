@@ -20,11 +20,11 @@ use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::DiscoveryTarget;
 use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload};
-use uptrakit_shared_types::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
     autodiscovery_ignore, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
     software_item,
 };
+use uptrakit_shared_types::SoftwareDiscoveryState;
 use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, DiscardDiscoveredResponse,
 };
@@ -822,8 +822,8 @@ mod tests {
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
         PluginRole, PluginType,
     };
-    use uptrakit_shared_types::SoftwareDiscoveryState;
     use uptrakit_shared_db::entity::{host, plugin_config, tenant};
+    use uptrakit_shared_types::SoftwareDiscoveryState;
 
     async fn setup_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");

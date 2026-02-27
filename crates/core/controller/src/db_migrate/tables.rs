@@ -227,10 +227,12 @@ where
     E::Model: IntoActiveModel<E::ActiveModel> + Send + Sync + 'static,
     E::ActiveModel: ActiveModelTrait<Entity = E> + ActiveModelBehavior + Send + 'static,
 {
-    let total = E::find()
-        .count(src)
-        .await
-        .map_err(|db_err| report!(DbMigrateError::TableOp { table: name, db_err }))?;
+    let total = E::find().count(src).await.map_err(|db_err| {
+        report!(DbMigrateError::TableOp {
+            table: name,
+            db_err
+        })
+    })?;
 
     let mut copied = 0u64;
     let mut offset = 0u64;
@@ -241,19 +243,29 @@ where
             .limit(batch_size)
             .all(src)
             .await
-            .map_err(|db_err| report!(DbMigrateError::TableOp { table: name, db_err }))?;
+            .map_err(|db_err| {
+                report!(DbMigrateError::TableOp {
+                    table: name,
+                    db_err
+                })
+            })?;
 
         if batch.is_empty() {
             break;
         }
 
         let n = batch.len() as u64;
-        let active: Vec<_> = batch.into_iter().map(IntoActiveModel::into_active_model).collect();
+        let active: Vec<_> = batch
+            .into_iter()
+            .map(IntoActiveModel::into_active_model)
+            .collect();
 
-        E::insert_many(active)
-            .exec(dst)
-            .await
-            .map_err(|db_err| report!(DbMigrateError::TableOp { table: name, db_err }))?;
+        E::insert_many(active).exec(dst).await.map_err(|db_err| {
+            report!(DbMigrateError::TableOp {
+                table: name,
+                db_err
+            })
+        })?;
 
         copied += n;
         offset += n;
@@ -274,7 +286,12 @@ async fn clean_table<E: EntityTrait>(name: &'static str, dst: &DatabaseConnectio
         .exec(dst)
         .await
         .map(|_| ())
-        .map_err(|db_err| report!(DbMigrateError::TableOp { table: name, db_err }))
+        .map_err(|db_err| {
+            report!(DbMigrateError::TableOp {
+                table: name,
+                db_err
+            })
+        })
 }
 
 /// Verify row count matches between `src` and `dst` for one entity table.
@@ -287,17 +304,25 @@ where
     E: EntityTrait + 'static,
     E::Model: Send + Sync + 'static,
 {
-    let src_count = E::find()
-        .count(src)
-        .await
-        .map_err(|db_err| report!(DbMigrateError::TableOp { table: name, db_err }))?;
-    let dst_count = E::find()
-        .count(dst)
-        .await
-        .map_err(|db_err| report!(DbMigrateError::TableOp { table: name, db_err }))?;
+    let src_count = E::find().count(src).await.map_err(|db_err| {
+        report!(DbMigrateError::TableOp {
+            table: name,
+            db_err
+        })
+    })?;
+    let dst_count = E::find().count(dst).await.map_err(|db_err| {
+        report!(DbMigrateError::TableOp {
+            table: name,
+            db_err
+        })
+    })?;
 
     if src_count != dst_count {
-        bail!(DbMigrateError::Mismatch { table: name, src: src_count, dst: dst_count });
+        bail!(DbMigrateError::Mismatch {
+            table: name,
+            src: src_count,
+            dst: dst_count
+        });
     }
 
     Ok(src_count)
@@ -309,6 +334,10 @@ mod tests {
 
     #[test]
     fn copy_order_has_all_34_tables() {
-        assert_eq!(COPY_ORDER.len(), 34, "COPY_ORDER must list all 34 app tables");
+        assert_eq!(
+            COPY_ORDER.len(),
+            34,
+            "COPY_ORDER must list all 34 app tables"
+        );
     }
 }

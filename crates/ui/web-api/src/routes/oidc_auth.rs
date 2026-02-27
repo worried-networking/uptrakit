@@ -26,9 +26,9 @@ use sea_orm::{
 use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
-use uptrakit_shared_types::MaskedEmail;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link, user_role};
+use uptrakit_shared_types::MaskedEmail;
 
 use crate::auth::AuthMethod;
 use uptrakit_web_api_types::SecretString;

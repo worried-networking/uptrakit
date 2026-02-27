@@ -1,9 +1,7 @@
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{
-    api_rate_limit, pending_device_flow, scheduled_task,
-};
 use uptrakit_shared_db::entity::prelude::*;
+use uptrakit_shared_db::entity::{api_rate_limit, pending_device_flow, scheduled_task};
 
 use crate::executor::TaskExecutor;
 

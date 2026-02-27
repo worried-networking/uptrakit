@@ -419,7 +419,9 @@ async fn enroll_service(
         friendly_name: &payload.friendly_name,
         enrollment_token: payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
         ip_address: client_ip,
-        capabilities_json: uptrakit_internal_wire::service_profile::serialize_capabilities(&payload.capabilities),
+        capabilities_json: uptrakit_internal_wire::service_profile::serialize_capabilities(
+            &payload.capabilities,
+        ),
     })
     .await;
 

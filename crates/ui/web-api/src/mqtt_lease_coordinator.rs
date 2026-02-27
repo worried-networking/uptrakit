@@ -745,8 +745,8 @@ mod tests {
     };
     use std::collections::BTreeSet;
     use uptrakit_internal_wire::Capability;
-    use uptrakit_shared_types::MqttTransport;
     use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease, tenant};
+    use uptrakit_shared_types::MqttTransport;
 
     fn mqtt_caps() -> BTreeSet<Capability> {
         BTreeSet::from([Capability::GracefulShutdown, Capability::MqttBridge])

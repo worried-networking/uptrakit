@@ -458,8 +458,7 @@ mod tests {
 
     #[test]
     fn default_resolve_shutdown_terminate() {
-        let (reason, outcome) =
-            default_resolve_shutdown(ShutdownCause::Signal(Signal::Terminate));
+        let (reason, outcome) = default_resolve_shutdown(ShutdownCause::Signal(Signal::Terminate));
         assert_eq!(reason, DisconnectReason::Shutdown);
         assert_eq!(outcome, LoopOutcome::Shutdown);
     }

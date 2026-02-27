@@ -468,10 +468,7 @@ mod tests {
         struct TrackingExecutor(std::sync::Arc<std::sync::atomic::AtomicBool>);
         #[async_trait::async_trait]
         impl TaskExecutor for TrackingExecutor {
-            async fn execute(
-                &self,
-                _task: &scheduled_task::Model,
-            ) -> crate::error::Result<()> {
+            async fn execute(&self, _task: &scheduled_task::Model) -> crate::error::Result<()> {
                 self.0.store(true, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
             }

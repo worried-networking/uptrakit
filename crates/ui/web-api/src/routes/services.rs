@@ -373,6 +373,7 @@ pub async fn merge_service(
 mod tests {
     use super::*;
     use crate::ServiceCredentialSources;
+    use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
@@ -387,11 +388,7 @@ mod tests {
         ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
     };
     use time::OffsetDateTime;
-    use crate::auth::AuthMethod;
-    use uptrakit_shared_db::entity::{
-        prelude::Service,
-        service, tenant,
-    };
+    use uptrakit_shared_db::entity::{prelude::Service, service, tenant};
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");
@@ -528,7 +525,8 @@ mod tests {
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
             credential_sources: ServiceCredentialSources::default(),
-            update_output_broadcaster: crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
+            update_output_broadcaster:
+                crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
         })
     }
 

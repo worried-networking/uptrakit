@@ -45,10 +45,7 @@ pub async fn tail(params: TailParams<'_>) -> Result<TailResult> {
     // For SSE we don't want a request timeout — the connection is long-lived.
     let client = authenticated_client(params.server, params.token, params.insecure, None)?;
 
-    eprintln!(
-        "Tailing update output for {} ...",
-        params.update_history_id
-    );
+    eprintln!("Tailing update output for {} ...", params.update_history_id);
 
     let stream = client
         .stream_update_output(params.update_history_id)

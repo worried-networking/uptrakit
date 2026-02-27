@@ -13,13 +13,13 @@ use async_trait::async_trait;
 #[cfg(feature = "daemon")]
 use futures_util::StreamExt;
 use rootcause::prelude::*;
+#[cfg(not(feature = "daemon"))]
+use uptrakit_plugin_infrastructure_core::UpdateOutputLine;
 #[cfg(feature = "daemon")]
 use uptrakit_plugin_infrastructure_core::command::send_output;
 use uptrakit_plugin_infrastructure_core::mpsc;
 #[cfg(feature = "daemon")]
 use uptrakit_plugin_infrastructure_core::{OutputStreamType, UpdateOutputLine};
-#[cfg(not(feature = "daemon"))]
-use uptrakit_plugin_infrastructure_core::UpdateOutputLine;
 
 use crate::config::DockerAuth;
 use crate::error::{DockerError, Result};

@@ -112,7 +112,12 @@ impl NatsTransport {
         msg: ControllerMessage,
     ) {
         self.conn
-            .publish(source_controller_id, target_service_id, target_capability, msg)
+            .publish(
+                source_controller_id,
+                target_service_id,
+                target_capability,
+                msg,
+            )
             .await;
     }
 
@@ -357,7 +362,8 @@ mod tests {
         let msg = uptrakit_internal_wire::ControllerMessage::CaBundleUpdated(
             uptrakit_internal_wire::CaBundleUpdatedPayload {
                 ca_bundle_pem: "test-pem".to_string(),
-            });
+            },
+        );
         transport_a
             .publish(controller_a, None, None, msg.clone())
             .await;

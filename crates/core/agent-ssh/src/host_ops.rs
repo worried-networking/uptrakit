@@ -653,7 +653,13 @@ mod tests {
 
         add_host(
             &db,
-            add_params("host-22", "srv.example.com", 22, "uptrakit", SshKeyType::Ed25519),
+            add_params(
+                "host-22",
+                "srv.example.com",
+                22,
+                "uptrakit",
+                SshKeyType::Ed25519,
+            ),
         )
         .await
         .expect("add host-22");

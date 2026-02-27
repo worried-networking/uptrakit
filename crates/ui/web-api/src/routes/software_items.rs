@@ -23,11 +23,11 @@ use uptrakit_command::{CommandOutput, CommandSpec, UpdateOutputLine};
 use uptrakit_plugin_infrastructure_registry::{
     CommandExecutor, PluginCapability, PluginRegistry, PluginType,
 };
-use uptrakit_shared_types::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
     service_host, software_item,
 };
+use uptrakit_shared_types::SoftwareDiscoveryState;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 

@@ -166,7 +166,13 @@ mod tests {
 
         let now = OffsetDateTime::now_utc();
         broadcaster
-            .send_line(id, line_id, "hello\n".to_string(), OutputStreamType::Stdout, now)
+            .send_line(
+                id,
+                line_id,
+                "hello\n".to_string(),
+                OutputStreamType::Stdout,
+                now,
+            )
             .await;
 
         let event = rx.recv().await.unwrap();

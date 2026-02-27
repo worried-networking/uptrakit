@@ -1361,14 +1361,13 @@ async fn run(cli: Cli) -> error::Result<()> {
                 output::print_output(format, &resp)?;
 
                 if follow {
-                    let tail_result =
-                        commands::tail::tail(commands::tail::TailParams {
-                            update_history_id: &resp.update_history_id,
-                            server: cli.server.as_deref(),
-                            token: cli.token.as_deref(),
-                            insecure,
-                        })
-                        .await?;
+                    let tail_result = commands::tail::tail(commands::tail::TailParams {
+                        update_history_id: &resp.update_history_id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                    })
+                    .await?;
                     std::process::exit(tail_result.exit_code());
                 }
             }

@@ -100,11 +100,7 @@ fn parse_typed_event(
         "completed" => {
             let parsed: std::result::Result<UpdateCompletedSSE, _> =
                 serde_json::from_str(&event.data);
-            Some(
-                parsed
-                    .map(UpdateOutputEvent::Completed)
-                    .map_err(Into::into),
-            )
+            Some(parsed.map(UpdateOutputEvent::Completed).map_err(Into::into))
         }
         _ => {
             // Unknown event types (e.g. keep-alive comments) are silently skipped.

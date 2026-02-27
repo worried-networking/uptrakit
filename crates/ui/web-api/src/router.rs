@@ -380,11 +380,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::scheduler::trigger_scheduled_task))
         .routes(routes!(crate::routes::update_history::list_update_history))
         .routes(routes!(crate::routes::update_history::get_update_history))
-        .routes(routes!(
-            crate::routes::update_history::stream_update_output
-        ))
+        .routes(routes!(crate::routes::update_history::stream_update_output))
         // Autodiscovery
-        .routes(routes!(crate::routes::software_items::approve_software_item))
+        .routes(routes!(
+            crate::routes::software_items::approve_software_item
+        ))
         .routes(routes!(crate::routes::hosts::discover_host))
         .routes(routes!(crate::routes::hosts::discard_host_discovered))
         .routes(routes!(
@@ -444,7 +444,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::oidc_auth::oidc_callback))
         .routes(routes!(crate::routes::oidc_auth::oidc_link))
         .routes(routes!(crate::routes::oidc_auth::oidc_exchange))
-        .routes(routes!(crate::routes::oidc_auth::oidc_complete_registration));
+        .routes(routes!(
+            crate::routes::oidc_auth::oidc_complete_registration
+        ));
 
     let (api_router, api) = base_router.split_for_parts();
 

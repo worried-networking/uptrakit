@@ -64,8 +64,7 @@ async fn resolve_host(
             )))
         })?;
 
-        let matches =
-            host_ops::find_hosts_by_hostname(db, &target.hostname, target.port).await?;
+        let matches = host_ops::find_hosts_by_hostname(db, &target.hostname, target.port).await?;
 
         match matches.len() {
             0 => bail!(Error::HostNotFound(name_or_id.to_string())),
@@ -194,8 +193,14 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     } else {
         Some(sudo_available)
     };
-    update_host_sudo_state(db, &host.id, persisted_sudo_available, Some(agent_is_root), None)
-        .await?;
+    update_host_sudo_state(
+        db,
+        &host.id,
+        persisted_sudo_available,
+        Some(agent_is_root),
+        None,
+    )
+    .await?;
 
     tracing::info!(
         is_root,

@@ -160,7 +160,8 @@ mod tests {
             hostname: "127.0.0.1".to_string(),
             port: 22,
             username: "uptrakit".to_string(),
-            private_key: EncryptedString::new("key".to_string()).expect("master key initialized above"),
+            private_key: EncryptedString::new("key".to_string())
+                .expect("master key initialized above"),
             key_type: SshKeyType::Ed25519,
             host_key_fingerprint: None,
             machine_id: String::new(),

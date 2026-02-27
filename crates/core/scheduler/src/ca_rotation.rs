@@ -42,7 +42,10 @@ impl ExternalCaRotationCheckExecutor {
 
 #[async_trait::async_trait]
 impl TaskExecutor for ExternalCaRotationCheckExecutor {
-    async fn execute(&self, _task: &scheduled_task::Model) -> uptrakit_scheduler_engine::Result<()> {
+    async fn execute(
+        &self,
+        _task: &scheduled_task::Model,
+    ) -> uptrakit_scheduler_engine::Result<()> {
         let cert_pem = self
             .load_active_ca_cert_pem()
             .await
@@ -54,7 +57,9 @@ impl TaskExecutor for ExternalCaRotationCheckExecutor {
         };
 
         if ca_utils::should_rotate_ca(&cert_pem) {
-            tracing::info!("CA certificate is within rotation window, requesting rotation via NATS");
+            tracing::info!(
+                "CA certificate is within rotation window, requesting rotation via NATS"
+            );
             self.notifier
                 .signal_ca_rotation(
                     "CA certificate approaching expiry (detected by external scheduler)",
@@ -84,13 +89,28 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SchedulerNotifier for TrackingNotifier {
-        async fn send_to_service(&self, _service_id: &Uuid, _msg: uptrakit_internal_wire::ControllerMessage) {}
+        async fn send_to_service(
+            &self,
+            _service_id: &Uuid,
+            _msg: uptrakit_internal_wire::ControllerMessage,
+        ) {
+        }
         async fn broadcast(&self, _msg: uptrakit_internal_wire::ControllerMessage) {}
-        async fn send_by_capability(&self, _capability: &str, _msg: uptrakit_internal_wire::ControllerMessage) {}
+        async fn send_by_capability(
+            &self,
+            _capability: &str,
+            _msg: uptrakit_internal_wire::ControllerMessage,
+        ) {
+        }
         async fn signal_ca_rotation(&self, _reason: &str) {
             self.0.store(true, Ordering::SeqCst);
         }
-        async fn push_software_states_for_tenant(&self, _db: &sea_orm::DatabaseConnection, _tenant_id: Uuid) {}
+        async fn push_software_states_for_tenant(
+            &self,
+            _db: &sea_orm::DatabaseConnection,
+            _tenant_id: Uuid,
+        ) {
+        }
     }
 
     fn dummy_task() -> scheduled_task::Model {
@@ -166,10 +186,10 @@ mod tests {
         ca_certificate::ActiveModel {
             fingerprint: ActiveValue::Set("test-fingerprint-long".to_string()),
             cert_pem: ActiveValue::Set(cert_pem),
-            key_pem: ActiveValue::Set(uptrakit_crypto::EncryptedString::new(
-                "placeholder-key".to_string(),
-            )
-            .expect("master key initialized above")),
+            key_pem: ActiveValue::Set(
+                uptrakit_crypto::EncryptedString::new("placeholder-key".to_string())
+                    .expect("master key initialized above"),
+            ),
             not_before: ActiveValue::Set(not_before),
             not_after: ActiveValue::Set(not_after),
             activated_at: ActiveValue::Set(OffsetDateTime::now_utc()),
@@ -202,10 +222,10 @@ mod tests {
         ca_certificate::ActiveModel {
             fingerprint: ActiveValue::Set("test-fingerprint-short".to_string()),
             cert_pem: ActiveValue::Set(cert_pem),
-            key_pem: ActiveValue::Set(uptrakit_crypto::EncryptedString::new(
-                "placeholder-key".to_string(),
-            )
-            .expect("master key initialized above")),
+            key_pem: ActiveValue::Set(
+                uptrakit_crypto::EncryptedString::new("placeholder-key".to_string())
+                    .expect("master key initialized above"),
+            ),
             not_before: ActiveValue::Set(not_before),
             not_after: ActiveValue::Set(not_after),
             activated_at: ActiveValue::Set(OffsetDateTime::now_utc()),

@@ -30,9 +30,7 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
     }
 
     async fn broadcast(&self, msg: ControllerMessage) {
-        self.nats
-            .publish(self.scheduler_id, None, None, msg)
-            .await;
+        self.nats.publish(self.scheduler_id, None, None, msg).await;
     }
 
     async fn send_by_capability(&self, capability: &str, msg: ControllerMessage) {

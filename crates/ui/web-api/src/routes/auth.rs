@@ -19,9 +19,9 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
-use uptrakit_shared_types::MaskedEmail;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
+use uptrakit_shared_types::MaskedEmail;
 
 use crate::auth::AuthMethod;
 use uptrakit_web_api_types::SecretString;
@@ -580,7 +580,8 @@ mod tests {
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
             credential_sources: ServiceCredentialSources::default(),
-            update_output_broadcaster: crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
+            update_output_broadcaster:
+                crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
         })
     }
 

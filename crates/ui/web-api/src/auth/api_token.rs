@@ -133,8 +133,8 @@ impl ApiTokenService {
 mod tests {
     use super::*;
     use sea_orm::{ConnectOptions, Database};
-    use uptrakit_shared_types::MaskedEmail;
     use uptrakit_shared_db::entity::user;
+    use uptrakit_shared_types::MaskedEmail;
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");

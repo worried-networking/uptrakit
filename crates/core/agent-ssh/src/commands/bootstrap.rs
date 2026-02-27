@@ -411,7 +411,15 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     verify_session.disconnect().await;
 
     // 8. SAVE TO DATABASE
-    save_host(&db, &params, &target_private_pem, key_type, &observed_fp, params.host_id).await?;
+    save_host(
+        &db,
+        &params,
+        &target_private_pem,
+        key_type,
+        &observed_fp,
+        params.host_id,
+    )
+    .await?;
 
     // 9. OUTPUT
     println!();

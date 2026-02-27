@@ -120,8 +120,8 @@ mod tests {
     use axum::extract::FromRequestParts;
     use axum::http::Request;
 
-    use crate::auth::permissions::Permission;
     use crate::auth::AuthMethod;
+    use crate::auth::permissions::Permission;
 
     /// Build request `Parts` with an `AuthenticatedUser` pre-inserted.
     fn parts_with_user(permissions: Vec<Permission>) -> axum::http::request::Parts {

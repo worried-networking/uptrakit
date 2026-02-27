@@ -54,8 +54,7 @@ mod tests {
 
     #[test]
     fn version_flag_parses_without_other_flags() {
-        let args =
-            Args::try_parse_from(["uptrakit-scheduler", "--version"]).expect("should parse");
+        let args = Args::try_parse_from(["uptrakit-scheduler", "--version"]).expect("should parse");
         assert!(args.common.version);
     }
 

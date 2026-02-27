@@ -221,4 +221,3 @@ fn generate_instance_id() -> String {
     let uuid_prefix = &uuid::Uuid::now_v7().to_string()[..8];
     format!("{host}-{uuid_prefix}")
 }
-

@@ -7,8 +7,8 @@ use sea_orm::{
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{mqtt_client, prelude::MqttClient};
-use uptrakit_shared_types::{MqttClientConnectionStatus, MqttTransport};
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_shared_types::{MqttClientConnectionStatus, MqttTransport};
 use uuid::Uuid;
 
 #[derive(Debug, Error)]

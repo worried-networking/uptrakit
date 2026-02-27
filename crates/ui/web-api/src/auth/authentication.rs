@@ -9,11 +9,11 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 #[cfg(feature = "oidc")]
 use time::OffsetDateTime;
 #[cfg(feature = "oidc")]
-use uptrakit_shared_types::MaskedEmail;
-#[cfg(feature = "oidc")]
 use uptrakit_shared_db::entity::{
     oidc_provider, prelude::*, role, user, user_oidc_link, user_role,
 };
+#[cfg(feature = "oidc")]
+use uptrakit_shared_types::MaskedEmail;
 
 /// Global authentication settings (password auth toggle).
 /// OIDC config lives in the `oidc_providers` table.
@@ -494,8 +494,8 @@ mod tests {
 
         // Ensure a test master key is set (no-op if already initialized).
         let _ = init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
-        let client_secret = EncryptedString::new("test-secret".to_string())
-            .expect("master key initialized above");
+        let client_secret =
+            EncryptedString::new("test-secret".to_string()).expect("master key initialized above");
 
         oidc_provider::Model {
             id: uuid::Uuid::nil(),

@@ -76,7 +76,11 @@ pub async fn run(args: &Args, migrate_args: &DbMigrateArgs) -> Result<()> {
     let user_count = uptrakit_shared_db::entity::prelude::User::find()
         .count(&dst)
         .await
-        .map_err(|e| report!(DbMigrateError::Connection(format!("counting target users: {e}"))))?;
+        .map_err(|e| {
+            report!(DbMigrateError::Connection(format!(
+                "counting target users: {e}"
+            )))
+        })?;
 
     if user_count > 0 && !migrate_args.force {
         bail!(DbMigrateError::TargetNotEmpty);
@@ -85,9 +89,7 @@ pub async fn run(args: &Args, migrate_args: &DbMigrateArgs) -> Result<()> {
     // ── 5. Confirmation prompt ───────────────────────────────────────────────
     if !migrate_args.yes {
         eprintln!();
-        eprintln!(
-            "WARNING: This will ERASE ALL DATA in the target database and replace it"
-        );
+        eprintln!("WARNING: This will ERASE ALL DATA in the target database and replace it");
         eprintln!("with data from the source database.");
         eprintln!();
         eprintln!("  Source: {}", crate::db::sanitize_url(src_url));
@@ -97,11 +99,11 @@ pub async fn run(args: &Args, migrate_args: &DbMigrateArgs) -> Result<()> {
         std::io::stderr().flush().ok();
 
         let mut line = String::new();
-        std::io::stdin()
-            .read_line(&mut line)
-            .map_err(|e| {
-                report!(DbMigrateError::Connection(format!("reading confirmation: {e}")))
-            })?;
+        std::io::stdin().read_line(&mut line).map_err(|e| {
+            report!(DbMigrateError::Connection(format!(
+                "reading confirmation: {e}"
+            )))
+        })?;
 
         if line.trim() != "yes" {
             bail!(DbMigrateError::MigrationAborted);

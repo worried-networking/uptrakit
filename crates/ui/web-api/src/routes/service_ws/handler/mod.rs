@@ -147,9 +147,10 @@ pub(crate) async fn handle_authenticated_loop(
             let sources = &state.credential_sources;
             let payload = ServiceCredentialsPayload {
                 db_url: if has_db_access {
-                    sources.db_url.as_ref().map(|u| {
-                        uptrakit_internal_wire::SecretString::new(u.clone())
-                    })
+                    sources
+                        .db_url
+                        .as_ref()
+                        .map(|u| uptrakit_internal_wire::SecretString::new(u.clone()))
                 } else {
                     None
                 },

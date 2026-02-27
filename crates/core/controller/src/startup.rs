@@ -70,8 +70,7 @@ pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<Option<S
                 );
             }
             let key_bytes = parse_master_key_hex(&key_hex)?;
-            uptrakit_crypto::init_master_key(zeroize::Zeroizing::new(key_bytes))
-                .context_to()?;
+            uptrakit_crypto::init_master_key(zeroize::Zeroizing::new(key_bytes)).context_to()?;
             tracing::info!("master encryption key initialized");
             Ok(Some(key_hex))
         }
@@ -175,16 +174,14 @@ pub(crate) async fn verify_master_key(
             if let Some(token_str) = value.as_str()
                 && uptrakit_crypto::is_encrypted(token_str)
             {
-                uptrakit_crypto::verify_key_verification_token(token_str).map_err(
-                    |_| {
-                        report!(AppError::Config(
-                            "master key mismatch: the current UPTRAKIT_MASTER_KEY cannot \
+                uptrakit_crypto::verify_key_verification_token(token_str).map_err(|_| {
+                    report!(AppError::Config(
+                        "master key mismatch: the current UPTRAKIT_MASTER_KEY cannot \
                              decrypt data encrypted by a previous instance. Ensure all \
                              controller instances use the same master key."
-                                .into()
-                        ))
-                    },
-                )?;
+                            .into()
+                    ))
+                })?;
                 tracing::info!("master key verification succeeded");
             }
         }
@@ -214,17 +211,15 @@ pub(crate) async fn verify_master_key(
                     && let Some(token_str) = value.as_str()
                     && uptrakit_crypto::is_encrypted(token_str)
                 {
-                    uptrakit_crypto::verify_key_verification_token(token_str).map_err(
-                        |_| {
-                            report!(AppError::Config(
-                                "master key mismatch: another controller instance stored a \
+                    uptrakit_crypto::verify_key_verification_token(token_str).map_err(|_| {
+                        report!(AppError::Config(
+                            "master key mismatch: another controller instance stored a \
                                  verification token first, and the current UPTRAKIT_MASTER_KEY \
                                  cannot decrypt it. Ensure all controller instances use the \
                                  same master key."
-                                    .into()
-                            ))
-                        },
-                    )?;
+                                .into()
+                        ))
+                    })?;
                     tracing::info!(
                         "master key verification succeeded (raced with another instance)"
                     );
@@ -528,8 +523,7 @@ pub(crate) async fn bootstrap_oidc(
 
             let now = OffsetDateTime::now_utc();
             let encrypted_secret =
-                uptrakit_crypto::EncryptedString::new(client_secret.to_string())
-                    .context_to()?;
+                uptrakit_crypto::EncryptedString::new(client_secret.to_string()).context_to()?;
             let provider = oidc_provider::ActiveModel {
                 id: Set(uuid::Uuid::now_v7()),
                 tenant_id: Set(tenant_id),
@@ -559,8 +553,7 @@ pub(crate) async fn bootstrap_oidc(
             use time::OffsetDateTime;
 
             let encrypted_secret =
-                uptrakit_crypto::EncryptedString::new(client_secret.to_string())
-                    .context_to()?;
+                uptrakit_crypto::EncryptedString::new(client_secret.to_string()).context_to()?;
             let mut model = existing_provider.into_active_model();
             model.issuer_url = Set(issuer_url.to_string());
             model.client_id = Set(client_id.to_string());

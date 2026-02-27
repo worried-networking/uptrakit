@@ -247,8 +247,7 @@ async fn run(args: cli::Args) -> Result<()> {
         let mut sources = uptrakit_web_api::ServiceCredentialSources {
             db_url: Some(db_url),
             nats_url: None,
-            master_key_hex: master_key_hex
-                .map(uptrakit_internal_wire::SecretString::new),
+            master_key_hex: master_key_hex.map(uptrakit_internal_wire::SecretString::new),
         };
         #[cfg(feature = "nats")]
         if let Some(ref url) = args.nats_url {

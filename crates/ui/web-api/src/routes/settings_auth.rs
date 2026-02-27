@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::auth::AuthMethod;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSettings, CanViewSettings};
 #[cfg(feature = "oidc")]
@@ -10,7 +11,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use crate::auth::AuthMethod;
 #[cfg(feature = "oidc")]
 use {
     sea_orm::{ColumnTrait, QueryFilter},

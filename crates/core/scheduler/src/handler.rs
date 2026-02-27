@@ -11,9 +11,7 @@ use std::time::Duration;
 use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter};
 use tokio_util::sync::CancellationToken;
-use uptrakit_internal_wire::{
-    Capability, ControllerMessage, DisconnectingPayload, ServiceMessage,
-};
+use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectingPayload, ServiceMessage};
 use uptrakit_scheduler_engine::executors::{
     auth_cleanup::AuthCleanupExecutor, service_cert_check::ServiceCertCheckExecutor,
     stale_lease_cleanup::StaleLeaseCleanupExecutor, version_check::VersionCheckExecutor,
@@ -99,8 +97,8 @@ impl ServiceHandler for SchedulerHandler {
                 if let Some(ref hex) = creds.master_key_hex
                     && !uptrakit_crypto::master_key_available()
                 {
-                    let key_bytes =
-                        uptrakit_shared_types::hex::decode(hex.expose_secret()).map_err(|e| {
+                    let key_bytes = uptrakit_shared_types::hex::decode(hex.expose_secret())
+                        .map_err(|e| {
                             report!(LoopError::Other(format!("invalid master key hex: {e}")))
                         })?;
                     let key: [u8; 32] = key_bytes.try_into().map_err(|v: Vec<u8>| {
@@ -140,12 +138,11 @@ impl ServiceHandler for SchedulerHandler {
                     ))
                 })?;
 
-                let nats_conn =
-                    uptrakit_nats::NatsConnection::connect(nats_url)
-                        .await
-                        .map_err(|e| {
-                            report!(LoopError::Other(format!("NATS connection failed: {e}")))
-                        })?;
+                let nats_conn = uptrakit_nats::NatsConnection::connect(nats_url)
+                    .await
+                    .map_err(|e| {
+                        report!(LoopError::Other(format!("NATS connection failed: {e}")))
+                    })?;
                 nats_conn.ensure_stream().await.map_err(|e| {
                     report!(LoopError::Other(format!("NATS stream setup failed: {e}")))
                 })?;
@@ -272,9 +269,9 @@ impl ServiceHandler for SchedulerHandler {
 
         // Send disconnect message to the controller.
         let _ = conn
-            .send(ServiceMessage::Disconnecting(
-                DisconnectingPayload::new(disconnect_reason),
-            ))
+            .send(ServiceMessage::Disconnecting(DisconnectingPayload::new(
+                disconnect_reason,
+            )))
             .await;
 
         outcome

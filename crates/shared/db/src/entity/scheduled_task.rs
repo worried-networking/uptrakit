@@ -28,7 +28,6 @@ impl ScheduledTaskType {
             Self::ServiceCertCheck => "Service Cert Check",
         }
     }
-
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]

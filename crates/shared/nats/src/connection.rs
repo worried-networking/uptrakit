@@ -23,9 +23,7 @@ impl NatsConnection {
     /// Connect to NATS and create the JetStream context.
     pub async fn connect(url: &str) -> Result<Self, Report<NatsError>> {
         tracing::info!(url, "connecting to NATS");
-        let client = async_nats::connect(url)
-            .await
-            .context_to::<NatsError>()?;
+        let client = async_nats::connect(url).await.context_to::<NatsError>()?;
 
         let js = jetstream::new(client.clone());
         Ok(Self { js, client })
@@ -53,8 +51,10 @@ impl NatsConnection {
     /// Fire-and-forget: errors are logged, not propagated. This matches the
     /// semantics where a publish failure is not fatal to the caller.
     pub async fn publish_envelope(&self, envelope: &NatsEventEnvelope) {
-        let subject =
-            subjects::determine(envelope.target_service_id, envelope.target_capability.as_deref());
+        let subject = subjects::determine(
+            envelope.target_service_id,
+            envelope.target_capability.as_deref(),
+        );
 
         let payload = match serde_json::to_vec(envelope) {
             Ok(p) => p,

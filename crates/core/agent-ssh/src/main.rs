@@ -92,9 +92,7 @@ impl SshAgentHandler {
     /// Returns `pending()` when no update is in flight, so the `select!` in
     /// `poll_service_event` can safely poll this arm alongside the reload
     /// ticker without a double-borrow of `self`.
-    async fn poll_update(
-        in_flight: &mut Option<client::InFlightUpdate>,
-    ) -> client::UpdateEvent {
+    async fn poll_update(in_flight: &mut Option<client::InFlightUpdate>) -> client::UpdateEvent {
         if let Some(update) = in_flight {
             tokio::select! {
                 biased;
@@ -295,9 +293,7 @@ impl SshAgentHandler {
             None => {
                 // Defensive: reload_ticker is None until on_connected, so this
                 // branch should never be reached in practice.
-                tracing::warn!(
-                    "host config reload tick fired before DB was initialized; skipping"
-                );
+                tracing::warn!("host config reload tick fired before DB was initialized; skipping");
                 return;
             }
         };
@@ -363,8 +359,7 @@ impl SshAgentHandler {
 
         // Convert to &str for the client call.
         let changed_ref: HashSet<&str> = changed_ids.iter().map(String::as_str).collect();
-        client::report_hosts_after_config_change(db, conn, &hosts, &changed_ref, &self.pool)
-            .await;
+        client::report_hosts_after_config_change(db, conn, &hosts, &changed_ref, &self.pool).await;
     }
 }
 
@@ -382,10 +377,8 @@ fn diff_host_snapshots<'a>(
     prev: &'a [host_ops::HostSnapshot],
     curr: &'a [host_ops::HostSnapshot],
 ) -> (Vec<&'a str>, HashSet<&'a str>) {
-    let prev_map: std::collections::HashMap<&str, i64> = prev
-        .iter()
-        .map(|s| (s.id.as_str(), s.updated_at))
-        .collect();
+    let prev_map: std::collections::HashMap<&str, i64> =
+        prev.iter().map(|s| (s.id.as_str(), s.updated_at)).collect();
     let curr_ids: HashSet<&str> = curr.iter().map(|s| s.id.as_str()).collect();
 
     let deleted: Vec<&str> = prev
@@ -650,7 +643,10 @@ mod tests {
         let prev = vec![snap("A", 100), snap("B", 200)];
         let curr = prev.clone();
         let (deleted, changed) = diff_host_snapshots(&prev, &curr);
-        assert!(deleted.is_empty(), "expected no deletions, got: {deleted:?}");
+        assert!(
+            deleted.is_empty(),
+            "expected no deletions, got: {deleted:?}"
+        );
         assert!(changed.is_empty(), "expected no changes, got: {changed:?}");
     }
 

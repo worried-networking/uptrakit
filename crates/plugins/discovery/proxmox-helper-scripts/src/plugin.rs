@@ -576,7 +576,11 @@ mod tests {
             ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
                 .expect("create");
         let entries = plugin.required_sudo_commands();
-        assert_eq!(entries.len(), 2, "expected two sudo entries: version + update");
+        assert_eq!(
+            entries.len(),
+            2,
+            "expected two sudo entries: version + update"
+        );
 
         // ── Version detection helper ─────────────────────────────────────────
         let version_entry = entries

@@ -3,10 +3,10 @@ use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_shared_types::DeviceAuthStatus;
 use uptrakit_shared_db::entity::pending_device_flow;
 use uptrakit_shared_db::entity::prelude::PendingDeviceFlow;
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_shared_types::DeviceAuthStatus;
 use uuid::Uuid;
 
 use super::token::{generate_secure_token, generate_uuid, hash_token};

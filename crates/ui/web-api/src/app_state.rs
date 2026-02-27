@@ -288,10 +288,7 @@ impl AppStateBuilder {
         self
     }
 
-    pub fn token_denylist(
-        mut self,
-        v: Arc<crate::auth::token_denylist::TokenDenylist>,
-    ) -> Self {
+    pub fn token_denylist(mut self, v: Arc<crate::auth::token_denylist::TokenDenylist>) -> Self {
         self.token_denylist = Some(v);
         self
     }

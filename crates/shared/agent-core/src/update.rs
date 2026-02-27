@@ -163,8 +163,12 @@ pub async fn execute_update(
                     "plugin update command failed"
                 );
                 let formatted = format!("[error] {error_msg}\n");
-                send_output(&output_tx, &format!("[error] {error_msg}"), OutputStreamType::Stderr)
-                    .await;
+                send_output(
+                    &output_tx,
+                    &format!("[error] {error_msg}"),
+                    OutputStreamType::Stderr,
+                )
+                .await;
                 append_bounded(&mut accumulated_output, &formatted, MAX_OUTPUT_BYTES);
                 return Err(AgentCoreError::UpdateExecution(error_msg));
             }
@@ -233,10 +237,7 @@ pub async fn execute_update(
             None
         }
         Err(_) => {
-            let timeout_msg = format!(
-                "Update timed out after {} seconds",
-                payload.timeout_seconds
-            );
+            let timeout_msg = format!("Update timed out after {} seconds", payload.timeout_seconds);
             tracing::warn!(
                 software_item = %payload.software_item_name,
                 timeout_seconds = payload.timeout_seconds,
