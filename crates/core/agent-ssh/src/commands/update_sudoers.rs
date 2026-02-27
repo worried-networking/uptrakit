@@ -134,7 +134,19 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
         auth = AuthMethod::PrivateKey(&key_pem);
     }
 
-    // 3. Establish SSH session.
+    // 3. Establish SSH session (strict host key checking — no TOFU allowed).
+    //
+    // The host is already registered, so the fingerprint must be stored.
+    // Accepting an unknown host key here would silently undermine the security
+    // of the sudoers write that follows.
+    let stored_fingerprint = host.host_key_fingerprint.as_deref().ok_or_else(|| {
+        report!(Error::InvalidInput(format!(
+            "host '{}' has no stored key fingerprint; cannot connect without \
+             TOFU. Set it with: host update {} --host-key-fingerprint SHA256:...",
+            host.name, host.name
+        )))
+    })?;
+
     let config = SshConnectionConfig {
         hostname: host.hostname.clone(),
         port: host.port as u16,
@@ -150,7 +162,7 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
         &config,
         connect_username,
         &auth,
-        host.host_key_fingerprint.as_deref(),
+        Some(stored_fingerprint),
     )
     .await?;
 
