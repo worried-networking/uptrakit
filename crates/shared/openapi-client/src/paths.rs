@@ -149,10 +149,6 @@ pub(crate) mod services {
     use uuid::Uuid;
     /// `GET /api/v1/services` · `POST /api/v1/services`
     pub(crate) const BASE: &str = "/api/v1/services";
-    /// `POST /api/v1/services/enrollment-token` · `DELETE …`
-    pub(crate) const ENROLLMENT_TOKEN: &str = "/api/v1/services/enrollment-token";
-    /// `GET /api/v1/services/enrollment-token/status`
-    pub(crate) const ENROLLMENT_TOKEN_STATUS: &str = "/api/v1/services/enrollment-token/status";
     /// `GET /api/v1/services/{id}` · `PUT …` · `DELETE …`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/services/{id}")

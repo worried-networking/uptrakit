@@ -607,20 +607,6 @@ impl<'a> MockServices<'a> {
         MockEndpoint::new(self.server, "POST", &paths::services::merge(target_id))
     }
 
-    /// Mock `POST /api/v1/services/enrollment-token`.
-    pub fn on_create_enrollment_token(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "POST", paths::services::ENROLLMENT_TOKEN)
-    }
-
-    /// Mock `DELETE /api/v1/services/enrollment-token`.
-    pub fn on_revoke_enrollment_token(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "DELETE", paths::services::ENROLLMENT_TOKEN)
-    }
-
-    /// Mock `GET /api/v1/services/enrollment-token/status`.
-    pub fn on_enrollment_token_status(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(self.server, "GET", paths::services::ENROLLMENT_TOKEN_STATUS)
-    }
 }
 
 // ── Section: Settings ──────────────────────────────────────────────────────

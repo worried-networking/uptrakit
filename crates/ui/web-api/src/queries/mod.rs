@@ -4,6 +4,7 @@
 //! response types, so that route handlers deal only with HTTP concerns.
 
 pub mod autodiscovery;
+pub mod enrollment_tokens;
 pub mod hosts;
 pub mod mqtt_software_states;
 pub mod plugin_configs;

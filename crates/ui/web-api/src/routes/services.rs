@@ -1,10 +1,7 @@
 use crate::AppState;
-use crate::SettingKey;
-use crate::auth::{password, token};
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageAgents, CanViewAgents};
 use crate::queries::services::{self as svc_queries, ServiceQueryError};
-use crate::settings_store::{delete_setting, load_setting, upsert_setting};
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -18,8 +15,8 @@ use uuid::Uuid;
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::services::{
-    EnrollmentTokenResponse, EnrollmentTokenStatusResponse, ListServicesQuery, MergeAgentRequest,
-    MessageResponse, ServiceResponse, ServiceStatus, UpdateServiceRequest,
+    ListServicesQuery, MergeAgentRequest, MessageResponse, ServiceResponse, ServiceStatus,
+    UpdateServiceRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -366,133 +363,6 @@ pub async fn merge_service(
     );
 
     (StatusCode::OK, Json(resp)).into_response()
-}
-
-/// Generate a new enrollment token
-#[utoipa::path(
-    post,
-    path = "/api/v1/services/enrollment-token",
-    responses(
-        (status = 201, description = "Enrollment token generated", body = EnrollmentTokenResponse),
-        (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Not authorized")
-    ),
-    tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
-    security(("bearer_token" = []))
-)]
-pub async fn create_enrollment_token(
-    State(state): State<Arc<AppState>>,
-    CanManageAgents(_user): CanManageAgents,
-) -> Response {
-    let setting_key = SettingKey::EnrollmentTokenHash;
-
-    let plaintext = match token::generate_secure_token() {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("Failed to generate enrollment token: {:?}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    let hash = match password::hash_password(&plaintext) {
-        Ok(h) => h,
-        Err(e) => {
-            tracing::error!("Failed to hash enrollment token: {:?}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    if let Err(e) = upsert_setting(
-        state.db(),
-        state.default_tenant_id,
-        setting_key,
-        serde_json::Value::String(hash.expose_secret().to_string()),
-    )
-    .await
-    {
-        tracing::error!("Failed to store enrollment token hash: {:?}", e);
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-    }
-
-    (
-        StatusCode::CREATED,
-        Json(EnrollmentTokenResponse {
-            token: uptrakit_web_api_types::SecretString::new(plaintext),
-        }),
-    )
-        .into_response()
-}
-
-/// Revoke the enrollment token
-#[utoipa::path(
-    delete,
-    path = "/api/v1/services/enrollment-token",
-    responses(
-        (status = 200, description = "Enrollment token revoked", body = MessageResponse),
-        (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Not authorized")
-    ),
-    tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
-    security(("bearer_token" = []))
-)]
-pub async fn revoke_enrollment_token(
-    State(state): State<Arc<AppState>>,
-    CanManageAgents(_user): CanManageAgents,
-) -> Response {
-    if let Err(e) = delete_setting(
-        state.db(),
-        state.default_tenant_id,
-        SettingKey::EnrollmentTokenHash,
-    )
-    .await
-    {
-        tracing::error!("Failed to delete enrollment token: {:?}", e);
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-    }
-
-    (
-        StatusCode::OK,
-        Json(MessageResponse {
-            message: "Enrollment token revoked".to_string(),
-        }),
-    )
-        .into_response()
-}
-
-/// Check if an enrollment token is configured
-#[utoipa::path(
-    get,
-    path = "/api/v1/services/enrollment-token/status",
-    responses(
-        (status = 200, description = "Enrollment token status", body = EnrollmentTokenStatusResponse),
-        (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Not authorized")
-    ),
-    tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
-    security(("bearer_token" = []))
-)]
-pub async fn enrollment_token_status(
-    State(state): State<Arc<AppState>>,
-    CanManageAgents(_user): CanManageAgents,
-) -> Response {
-    let configured = matches!(
-        load_setting(
-            state.db(),
-            state.default_tenant_id,
-            SettingKey::EnrollmentTokenHash
-        )
-        .await,
-        Ok(Some(_))
-    );
-
-    (
-        StatusCode::OK,
-        Json(EnrollmentTokenStatusResponse { configured }),
-    )
-        .into_response()
 }
 
 #[cfg(test)]

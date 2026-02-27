@@ -517,6 +517,7 @@ impl AppState {
         (name = "Authentication", description = "User authentication endpoints"),
         (name = "Settings", description = "Application settings management"),
         (name = "Services", description = "Unified service (agent and MQTT) enrollment and management"),
+        (name = "Enrollment Tokens", description = "Enrollment token management"),
         (name = "OIDC Providers", description = "OIDC provider configuration"),
         (name = "API Tokens", description = "Personal access token management"),
         (name = "Hosts", description = "Host machine management"),
@@ -543,9 +544,10 @@ impl AppState {
         routes::services::reject_service,
         routes::services::deactivate_service,
         routes::services::merge_service,
-        routes::services::create_enrollment_token,
-        routes::services::revoke_enrollment_token,
-        routes::services::enrollment_token_status,
+        routes::enrollment_tokens::create_enrollment_token,
+        routes::enrollment_tokens::list_enrollment_tokens,
+        routes::enrollment_tokens::get_enrollment_token,
+        routes::enrollment_tokens::revoke_enrollment_token,
         routes::settings_agent_certs::get_agent_certificate_settings,
         routes::settings_agent_certs::update_agent_certificate_settings,
         routes::system_alerts::get_system_alerts,
@@ -620,10 +622,12 @@ impl AppState {
             routes::services::ServiceStatus,
             routes::services::ServiceResponse,
             routes::services::UpdateServiceRequest,
-            routes::services::EnrollmentTokenResponse,
             routes::services::MessageResponse,
             routes::services::MergeAgentRequest,
-            routes::services::EnrollmentTokenStatusResponse,
+            routes::enrollment_tokens::CreateEnrollmentTokenRequest,
+            routes::enrollment_tokens::EnrollmentTokenCreatedResponse,
+            routes::enrollment_tokens::EnrollmentTokenResponse,
+            routes::enrollment_tokens::EnrollmentTokensSummary,
             routes::settings_agent_certs::AgentCertificateSettingsResponse,
             routes::settings_agent_certs::UpdateAgentCertificateSettingsRequest,
             routes::system_alerts::SystemAlert,
@@ -673,6 +677,7 @@ impl AppState {
             routes::hosts::DiscardDiscoveredResponse,
             routes::autodiscovery::AutodiscoveryIgnoreResponse,
             routes::autodiscovery::CreateAutodiscoveryIgnoreRequest,
+            uptrakit_web_api_types::pagination::PaginatedResponse<routes::enrollment_tokens::EnrollmentTokenResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::services::ServiceResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::hosts::HostResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::software_items::SoftwareItemResponse>,
@@ -795,10 +800,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             routes::settings_agent_certs::update_agent_certificate_settings
         ))
         .routes(routes!(routes::services::list_services))
-        .routes(routes!(routes::services::enrollment_token_status))
         .routes(routes!(
-            routes::services::create_enrollment_token,
-            routes::services::revoke_enrollment_token
+            routes::enrollment_tokens::create_enrollment_token,
+            routes::enrollment_tokens::list_enrollment_tokens
+        ))
+        .routes(routes!(
+            routes::enrollment_tokens::get_enrollment_token,
+            routes::enrollment_tokens::revoke_enrollment_token
         ))
         .routes(routes!(routes::services::approve_service))
         .routes(routes!(routes::services::reject_service))

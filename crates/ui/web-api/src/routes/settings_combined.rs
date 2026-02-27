@@ -8,10 +8,10 @@ use axum::{
 };
 
 use crate::AppState;
-use crate::SettingKey;
+use crate::error_response::error_response;
 use crate::middleware::permission::CanViewSettings;
-use crate::settings_store::load_setting;
-use uptrakit_web_api_types::agents::EnrollmentTokenStatusResponse;
+use crate::queries::enrollment_tokens as et_queries;
+use uptrakit_web_api_types::enrollment_tokens::EnrollmentTokensSummary;
 use uptrakit_web_api_types::settings::RegistrationSettingsResponse;
 use uptrakit_web_api_types::settings_agent_certs::AgentCertificateSettingsResponse;
 use uptrakit_web_api_types::settings_auth::AuthenticationSettingsResponse;
@@ -21,13 +21,13 @@ fn build_combined_settings_response(
     registration: RegistrationSettingsResponse,
     authentication: AuthenticationSettingsResponse,
     agent_certificates: AgentCertificateSettingsResponse,
-    enrollment_token: EnrollmentTokenStatusResponse,
+    enrollment_tokens: EnrollmentTokensSummary,
 ) -> CombinedSettingsResponse {
     CombinedSettingsResponse {
         registration,
         authentication,
         agent_certificates,
-        enrollment_token,
+        enrollment_tokens,
     }
 }
 
@@ -64,22 +64,24 @@ pub async fn get_combined_settings(
         renewal_window_hours: state.settings.renewal_window_hours(),
     };
 
-    let configured = matches!(
-        load_setting(
-            state.db(),
-            state.default_tenant_id,
-            SettingKey::EnrollmentTokenHash
-        )
-        .await,
-        Ok(Some(_))
-    );
-    let enrollment_token = EnrollmentTokenStatusResponse { configured };
+    let active_count =
+        match et_queries::count_active_tokens(state.db(), state.default_tenant_id).await {
+            Ok(count) => count,
+            Err(e) => {
+                tracing::error!("Failed to count active enrollment tokens: {}", e);
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                );
+            }
+        };
+    let enrollment_tokens = EnrollmentTokensSummary { active_count };
 
     let response = build_combined_settings_response(
         registration,
         authentication,
         agent_certificates,
-        enrollment_token,
+        enrollment_tokens,
     );
 
     (StatusCode::OK, Json(response)).into_response()
@@ -87,7 +89,7 @@ pub async fn get_combined_settings(
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::agents::EnrollmentTokenStatusResponse;
+    use uptrakit_web_api_types::enrollment_tokens::EnrollmentTokensSummary;
     use uptrakit_web_api_types::settings::RegistrationSettingsResponse;
     use uptrakit_web_api_types::settings_agent_certs::AgentCertificateSettingsResponse;
 
@@ -109,13 +111,13 @@ mod tests {
             lifetime_days: 14,
             renewal_window_hours: 9,
         };
-        let enrollment_token = EnrollmentTokenStatusResponse { configured: true };
+        let enrollment_tokens = EnrollmentTokensSummary { active_count: 3 };
 
         let combined = build_combined_settings_response(
             registration,
             authentication,
             agent_certificates,
-            enrollment_token,
+            enrollment_tokens,
         );
 
         assert_eq!(combined.registration.mode, RegistrationMode::Invite);
@@ -123,6 +125,6 @@ mod tests {
         assert!(!combined.authentication.password_auth_enabled);
         assert_eq!(combined.agent_certificates.lifetime_days, 14);
         assert_eq!(combined.agent_certificates.renewal_window_hours, 9);
-        assert!(combined.enrollment_token.configured);
+        assert_eq!(combined.enrollment_tokens.active_count, 3);
     }
 }

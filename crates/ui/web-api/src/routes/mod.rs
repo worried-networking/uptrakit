@@ -4,6 +4,7 @@ pub mod auth;
 pub mod autodiscovery;
 pub mod ca;
 pub mod device_auth;
+pub mod enrollment_tokens;
 pub mod health;
 pub mod hosts;
 pub mod ocsp;

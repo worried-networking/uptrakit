@@ -17,6 +17,9 @@ pub enum SettingKey {
     RealIpHeader,
     ExtraSans,
     HttpsAddr,
+    /// Legacy enrollment token hash. Superseded by the `enrollment_tokens` table.
+    /// Retained only for backwards compatibility during the migration to
+    /// per-token enrollment in `do_enroll`. Will be removed once Commit 4 lands.
     EnrollmentTokenHash,
     ForwardedClientCertInfoHeader,
     ForwardedClientCertPemHeader,

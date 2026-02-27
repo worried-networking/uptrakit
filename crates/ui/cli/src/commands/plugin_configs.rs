@@ -234,6 +234,7 @@ mod tests {
             plugin_type: PluginType::ReleasesGithub,
             config: serde_json::json!({"tag_strip_prefix": "v"}),
             enabled: true,
+            capabilities: vec!["discover_remote_releases".to_string()],
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
         }

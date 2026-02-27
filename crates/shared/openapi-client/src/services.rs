@@ -2,8 +2,7 @@ use crate::Result;
 use crate::UptrakitClient;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::services::{
-    EnrollmentTokenResponse, EnrollmentTokenStatusResponse, ListServicesQuery, MergeAgentRequest,
-    MessageResponse, ServiceResponse, UpdateServiceRequest,
+    ListServicesQuery, MergeAgentRequest, MessageResponse, ServiceResponse, UpdateServiceRequest,
 };
 use uuid::Uuid;
 
@@ -72,22 +71,6 @@ impl UptrakitClient {
             .await
     }
 
-    /// Create an enrollment token (shared by all service types).
-    pub async fn create_enrollment_token(&self) -> Result<EnrollmentTokenResponse> {
-        self.post_empty(crate::paths::services::ENROLLMENT_TOKEN)
-            .await
-    }
-
-    /// Revoke the enrollment token.
-    pub async fn revoke_enrollment_token(&self) -> Result<()> {
-        self.delete(crate::paths::services::ENROLLMENT_TOKEN).await
-    }
-
-    /// Check if an enrollment token is configured.
-    pub async fn enrollment_token_status(&self) -> Result<EnrollmentTokenStatusResponse> {
-        self.get(crate::paths::services::ENROLLMENT_TOKEN_STATUS)
-            .await
-    }
 }
 
 #[cfg(test)]

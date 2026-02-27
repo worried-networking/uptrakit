@@ -73,10 +73,10 @@ impl HumanOutput for CombinedSettingsResponse {
             "  Renewal Window (hours):  {}\n",
             self.agent_certificates.renewal_window_hours
         ));
-        out.push_str("\nEnrollment Token:\n");
+        out.push_str("\nEnrollment Tokens:\n");
         out.push_str(&format!(
-            "  Configured:              {}\n",
-            self.enrollment_token.configured
+            "  Active:                  {}\n",
+            self.enrollment_tokens.active_count
         ));
         out
     }
@@ -786,7 +786,7 @@ pub async fn alerts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_openapi_client::types::agents::EnrollmentTokenStatusResponse;
+    use uptrakit_openapi_client::types::enrollment_tokens::EnrollmentTokensSummary;
     use uptrakit_openapi_client::types::registration::RegistrationMode;
     use uptrakit_openapi_client::types::system_alerts::{AlertSeverity, SystemAlert};
 
@@ -843,7 +843,7 @@ mod tests {
                 lifetime_days: 365,
                 renewal_window_hours: 168,
             },
-            enrollment_token: EnrollmentTokenStatusResponse { configured: true },
+            enrollment_tokens: EnrollmentTokensSummary { active_count: 3 },
         };
         let s = resp.to_human_string();
         assert!(s.contains("Registration"), "registration section missing");
