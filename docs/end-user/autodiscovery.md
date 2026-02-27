@@ -59,10 +59,10 @@ create:
 
 - **GitHub-managed apps** (e.g. Booklore, Radarr, Sonarr, Pangolin, Uptime Kuma): The PHS plugin
   emits a target for the `releases_github` plugin type, pre-configured with the repository owner
-  and name, the installed version detection command (`~/.{slug}`), and the unattended update script
-  (`env PHS_SILENT=1 /usr/bin/update`). The controller auto-creates the GitHub Releases plugin
-  config from the target. The software item's plugin config will be the auto-created GitHub config,
-  not the PHS config.
+  and name, the installed version detection command, and the unattended update script
+  (`sudo /usr/local/bin/uptrakit-phs-update`). The controller auto-creates the GitHub Releases
+  plugin config from the target. The software item's plugin config will be the auto-created GitHub
+  config, not the PHS config.
 
 - **APT-managed apps** (e.g. Grafana, Plex): The PHS plugin emits a target for the `package_manager_apt` plugin
   type. The controller finds or creates a shared `APT (auto)` plugin config. The software item's

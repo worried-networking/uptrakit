@@ -78,6 +78,21 @@ uptrakit ALL=(root) NOPASSWD: /usr/local/bin/uptrakit-phs-version
 This restricts root access to exactly one path pattern — PHS dot-files in `/root/` —
 and argument injection is prevented by the script's `case` guard.
 
+**Example: PHS updates.** Executing a PHS update requires root to run `pct exec` on
+the Proxmox host. Rather than granting `NOPASSWD: /usr/bin/update` directly (which
+would allow passing arbitrary arguments) or granting `NOPASSWD: /usr/bin/env` (too
+broad), bootstrap installs `/usr/local/bin/uptrakit-phs-update`. The script accepts
+no arguments and simply runs `env PHS_SILENT=1 /usr/bin/update` so the update
+proceeds without interactive whiptail prompts. The resulting sudoers line is:
+
+```text
+uptrakit ALL=(root) NOPASSWD: /usr/local/bin/uptrakit-phs-update
+```
+
+The Shell plugin embeds `sudo` directly in the `update_command` string
+(`sudo /usr/local/bin/uptrakit-phs-update`) because `CommandSpec::shell()` does not
+support the `.privileged()` flag.
+
 ### Implementing a helper script in a plugin
 
 Override `required_sudo_commands()` and supply a `SudoHelperScript`:

@@ -303,13 +303,16 @@ for user review. Key invariants:
         `package_identifier: Some("owner/repo")` override.
      2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]`, config with
         `version_command` (`sudo /usr/local/bin/uptrakit-phs-version {package_identifier}`) and
-        `update_command` (`env PHS_SILENT=1 /usr/bin/update`). `sudo` is embedded in
-        the version command because the Shell plugin uses `CommandSpec::shell()`, where
-        the `privileged` flag has no effect. The corresponding sudoers entry covers only
-        the specific helper script (no wildcards); the script validates its slug argument
-        to prevent path traversal before reading `/root/.<slug>`.
-        Declared via `ProxmoxHelperScriptsPlugin::required_sudo_commands()` using
-        `SudoHelperScript { install_path, content }` — bootstrap installs the script.
+        `update_command` (`sudo /usr/local/bin/uptrakit-phs-update`). `sudo` is embedded in
+        both commands because the Shell plugin uses `CommandSpec::shell()`, where the
+        `privileged` flag has no effect. Each command delegates to a dedicated helper script
+        installed by bootstrap:
+        - `uptrakit-phs-version <slug>`: validates the slug and reads `/root/.<slug>`
+          for version detection.
+        - `uptrakit-phs-update`: runs `env PHS_SILENT=1 /usr/bin/update` for unattended
+          container updates (no arguments, so no argument validation is needed).
+        Both are declared via `ProxmoxHelperScriptsPlugin::required_sudo_commands()` using
+        `SudoHelperScript { install_path, content }` — bootstrap installs both scripts.
      The PHS shell constants live in `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`.
    - APT-managed apps emit a `DiscoveryTarget` with `plugin_type: PackageManagerApt`, empty config `{}`, and
      name `"APT (auto)"`.

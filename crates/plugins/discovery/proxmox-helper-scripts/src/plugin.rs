@@ -28,6 +28,21 @@ const PHS_VERSION_HELPER_PATH: &str = "/usr/local/bin/uptrakit-phs-version";
 /// wildcard restrictions ineffective).
 const PHS_VERSION_HELPER_CONTENT: &str = include_str!("phs_version.sh");
 
+/// Absolute path where the PHS update helper script is installed on managed hosts.
+///
+/// This path is used for the sudoers entry and as the command in the Shell
+/// plugin's `update_command` config. Installed during host bootstrap via
+/// [`SudoHelperScript`].
+const PHS_UPDATE_HELPER_PATH: &str = "/usr/local/bin/uptrakit-phs-update";
+
+/// Content of the PHS update helper script, embedded at compile time.
+///
+/// The script runs `/usr/bin/update` with `PHS_SILENT=1` set, ensuring the
+/// update proceeds without interactive whiptail prompts. No user arguments
+/// are accepted — the script always performs the full PHS update pass for
+/// all managed containers on the Proxmox node.
+const PHS_UPDATE_HELPER_CONTENT: &str = include_str!("phs_update.sh");
+
 /// Shell command to detect the installed version of a GitHub-managed PHS app.
 ///
 /// PHS scripts execute via `pct exec` as root and write their version files
@@ -51,10 +66,19 @@ const PHS_DETECT_VERSION_CMD: &str =
 
 /// Install command for PHS-managed apps.
 ///
-/// Uses the unattended mode (`PHS_SILENT=1`) exactly as the official
-/// `update-apps.sh` PVE tool does via `pct exec`, so the update runs without
-/// interactive prompts and without requiring a network fetch of the script.
-const PHS_INSTALL_CMD: &str = "env PHS_SILENT=1 /usr/bin/update";
+/// Delegates to the `uptrakit-phs-update` helper script (installed by
+/// bootstrap), which runs `/usr/bin/update` with `PHS_SILENT=1` so the update
+/// proceeds without interactive prompts.
+///
+/// `sudo` is embedded in the command string because the Shell plugin executes
+/// update commands through [`CommandSpec::shell`], which does not support the
+/// `.privileged()` flag — shell commands must handle their own privilege
+/// escalation. The corresponding sudoers entry is:
+///
+/// ```text
+/// uptrakit ALL=(root) NOPASSWD: /usr/local/bin/uptrakit-phs-update
+/// ```
+const PHS_INSTALL_CMD: &str = "sudo /usr/local/bin/uptrakit-phs-update";
 
 /// Capabilities: discovery only — no release-index refresh needed.
 const CAPABILITIES: &[PluginCapability] = &[PluginCapability::DiscoverLocalSoftware];
@@ -246,16 +270,29 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
     }
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
-        vec![SudoCommandEntry {
-            command: "uptrakit-phs-version".into(),
-            explanation: "Reads /root/.<slug> for PHS version detection; the helper script \
-                validates the slug argument to prevent path traversal"
-                .into(),
-            helper_script: Some(SudoHelperScript {
-                install_path: PHS_VERSION_HELPER_PATH,
-                content: PHS_VERSION_HELPER_CONTENT,
-            }),
-        }]
+        vec![
+            SudoCommandEntry {
+                command: "uptrakit-phs-version".into(),
+                explanation: "Reads /root/.<slug> for PHS version detection; the helper script \
+                    validates the slug argument to prevent path traversal"
+                    .into(),
+                helper_script: Some(SudoHelperScript {
+                    install_path: PHS_VERSION_HELPER_PATH,
+                    content: PHS_VERSION_HELPER_CONTENT,
+                }),
+            },
+            SudoCommandEntry {
+                command: "uptrakit-phs-update".into(),
+                explanation: "Runs /usr/bin/update with PHS_SILENT=1 for unattended PHS \
+                    container updates; the helper script takes no arguments so no \
+                    argument validation is needed"
+                    .into(),
+                helper_script: Some(SudoHelperScript {
+                    install_path: PHS_UPDATE_HELPER_PATH,
+                    content: PHS_UPDATE_HELPER_CONTENT,
+                }),
+            },
+        ]
     }
 
     async fn discover_software(
@@ -496,6 +533,18 @@ mod tests {
             "version_command must use sudo for shell-mode execution, got: {version_cmd}"
         );
         assert_eq!(target.plugin_config["update_command"], PHS_INSTALL_CMD);
+        // update_command must also use sudo (shell-mode, so .privileged() has no effect).
+        let update_cmd = target.plugin_config["update_command"]
+            .as_str()
+            .expect("update_command is a string");
+        assert!(
+            update_cmd.starts_with("sudo "),
+            "update_command must use sudo for shell-mode execution, got: {update_cmd}"
+        );
+        assert!(
+            update_cmd.contains(PHS_UPDATE_HELPER_PATH),
+            "update_command must invoke the update helper script, got: {update_cmd}"
+        );
         // Without an override, the software item's own package_identifier
         // (the container slug) is used at runtime.
         assert!(target.package_identifier.is_none());
@@ -522,33 +571,55 @@ mod tests {
     }
 
     #[test]
-    fn required_sudo_commands_uses_helper_script() {
+    fn required_sudo_commands_uses_helper_scripts() {
         let plugin =
             ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
                 .expect("create");
         let entries = plugin.required_sudo_commands();
-        assert_eq!(entries.len(), 1);
+        assert_eq!(entries.len(), 2, "expected two sudo entries: version + update");
 
-        let entry = &entries[0];
-        assert_eq!(entry.command, "uptrakit-phs-version");
-        assert!(!entry.explanation.is_empty());
+        // ── Version detection helper ─────────────────────────────────────────
+        let version_entry = entries
+            .iter()
+            .find(|e| e.command == "uptrakit-phs-version")
+            .expect("uptrakit-phs-version sudo entry must be present");
+        assert!(!version_entry.explanation.is_empty());
 
-        // Must use a helper script, not a bare `cat` command.
-        let helper = entry
+        let version_helper = version_entry
             .helper_script
             .as_ref()
-            .expect("PHS sudo entry must have a helper_script");
-        assert_eq!(helper.install_path, PHS_VERSION_HELPER_PATH);
-
-        // Helper script content must be non-empty and validate the slug.
-        assert!(!helper.content.is_empty());
+            .expect("version sudo entry must have a helper_script");
+        assert_eq!(version_helper.install_path, PHS_VERSION_HELPER_PATH);
+        assert!(!version_helper.content.is_empty());
         assert!(
-            helper.content.contains("[!a-z0-9-]"),
-            "helper script must validate slug characters"
+            version_helper.content.contains("[!a-z0-9-]"),
+            "version helper must validate slug characters"
         );
         assert!(
-            helper.content.contains("/root/."),
-            "helper script must read from /root/"
+            version_helper.content.contains("/root/."),
+            "version helper must read from /root/"
+        );
+
+        // ── Update helper ────────────────────────────────────────────────────
+        let update_entry = entries
+            .iter()
+            .find(|e| e.command == "uptrakit-phs-update")
+            .expect("uptrakit-phs-update sudo entry must be present");
+        assert!(!update_entry.explanation.is_empty());
+
+        let update_helper = update_entry
+            .helper_script
+            .as_ref()
+            .expect("update sudo entry must have a helper_script");
+        assert_eq!(update_helper.install_path, PHS_UPDATE_HELPER_PATH);
+        assert!(!update_helper.content.is_empty());
+        assert!(
+            update_helper.content.contains("PHS_SILENT=1"),
+            "update helper must set PHS_SILENT=1"
+        );
+        assert!(
+            update_helper.content.contains("/usr/bin/update"),
+            "update helper must call /usr/bin/update"
         );
     }
 
