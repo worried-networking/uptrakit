@@ -115,11 +115,40 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
         }
         HostCommands::UpdateSudoers {
             name_or_id,
+            auth_password,
+            auth_private_key_file,
             allow_all,
             dry_run,
         } => {
+            // Resolve auth password (prompt when flag was given with no value).
+            let resolved_password = match auth_password {
+                Some(Some(pw)) => Some(pw),
+                Some(None) => {
+                    let pw = rpassword::prompt_password("SSH password: ").map_err(|e| {
+                        report!(crate::error::Error::InvalidInput(format!(
+                            "failed to read password: {e}"
+                        )))
+                    })?;
+                    Some(pw)
+                }
+                None => None,
+            };
+
+            // Detect SSH agent fallback: no password, no key file, SSH_AUTH_SOCK set.
+            let use_ssh_agent = resolved_password.is_none()
+                && auth_private_key_file.is_none()
+                && std::env::var_os("SSH_AUTH_SOCK").is_some();
+
+            let auth_private_key_pem = match auth_private_key_file.as_deref() {
+                Some(path) => Some(crate::ssh_key::read_private_key(path)?),
+                None => None,
+            };
+
             let args = UpdateSudoersArgs {
                 name_or_id,
+                auth_password: resolved_password,
+                auth_private_key_pem,
+                use_ssh_agent,
                 allow_all,
                 dry_run,
             };

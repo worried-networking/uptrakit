@@ -213,6 +213,18 @@ pub enum HostCommands {
         /// ssh://[user@]host[:port]).
         name_or_id: String,
 
+        /// Password for authenticating as the SSH address username (when it
+        /// differs from the stored host username).
+        /// Use `--auth-password` (no value) to prompt securely at runtime.
+        /// Mutually exclusive with --auth-private-key-file.
+        #[arg(long, num_args = 0..=1, default_missing_value = None, conflicts_with = "auth_private_key_file")]
+        auth_password: Option<Option<String>>,
+
+        /// Path to private key for the SSH address username. Use `-` for stdin.
+        /// Mutually exclusive with --auth-password.
+        #[arg(long, conflicts_with = "auth_password")]
+        auth_private_key_file: Option<std::path::PathBuf>,
+
         /// Write `NOPASSWD: ALL` instead of specific command entries.
         ///
         /// Less secure; use only when no plugin commands can be resolved on
@@ -1040,7 +1052,7 @@ mod tests {
 
         match &args.command {
             Some(Commands::Host {
-                command: HostCommands::UpdateSudoers { name_or_id, allow_all, dry_run },
+                command: HostCommands::UpdateSudoers { name_or_id, allow_all, dry_run, .. },
             }) => {
                 assert_eq!(name_or_id, "my-server");
                 assert!(!allow_all);

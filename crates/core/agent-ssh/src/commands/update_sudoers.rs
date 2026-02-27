@@ -28,16 +28,34 @@ pub struct UpdateSudoersArgs {
     /// SSH address and the host is looked up by hostname (and port, if
     /// present).  Otherwise the value is treated as a host name or UUID
     /// (existing behaviour).
+    ///
+    /// When a username is present in the SSH address *and* it differs from the
+    /// stored host username, that username is used for the connection together
+    /// with the supplied authentication credentials (or SSH agent).
     pub name_or_id: String,
+    /// Password for authenticating as the SSH address username (when it
+    /// differs from the stored host username).
+    pub auth_password: Option<String>,
+    /// Private key PEM for authenticating as the SSH address username.
+    pub auth_private_key_pem: Option<String>,
+    /// Use the local SSH agent (`SSH_AUTH_SOCK`) for authentication when the
+    /// SSH address username differs from the stored host username.
+    pub use_ssh_agent: bool,
     /// Force `NOPASSWD: ALL` instead of specific command entries.
     pub allow_all: bool,
     /// Preview the sudoers file without writing it.
     pub dry_run: bool,
 }
 
-/// Resolve the target host from `name_or_id`, which may be a host name, UUID,
-/// or an SSH address in `[user@]host[:port]` / `ssh://[user@]host[:port]` form.
-async fn resolve_host(db: &DatabaseConnection, name_or_id: &str) -> Result<Model> {
+/// Resolve the target host from `name_or_id`.
+///
+/// Returns `(host, url_username)` where `url_username` is `Some` when the
+/// SSH address included an explicit `user@` prefix that should be used as
+/// the connection username instead of the stored host username.
+async fn resolve_host(
+    db: &DatabaseConnection,
+    name_or_id: &str,
+) -> Result<(Model, Option<String>)> {
     if name_or_id.contains('@') || name_or_id.starts_with("ssh://") {
         // Parse as SSH target and find by hostname (+ optional port).
         let target = name_or_id.parse::<SshTarget>().map_err(|e| {
@@ -51,7 +69,10 @@ async fn resolve_host(db: &DatabaseConnection, name_or_id: &str) -> Result<Model
 
         match matches.len() {
             0 => bail!(Error::HostNotFound(name_or_id.to_string())),
-            1 => Ok(matches.into_iter().next().expect("length checked above")),
+            1 => Ok((
+                matches.into_iter().next().expect("length checked above"),
+                target.username,
+            )),
             _ => bail!(Error::InvalidInput(format!(
                 "multiple hosts found for '{}'; use the host name or UUID to \
                  disambiguate (see `host list`)",
@@ -60,40 +81,80 @@ async fn resolve_host(db: &DatabaseConnection, name_or_id: &str) -> Result<Model
         }
     } else {
         // Name or UUID lookup (existing behaviour).
-        host_ops::find_host(db, name_or_id)
+        let host = host_ops::find_host(db, name_or_id)
             .await?
-            .ok_or_else(|| report!(Error::HostNotFound(name_or_id.to_string())))
+            .ok_or_else(|| report!(Error::HostNotFound(name_or_id.to_string())))?;
+        Ok((host, None))
     }
 }
 
 /// Run the `update-sudoers` command.
 pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()> {
     // 1. Load SSH host from DB (supports name, UUID, and SSH address).
-    let host = resolve_host(db, &args.name_or_id).await?;
+    let (host, url_username) = resolve_host(db, &args.name_or_id).await?;
 
-    // 2. Establish SSH session.
+    // 2. Determine connection username and authentication method.
+    //
+    // When the SSH address includes a username that differs from the stored
+    // host username (e.g. `root@myserver`) we connect as that user using the
+    // caller-supplied credentials or the local SSH agent.  Otherwise we use
+    // the stored private key for the host's agent user.
+    let connect_username: &str;
+    let auth: AuthMethod<'_>;
+
+    // `key_pem` owns the PEM string when we borrow from the stored host key.
+    // Declared here so its lifetime covers the `auth` borrow below.
+    let key_pem: String;
+
+    let auth_override = url_username
+        .as_deref()
+        .map(|u| u != host.username.as_str())
+        .unwrap_or(false);
+
+    if auth_override {
+        let override_user = url_username.as_deref().expect("checked above");
+        connect_username = override_user;
+        auth = match (
+            &args.auth_password,
+            &args.auth_private_key_pem,
+            args.use_ssh_agent,
+        ) {
+            (Some(pw), _, _) => AuthMethod::Password(pw.as_str()),
+            (_, Some(pem), _) => AuthMethod::PrivateKey(pem.as_str()),
+            (_, _, true) => AuthMethod::Agent,
+            _ => bail!(Error::InvalidInput(format!(
+                "no authentication method available for '{override_user}': use \
+                 --auth-password, --auth-private-key-file, or ensure SSH_AUTH_SOCK \
+                 is set for SSH agent forwarding"
+            ))),
+        };
+    } else {
+        key_pem = host.private_key.expose_secret().to_string();
+        connect_username = &host.username;
+        auth = AuthMethod::PrivateKey(&key_pem);
+    }
+
+    // 3. Establish SSH session.
     let config = SshConnectionConfig {
         hostname: host.hostname.clone(),
         port: host.port as u16,
         connect_timeout: Duration::from_secs(30),
     };
-    let private_key_pem = host.private_key.expose_secret();
-    let auth = AuthMethod::PrivateKey(private_key_pem);
 
     println!(
         "Connecting to {}:{} as '{}'...",
-        host.hostname, host.port, host.username
+        host.hostname, host.port, connect_username
     );
 
     let (session, _fingerprint) = crate::ssh_transport::connect_and_authenticate(
         &config,
-        &host.username,
+        connect_username,
         &auth,
         host.host_key_fingerprint.as_deref(),
     )
     .await?;
 
-    // 3. Detect sudo state.
+    // 4. Detect sudo state.
     println!("Detecting privilege context...");
     let is_root = detect_is_root(&session).await?;
     let sudo_available = if is_root {
@@ -102,23 +163,23 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
         detect_sudo_available(&session).await?
     };
 
-    // 4. Update DB with detected values (always refresh on this command).
+    // 5. Update DB with detected values (always refresh on this command).
     update_host_sudo_state(db, &host.id, Some(sudo_available), Some(is_root), None).await?;
 
     tracing::info!(is_root, sudo_available, "sudo state detected and persisted");
 
-    // 5. Permission check.
+    // 6. Permission check.
     if !is_root && !sudo_available {
         bail!(Error::InvalidInput(format!(
             "sudo is not available for user '{}' on '{}'. Cannot update sudoers. \
              Either connect as root or ensure the user has passwordless sudo first.",
-            host.username, host.hostname
+            connect_username, host.hostname
         )));
     }
 
     let privileged = !is_root; // root needs no sudo prefix
 
-    // 6. Collect plugin commands + resolve paths.
+    // 7. Collect plugin commands + resolve paths.
     let plugin_sudo_cmds = PluginRegistry::all_required_sudo_commands();
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
@@ -157,7 +218,7 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
         }
     }
 
-    // 7. Determine sudoers content.
+    // 8. Determine sudoers content.
     let sudoers_content = if !resolved.is_empty() {
         SudoersContent::SpecificCommands(resolved)
     } else if args.allow_all {
@@ -185,16 +246,16 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
         return Ok(());
     }
 
-    // 8. Write the sudoers file.
+    // 9. Write the sudoers file.
     println!("Writing {sudoers_file}...");
     write_sudoers_file(&session, &host.username, &sudoers_content, privileged).await?;
 
-    // 9. Update DB: sudo_available = true (since we just wrote a sudoers file).
+    // 10. Update DB: sudo_available = true (since we just wrote a sudoers file).
     update_host_sudo_state(db, &host.id, Some(true), Some(is_root), None).await?;
 
     session.disconnect().await;
 
-    // 10. Success summary.
+    // 11. Success summary.
     println!();
     println!("Sudoers updated for host '{}'.", host.name);
     println!("  File: {sudoers_file}");
