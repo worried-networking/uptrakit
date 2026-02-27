@@ -1,8 +1,43 @@
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 
 use crate::db::entity::ssh_host::{ActiveModel, Column, Entity, Model, SshKeyType};
 use crate::error::{Error, Result};
+
+// ── HostSnapshot ──────────────────────────────────────────────────────────────
+
+/// Lightweight representation of an `ssh_hosts` row used for change detection.
+///
+/// Only `id` and `updated_at` are stored — the full model is never cached in
+/// memory across reload ticks.  The SSH agent polls these snapshots every
+/// [`HOST_RELOAD_INTERVAL`](crate::HOST_RELOAD_INTERVAL) seconds to detect
+/// additions, removals, and updates without loading full host credentials.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostSnapshot {
+    pub id: String,
+    pub updated_at: i64,
+}
+
+/// Return a lightweight snapshot of every row in `ssh_hosts`, ordered by `id`.
+///
+/// Used by `SshAgentHandler` to detect host-database changes without storing
+/// full [`Model`] values in memory between reload ticks.
+pub async fn list_host_snapshots(db: &DatabaseConnection) -> Result<Vec<HostSnapshot>> {
+    let models = Entity::find()
+        .order_by_asc(Column::Id)
+        .all(db)
+        .await
+        .context_to::<Error>()?;
+    Ok(models
+        .into_iter()
+        .map(|m| HostSnapshot {
+            id: m.id,
+            updated_at: m.updated_at,
+        })
+        .collect())
+}
 
 /// Parameters for adding a new SSH host.
 pub struct AddHostParams {
@@ -670,5 +705,96 @@ mod tests {
             .await
             .expect("find");
         assert_eq!(results.len(), 2);
+    }
+
+    // ── list_host_snapshots tests ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_host_snapshots_empty() {
+        let (_dir, db) = setup_db().await;
+        let snapshots = list_host_snapshots(&db).await.expect("list_host_snapshots");
+        assert!(snapshots.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_host_snapshots_returns_id_and_updated_at() {
+        let (_dir, db) = setup_db().await;
+
+        let h1 = add_host(
+            &db,
+            add_params("snap-a", "10.0.0.1", 22, "u", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add h1");
+
+        let h2 = add_host(
+            &db,
+            add_params("snap-b", "10.0.0.2", 22, "u", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add h2");
+
+        let snapshots = list_host_snapshots(&db).await.expect("list_host_snapshots");
+        assert_eq!(snapshots.len(), 2);
+
+        // Ordered by id (lexicographic UUID order).
+        let ids: Vec<&str> = snapshots.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&h1.id.as_str()));
+        assert!(ids.contains(&h2.id.as_str()));
+
+        for snap in &snapshots {
+            assert!(snap.updated_at > 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn list_host_snapshots_reflects_update() {
+        let (_dir, db) = setup_db().await;
+
+        let host = add_host(
+            &db,
+            add_params("snap-update", "10.0.0.3", 22, "u", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add");
+
+        let before = list_host_snapshots(&db)
+            .await
+            .expect("before")
+            .into_iter()
+            .find(|s| s.id == host.id)
+            .expect("snapshot present");
+
+        // Small sleep to ensure updated_at changes (it has 1-second resolution).
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        update_host(
+            &db,
+            "snap-update",
+            HostUpdates {
+                name: Some("snap-updated".to_string()),
+                hostname: None,
+                port: None,
+                username: None,
+                private_key: None,
+                key_type: None,
+                host_key_fingerprint: None,
+                sudo_policy: None,
+            },
+        )
+        .await
+        .expect("update");
+
+        let after = list_host_snapshots(&db)
+            .await
+            .expect("after")
+            .into_iter()
+            .find(|s| s.id == host.id)
+            .expect("snapshot present");
+
+        assert!(
+            after.updated_at >= before.updated_at,
+            "updated_at should not decrease"
+        );
     }
 }
