@@ -336,6 +336,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         (status = 403, description = "Token does not belong to this user")
     ),
     tag = "Authentication",
+    extensions(("x-required-permission" = json!("self"))),
     security(("bearer_token" = []))
 )]
 pub async fn logout(
@@ -673,6 +674,7 @@ mod tests {
         (status = 401, description = "Not authenticated")
     ),
     tag = "Authentication",
+    extensions(("x-required-permission" = json!("self"))),
     security(("bearer_token" = []))
 )]
 pub async fn me(

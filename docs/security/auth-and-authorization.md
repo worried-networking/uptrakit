@@ -12,6 +12,25 @@
 | Forwarded cert headers | Reverse proxy | Trusted proxies forward cert info/PEM; issuer CN verified. |
 | Enrollment tokens | Service onboarding | Multiple named tokens stored in the `enrollment_tokens` table (Argon2id hashed). Each token supports capability scoping, usage limits, and TTL. See [Enrollment Tokens API](../api/enrollment-tokens.md). |
 
+## JWT Access Token Claims Contract
+
+Every access token minted by `JwtManager::create_access_token` includes:
+
+| Claim | Value | Purpose |
+| --- | --- | --- |
+| `iss` | `"uptrakit"` | Identifies the issuing deployment. |
+| `aud` | `["uptrakit"]` | Restricts token acceptance to Uptrakit instances. |
+| `sub` | User UUID | Identifies the subject user. |
+| `exp` | Unix timestamp | Token expiry (15 minutes from issuance). |
+| `jti` | UUID | Per-token unique identifier used for denylist lookups. |
+| `permissions` | `string[]` | Resolved permissions embedded at issuance time. |
+| `auth_method` | `"password"` \| `"oidc"` \| `"api_token"` | How the user authenticated. |
+
+`decode_access_token` validates **all three** of `exp`, `iss`, and `aud`. Tokens that lack any of
+these claims, or that carry the wrong values (e.g. tokens issued by a different deployment sharing the
+same signing key), are rejected with `AuthError::JwtDecode`. This prevents cross-deployment token
+replay attacks in scenarios where the signing key file is accidentally shared or restored from backup.
+
 ## JWT Signing Key Storage
 
 The JWT signing key is stored in the `settings` table under `auth.jwt_signing_key` (global scope, base64
@@ -133,6 +152,21 @@ OIDC auto-created) get the `user` role by default. OIDC role mapping can overrid
    permission machine-readable in the generated OpenAPI spec.
 1. The frontend receives permissions as `string[]` (e.g. `["view_settings", "manage_agents"]`) and uses the `Permission`
    TypeScript enum for checks.
+
+### Self-authenticated endpoints and the `"self"` sentinel
+
+Some endpoints — `create_api_token`, `list_api_tokens`, `revoke_api_token`, `logout`, and `me` — are
+authenticated (require a valid Bearer token) but not governed by the RBAC permission model. Any authenticated
+user may call them regardless of their assigned roles. These endpoints use `Extension<AuthenticatedUser>`
+directly rather than a typed permission extractor, and carry:
+
+```rust
+extensions(("x-required-permission" = json!("self")))
+```
+
+The sentinel value `"self"` is distinct from the nine named `Permission` variants. It signals to automated
+permission-audit tooling that the endpoint requires only **authentication** (a valid token), not any specific
+RBAC permission. Tools must treat `"self"` as "any authenticated user is authorized".
 
 ### Permission extractor reference
 

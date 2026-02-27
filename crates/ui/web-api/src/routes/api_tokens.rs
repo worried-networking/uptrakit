@@ -26,6 +26,7 @@ pub use uptrakit_web_api_types::api_tokens::{
         (status = 401, description = "Not authenticated")
     ),
     tag = "Authentication",
+    extensions(("x-required-permission" = json!("self"))),
     security(("bearer_token" = []))
 )]
 pub async fn create_api_token(
@@ -60,6 +61,7 @@ pub async fn create_api_token(
         (status = 401, description = "Not authenticated")
     ),
     tag = "Authentication",
+    extensions(("x-required-permission" = json!("self"))),
     security(("bearer_token" = []))
 )]
 pub async fn list_api_tokens(
@@ -104,6 +106,7 @@ pub async fn list_api_tokens(
         (status = 404, description = "API token not found")
     ),
     tag = "Authentication",
+    extensions(("x-required-permission" = json!("self"))),
     security(("bearer_token" = []))
 )]
 pub async fn revoke_api_token(
