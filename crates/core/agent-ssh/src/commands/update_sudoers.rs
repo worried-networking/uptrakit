@@ -12,14 +12,22 @@ use crate::commands::sudoers::{
     self, ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,
     install_helper_script, resolve_command_path, write_sudoers_file,
 };
+use crate::db::entity::ssh_host::Model;
 use crate::error::{Error, Result};
 use crate::host_ops::{self, update_host_sudo_state};
+use crate::ssh_target::SshTarget;
 use crate::ssh_transport::{AuthMethod, SshConnectionConfig};
 use std::time::Duration;
 
 /// Arguments for the `update-sudoers` command.
 pub struct UpdateSudoersArgs {
-    /// Host name or UUID.
+    /// Host name, UUID, or SSH address (`[user@]host[:port]` /
+    /// `ssh://[user@]host[:port]`).
+    ///
+    /// When the value contains `@` or starts with `ssh://` it is parsed as an
+    /// SSH address and the host is looked up by hostname (and port, if
+    /// present).  Otherwise the value is treated as a host name or UUID
+    /// (existing behaviour).
     pub name_or_id: String,
     /// Force `NOPASSWD: ALL` instead of specific command entries.
     pub allow_all: bool,
@@ -27,12 +35,41 @@ pub struct UpdateSudoersArgs {
     pub dry_run: bool,
 }
 
+/// Resolve the target host from `name_or_id`, which may be a host name, UUID,
+/// or an SSH address in `[user@]host[:port]` / `ssh://[user@]host[:port]` form.
+async fn resolve_host(db: &DatabaseConnection, name_or_id: &str) -> Result<Model> {
+    if name_or_id.contains('@') || name_or_id.starts_with("ssh://") {
+        // Parse as SSH target and find by hostname (+ optional port).
+        let target = name_or_id.parse::<SshTarget>().map_err(|e| {
+            report!(Error::InvalidInput(format!(
+                "invalid SSH address '{name_or_id}': {e}"
+            )))
+        })?;
+
+        let matches =
+            host_ops::find_hosts_by_hostname(db, &target.hostname, target.port).await?;
+
+        match matches.len() {
+            0 => bail!(Error::HostNotFound(name_or_id.to_string())),
+            1 => Ok(matches.into_iter().next().expect("length checked above")),
+            _ => bail!(Error::InvalidInput(format!(
+                "multiple hosts found for '{}'; use the host name or UUID to \
+                 disambiguate (see `host list`)",
+                name_or_id
+            ))),
+        }
+    } else {
+        // Name or UUID lookup (existing behaviour).
+        host_ops::find_host(db, name_or_id)
+            .await?
+            .ok_or_else(|| report!(Error::HostNotFound(name_or_id.to_string())))
+    }
+}
+
 /// Run the `update-sudoers` command.
 pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()> {
-    // 1. Load SSH host from DB.
-    let host = host_ops::find_host(db, &args.name_or_id)
-        .await?
-        .ok_or_else(|| report!(Error::HostNotFound(args.name_or_id.clone())))?;
+    // 1. Load SSH host from DB (supports name, UUID, and SSH address).
+    let host = resolve_host(db, &args.name_or_id).await?;
 
     // 2. Establish SSH session.
     let config = SshConnectionConfig {
