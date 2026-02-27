@@ -1879,9 +1879,9 @@ components:
           type: integer
           format: int32
           description: Maximum execution time in seconds
-          default: 300
+          default: 7200
           examples:
-            - 300
+            - 7200
 
     updateStartedPayload:
       type: object

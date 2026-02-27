@@ -631,9 +631,12 @@ pub enum UpdateFinalStatus {
     Failed,
 }
 
+/// Default timeout for update execution, in seconds (2 hours).
+pub const DEFAULT_UPDATE_TIMEOUT_SECS: u32 = 7200;
+
 /// Default timeout for update execution in seconds.
 fn default_update_timeout() -> u32 {
-    300
+    DEFAULT_UPDATE_TIMEOUT_SECS
 }
 
 /// Controller -> Agent: Trigger an update.
@@ -1891,7 +1894,7 @@ mod tests {
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
             release_info: None,
-            timeout_seconds: 300,
+            timeout_seconds: DEFAULT_UPDATE_TIMEOUT_SECS,
         }));
         let json = serde_json::to_string(&msg).unwrap();
         // Empty vectors should be omitted
@@ -1921,7 +1924,7 @@ mod tests {
         }"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         if let ControllerMessage::ExecuteUpdate(payload) = msg {
-            assert_eq!(payload.timeout_seconds, 300);
+            assert_eq!(payload.timeout_seconds, DEFAULT_UPDATE_TIMEOUT_SECS);
             assert!(payload.pre_update_hooks.is_empty());
             assert!(payload.post_update_hooks.is_empty());
         } else {
@@ -1949,7 +1952,7 @@ mod tests {
             }],
             post_update_hooks: vec![],
             release_info: None,
-            timeout_seconds: 300,
+            timeout_seconds: DEFAULT_UPDATE_TIMEOUT_SECS,
         }));
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""shell"#));
@@ -3081,7 +3084,7 @@ mod tests {
                 pre_update_hooks: vec![],
                 post_update_hooks: vec![],
                 release_info: None,
-                timeout_seconds: 300,
+                timeout_seconds: DEFAULT_UPDATE_TIMEOUT_SECS,
             },
         )));
         spec.validate("executeUpdatePayload", &json);

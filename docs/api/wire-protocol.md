@@ -178,6 +178,7 @@ and is not sent to the agent.
 | `execute_update_plugin` | `PluginAssignment` | Plugin for the `execute_update` role (required) |
 | `pre_update_hooks` | `Vec<HookCommand>` | Pre-update hook commands |
 | `post_update_hooks` | `Vec<HookCommand>` | Post-update hook commands |
+| `timeout_seconds` | `u32` | Maximum execution time for the entire update (including hooks). Defaults to 7200 (2 hours) when omitted. |
 
 #### `discover_software` payload
 

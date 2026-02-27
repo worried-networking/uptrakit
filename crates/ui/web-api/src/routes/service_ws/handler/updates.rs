@@ -243,7 +243,7 @@ pub(super) async fn deliver_pending_updates(
             pre_update_hooks: resolved_hooks.pre_update_hooks,
             post_update_hooks: resolved_hooks.post_update_hooks,
             release_info: None,
-            timeout_seconds: 300,
+            timeout_seconds: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT_SECS,
         };
 
         let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
