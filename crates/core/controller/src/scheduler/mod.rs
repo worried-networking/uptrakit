@@ -394,7 +394,7 @@ mod tests {
         let task = scheduled_task::ActiveModel {
             id: ActiveValue::Set(Uuid::now_v7()),
             tenant_id: ActiveValue::Set(tenant.id),
-            task_type: ActiveValue::Set(ScheduledTaskType::EventCleanup),
+            task_type: ActiveValue::Set(ScheduledTaskType::StaleLeaseCleanup),
             cron_expression: ActiveValue::Set("*/5 * * * *".to_string()),
             enabled: ActiveValue::Set(true),
             task_config: ActiveValue::Set(None),
@@ -426,7 +426,7 @@ mod tests {
         let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
         let mut scheduler = Scheduler::new(db.clone(), config);
         scheduler.register(
-            ScheduledTaskType::EventCleanup,
+            ScheduledTaskType::StaleLeaseCleanup,
             Box::new(TrackingExecutor(executed_clone)),
         );
 

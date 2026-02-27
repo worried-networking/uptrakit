@@ -381,7 +381,7 @@ mod tests {
         let task = scheduled_task::ActiveModel {
             id: ActiveValue::Set(Uuid::now_v7()),
             tenant_id: ActiveValue::Set(tenant.id),
-            task_type: ActiveValue::Set(scheduled_task::ScheduledTaskType::EventCleanup),
+            task_type: ActiveValue::Set(scheduled_task::ScheduledTaskType::StaleLeaseCleanup),
             cron_expression: ActiveValue::Set("0 * * * *".to_string()),
             enabled: ActiveValue::Set(true),
             task_config: ActiveValue::Set(None),

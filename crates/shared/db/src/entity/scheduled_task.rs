@@ -9,8 +9,6 @@ pub enum ScheduledTaskType {
     AuthCleanup,
     #[sea_orm(string_value = "stale_lease_cleanup")]
     StaleLeaseCleanup,
-    #[sea_orm(string_value = "event_cleanup")]
-    EventCleanup,
     #[sea_orm(string_value = "ca_rotation_check")]
     CaRotationCheck,
     #[sea_orm(string_value = "version_check")]
@@ -25,7 +23,6 @@ impl ScheduledTaskType {
         match self {
             Self::AuthCleanup => "Auth Cleanup",
             Self::StaleLeaseCleanup => "Stale Lease Cleanup",
-            Self::EventCleanup => "Event Cleanup",
             Self::CaRotationCheck => "CA Rotation Check",
             Self::VersionCheck => "Version Check",
             Self::ServiceCertCheck => "Service Cert Check",
@@ -37,7 +34,6 @@ impl ScheduledTaskType {
         match self {
             Self::AuthCleanup => "*/5 * * * *",
             Self::StaleLeaseCleanup => "*/5 * * * *",
-            Self::EventCleanup => "0 * * * *",
             Self::CaRotationCheck => "0 3 * * *",
             Self::VersionCheck => "0 */6 * * *",
             Self::ServiceCertCheck => "0 */12 * * *",

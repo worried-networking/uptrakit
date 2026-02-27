@@ -2025,7 +2025,6 @@ impl MigrationTrait for Migration {
         let scheduled_task_types = [
             ("auth_cleanup", "*/5 * * * *"),
             ("stale_lease_cleanup", "*/5 * * * *"),
-            ("event_cleanup", "0 * * * *"),
             ("ca_rotation_check", "0 3 * * *"),
             ("version_check", "0 */6 * * *"),
             ("service_cert_check", "0 */12 * * *"),

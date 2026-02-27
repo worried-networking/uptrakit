@@ -3,6 +3,7 @@ use sea_orm_migration::prelude::*;
 
 mod m20260209_000001_initial;
 mod m20260227_000001_drop_controller_events;
+mod m20260227_000002_remove_event_cleanup_tasks;
 
 pub struct Migrator;
 
@@ -12,6 +13,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20260209_000001_initial::Migration),
             Box::new(m20260227_000001_drop_controller_events::Migration),
+            Box::new(m20260227_000002_remove_event_cleanup_tasks::Migration),
         ]
     }
 }

@@ -62,6 +62,35 @@ pub enum Capability {
     ///
     /// Wire string: `update_hooks`.
     UpdateHooks,
+    /// Marker: service is an external task scheduler.
+    ///
+    /// Identifies a service that runs scheduled tasks (version checks, cert
+    /// checks, auth cleanup, etc.) externally. The controller uses this to
+    /// detect scheduler presence and disable the embedded scheduler.
+    ///
+    /// Wire string: `scheduler`.
+    Scheduler,
+    /// Service requires direct database access. The controller will include
+    /// `db_url` in [`ServiceCredentialsPayload`].
+    ///
+    /// Wire string: `database_access`.
+    DatabaseAccess,
+    /// Service requires NATS access. The controller will include `nats_url`
+    /// in [`ServiceCredentialsPayload`] (if NATS is configured).
+    ///
+    /// Wire string: `nats_access`.
+    NatsAccess,
+    /// Service requires the master encryption key. The controller will include
+    /// `master_key_hex` in [`ServiceCredentialsPayload`] (if encryption is enabled).
+    ///
+    /// Wire string: `master_key_access`.
+    MasterKeyAccess,
+    /// Service can request CA certificate rotation via [`RequestCaRotationPayload`].
+    /// The controller will accept `RequestCaRotation` messages from services
+    /// with this capability (via NATS or local delivery).
+    ///
+    /// Wire string: `ca_management`.
+    CaManagement,
     /// Unknown capability from a newer peer; never participates in intersection.
     ///
     /// Provides forward compatibility: a newer peer may advertise capabilities
@@ -79,6 +108,11 @@ impl Capability {
             Self::GracefulShutdown => "graceful_shutdown",
             Self::MqttBridge => "mqtt_bridge",
             Self::SshRemote => "ssh_remote",
+            Self::Scheduler => "scheduler",
+            Self::DatabaseAccess => "database_access",
+            Self::NatsAccess => "nats_access",
+            Self::MasterKeyAccess => "master_key_access",
+            Self::CaManagement => "ca_management",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -124,6 +158,11 @@ impl FromStr for Capability {
             "graceful_shutdown" => Self::GracefulShutdown,
             "mqtt_bridge" => Self::MqttBridge,
             "ssh_remote" => Self::SshRemote,
+            "scheduler" => Self::Scheduler,
+            "database_access" => Self::DatabaseAccess,
+            "nats_access" => Self::NatsAccess,
+            "master_key_access" => Self::MasterKeyAccess,
+            "ca_management" => Self::CaManagement,
             other => Self::Other(other.to_string()),
         })
     }
@@ -260,6 +299,20 @@ pub enum ControllerMessage {
     TenantRevoked(MqttTenantRevokedPayload),
     MqttClientCreated(MqttClientCreatedPayload),
     SoftwareStates(MqttSoftwareStatesPayload),
+    // -- Infrastructure credential delivery --
+    /// Infrastructure credentials for services that advertise credential
+    /// capabilities. Fields are populated based on the service's capability set:
+    ///   - `database_access` → `db_url` is set
+    ///   - `nats_access` → `nats_url` is set (if controller has NATS)
+    ///   - `master_key_access` → `master_key_hex` is set (if encryption enabled)
+    ///
+    /// **Security**: NEVER published to NATS. Delivered locally via WebSocket only,
+    /// following the same pattern as MQTT credential messages.
+    ServiceCredentials(ServiceCredentialsPayload),
+    /// Request from an external component (e.g. scheduler) for the controller to
+    /// perform CA certificate rotation. Published via NATS to the controller subject;
+    /// handled by triggering `ca_rotation_trigger.notify_one()`.
+    RequestCaRotation(RequestCaRotationPayload),
 }
 
 /// Payload for ping messages.
@@ -795,6 +848,46 @@ pub struct MqttTenantRevokedPayload {
 pub struct MqttClientCreatedPayload {
     /// MQTT client UUID to lease.
     pub mqtt_client_id: Uuid,
+}
+
+// =============================================================================
+// Infrastructure Credential Payloads
+// =============================================================================
+
+/// Infrastructure credentials for services that advertise credential capabilities.
+///
+/// Fields are populated based on the service's capability set:
+///   - `database_access` → `db_url` is set
+///   - `nats_access` → `nats_url` is set (if controller has NATS)
+///   - `master_key_access` → `master_key_hex` is set (if encryption enabled)
+///
+/// **Security**: This payload contains highly sensitive credentials. It must
+/// NEVER be published to NATS or any external transport. It is delivered
+/// exclusively over the authenticated WebSocket connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceCredentialsPayload {
+    /// Database connection URL. Present when the service has `database_access`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub db_url: Option<SecretString>,
+    /// Master encryption key as 64-char hex. Present when the service has
+    /// `master_key_access` and encryption is enabled on the controller.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub master_key_hex: Option<SecretString>,
+    /// NATS server URL. Present when the service has `nats_access` and
+    /// NATS is configured on the controller.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nats_url: Option<String>,
+}
+
+/// Request from an external component (e.g. scheduler) for the controller to
+/// perform CA certificate rotation.
+///
+/// Published via NATS to `uptrakit.events.controller` subject. Handled by
+/// triggering `ca_rotation_trigger.notify_one()` on the receiving controller.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequestCaRotationPayload {
+    /// Human-readable reason for the rotation request.
+    pub reason: String,
 }
 
 fn default_ha_discovery_prefix() -> String {
@@ -3328,5 +3421,98 @@ mod tests {
                 .into_iter()
                 .collect()
         );
+    }
+
+    // =========================================================================
+    // New capability variants
+    // =========================================================================
+
+    #[test]
+    fn scheduler_capability_roundtrip() {
+        let cap = Capability::Scheduler;
+        assert_eq!(cap.as_str(), "scheduler");
+        assert!(cap.is_known());
+        let json = serde_json::to_string(&cap).unwrap();
+        assert_eq!(json, r#""scheduler""#);
+        let parsed: Capability = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, cap);
+    }
+
+    #[test]
+    fn database_access_capability_roundtrip() {
+        let cap = Capability::DatabaseAccess;
+        assert_eq!(cap.as_str(), "database_access");
+        assert!(cap.is_known());
+        let parsed: Capability = "database_access".parse().unwrap();
+        assert_eq!(parsed, cap);
+    }
+
+    #[test]
+    fn nats_access_capability_roundtrip() {
+        let cap = Capability::NatsAccess;
+        assert_eq!(cap.as_str(), "nats_access");
+        let parsed: Capability = "nats_access".parse().unwrap();
+        assert_eq!(parsed, cap);
+    }
+
+    #[test]
+    fn master_key_access_capability_roundtrip() {
+        let cap = Capability::MasterKeyAccess;
+        assert_eq!(cap.as_str(), "master_key_access");
+        let parsed: Capability = "master_key_access".parse().unwrap();
+        assert_eq!(parsed, cap);
+    }
+
+    #[test]
+    fn ca_management_capability_roundtrip() {
+        let cap = Capability::CaManagement;
+        assert_eq!(cap.as_str(), "ca_management");
+        let parsed: Capability = "ca_management".parse().unwrap();
+        assert_eq!(parsed, cap);
+    }
+
+    // =========================================================================
+    // ServiceCredentials and RequestCaRotation payloads
+    // =========================================================================
+
+    #[test]
+    fn service_credentials_serialization_roundtrip() {
+        let msg = ControllerMessage::ServiceCredentials(ServiceCredentialsPayload {
+            db_url: Some(SecretString::new("postgres://localhost/uptrakit".into())),
+            master_key_hex: Some(SecretString::new("aa".repeat(32))),
+            nats_url: Some("nats://localhost:4222".to_string()),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"service_credentials"#));
+        assert!(json.contains(r#""db_url":"#));
+        assert!(json.contains(r#""nats_url":"#));
+        assert!(json.contains(r#""master_key_hex":"#));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn service_credentials_omits_none_fields() {
+        let msg = ControllerMessage::ServiceCredentials(ServiceCredentialsPayload {
+            db_url: Some(SecretString::new("sqlite://test.db".into())),
+            master_key_hex: None,
+            nats_url: None,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""db_url":"#));
+        assert!(!json.contains("master_key_hex"));
+        assert!(!json.contains("nats_url"));
+    }
+
+    #[test]
+    fn request_ca_rotation_serialization_roundtrip() {
+        let msg = ControllerMessage::RequestCaRotation(RequestCaRotationPayload {
+            reason: "CA certificate expiring in 30 days".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"request_ca_rotation"#));
+        assert!(json.contains(r#""reason":"CA certificate expiring in 30 days"#));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
     }
 }
