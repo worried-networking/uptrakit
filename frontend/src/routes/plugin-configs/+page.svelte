@@ -12,7 +12,10 @@
 		discardPluginConfigDiscovered,
 		getAutodiscoveryIgnores,
 		createAutodiscoveryIgnore,
-		deleteAutodiscoveryIgnore
+		deleteAutodiscoveryIgnore,
+		listDiscoveryAllowlist,
+		addDiscoveryAllowlistEntry,
+		deleteDiscoveryAllowlistEntry
 	} from '$lib/api';
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
@@ -20,10 +23,10 @@
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission, PluginCapability } from '$lib/types';
-	import type { PluginConfigResponse, AutodiscoveryIgnoreResponse } from '$lib/types';
+	import type { PluginConfigResponse, AutodiscoveryIgnoreResponse, TenantDiscoveryAllowlistEntry } from '$lib/types';
 
-	type ActiveTab = 'configs' | 'ignores';
-	const ACTIVE_TAB_VALUES = ['configs', 'ignores'] as const satisfies readonly ActiveTab[];
+	type ActiveTab = 'configs' | 'ignores' | 'allowlist';
+	const ACTIVE_TAB_VALUES = ['configs', 'ignores', 'allowlist'] as const satisfies readonly ActiveTab[];
 
 	let activeTab: ActiveTab = $state(parseUrlParam(page.url, 'tab', ACTIVE_TAB_VALUES, 'configs'));
 
@@ -46,6 +49,13 @@
 	let ignoreForm = $state({ plugin_config_id: '', package_identifier: '' });
 	let ignoreDeleteConfirm: { id: string; pkg: string } | null = $state(null);
 
+	// Discovery allowlist state
+	let allowlist: TenantDiscoveryAllowlistEntry[] = $state([]);
+	let allowlistLoading: boolean = $state(true);
+	let showAllowlistModal: boolean = $state(false);
+	let allowlistForm = $state({ plugin_type: 'package_manager_homebrew' });
+	let allowlistDeleteConfirm: { id: string; plugin_type: string } | null = $state(null);
+
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
@@ -65,6 +75,7 @@
 		if (canView) {
 			loadConfigs();
 			loadIgnores(ignoresPage);
+			loadAllowlist();
 		}
 	});
 
@@ -72,6 +83,53 @@
 		if (activeTab === tab) return;
 		ignoresPage = 1;
 		activeTab = tab;
+	}
+
+	async function loadAllowlist() {
+		allowlistLoading = true;
+		try {
+			allowlist = await listDiscoveryAllowlist();
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to load discovery allowlist');
+		} finally {
+			allowlistLoading = false;
+		}
+	}
+
+	function openAddAllowlistEntry() {
+		allowlistForm = { plugin_type: 'package_manager_homebrew' };
+		showAllowlistModal = true;
+	}
+
+	function closeAllowlistModal() {
+		showAllowlistModal = false;
+	}
+
+	async function saveAllowlistEntry() {
+		try {
+			const created = await addDiscoveryAllowlistEntry({ plugin_type: allowlistForm.plugin_type });
+			// If it already existed the server returns the existing entry — avoid duplicates.
+			if (!allowlist.some((e) => e.id === created.id)) {
+				allowlist = [...allowlist, created];
+			}
+			showSuccess('Allowlist entry added.');
+			closeAllowlistModal();
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to add allowlist entry');
+		}
+	}
+
+	async function executeDeleteAllowlistEntry() {
+		if (!allowlistDeleteConfirm) return;
+		const { id } = allowlistDeleteConfirm;
+		allowlistDeleteConfirm = null;
+		try {
+			await deleteDiscoveryAllowlistEntry(id);
+			allowlist = allowlist.filter((e) => e.id !== id);
+			showSuccess('Allowlist entry removed.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to remove allowlist entry');
+		}
 	}
 
 	async function loadConfigs() {
@@ -239,8 +297,10 @@
 		if (e.key === 'Escape') {
 			if (showConfigModal) closeConfigModal();
 			else if (showIgnoreModal) closeIgnoreModal();
+			else if (showAllowlistModal) closeAllowlistModal();
 			else if (configDeleteConfirm) configDeleteConfirm = null;
 			else if (ignoreDeleteConfirm) ignoreDeleteConfirm = null;
+			else if (allowlistDeleteConfirm) allowlistDeleteConfirm = null;
 		}
 	}}
 />
@@ -266,6 +326,12 @@
 				onclick={() => switchTab('ignores')}
 			>
 				Ignore Rules
+			</button>
+			<button
+				class="btn btn-sm {activeTab === 'allowlist' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				onclick={() => switchTab('allowlist')}
+			>
+				Discovery Allowlist
 			</button>
 		</div>
 
@@ -345,7 +411,7 @@
 					</table>
 				</div>
 			{/if}
-		{:else}
+		{:else if activeTab === 'ignores'}
 			<!-- Ignore rules tab -->
 			<div class="mb-4 flex justify-end">
 				{#if canManage}
@@ -400,6 +466,62 @@
 					</table>
 				</div>
 				<Pagination currentPage={ignoresPage} totalPages={ignoresTotalPages} onPageChange={loadIgnores} />
+			{/if}
+		{:else}
+			<!-- Discovery allowlist tab -->
+			<div class="mb-4">
+				<p class="text-sm text-surface-500 mb-3">
+					When the allowlist is empty, all discovery plugins are active. Once you add at least one
+					entry, only the listed plugin types will run discovery tenant-wide.
+				</p>
+				{#if canManage}
+					<div class="flex justify-end">
+						<button class="btn preset-filled-primary-500" onclick={openAddAllowlistEntry}>
+							Add Plugin Type
+						</button>
+					</div>
+				{/if}
+			</div>
+
+			{#if allowlistLoading}
+				<p class="text-center py-4">Loading...</p>
+			{:else if allowlist.length === 0}
+				<aside class="rounded-lg p-4 preset-tonal-surface">
+					<p class="font-medium">No restrictions — all discovery plugins are active.</p>
+					<p class="mt-1 text-sm text-surface-500">
+						Add a plugin type to restrict discovery to only the listed types.
+					</p>
+				</aside>
+			{:else}
+				<div class="table-wrap">
+					<table class="table">
+						<thead>
+							<tr>
+								<th>Plugin Type</th>
+								<th>Created</th>
+								{#if canManage}<th class="w-24">Actions</th>{/if}
+							</tr>
+						</thead>
+						<tbody>
+							{#each allowlist as entry (entry.id)}
+								<tr>
+									<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
+									<td>{formatDate(entry.created_at)}</td>
+									{#if canManage}
+										<td>
+											<button
+												class="btn btn-sm preset-tonal-error"
+												onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
+											>
+												Remove
+											</button>
+										</td>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
 			{/if}
 		{/if}
 	{/if}
@@ -520,5 +642,44 @@
 		confirmClass="preset-filled-error-500"
 		onconfirm={executeDeleteIgnore}
 		oncancel={() => (ignoreDeleteConfirm = null)}
+	/>
+{/if}
+
+<!-- Discovery allowlist modal -->
+{#if showAllowlistModal}
+	<ModalBackdrop onclose={closeAllowlistModal}>
+		<div
+			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
+			role="dialog"
+			aria-modal="true"
+		>
+			<h3 class="h3">Add Discovery Plugin Type</h3>
+
+			<label class="label">
+				<span>Plugin Type</span>
+				<select class="select" bind:value={allowlistForm.plugin_type}>
+					<option value="package_manager_homebrew">Homebrew</option>
+					<option value="package_manager_apt">APT</option>
+					<option value="discovery_proxmox_helper_scripts">Proxmox Helper Scripts</option>
+				</select>
+			</label>
+
+			<div class="flex justify-end gap-2">
+				<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
+				<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
+			</div>
+		</div>
+	</ModalBackdrop>
+{/if}
+
+{#if allowlistDeleteConfirm}
+	<ConfirmDialog
+		title="Remove Allowlist Entry"
+		messagePrefix="Remove discovery plugin type"
+		entityName={allowlistDeleteConfirm.plugin_type}
+		confirmLabel="Remove"
+		confirmClass="preset-filled-error-500"
+		onconfirm={executeDeleteAllowlistEntry}
+		oncancel={() => (allowlistDeleteConfirm = null)}
 	/>
 {/if}

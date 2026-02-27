@@ -58,7 +58,10 @@ import type {
 	UpdateScheduledTaskRequest,
 	UpdateServiceRequest,
 	UpdateSoftwareItemRequest,
-	User
+	User,
+	TenantDiscoveryAllowlistEntry,
+	HostDiscoveryAllowlistEntry,
+	CreateDiscoveryAllowlistEntryRequest
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -731,4 +734,49 @@ export async function revokeApiToken(id: string): Promise<void> {
 // CA rotation
 export async function rotateCA(): Promise<RotateCaResponse> {
 	return request<RotateCaResponse>('/settings/ca/rotate', { method: 'POST' });
+}
+
+// Discovery allowlist — tenant-wide
+
+export async function listDiscoveryAllowlist(): Promise<TenantDiscoveryAllowlistEntry[]> {
+	return request<TenantDiscoveryAllowlistEntry[]>('/discovery-allowlist');
+}
+
+export async function addDiscoveryAllowlistEntry(
+	req: CreateDiscoveryAllowlistEntryRequest
+): Promise<TenantDiscoveryAllowlistEntry> {
+	return request<TenantDiscoveryAllowlistEntry>('/discovery-allowlist', {
+		method: 'POST',
+		body: JSON.stringify(req)
+	});
+}
+
+export async function deleteDiscoveryAllowlistEntry(id: string): Promise<void> {
+	return requestVoid(`/discovery-allowlist/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// Discovery allowlist — host-specific
+
+export async function listHostDiscoveryAllowlist(hostId: string): Promise<HostDiscoveryAllowlistEntry[]> {
+	return request<HostDiscoveryAllowlistEntry[]>(`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist`);
+}
+
+export async function addHostDiscoveryAllowlistEntry(
+	hostId: string,
+	req: CreateDiscoveryAllowlistEntryRequest
+): Promise<HostDiscoveryAllowlistEntry> {
+	return request<HostDiscoveryAllowlistEntry>(
+		`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist`,
+		{ method: 'POST', body: JSON.stringify(req) }
+	);
+}
+
+export async function deleteHostDiscoveryAllowlistEntry(
+	hostId: string,
+	entryId: string
+): Promise<void> {
+	return requestVoid(
+		`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist/${encodeURIComponent(entryId)}`,
+		{ method: 'DELETE' }
+	);
 }

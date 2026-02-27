@@ -541,3 +541,22 @@ export interface UpdatePluginConfigRequest {
 	config?: Record<string, unknown>;
 	enabled?: boolean;
 }
+
+// Discovery allowlist
+
+export interface TenantDiscoveryAllowlistEntry {
+	id: string;
+	plugin_type: string;
+	created_at: string;
+}
+
+export interface HostDiscoveryAllowlistEntry {
+	id: string;
+	host_id: string;
+	plugin_type: string;
+	created_at: string;
+}
+
+export interface CreateDiscoveryAllowlistEntryRequest {
+	plugin_type: string;
+}
