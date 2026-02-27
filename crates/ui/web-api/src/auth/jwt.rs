@@ -23,6 +23,16 @@ pub struct AccessTokenClaims {
     pub oidc_provider_id: Option<String>,
     pub iat: i64,
     pub exp: i64,
+    /// Issuer — always `"uptrakit"`. `#[serde(default)]` allows tokens issued
+    /// before this field was introduced to be deserialized; the `Validation`
+    /// step rejects them because `iss` is in `required_spec_claims`.
+    #[serde(default)]
+    pub iss: String,
+    /// Audience — always `["uptrakit"]`. `#[serde(default)]` allows legacy
+    /// tokens without an `aud` claim to reach the `Validation` step, which
+    /// rejects them because `aud` is in `required_spec_claims`.
+    #[serde(default)]
+    pub aud: Vec<String>,
 }
 
 pub struct JwtManager {
@@ -87,6 +97,8 @@ impl JwtManager {
             oidc_provider_id: oidc_provider_id.map(|id| id.to_string()),
             iat: now,
             exp: now + ACCESS_TOKEN_EXPIRY_SECS,
+            iss: "uptrakit".to_string(),
+            aud: vec!["uptrakit".to_string()],
         };
 
         jsonwebtoken::encode(&Header::default(), &claims, &self.encoding_key)
@@ -94,11 +106,25 @@ impl JwtManager {
     }
 
     /// Decode and validate a JWT access token.
+    ///
+    /// Requires `iss = "uptrakit"` and `aud = ["uptrakit"]` in addition to the
+    /// standard `exp` check. Tokens minted before these claims were introduced
+    /// (or tokens from a different deployment) are rejected with
+    /// [`AuthError::JwtDecode`].
     pub fn decode_access_token(&self, token: &str) -> Result<AccessTokenClaims> {
+        let mut validation = Validation::default();
+        validation.set_audience(&["uptrakit"]);
+        validation.set_issuer(&["uptrakit"]);
+        // Require aud and iss to be present in the token, not just validated when present.
+        // Without this, jsonwebtoken v10 skips the audience/issuer check for tokens
+        // that omit these claims entirely (e.g. tokens minted before these fields were added).
+        validation.required_spec_claims.insert("aud".to_string());
+        validation.required_spec_claims.insert("iss".to_string());
+
         let token_data = jsonwebtoken::decode::<AccessTokenClaims>(
             token,
             &self.decoding_key,
-            &Validation::default(),
+            &validation,
         )
         .map_err(|e| report!(AuthError::JwtDecode(e.to_string())))?;
 
@@ -175,6 +201,50 @@ mod tests {
 
         let result = manager2.decode_access_token(&token);
         assert!(result.is_err());
+    }
+
+    /// Tokens minted without `aud`/`iss` (e.g. before this validation was
+    /// introduced) must be rejected even when signed with the correct key.
+    #[test]
+    fn test_decode_legacy_token_without_aud_rejected() {
+        use jsonwebtoken::{EncodingKey, Header};
+
+        let secret = b"test-secret-key-for-jwt-testing-only-do-not-use";
+        let manager = JwtManager::from_secret(secret);
+
+        // Simulate a legacy token struct that does not include `aud` or `iss`.
+        #[derive(serde::Serialize)]
+        struct LegacyClaims<'a> {
+            sub: &'a str,
+            jti: &'a str,
+            permissions: Vec<Permission>,
+            auth_method: &'a str,
+            iat: i64,
+            exp: i64,
+        }
+
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let legacy = LegacyClaims {
+            sub: "00000000-0000-0000-0000-000000000001",
+            jti: "00000000-0000-0000-0000-000000000002",
+            permissions: vec![],
+            auth_method: "password",
+            iat: now,
+            exp: now + 900,
+        };
+
+        let token = jsonwebtoken::encode(
+            &Header::default(),
+            &legacy,
+            &EncodingKey::from_secret(secret),
+        )
+        .expect("encode legacy token");
+
+        let result = manager.decode_access_token(&token);
+        assert!(
+            result.is_err(),
+            "token without aud/iss must be rejected by decode_access_token"
+        );
     }
 
     #[test]
