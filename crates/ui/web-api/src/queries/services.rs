@@ -194,17 +194,29 @@ pub async fn reject_service(
 }
 
 /// Soft-delete a service, revoke its certificates, and bump the revocation counter.
-/// Returns `true` if deactivated, `false` if not found.
+///
+/// All three mutations run inside a single database transaction. If any step
+/// fails the entire operation is rolled back, preventing a partially-deactivated
+/// state where certificates are not revoked and the CRL is not updated.
+///
+/// Returns `true` if the service was deactivated, `false` if not found.
 pub async fn deactivate_service(
     tenant_db: &TenantDb,
     id: Uuid,
     default_tenant_id: Uuid,
-) -> Result<bool, sea_orm::DbErr> {
+) -> Result<bool, ServiceQueryError> {
+    let txn = tenant_db
+        .db()
+        .begin()
+        .await
+        .map_err(ServiceQueryError::Db)?;
+
     let Some(svc) = tenant_db
         .find_by_id::<service::Entity, _>(id)
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await?
+        .one(&txn)
+        .await
+        .map_err(ServiceQueryError::Db)?
     else {
         return Ok(false);
     };
@@ -213,9 +225,9 @@ pub async fn deactivate_service(
     let mut active: service::ActiveModel = svc.into();
     active.deactivated_at = Set(Some(now));
     active.updated_at = Set(now);
-    active.update(tenant_db.db()).await?;
+    active.update(&txn).await.map_err(ServiceQueryError::Db)?;
 
-    if let Err(e) = ServiceCertificate::update_many()
+    ServiceCertificate::update_many()
         .col_expr(
             service_certificate::Column::RevokedAt,
             Expr::value(Some(now)),
@@ -226,17 +238,15 @@ pub async fn deactivate_service(
         )
         .filter(service_certificate::Column::ServiceId.eq(id))
         .filter(service_certificate::Column::RevokedAt.is_null())
-        .exec(tenant_db.db())
+        .exec(&txn)
         .await
-    {
-        tracing::error!("Failed to revoke certificates: {}", e);
-    }
+        .map_err(ServiceQueryError::Db)?;
 
-    if let Err(e) =
-        crate::settings_store::bump_revocation_version(tenant_db.db(), default_tenant_id).await
-    {
-        tracing::warn!(error = ?e, "failed to bump revocation version counter");
-    }
+    crate::settings_store::bump_revocation_version(&txn, default_tenant_id)
+        .await
+        .map_err(|e| ServiceQueryError::Db(sea_orm::DbErr::Custom(e.to_string())))?;
+
+    txn.commit().await.map_err(ServiceQueryError::Db)?;
 
     Ok(true)
 }

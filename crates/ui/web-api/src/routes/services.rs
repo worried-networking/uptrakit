@@ -270,8 +270,12 @@ pub async fn deactivate_service(
                 .into_response()
         }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Service not found"),
-        Err(e) => {
+        Err(ServiceQueryError::Db(e)) => {
             tracing::error!("Failed to deactivate service: {}", e);
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
+        Err(e) => {
+            tracing::error!("Unexpected error deactivating service: {:?}", e);
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
