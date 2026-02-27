@@ -88,6 +88,13 @@ impl MockApiServer {
         }
     }
 
+    /// Enrollment token endpoints (`/api/v1/enrollment-tokens`).
+    pub fn enrollment_tokens(&self) -> MockEnrollmentTokens<'_> {
+        MockEnrollmentTokens {
+            server: &self.server,
+        }
+    }
+
     /// Health endpoint (`/healthz`).
     pub fn health(&self) -> MockHealth<'_> {
         MockHealth {
@@ -359,6 +366,35 @@ impl<'a> MockApiTokens<'a> {
     /// Mock `DELETE /api/v1/auth/api-tokens/{id}`.
     pub fn on_revoke(&self, id: &Uuid) -> MockEndpoint<'_> {
         MockEndpoint::new(self.server, "DELETE", &paths::api_tokens::by_id(id))
+    }
+}
+
+// ── Section: Enrollment Tokens ─────────────────────────────────────────────
+
+/// Mock helpers for enrollment token endpoints.
+pub struct MockEnrollmentTokens<'a> {
+    server: &'a MockServer,
+}
+
+impl<'a> MockEnrollmentTokens<'a> {
+    /// Mock `GET /api/v1/enrollment-tokens`.
+    pub fn on_list(&self) -> MockEndpoint<'_> {
+        MockEndpoint::new(self.server, "GET", paths::enrollment_tokens::BASE)
+    }
+
+    /// Mock `POST /api/v1/enrollment-tokens`.
+    pub fn on_create(&self) -> MockEndpoint<'_> {
+        MockEndpoint::new(self.server, "POST", paths::enrollment_tokens::BASE)
+    }
+
+    /// Mock `GET /api/v1/enrollment-tokens/{id}`.
+    pub fn on_get(&self, id: &Uuid) -> MockEndpoint<'_> {
+        MockEndpoint::new(self.server, "GET", &paths::enrollment_tokens::by_id(id))
+    }
+
+    /// Mock `DELETE /api/v1/enrollment-tokens/{id}`.
+    pub fn on_revoke(&self, id: &Uuid) -> MockEndpoint<'_> {
+        MockEndpoint::new(self.server, "DELETE", &paths::enrollment_tokens::by_id(id))
     }
 }
 

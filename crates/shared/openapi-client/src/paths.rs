@@ -145,6 +145,16 @@ pub(crate) mod scheduler {
     }
 }
 
+pub(crate) mod enrollment_tokens {
+    use uuid::Uuid;
+    /// `GET /api/v1/enrollment-tokens` · `POST /api/v1/enrollment-tokens`
+    pub(crate) const BASE: &str = "/api/v1/enrollment-tokens";
+    /// `GET /api/v1/enrollment-tokens/{id}` · `DELETE /api/v1/enrollment-tokens/{id}`
+    pub(crate) fn by_id(id: &Uuid) -> String {
+        format!("/api/v1/enrollment-tokens/{id}")
+    }
+}
+
 pub(crate) mod services {
     use uuid::Uuid;
     /// `GET /api/v1/services` · `POST /api/v1/services`

@@ -6,6 +6,7 @@ pub(crate) mod paths;
 pub mod api_tokens;
 pub mod auth;
 pub mod autodiscovery;
+pub mod enrollment_tokens;
 pub mod error;
 pub mod health;
 pub mod hosts;
