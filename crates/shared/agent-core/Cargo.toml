@@ -24,7 +24,7 @@ uuid = { workspace = true, features = ["v7", "serde"] }
 uptrakit-command = { workspace = true }
 uptrakit-internal-wire = { path = "../wire" }
 uptrakit-plugin-infrastructure-core = { workspace = true }
-uptrakit-plugin-infrastructure-registry = { workspace = true }
+uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon"] }
 uptrakit-service-sdk = { path = "../service-sdk" }
 uptrakit-directories = { path = "../directories" }
 

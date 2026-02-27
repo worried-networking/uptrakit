@@ -3,13 +3,23 @@
 //! Defines the [`DockerClient`] trait for injecting different implementations
 //! (real bollard client in production, mock in tests), and the production
 //! [`BollardDockerClient`] that communicates with the Docker daemon.
+//!
+//! When the `daemon` feature is disabled, only [`NoopDockerClient`] is available.
+//! It returns [`DockerError::Configuration`] for every operation, which lets the
+//! plugin compile (and serve registry-only capabilities) without pulling in
+//! bollard and its TLS stack.
 
 use async_trait::async_trait;
+#[cfg(feature = "daemon")]
 use futures_util::StreamExt;
 use rootcause::prelude::*;
+#[cfg(feature = "daemon")]
 use uptrakit_plugin_infrastructure_core::command::send_output;
 use uptrakit_plugin_infrastructure_core::mpsc;
+#[cfg(feature = "daemon")]
 use uptrakit_plugin_infrastructure_core::{OutputStreamType, UpdateOutputLine};
+#[cfg(not(feature = "daemon"))]
+use uptrakit_plugin_infrastructure_core::UpdateOutputLine;
 
 use crate::config::DockerAuth;
 use crate::error::{DockerError, Result};
@@ -63,8 +73,47 @@ pub(crate) trait DockerClient: Send + Sync {
     async fn list_containers(&self, all: bool) -> Result<Vec<LocalContainerInfo>>;
 }
 
-// ── Production implementation ────────────────────────────────────────────────
+// ── Noop implementation (when daemon is disabled) ───────────────────────────
 
+/// Stub Docker client returned when the `daemon` feature is disabled.
+///
+/// Every method returns [`DockerError::Configuration`], making it clear at
+/// runtime that local Docker daemon operations require a build with the
+/// `daemon` feature enabled.
+#[cfg(not(feature = "daemon"))]
+pub(crate) struct NoopDockerClient;
+
+#[cfg(not(feature = "daemon"))]
+#[async_trait]
+impl DockerClient for NoopDockerClient {
+    async fn pull_image(
+        &self,
+        _image: &str,
+        _tag: &str,
+        _auth: Option<&DockerAuth>,
+        _output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<String> {
+        bail!(DockerError::Configuration(
+            "Docker daemon operations require the 'daemon' Cargo feature".to_string(),
+        ))
+    }
+
+    async fn inspect_image(&self, _full_ref: &str) -> Result<Option<LocalImageDigest>> {
+        bail!(DockerError::Configuration(
+            "Docker daemon operations require the 'daemon' Cargo feature".to_string(),
+        ))
+    }
+
+    async fn list_containers(&self, _all: bool) -> Result<Vec<LocalContainerInfo>> {
+        bail!(DockerError::Configuration(
+            "Docker daemon operations require the 'daemon' Cargo feature".to_string(),
+        ))
+    }
+}
+
+// ── Production implementation (daemon feature) ──────────────────────────────
+
+#[cfg(feature = "daemon")]
 /// Docker client backed by the bollard library.
 ///
 /// Communicates with the Docker daemon directly over its Unix socket (or
@@ -73,6 +122,7 @@ pub(crate) struct BollardDockerClient {
     docker: bollard::Docker,
 }
 
+#[cfg(feature = "daemon")]
 impl BollardDockerClient {
     /// Create a new client connected to the Docker daemon.
     ///
@@ -132,6 +182,7 @@ impl BollardDockerClient {
     }
 }
 
+#[cfg(feature = "daemon")]
 #[async_trait]
 impl DockerClient for BollardDockerClient {
     async fn pull_image(
@@ -228,6 +279,7 @@ impl DockerClient for BollardDockerClient {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Map a [`DockerAuth`] config value to bollard credentials.
+#[cfg(feature = "daemon")]
 fn map_auth_to_credentials(image: &str, auth: &DockerAuth) -> bollard::auth::DockerCredentials {
     use crate::image_ref::ImageRef;
     let server_address = image.parse::<ImageRef>().map(|r| r.server_address()).ok();
@@ -248,6 +300,7 @@ fn map_auth_to_credentials(image: &str, auth: &DockerAuth) -> bollard::auth::Doc
 
 /// Format a single pull-progress event as `"{id}: {status} {progress}"`,
 /// omitting any empty components.
+#[cfg(feature = "daemon")]
 fn format_progress_line(id: Option<&str>, status: Option<&str>, progress: Option<&str>) -> String {
     let status = status.unwrap_or("").trim();
     let progress = progress.unwrap_or("").trim();
@@ -275,7 +328,7 @@ fn format_progress_line(id: Option<&str>, status: Option<&str>, progress: Option
 
 // ── Test mock ────────────────────────────────────────────────────────────────
 
-#[cfg(test)]
+#[cfg(all(test, feature = "daemon"))]
 pub(crate) struct MockDockerClient {
     pub pull_output: String,
     pub pull_should_fail: bool,
@@ -283,7 +336,7 @@ pub(crate) struct MockDockerClient {
     pub containers: Vec<LocalContainerInfo>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "daemon"))]
 #[async_trait]
 impl DockerClient for MockDockerClient {
     async fn pull_image(
@@ -314,7 +367,7 @@ impl DockerClient for MockDockerClient {
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
-#[cfg(test)]
+#[cfg(all(test, feature = "daemon"))]
 mod tests {
     use super::*;
 

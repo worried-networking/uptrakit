@@ -49,6 +49,7 @@ pub type Result<T> = std::result::Result<T, Report<DockerError>>;
 impl_report_conversion!(reqwest::Error => DockerError, |e| DockerError::Request(e.to_string()));
 impl_report_conversion!(PluginError => DockerError, |e| DockerError::Configuration(e.to_string()));
 impl_report_conversion!(DockerError => PluginError, |e| PluginError::PluginInternal(e.to_string()));
+#[cfg(feature = "daemon")]
 impl_report_conversion!(bollard::errors::Error => DockerError, |e| DockerError::DaemonConnection(e.to_string()));
 
 #[cfg(test)]

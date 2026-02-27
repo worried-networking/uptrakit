@@ -8,13 +8,14 @@ version.workspace = true
 publish = false
 
 [features]
-default = []
-ssh = ["bollard/ssh"]
+default = ["daemon"]
+daemon = ["dep:bollard", "dep:futures-util"]
+ssh = ["daemon", "bollard/ssh"]
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true }
-bollard      = { workspace = true, features = ["ssl"] }
-futures-util = { workspace = true }
+bollard      = { workspace = true, features = ["aws-lc-rs"], optional = true }
+futures-util = { workspace = true, optional = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

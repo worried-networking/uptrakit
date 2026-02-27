@@ -72,7 +72,7 @@ uptrakit-shared-types = { path = "crates/shared/types" }
 uptrakit-openapi-client = { path = "crates/shared/openapi-client" }
 uptrakit-command = { path = "crates/shared/command" }
 uptrakit-plugin-infrastructure-core = { path = "crates/plugins/infrastructure/core" }
-uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructure/registry" }
+uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructure/registry", default-features = false }
 
 [workspace.lints.rust]
 warnings = "deny"

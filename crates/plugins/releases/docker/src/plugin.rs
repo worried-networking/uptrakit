@@ -15,7 +15,11 @@ use uptrakit_plugin_infrastructure_core::{
 };
 
 use crate::config::{DockerConfig, TrackingMode};
-use crate::docker_client::{BollardDockerClient, DockerClient};
+#[cfg(feature = "daemon")]
+use crate::docker_client::BollardDockerClient;
+use crate::docker_client::DockerClient;
+#[cfg(not(feature = "daemon"))]
+use crate::docker_client::NoopDockerClient;
 use crate::error::{DockerError, Result};
 use crate::image_ref::ImageRef;
 use crate::registry::RegistryClient;
@@ -39,11 +43,18 @@ pub struct DockerPlugin {
 
 impl DockerPlugin {
     /// Create a new `DockerPlugin` from the given configuration.
+    ///
+    /// With the `daemon` feature enabled, connects to the Docker daemon via
+    /// bollard. Without it, uses [`NoopDockerClient`] so the plugin can still
+    /// serve registry-only capabilities (e.g. `ControllerSideFetchReleases`).
     pub fn new(config: DockerConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        let docker_client = Arc::new(BollardDockerClient::new(
+        #[cfg(feature = "daemon")]
+        let docker_client: Arc<dyn DockerClient> = Arc::new(BollardDockerClient::new(
             config.docker_host.as_deref(),
             config.ssh_key_path.as_deref(),
         )?);
+        #[cfg(not(feature = "daemon"))]
+        let docker_client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
         Self::init(config, executor, docker_client)
     }
 
@@ -77,7 +88,7 @@ impl DockerPlugin {
     }
 
     /// Test constructor that injects a custom [`DockerClient`].
-    #[cfg(test)]
+    #[cfg(all(test, feature = "daemon"))]
     pub(crate) fn new_for_test(
         config: DockerConfig,
         executor: Arc<dyn CommandExecutor>,
@@ -121,10 +132,17 @@ impl Plugin for DockerPlugin {
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
-        &[
-            PluginCapability::DiscoverLocalSoftware,
-            PluginCapability::ControllerSideFetchReleases,
-        ]
+        #[cfg(feature = "daemon")]
+        {
+            &[
+                PluginCapability::ControllerSideFetchReleases,
+                PluginCapability::DiscoverLocalSoftware,
+            ]
+        }
+        #[cfg(not(feature = "daemon"))]
+        {
+            &[PluginCapability::ControllerSideFetchReleases]
+        }
     }
 
     async fn fetch_releases(
@@ -417,7 +435,7 @@ fn derive_container_name(ir: &ImageRef, container_names: &[String]) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "daemon"))]
 mod tests {
     use super::*;
     use crate::config::TrackingMode;
