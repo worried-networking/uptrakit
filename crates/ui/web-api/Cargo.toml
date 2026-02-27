@@ -18,6 +18,7 @@ db-postgres = ["sea-orm/sqlx-postgres"]
 db-mysql = ["sea-orm/sqlx-mysql"]
 
 [dependencies]
+async-stream = { workspace = true }
 axum = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
@@ -26,6 +27,7 @@ futures-util = { workspace = true }
 http = { workspace = true }
 ipnet = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-stream = { workspace = true }
 tower = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }

@@ -642,6 +642,7 @@ impl AppState {
         routes::scheduler::trigger_scheduled_task,
         routes::update_history::list_update_history,
         routes::update_history::get_update_history,
+        routes::update_history::stream_update_output,
     ),
     components(
         schemas(
@@ -909,6 +910,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::scheduler::trigger_scheduled_task))
         .routes(routes!(routes::update_history::list_update_history))
         .routes(routes!(routes::update_history::get_update_history))
+        .routes(routes!(routes::update_history::stream_update_output))
         // Autodiscovery
         .routes(routes!(routes::software_items::approve_software_item))
         .routes(routes!(routes::hosts::discover_host))

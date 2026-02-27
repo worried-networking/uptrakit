@@ -1,13 +1,24 @@
+use std::convert::Infallible;
+use std::sync::Arc;
+
+use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::CanViewSoftware;
 use crate::queries::update_history as uh_queries;
 use crate::tenant_db::TenantDb;
+use crate::update_output_broadcaster::BroadcastEvent;
 use axum::{
     Json,
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::{
+        IntoResponse, Response,
+        sse::{Event, KeepAlive, Sse},
+    },
 };
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use uptrakit_shared_db::entity::{host, update_history, update_output_line};
+use uptrakit_web_api_types::update_history::{OutputLineSSE, UpdateCompletedSSE};
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
@@ -79,4 +90,178 @@ pub async fn get_update_history(
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// SSE output stream
+// ---------------------------------------------------------------------------
+
+/// Stream update output in real-time via Server-Sent Events.
+///
+/// For in-progress updates: replays stored output lines, then streams live
+/// output from the broadcaster. For completed/failed updates: replays the
+/// stored output and sends a `completed` event.
+#[utoipa::path(
+    get,
+    path = "/api/v1/update-history/{id}/output/stream",
+    params(("id" = Uuid, Path, description = "Update history record UUID")),
+    responses(
+        (status = 200, description = "SSE output stream", content_type = "text/event-stream"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Record not found")
+    ),
+    tag = "Update History",
+    extensions(("x-required-permission" = json!("view_software"))),
+    security(("bearer_token" = []))
+)]
+pub async fn stream_update_output(
+    tenant_db: TenantDb,
+    CanViewSoftware(_user): CanViewSoftware,
+    State(state): State<Arc<AppState>>,
+    Path(record_id): Path<Uuid>,
+) -> Response {
+    // 1. Load the update_history record.
+    let record = match update_history::Entity::find_by_id(record_id)
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return error_response(StatusCode::NOT_FOUND, "Update history record not found");
+        }
+        Err(e) => {
+            tracing::error!("Failed to load update history for SSE: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Tenant scoping: verify the record's host belongs to this tenant.
+    match tenant_db
+        .find_by_id::<host::Entity, _>(record.host_id)
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return error_response(StatusCode::NOT_FOUND, "Update history record not found");
+        }
+        Err(e) => {
+            tracing::error!("Failed to verify tenant scope for SSE: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    // 2. Subscribe to the broadcast channel BEFORE loading DB lines to avoid
+    //    a gap where lines arrive after the DB query but before subscription.
+    let broadcast_rx = state.update_output_broadcaster.subscribe(record_id).await;
+
+    // 3. Load existing output lines from the DB for replay.
+    let db_lines = update_output_line::Entity::find()
+        .filter(update_output_line::Column::UpdateHistoryId.eq(record_id))
+        .order_by_asc(update_output_line::Column::CreatedAt)
+        .order_by_asc(update_output_line::Column::Id)
+        .all(tenant_db.db())
+        .await
+        .unwrap_or_default();
+
+    let is_terminal = matches!(
+        record.status,
+        update_history::UpdateStatus::Completed | update_history::UpdateStatus::Failed
+    );
+    let terminal_status = match record.status {
+        update_history::UpdateStatus::Completed => "completed",
+        update_history::UpdateStatus::Failed => "failed",
+        _ => "",
+    };
+
+    // If the update is already terminal and there are no streaming lines,
+    // fall back to the consolidated output stored on the record.
+    let has_db_lines = !db_lines.is_empty();
+    let replay_count = db_lines.len() as u64;
+
+    let stream = async_stream::stream! {
+        // Replay DB lines.
+        if has_db_lines {
+            for (seq, line) in db_lines.into_iter().enumerate() {
+                let payload = OutputLineSSE {
+                    id: line.id,
+                    text: line.output,
+                    stream: line.stream.to_string(),
+                    timestamp: line.created_at,
+                    seq: seq as u64,
+                };
+                if let Ok(json) = serde_json::to_string(&payload) {
+                    yield Ok::<_, Infallible>(Event::default().event("output").data(json));
+                }
+            }
+        } else if is_terminal && !record.output.is_empty() {
+            // No transient lines, but the update has consolidated output.
+            let payload = OutputLineSSE {
+                id: record_id,
+                text: record.output.clone(),
+                stream: "stdout".to_string(),
+                timestamp: record.completed_at.unwrap_or(record.started_at),
+                seq: 0,
+            };
+            if let Ok(json) = serde_json::to_string(&payload) {
+                yield Ok::<_, Infallible>(Event::default().event("output").data(json));
+            }
+        }
+
+        // If update is already terminal, send completed and stop.
+        if is_terminal {
+            let payload = UpdateCompletedSSE {
+                status: terminal_status.to_string(),
+                error: None,
+            };
+            if let Ok(json) = serde_json::to_string(&payload) {
+                yield Ok::<_, Infallible>(Event::default().event("completed").data(json));
+            }
+            return;
+        }
+
+        // Stream from broadcast (if we got a subscription).
+        if let Some(mut rx) = broadcast_rx {
+            loop {
+                match rx.recv().await {
+                    Ok(BroadcastEvent::Line { id, text, stream, timestamp, seq }) => {
+                        // Skip lines already replayed from DB.
+                        if seq < replay_count {
+                            continue;
+                        }
+                        let payload = OutputLineSSE {
+                            id,
+                            text,
+                            stream: stream.to_string(),
+                            timestamp,
+                            seq,
+                        };
+                        if let Ok(json) = serde_json::to_string(&payload) {
+                            yield Ok::<_, Infallible>(Event::default().event("output").data(json));
+                        }
+                    }
+                    Ok(BroadcastEvent::Completed { status, error }) => {
+                        let payload = UpdateCompletedSSE { status, error };
+                        if let Ok(json) = serde_json::to_string(&payload) {
+                            yield Ok::<_, Infallible>(Event::default().event("completed").data(json));
+                        }
+                        return;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::debug!(lagged = n, "SSE subscriber lagged, continuing");
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Channel closed without a Completed event (e.g. server shutdown).
+                        return;
+                    }
+                }
+            }
+        }
+    };
+
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default().interval(std::time::Duration::from_secs(15)))
+        .into_response()
 }

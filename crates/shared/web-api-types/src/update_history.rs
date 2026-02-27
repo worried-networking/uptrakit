@@ -102,3 +102,25 @@ pub struct UpdateHistoryResponse {
     )]
     pub created_at: OffsetDateTime,
 }
+
+// ---------------------------------------------------------------------------
+// SSE event types for real-time update output streaming
+// ---------------------------------------------------------------------------
+
+/// SSE `output` event payload: a single line of update output.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OutputLineSSE {
+    pub id: Uuid,
+    pub text: String,
+    pub stream: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub timestamp: OffsetDateTime,
+    pub seq: u64,
+}
+
+/// SSE `completed` event payload: the update has finished.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpdateCompletedSSE {
+    pub status: String,
+    pub error: Option<String>,
+}
