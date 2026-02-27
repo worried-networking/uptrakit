@@ -256,6 +256,11 @@ Main functionality that delivers the core value proposition.
   - [x] Background task runner
   - [x] Scheduled check execution
   - [x] Schedule conflict resolution
+- [x] Extract scheduler engine into shared crate (`uptrakit-scheduler-engine`)
+- [x] External scheduler binary (`uptrakit-scheduler`) with service enrollment
+- [x] Embedded scheduler feature (`embedded-scheduler`) with auto-disable on external connect
+- [x] Credential delivery (`ServiceCredentials`) for services with `database_access`, `nats_access`, `master_key_access`
+- [x] Shared NATS crate (`uptrakit-nats`) for envelope, subjects, connection
 - [ ] Add per-software-item schedule configuration
 - [x] Implement global schedule defaults
 - [x] Add schedule enable/disable functionality
@@ -934,7 +939,8 @@ Items to consider for future versions but not currently prioritized:
 - [ ] High availability for controller (auth flow stores are now DB-backed and HA-ready; settings cache uses version-gated periodic reload for
   cross-instance consistency; CRL rebuilds propagate cross-instance via `revocation_version` polling; cross-controller push notification delivery via
   NATS JetStream is implemented (feature-gated `nats`); JWT signing key is DB-backed and shared across instances; master key mismatch detection via
-  startup verification token is implemented; token denylist is per-instance — DB-backed HA sync deferred)
+  startup verification token is implemented; token denylist is per-instance — DB-backed HA sync deferred; external scheduler binary supports HA via
+  DB-level optimistic locking)
 - [ ] Update preview/dry-run mode
 - [ ] Cost tracking for cloud-based updates
 - [ ] Compliance reporting (update audit trails)

@@ -4,26 +4,30 @@ This document covers the NATS JetStream integration from a development perspecti
 guidance, see [NATS Deployment](../end-user/deployment/nats.md). For the high-level design, see
 [Cross-Controller Communication](cross-controller-comm.md).
 
-## Feature flag
+## Crate structure
 
-NATS support is gated behind the `nats` Cargo feature:
+NATS primitives are split across two crates:
 
-- **`uptrakit-web-api`**: `nats = ["dep:async-nats"]` — enables the `nats_transport` module and NATS-related
-  code paths in `NotificationService`.
-- **`uptrakit-controller`**: `nats = ["uptrakit-web-api/nats"]` — cascades the feature to the web API crate.
+| Crate | Path | Purpose |
+| --- | --- | --- |
+| `uptrakit-nats` | `crates/shared/nats/` | Shared: envelope, subjects, connection, publish |
+| `uptrakit-web-api` | `crates/ui/web-api/` | Controller-specific: `NatsTransport`, consumer, delivery |
 
-This pattern matches the existing `oidc` feature flag approach. When the `nats` feature is disabled, all
-NATS-related code is compiled out via `#[cfg(feature = "nats")]` and the controller operates in single-instance
-mode.
+The `uptrakit-nats` crate is unconditional — it is always compiled (no feature gate). Both the
+controller's `NatsTransport` and the external scheduler's `NatsSchedulerNotifier` depend on it.
 
-## Crate dependency
+### `uptrakit-nats` contents
 
-The `async-nats` crate (version 0.46+) is declared as a workspace dependency and used as an optional dependency
-in `uptrakit-web-api`. It provides the NATS client, JetStream API, and consumer abstractions.
+```text
+crates/shared/nats/src/
+├── lib.rs          # Re-exports
+├── envelope.rs     # NatsEventEnvelope
+├── subjects.rs     # determine_subject(), STREAM_NAME, SUBJECT_PREFIX, STREAM_MAX_AGE
+├── connection.rs   # NatsConnection: connect(), ensure_stream(), publish(), publish_envelope()
+└── error.rs        # NatsError enum
+```
 
-## Architecture
-
-### Module structure
+### Controller NATS modules
 
 ```text
 crates/ui/web-api/src/
@@ -31,6 +35,21 @@ crates/ui/web-api/src/
 ├── nats_transport.rs         # NatsTransport (connect, publish, consumer)
 └── event_delivery.rs         # Shared delivery routing (used by NATS consumer)
 ```
+
+## Feature flag
+
+NATS support on the controller is gated behind the `nats` Cargo feature:
+
+- **`uptrakit-web-api`**: `nats = ["dep:uptrakit-nats"]` — enables the `nats_transport` module and NATS-related
+  code paths in `NotificationService`.
+- **`uptrakit-controller`**: `nats = ["uptrakit-web-api/nats"]` — cascades the feature to the web API crate.
+
+This pattern matches the existing `oidc` feature flag approach. When the `nats` feature is disabled, all
+NATS-related code is compiled out via `#[cfg(feature = "nats")]` and the controller operates in single-instance
+mode.
+
+The external scheduler (`uptrakit-scheduler`) always depends on `uptrakit-nats` directly — it does not use the
+`nats` feature flag since NATS is required for its operation.
 
 ### NotificationService
 
@@ -47,16 +66,28 @@ Key methods:
 | `publish_controller_event(msg)` | NATS-only publish to controller subject (no-op without NATS) |
 | `push_software_states_for_tenant(db, tenant_id)` | Local capability broadcast + NATS publish to `mqtt_bridge` |
 
-### NatsTransport
+### NatsTransport (controller-specific)
 
-`NatsTransport` handles the NATS connection, stream setup, message publishing, and the consumer loop.
+`NatsTransport` handles the controller-side NATS operations: publishing via `NatsConnection` and the
+consumer loop.
 
-- **`connect(url, controller_id)`** — Connects to NATS, creates the JetStream context, and ensures the
-  `UPTRAKIT_EVENTS` stream exists.
-- **`publish(...)`** — Fire-and-forget: serializes a `NatsEventEnvelope` and publishes to the appropriate
-  subject. Errors are logged, not propagated.
-- **`run_consumer(registry, db, cancel)`** — Main consumer loop: pulls messages from JetStream, filters
-  self-originated messages, delivers via `event_delivery::deliver_event()`, and ack/nacks.
+- **`connect(url, controller_id)`** — Creates a `NatsConnection` and wraps it with controller-specific
+  consumer state.
+- **`publish(...)`** — Fire-and-forget: serializes a `NatsEventEnvelope` via `NatsConnection::publish()`
+  to the appropriate subject. Errors are logged, not propagated.
+- **`run_consumer(registry, db, ca_rotation_trigger, cancel)`** — Main consumer loop: pulls messages
+  from JetStream, filters self-originated messages, delivers via `event_delivery::deliver_event()`,
+  handles `RequestCaRotation` events, and ack/nacks.
+
+### NatsConnection (shared)
+
+`NatsConnection` in `uptrakit-nats` provides the core NATS operations used by both the controller
+and the external scheduler:
+
+- **`connect(url)`** — Connects to NATS, creates the JetStream context.
+- **`ensure_stream()`** — Creates or updates the `UPTRAKIT_EVENTS` stream (idempotent).
+- **`publish(subject, envelope)`** — Publishes a `NatsEventEnvelope` to a subject.
+- **`publish_envelope(envelope)`** — Determines the subject from the envelope and publishes.
 
 ### Event delivery
 
@@ -145,10 +176,16 @@ NATS_URL=nats://custom-host:4222 cargo test -p uptrakit-web-api --features nats 
   processing its own messages.
 - **MQTT credential messages**: `is_mqtt_tenant_message()` in `NotificationService` prevents credential-bearing
   messages from reaching NATS. See [Secrets and Encryption](../security/secrets-and-encryption.md).
+- **Service credential messages**: `is_credential_message()` in `NotificationService` prevents
+  `ServiceCredentials` from reaching NATS. Credentials are delivered exclusively via WebSocket.
+- **`RequestCaRotation`**: Published by the external scheduler to `uptrakit.events.controller`. The
+  controller's NATS consumer handles it by triggering `ca_rotation_trigger.notify_one()`.
 
 ## Related documentation
 
 - [Cross-Controller Communication](cross-controller-comm.md) — high-level design
 - [NATS Deployment](../end-user/deployment/nats.md) — production configuration
+- [Scheduler Engine](scheduler-engine.md) — scheduler engine crate internals
+- [External Scheduler Deployment](../end-user/deployment/external-scheduler.md) — external scheduler setup
 - [Secrets and Encryption](../security/secrets-and-encryption.md) — credential filtering rationale
 - [Secure Development](../security/secure-development.md) — security requirements for contributors

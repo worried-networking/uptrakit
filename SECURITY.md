@@ -16,6 +16,8 @@ a week.
 - The scheduler never runs automatic updates; all actions require user confirmation.
 - Secrets are encrypted at rest, never logged, and sensitive endpoints are rate limited.
 - Master key consistency is verified at startup to prevent silent decryption failures in HA deployments.
+- Infrastructure credentials (database URL, NATS URL, master key) are delivered only to services with
+  explicit credential capabilities, exclusively via authenticated WebSocket — never via NATS or other channels.
 
 ## Detailed guidance
 

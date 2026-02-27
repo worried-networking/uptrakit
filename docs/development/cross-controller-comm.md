@@ -31,6 +31,10 @@ This is the default and is sufficient for single-controller deployments.
 - MQTT credential-bearing messages (`TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`) are local-only —
   filtered by `is_mqtt_tenant_message()` in `NotificationService`. `MqttLeaseCoordinator` delivers these directly via
   `ServiceConnectionRegistry` without NATS publication.
+- `ServiceCredentials` is local-only — filtered by `is_credential_message()` in `NotificationService`. Infrastructure
+  credentials are delivered exclusively via WebSocket to services with credential capabilities.
+- `RequestCaRotation` flows in the opposite direction: published by the external scheduler to
+  `uptrakit.events.controller`, consumed by controllers to trigger `ca_rotation_trigger.notify_one()`.
 - NATS publishes are fire-and-forget (errors are logged, not propagated to the caller).
 - Without NATS, there is zero cross-controller overhead — `NotificationService` delivers locally only.
 
@@ -84,8 +88,10 @@ See [NATS Integration](nats-integration.md) for development details and
 
 | File | Purpose |
 | --- | --- |
+| `crates/shared/nats/src/` | `uptrakit-nats` — shared envelope, subjects, connection, publish |
 | `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — local delivery + optional NATS publish |
 | `crates/ui/web-api/src/nats_transport.rs` | `NatsTransport` — NATS connect, publish, and consumer loop |
 | `crates/ui/web-api/src/event_delivery.rs` | Shared delivery routing logic (used by NATS consumer) |
 | `crates/core/controller/src/cli.rs` | `--nats-url` CLI argument |
 | `crates/core/controller/src/main.rs` | NATS transport wiring and consumer spawn |
+| `crates/core/scheduler/src/nats_notifier.rs` | `NatsSchedulerNotifier` — external scheduler NATS publisher |

@@ -1,20 +1,45 @@
 # Scheduler
 
-The centralised DB-backed scheduler coordinates periodic background tasks across controller instances. It ensures exactly-once execution in HA
-deployments via optimistic locking on the `scheduled_tasks` table.
+The centralised DB-backed scheduler coordinates periodic background tasks using optimistic locking on
+the `scheduled_tasks` table for HA-safe exactly-once execution.
 
 ## Overview
 
-Before the scheduler, periodic tasks ran as independent `tokio::time::interval` loops inside each controller. In a multi-controller HA deployment this
-caused duplicate work (every controller ran every task) and provided no coordination for tasks that should execute once globally. The scheduler fixes
-this by moving periodic work into the database and claiming tasks with optimistic locking.
+The scheduler ensures that periodic work (version checks, cleanup, CA rotation, certificate renewal)
+runs exactly once, regardless of how many controller instances are deployed.
 
 Key properties:
 
-- **HA-safe**: only one controller executes a given task at a time (optimistic lock via `locked_by`/`locked_at` columns).
+- **HA-safe**: only one instance executes a given task at a time (optimistic lock via `locked_by`/`locked_at` columns).
 - **Stale recovery**: tasks locked longer than 10 minutes are automatically released.
 - **Cron-based**: standard 5-field cron expressions control scheduling; 6/7-field extended expressions are also accepted.
 - **REST-manageable**: administrators can view, update schedules, and trigger immediate execution via the REST API.
+
+## Deployment modes
+
+The scheduler engine (`uptrakit-scheduler-engine`) is a shared library crate used in two modes:
+
+| Mode | Binary | Feature | How it runs |
+| --- | --- | --- | --- |
+| Embedded | `uptrakit-controller` | `embedded-scheduler` (not default) | Spawned inside the controller process |
+| External | `uptrakit-scheduler` | Always | Standalone binary, enrolls as a service via WebSocket |
+
+### Embedded scheduler
+
+When built with `--features embedded-scheduler`, the controller spawns the scheduler loop internally.
+If an external scheduler connects (detected via `ServiceConnectionRegistry`), the embedded scheduler
+auto-disables (cancels its `CancellationToken`, releases claims). It re-enables when the external
+scheduler disconnects. This provides automatic failover.
+
+### External scheduler
+
+The `uptrakit-scheduler` binary enrolls as a service with capabilities `scheduler`, `database_access`,
+`nats_access`, `master_key_access`, `ca_management`, and `graceful_shutdown`. After mTLS authentication,
+the controller sends `ServiceCredentials` containing the database URL, NATS URL, and master encryption
+key. The scheduler uses these to connect directly to the database and publish notifications via NATS.
+
+See [External Scheduler Deployment](../end-user/deployment/external-scheduler.md) for production guidance
+and [Scheduler Engine (Development)](../development/scheduler-engine.md) for engine internals.
 
 ## Database Schema
 
@@ -39,14 +64,11 @@ One task per type per tenant |
 | --- | --- | --- |
 | `auth_cleanup` | `*/5 * * * *` | Clean expired auth flow state from DB |
 | `stale_lease_cleanup` | `*/5 * * * *` | Release stale MQTT client leases |
-| `event_cleanup` | `0 * * * *` | Legacy (no executor registered; kept for DB compat) |
 | `ca_rotation_check` | `0 3 * * *` | Check if managed CA needs rotation |
 | `version_check` | `0 */6 * * *` | Trigger version detection on agents |
 | `service_cert_check` | `0 */12 * * *` | Proactive certificate renewal for services |
 
-All six rows are seeded during the migration with `next_run_at = now`. The `event_cleanup` task type exists in
-the database for backward compatibility but has no registered executor — the `controller_events` table has been
-dropped in favour of [NATS JetStream](../development/cross-controller-comm.md).
+All five rows are seeded during the migration with `next_run_at = now`.
 
 ## HA Claim Mechanism
 
@@ -63,22 +85,30 @@ Manual trigger via the REST API sets `next_run_at = now`, making the task immedi
 
 ## Module Structure
 
-The scheduler lives in the controller crate:
+The scheduler engine is a shared library crate:
 
 ```text
-crates/core/controller/src/scheduler/
-    mod.rs              -- Scheduler struct, SchedulerConfig, poll loop
-    cron_utils.rs       -- Cron parsing (chrono<->time bridge), next_run_after()
+crates/shared/scheduler-engine/src/
+    lib.rs              -- Re-exports
+    scheduler.rs        -- Scheduler struct, SchedulerConfig, poll loop
+    cron_utils.rs       -- Cron parsing (chrono↔time bridge), next_run_after()
     claim.rs            -- try_claim, release_claim, recover_stale, release_all, find_due_tasks
     executor.rs         -- TaskExecutor trait
+    notifier.rs         -- SchedulerNotifier trait
+    ca_utils.rs         -- should_rotate_ca() utility
+    software_states.rs  -- load_software_states_for_tenant() query
     executors/
         mod.rs
         auth_cleanup.rs
         stale_lease_cleanup.rs
-        ca_rotation_check.rs
         version_check.rs
         service_cert_check.rs
 ```
+
+The CA rotation check executor is mode-specific:
+
+- **Embedded**: `EmbeddedCaRotationCheckExecutor` in `crates/core/controller/src/scheduler/`
+- **External**: `ExternalCaRotationCheckExecutor` in `crates/core/scheduler/src/ca_rotation.rs`
 
 ### TaskExecutor trait
 
@@ -110,8 +140,15 @@ than the stale threshold.
 
 ### CaRotationCheckExecutor
 
-Checks `pki::should_rotate_ca()` against the current CA snapshot. If rotation is needed, fires the existing `ca_rotation_trigger` (`Arc<Notify>`). The
-per-controller CA rotation loop still handles the actual key generation and certificate signing.
+Mode-specific implementations:
+
+- **Embedded** (`EmbeddedCaRotationCheckExecutor`): Checks `should_rotate_ca()` against the in-process CA
+  snapshot (`watch::Receiver<CaSnapshot>`). If rotation is needed, fires the `ca_rotation_trigger`
+  (`Arc<Notify>`) directly.
+- **External** (`ExternalCaRotationCheckExecutor`): Reads the active CA certificate from the database,
+  calls `should_rotate_ca()` from the engine, and signals via `SchedulerNotifier::signal_ca_rotation()`
+  which publishes a `RequestCaRotation` message to the `uptrakit.events.controller` NATS subject.
+  Controllers consume this and trigger their local rotation logic.
 
 ### VersionCheckExecutor
 
@@ -161,6 +198,8 @@ All endpoints require the `ManageSoftware` permission.
 
 ## Related Documentation
 
+- [Scheduler Engine (Development)](../development/scheduler-engine.md) -- engine crate internals
+- [External Scheduler Deployment](../end-user/deployment/external-scheduler.md) -- production deployment
 - [Cross-Controller Communication](../development/cross-controller-comm.md) -- NATS-based cross-controller messaging
 - [HTTP Web API](../api/http-web-api.md) -- REST endpoint documentation
 - [Services and Operations](../api/services-operations.md) -- version check and cert renewal flows

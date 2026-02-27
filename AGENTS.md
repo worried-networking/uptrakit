@@ -11,7 +11,9 @@ auto-updater.
 
 Key components:
 
-- **Controller** (server): API, Web UI, scheduler, upstream version checking.
+- **Controller** (server): API, Web UI, optional embedded scheduler, upstream version checking.
+- **External Scheduler** (standalone binary): enrolls as a service, receives DB/NATS/master-key credentials via
+  WebSocket, runs scheduled tasks independently.
 - **MQTT Service** (standalone binary): MQTT/Home Assistant integration with lease-based multi-instance tenant
   distribution.
 - **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version
@@ -59,9 +61,10 @@ uptrakit/
 │   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; version checks and updates over SSH; host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server; migration runner delegates to `uptrakit_shared_db::migration`
 │   │   │   ├── src/db_migrate/         #   `db-migrate` subcommand: copies all data between DB backends; error.rs (DbMigrateError + Report<> Result), tables.rs (migrate_table<E>, copy_all, clean_all, verify_all for all 34 app tables), mod.rs (run() orchestrator)
-│   │   │   ├── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
+│   │   │   ├── src/scheduler/          #   (cfg: embedded-scheduler) Embedded scheduler using uptrakit-scheduler-engine
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
-│   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
+│   │   ├── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
+│   │   └── scheduler/                  # uptrakit-scheduler                     (bin)  — external scheduler binary; enrolls as a service, receives credentials, runs scheduled tasks via direct DB + NATS
 │   ├── plugins/
 │   │   ├── infrastructure/
 │   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult
@@ -86,6 +89,8 @@ uptrakit/
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, etc.); feature-gated: sea-orm, openapi
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing
+│   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
+│   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, cron utils, TaskExecutor trait, SchedulerNotifier trait, 4 built-in executors
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
@@ -126,6 +131,8 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `db-mysql` | No | MySQL backend |
 | `db-all` | No | All database backends |
 | `oidc` | Yes | OpenID Connect authentication support. Disabling removes the `openidconnect` crate and all OIDC routes/stores, significantly reducing compile-time dependencies. Propagates to `uptrakit-web-api/oidc`. |
+| `embedded-scheduler` | No | Embeds the scheduler engine in the controller process. Auto-disables when an external scheduler connects. Adds `uptrakit-scheduler-engine` dependency. |
+| `nats` | No | Enables NATS JetStream transport for cross-controller messaging. Propagates to `uptrakit-web-api/nats`. |
 | `swagger-ui` | No | Swagger UI at `/swagger-ui` |
 | `embed-frontend` | No | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md). |
 
@@ -207,7 +214,8 @@ These are non-negotiable design constraints. Do not violate them.
    documentation. Any changes to the agent-controller wire protocol must be documented in
    `crates/shared/wire/asyncapi.yaml` and reflected in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 1. **Version/build metadata contract is unified.** All workspace binaries (`uptrakit-controller`, `uptrakit-agent`,
-   `uptrakit-agent-ssh`, `uptrakit-mqtt`, `uptrakit`) must expose consistent `--version` metadata output. Enabled features are derived at
+   `uptrakit-agent-ssh`, `uptrakit-mqtt`, `uptrakit-scheduler`, `uptrakit`) must expose consistent `--version`
+   metadata output. Enabled features are derived at
    build time from `CARGO_CFG_FEATURE` via `uptrakit_build_info::emit_enabled_features_env()` and passed through
    `UPTRAKIT_BUILD_ENABLED_FEATURES`; do not hardcode feature lists per binary.
 1. **Do not add any `#[allow()]`** without explicit confirmation. There are currently no approved exceptions in the
@@ -494,14 +502,19 @@ Services are identified by their **capability set** rather than a fixed type enu
 Each service declares a `BTreeSet<Capability>` at enrollment time. The set is persisted as a JSON array string in the
 `services.capabilities` DB column.
 
-| Capability | Wire String | Agent | SSH Agent | MQTT | Controller |
-| --- | --- | :---: | :---: | :---: | :---: |
-| `SoftwareDiscovery` | `software_discovery` | yes | yes | -- | yes |
-| `UpdateHooks` | `update_hooks` | yes | yes | -- | yes |
-| `GracefulShutdown` | `graceful_shutdown` | yes | yes | yes | yes |
-| `MqttBridge` | `mqtt_bridge` | -- | -- | yes | yes |
-| `SshRemote` | `ssh_remote` | -- | yes | -- | yes |
-| `Other(String)` | *(unknown)* | -- | -- | -- | -- |
+| Capability | Wire String | Agent | SSH Agent | MQTT | Scheduler | Controller |
+| --- | --- | :---: | :---: | :---: | :---: | :---: |
+| `SoftwareDiscovery` | `software_discovery` | yes | yes | -- | -- | yes |
+| `UpdateHooks` | `update_hooks` | yes | yes | -- | -- | yes |
+| `GracefulShutdown` | `graceful_shutdown` | yes | yes | yes | yes | yes |
+| `MqttBridge` | `mqtt_bridge` | -- | -- | yes | -- | yes |
+| `SshRemote` | `ssh_remote` | -- | yes | -- | -- | yes |
+| `Scheduler` | `scheduler` | -- | -- | -- | yes | yes |
+| `DatabaseAccess` | `database_access` | -- | -- | -- | yes | yes |
+| `NatsAccess` | `nats_access` | -- | -- | -- | yes | yes |
+| `MasterKeyAccess` | `master_key_access` | -- | -- | -- | yes | yes |
+| `CaManagement` | `ca_management` | -- | -- | -- | yes | yes |
+| `Other(String)` | *(unknown)* | -- | -- | -- | -- | -- |
 
 `Other(String)` is a forward-compat catch-all received from newer peers; it never participates in intersection
 (`Capability::is_known()` returns `false` for it).
@@ -514,11 +527,12 @@ behavioral defaults (ping interval, shutdown timeout, human-readable label). It 
 | Profile | Key capability | Services | Default ping | Shutdown timeout |
 | --- | --- | --- | --- | --- |
 | `MqttBridge` | `Capability::MqttBridge` | MQTT service | 15 s | None |
+| `Scheduler` | `Capability::Scheduler` | External scheduler | 60 s | 30 s |
 | `Agent` | `Capability::SoftwareDiscovery` | Local agent, SSH agent | 300 s | 120 s |
 | `Unknown` | (none of the above) | Unrecognized | 300 s | 120 s |
 
 `ServiceProfile::service_label(has_ssh_remote)` provides the human-readable label: "Agent", "SSH Agent",
-"MQTT Bridge", or "Unknown".
+"MQTT Bridge", "Scheduler", or "Unknown".
 
 #### Capability negotiation (wire protocol)
 
@@ -675,7 +689,7 @@ malformed.
 
 ### Directory management
 
-All binaries (controller, agent, MQTT service) use the `uptrakit-directories` crate for cross-platform directory
+All binaries (controller, agent, MQTT service, scheduler) use the `uptrakit-directories` crate for cross-platform directory
 resolution. The crate uses the `directories` crate (`ProjectDirs`) to follow platform conventions:
 
 | Platform | Config directory | State directory |
@@ -684,7 +698,7 @@ resolution. The crate uses the `directories` crate (`ProjectDirs`) to follow pla
 | macOS | `~/Library/Application Support/org.uptrakit.{app}/` | `~/Library/Application Support/org.uptrakit.{app}/` |
 | Windows | `{FOLDERID_RoamingAppData}\uptrakit\{app}\` | `{FOLDERID_LocalAppData}\uptrakit\{app}\` |
 
-Where `{app}` is one of: `controller`, `agent`, `agent-ssh`, `mqtt`.
+Where `{app}` is one of: `controller`, `agent`, `agent-ssh`, `mqtt`, `scheduler`.
 
 #### Config vs state separation
 
@@ -812,6 +826,8 @@ For more in-depth information on specific topics, refer to the following documen
 - [Software Item Entity](docs/architecture/software-item-entity.md)
 - [Update History Entity](docs/architecture/update-history-entity.md)
 - [Scheduler](docs/architecture/scheduler.md)
+- [Scheduler Engine](docs/development/scheduler-engine.md)
+- [External Scheduler Deployment](docs/end-user/deployment/external-scheduler.md)
 - [SSH Agent](docs/architecture/ssh-agent.md)
 
 ### API and Protocol

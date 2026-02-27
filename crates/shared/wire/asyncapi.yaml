@@ -166,6 +166,12 @@ channels:
         $ref: "#/components/messages/softwareStates"
       mqttTriggerUpdate:
         $ref: "#/components/messages/mqttTriggerUpdate"
+      serviceCredentials:
+        $ref: "#/components/messages/serviceCredentials"
+      discoverSoftware:
+        $ref: "#/components/messages/discoverSoftware"
+      discoveryResults:
+        $ref: "#/components/messages/discoveryResults"
 
   controllerEvents:
     address: uptrakit.events.controller
@@ -176,6 +182,8 @@ channels:
     messages:
       mqttClientCreated:
         $ref: "#/components/messages/mqttClientCreated"
+      requestCaRotation:
+        $ref: "#/components/messages/requestCaRotation"
 
 operations:
   sendPing:
@@ -598,6 +606,43 @@ operations:
 
       Attribution: `actor_type = "mqtt"`, `actor_id = mqtt_client_id`.
 
+  receiveServiceCredentials:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/serviceCredentials"
+    summary: Service receives infrastructure credentials from the controller
+    description: |
+      The controller sends this message after mTLS authentication to services
+      that advertise credential capabilities (`database_access`, `nats_access`,
+      `master_key_access`). Fields are populated based on the service's
+      capability set. This message is NEVER published to NATS — it is delivered
+      exclusively via the authenticated WebSocket connection.
+
+  sendRequestCaRotation:
+    action: send
+    channel:
+      $ref: "#/channels/controllerEvents"
+    messages:
+      - $ref: "#/channels/controllerEvents/messages/requestCaRotation"
+    summary: External scheduler requests CA rotation
+    description: |
+      Published by the external scheduler via NATS when the CA rotation check
+      executor determines that the managed CA certificate is approaching expiry.
+      Controllers consume this event and trigger their local CA rotation logic.
+
+  receiveRequestCaRotation:
+    action: receive
+    channel:
+      $ref: "#/channels/controllerEvents"
+    messages:
+      - $ref: "#/channels/controllerEvents/messages/requestCaRotation"
+    summary: Controller receives CA rotation request
+    description: |
+      A controller consumes this event from NATS and triggers
+      `ca_rotation_trigger.notify_one()` to initiate CA rotation.
+
 components:
   securitySchemes:
     mtls:
@@ -890,6 +935,22 @@ components:
       payload:
         $ref: "#/components/schemas/discoveryResultsPayload"
 
+    serviceCredentials:
+      name: service_credentials
+      title: Service Credentials Message
+      summary: Controller sends infrastructure credentials to services with credential capabilities
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/serviceCredentialsPayload"
+
+    requestCaRotation:
+      name: request_ca_rotation
+      title: Request CA Rotation Message
+      summary: External scheduler requests CA rotation via NATS
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/requestCaRotationPayload"
+
   schemas:
     pingPayload:
       type: object
@@ -979,10 +1040,19 @@ components:
           description: >-
             Capabilities this service supports. The controller persists these
             and derives behavioral defaults from the resulting service profile.
+            Known capabilities: software_discovery, update_hooks, graceful_shutdown,
+            mqtt_bridge, ssh_remote, scheduler, database_access, nats_access,
+            master_key_access, ca_management.
           examples:
             - - graceful_shutdown
               - software_discovery
               - update_hooks
+            - - scheduler
+              - database_access
+              - nats_access
+              - master_key_access
+              - ca_management
+              - graceful_shutdown
         enrollment_token:
           type: string
           description: Optional pre-shared enrollment token for auto-approval
@@ -2593,3 +2663,59 @@ components:
           description: Per-plugin discovery results
           items:
             $ref: "#/components/schemas/discoveryPluginResult"
+
+    serviceCredentialsPayload:
+      type: object
+      required:
+        - seq
+        - type
+      properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: service_credentials
+          description: Message type discriminator
+        db_url:
+          type: string
+          description: |
+            Database connection URL. Present when the service has the
+            `database_access` capability.
+        master_key_hex:
+          type: string
+          description: |
+            Master encryption key as 64-character hex string (32 bytes).
+            Present when the service has the `master_key_access` capability
+            and encryption is enabled on the controller.
+        nats_url:
+          type: string
+          description: |
+            NATS server URL. Present when the service has the `nats_access`
+            capability and NATS is configured on the controller.
+          examples:
+            - nats://localhost:4222
+
+    requestCaRotationPayload:
+      type: object
+      required:
+        - seq
+        - type
+        - reason
+      properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: request_ca_rotation
+          description: Message type discriminator
+        reason:
+          type: string
+          description: Human-readable reason for the rotation request
+          examples:
+            - CA certificate approaching expiry (within 6 months)

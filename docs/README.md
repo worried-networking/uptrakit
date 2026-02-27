@@ -62,7 +62,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Host Entity](architecture/host-entity.md) | Host representation and `machine_id` tracking. See also: [Wire Protocol](api/wire-protocol.md). |
 | [Software Item Entity](architecture/software-item-entity.md) | Software item definition and plugin configuration. See also: [Plugin Guidelines](development/plugin-guidelines.md), [Plugin System](development/plugin-system.md). |
 | [Update History Entity](architecture/update-history-entity.md) | Immutable update history records. See also: [Update Workflow](end-user/update-workflow.md). |
-| [Scheduler](architecture/scheduler.md) | Centralised DB-backed task scheduler with HA-safe optimistic locking. See also: [HTTP Web API](api/http-web-api.md), [Cross-Controller Communication](development/cross-controller-comm.md). |
+| [Scheduler](architecture/scheduler.md) | Centralised DB-backed task scheduler with HA-safe optimistic locking (embedded or external). See also: [Scheduler Engine](development/scheduler-engine.md), [External Scheduler Deployment](end-user/deployment/external-scheduler.md), [HTTP Web API](api/http-web-api.md), [Cross-Controller Communication](development/cross-controller-comm.md). |
 | [SSH Agent](architecture/ssh-agent.md) | SSH-backed agent architecture, local DB schema, and self-managed encryption. See also: [SSH Agent Secrets](security/ssh-agent-secrets.md), [Service Lifecycle](development/service-lifecycle.md). |
 
 ## Development
@@ -88,6 +88,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Command Executor](development/command-executor.md) | `CommandExecutor` trait, `CommandSpec`, and `LocalCommandExecutor` for transport-agnostic command dispatch. See also: [Plugin Guidelines](development/plugin-guidelines.md), [SSH Agent](architecture/ssh-agent.md). |
 | [Service Lifecycle](development/service-lifecycle.md) | `ServiceHandler` trait and `run_service_lifecycle()` for building new services. See also: [Services and Operations](api/services-operations.md). |
 | [OpenAPI Client](development/openapi-client.md) | Typed HTTP client for the web API (`uptrakit-openapi-client`). See also: [HTTP Web API](api/http-web-api.md), [CLI Usage](end-user/cli-usage.md). |
+| [Scheduler Engine](development/scheduler-engine.md) | Scheduler engine crate internals: `TaskExecutor`, `SchedulerNotifier`, executor details. See also: [Scheduler](architecture/scheduler.md), [External Scheduler Deployment](end-user/deployment/external-scheduler.md). |
 | [Embedded Frontend](development/embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). See also: [Setup](development/setup.md), [Deployment Guides](end-user/deployment/README.md). |
 
 ## Deployment Guides
@@ -103,6 +104,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [HAProxy](end-user/deployment/haproxy.md) | HAProxy reverse proxy configuration guidance. |
 | [Caddy](end-user/deployment/caddy.md) | Caddy reverse proxy configuration guidance. |
 | [NATS](end-user/deployment/nats.md) | NATS JetStream deployment for multi-controller HA setups. |
+| [External Scheduler](end-user/deployment/external-scheduler.md) | External scheduler binary deployment, enrollment, and credential flow. |
 
 ## Additional Resources
 

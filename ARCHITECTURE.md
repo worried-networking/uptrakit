@@ -7,7 +7,9 @@ only by the capabilities they advertise during enrollment (see [Capability-Based
 [SSH Agent Architecture](docs/architecture/ssh-agent.md)).
 
 A centralised [DB-backed scheduler](docs/architecture/scheduler.md) coordinates periodic tasks (version checks, cleanup, CA rotation checks,
-certificate renewal) across controller instances using optimistic locking for HA-safe exactly-once execution.
+certificate renewal) using optimistic locking for HA-safe exactly-once execution. The scheduler can run as an **embedded feature** inside the
+controller (`--features embedded-scheduler`) or as a standalone **external binary** (`uptrakit-scheduler`) that enrolls as a service and receives
+infrastructure credentials (database, NATS, master key) via the wire protocol. See [External Scheduler Deployment](docs/end-user/deployment/external-scheduler.md).
 
 ## Key references
 
@@ -93,6 +95,11 @@ Each service sends a `BTreeSet<Capability>` in its `EnrollPayload` during enroll
 | `GracefulShutdown` | `graceful_shutdown` | Supports coordinated shutdown |
 | `MqttBridge` | `mqtt_bridge` | MQTT bridge: handles `register`, `tenant_assignments`, `release_tenants`, etc. |
 | `SshRemote` | `ssh_remote` | Manages remote hosts over SSH |
+| `Scheduler` | `scheduler` | Marker: service is an external task scheduler |
+| `DatabaseAccess` | `database_access` | Service requires direct database access credentials |
+| `NatsAccess` | `nats_access` | Service requires NATS connection details |
+| `MasterKeyAccess` | `master_key_access` | Service requires the master encryption key |
+| `CaManagement` | `ca_management` | Service can request CA certificate rotation |
 
 ### ServiceProfile (derived, never stored)
 
@@ -102,10 +109,11 @@ controller-side behavioral defaults (ping interval, shutdown timeout, human-read
 | Profile | Key capability | Typical services | Default ping | Shutdown timeout |
 | --- | --- | --- | --- | --- |
 | `MqttBridge` | `MqttBridge` | MQTT service | 15 s | None |
+| `Scheduler` | `Scheduler` | External scheduler | 60 s | 30 s |
 | `Agent` | `SoftwareDiscovery` | Local agent, SSH agent | 300 s | 120 s |
 | `Unknown` | (none of the above) | Future services | 300 s | 120 s |
 
-`MqttBridge` takes precedence if both `MqttBridge` and `SoftwareDiscovery` are present. For `Agent` profiles, the `SshRemote` capability
+`MqttBridge` takes precedence over `Scheduler`, which takes precedence over `Agent`. For `Agent` profiles, the `SshRemote` capability
 distinguishes SSH-backed agents from local agents in UI labels (`service_label`).
 
 ### Enrollment tokens
@@ -132,6 +140,21 @@ former per-type registration and broadcast paths.
 - `services.capabilities` -- JSON text column holding a serialized `Vec<Capability>` (e.g. `["software_discovery","update_hooks","graceful_shutdown"]`).
 - Cross-controller event routing uses capability strings (`"software_discovery"`, `"mqtt_bridge"`, etc.) via NATS
   JetStream subjects when NATS is configured. See [Cross-Controller Communication](docs/development/cross-controller-comm.md).
+
+### Credential delivery
+
+Services advertising credential capabilities (`DatabaseAccess`, `NatsAccess`, `MasterKeyAccess`) automatically
+receive a `ServiceCredentials` message after mTLS authentication. The controller populates the payload based on
+the service's capability set:
+
+| Capability | Field populated | Condition |
+| --- | --- | --- |
+| `DatabaseAccess` | `db_url` | Always (controller has a database) |
+| `NatsAccess` | `nats_url` | Only if NATS is configured on the controller |
+| `MasterKeyAccess` | `master_key_hex` | Only if encryption is enabled on the controller |
+
+`ServiceCredentials` is **never** published to NATS — it is delivered exclusively via the authenticated
+WebSocket connection. See [Secrets and Encryption](docs/security/secrets-and-encryption.md).
 
 ### REST API
 

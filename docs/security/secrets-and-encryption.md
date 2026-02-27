@@ -184,6 +184,39 @@ never stored in the database.
 
 See also: [Auth Flows](../api/auth-flows.md) for the authentication flow descriptions.
 
+## Credential Capabilities and ServiceCredentials
+
+Services advertising credential capabilities (`DatabaseAccess`, `NatsAccess`, `MasterKeyAccess`) receive
+a `ServiceCredentials` message from the controller after mTLS authentication. This message carries
+infrastructure secrets:
+
+| Capability | Field | Content |
+| --- | --- | --- |
+| `DatabaseAccess` | `db_url` | Database connection string (contains credentials) |
+| `NatsAccess` | `nats_url` | NATS server URL |
+| `MasterKeyAccess` | `master_key_hex` | 256-bit master encryption key as 64-char hex |
+
+### Security invariants
+
+- **Never published to NATS.** `is_credential_message()` in `NotificationService` filters
+  `ServiceCredentials` from NATS publication. Credentials are delivered exclusively via the
+  authenticated WebSocket connection.
+- **Capability-gated.** The controller only populates fields matching the service's capabilities.
+  A service without `MasterKeyAccess` will not receive the master key, even if it has other
+  credential capabilities.
+- **Admin approval required.** The frontend displays per-capability security warnings when
+  approving services with credential capabilities (e.g., "This service will receive direct
+  database access credentials."). Only trusted services should be approved.
+- **WebSocket-only delivery.** Follows the same pattern as MQTT credential messages
+  (`TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`), which are also local-only.
+
+Currently, the only service using credential capabilities is the external scheduler
+(`uptrakit-scheduler`), which advertises all five capabilities: `Scheduler`, `DatabaseAccess`,
+`NatsAccess`, `MasterKeyAccess`, `CaManagement`.
+
+See also: [External Scheduler Deployment](../end-user/deployment/external-scheduler.md),
+[Cross-Controller Communication](../development/cross-controller-comm.md).
+
 ## Tokens and Secrets
 
 - JWT signing keys live in the `auth.jwt_signing_key` settings entry (base64 encoded, global scope). File-based keys
