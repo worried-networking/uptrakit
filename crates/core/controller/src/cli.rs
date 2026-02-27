@@ -1,9 +1,62 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use ipnet::IpNet;
 use uptrakit_directories::AppDirs;
+
+/// Available subcommands for the controller binary.
+#[derive(Subcommand, Debug)]
+pub enum ControllerCommand {
+    /// Migrate all data from one database to another.
+    ///
+    /// Copies every application table from the source database to the target
+    /// database. The target schema is set up automatically via the normal
+    /// migrations path. All existing data in the target is erased before the
+    /// copy begins.
+    ///
+    /// Run this while the controller is stopped. Take a backup of both
+    /// databases before proceeding.
+    DbMigrate(DbMigrateArgs),
+}
+
+/// Arguments for the `db-migrate` subcommand.
+#[derive(Parser, Debug)]
+pub struct DbMigrateArgs {
+    /// Source database URL to read data from.
+    ///
+    /// Supported schemes depend on enabled build features:
+    ///   SQLite (default): sqlite:///path/to/uptrakit.db
+    ///   PostgreSQL: postgresql://user:pass@host:5432/dbname
+    ///   MySQL: mysql://user:pass@host:3306/dbname
+    #[arg(long)]
+    pub source_db: String,
+
+    /// Target database URL to write data into.
+    ///
+    /// The schema will be created automatically. All existing rows in the
+    /// target are erased before the copy begins.
+    #[arg(long)]
+    pub target_db: String,
+
+    /// Number of rows to read and insert per batch.
+    #[arg(long, default_value = "500")]
+    pub batch_size: u64,
+
+    /// Skip the non-empty target safety check.
+    ///
+    /// By default, migration is aborted if the target already contains user
+    /// data. Use this flag to override that check.
+    #[arg(long)]
+    pub force: bool,
+
+    /// Skip the interactive confirmation prompt.
+    ///
+    /// Useful for scripted or CI use-cases where interactive input is
+    /// not available.
+    #[arg(long)]
+    pub yes: bool,
+}
 
 /// Uptrakit Controller — central server for the Uptrakit update tracking toolkit.
 #[derive(Parser, Debug)]
@@ -172,6 +225,10 @@ pub struct Args {
     /// Use RUST_LOG to enable logging for other crates (e.g. `RUST_LOG=tokio=info`).
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    /// Optional subcommand.
+    #[command(subcommand)]
+    pub command: Option<ControllerCommand>,
 }
 
 /// OIDC provider bootstrap options.

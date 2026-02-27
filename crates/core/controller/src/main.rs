@@ -2,6 +2,7 @@ mod cert_signer;
 mod cli;
 mod crl_manager;
 mod db;
+mod db_migrate;
 mod durations;
 #[cfg(feature = "embed-frontend")]
 mod embedded_frontend;
@@ -81,6 +82,15 @@ async fn main() -> std::process::ExitCode {
                 .add_directive(directive.parse().expect("valid directive")),
         )
         .init();
+
+    // Dispatch optional subcommands before entering the normal server path.
+    if let Some(cli::ControllerCommand::DbMigrate(ref db_args)) = args.command {
+        if let Err(report) = db_migrate::run(&args, db_args).await {
+            eprintln!("db-migrate error: {report:?}");
+            return std::process::ExitCode::FAILURE;
+        }
+        return std::process::ExitCode::SUCCESS;
+    }
 
     if let Err(report) = run(args).await {
         eprintln!("Error: {report:?}");
