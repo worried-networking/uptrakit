@@ -166,7 +166,7 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     )
     .await?;
 
-    // 4. Detect sudo state.
+    // 4. Detect sudo state for the *connection* user.
     println!("Detecting privilege context...");
     let is_root = detect_is_root(&session).await?;
     let sudo_available = if is_root {
@@ -175,10 +175,35 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
         detect_sudo_available(&session).await?
     };
 
-    // 5. Update DB with detected values (always refresh on this command).
-    update_host_sudo_state(db, &host.id, Some(sudo_available), Some(is_root), None).await?;
+    // When an auth override is active (e.g. `root@host`), the detection
+    // above reflects the override user's privileges, not the host's
+    // configured agent user.  The agent user is definitively non-root —
+    // otherwise no override would be needed.  Store the corrected value
+    // so that `SudoAwareCommandExecutor` will correctly prepend `sudo`
+    // for privileged commands during subsequent agent operations.
+    let agent_is_root = if auth_override { false } else { is_root };
 
-    tracing::info!(is_root, sudo_available, "sudo state detected and persisted");
+    // 5. Update DB with detected values (always refresh on this command).
+    //
+    // When auth_override: sudo_available was detected for the override
+    // user and is unreliable for the agent user.  Pass `None` to
+    // preserve whatever the DB already has; step 10 will set it to
+    // `true` after the sudoers file is written successfully.
+    let persisted_sudo_available = if auth_override {
+        None
+    } else {
+        Some(sudo_available)
+    };
+    update_host_sudo_state(db, &host.id, persisted_sudo_available, Some(agent_is_root), None)
+        .await?;
+
+    tracing::info!(
+        is_root,
+        agent_is_root,
+        sudo_available,
+        auth_override,
+        "sudo state detected and persisted"
+    );
 
     // 6. Permission check.
     if !is_root && !sudo_available {
@@ -263,7 +288,7 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     write_sudoers_file(&session, &host.username, &sudoers_content, privileged).await?;
 
     // 10. Update DB: sudo_available = true (since we just wrote a sudoers file).
-    update_host_sudo_state(db, &host.id, Some(true), Some(is_root), None).await?;
+    update_host_sudo_state(db, &host.id, Some(true), Some(agent_is_root), None).await?;
 
     session.disconnect().await;
 
