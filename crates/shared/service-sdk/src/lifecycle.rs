@@ -176,6 +176,25 @@ pub trait ServiceHandler: Send {
     ) -> LoopOutcome;
 }
 
+/// Default shutdown cause → outcome mapping shared by all service binaries.
+///
+/// | Cause | `DisconnectReason` | `LoopOutcome` |
+/// | --- | --- | --- |
+/// | `Signal(Hangup)` | `Restart` | `Restart` |
+/// | `Signal(_)` | `Shutdown` | `Shutdown` |
+/// | `ServerRestarting` | `Restart` | `Disconnected` |
+pub fn default_resolve_shutdown(
+    cause: ShutdownCause,
+) -> (uptrakit_internal_wire::DisconnectReason, LoopOutcome) {
+    use uptrakit_internal_wire::DisconnectReason;
+
+    match cause {
+        ShutdownCause::Signal(Signal::Hangup) => (DisconnectReason::Restart, LoopOutcome::Restart),
+        ShutdownCause::Signal(_) => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
+        ShutdownCause::ServerRestarting => (DisconnectReason::Restart, LoopOutcome::Disconnected),
+    }
+}
+
 /// Run the full service lifecycle: directory setup → identity load →
 /// CA bootstrap → enrollment → authenticated loop with reconnect.
 ///
@@ -423,4 +442,32 @@ fn is_cert_expired_report(report: &Report<EnrollmentError>) -> bool {
 /// Check if a `Report<EnrollmentError>` represents a receive-closed condition.
 fn is_receive_closed_report(report: &Report<EnrollmentError>) -> bool {
     report.current_context().is_receive_closed()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uptrakit_internal_wire::DisconnectReason;
+
+    #[test]
+    fn default_resolve_shutdown_hangup() {
+        let (reason, outcome) = default_resolve_shutdown(ShutdownCause::Signal(Signal::Hangup));
+        assert_eq!(reason, DisconnectReason::Restart);
+        assert_eq!(outcome, LoopOutcome::Restart);
+    }
+
+    #[test]
+    fn default_resolve_shutdown_terminate() {
+        let (reason, outcome) =
+            default_resolve_shutdown(ShutdownCause::Signal(Signal::Terminate));
+        assert_eq!(reason, DisconnectReason::Shutdown);
+        assert_eq!(outcome, LoopOutcome::Shutdown);
+    }
+
+    #[test]
+    fn default_resolve_shutdown_server_restarting() {
+        let (reason, outcome) = default_resolve_shutdown(ShutdownCause::ServerRestarting);
+        assert_eq!(reason, DisconnectReason::Restart);
+        assert_eq!(outcome, LoopOutcome::Disconnected);
+    }
 }

@@ -12,7 +12,7 @@ use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter};
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::{
-    Capability, ControllerMessage, DisconnectReason, DisconnectingPayload, ServiceMessage,
+    Capability, ControllerMessage, DisconnectingPayload, ServiceMessage,
 };
 use uptrakit_scheduler_engine::executors::{
     auth_cleanup::AuthCleanupExecutor, service_cert_check::ServiceCertCheckExecutor,
@@ -21,7 +21,7 @@ use uptrakit_scheduler_engine::executors::{
 use uptrakit_scheduler_engine::{Scheduler, SchedulerConfig, SchedulerNotifier};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause,
-    Signal,
+    default_resolve_shutdown,
 };
 use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 use uuid::Uuid;
@@ -265,7 +265,7 @@ impl ServiceHandler for SchedulerHandler {
         cause: ShutdownCause,
         _shutdown_timeout_seconds: u32,
     ) -> LoopOutcome {
-        let (disconnect_reason, outcome) = resolve_shutdown(cause);
+        let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
 
         // Stop the scheduler engine (releases DB claims).
         self.stop_scheduler();
@@ -281,40 +281,9 @@ impl ServiceHandler for SchedulerHandler {
     }
 }
 
-/// Map a [`ShutdownCause`] to the appropriate [`DisconnectReason`] and
-/// [`LoopOutcome`] for this service.
-fn resolve_shutdown(cause: ShutdownCause) -> (DisconnectReason, LoopOutcome) {
-    match cause {
-        ShutdownCause::Signal(Signal::Hangup) => (DisconnectReason::Restart, LoopOutcome::Restart),
-        ShutdownCause::Signal(_) => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
-        ShutdownCause::ServerRestarting => (DisconnectReason::Restart, LoopOutcome::Disconnected),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn resolve_shutdown_hangup() {
-        let (reason, outcome) = resolve_shutdown(ShutdownCause::Signal(Signal::Hangup));
-        assert_eq!(reason, DisconnectReason::Restart);
-        assert_eq!(outcome, LoopOutcome::Restart);
-    }
-
-    #[test]
-    fn resolve_shutdown_terminate() {
-        let (reason, outcome) = resolve_shutdown(ShutdownCause::Signal(Signal::Terminate));
-        assert_eq!(reason, DisconnectReason::Shutdown);
-        assert_eq!(outcome, LoopOutcome::Shutdown);
-    }
-
-    #[test]
-    fn resolve_shutdown_server_restarting() {
-        let (reason, outcome) = resolve_shutdown(ShutdownCause::ServerRestarting);
-        assert_eq!(reason, DisconnectReason::Restart);
-        assert_eq!(outcome, LoopOutcome::Disconnected);
-    }
 
     #[test]
     fn scheduler_handler_capabilities() {

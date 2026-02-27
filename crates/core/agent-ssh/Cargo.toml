@@ -24,7 +24,6 @@ time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "fs", "sync", "time"] }
 tokio-rustls = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 url = { workspace = true }
 uptrakit-agent-core = { path = "../../shared/agent-core", features = ["ssh"] }
 uptrakit-command = { workspace = true }

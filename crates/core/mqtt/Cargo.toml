@@ -29,7 +29,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "
 tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uuid = { workspace = true, features = ["v7", "serde"] }

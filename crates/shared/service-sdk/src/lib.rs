@@ -25,7 +25,10 @@ pub use error::{
 pub use event_loop::EventLoopContext;
 pub use identity::ServiceIdentityState;
 pub use lifecycle::{
-    LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause, run_service_lifecycle,
+    LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause, default_resolve_shutdown,
+    run_service_lifecycle,
 };
-pub use main_helper::{init_crypto, print_build_info, run_lifecycle_and_handle_errors};
+pub use main_helper::{
+    init_crypto, init_tracing, print_build_info, run_lifecycle_and_handle_errors,
+};
 pub use signal::{Signal, SignalWatcher};

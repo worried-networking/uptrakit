@@ -7,45 +7,14 @@ use rootcause::prelude::*;
 use std::collections::BTreeSet;
 
 use uptrakit_internal_wire::{
-    Capability, ControllerMessage, DisconnectReason, ReportHostsPayload, ServiceMessage,
+    Capability, ControllerMessage, ReportHostsPayload, ServiceMessage,
 };
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
-    ShutdownCause, Signal,
+    ShutdownCause, default_resolve_shutdown,
 };
 
 use cli::Args;
-
-/// Initialize `tracing_subscriber` with a verbosity-aware filter.
-///
-/// Verbosity levels expand scope progressively, keeping third-party crates
-/// silent unless `RUST_LOG` explicitly enables them:
-///
-/// - `verbosity == 0`: `{own_module}=info`
-/// - `verbosity == 1`: `{own_module}=debug`
-/// - `verbosity == 2`: `uptrakit=debug`
-/// - `verbosity >= 3`: `uptrakit=trace`
-fn init_tracing(own_module: &str, verbosity: u8) {
-    use tracing_subscriber::EnvFilter;
-
-    if verbosity > 3 {
-        eprintln!(
-            "warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)"
-        );
-    }
-
-    let directive = match verbosity {
-        0 => format!("{own_module}=info"),
-        1 => format!("{own_module}=debug"),
-        2 => "uptrakit=debug".to_string(),
-        _ => "uptrakit=trace".to_string(),
-    };
-    let mut filter = EnvFilter::from_default_env();
-    if let Ok(d) = directive.parse() {
-        filter = filter.add_directive(d);
-    }
-    tracing_subscriber::fmt().with_env_filter(filter).init();
-}
 
 struct AgentHandler {
     /// Local machine ID, collected once on connect and used to validate
@@ -179,7 +148,7 @@ impl ServiceHandler for AgentHandler {
         cause: ShutdownCause,
         shutdown_timeout_seconds: u32,
     ) -> LoopOutcome {
-        let (disconnect_reason, outcome) = resolve_shutdown(cause);
+        let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
         client::handle_graceful_shutdown(
             conn,
             self.in_flight_update.take(),
@@ -188,22 +157,6 @@ impl ServiceHandler for AgentHandler {
             outcome,
         )
         .await
-    }
-}
-
-/// Map a [`ShutdownCause`] to the appropriate [`DisconnectReason`] and
-/// [`LoopOutcome`] for this service.
-///
-/// | Cause | `DisconnectReason` | `LoopOutcome` |
-/// | --- | --- | --- |
-/// | `Signal(Hangup)` | `Restart` | `Restart` |
-/// | `Signal(_)` | `Shutdown` | `Shutdown` |
-/// | `ServerRestarting` | `Restart` | `Disconnected` |
-fn resolve_shutdown(cause: ShutdownCause) -> (DisconnectReason, LoopOutcome) {
-    match cause {
-        ShutdownCause::Signal(Signal::Hangup) => (DisconnectReason::Restart, LoopOutcome::Restart),
-        ShutdownCause::Signal(_) => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
-        ShutdownCause::ServerRestarting => (DisconnectReason::Restart, LoopOutcome::Disconnected),
     }
 }
 
@@ -230,7 +183,7 @@ async fn main() {
         return;
     }
 
-    init_tracing("uptrakit_agent", args.common.verbose);
+    uptrakit_service_sdk::init_tracing("uptrakit_agent", args.common.verbose);
     uptrakit_service_sdk::init_crypto();
 
     let mut handler = AgentHandler {
@@ -245,28 +198,3 @@ async fn main() {
     .await;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn resolve_shutdown_hangup() {
-        let (reason, outcome) = resolve_shutdown(ShutdownCause::Signal(Signal::Hangup));
-        assert_eq!(reason, DisconnectReason::Restart);
-        assert_eq!(outcome, LoopOutcome::Restart);
-    }
-
-    #[test]
-    fn resolve_shutdown_terminate() {
-        let (reason, outcome) = resolve_shutdown(ShutdownCause::Signal(Signal::Terminate));
-        assert_eq!(reason, DisconnectReason::Shutdown);
-        assert_eq!(outcome, LoopOutcome::Shutdown);
-    }
-
-    #[test]
-    fn resolve_shutdown_server_restarting() {
-        let (reason, outcome) = resolve_shutdown(ShutdownCause::ServerRestarting);
-        assert_eq!(reason, DisconnectReason::Restart);
-        assert_eq!(outcome, LoopOutcome::Disconnected);
-    }
-}
