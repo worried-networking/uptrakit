@@ -8,6 +8,7 @@
 		confirmLabel,
 		confirmClass = 'preset-filled-error-500',
 		confirmDisabled = false,
+		warnings = [],
 		onconfirm,
 		oncancel
 	}: {
@@ -17,6 +18,7 @@
 		confirmLabel: string;
 		confirmClass?: string;
 		confirmDisabled?: boolean;
+		warnings?: string[];
 		onconfirm: () => void;
 		oncancel: () => void;
 	} = $props();
@@ -30,6 +32,13 @@
 	>
 		<h3 class="h3">{title}</h3>
 		<p>{messagePrefix} <strong>{entityName}</strong>?</p>
+		{#if warnings.length > 0}
+			<aside class="rounded-lg p-3 preset-filled-warning-500 text-sm space-y-1">
+				{#each warnings as warning}
+					<p>{warning}</p>
+				{/each}
+			</aside>
+		{/if}
 		<div class="flex justify-end gap-2">
 			<button class="btn preset-tonal-surface" onclick={oncancel}>Cancel</button>
 			<button class="btn {confirmClass}" disabled={confirmDisabled} onclick={onconfirm}>

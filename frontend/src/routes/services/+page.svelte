@@ -12,14 +12,14 @@
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 
-	const CAPABILITY_FILTER_VALUES = ['all', 'software_discovery', 'mqtt_bridge', 'ssh_remote'] as const;
+	const CAPABILITY_FILTER_VALUES = ['all', 'software_discovery', 'mqtt_bridge', 'ssh_remote', 'scheduler'] as const;
 	type CapabilityFilter = (typeof CAPABILITY_FILTER_VALUES)[number];
 
 	let services: ServiceResponse[] = $state([]);
 	let error: string | null = $state(null);
 	let openMenuId: string | null = $state(null);
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
-	let confirmAction: { serviceId: string; action: 'approve' | 'reject' | 'delete'; name: string } | null = $state(null);
+	let confirmAction: { serviceId: string; action: 'approve' | 'reject' | 'delete'; name: string; capabilities: string[] } | null = $state(null);
 	let mergeSource: { id: string; name: string; capabilities: string[] } | null = $state(null);
 	let mergeTargetId: string | null = $state(null);
 	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
@@ -101,9 +101,26 @@
 		closeMenu();
 	}
 
-	function requestConfirm(serviceId: string, action: 'approve' | 'reject' | 'delete', name: string) {
+	function requestConfirm(serviceId: string, action: 'approve' | 'reject' | 'delete', name: string, capabilities: string[] = []) {
 		closeMenu();
-		confirmAction = { serviceId, action, name };
+		confirmAction = { serviceId, action, name, capabilities };
+	}
+
+	function getCredentialWarnings(capabilities: string[]): string[] {
+		const warnings: string[] = [];
+		if (capabilities.includes('database_access')) {
+			warnings.push('This service will receive direct database access credentials.');
+		}
+		if (capabilities.includes('master_key_access')) {
+			warnings.push('This service will receive the master encryption key.');
+		}
+		if (capabilities.includes('nats_access')) {
+			warnings.push('This service will receive NATS connection details.');
+		}
+		if (capabilities.includes('ca_management')) {
+			warnings.push('This service can request CA certificate rotation.');
+		}
+		return warnings;
 	}
 
 	function cancelConfirm() {
@@ -251,6 +268,12 @@
 		>
 			SSH Agents
 		</button>
+		<button
+			class="btn btn-sm {capabilityFilter === 'scheduler' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('scheduler')}
+		>
+			Schedulers
+		</button>
 	</div>
 
 	{#if error}
@@ -318,7 +341,7 @@
 						<td colspan={canManage ? 7 : 6} class="text-center py-8">
 							<p class="text-lg font-medium">No services registered yet</p>
 							<p class="mt-1 text-sm text-surface-500">
-								Agents, MQTT services, and SSH agents appear here when they enroll with the controller.
+								Agents, MQTT services, SSH agents, and schedulers appear here when they enroll with the controller.
 							</p>
 						</td>
 					</tr>
@@ -349,7 +372,7 @@
 							class="w-full rounded-md px-3 py-2 text-left text-sm text-success-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 							role="menuitem"
 							tabindex="-1"
-							onclick={() => requestConfirm(service.id, 'approve', service.friendly_name)}
+							onclick={() => requestConfirm(service.id, 'approve', service.friendly_name, service.capabilities)}
 						>
 							Approve
 						</button>
@@ -399,6 +422,7 @@
 			confirmLabel={submitting ? 'Processing...' : labels.title}
 			confirmClass={labels.btnClass}
 			confirmDisabled={submitting}
+			warnings={confirmAction.action === 'approve' ? getCredentialWarnings(confirmAction.capabilities) : []}
 			onconfirm={executeConfirmed}
 			oncancel={cancelConfirm}
 		/>
