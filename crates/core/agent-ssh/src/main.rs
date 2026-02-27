@@ -14,7 +14,7 @@ mod ssh_transport;
 
 use clap::Parser;
 use rootcause::prelude::*;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use uptrakit_internal_wire::{Capability, ControllerMessage};
@@ -52,12 +52,15 @@ type InitResult<T> = std::result::Result<T, rootcause::Report<InitError>>;
 
 /// Events produced by the SSH agent's service loop.
 ///
-/// Extends the original `client::UpdateEvent` with a host-config-changed
-/// trigger so both sources of internal events flow through the same
+/// Extends `client::UpdateEvent` with a `host_machine_id` tag and a
+/// host-config-changed trigger so all internal events flow through the same
 /// `poll_service_event` / `on_service_event` contract.
 enum SshAgentEvent {
     /// Progress from an in-flight update task (output line or completion).
-    Update(client::UpdateEvent),
+    ///
+    /// The first field is the `host_machine_id` that identifies which entry in
+    /// `SshAgentHandler::in_flight_updates` the event belongs to.
+    Update(String, client::UpdateEvent),
     /// The host-config reload ticker fired; the handler will diff the DB
     /// snapshot and send `ReportHosts` if anything changed.
     HostConfigChanged,
@@ -70,7 +73,20 @@ enum SshAgentEvent {
 struct SshAgentHandler {
     state_dir: std::path::PathBuf,
     local_db: Option<sea_orm::DatabaseConnection>,
-    in_flight_update: Option<client::InFlightUpdate>,
+    /// Per-host in-flight update state, keyed by `host_machine_id`.
+    ///
+    /// The architectural invariant is **no overlapping update actions per
+    /// host**: two concurrent updates for the same host are forbidden, but
+    /// different hosts may update simultaneously.
+    in_flight_updates: HashMap<String, client::SshInFlightUpdate>,
+    /// Receiving end of the aggregate event channel.
+    ///
+    /// Each update's forwarder task holds a clone of `aggregate_tx` and sends
+    /// `(host_machine_id, UpdateEvent)` tuples here.  The service loop drains
+    /// this channel in `poll_service_event`.
+    aggregate_rx: tokio::sync::mpsc::Receiver<(String, client::UpdateEvent)>,
+    /// Sending end of the aggregate event channel, cloned into each forwarder.
+    aggregate_tx: tokio::sync::mpsc::Sender<(String, client::UpdateEvent)>,
     pool: ssh_pool::SshConnectionPool,
     /// Periodic ticker for host-config change detection.
     ///
@@ -87,24 +103,25 @@ struct SshAgentHandler {
 }
 
 impl SshAgentHandler {
-    /// Drive an in-flight update to completion or the next output line.
+    /// Await the next event from the aggregate update channel.
     ///
-    /// Returns `pending()` when no update is in flight, so the `select!` in
-    /// `poll_service_event` can safely poll this arm alongside the reload
-    /// ticker without a double-borrow of `self`.
-    async fn poll_update(in_flight: &mut Option<client::InFlightUpdate>) -> client::UpdateEvent {
-        if let Some(update) = in_flight {
-            tokio::select! {
-                biased;
-                Some(output_msg) = update.output_rx.recv() => {
-                    client::UpdateEvent::Output(output_msg)
-                }
-                result = &mut update.handle => {
-                    client::UpdateEvent::Completed(result)
-                }
-            }
+    /// Returns `pending()` when no updates are in-flight, so the `select!` in
+    /// `poll_service_event` can safely park this arm without polling an empty
+    /// channel.  Once at least one update is running, any event produced by any
+    /// forwarder task will wake this future.
+    async fn poll_updates(
+        aggregate_rx: &mut tokio::sync::mpsc::Receiver<(String, client::UpdateEvent)>,
+        in_flight_updates: &HashMap<String, client::SshInFlightUpdate>,
+    ) -> (String, client::UpdateEvent) {
+        if in_flight_updates.is_empty() {
+            std::future::pending().await
         } else {
-            std::future::pending::<client::UpdateEvent>().await
+            match aggregate_rx.recv().await {
+                Some(event) => event,
+                // Channel closed — should never happen while forwarders are alive,
+                // but park indefinitely rather than busy-looping.
+                None => std::future::pending().await,
+            }
         }
     }
 
@@ -189,7 +206,8 @@ impl ServiceHandler for SshAgentHandler {
                 client::handle_execute_update_ssh(
                     *payload,
                     db,
-                    &mut self.in_flight_update,
+                    &mut self.in_flight_updates,
+                    &self.aggregate_tx,
                     conn,
                     &self.pool,
                 )
@@ -208,11 +226,14 @@ impl ServiceHandler for SshAgentHandler {
 
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {
         // Borrow separate fields by name — Rust's field-projection rules allow
-        // both borrows simultaneously, sidestepping a double-borrow of `self`.
+        // all three borrows simultaneously, sidestepping a double-borrow of `self`.
         tokio::select! {
             biased;
-            event = Self::poll_update(&mut self.in_flight_update) => {
-                SshAgentEvent::Update(event)
+            (host_machine_id, event) = Self::poll_updates(
+                &mut self.aggregate_rx,
+                &self.in_flight_updates,
+            ) => {
+                SshAgentEvent::Update(host_machine_id, event)
             }
             _ = Self::poll_reload_tick(&mut self.reload_ticker) => {
                 SshAgentEvent::HostConfigChanged
@@ -226,9 +247,12 @@ impl ServiceHandler for SshAgentHandler {
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
         match event {
-            SshAgentEvent::Update(update_event) => {
-                let Some(ref update) = self.in_flight_update else {
-                    tracing::error!("received update event but no in-flight update exists");
+            SshAgentEvent::Update(host_machine_id, update_event) => {
+                let Some(update) = self.in_flight_updates.get(&host_machine_id) else {
+                    tracing::error!(
+                        %host_machine_id,
+                        "received update event but no in-flight update found for this host"
+                    );
                     return Ok(None);
                 };
                 let update_history_id = update.update_history_id;
@@ -239,7 +263,7 @@ impl ServiceHandler for SshAgentHandler {
                     }
                     client::UpdateEvent::Completed(result) => {
                         client::send_update_result(conn, update_history_id, result).await;
-                        self.in_flight_update = None;
+                        self.in_flight_updates.remove(&host_machine_id);
                     }
                 }
                 Ok(None)
@@ -262,15 +286,86 @@ impl ServiceHandler for SshAgentHandler {
         cause: ShutdownCause,
         shutdown_timeout_seconds: u32,
     ) -> LoopOutcome {
+        use uptrakit_internal_wire::{DisconnectingPayload, ServiceMessage, UpdateFinalStatus, UpdateResultPayload};
+
         let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
-        let outcome = client::handle_graceful_shutdown(
-            conn,
-            self.in_flight_update.take(),
-            shutdown_timeout_seconds,
-            disconnect_reason,
-            outcome,
-        )
-        .await;
+
+        if !self.in_flight_updates.is_empty() {
+            let count = self.in_flight_updates.len();
+            tracing::info!(
+                count,
+                timeout_seconds = shutdown_timeout_seconds,
+                "waiting for in-flight updates to complete before shutdown"
+            );
+
+            let deadline = tokio::time::Instant::now()
+                + Duration::from_secs(u64::from(shutdown_timeout_seconds));
+
+            while !self.in_flight_updates.is_empty() {
+                tokio::select! {
+                    biased;
+                    Some((host_id, event)) = self.aggregate_rx.recv() => {
+                        if let Some(update) = self.in_flight_updates.get(&host_id) {
+                            let uid = update.update_history_id;
+                            match event {
+                                client::UpdateEvent::Output(msg) => {
+                                    client::send_update_output(conn, uid, msg).await;
+                                }
+                                client::UpdateEvent::Completed(result) => {
+                                    client::send_update_result(conn, uid, result).await;
+                                    self.in_flight_updates.remove(&host_id);
+                                }
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep_until(deadline) => {
+                        tracing::warn!(
+                            remaining = self.in_flight_updates.len(),
+                            "shutdown timeout reached, abandoning remaining in-flight updates"
+                        );
+                        for (_, update) in self.in_flight_updates.drain() {
+                            conn.send_best_effort(ServiceMessage::UpdateResult(
+                                UpdateResultPayload {
+                                    update_history_id: update.update_history_id,
+                                    status: UpdateFinalStatus::Failed,
+                                    from_version: None,
+                                    to_version: None,
+                                    output: String::new(),
+                                    error: Some(format!(
+                                        "Agent shutdown timeout ({shutdown_timeout_seconds}s) reached"
+                                    )),
+                                },
+                            ))
+                            .await;
+                            update.forwarder.abort();
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Drain any remaining buffered events that forwarders sent before
+            // aborting or completing under the timeout.
+            while let Ok((host_id, event)) = self.aggregate_rx.try_recv() {
+                if let Some(update) = self.in_flight_updates.get(&host_id)
+                    && let client::UpdateEvent::Output(msg) = event
+                {
+                    client::send_update_output(conn, update.update_history_id, msg).await;
+                }
+            }
+        }
+
+        // Send Disconnecting and close pooled SSH connections.
+        let disconnecting_msg =
+            ServiceMessage::Disconnecting(DisconnectingPayload::new(disconnect_reason));
+        if let Err(e) = conn.send(disconnecting_msg).await {
+            tracing::debug!(error = %e, "failed to send Disconnecting message");
+        } else {
+            tracing::debug!(
+                reason = ?disconnect_reason,
+                "sent Disconnecting message to controller"
+            );
+        }
 
         // Gracefully close all pooled SSH connections so remote hosts receive
         // a clean disconnect rather than a silent socket drop.
@@ -474,10 +569,15 @@ async fn main() {
         }
     };
 
+    let (aggregate_tx, aggregate_rx) =
+        tokio::sync::mpsc::channel::<(String, client::UpdateEvent)>(256);
+
     let mut handler = SshAgentHandler {
         state_dir,
         local_db: None,
-        in_flight_update: None,
+        in_flight_updates: HashMap::new(),
+        aggregate_rx,
+        aggregate_tx,
         pool: ssh_pool::SshConnectionPool::new(),
         reload_ticker: None,
         host_snapshot: Vec::new(),
@@ -690,5 +790,83 @@ mod tests {
         assert!(deleted.contains(&"B"));
         assert_eq!(changed.len(), 1, "expected C added");
         assert!(changed.contains("C"));
+    }
+
+    // ── poll_updates tests ───────────────────────────────────────────────────
+
+    use super::{HashMap, SshAgentHandler, client};
+
+    /// `poll_updates` must park indefinitely (never resolve) when the
+    /// `in_flight_updates` map is empty, regardless of whether the channel
+    /// has buffered events.
+    #[tokio::test]
+    async fn poll_updates_parks_when_map_is_empty() {
+        let (_, mut rx) = tokio::sync::mpsc::channel::<(String, client::UpdateEvent)>(4);
+        let empty_map: HashMap<String, client::SshInFlightUpdate> = HashMap::new();
+
+        let timed_out = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            SshAgentHandler::poll_updates(&mut rx, &empty_map),
+        )
+        .await
+        .is_err();
+
+        assert!(
+            timed_out,
+            "poll_updates must not resolve when in_flight_updates is empty"
+        );
+    }
+
+    /// `poll_updates` must return the next event from the aggregate channel
+    /// when the `in_flight_updates` map is non-empty.
+    #[tokio::test]
+    async fn poll_updates_returns_event_when_map_nonempty() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, client::UpdateEvent)>(4);
+
+        let mut map: HashMap<String, client::SshInFlightUpdate> = HashMap::new();
+        map.insert(
+            "host-1".to_string(),
+            client::SshInFlightUpdate {
+                update_history_id: uuid::Uuid::nil(),
+                forwarder: tokio::spawn(std::future::pending()),
+            },
+        );
+
+        // Construct a completed-update event by spawning a trivial task
+        // (the only safe way to get a Result<UpdateExecutionResult, JoinError>).
+        let exec_result = tokio::spawn(async {
+            uptrakit_agent_core::update::UpdateExecutionResult {
+                result: uptrakit_internal_wire::UpdateResultPayload {
+                    update_history_id: uuid::Uuid::nil(),
+                    status: uptrakit_internal_wire::UpdateFinalStatus::Completed,
+                    from_version: None,
+                    to_version: None,
+                    output: String::new(),
+                    error: None,
+                },
+            }
+        })
+        .await;
+
+        tx.send(("host-1".to_string(), client::UpdateEvent::Completed(exec_result)))
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            SshAgentHandler::poll_updates(&mut rx, &map),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "poll_updates must return an event when the map is non-empty"
+        );
+        let (host_id, _) = result.unwrap();
+        assert_eq!(host_id, "host-1");
+
+        for (_, update) in map.drain() {
+            update.forwarder.abort();
+        }
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -22,6 +23,23 @@ use std::collections::HashSet;
 
 // Re-export shared update types for use in main.rs.
 pub(crate) use uptrakit_agent_core::{InFlightUpdate, UpdateEvent};
+
+// ── SSH in-flight update tracking ────────────────────────────────────────────
+
+/// State for a per-host in-flight update managed by the SSH agent.
+///
+/// Unlike `InFlightUpdate` (which owns the JoinHandle and output channel
+/// directly), `SshInFlightUpdate` only stores the update ID and a handle to
+/// the **forwarder task**. The forwarder task owns the underlying
+/// `InFlightUpdate` and forwards all events to the shared aggregate channel.
+pub(crate) struct SshInFlightUpdate {
+    /// The update history ID used to correlate events with the controller.
+    pub update_history_id: uuid::Uuid,
+    /// JoinHandle for the forwarder task.
+    ///
+    /// Dropped when the update completes normally; aborted on shutdown timeout.
+    pub forwarder: tokio::task::JoinHandle<()>,
+}
 
 // ── Temporary key file ────────────────────────────────────────────────────────
 
@@ -409,11 +427,22 @@ pub(crate) async fn handle_check_versions_ssh(
 /// Handle an `ExecuteUpdate` message for the SSH agent.
 ///
 /// Looks up the SSH host by `host_machine_id`, acquires a pooled session, and
-/// delegates to the shared `uptrakit_agent_core::handle_execute_update()`.
+/// spawns the update task with a per-host concurrency guard.
+///
+/// Unlike the regular agent (which uses a global `Option<InFlightUpdate>`),
+/// the SSH agent maintains a `HashMap<String, SshInFlightUpdate>` keyed by
+/// `host_machine_id`. This allows different hosts to update simultaneously
+/// while still preventing two concurrent updates on the **same** host.
+///
+/// Each spawned update gets a lightweight **forwarder task** that owns the
+/// `InFlightUpdate` and forwards all output/completion events to the shared
+/// `aggregate_tx` channel. The `SshAgentHandler` drains that channel in
+/// `poll_service_event`.
 pub(crate) async fn handle_execute_update_ssh(
     payload: ExecuteUpdatePayload,
     db: &sea_orm::DatabaseConnection,
-    in_flight_update: &mut Option<InFlightUpdate>,
+    in_flight_updates: &mut HashMap<String, SshInFlightUpdate>,
+    aggregate_tx: &tokio::sync::mpsc::Sender<(String, UpdateEvent)>,
     conn: &mut ControllerConnection,
     pool: &SshConnectionPool,
 ) {
@@ -482,6 +511,28 @@ pub(crate) async fn handle_execute_update_ssh(
         }
     };
 
+    // Per-host concurrency guard — reject if this host already has an update in flight.
+    if in_flight_updates.contains_key(&payload.host_machine_id) {
+        tracing::warn!(
+            host_machine_id = %payload.host_machine_id,
+            update_id = %payload.update_history_id,
+            "rejecting update: another update is already in progress for this host"
+        );
+        conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
+            update_history_id: payload.update_history_id,
+            status: UpdateFinalStatus::Failed,
+            from_version: None,
+            to_version: None,
+            output: String::new(),
+            error: Some(format!(
+                "Another update is already in progress for host '{}'",
+                payload.host_machine_id
+            )),
+        }))
+        .await;
+        return;
+    }
+
     let ctx = build_connection_context(&host).await;
 
     // The session Arc is shared with the executor that travels into the spawned
@@ -499,8 +550,45 @@ pub(crate) async fn handle_execute_update_ssh(
         hostname = %host.hostname,
         "running update on SSH host"
     );
-    uptrakit_agent_core::handle_execute_update(payload, executor, in_flight_update, conn, &ctx)
-        .await;
+
+    let host_machine_id = payload.host_machine_id.clone();
+    let update_history_id = payload.update_history_id;
+
+    let in_flight = uptrakit_agent_core::start_update(payload, executor, conn, &ctx).await;
+
+    // Spawn a forwarder task that owns the InFlightUpdate and forwards all
+    // output/completion events to the shared aggregate channel.
+    let host_id = host_machine_id.clone();
+    let tx = aggregate_tx.clone();
+    let forwarder = tokio::spawn(async move {
+        let InFlightUpdate {
+            update_history_id: _,
+            mut handle,
+            mut output_rx,
+        } = in_flight;
+        loop {
+            tokio::select! {
+                biased;
+                Some(msg) = output_rx.recv() => {
+                    if tx.send((host_id.clone(), UpdateEvent::Output(msg))).await.is_err() {
+                        break;
+                    }
+                }
+                result = &mut handle => {
+                    let _ = tx.send((host_id, UpdateEvent::Completed(result))).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    in_flight_updates.insert(
+        host_machine_id,
+        SshInFlightUpdate {
+            update_history_id,
+            forwarder,
+        },
+    );
 }
 
 // ── DiscoverSoftware ──────────────────────────────────────────────────────────
@@ -591,9 +679,7 @@ pub(crate) async fn handle_discover_software_ssh(
 
 // ── Shared re-exports ─────────────────────────────────────────────────────────
 
-pub(crate) use uptrakit_agent_core::{
-    handle_graceful_shutdown, send_update_output, send_update_result,
-};
+pub(crate) use uptrakit_agent_core::{send_update_output, send_update_result};
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
@@ -626,4 +712,53 @@ fn error_results_for_discovery(
             error: Some(error.to_string()),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_ssh_in_flight() -> SshInFlightUpdate {
+        SshInFlightUpdate {
+            update_history_id: uuid::Uuid::nil(),
+            forwarder: tokio::spawn(std::future::pending()),
+        }
+    }
+
+    /// A second `ExecuteUpdate` for the **same** host must be rejected while an
+    /// update is already in-flight for that host.
+    #[tokio::test]
+    async fn test_per_host_guard_rejects_same_host() {
+        let mut map: HashMap<String, SshInFlightUpdate> = HashMap::new();
+        map.insert("host-machine-1".to_string(), make_ssh_in_flight());
+
+        // The guard in handle_execute_update_ssh checks contains_key.
+        assert!(
+            map.contains_key("host-machine-1"),
+            "in-flight update must block a second request for the same host"
+        );
+
+        // Clean up background task.
+        for (_, update) in map.drain() {
+            update.forwarder.abort();
+        }
+    }
+
+    /// An `ExecuteUpdate` for a **different** host must not be blocked by an
+    /// in-flight update on another host.
+    #[tokio::test]
+    async fn test_per_host_guard_allows_different_host() {
+        let mut map: HashMap<String, SshInFlightUpdate> = HashMap::new();
+        map.insert("host-machine-1".to_string(), make_ssh_in_flight());
+
+        assert!(
+            !map.contains_key("host-machine-2"),
+            "a different host must not be blocked by another host's in-flight update"
+        );
+
+        // Clean up background task.
+        for (_, update) in map.drain() {
+            update.forwarder.abort();
+        }
+    }
 }

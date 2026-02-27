@@ -379,30 +379,53 @@ specification.
 1. Controller sends `ExecuteUpdate` with `host_machine_id` and role-based plugin assignments:
    `execute_update_plugin` (required `PluginAssignment`) and optionally `detect_version_plugin`
    (for before/after installed-version detection).
-2. SSH agent looks up the matching host and rejects the message if an update is already in flight.
+2. SSH agent looks up the matching host by `host_machine_id`. If an update is already in-flight
+   **for that specific host**, the request is rejected immediately. Updates for **different hosts**
+   proceed concurrently.
 3. A session is acquired from `SshConnectionPool` and passed (via `Arc<SshSession>`) to
    `SshCommandExecutor` (wrapped with `SudoAwareCommandExecutor`).
-4. `uptrakit_agent_core::handle_execute_update()` spawns an async task that uses the
+4. `uptrakit_agent_core::start_update()` spawns an async task that uses the
    `execute_update_plugin` to perform the update and the `detect_version_plugin` (if present) for
-   before/after version detection. It streams `update_output` lines and sends a final
-   `update_result` to the controller.
-5. The spawned task's `Arc<SshSession>` clone keeps the SSH connection alive until streaming
+   before/after version detection. It streams `update_output` lines to an `mpsc` channel.
+5. A **forwarder task** is spawned. It owns the `InFlightUpdate` (the channel receiver and task
+   handle) and forwards all `(host_machine_id, UpdateEvent)` tuples to the shared aggregate channel
+   on `SshAgentHandler`.
+6. The spawned task's `Arc<SshSession>` clone keeps the SSH connection alive until streaming
    completes. The pool retains its own clone so the same connection can be reused for subsequent
    operations once the update task finishes.
 
 ### In-Flight Update Tracking
 
-Only one update may execute at a time per SSH agent instance (the same constraint as the regular agent).
-`SshAgentHandler` stores an `Option<InFlightUpdate>` field. While a task is running, new `ExecuteUpdate` messages
-are rejected with an appropriate error response. The `poll_service_event()` loop drives in-flight update output
-delivery over the WebSocket.
+The SSH agent enforces a **per-host** concurrency invariant: at most one update may execute at a
+time for a given `host_machine_id`, but different hosts may update simultaneously.
+
+`SshAgentHandler` stores `in_flight_updates: HashMap<String, SshInFlightUpdate>` keyed by
+`host_machine_id`. When an `ExecuteUpdate` arrives for a host already in the map, the request is
+rejected immediately with an error response. When no conflicting update exists, the SSH agent:
+
+1. Calls `uptrakit_agent_core::start_update()` to spawn the update task and obtain an `InFlightUpdate`.
+2. Spawns a lightweight **forwarder task** that owns the `InFlightUpdate` and forwards all
+   `output` and `completion` events to a shared `aggregate_tx: mpsc::Sender<(String, UpdateEvent)>` channel.
+3. Inserts a `SshInFlightUpdate { update_history_id, forwarder }` entry into the map.
+
+The `poll_service_event()` loop awaits `aggregate_rx.recv()` (the receiving side of the shared
+channel) to drive output delivery and completion handling for all concurrent updates. When the map
+is empty, `poll_updates()` parks indefinitely so the reload-ticker arm is not starved.
 
 ### Graceful Shutdown
 
-On shutdown, the SSH agent delegates to `uptrakit_agent_core::handle_graceful_shutdown()`, which waits for any
-in-flight update to complete before disconnecting, respecting the controller-provided `shutdown_timeout_seconds`.
-After the graceful shutdown completes, `SshConnectionPool::disconnect_all()` sends a clean SSH disconnect to every
-pooled session so remote hosts do not see silent socket drops.
+On shutdown, the SSH agent drains all in-flight updates using the aggregate channel with a shared
+deadline. All updates share the same `shutdown_timeout_seconds` deadline (not per-update):
+
+1. The handler loops over `aggregate_rx.recv()` until `in_flight_updates` is empty or the deadline
+   is exceeded.
+2. On each received event, output is forwarded and completed updates are removed from the map.
+3. If the deadline is reached before all updates finish, each remaining entry receives a `Failed`
+   `UpdateResult` message and its forwarder task is aborted.
+4. After the drain loop, remaining buffered output events are flushed via `try_recv()`.
+5. A `Disconnecting` message is sent, and `SshConnectionPool::disconnect_all()` closes all pooled
+   SSH sessions cleanly.
+
 A SIGHUP signal triggers a graceful restart (drain + reconnect) rather than a hard stop.
 
 ## Host Reporting
@@ -457,13 +480,15 @@ The ticker is implemented as `SshAgentEvent::HostConfigChanged`, an arm in the s
 
 ```rust
 enum SshAgentEvent {
-    Update(client::UpdateEvent),    // existing update events
-    HostConfigChanged,              // reload tick fired
+    Update(String, client::UpdateEvent),  // (host_machine_id, event) from aggregate channel
+    HostConfigChanged,                    // reload tick fired
 }
 ```
 
-Two static helper methods (`poll_update`, `poll_reload_tick`) borrow separate fields of
+Two static helper methods (`poll_updates`, `poll_reload_tick`) borrow separate fields of
 `SshAgentHandler` so the `select!` can poll both without a double-borrow of `self`.
+`poll_updates` parks indefinitely when `in_flight_updates` is empty so the reload-ticker arm
+is never starved.
 
 ### Reload sequence
 
@@ -516,12 +541,14 @@ crates/core/agent-ssh/
 ├── Cargo.toml
 ├── build.rs
 └── src/
-    ├── main.rs          # SshAgentHandler (ServiceHandler impl, in_flight_update, reload_ticker,
-    │                    # host_snapshot), SshAgentEvent enum, diff_host_snapshots(), entry point,
-    │                    # master key init
+    ├── main.rs          # SshAgentHandler (ServiceHandler impl, in_flight_updates HashMap,
+    │                    # aggregate_rx/tx channel, reload_ticker, host_snapshot),
+    │                    # SshAgentEvent enum, poll_updates(), diff_host_snapshots(),
+    │                    # entry point, master key init
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
-    ├── client.rs        # Authenticated loop; handle_check_versions_ssh(), handle_execute_update_ssh(),
-    │                    # handle_discover_software_ssh(), build_reload_host_infos(),
+    ├── client.rs        # Authenticated loop; handle_check_versions_ssh(), handle_execute_update_ssh()
+    │                    # (per-host guard + forwarder task), handle_discover_software_ssh(),
+    │                    # SshInFlightUpdate struct, build_reload_host_infos(),
     │                    # report_hosts_after_config_change() — all wrap SshCommandExecutor with
     │                    # SudoAwareCommandExecutor
     ├── error.rs         # Error types (rootcause + thiserror)
@@ -562,9 +589,10 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 | `check_version(plugin_assignment, executor)` | Runs a single version check for a role-based plugin assignment using the given executor |
 | `execute_update(payload, executor, output_tx)` | Executes an update using role-based plugin assignments and streams output lines |
 | `handle_check_versions(payload, executor, conn)` | Refreshes package indexes, runs version checks, sends `version_check_results` |
-| `handle_execute_update(payload, executor, in_flight, conn)` | Rejects if update already in flight; spawns update task |
-| `handle_graceful_shutdown(conn, in_flight, timeout, reason, outcome)` | Drains in-flight update before disconnecting |
-| `InFlightUpdate` | Handle for a running update task |
+| `start_update(payload, executor, conn, ctx)` | Applies ctx overrides, spawns update task, sends `UpdateStarted`, returns `InFlightUpdate` |
+| `handle_execute_update(payload, executor, in_flight, conn)` | Rejects if update already in flight (global guard for single-host agent); delegates to `start_update()` |
+| `handle_graceful_shutdown(conn, in_flight, timeout, reason, outcome)` | Drains a single in-flight update before disconnecting (used by the regular agent) |
+| `InFlightUpdate` | Handle for a running update task (holds `JoinHandle` and output `mpsc::Receiver`) |
 | `UpdateEvent` | Enum of events emitted by an in-flight update (output line, completion) |
 | `send_update_output()` | Sends an `update_output` message to the controller |
 | `send_update_result()` | Sends an `update_result` message to the controller |
