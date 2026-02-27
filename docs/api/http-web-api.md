@@ -74,6 +74,13 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `DELETE /api/v1/hosts/{id}/discovered[?plugin_config_id={uuid}]`: bulk-discard pending discovered items for a host. Requires `manage_software`.
 - `POST /api/v1/plugin-configs/{id}/discover`: trigger discovery for a specific plugin config. Requires `manage_software`.
 - `DELETE /api/v1/plugin-configs/{id}/discovered`: bulk-discard pending discovered items for a plugin config. Requires `manage_software`.
+
+`PluginConfigResponse` includes a `capabilities: Vec<String>` field listing the snake\_case capability strings
+declared by the plugin type (e.g. `["discover_local_software"]`). Clients should use this field to determine
+which actions are valid for a given config — for example, only showing **Discover** and **Discard** buttons
+when `"discover_local_software"` is present. Discovery-capable plugin types are `releases_docker`,
+`package_manager_homebrew`, `package_manager_apt`, and `discovery_proxmox_helper_scripts`; non-discovery types
+(`releases_github`, `generic_shell`) return an empty capabilities list for this field.
 - `/api/v1/autodiscovery/ignores`: CRUD for permanent suppression rules. See [docs/api/autodiscovery.md](autodiscovery.md) for full details.
 
 `ServiceResponse` includes an optional `ping_interval_seconds` field (`Option<u32>`) that reports the per-service
