@@ -80,6 +80,7 @@ pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<Option<S
                     "master encryption key not set; encryption at rest is disabled. \
                     This is for development only and is NOT safe for production."
                 );
+                uptrakit_crypto::enable_plaintext_mode();
             } else {
                 bail!(AppError::Config(
                     "master encryption key is required: set UPTRAKIT_MASTER_KEY env var \

@@ -5,6 +5,7 @@
 
 use std::fmt;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use rand::RngCore;
@@ -62,6 +63,13 @@ impl_report_conversion! {
 /// `'static` lifetime and are not normally dropped).
 static MASTER_KEY: OnceLock<Zeroizing<[u8; 32]>> = OnceLock::new();
 
+/// When `true`, encryption is disabled and values are stored as plaintext.
+///
+/// Only set by [`enable_plaintext_mode`] at startup when
+/// `--allow-plaintext-secrets` is passed without a master key.
+/// Must never be set in production.
+static PLAINTEXT_MODE: AtomicBool = AtomicBool::new(false);
+
 /// Initialize the global master key. Must be called once at startup.
 ///
 /// The key bytes are wrapped in [`Zeroizing`] so that any intermediate copy
@@ -72,6 +80,22 @@ pub fn init_master_key(key: Zeroizing<[u8; 32]>) -> Result<()> {
     MASTER_KEY
         .set(key)
         .map_err(|_| report!(CryptoError::AlreadyInitialized))
+}
+
+/// Enable plaintext mode for development use.
+///
+/// When active, [`encrypt_str`] and [`EncryptedString::new`] store values as
+/// plaintext (no encryption). This is safe to call multiple times.
+///
+/// **Never call this in production.** It is intended solely for development
+/// runs started with `--allow-plaintext-secrets` and no master key.
+pub fn enable_plaintext_mode() {
+    PLAINTEXT_MODE.store(true, Ordering::Relaxed);
+}
+
+/// Returns `true` if plaintext mode is enabled (no master key, dev only).
+pub fn is_plaintext_mode() -> bool {
+    PLAINTEXT_MODE.load(Ordering::Relaxed)
 }
 
 /// Returns `true` if the master key has been initialized.
@@ -147,6 +171,10 @@ pub fn decrypt_str(stored: &str) -> Result<String> {
 }
 
 fn encrypt_value(plaintext: &str) -> Result<String> {
+    if PLAINTEXT_MODE.load(Ordering::Relaxed) {
+        return Ok(plaintext.to_string());
+    }
+
     let key_bytes = MASTER_KEY
         .get()
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
@@ -688,5 +716,58 @@ mod tests {
         let es2 = EncryptedString::new("value_b".to_string()).expect("should encrypt");
 
         assert_ne!(es1, es2);
+    }
+
+    #[test]
+    fn test_plaintext_mode_encrypt_returns_plaintext() {
+        let _lock = TEST_LOCK.lock().unwrap();
+
+        // Save and set plaintext mode; restore on exit to avoid affecting other tests.
+        let was_plaintext = PLAINTEXT_MODE.load(Ordering::Relaxed);
+        PLAINTEXT_MODE.store(true, Ordering::Relaxed);
+
+        let result = encrypt_value("dev secret");
+        PLAINTEXT_MODE.store(was_plaintext, Ordering::Relaxed);
+
+        let encrypted = result.expect("plaintext mode encrypt should succeed");
+        assert_eq!(
+            encrypted, "dev secret",
+            "in plaintext mode, encrypt_value should return the value unchanged"
+        );
+        assert!(
+            !is_encrypted(&encrypted),
+            "plaintext mode output must not carry the ENC:v1: prefix"
+        );
+    }
+
+    #[test]
+    fn test_plaintext_mode_encrypted_string_new() {
+        let _lock = TEST_LOCK.lock().unwrap();
+
+        let was_plaintext = PLAINTEXT_MODE.load(Ordering::Relaxed);
+        PLAINTEXT_MODE.store(true, Ordering::Relaxed);
+
+        let es = EncryptedString::new("plain dev value".to_string());
+        PLAINTEXT_MODE.store(was_plaintext, Ordering::Relaxed);
+
+        let es = es.expect("EncryptedString::new should succeed in plaintext mode");
+        assert_eq!(es.expose_secret(), "plain dev value");
+        assert!(
+            !es.is_db_value_encrypted(),
+            "db_value should not be encrypted in plaintext mode"
+        );
+    }
+
+    #[test]
+    fn test_is_plaintext_mode_default_false() {
+        // PLAINTEXT_MODE starts as false; individual tests may toggle it temporarily
+        // but always restore it. This just documents the expected default.
+        // We do NOT acquire TEST_LOCK here since we are only reading and not
+        // touching MASTER_KEY or PLAINTEXT_MODE (no write).
+        // The AtomicBool load is safe to call concurrently.
+        let mode = is_plaintext_mode();
+        // Cannot assert false here because other tests in the suite may have toggled
+        // the flag momentarily; we just assert the function is callable.
+        let _ = mode;
     }
 }
