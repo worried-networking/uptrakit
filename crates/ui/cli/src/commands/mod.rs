@@ -2,6 +2,7 @@ pub mod api;
 pub mod auth;
 pub mod autodiscovery;
 pub mod check;
+pub mod enrollment_tokens;
 pub mod history;
 pub mod hosts;
 pub mod plugin_configs;

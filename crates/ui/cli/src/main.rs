@@ -110,6 +110,11 @@ enum Commands {
         #[command(subcommand)]
         command: PluginConfigsCommands,
     },
+    /// Manage enrollment tokens
+    EnrollmentTokens {
+        #[command(subcommand)]
+        command: EnrollmentTokensCommands,
+    },
     /// Autodiscovery management
     Autodiscovery {
         #[command(subcommand)]
@@ -791,6 +796,45 @@ enum PluginConfigsCommands {
     /// Discard all pending discovered items for a plugin config
     DiscardDiscovered {
         /// Plugin config UUID
+        id: Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum EnrollmentTokensCommands {
+    /// List enrollment tokens
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Create a new enrollment token
+    Create {
+        /// Human-readable token name
+        #[arg(long)]
+        name: String,
+        /// Comma-separated list of allowed capabilities (e.g. software_discovery,mqtt_bridge).
+        /// Omit for a wildcard token that allows any service type.
+        #[arg(long)]
+        capabilities: Option<String>,
+        /// Maximum number of enrollments allowed
+        #[arg(long)]
+        max_uses: Option<u32>,
+        /// Token lifetime in seconds (e.g. 86400 for 24 hours)
+        #[arg(long)]
+        expires_in: Option<u64>,
+    },
+    /// Show enrollment token details
+    Show {
+        /// Enrollment token UUID
+        id: Uuid,
+    },
+    /// Revoke an enrollment token
+    Revoke {
+        /// Enrollment token UUID
         id: Uuid,
     },
 }
@@ -1934,6 +1978,73 @@ async fn run(cli: Cli) -> error::Result<()> {
                 output::print_output(format, &resp)?;
             }
         },
+        Commands::EnrollmentTokens { command } => match command {
+            EnrollmentTokensCommands::List { page, per_page } => {
+                let resp =
+                    commands::enrollment_tokens::list(commands::enrollment_tokens::ListParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                        page,
+                        per_page,
+                    })
+                    .await?;
+                output::print_output(format, &resp)?;
+            }
+            EnrollmentTokensCommands::Create {
+                name,
+                capabilities,
+                max_uses,
+                expires_in,
+            } => {
+                let allowed_capabilities = capabilities.map(|s| {
+                    s.split(',')
+                        .map(|c| c.trim().to_string())
+                        .filter(|c| !c.is_empty())
+                        .collect()
+                });
+                let resp = commands::enrollment_tokens::create(
+                    commands::enrollment_tokens::CreateParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                        name: &name,
+                        allowed_capabilities,
+                        max_uses,
+                        expires_in_seconds: expires_in,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            EnrollmentTokensCommands::Show { id } => {
+                let resp =
+                    commands::enrollment_tokens::show(commands::enrollment_tokens::ShowParams {
+                        id: &id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    })
+                    .await?;
+                output::print_output(format, &resp)?;
+            }
+            EnrollmentTokensCommands::Revoke { id } => {
+                let resp = commands::enrollment_tokens::revoke(
+                    commands::enrollment_tokens::RevokeParams {
+                        id: &id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+        },
         Commands::Autodiscovery { command } => match command {
             AutodiscoveryCommands::Ignores { command } => match command {
                 IgnoresCommands::List {
@@ -2017,6 +2128,7 @@ mod tests {
     const SOURCE_UUID: &str = "aa000000-bb00-cc00-dd00-ee0000000002";
     const PC_UUID: &str = "aa100000-bb00-cc00-dd00-ee0000000001";
     const IGNORE_UUID: &str = "aa200000-bb00-cc00-dd00-ee0000000001";
+    const ET_UUID: &str = "aa300000-bb00-cc00-dd00-ee0000000001";
 
     /// Parse a UUID constant (safe in tests).
     fn uuid(s: &str) -> Uuid {
@@ -3320,6 +3432,138 @@ mod tests {
                 assert_eq!(id, uuid(PC_UUID));
             }
             _ => panic!("expected PluginConfigs DiscardDiscovered"),
+        }
+    }
+
+    #[test]
+    fn enrollment_tokens_list_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "enrollment-tokens", "list"]).expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::EnrollmentTokens {
+                command: EnrollmentTokensCommands::List { page: None, per_page: None }
+            })
+        ));
+    }
+
+    #[test]
+    fn enrollment_tokens_list_with_pagination() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "enrollment-tokens",
+            "list",
+            "--page",
+            "2",
+            "--per-page",
+            "50",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::EnrollmentTokens {
+                command: EnrollmentTokensCommands::List { page, per_page },
+            }) => {
+                assert_eq!(page, Some(2));
+                assert_eq!(per_page, Some(50));
+            }
+            _ => panic!("expected EnrollmentTokens List"),
+        }
+    }
+
+    #[test]
+    fn enrollment_tokens_create_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "enrollment-tokens",
+            "create",
+            "--name",
+            "CI Token",
+            "--capabilities",
+            "software_discovery,mqtt_bridge",
+            "--max-uses",
+            "10",
+            "--expires-in",
+            "86400",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::EnrollmentTokens {
+                command:
+                    EnrollmentTokensCommands::Create {
+                        name,
+                        capabilities,
+                        max_uses,
+                        expires_in,
+                    },
+            }) => {
+                assert_eq!(name, "CI Token");
+                assert_eq!(
+                    capabilities.as_deref(),
+                    Some("software_discovery,mqtt_bridge")
+                );
+                assert_eq!(max_uses, Some(10));
+                assert_eq!(expires_in, Some(86400));
+            }
+            _ => panic!("expected EnrollmentTokens Create"),
+        }
+    }
+
+    #[test]
+    fn enrollment_tokens_create_minimal() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "enrollment-tokens",
+            "create",
+            "--name",
+            "Wildcard",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::EnrollmentTokens {
+                command:
+                    EnrollmentTokensCommands::Create {
+                        name,
+                        capabilities,
+                        max_uses,
+                        expires_in,
+                    },
+            }) => {
+                assert_eq!(name, "Wildcard");
+                assert!(capabilities.is_none());
+                assert!(max_uses.is_none());
+                assert!(expires_in.is_none());
+            }
+            _ => panic!("expected EnrollmentTokens Create"),
+        }
+    }
+
+    #[test]
+    fn enrollment_tokens_show_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "enrollment-tokens", "show", ET_UUID])
+                .expect("should parse");
+        match args.command {
+            Some(Commands::EnrollmentTokens {
+                command: EnrollmentTokensCommands::Show { id },
+            }) => {
+                assert_eq!(id, uuid(ET_UUID));
+            }
+            _ => panic!("expected EnrollmentTokens Show"),
+        }
+    }
+
+    #[test]
+    fn enrollment_tokens_revoke_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "enrollment-tokens", "revoke", ET_UUID])
+                .expect("should parse");
+        match args.command {
+            Some(Commands::EnrollmentTokens {
+                command: EnrollmentTokensCommands::Revoke { id },
+            }) => {
+                assert_eq!(id, uuid(ET_UUID));
+            }
+            _ => panic!("expected EnrollmentTokens Revoke"),
         }
     }
 
