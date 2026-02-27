@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod cert_signer;
 pub mod error_response;
+pub mod event_delivery;
 pub mod event_poller;
 pub mod extract;
 pub mod middleware;
