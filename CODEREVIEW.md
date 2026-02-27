@@ -67,10 +67,6 @@ The AGENTS.md should include explicit dependency direction statements to elimina
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/shared/crypto/src/lib.rs:244-251` — `EncryptedString::new` silently degrades to plaintext when master key is absent
-
-When `MASTER_KEY` is not initialised, `EncryptedString::new` logs `tracing::warn!` and stores the plaintext value. There is no startup guard or environment assertion that prevents a production deployment from running in this mode. OIDC client secrets, provider API keys, and CA private key material would all be stored cleartext in the database with no machine-readable indicator beyond a transient log line. This is a workspace-level policy concern: `uptrakit-service-sdk` initializes the application lifecycle, and the master-key check belongs there as a hard startup failure, not a soft warning in the crypto library.
-
 **[SEVERITY: Medium]** `crates/ui/web-api/src/auth/jwt.rs:101` — JWT validation uses `Validation::default()` with no audience claim
 
 No `aud` claim is required during token validation. A JWT issued for one deployment environment will be accepted by another if the HMAC signing key is shared or accidentally reused. There is also no `iss` or `sub` format validation. This is a workspace-level concern because the JWT signing key file path and generation are handled in `uptrakit-service-sdk` and `uptrakit-directories` — the key lifecycle spans crates, so the validation policy must be defined and enforced consistently.
@@ -190,14 +186,6 @@ Without a CI check, the invariant is documentation-only and will continue to be 
 - `crates/core/controller/src/tasks.rs:36-37`: `CancellationToken` child tokens propagated to all background tasks — clean cooperative shutdown.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/core/controller/src/scheduler/mod.rs:153` — Scheduler executes tasks sequentially with no timeout and no cancellation-point between tasks
-
-`executor.execute(&task).await` is called with no timeout wrapper and no check of the `CancellationToken` during execution. A network-blocked `VersionCheckExecutor` or `ServiceCertCheckExecutor` will stall the entire scheduler poll cycle. Because the token is only checked in the outer `tokio::select!` between interval ticks, shutdown cannot interrupt a running task. The stale-claim recovery window (10 minutes) means a hung task blocks the entire scheduler for up to 10 minutes. Each task execution should be wrapped in `tokio::time::timeout` with a per-task budget, and the cancellation token should be passed into the executor so long-running tasks can cooperate with shutdown.
-
-**[SEVERITY: High]** `crates/ui/web-api/src/mqtt_lease_coordinator.rs:533-576` — `reconcile_mqtt_clients` silently overwrites an active peer's MQTT lease
-
-The reconciliation function updates `instance_id` and `heartbeat_at` without any notification to the previous holder. Two controller instances can both believe they hold the same MQTT lease simultaneously, producing duplicate MQTT connections, conflicting status update messages, and broken QoS guarantees. Reconciliation should only claim a lease whose heartbeat has exceeded the stale threshold and must update the holder atomically (e.g., `UPDATE WHERE instance_id = :previous_id AND heartbeat_at < :stale_threshold`).
 
 **[SEVERITY: Medium]** `crates/core/mqtt/src/mqtt_client.rs:253-254` — MQTT reconnect uses a fixed 5-second delay with no backoff
 
@@ -340,10 +328,6 @@ MQTT-specific wire variants are deserializable on agent connections and vice ver
 **[SEVERITY: Medium]** `crates/shared/service-sdk/src/lifecycle.rs:79,89` — `ServiceHandler` is not object-safe due to associated constants; no documentation or `where Self: Sized` guards
 
 `DIR_NAME` and `SERVICE_LABEL` are `const` items on the trait. Object safety requires that no associated constants be present without a `where Self: Sized` bound. If anyone attempts `Box<dyn ServiceHandler>` or `Arc<dyn ServiceHandler>`, the compiler error is non-obvious. The trait should either document that it is not intended as a trait object, or add `where Self: Sized` to the constant items to produce a clear diagnostic.
-
-**[RESOLVED]** ~~`EnrollPayload.service_type` deprecation is undocumented in code~~
-
-The `ServiceType` enum and `EnrollPayload.service_type` field have been removed. Service identity is now determined by `BTreeSet<Capability>` advertised during enrollment and capability negotiation. The controller infers the service role from the agreed capability set. Enrollment uses a single `register()` call (replacing the former `register_agent`/`register_mqtt`/`register_ssh_agent` triple), and routing uses `broadcast_by_capability` instead of the former `broadcast_by_type`.
 
 #### 2026-02-24 Review
 

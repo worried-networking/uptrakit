@@ -44,10 +44,6 @@ These nine crates form the foundational layer that every other crate in the work
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/shared/crypto/src/lib.rs:244-251` — `EncryptedString::new` silently falls back to plaintext when no master key is configured
-
-When `master_key_available()` returns `false`, `EncryptedString::new` logs a single `tracing::warn!` and stores the plaintext value as the `db_value`. There is no startup guard, no environment check, and no way for a caller to distinguish a successfully encrypted value from a silently unencrypted one at the call site. In a production deployment where the master key environment variable is accidentally absent (misconfigured container, missing secret mount), OIDC client secrets, provider credentials, and similar sensitive values would be stored in the database in plaintext. The only observable signal is a single `WARN`-level log line that may be missed in high-volume startup output. The doc-comment on `EncryptedString` describes this as "development mode", but there is no code-level enforcement preventing this path in production builds. Fix: add a startup assertion (e.g., checked at `AppState` build time) that `master_key_available()` returns `true` unless an explicit development-mode flag is set. Alternatively, expose a `EncryptedString::new_require_key` variant that returns `Err` when no key is present and deprecate the silent fallback path.
-
 **[SEVERITY: Low]** `crates/shared/directories/src/lib.rs:829,837` — `unsafe` env var mutation in tests creates data-race risk
 
 ```rust
@@ -226,10 +222,6 @@ AGENTS.md restricts `as_u16()` to documented serialization sites only. Both call
 #### 2026-02-24 Review
 
 #### Issues
-
-**[RESOLVED]** ~~`ServiceType` has `#[non_exhaustive]` but no `Other(String)` forward-compatibility variant~~
-
-The `ServiceType` enum has been removed entirely. Service identity is now determined by `BTreeSet<Capability>` advertised during enrollment and capability negotiation. The `Capability` enum already uses the `Other(String)` forward-compatibility pattern, so the inconsistency no longer exists.
 
 **[SEVERITY: Low]** `crates/shared/web-api-types/src/permissions.rs:9` and others — Several public API-facing enums lack `#[non_exhaustive]` unlike wire-protocol enums
 

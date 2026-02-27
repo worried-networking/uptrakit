@@ -71,11 +71,7 @@ Several Medium-severity schema decisions (soft-delete naming inconsistency, dual
 
 ### Issues
 
-No security issues are directly owned by this crate beyond the inherited crypto coupling
-described in Architecture. The plaintext-fallback risk in `EncryptedString::new` when no
-master key is configured (Medium severity, reported in the Security section of Phase 1
-findings) is owned by `uptrakit-crypto`, not this crate; it is cross-referenced here because
-`entity/oidc_provider.rs:80` is the most sensitive call site.
+No open issues in this section.
 
 ---
 

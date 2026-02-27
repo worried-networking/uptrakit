@@ -112,10 +112,6 @@ Found at lines 388, 535, 584, 1221. UUID v4 has 122 bits of entropy versus the i
 
 #### 2026-02-24 Review
 
-**[SEVERITY: Medium]** `src/settings_store.rs:313-354` — JWT signing key stored in database without at-rest encryption
-
-Stored as plain base64 JSON, bypassing the `EncryptedString` layer used for CA keys and OIDC secrets. A database dump exposes the key, allowing JWT forgery.
-
 **[SEVERITY: Low]** `src/middleware/resolve_proxy_headers.rs:256-258` — CA CN comparison uses non-constant-time string equality
 
 The `==` operator short-circuits, but the compared values (CA CNs) are not confidential, making exploitability very low.
@@ -153,10 +149,6 @@ Both `oidc_complete_registration` and `oidc_link` contain the same ~30-line bloc
 **[SEVERITY: Medium]** `src/routes/oidc_auth.rs:142-165` and `src/routes/oidc_auth.rs:272-296` — OIDC client construction via discovery duplicated between `oidc_authorize` and `oidc_callback`
 
 ~20 identical lines of `IssuerUrl::new` + `CoreProviderMetadata::discover_async` + `CoreClient::from_provider_metadata` + `set_redirect_uri`. Error handling is inconsistent: `oidc_authorize` returns `BAD_GATEWAY` (correct), while `oidc_callback` redirects to `/login?error=oidc_discovery_failed` (inconsistent semantics for what is an outbound HTTP failure). Extract `async fn build_oidc_client(provider, redirect_url) -> Result<CoreClient, Response>`.
-
-**[RESOLVED]** ~~`enroll_agent`, `enroll_mqtt`, `enroll_ssh_agent` share an identical 47-line post-enrollment shape~~
-
-The three separate enrollment functions have been unified into a single `register()` call. Enrollment now uses a single enrollment token (replacing the former per-service-type tokens), and the controller infers the service role from the `BTreeSet<Capability>` advertised during enrollment.
 
 **[SEVERITY: Medium]** `src/routes/oidc_auth.rs:66` and `src/routes/oidc_auth.rs:352` — `unwrap_or_default()` on DB queries silently returns empty results
 
@@ -275,10 +267,6 @@ Should test that `svc.broadcast(msg)` does NOT write to the outbox, verifying th
 
 ### Issues
 
-**[SEVERITY: High]** `src/mqtt_lease_coordinator.rs:533-576` — `reconcile_mqtt_clients` silently takes over a live peer's lease without notification
-
-When `existing.instance_id != instance_id` (line 545-555), the function overwrites the `instance_id` and `heartbeat_at` without sending a `TenantRevoked` message to the prior holder or removing the prior holder from the in-memory registry. The result: two controller instances simultaneously believe they hold the same MQTT lease — duplicate MQTT connections, conflicting client-status messages, and broken QoS delivery. The prior holder must be notified and its registry entry cleaned up before the takeover is committed.
-
 **[SEVERITY: Medium]** `src/event_poller.rs:59` — `retry_counts: HashMap<i64, u8>` grows unboundedly when cursor is stuck
 
 If the event cursor cannot advance (e.g., the target service never connects), `retry_counts` accumulates entries for every event in the stuck window. The `retain` cleanup on line 180 only fires when `new_cursor` advances. A long outage with many events produces unbounded map growth. Add a hard cap (e.g., 10,000 entries) or a TTL-based eviction that does not depend on cursor progress.
@@ -305,10 +293,6 @@ Consuming the first tick with `.await` suspends the enrolled loop before enterin
 **[SEVERITY: Medium]** `src/event_poller.rs:59` — Fixed 1-second poll interval with no configurability or adaptive behavior
 
 Every controller instance polls `controller_events` once per second regardless of activity. Should be configurable or adaptive.
-
-**[RESOLVED]** ~~`unreachable!` on unknown ServiceType variant will panic on new service types~~
-
-The `ServiceType` enum has been removed. Service routing now uses capability-based identification via `BTreeSet<Capability>`, and message dispatch uses `broadcast_by_capability` which handles unknown capabilities gracefully without panicking.
 
 **[SEVERITY: Low]** `src/middleware/rate_limit.rs:114-152` — In-memory fallback rate limiter uses `std::sync::Mutex` with no poisoning recovery and no size bound
 
@@ -363,10 +347,6 @@ API tokens are valid indefinitely once issued. A compromised token that was neve
 "Find active sessions for user" is a common query path (user detail view, session revocation). A composite index on `(user_id, expires_at)` would serve this filter efficiently.
 
 #### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `src/queries/services.rs:184-228` — Missing transaction in `deactivate_service` for multi-step mutation
-
-Three sequential mutations without a transaction. Certificate revocation failure is swallowed.
 
 **[SEVERITY: Medium]** `src/queries/autodiscovery.rs:36-75` — TOCTOU race in `create_or_ignore_ignore_rule`
 
@@ -450,14 +430,6 @@ The role sync reconstruction only places values at the first dot-separated segme
 Additional claim retrieval (groups, department, cost center) requires custom scopes. The current implementation splits `plugin.scopes` on whitespace and adds each as a separate `Scope`. This works but is the only extensibility point for claims enrichment. There is no documented path for operators to add custom claims processors without code changes.
 
 #### 2026-02-24 Review
-
-**[RESOLVED]** ~~Three `match service_type` dispatch blocks require manual extension for every new service type~~
-
-The `ServiceType`-based dispatch has been replaced by capability-based routing. The controller now infers service roles from the `BTreeSet<Capability>` advertised during enrollment, and message dispatch uses `broadcast_by_capability` rather than matching on a service type enum.
-
-**[RESOLVED]** ~~Enrollment dispatch triplication with near-identical 70-line functions~~
-
-The three `enroll_*` functions (`enroll_agent`, `enroll_mqtt`, `enroll_ssh_agent`) have been unified into a single `register()` call. Enrollment now uses a single enrollment token and the controller infers the service role from the advertised `BTreeSet<Capability>`.
 
 **[SEVERITY: Medium]** `src/routes/service_ws/protocol.rs` — `controller_capabilities()` is a hardcoded array
 

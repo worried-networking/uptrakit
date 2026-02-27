@@ -195,32 +195,6 @@ window), causing a 10-minute gap in scheduled task execution after every
 non-clean shutdown. A domain-appropriate timeout (30–60 seconds) for the scheduler
 specifically, distinct from the generic 5-second default, would be safer.
 
-**[SEVERITY: Medium]** `crates/core/controller/src/scheduler/mod.rs:153` — Sequential task execution with no timeout or cancellation awareness
-
-```rust
-// scheduler/mod.rs:153
-let result = executor.execute(&task).await;
-```
-
-All due tasks in a poll cycle are executed serially. There is no per-task timeout
-and no `tokio::select!` against the cancellation token inside the execution loop.
-A `VersionCheckExecutor` blocked on a slow notification delivery, or a
-`ServiceCertCheckExecutor` blocked on a DB query, stalls the entire poll cycle.
-More critically, a graceful shutdown that arrives while a task is executing cannot
-interrupt it — the `token.cancelled()` arm is only checked between interval ticks
-in the outer `tokio::select!`. Execution could hold the task claim for the full
-600-second stale window.
-
-The recommended fix is to wrap each execution with a per-task timeout:
-
-```rust
-let result = tokio::time::timeout(TASK_EXECUTION_TIMEOUT, executor.execute(&task)).await
-    .unwrap_or_else(|_| Err(report!(SchedulerError::Timeout)));
-```
-
-Adding a second `tokio::select!` branch on `token.cancelled()` inside the loop
-would also allow cooperative shutdown mid-cycle.
-
 #### 2026-02-24 Review
 
 **[SEVERITY: Low]** `crates/core/controller/src/pki.rs:543` — `bundle_from_pem` takes `String` parameters where `&str` would suffice for key parsing
@@ -360,19 +334,6 @@ and has no correctness impact.
 - **All HA-critical timing constants are centralised with documentation.** `src/durations.rs:1-34` — Makes HA tuning auditable from a single location.
 
 ### Issues
-
-**[SEVERITY: Medium]** `crates/core/controller/src/scheduler/mod.rs:153` — Scheduler task execution blocks shutdown
-
-See Code Quality section. A hung executor holds the scheduler task alive until the
-5-second `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` expires. The claim is not released
-before the timeout fires, meaning the task stays locked for up to 600 seconds on
-the next restart.
-
-**[SEVERITY: Medium]** `crates/core/controller/src/tasks.rs:98-104` — Shutdown timeout too short for DB-dependent cleanup
-
-See Code Quality section. The 5-second uniform timeout for all background tasks is
-too short for the scheduler's `release_all_claims` DB write under transient DB
-pressure.
 
 #### 2026-02-24 Review
 
