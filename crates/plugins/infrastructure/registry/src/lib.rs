@@ -92,6 +92,11 @@ pub trait PluginOps: Send + Sync + 'static {
         plugin_type: &str,
         value: &str,
     ) -> std::result::Result<(), String>;
+
+    /// Returns the capabilities declared by the given plugin type.
+    ///
+    /// Returns an empty vec for unknown plugin types.
+    fn capabilities_for_str(&self, plugin_type: &str) -> Vec<PluginCapability>;
 }
 
 impl PluginOps for PluginRegistry {
@@ -129,5 +134,9 @@ impl PluginOps for PluginRegistry {
             return Ok(());
         };
         PluginRegistry::validate_package_identifier(pt, value)
+    }
+
+    fn capabilities_for_str(&self, plugin_type: &str) -> Vec<PluginCapability> {
+        PluginRegistry::capabilities_for_str(plugin_type)
     }
 }

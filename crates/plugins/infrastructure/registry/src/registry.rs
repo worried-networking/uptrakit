@@ -308,6 +308,34 @@ impl PluginRegistry {
         };
         Self::restore_config_secrets(pt, incoming, existing)
     }
+
+    /// Returns the capabilities declared by the given plugin type.
+    ///
+    /// Instantiates the plugin with an empty config (no validation), then calls
+    /// `capabilities()`. Returns an empty vec for unknown types or if instantiation
+    /// fails.
+    pub fn capabilities_for(
+        plugin_type: PluginType,
+    ) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+        let executor =
+            Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let empty = serde_json::Value::Object(serde_json::Map::new());
+        if let Ok(p) = Self::create_plugin_for_discovery(plugin_type, &empty, executor) {
+            p.capabilities().to_vec()
+        } else {
+            vec![]
+        }
+    }
+
+    /// String-accepting convenience wrapper around [`capabilities_for`].
+    pub fn capabilities_for_str(
+        plugin_type: &str,
+    ) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
+        let Ok(pt) = plugin_type.parse::<PluginType>() else {
+            return vec![];
+        };
+        Self::capabilities_for(pt)
+    }
 }
 
 #[cfg(test)]
@@ -921,6 +949,65 @@ mod tests {
         assert!(
             PluginRegistry::validate_package_identifier(PluginType::ReleasesDocker, "ghcr.io//app")
                 .is_err()
+        );
+    }
+
+    // ── capabilities_for / capabilities_for_str ───────────────────────────
+
+    #[test]
+    fn capabilities_for_docker_includes_discover() {
+        let caps = PluginRegistry::capabilities_for(PluginType::ReleasesDocker);
+        assert!(
+            caps.contains(&uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware),
+            "Docker plugin should declare DiscoverLocalSoftware"
+        );
+    }
+
+    #[test]
+    fn capabilities_for_github_is_empty() {
+        let caps = PluginRegistry::capabilities_for(PluginType::ReleasesGithub);
+        assert!(
+            !caps.contains(
+                &uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+            ),
+            "GitHub releases plugin must not declare DiscoverLocalSoftware"
+        );
+    }
+
+    #[test]
+    fn capabilities_for_str_docker_includes_discover() {
+        let caps = PluginRegistry::capabilities_for_str("releases_docker");
+        assert!(
+            caps.contains(&uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware),
+            "releases_docker should declare DiscoverLocalSoftware via string lookup"
+        );
+    }
+
+    #[test]
+    fn capabilities_for_str_github_has_no_discover() {
+        let caps = PluginRegistry::capabilities_for_str("releases_github");
+        assert!(
+            !caps.contains(
+                &uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+            ),
+            "releases_github must not declare DiscoverLocalSoftware"
+        );
+    }
+
+    #[test]
+    fn capabilities_for_str_unknown_returns_empty() {
+        let caps = PluginRegistry::capabilities_for_str("unknown_type");
+        assert!(caps.is_empty(), "Unknown plugin type should return an empty capabilities vec");
+    }
+
+    #[test]
+    fn capabilities_for_str_generic_shell_has_no_discover() {
+        let caps = PluginRegistry::capabilities_for_str("generic_shell");
+        assert!(
+            !caps.contains(
+                &uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+            ),
+            "generic_shell must not declare DiscoverLocalSoftware"
         );
     }
 }
