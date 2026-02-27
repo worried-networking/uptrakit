@@ -1,7 +1,6 @@
-use crate::SettingKey;
 use crate::auth::{password, token};
 use crate::cert_signer::SignedCertBundle;
-use crate::settings_store::load_setting;
+use crate::queries::enrollment_tokens as et_queries;
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
 use std::net::IpAddr;
@@ -83,42 +82,73 @@ pub(crate) async fn do_enroll(
     // Generate agent_id server-side (single source of truth)
     let agent_id = uuid::Uuid::now_v7();
 
-    // Determine status based on enrollment token
-    let status = if let Some(enrollment_token) = enrollment_token {
-        let token_hash = match load_setting(db, tenant_id, SettingKey::EnrollmentTokenHash).await {
-            Ok(Some(v)) => match v.as_str() {
-                Some(hash) => hash.to_string(),
-                None => {
-                    bail!(AgentRouteError::Forbidden(
-                        "No enrollment token configured".into()
-                    ));
-                }
-            },
-            Ok(None) => {
-                bail!(AgentRouteError::Forbidden(
-                    "No enrollment token configured".into()
-                ));
-            }
-            Err(e) => {
-                tracing::error!("Failed to load enrollment token hash: {:?}", e);
-                bail!(AgentRouteError::Internal("Internal server error".into()));
-            }
-        };
+    // Determine status based on enrollment token.
+    // When a token is provided, iterate over all active tokens for the tenant
+    // and verify the plaintext against each Argon2 hash. On match, check
+    // capability intersection and auto-approve.
+    let (status, enrollment_token_id) = if let Some(provided_token) = enrollment_token {
+        let active_tokens = et_queries::find_active_tokens(db, tenant_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to load active enrollment tokens: {:?}", e);
+                report!(AgentRouteError::Internal("Internal server error".into()))
+            })?;
 
-        match password::verify_password(enrollment_token, &token_hash) {
-            Ok(true) => ServiceStatus::Approved,
-            Ok(false) => {
+        if active_tokens.is_empty() {
+            bail!(AgentRouteError::Forbidden(
+                "No active enrollment tokens configured".into()
+            ));
+        }
+
+        let mut matched_token = None;
+        for tok in &active_tokens {
+            match password::verify_password(provided_token, &tok.token_hash) {
+                Ok(true) => {
+                    matched_token = Some(tok);
+                    break;
+                }
+                Ok(false) => continue,
+                Err(e) => {
+                    tracing::error!("Token verification error: {:?}", e);
+                    bail!(AgentRouteError::Internal("Internal server error".into()));
+                }
+            }
+        }
+
+        let tok = match matched_token {
+            Some(t) => t,
+            None => {
                 bail!(AgentRouteError::Forbidden(
                     "Invalid enrollment token".into()
                 ));
             }
-            Err(e) => {
-                tracing::error!("Token verification error: {:?}", e);
-                bail!(AgentRouteError::Internal("Internal server error".into()));
+        };
+
+        // Check capability intersection: if the token has allowed_capabilities,
+        // at least one must overlap with the service's capabilities. NULL = wildcard.
+        if let Some(ref allowed_caps_json) = tok.allowed_capabilities {
+            let allowed: Vec<String> = serde_json::from_str(allowed_caps_json).unwrap_or_default();
+            if !allowed.is_empty() {
+                let service_caps: Vec<String> =
+                    serde_json::from_str(&capabilities_json).unwrap_or_default();
+                let has_overlap = allowed.iter().any(|a| service_caps.contains(a));
+                if !has_overlap {
+                    bail!(AgentRouteError::Forbidden(
+                        "Enrollment token does not permit this service type".into()
+                    ));
+                }
             }
         }
+
+        // Increment usage counter
+        if let Err(e) = et_queries::increment_token_uses(db, tok.id).await {
+            tracing::error!("Failed to increment token uses: {:?}", e);
+            bail!(AgentRouteError::Internal("Internal server error".into()));
+        }
+
+        (ServiceStatus::Approved, Some(tok.id))
     } else {
-        ServiceStatus::Pending
+        (ServiceStatus::Pending, None)
     };
 
     let enrollment_secret = match token::generate_secure_token() {
@@ -155,7 +185,7 @@ pub(crate) async fn do_enroll(
         updated_at: Set(now),
         deactivated_at: Set(None),
         ping_interval_seconds: Set(None),
-        enrollment_token_id: Set(None),
+        enrollment_token_id: Set(enrollment_token_id),
     };
 
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;

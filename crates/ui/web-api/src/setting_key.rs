@@ -17,10 +17,6 @@ pub enum SettingKey {
     RealIpHeader,
     ExtraSans,
     HttpsAddr,
-    /// Legacy enrollment token hash. Superseded by the `enrollment_tokens` table.
-    /// Retained only for backwards compatibility during the migration to
-    /// per-token enrollment in `do_enroll`. Will be removed once Commit 4 lands.
-    EnrollmentTokenHash,
     ForwardedClientCertInfoHeader,
     ForwardedClientCertPemHeader,
     PkiAddr,
@@ -46,7 +42,6 @@ impl SettingKey {
             Self::RealIpHeader => "network.real_ip_header",
             Self::ExtraSans => "network.extra_sans",
             Self::HttpsAddr => "network.https_addr",
-            Self::EnrollmentTokenHash => "service_enrollment.token_hash",
             Self::ForwardedClientCertInfoHeader => "network.forwarded_client_cert_info_header",
             Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
             Self::PkiAddr => "network.pki_addr",
@@ -72,7 +67,6 @@ impl SettingKey {
             "network.real_ip_header" => Some(Self::RealIpHeader),
             "network.extra_sans" => Some(Self::ExtraSans),
             "network.https_addr" => Some(Self::HttpsAddr),
-            "service_enrollment.token_hash" => Some(Self::EnrollmentTokenHash),
             "network.forwarded_client_cert_info_header" => {
                 Some(Self::ForwardedClientCertInfoHeader)
             }
@@ -160,6 +154,5 @@ mod tests {
         assert!(SettingKey::JwtSigningKey.is_global());
         // Per-tenant keys
         assert!(!SettingKey::RegistrationMode.is_global());
-        assert!(!SettingKey::EnrollmentTokenHash.is_global());
     }
 }
