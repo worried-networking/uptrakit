@@ -239,6 +239,61 @@ pub async fn handle_check_versions(
     None
 }
 
+/// Spawn an update task and return the in-flight update handle.
+///
+/// Applies the connection context to the plugin configs, spawns the update
+/// execution task, sends `UpdateStarted` to the controller, and returns an
+/// [`InFlightUpdate`] for the caller to track.
+///
+/// This is the low-level primitive used by both [`handle_execute_update`] (for
+/// the single-host agent, which holds a global `Option<InFlightUpdate>`) and
+/// `handle_execute_update_ssh` in the SSH agent (which holds a per-host
+/// `HashMap<String, SshInFlightUpdate>`).
+pub async fn start_update(
+    payload: uptrakit_internal_wire::ExecuteUpdatePayload,
+    executor: Arc<dyn CommandExecutor>,
+    conn: &mut ControllerConnection,
+    ctx: &ConnectionContext,
+) -> InFlightUpdate {
+    // Apply connection context to the plugin configs
+    let mut effective_payload = payload.clone();
+    ctx.apply_to_config(
+        &effective_payload.execute_update_plugin.plugin_type,
+        &mut effective_payload.execute_update_plugin.config,
+    );
+    if let Some(ref mut detect) = effective_payload.detect_version_plugin {
+        ctx.apply_to_config(&detect.plugin_type, &mut detect.config);
+    }
+
+    // Create a channel for output streaming
+    let (output_tx, output_rx) =
+        tokio::sync::mpsc::channel::<crate::update::UpdateOutputMessage>(100);
+
+    let update_history_id = effective_payload.update_history_id;
+
+    // Spawn update execution task
+    let handle = tokio::spawn(async move {
+        crate::update::execute_update(effective_payload, executor, output_tx).await
+    });
+
+    // Send UpdateStarted
+    if let Err(e) = conn
+        .send(ServiceMessage::UpdateStarted(UpdateStartedPayload {
+            update_history_id,
+            from_version: None,
+        }))
+        .await
+    {
+        tracing::error!(error = %e, "failed to send UpdateStarted");
+    }
+
+    InFlightUpdate {
+        update_history_id,
+        handle,
+        output_rx,
+    }
+}
+
 /// Handle an `ExecuteUpdate` message from the controller.
 ///
 /// The `executor` is provided by the caller — `LocalCommandExecutor` for the
@@ -246,6 +301,9 @@ pub async fn handle_check_versions(
 ///
 /// The `ctx` is used to inject connection-specific overrides into the plugin
 /// config before instantiation.
+///
+/// For the SSH agent (which manages multiple hosts), use `start_update()`
+/// directly together with a per-host concurrency check and a forwarder task.
 pub async fn handle_execute_update(
     payload: uptrakit_internal_wire::ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
@@ -279,44 +337,7 @@ pub async fn handle_execute_update(
         return;
     }
 
-    // Apply connection context to the plugin configs
-    let mut effective_payload = payload.clone();
-    ctx.apply_to_config(
-        &effective_payload.execute_update_plugin.plugin_type,
-        &mut effective_payload.execute_update_plugin.config,
-    );
-    if let Some(ref mut detect) = effective_payload.detect_version_plugin {
-        ctx.apply_to_config(&detect.plugin_type, &mut detect.config);
-    }
-
-    // Create a channel for output streaming
-    let (output_tx, output_rx) =
-        tokio::sync::mpsc::channel::<crate::update::UpdateOutputMessage>(100);
-
-    let update_history_id = effective_payload.update_history_id;
-
-    // Spawn update execution task
-    let handle = tokio::spawn(async move {
-        crate::update::execute_update(effective_payload, executor, output_tx).await
-    });
-
-    // Send UpdateStarted
-    if let Err(e) = conn
-        .send(ServiceMessage::UpdateStarted(UpdateStartedPayload {
-            update_history_id,
-            from_version: None,
-        }))
-        .await
-    {
-        tracing::error!(error = %e, "failed to send UpdateStarted");
-    }
-
-    // Track the in-flight update
-    *in_flight_update = Some(InFlightUpdate {
-        update_history_id,
-        handle,
-        output_rx,
-    });
+    *in_flight_update = Some(start_update(payload, executor, conn, ctx).await);
 }
 
 /// Handle a `DiscoverSoftware` message from the controller.
