@@ -211,8 +211,56 @@ dev-dependency.
 
 ---
 
+---
+
+## Data migration
+
+Schema migrations (described above) only manage the **structure** of the
+database — tables, indexes, and the small amount of seeded reference data
+(tenant, roles, permissions, scheduled tasks). They do not copy **user data**
+between database backends.
+
+To move an existing dataset from SQLite to PostgreSQL or MySQL (or between any
+two supported backends), use the `db-migrate` subcommand of the controller
+binary:
+
+```sh
+uptrakit-controller \
+  --master-key-file /path/to/master.key \
+  db-migrate \
+  --source-db sqlite:///path/to/uptrakit.db \
+  --target-db postgresql://user:pass@host:5432/uptrakit
+```
+
+### Where the data migration code lives
+
+| Path | Purpose |
+| --- | --- |
+| `crates/core/controller/src/db_migrate/mod.rs` | Top-level `run()` function, orchestration |
+| `crates/core/controller/src/db_migrate/error.rs` | `DbMigrateError` and `Result<T>` type alias |
+| `crates/core/controller/src/db_migrate/tables.rs` | Generic `migrate_table<E>`, `copy_all`, `clean_all`, `verify_all` |
+| `crates/core/controller/src/cli.rs` | `ControllerCommand::DbMigrate`, `DbMigrateArgs` |
+
+### Algorithm
+
+1. Run `run_migrations()` on the target to create the schema and seed rows.
+2. Delete all seeded rows from the target in reverse FK order (`clean_all`).
+3. Copy each of the 34 application tables from source to target in FK-safe
+   order using offset pagination (`copy_all`).
+4. Count every table on both sides; fail on the first mismatch (`verify_all`).
+
+Encrypted fields (CA keys, MQTT passwords, OIDC secrets) are copied as opaque
+blobs — no decryption or re-encryption occurs during migration. The same master
+key used in normal operation must be supplied to `db-migrate`.
+
+See the end-user guide for operator-facing instructions:
+[docs/end-user/db-migration.md](../end-user/db-migration.md).
+
+---
+
 ## Cross-references
 
+- [Data migration guide](../end-user/db-migration.md) — operator-facing instructions for `db-migrate`
 - [Testing](testing.md) — test DB helper pattern, FK conventions
 - [Coding Standards](coding-standards.md) — general code quality rules
 - [Security: Database](../security/secrets-encryption.md) — at-rest encryption for sensitive

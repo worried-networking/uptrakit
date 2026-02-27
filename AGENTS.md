@@ -58,6 +58,7 @@ uptrakit/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
 │   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; version checks and updates over SSH; host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server; migration runner delegates to `uptrakit_shared_db::migration`
+│   │   │   ├── src/db_migrate/         #   `db-migrate` subcommand: copies all data between DB backends; error.rs (DbMigrateError + Report<> Result), tables.rs (migrate_table<E>, copy_all, clean_all, verify_all for all 34 app tables), mod.rs (run() orchestrator)
 │   │   │   ├── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
