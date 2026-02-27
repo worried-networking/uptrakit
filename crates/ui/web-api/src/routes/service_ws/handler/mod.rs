@@ -34,7 +34,7 @@ use sea_orm::EntityTrait;
 use uptrakit_internal_wire::{
     ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage, ErrorCode,
     ErrorPayload, IncomingSeq, MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq,
-    PingPayload, RejectedPayload, ServiceMessage,
+    PingPayload, RejectedPayload, ServiceCredentialsPayload, ServiceMessage,
 };
 use uptrakit_shared_db::entity::service;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -134,6 +134,51 @@ pub(crate) async fn handle_authenticated_loop(
     let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
 
     let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
+
+    // ------------------------------------------------------------------
+    // Credential delivery for services with credential capabilities
+    // ------------------------------------------------------------------
+    {
+        let has_db_access = capabilities.contains(&Capability::DatabaseAccess);
+        let has_nats_access = capabilities.contains(&Capability::NatsAccess);
+        let has_master_key_access = capabilities.contains(&Capability::MasterKeyAccess);
+
+        if has_db_access || has_nats_access || has_master_key_access {
+            let sources = &state.credential_sources;
+            let payload = ServiceCredentialsPayload {
+                db_url: if has_db_access {
+                    sources.db_url.as_ref().map(|u| {
+                        uptrakit_internal_wire::SecretString::new(u.clone())
+                    })
+                } else {
+                    None
+                },
+                nats_url: if has_nats_access {
+                    sources.nats_url.clone()
+                } else {
+                    None
+                },
+                master_key_hex: if has_master_key_access {
+                    sources.master_key_hex.clone()
+                } else {
+                    None
+                },
+            };
+            let cred_msg = ControllerMessage::ServiceCredentials(payload);
+            if let Some(json) = serialize_controller_msg(out_seq, cred_msg) {
+                if sink.send(Message::Text(json.into())).await.is_err() {
+                    return;
+                }
+            }
+            tracing::info!(
+                %service_id,
+                db = has_db_access,
+                nats = has_nats_access,
+                master_key = has_master_key_access,
+                "delivered service credentials"
+            );
+        }
+    }
 
     // ------------------------------------------------------------------
     // MQTT pre-loop phase: wait for Register, set up leases

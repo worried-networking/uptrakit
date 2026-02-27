@@ -398,6 +398,7 @@ pub async fn logout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ServiceCredentialSources;
     use axum::body::Body;
     use axum::http::Request;
     use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
@@ -576,6 +577,7 @@ mod tests {
             notification_service,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
+            credential_sources: ServiceCredentialSources::default(),
         })
     }
 

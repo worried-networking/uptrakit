@@ -79,6 +79,24 @@ impl NotificationService {
         self.maybe_publish_nats(None, Some("controller"), msg).await;
     }
 
+    /// Send a message to all services with a specific capability (local + optional NATS).
+    ///
+    /// The `capability_str` is the wire-format capability name (e.g. `"mqtt_bridge"`).
+    /// It is parsed to a [`Capability`] for local delivery via the registry.
+    pub async fn send_by_capability(&self, capability_str: &str, msg: ControllerMessage) {
+        let cap: Capability = capability_str.parse().unwrap_or_else(|_| {
+            // Should never happen — parse() always succeeds via Other fallback.
+            Capability::Other(capability_str.to_string())
+        });
+        self.registry
+            .broadcast_by_capability(&cap, msg.clone())
+            .await;
+        if !is_local_only_message(&msg) {
+            self.maybe_publish_nats(None, Some(capability_str), msg)
+                .await;
+        }
+    }
+
     /// Access the underlying registry (e.g. for `is_connected` checks).
     pub fn registry(&self) -> &ServiceConnectionRegistry {
         &self.registry

@@ -389,6 +389,16 @@ impl ServiceConnectionRegistry {
             .collect()
     }
 
+    /// Check whether any connected service advertises the given capability.
+    pub async fn has_capability_connected(&self, capability: &Capability) -> bool {
+        self.inner
+            .read()
+            .await
+            .connections
+            .values()
+            .any(|c| c.capabilities.contains(capability))
+    }
+
     /// Get MQTT services that haven't sent a heartbeat within the given timeout.
     ///
     /// Returns a list of `(service_id, last_heartbeat_age)` for stale connections.

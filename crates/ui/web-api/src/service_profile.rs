@@ -11,12 +11,11 @@ use uptrakit_internal_wire::Capability;
 
 /// Behavioral profile derived from a service's capability set.
 ///
-/// Two profiles cover all current service kinds:
-///
 /// | Profile | Key capability | Services |
 /// | --- | --- | --- |
 /// | `MqttBridge` | `Capability::MqttBridge` | MQTT service |
 /// | `Agent` | `Capability::SoftwareDiscovery` | Local agent, SSH agent |
+/// | `Scheduler` | `Capability::Scheduler` | External task scheduler |
 ///
 /// `Unknown` is the fallback for unrecognized capability combinations.
 /// `ServiceProfile` is never persisted — it is always derived from capabilities.
@@ -27,6 +26,8 @@ pub enum ServiceProfile {
     MqttBridge,
     /// Agent service — local or SSH-backed (has `SoftwareDiscovery` capability).
     Agent,
+    /// External task scheduler service (has `Scheduler` capability).
+    Scheduler,
     /// Unrecognized capability combination.
     Unknown,
 }
@@ -34,11 +35,12 @@ pub enum ServiceProfile {
 impl ServiceProfile {
     /// Derive the behavioral profile from a capability set.
     ///
-    /// `MqttBridge` takes precedence if both `MqttBridge` and `SoftwareDiscovery`
-    /// are present (this combination is not expected in practice).
+    /// Precedence: `MqttBridge` > `Scheduler` > `Agent` > `Unknown`.
     pub fn from_capabilities(caps: &BTreeSet<Capability>) -> Self {
         if caps.contains(&Capability::MqttBridge) {
             Self::MqttBridge
+        } else if caps.contains(&Capability::Scheduler) {
+            Self::Scheduler
         } else if caps.contains(&Capability::SoftwareDiscovery) {
             Self::Agent
         } else {
@@ -49,10 +51,12 @@ impl ServiceProfile {
     /// Default ping interval in seconds for this profile.
     ///
     /// - `MqttBridge`: 15 seconds (MQTT lease heartbeat).
+    /// - `Scheduler`: 60 seconds (less latency-sensitive).
     /// - `Agent` / `Unknown`: 300 seconds (5 minutes).
     pub const fn default_ping_interval_secs(&self) -> u32 {
         match self {
             Self::MqttBridge => 15,
+            Self::Scheduler => 60,
             Self::Agent | Self::Unknown => 300,
         }
     }
@@ -60,10 +64,12 @@ impl ServiceProfile {
     /// Shutdown timeout in seconds, if applicable.
     ///
     /// - `MqttBridge`: `None` (no graceful shutdown timeout).
+    /// - `Scheduler`: `Some(30)` (allow claim release).
     /// - `Agent` / `Unknown`: `Some(120)` (2 minutes).
     pub const fn shutdown_timeout_secs(&self) -> Option<u32> {
         match self {
             Self::MqttBridge => None,
+            Self::Scheduler => Some(30),
             Self::Agent | Self::Unknown => Some(120),
         }
     }
@@ -75,6 +81,7 @@ impl ServiceProfile {
     pub const fn service_label(&self, has_ssh_remote: bool) -> &'static str {
         match self {
             Self::MqttBridge => "MQTT Bridge",
+            Self::Scheduler => "Scheduler",
             Self::Agent if has_ssh_remote => "SSH Agent",
             Self::Agent => "Agent",
             Self::Unknown => "Unknown",
@@ -147,6 +154,38 @@ mod tests {
     }
 
     #[test]
+    fn profile_scheduler() {
+        let c = caps(&[
+            Capability::Scheduler,
+            Capability::DatabaseAccess,
+            Capability::NatsAccess,
+            Capability::GracefulShutdown,
+        ]);
+        assert_eq!(
+            ServiceProfile::from_capabilities(&c),
+            ServiceProfile::Scheduler
+        );
+    }
+
+    #[test]
+    fn scheduler_takes_precedence_over_agent() {
+        let c = caps(&[Capability::Scheduler, Capability::SoftwareDiscovery]);
+        assert_eq!(
+            ServiceProfile::from_capabilities(&c),
+            ServiceProfile::Scheduler
+        );
+    }
+
+    #[test]
+    fn mqtt_bridge_takes_precedence_over_scheduler() {
+        let c = caps(&[Capability::MqttBridge, Capability::Scheduler]);
+        assert_eq!(
+            ServiceProfile::from_capabilities(&c),
+            ServiceProfile::MqttBridge
+        );
+    }
+
+    #[test]
     fn profile_unknown_empty() {
         assert_eq!(
             ServiceProfile::from_capabilities(&BTreeSet::new()),
@@ -187,6 +226,11 @@ mod tests {
     }
 
     #[test]
+    fn ping_interval_scheduler() {
+        assert_eq!(ServiceProfile::Scheduler.default_ping_interval_secs(), 60);
+    }
+
+    #[test]
     fn ping_interval_unknown() {
         assert_eq!(ServiceProfile::Unknown.default_ping_interval_secs(), 300);
     }
@@ -203,6 +247,11 @@ mod tests {
     #[test]
     fn shutdown_timeout_agent() {
         assert_eq!(ServiceProfile::Agent.shutdown_timeout_secs(), Some(120));
+    }
+
+    #[test]
+    fn shutdown_timeout_scheduler() {
+        assert_eq!(ServiceProfile::Scheduler.shutdown_timeout_secs(), Some(30));
     }
 
     #[test]
@@ -230,6 +279,11 @@ mod tests {
             ServiceProfile::MqttBridge.service_label(false),
             "MQTT Bridge"
         );
+    }
+
+    #[test]
+    fn label_scheduler() {
+        assert_eq!(ServiceProfile::Scheduler.service_label(false), "Scheduler");
     }
 
     #[test]

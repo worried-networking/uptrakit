@@ -54,7 +54,10 @@ pub(crate) struct PkiRuntime {
 // ---------------------------------------------------------------------------
 
 /// Initialize the global master encryption key from env var or file.
-pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<()> {
+///
+/// Returns the raw hex string if a master key was loaded, `None` otherwise.
+/// This hex string can be passed to services via `ServiceCredentials`.
+pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<Option<String>> {
     let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
     let key_hex = read_master_key_hex(args.master_key_file.as_deref(), env_val.as_deref())?;
 
@@ -70,6 +73,7 @@ pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<()> {
             uptrakit_shared_db::crypto::init_master_key(zeroize::Zeroizing::new(key_bytes))
                 .context_to()?;
             tracing::info!("master encryption key initialized");
+            Ok(Some(key_hex))
         }
         None => {
             if args.allow_plaintext_secrets {
@@ -86,23 +90,28 @@ pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<()> {
                         .into()
                 ));
             }
+            Ok(None)
         }
     }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Phase 3: Database initialization
 // ---------------------------------------------------------------------------
 
+/// Database initialization result.
+pub(crate) struct DatabaseInit {
+    pub conn: sea_orm::DatabaseConnection,
+    pub default_tenant: uptrakit_shared_db::entity::tenant::Model,
+    /// The resolved database URL (for credential delivery to external services).
+    pub url: String,
+}
+
 /// Connect to the database, run migrations, and load the default tenant.
 pub(crate) async fn init_database(
     args: &crate::cli::Args,
     state_dir: &std::path::Path,
-) -> crate::Result<(
-    sea_orm::DatabaseConnection,
-    uptrakit_shared_db::entity::tenant::Model,
-)> {
+) -> crate::Result<DatabaseInit> {
     let db_config = crate::db::DbConfig::from_args(args.db_url.clone(), state_dir)
         .context(AppError::Database)?;
     tracing::info!(
@@ -132,7 +141,11 @@ pub(crate) async fn init_database(
             .ok_or_else(|| report!(AppError::Database))?
     };
 
-    Ok((db_conn, default_tenant))
+    Ok(DatabaseInit {
+        conn: db_conn,
+        default_tenant,
+        url: db_config.url,
+    })
 }
 
 // ---------------------------------------------------------------------------

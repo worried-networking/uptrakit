@@ -159,6 +159,23 @@ pub mod ca_snapshot {
     }
 }
 
+/// Credential sources for building [`ServiceCredentialsPayload`] for services
+/// that advertise credential capabilities (`database_access`, `nats_access`,
+/// `master_key_access`).
+///
+/// Stored in [`AppState`] and only used by the service WebSocket handler during
+/// credential delivery. The values are set at controller startup from CLI
+/// arguments and environment variables.
+#[derive(Clone, Default)]
+pub struct ServiceCredentialSources {
+    /// Database URL to provide to services with `database_access` capability.
+    pub db_url: Option<String>,
+    /// NATS URL to provide to services with `nats_access` capability.
+    pub nats_url: Option<String>,
+    /// Master key hex to provide to services with `master_key_access` capability.
+    pub master_key_hex: Option<uptrakit_internal_wire::SecretString>,
+}
+
 /// Shared application state available to all handlers.
 #[derive(Clone)]
 pub struct AppState {
@@ -216,6 +233,8 @@ pub struct AppState {
     /// helpers are decoupled from the concrete [`uptrakit_plugin_infrastructure_registry::PluginRegistry`]
     /// and can be tested with a mock implementation.
     pub plugin_ops: Arc<dyn PluginOps>,
+    /// Credential sources for services with credential capabilities.
+    pub credential_sources: ServiceCredentialSources,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -262,6 +281,7 @@ pub struct AppStateBuilder {
     notification_service: Option<NotificationService>,
     token_denylist: Option<Arc<auth::token_denylist::TokenDenylist>>,
     plugin_ops: Option<Arc<dyn PluginOps>>,
+    credential_sources: Option<ServiceCredentialSources>,
 }
 
 impl AppStateBuilder {
@@ -294,6 +314,7 @@ impl AppStateBuilder {
             notification_service: None,
             token_denylist: None,
             plugin_ops: None,
+            credential_sources: None,
         }
     }
 
@@ -421,6 +442,14 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the credential sources for services with credential capabilities.
+    ///
+    /// Optional — defaults to empty sources (no credentials delivered).
+    pub fn credential_sources(mut self, v: ServiceCredentialSources) -> Self {
+        self.credential_sources = Some(v);
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -491,6 +520,9 @@ impl AppStateBuilder {
             plugin_ops: self.plugin_ops.unwrap_or_else(|| {
                 Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry)
             }),
+            credential_sources: self
+                .credential_sources
+                .unwrap_or_default(),
         })
     }
 }
@@ -1012,7 +1044,7 @@ mod tests {
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
     use crate::settings::Settings;
-    use crate::{AppState, build_pki_router, build_router};
+    use crate::{AppState, ServiceCredentialSources, build_pki_router, build_router};
 
     struct NoopCertSigner;
     #[async_trait::async_trait]
@@ -1142,6 +1174,7 @@ mod tests {
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
             db,
+            credential_sources: ServiceCredentialSources::default(),
         })
     }
 

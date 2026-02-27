@@ -11,6 +11,7 @@ mod mtls_acceptor;
 mod pki;
 mod reconcile;
 mod reencrypt;
+#[cfg(feature = "embedded-scheduler")]
 mod scheduler;
 mod server;
 mod startup;
@@ -112,7 +113,7 @@ fn print_build_info() {
 
 async fn run(args: cli::Args) -> Result<()> {
     // Phase 1: Master key initialization
-    startup::init_master_key(&args)?;
+    let master_key_hex = startup::init_master_key(&args)?;
 
     // Phase 2: Application directories
     let app_dirs = args.resolve_dirs().map_err(|e| {
@@ -129,8 +130,10 @@ async fn run(args: cli::Args) -> Result<()> {
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
 
     // Phase 3: Database
-    let (db_conn, default_tenant) = startup::init_database(&args, app_dirs.state_dir()).await?;
-    let default_tenant_id = default_tenant.id;
+    let db_init = startup::init_database(&args, app_dirs.state_dir()).await?;
+    let db_conn = db_init.conn;
+    let db_url = db_init.url;
+    let default_tenant_id = db_init.default_tenant.id;
     tracing::info!(%default_tenant_id, "loaded default tenant");
 
     // Phase 4: Master key verification (HA safety)
@@ -238,6 +241,22 @@ async fn run(args: cli::Args) -> Result<()> {
 
     let token_denylist = Arc::new(uptrakit_web_api::auth::token_denylist::TokenDenylist::new());
 
+    // Build credential sources for external services that need direct infrastructure access.
+    let credential_sources = {
+        #[cfg_attr(not(feature = "nats"), allow(unused_mut))]
+        let mut sources = uptrakit_web_api::ServiceCredentialSources {
+            db_url: Some(db_url),
+            nats_url: None,
+            master_key_hex: master_key_hex
+                .map(uptrakit_internal_wire::SecretString::new),
+        };
+        #[cfg(feature = "nats")]
+        if let Some(ref url) = args.nats_url {
+            sources.nats_url = Some(url.clone());
+        }
+        sources
+    };
+
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)
         .ca_key_store(ca_key_store)
@@ -256,7 +275,8 @@ async fn run(args: cli::Args) -> Result<()> {
         .default_tenant_id(default_tenant_id)
         .controller_id(controller_id)
         .notification_service(notification_service)
-        .token_denylist(token_denylist);
+        .token_denylist(token_denylist)
+        .credential_sources(credential_sources);
 
     #[cfg(feature = "oidc")]
     let builder = builder
@@ -298,42 +318,43 @@ async fn run(args: cli::Args) -> Result<()> {
         bg.track("ca-reload", h);
     }
 
-    // Centralised task scheduler (HA-safe via optimistic locking)
+    // Centralised task scheduler (HA-safe via optimistic locking).
+    // Only compiled when the `embedded-scheduler` feature is enabled.
+    // When an external scheduler service is deployed, the controller does NOT
+    // need this feature — the external scheduler handles all scheduled tasks.
+    #[cfg(feature = "embedded-scheduler")]
     {
-        use scheduler::executors::*;
+        use scheduler::ControllerSchedulerNotifier;
+        use uptrakit_scheduler_engine::executors::*;
         use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 
-        let mut sched = scheduler::Scheduler::new(
+        let notifier: std::sync::Arc<dyn uptrakit_scheduler_engine::SchedulerNotifier> =
+            std::sync::Arc::new(ControllerSchedulerNotifier::new(
+                app_state.notification_service.clone(),
+                Arc::clone(&app_state.ca_rotation_trigger),
+            ));
+
+        let mut sched = uptrakit_scheduler_engine::Scheduler::new(
             app_state.db().clone(),
-            scheduler::SchedulerConfig::new(controller_id, default_tenant_id),
+            uptrakit_scheduler_engine::SchedulerConfig::new(controller_id, default_tenant_id),
         );
 
         sched.register(
             ScheduledTaskType::AuthCleanup,
             Box::new(auth_cleanup::AuthCleanupExecutor::new(
-                #[cfg(feature = "oidc")]
-                app_state.oidc_flow_store.clone(),
-                #[cfg(feature = "oidc")]
-                app_state.account_link_store.clone(),
-                #[cfg(feature = "oidc")]
-                app_state.oidc_token_exchange_store.clone(),
-                #[cfg(feature = "oidc")]
-                app_state.oidc_registration_store.clone(),
-                app_state.device_flow_store.clone(),
-                app_state.rate_limit_store.clone(),
+                app_state.db().clone(),
             )),
         );
         sched.register(
             ScheduledTaskType::StaleLeaseCleanup,
             Box::new(stale_lease_cleanup::StaleLeaseCleanupExecutor::new(
                 app_state.db().clone(),
-                service_connections.clone(),
             )),
         );
         if ca_managed {
             sched.register(
                 ScheduledTaskType::CaRotationCheck,
-                Box::new(ca_rotation_check::CaRotationCheckExecutor::new(
+                Box::new(scheduler::CaRotationCheckExecutor::new(
                     ca_tx.subscribe(),
                     Arc::clone(&app_state.ca_rotation_trigger),
                 )),
@@ -343,14 +364,14 @@ async fn run(args: cli::Args) -> Result<()> {
             ScheduledTaskType::VersionCheck,
             Box::new(version_check::VersionCheckExecutor::new(
                 app_state.db().clone(),
-                app_state.notification_service.clone(),
+                Arc::clone(&notifier),
             )),
         );
         sched.register(
             ScheduledTaskType::ServiceCertCheck,
             Box::new(service_cert_check::ServiceCertCheckExecutor::new(
                 app_state.db().clone(),
-                app_state.notification_service.clone(),
+                Arc::clone(&notifier),
             )),
         );
 

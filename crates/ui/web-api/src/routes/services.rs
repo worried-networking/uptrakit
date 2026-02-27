@@ -368,6 +368,7 @@ pub async fn merge_service(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ServiceCredentialSources;
     use crate::auth::permissions::Permission;
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
@@ -521,6 +522,7 @@ mod tests {
             notification_service,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
+            credential_sources: ServiceCredentialSources::default(),
         })
     }
 

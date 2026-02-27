@@ -123,6 +123,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::AppState;
+    use crate::ServiceCredentialSources;
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::extract::{ClientIp, ProxyIp};
     use crate::settings::Settings;
@@ -247,6 +248,7 @@ mod tests {
             notification_service,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
+            credential_sources: ServiceCredentialSources::default(),
         })
     }
 
