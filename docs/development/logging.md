@@ -141,6 +141,37 @@ All secret fields in HTTP API types must use `SecretString` instead of `String`.
 called with values that expose sensitive data, even at `trace` level. The secret must be masked before any logging
 call.
 
+### Startup-time credentials: use `eprintln!`, not `tracing`
+
+One-time registration tokens and similarly short-lived credentials that must be shown to the operator at startup must
+be written to **stderr via `eprintln!()`**, never emitted through the `tracing` pipeline.
+
+```rust
+// ✓ Correct — goes to stderr only; never captured by log aggregators
+if let Some(token) = reg_token {
+    eprintln!("==========================================================");
+    eprintln!("  No users found. Use this one-time registration token:");
+    eprintln!("  {token}");
+    eprintln!("==========================================================");
+}
+
+// ✗ Wrong — any tracing subscriber (Loki, journald, structured JSON)
+// will capture and persist this credential
+tracing::info!("Registration token: {}", token);
+```
+
+**Why:** Structured tracing subscribers (Loki, Datadog, structured journald) persist all
+`tracing::info!` output indefinitely. A one-time token in a log aggregator becomes a persistent
+credential that attackers can extract. Stderr is the conventional channel for startup-time
+operator messages and is not forwarded by log aggregators.
+
+When a `SecretString` wrapper holds a credential that must be displayed, call `.expose_secret()`
+explicitly at the `eprintln!` call site to make the exposure visible in code review:
+
+```rust
+eprintln!("  Token: {}", secret.expose_secret());
+```
+
 See [Secrets Handling and Encryption](../security/secrets-and-encryption.md) for the full secrets policy, including
 `SecretString` usage, master key handling, and at-rest encryption.
 

@@ -147,10 +147,10 @@ async fn run(args: cli::Args) -> Result<()> {
         .await
         .context(AppError::Settings)?;
     if let Some(token) = reg_token {
-        tracing::info!("==========================================================");
-        tracing::info!("  No users found. Use this one-time registration token:");
-        tracing::info!("  {}", token);
-        tracing::info!("==========================================================");
+        eprintln!("==========================================================");
+        eprintln!("  No users found. Use this one-time registration token:");
+        eprintln!("  {token}");
+        eprintln!("==========================================================");
     }
 
     // Phase 6: Reconcile settings

@@ -128,12 +128,6 @@ there is no assertion or documented invariant enforcing this. The function shoul
 `panic!` (or return an error) for lengths >= 0x10000, and an inline comment
 should document the `max = 65535` constraint.
 
-#### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `crates/core/controller/src/main.rs:137-139` — Registration token logged in plaintext to structured logging
-
-The one-time registration token is emitted via `tracing::info!`. In production with centralized log aggregation, the token will be captured and accessible to log viewers. Should use `eprintln!` or write to a temporary file with 0o600 permissions.
-
 ---
 
 ## Code Quality
