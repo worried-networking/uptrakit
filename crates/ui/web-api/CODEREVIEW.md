@@ -25,14 +25,6 @@ The crate demonstrates several architectural strengths: a well-designed builder 
 
 ### Issues
 
-**[SEVERITY: High]** `Cargo.toml:22-23` — `chrono` and `cron` are not in `[workspace.dependencies]`
-
-`chrono = { version = "0.4", ... }` and `cron = "0.15"` are declared inline in this crate and again in `crates/core/controller/Cargo.toml:50-51`. During the SeaORM RC series, patch versions of `chrono` could diverge between the two declaration sites. Workspace-pinning eliminates this risk.
-
-**[SEVERITY: Medium]** `Cargo.toml:46` — `base64 = "0.22"` not in workspace dependencies
-
-`base64` is used by the web-api crate but declared inline rather than pinned via `[workspace.dependencies]`. A separate consumer adding `base64` independently risks version misalignment.
-
 **[SEVERITY: Low]** No `rust-version` MSRV set anywhere in the workspace
 
 `AGENTS.md` documents `rust-version = "1.91"` but no crate declares it. If this crate uses edition 2024 features, build failures on older toolchains have no documented expectation.
@@ -70,14 +62,6 @@ The plain JSON route should be registered unconditionally; Swagger UI should be 
 - **`SecretString` at all API input boundaries** — OIDC tokens, device-flow codes, API token responses use `SecretString`; raw bytes are not retained after the response is serialized.
 
 ### Issues
-
-**[SEVERITY: Medium]** `src/auth/jwt.rs:101` — JWT validation uses `Validation::default()` with no audience check
-
-```rust
-jsonwebtoken::decode::<AccessTokenClaims>(token, &self.decoding_key, &Validation::default())
-```
-
-`Validation::default()` does not enforce `aud`. A token minted for a staging environment is accepted in production if the same HMAC key is shared. Additionally, `iss` and `sub` format are not validated. At minimum, `validation.set_audience(&["uptrakit-controller"])` should be added and `iss` should be set to the controller's own hostname.
 
 **[SEVERITY: Medium]** `src/auth/token_denylist.rs:15` (acknowledged in code comment) — In-memory denylist provides no cross-instance revocation
 
@@ -138,25 +122,9 @@ The `==` operator short-circuits, but the compared values (CA CNs) are not confi
 
 ### Issues
 
-**[SEVERITY: High]** `src/routes/oidc_auth.rs:224-637` — `oidc_callback` is 413 lines with 7+ nesting levels
-
-The function simultaneously handles: parameter validation, state store lookup, provider loading, OIDC discovery (again — see duplication below), PKCE token exchange, ID token validation, claims extraction, registration-mode pre-check, transaction management, user resolution (5 `OidcUserResolution` branches), role sync, session creation, and redirect construction. This is the second-largest function in the entire codebase. Maximum nesting depth exceeds 7 `match`/`if let` levels, making control flow difficult to audit. Decompose into: `exchange_code_for_token`, `validate_id_token`, `resolve_or_create_user`, and `create_session_and_redirect`.
-
-**[SEVERITY: High]** `src/routes/oidc_auth.rs:873-906` and `src/routes/oidc_auth.rs:1088-1124` — Identical "fake claims" role reverse-mapping block duplicated verbatim
-
-Both `oidc_complete_registration` and `oidc_link` contain the same ~30-line block that reverse-maps local role names to OIDC claim values, constructs a synthetic `serde_json::Map`, and calls `sync_oidc_roles`. Even the comment "Set at the first path segment for simplicity" is identical. The "first path segment only" limitation (line 887/1106) is a known semantic restriction that only exists in one place and could silently diverge. Extract: `fn build_fake_claims_for_sync(provider: &OidcProvider, mapped_roles: &[String]) -> serde_json::Value`.
-
-**[SEVERITY: Medium]** `src/routes/oidc_auth.rs:142-165` and `src/routes/oidc_auth.rs:272-296` — OIDC client construction via discovery duplicated between `oidc_authorize` and `oidc_callback`
-
-~20 identical lines of `IssuerUrl::new` + `CoreProviderMetadata::discover_async` + `CoreClient::from_provider_metadata` + `set_redirect_uri`. Error handling is inconsistent: `oidc_authorize` returns `BAD_GATEWAY` (correct), while `oidc_callback` redirects to `/login?error=oidc_discovery_failed` (inconsistent semantics for what is an outbound HTTP failure). Extract `async fn build_oidc_client(provider, redirect_url) -> Result<CoreClient, Response>`.
-
 **[SEVERITY: Medium]** `src/routes/oidc_auth.rs:66` and `src/routes/oidc_auth.rs:352` — `unwrap_or_default()` on DB queries silently returns empty results
 
 `OidcProvider::find().all(...).await.unwrap_or_default()` at line 66 returns an empty provider list on DB error, causing `auth_methods` to report "no OIDC providers configured" rather than a server error. At line 352, `count(...).unwrap_or(1)` treats a DB error as "link exists", gating the user out of the OIDC flow. Both should log with `tracing::warn!` or propagate as errors.
-
-**[SEVERITY: Medium]** `src/routes/oidc_auth.rs:751` and `src/routes/oidc_auth.rs:995` — Session creation four-step pattern duplicated three times
-
-The pattern of `SessionService::new(...)`, `create_refresh_token(...)`, `get_user_permissions(...)`, `create_access_token(...)`, and building `AuthResponse` is repeated identically in `oidc_exchange` (lines 668-733), `oidc_complete_registration` (lines 913-980), and `oidc_link` (lines 1128-1193). Extract `async fn create_oidc_session(state, user_id, provider_id) -> Response`.
 
 #### 2026-02-24 Review
 
@@ -271,10 +239,6 @@ Should test that `svc.broadcast(msg)` does NOT write to the outbox, verifying th
 
 If the event cursor cannot advance (e.g., the target service never connects), `retry_counts` accumulates entries for every event in the stuck window. The `retain` cleanup on line 180 only fires when `new_cursor` advances. A long outage with many events produces unbounded map growth. Add a hard cap (e.g., 10,000 entries) or a TTL-based eviction that does not depend on cursor progress.
 
-**[SEVERITY: Medium]** `src/routes/service_ws/handler/updates.rs` — `deliver_pending_updates` issues N sequential DB queries per pending update
-
-For each pending update record the function issues separate sequential queries for: software item, host-software-item link, plugin config, and host. With M pending updates that is 4M sequential round-trips. Batch the pending-updates delivery: load all software items, all links, all plugin configs, and all hosts in four single queries using `is_in`, then join in memory.
-
 **[SEVERITY: Low]** `src/service_connections.rs:312-319` — `broadcast_server_restarting_scattered` spawns unbounded tasks
 
 Each agent receives a separate `tokio::spawn`'d task with a random delay. With thousands of connected agents, this briefly creates thousands of tasks competing for the event loop. A bounded `tokio::sync::Semaphore` with a reasonable concurrency limit (e.g., 256) would smooth the burst without meaningfully delaying shutdown notification.
@@ -383,10 +347,6 @@ DB outage causes items to report zero linked hosts silently.
 - **Zero `#[allow(clippy::...)]` in the entire codebase** — All previously allowed lints have been resolved.
 
 ### Issues
-
-**[SEVERITY: High]** `src/routes/api_tokens.rs:19-31` and `src/routes/auth.rs:339,666` — `x-required-permission` annotation missing on user-identity endpoints
-
-`create_api_token`, `list_api_tokens`, `revoke_api_token`, `logout`, and `me` use raw `Extension<AuthenticatedUser>` directly (appropriate for user-scoped resources) but lack the `x-required-permission` OpenAPI extension. The OpenAPI spec consequently omits the permission requirement from generated clients, and the automated permission-coverage check cannot verify these endpoints. Add `x-required-permission: "self"` or an equivalent sentinel value to document that these endpoints require only authentication, not a specific resource permission.
 
 **[SEVERITY: Medium]** `src/routes/services.rs:282` and `src/routes/hosts.rs:141` — Soft-delete `DELETE` endpoints return `200 OK` with body instead of `204 No Content`
 

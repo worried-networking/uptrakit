@@ -66,13 +66,6 @@ small number of code-quality issues in `main.rs` that add friction without benef
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/ui/cli/Cargo.toml:30` — `serde_yaml_ng` not pinned in workspace
-`serde_yaml_ng = "0.10"` is declared inline and is the only non-workspace, non-path dependency in
-this crate (all other dependencies use `workspace = true` or `path = ...`). If `serde_yaml_ng`
-releases a `0.10.x` patch that changes YAML output format or introduces a serialization regression,
-only this crate is affected. The crate should be added to `[workspace.dependencies]` in the root
-`Cargo.toml` alongside the other serialization crates (`serde`, `serde_json`).
-
 **[SEVERITY: Low]** `crates/ui/cli/src/commands/services.rs` and several others — inconsistent
 parameter-passing style between command functions
 Commands in `hosts.rs`, `scheduler.rs`, `software_items.rs`, `update.rs`, and `check.rs` all
@@ -294,10 +287,6 @@ quoting rules, key ordering) would not be caught until a user reports it.
 - **CLI error-handling tests cover 401, 429, and 500 status codes with message assertions.** `tests/command_execution.rs:298-374` — Three tests verify HTTP error status codes translate correctly.
 
 ##### Issues
-
-**[SEVERITY: Medium]** `tests/command_execution.rs:110-423` — All 14 CLI integration tests use bare `#[tokio::test]`
-
-These tests communicate with `MockApiServer` over HTTP. Per `testing.md`, `start_paused = true` is required.
 
 ---
 

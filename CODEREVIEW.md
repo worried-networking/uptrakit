@@ -67,10 +67,6 @@ The AGENTS.md should include explicit dependency direction statements to elimina
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/ui/web-api/src/auth/jwt.rs:101` — JWT validation uses `Validation::default()` with no audience claim
-
-No `aud` claim is required during token validation. A JWT issued for one deployment environment will be accepted by another if the HMAC signing key is shared or accidentally reused. There is also no `iss` or `sub` format validation. This is a workspace-level concern because the JWT signing key file path and generation are handled in `uptrakit-service-sdk` and `uptrakit-directories` — the key lifecycle spans crates, so the validation policy must be defined and enforced consistently.
-
 **[SEVERITY: Medium]** `crates/ui/web-api/src/auth/token_denylist.rs:15` — In-memory JWT denylist provides no cross-instance revocation
 
 The denylist is per-process. A revoked token remains valid on all other running instances for up to the JWT TTL (15 minutes). The code comment at line 15 acknowledges this. For a system managing infrastructure access with potential privilege escalation via compromised tokens, a 15-minute window is operationally significant. A shared DB-backed denylist — consistent with the existing refresh token and rate-limit tables — would close this gap. This is a workspace-level HA and security intersection: the multi-instance architecture described in `docs/development/cross-controller-comm.md` is undermined by per-process revocation state.
@@ -100,15 +96,6 @@ Although the controller has migrated to DB-based JWT key storage, the file-based
 
 ### Issues
 
-**[SEVERITY: High]** `crates/ui/web-api/src/routes/oidc_auth.rs:224-637` — `oidc_callback` is 413 lines with at least 7 levels of nesting
-
-This single function mixes HTTP client construction, PKCE code exchange, ID token validation, claims extraction, registration checks, user resolution, role synchronization, and session creation. Cyclomatic complexity exceeds 10 by a substantial margin. The workspace-level concern is that OIDC is gated behind a feature flag, and all of this logic is untested at the unit level — the complexity makes it resistant to targeted unit testing. Decomposing into `exchange_code_for_token`, `validate_id_token`, `resolve_or_create_user`, and `create_session_and_redirect` would bring each function within the complexity budget and make the OIDC feature flag boundary auditable.
-
-**[SEVERITY: Medium]** `crates/ui/web-api/src/routes/oidc_auth.rs:873-906` and `:1088-1124` — Identical 33-line role reverse-mapping block duplicated verbatim
-
-Both `oidc_complete_registration` and `oidc_link` reconstruct "fake claims" using identical logic including the same `// first path segment only` limitation comment. A shared `fn build_claims_for_role_sync(provider, mapped_roles) -> serde_json::Value` would eliminate the duplication and ensure the limitation is fixed in one place.
-
-
 #### 2026-02-24 Review
 
 ##### Strengths
@@ -132,13 +119,9 @@ Both `oidc_complete_registration` and `oidc_link` reconstruct "fake claims" usin
 
 ### Issues
 
-**[SEVERITY: High]** `crates/core/controller/src/scheduler/mod.rs:265` — Real `sleep(150ms)` in a non-paused scheduler cancellation test
+**[SEVERITY: Low]** `crates/core/controller/tests/reverse_proxy/nginx_ocsp.rs:46,164,297` — Real `sleep(1 second)` inside Docker integration tests, fragile on slow CI hosts
 
-`scheduler_run_exits_on_cancellation` uses `tokio::time::sleep(Duration::from_millis(150))` without `start_paused = true`. This burns real wall-clock time and is sensitive to scheduler latency under load. This directly violates the AGENTS.md invariant: "All time-dependent tests must use virtual time via `#[tokio::test(start_paused = true)]`." The exception for DB-connection tests does not apply here — no SeaORM pool is involved. The test should use `start_paused = true` with `tokio::time::advance`.
-
-**[SEVERITY: High]** `crates/core/controller/tests/reverse_proxy/nginx_ocsp.rs:46,164,297` — Real `sleep(1 second)` inside Docker integration tests, fragile on slow CI hosts
-
-Three test functions unconditionally sleep one second waiting for Nginx OCSP responder initialization. On a loaded CI host this window is insufficient; on a fast host it is wasteful. The correct pattern is a retry loop polling `/healthz` (or equivalent readiness probe) with a configurable timeout and a short poll interval, consistent with the restart-scattered and exponential-backoff patterns already present in the production code.
+Three test functions unconditionally sleep one second waiting for Nginx OCSP responder initialization. On a loaded CI host this window is insufficient; on a fast host it is wasteful. The correct pattern is a retry loop polling `/healthz` (or equivalent readiness probe) with a configurable timeout and a short poll interval. Note: these tests carry `#[ignore = "Docker integration test…"]`, so per AGENTS.md Exception 1 this does not violate the no-real-sleeps invariant; the severity is Low.
 
 **[SEVERITY: Medium]** Workspace-wide — `test_state(db)` / `test_db()` / `NoopCertSigner` construction duplicated across test modules
 
@@ -271,10 +254,6 @@ Issues N_tenants x 6 individual INSERT statements. Should use a single multi-row
 - 70+ endpoints carry `x-required-permission` OpenAPI extension annotations with values that match `Permission::as_str()` serialization — auditable authorization coverage by static inspection.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/ui/web-api/src/routes/api_tokens.rs:19-31` and `crates/ui/web-api/src/routes/auth.rs:339,666` — User-identity endpoints missing `x-required-permission` OpenAPI extension
-
-`create_api_token`, `list_api_tokens`, `revoke_api_token`, `logout`, and `me` use `Extension<AuthenticatedUser>` directly (appropriate for user-scoped endpoints not governed by the RBAC permission model), but none carry a `x-required-permission` annotation. AGENTS.md invariant 18 requires every protected endpoint to carry the matching annotation. User-identity endpoints should carry a documented sentinel value (e.g., `"authenticated"`) so the OpenAPI spec is consistent and automated permission-audit tooling does not treat them as unprotected.
 
 **[SEVERITY: Medium]** `crates/ui/web-api/src/routes/hosts.rs:141`, `services.rs:282`, `services.rs:483` — Three `DELETE` endpoints return `200 OK` with a body
 

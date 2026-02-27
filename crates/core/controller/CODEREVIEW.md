@@ -236,23 +236,7 @@ Ownership is eventually needed for the struct, but the parameter naming could cl
 
 ### Issues
 
-**[SEVERITY: High]** `crates/core/controller/src/scheduler/mod.rs:265` — Real `tokio::time::sleep(150ms)` in `scheduler_run_exits_on_cancellation`
-
-```rust
-// scheduler/mod.rs:264-266
-tokio::spawn(async move {
-    tokio::time::sleep(Duration::from_millis(150)).await;
-    token_clone.cancel();
-});
-```
-
-This test burns 150ms of real wall-clock time on every run. On a loaded CI agent,
-the 5-second outer `timeout` is generous but the inner sleep itself is sensitive to
-scheduler jitter. The test should use `#[tokio::test(start_paused = true)]` with
-`tokio::time::advance(Duration::from_millis(150))` to make the timing
-deterministic and eliminate wall-clock overhead.
-
-**[SEVERITY: High]** `crates/core/controller/tests/reverse_proxy/nginx_ocsp.rs:46` — Real `sleep(1 second)` inside Docker tests
+**[SEVERITY: Low]** `crates/core/controller/tests/reverse_proxy/nginx_ocsp.rs:46,164,297` — Real `sleep(1 second)` inside Docker tests
 
 ```rust
 // nginx_ocsp.rs:46 (and lines 164, 297)
@@ -264,7 +248,9 @@ cache. This is fragile on slow or loaded hosts where Nginx may not be ready with
 1 second, causing intermittent failures. The pattern should be replaced with a
 retry loop polling a `/healthz` endpoint (or the test port directly) with a
 short sleep between attempts and a total timeout, which is more robust and equally
-readable.
+readable. Note: these tests carry `#[ignore = "Docker integration test…"]`, so
+per AGENTS.md Exception 1 this does not violate the no-real-sleeps invariant;
+severity is Low.
 
 #### 2026-02-24 Review
 
