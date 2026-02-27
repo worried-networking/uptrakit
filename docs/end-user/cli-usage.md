@@ -121,9 +121,24 @@ uptrakit hosts discard-discovered <HOST_ID>
 
 # Discard pending discovered items for a specific plugin config on a host
 uptrakit hosts discard-discovered <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID>
+
+# List the discovery plugin allowlist for a specific host
+uptrakit hosts discovery-allowlist list <HOST_ID>
+
+# Add a plugin type to a host's discovery allowlist
+uptrakit hosts discovery-allowlist add <HOST_ID> <PLUGIN_TYPE>
+
+# Remove an entry from a host's discovery allowlist
+uptrakit hosts discovery-allowlist remove <HOST_ID> <ENTRY_ID>
 ```
 
-See also: [Host Entity](../architecture/host-entity.md), [Autodiscovery](autodiscovery.md).
+When a host has its own discovery allowlist entries, only those plugin types run during discovery
+for that host. The tenant-wide allowlist is ignored entirely for hosts with their own entries.
+Removing all entries from a host allowlist causes the host to fall back to the tenant-wide
+allowlist (or the system default of all plugins if the tenant list is also empty).
+
+See also: [Host Entity](../architecture/host-entity.md), [Autodiscovery](autodiscovery.md),
+[Discovery Allowlist API](../api/discovery-allowlist.md).
 
 ## Software Items
 
@@ -247,6 +262,35 @@ uptrakit autodiscovery ignores delete <IGNORE_ID>
 ```
 
 See also: [Autodiscovery](autodiscovery.md), [Plugin Configurations](plugin-configs.md).
+
+## Discovery Allowlist
+
+Control which plugin types participate in automatic host discovery. By default, all
+discovery-capable plugins run on every host. Adding entries to an allowlist restricts discovery
+to only the listed plugin types.
+
+Two scopes exist: tenant-wide (applies to all hosts by default) and host-specific (overrides the
+tenant-wide list for a single host). See [Autodiscovery: Controlling Which Plugins Run
+Discovery](autodiscovery.md#controlling-which-plugins-run-discovery) for a full explanation.
+
+```sh
+# List the tenant-wide discovery allowlist
+uptrakit discovery-allowlist list
+
+# Add a plugin type to the tenant-wide allowlist
+uptrakit discovery-allowlist add <PLUGIN_TYPE>
+
+# Remove an entry from the tenant-wide allowlist
+uptrakit discovery-allowlist remove <ENTRY_ID>
+```
+
+`<PLUGIN_TYPE>` must be one of the discovery-capable plugin types: `package_manager_apt`,
+`package_manager_homebrew`, `releases_docker`, or `discovery_proxmox_helper_scripts`. Supplying
+an unknown type or a type without the `DiscoverLocalSoftware` capability returns an error.
+
+Adding an entry that already exists returns the existing entry without creating a duplicate.
+
+See also: [Discovery Allowlist API](../api/discovery-allowlist.md), [Autodiscovery](autodiscovery.md).
 
 ## Version Checks
 

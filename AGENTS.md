@@ -392,7 +392,22 @@ for user review. Key invariants:
    These plugin-level hooks are distinct from the user-configured `hooks` in plugin config JSON
    (documented in [Update Hooks](docs/development/update-hooks.md)).
 
-9. **Partial unique indexes.** `software_items` uses a partial unique index
+9. **Discovery allowlist controls which plugin types run.** Two tables, `tenant_discovery_allowlist`
+   and `host_discovery_allowlist`, gate which discovery plugin types execute during
+   `trigger_discovery_for_agent_host()`:
+
+   - **Unconfigured (no entries for the tenant):** all discovery-capable plugin types run (backward-compatible default).
+   - **Tenant-wide entries exist:** only the listed plugin types run tenant-wide.
+   - **Host-specific entries exist for the target host:** those entries fully override the tenant list for that
+     host (the host list replaces — not extends — the tenant list).
+
+   This applies to auto-discovery on new host registration and to `POST /api/v1/hosts/{id}/discover`.
+   It does **not** apply to `POST /api/v1/plugin-configs/{id}/discover` (explicit plugin-config invocation bypasses
+   the allowlist intentionally). Duplicate entries are idempotent — the server returns the existing entry
+   rather than erroring. Only plugin types that have the `DiscoverLocalSoftware` capability and are not
+   `PluginType::Other(...)` can be added to the allowlist; all other types are rejected with HTTP 400.
+
+10. **Partial unique indexes.** `software_items` uses a partial unique index
    `(tenant_id, name) WHERE deactivated_at IS NULL` — prevents duplicate item names within a tenant while
    allowing re-creation after soft-delete. `host_software_item_plugins` uses a unique index
    `(host_id, software_item_id, role, ordinal)` — prevents duplicate role assignments for the same
@@ -411,11 +426,16 @@ for user review. Key invariants:
 | `crates/shared/agent-core/src/discovery.rs` | `handle_discover_software()` agent-side logic |
 | `crates/ui/web-api/src/queries/autodiscovery.rs` | DB helpers + `process_discovery_results()` |
 | `crates/ui/web-api/src/routes/autodiscovery.rs` | Ignore list CRUD routes |
-| `crates/ui/web-api/src/routes/service_ws/handler/discovery.rs` | `trigger_discovery_for_agent_host()` helper |
+| `crates/ui/web-api/src/routes/service_ws/handler/discovery.rs` | `trigger_discovery_for_agent_host()` helper — applies allowlist before dispatching |
+| `crates/shared/db/src/entity/tenant_discovery_allowlist.rs` | SeaORM entity for tenant-wide discovery allowlist |
+| `crates/shared/db/src/entity/host_discovery_allowlist.rs` | SeaORM entity for per-host discovery allowlist |
+| `crates/ui/web-api/src/queries/discovery_allowlist.rs` | DB helpers: list, add, remove, and `load_*_allowlist_set()` for filter lookups |
+| `crates/ui/web-api/src/routes/discovery_allowlist.rs` | Route handlers for tenant/host allowlist CRUD |
 | `docs/api/autodiscovery.md` | Full API reference for autodiscovery endpoints |
-| `docs/end-user/autodiscovery.md` | End-user guide (discovery workflow, review, ignore list) |
+| `docs/api/discovery-allowlist.md` | Full API reference for discovery allowlist endpoints |
+| `docs/end-user/autodiscovery.md` | End-user guide (discovery workflow, review, ignore list, allowlist) |
 | `docs/end-user/plugin-configs.md` | End-user guide for plugin config CRUD and discovery |
-| `docs/end-user/cli-usage.md` | CLI command reference including `plugin-configs` and `autodiscovery` groups |
+| `docs/end-user/cli-usage.md` | CLI command reference including `plugin-configs`, `autodiscovery`, and `discovery-allowlist` groups |
 
 ### Home Assistant MQTT discovery
 

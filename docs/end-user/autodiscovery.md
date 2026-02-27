@@ -161,6 +161,68 @@ plugin will be able to create a pending item for that package again.
 See the [API reference](../api/autodiscovery.md#get-apiv1autodiscoveryignores) for managing
 ignore rules via the API.
 
+## Controlling Which Plugins Run Discovery
+
+By default, when you have not configured an allowlist, all discovery-capable plugin types run on
+every host. Once you add at least one entry to an allowlist, only the listed plugin types will
+be used during discovery for the applicable scope.
+
+### Tenant-wide allowlist
+
+The tenant-wide allowlist sets a default for all hosts. For example, if you add
+`package_manager_apt` to the tenant-wide allowlist, only APT discovery runs on every host
+unless a host has its own allowlist that overrides this.
+
+```sh
+# Allow only APT discovery across all hosts by default
+uptrakit discovery-allowlist add package_manager_apt
+
+# View the current tenant-wide allowlist
+uptrakit discovery-allowlist list
+
+# Remove an entry (restores all-plugins default if the list becomes empty)
+uptrakit discovery-allowlist remove <ENTRY_ID>
+```
+
+### Host-specific allowlist
+
+You can override the tenant-wide allowlist for individual hosts. If a host has any entries in
+its own allowlist, those entries are used exclusively — the tenant-wide list does not apply to
+that host at all.
+
+```sh
+# Allow only Homebrew discovery on a specific host
+uptrakit hosts discovery-allowlist add <HOST_ID> package_manager_homebrew
+
+# View the allowlist for a specific host
+uptrakit hosts discovery-allowlist list <HOST_ID>
+
+# Remove an entry from a host's allowlist
+uptrakit hosts discovery-allowlist remove <HOST_ID> <ENTRY_ID>
+```
+
+### Priority and defaults
+
+The controller resolves which plugins to run using this priority order:
+
+1. Host-specific allowlist entries — if the host has any, only those plugin types run.
+2. Tenant-wide allowlist entries — if the tenant has entries but the host has none, the
+   tenant-wide list is used.
+3. No entries anywhere — all discovery-capable plugins run (the default out-of-the-box
+   behavior).
+
+Removing all entries from a list restores the more permissive fallback for that scope. Removing
+all entries from both lists restores the system default of running all plugins.
+
+### Plugin-config-level discovery bypasses the allowlist
+
+The allowlist applies to host-level discovery triggers: automatic discovery on new host
+registration and `POST /api/v1/hosts/{id}/discover`. It does **not** apply to
+`POST /api/v1/plugin-configs/{id}/discover` (`uptrakit plugin-configs discover`). When you
+explicitly invoke a specific plugin config, that config always runs regardless of the allowlist.
+
+See [Discovery Allowlist API](../api/discovery-allowlist.md) for the full endpoint reference.
+
 ## Triggering Discovery Manually
 
 Autodiscovery runs automatically when an agent registers a new host. You can also trigger it on
@@ -214,6 +276,8 @@ in the API reference.
 
 - [API Reference: Autodiscovery](../api/autodiscovery.md) — endpoint details, request/response
   shapes, and ignore rule management.
+- [API Reference: Discovery Allowlist](../api/discovery-allowlist.md) — full endpoint reference
+  for tenant-wide and host-specific allowlist management.
 - [Software Item Entity](../architecture/software-item-entity.md) — underlying data model and
   database schema.
 - [System Overview](system-overview.md) — agent and plugin architecture.

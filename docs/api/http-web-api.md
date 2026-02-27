@@ -84,6 +84,12 @@ when `"discover_local_software"` is present. Discovery-capable plugin types are 
 (`releases_github`, `generic_shell`) return an empty capabilities list for this field.
 
 - `/api/v1/autodiscovery/ignores`: CRUD for permanent suppression rules. See [docs/api/autodiscovery.md](autodiscovery.md) for full details.
+- `/api/v1/discovery-allowlist`: tenant-wide list of plugin types permitted to run during host
+  discovery. `GET` requires `view_software`; `POST`/`DELETE` require `manage_software`.
+- `/api/v1/hosts/{id}/discovery-allowlist`: per-host override of the tenant-wide allowlist.
+  Same permission requirements. When a host has its own entries the tenant-wide list is ignored
+  entirely for that host. When neither list has entries all discovery-capable plugins run (default).
+  See [Discovery Allowlist API](discovery-allowlist.md) for full details.
 
 `ServiceResponse` includes an optional `ping_interval_seconds` field (`Option<u32>`) that reports the per-service
 ping interval override. When `null`, the service uses its profile default (300s for agents/SSH agents, 15s for MQTT).
