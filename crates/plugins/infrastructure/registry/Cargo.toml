@@ -21,6 +21,7 @@ uptrakit-plugin-releases-docker = { path = "../../releases/docker" }
 uptrakit-plugin-discovery-proxmox-helper-scripts = { path = "../../discovery/proxmox-helper-scripts" }
 uptrakit-plugin-package-manager-homebrew = { path = "../../package-managers/homebrew" }
 uptrakit-plugin-package-manager-apt = { path = "../../package-managers/apt" }
+uptrakit-plugin-package-manager-npm = { path = "../../package-managers/npm" }
 uptrakit-plugin-generic-shell = { path = "../../generic/shell" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

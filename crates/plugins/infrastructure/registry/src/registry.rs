@@ -10,6 +10,7 @@ use uptrakit_plugin_generic_shell::{ShellConfig, ShellPlugin};
 use uptrakit_plugin_infrastructure_core::{Plugin, PluginType, SecretMasking, SudoCommandEntry};
 use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
 use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
+use uptrakit_plugin_package_manager_npm::{NpmConfig, NpmPlugin};
 use uptrakit_plugin_releases_docker::{DockerConfig, DockerPlugin};
 use uptrakit_plugin_releases_github::{GitHubConfig, GitHubPlugin};
 
@@ -244,6 +245,7 @@ register_plugins! {
     DiscoveryProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig,     plugin: ProxmoxHelperScriptsPlugin },
     PackageManagerHomebrew        => { config: HomebrewConfig,                 plugin: HomebrewPlugin },
     PackageManagerApt             => { config: AptConfig,                      plugin: AptPlugin },
+    PackageManagerNpm             => { config: NpmConfig,                      plugin: NpmPlugin },
     GenericShell                  => { config: ShellConfig,                    plugin: ShellPlugin },
 }
 
@@ -268,6 +270,9 @@ impl PluginRegistry {
             }
             PluginType::PackageManagerApt => {
                 uptrakit_plugin_package_manager_apt::validate_identifier(value)
+            }
+            PluginType::PackageManagerNpm => {
+                uptrakit_plugin_package_manager_npm::validate_identifier(value)
             }
             _ => Ok(()),
         }
@@ -1014,6 +1019,104 @@ mod tests {
                 &uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
             ),
             "generic_shell must not declare DiscoverLocalSoftware"
+        );
+    }
+
+    // ── npm plugin tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn create_plugin_npm() {
+        let config = serde_json::json!({});
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::PackageManagerNpm, &config, test_executor());
+        assert!(plugin.is_ok());
+    }
+
+    #[test]
+    fn create_plugin_npm_with_prereleases() {
+        let config = serde_json::json!({"include_prereleases": true});
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::PackageManagerNpm, &config, test_executor());
+        assert!(plugin.is_ok());
+    }
+
+    #[test]
+    fn validate_npm_config() {
+        let config = serde_json::json!({});
+        assert!(PluginRegistry::validate_config(PluginType::PackageManagerNpm, &config).is_ok());
+    }
+
+    #[test]
+    fn npm_plugin_capabilities() {
+        let config = serde_json::json!({});
+        let plugin =
+            PluginRegistry::create_plugin(PluginType::PackageManagerNpm, &config, test_executor())
+                .unwrap();
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+        ));
+        assert!(plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::ControllerSideFetchReleases
+        ));
+        assert!(!plugin.has_capability(
+            uptrakit_plugin_infrastructure_core::PluginCapability::RefreshPackageIndex
+        ));
+    }
+
+    #[test]
+    fn mask_config_secrets_npm_is_noop() {
+        let config = serde_json::json!({"include_prereleases": false});
+        let masked = PluginRegistry::mask_config_secrets(PluginType::PackageManagerNpm, &config);
+        assert_eq!(masked, config);
+    }
+
+    #[test]
+    fn validate_package_identifier_npm_plain_valid() {
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::PackageManagerNpm, "n8n")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_npm_scoped_valid() {
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::PackageManagerNpm,
+                "@angular/cli"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_npm_uppercase_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::PackageManagerNpm,
+                "MyPackage"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn all_required_sudo_commands_includes_npm() {
+        let entries = PluginRegistry::all_required_sudo_commands();
+        let npm_entry = entries
+            .iter()
+            .find(|(pt, _)| *pt == PluginType::PackageManagerNpm)
+            .expect("npm should have sudo command entries");
+        assert!(!npm_entry.1.is_empty());
+        assert_eq!(npm_entry.1[0].command, "npm");
+    }
+
+    #[test]
+    fn discovery_plugins_includes_npm() {
+        let types = PluginRegistry::discovery_plugins();
+        assert!(
+            types.contains(&PluginType::PackageManagerNpm),
+            "npm should be in discovery_plugins()"
         );
     }
 }
