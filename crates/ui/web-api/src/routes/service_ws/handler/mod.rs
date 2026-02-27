@@ -165,10 +165,10 @@ pub(crate) async fn handle_authenticated_loop(
                 },
             };
             let cred_msg = ControllerMessage::ServiceCredentials(payload);
-            if let Some(json) = serialize_controller_msg(out_seq, cred_msg) {
-                if sink.send(Message::Text(json.into())).await.is_err() {
-                    return;
-                }
+            if let Some(json) = serialize_controller_msg(out_seq, cred_msg)
+                && sink.send(Message::Text(json.into())).await.is_err()
+            {
+                return;
             }
             tracing::info!(
                 %service_id,
