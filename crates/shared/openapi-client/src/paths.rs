@@ -56,6 +56,24 @@ pub(crate) mod autodiscovery {
     }
 }
 
+pub(crate) mod discovery_allowlist {
+    use uuid::Uuid;
+    /// `GET /api/v1/discovery-allowlist` · `POST …`
+    pub(crate) const BASE: &str = "/api/v1/discovery-allowlist";
+    /// `DELETE /api/v1/discovery-allowlist/{id}`
+    pub(crate) fn by_id(id: &Uuid) -> String {
+        format!("/api/v1/discovery-allowlist/{id}")
+    }
+    /// `GET /api/v1/hosts/{host_id}/discovery-allowlist` · `POST …`
+    pub(crate) fn host_base(host_id: &Uuid) -> String {
+        format!("/api/v1/hosts/{host_id}/discovery-allowlist")
+    }
+    /// `DELETE /api/v1/hosts/{host_id}/discovery-allowlist/{entry_id}`
+    pub(crate) fn host_entry(host_id: &Uuid, entry_id: &Uuid) -> String {
+        format!("/api/v1/hosts/{host_id}/discovery-allowlist/{entry_id}")
+    }
+}
+
 pub(crate) mod hosts {
     use uuid::Uuid;
     /// `GET /api/v1/hosts`
