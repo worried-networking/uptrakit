@@ -123,17 +123,6 @@ be extended.
 
 ### Issues
 
-**[SEVERITY: Low]** `mqtt_client.rs:254` — Magic number `5` for reconnect delay
-
-```rust
-_ = tokio::time::sleep(Duration::from_secs(5)) => {
-```
-
-This literal is the root cause of the HA issue described below. Extracting it to a named constant
-(e.g., `RECONNECT_DELAY: Duration = Duration::from_secs(5)`) would make it co-located with
-`SHUTDOWN_TIMEOUT` and easier to find when implementing backoff. A constant name also signals
-intent and makes the backoff issue visible in code review.
-
 #### 2026-02-24 Review
 
 ##### Strengths
@@ -226,32 +215,6 @@ One sibling test correctly uses `start_paused = true` (`shutdown_task` at line 4
   does not need its own controller reconnect logic.
 
 ### Issues
-
-**[SEVERITY: Medium]** `mqtt_client.rs:253-254` — Fixed 5-second MQTT reconnect delay, no exponential backoff
-
-```rust
-_ = tokio::time::sleep(Duration::from_secs(5)) => {
-    report_status(&reporter, MqttClientConnectionStatus::Connecting);
-}
-```
-
-After any MQTT error (connection refused, network partition, broker crash), the event loop waits
-exactly 5 seconds and retries unconditionally. There is no backoff and no circuit breaker.
-
-The contrast with the WebSocket reconnect path in `uptrakit-service-sdk` is direct: that path
-uses `backoff.rs` (exponential, base 2s, cap 60s, ~25% jitter). During an extended broker
-outage with N MQTT service instances each managing M tenants, every client hammers the broker
-once every 5 seconds. With the default `max_tenants = 0` (unlimited), a single instance could
-maintain dozens of connections, all retrying in a tight fixed-interval loop with no coordinated
-relief period.
-
-The `CancellationToken` is correctly checked in the inner `tokio::select!` inside the error
-branch, so shutdown is not blocked. The availability concern is the broker-side load during
-outage, not service shutdown correctness.
-
-Recommended fix: use the existing `uptrakit-service-sdk` `Backoff` struct (or a per-client
-equivalent) with exponential delay capped at 60 seconds and jitter. Reset the backoff counter on
-a successful `ConnAck`.
 
 #### 2026-02-24 Review
 

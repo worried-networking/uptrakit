@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::MqttClientConnectionStatus;
 use uptrakit_internal_wire::MqttTransport;
 use uptrakit_internal_wire::SecretString;
+use uptrakit_service_sdk::Backoff;
 use uptrakit_shared_macros::impl_report_conversion;
 
 /// Configuration for connecting to an MQTT broker.
@@ -214,6 +215,7 @@ pub async fn start(
     let task_topic = topic.clone();
     let task_client = client.clone();
     let task_token = shutdown_token.clone();
+    let reconnect_backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
     let task = tokio::spawn(run_event_loop(
         event_loop,
         task_client,
@@ -221,6 +223,7 @@ pub async fn start(
         task_token,
         reporter,
         ha_status_topic,
+        reconnect_backoff,
     ));
 
     Ok(MqttHandle {
@@ -282,6 +285,7 @@ async fn run_event_loop(
     shutdown_token: CancellationToken,
     reporter: Option<MqttEventReporter>,
     ha_status_topic: Option<String>,
+    mut reconnect_backoff: Backoff,
 ) {
     loop {
         tokio::select! {
@@ -292,6 +296,7 @@ async fn run_event_loop(
             poll = event_loop.poll() => {
                 match poll {
                     Ok(rumqttc::Event::Incoming(Packet::ConnAck(_))) => {
+                        reconnect_backoff.reset();
                         tracing::info!("MQTT connected");
                         if let Some(ref r) = reporter {
                             r.report_status(MqttClientConnectionStatus::Online);
@@ -324,7 +329,8 @@ async fn run_event_loop(
                     }
                     Ok(_) => {}
                     Err(e) => {
-                        tracing::warn!("MQTT error: {e}");
+                        let delay = reconnect_backoff.next_delay();
+                        tracing::warn!("MQTT error: {e}; retrying in {delay:?}");
                         if let Some(ref r) = reporter {
                             r.report_status(MqttClientConnectionStatus::Offline);
                         }
@@ -333,7 +339,7 @@ async fn run_event_loop(
                                 tracing::debug!("MQTT event loop shutdown requested");
                                 break;
                             }
-                            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                            _ = tokio::time::sleep(delay) => {
                                 if let Some(ref r) = reporter {
                                     r.report_status(MqttClientConnectionStatus::Connecting);
                                 }
