@@ -107,6 +107,9 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
                 strict_host_key_checking,
                 allow_all,
                 remove_stale_keys,
+                // Pre-generate the host UUID so it can be embedded in the
+                // authorized_keys comment before the DB row is created.
+                host_id: uuid::Uuid::now_v7(),
             };
             run_bootstrap(cli_params).await
         }
@@ -150,6 +153,7 @@ async fn run_add(db: &sea_orm::DatabaseConnection, p: AddCliParams) -> Result<()
     let host = host_ops::add_host(
         db,
         AddHostParams {
+            host_id: uuid::Uuid::now_v7(),
             name: p.name,
             hostname: p.hostname,
             port: p.port,
@@ -317,6 +321,9 @@ struct BootstrapCliParams<'a> {
     strict_host_key_checking: bool,
     allow_all: bool,
     remove_stale_keys: bool,
+    /// Pre-generated UUID for the new host DB entry.  Embedded in the
+    /// `authorized_keys` comment so the entry can be traced back to the DB.
+    host_id: uuid::Uuid,
 }
 
 async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
@@ -430,6 +437,7 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
         host_key_fingerprint: p.host_key_fingerprint,
         strict_host_key_checking: p.strict_host_key_checking,
         allow_all: p.allow_all,
+        host_id: p.host_id,
         service_id,
         remove_stale_keys: p.remove_stale_keys,
     };
