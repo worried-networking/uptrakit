@@ -27,6 +27,6 @@ pub use error::{Result, SchedulerError};
 pub use executor::TaskExecutor;
 pub use notifier::SchedulerNotifier;
 
-// Re-export the scheduler struct and config.
-mod scheduler;
-pub use scheduler::{Scheduler, SchedulerConfig};
+// Re-export the scheduler struct, config, and constants.
+pub mod scheduler;
+pub use scheduler::{Scheduler, SchedulerConfig, TASK_EXECUTION_TIMEOUT};

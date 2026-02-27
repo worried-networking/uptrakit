@@ -184,6 +184,7 @@ impl ServiceHandler for SchedulerHandler {
                     poll_interval: Duration::from_secs(self.poll_interval_secs),
                     controller_id: scheduler_id,
                     tenant_id: default_tenant.id,
+                    task_execution_timeout: uptrakit_scheduler_engine::TASK_EXECUTION_TIMEOUT,
                 };
 
                 let mut scheduler = Scheduler::new(db.clone(), config);

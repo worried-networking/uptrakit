@@ -1,16 +1,25 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use tokio_util::sync::CancellationToken;
 use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 use uuid::Uuid;
 
+use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::{claim, cron_utils};
 
 /// Default poll interval for the scheduler loop.
 const DEFAULT_POLL_INTERVAL_SECS: u64 = 15;
+
+/// Maximum wall-clock time allowed for a single scheduled task execution.
+///
+/// Matches the wire-protocol update execution timeout (2 hours). Tasks that
+/// exceed this limit receive a `SchedulerError::TaskTimedOut` error and their
+/// claim is released with the timeout recorded as the last error.
+pub const TASK_EXECUTION_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// Configuration for the scheduler.
 pub struct SchedulerConfig {
@@ -20,6 +29,10 @@ pub struct SchedulerConfig {
     pub controller_id: Uuid,
     /// The default tenant ID for task queries.
     pub tenant_id: Uuid,
+    /// Maximum wall-clock time allowed for a single task execution before it
+    /// is considered hung and its claim is released with a timeout error.
+    /// Defaults to [`TASK_EXECUTION_TIMEOUT`] (2 hours).
+    pub task_execution_timeout: Duration,
 }
 
 impl SchedulerConfig {
@@ -28,6 +41,7 @@ impl SchedulerConfig {
             poll_interval: Duration::from_secs(DEFAULT_POLL_INTERVAL_SECS),
             controller_id,
             tenant_id,
+            task_execution_timeout: TASK_EXECUTION_TIMEOUT,
         }
     }
 }
@@ -72,9 +86,7 @@ impl Scheduler {
 
         loop {
             tokio::select! {
-                _ = interval.tick() => {
-                    self.poll_cycle().await;
-                }
+                biased;
                 _ = token.cancelled() => {
                     tracing::debug!("scheduler shutting down, releasing claims");
                     if let Err(e) = claim::release_all_claims(
@@ -85,12 +97,19 @@ impl Scheduler {
                     }
                     return;
                 }
+                _ = interval.tick() => {
+                    self.poll_cycle(&token).await;
+                }
             }
         }
     }
 
     /// Single poll cycle: recover stale claims, find due tasks, execute them.
-    async fn poll_cycle(&self) {
+    ///
+    /// `token` is checked before and during each task execution. If the token
+    /// is cancelled mid-cycle the loop exits early — the per-task timeout
+    /// ensures no single executor can block the cancellation check indefinitely.
+    async fn poll_cycle(&self, token: &CancellationToken) {
         // Recover stale claims from crashed controllers
         match claim::recover_stale_claims(&self.db).await {
             Ok(recovered) if recovered > 0 => {
@@ -112,6 +131,11 @@ impl Scheduler {
         };
 
         for task in due_tasks {
+            // Exit early if a shutdown was requested while iterating
+            if token.is_cancelled() {
+                break;
+            }
+
             let Some(executor) = self.executors.get(&task.task_type) else {
                 tracing::warn!(
                     task_type = ?task.task_type,
@@ -145,7 +169,34 @@ impl Scheduler {
                 "executing scheduled task"
             );
 
-            let result = executor.execute(&task).await;
+            // Execute with per-task timeout and cancellation awareness.
+            // `biased` gives the cancellation branch higher priority so that a
+            // pending shutdown is honoured before the timeout branch fires.
+            let result: crate::error::Result<()> = tokio::select! {
+                biased;
+                _ = token.cancelled() => {
+                    tracing::debug!(
+                        task_id = %task.id,
+                        task_type = ?task.task_type,
+                        "scheduler shutdown requested during task execution"
+                    );
+                    break;
+                }
+                res = tokio::time::timeout(
+                    self.config.task_execution_timeout,
+                    executor.execute(&task),
+                ) => {
+                    res.unwrap_or_else(|_| {
+                        tracing::warn!(
+                            task_id = %task.id,
+                            task_type = ?task.task_type,
+                            timeout_secs = self.config.task_execution_timeout.as_secs(),
+                            "scheduled task timed out"
+                        );
+                        bail!(SchedulerError::TaskTimedOut(task.task_type))
+                    })
+                }
+            };
 
             if let Err(ref e) = result {
                 tracing::warn!(
@@ -222,6 +273,7 @@ mod tests {
         assert_eq!(config.poll_interval, Duration::from_secs(15));
         assert_eq!(config.controller_id, controller_id);
         assert_eq!(config.tenant_id, tenant_id);
+        assert_eq!(config.task_execution_timeout, TASK_EXECUTION_TIMEOUT);
     }
 
     #[tokio::test]
@@ -229,8 +281,9 @@ mod tests {
         let db = setup_test_db().await;
         let config = SchedulerConfig::new(Uuid::now_v7(), Uuid::now_v7());
         let scheduler = Scheduler::new(db.clone(), config);
+        let token = CancellationToken::new();
 
-        scheduler.poll_cycle().await;
+        scheduler.poll_cycle(&token).await;
 
         // No tasks should exist at all in the empty DB
         let all_tasks = scheduled_task::Entity::find()
@@ -249,6 +302,7 @@ mod tests {
             poll_interval: Duration::from_millis(50),
             controller_id,
             tenant_id: tenant.id,
+            task_execution_timeout: TASK_EXECUTION_TIMEOUT,
         };
         let scheduler = Scheduler::new(db.clone(), config);
 
@@ -313,7 +367,8 @@ mod tests {
         let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
         let scheduler = Scheduler::new(db.clone(), config);
 
-        scheduler.poll_cycle().await;
+        let token = CancellationToken::new();
+        scheduler.poll_cycle(&token).await;
 
         // Task should remain untouched: not locked, run_count still 0
         let task = scheduled_task::Entity::find_by_id(task_id)
@@ -361,8 +416,9 @@ mod tests {
 
         let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
         let scheduler = Scheduler::new(db.clone(), config);
+        let token = CancellationToken::new();
 
-        scheduler.poll_cycle().await;
+        scheduler.poll_cycle(&token).await;
 
         // Task should NOT be claimed or executed when no executor is registered
         let task = scheduled_task::Entity::find_by_id(task_id)
@@ -427,8 +483,9 @@ mod tests {
             ScheduledTaskType::StaleLeaseCleanup,
             Box::new(TrackingExecutor(executed_clone)),
         );
+        let token = CancellationToken::new();
 
-        scheduler.poll_cycle().await;
+        scheduler.poll_cycle(&token).await;
 
         assert!(executed.load(std::sync::atomic::Ordering::SeqCst));
 
