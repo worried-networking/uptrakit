@@ -120,6 +120,11 @@ enum Commands {
         #[command(subcommand)]
         command: AutodiscoveryCommands,
     },
+    /// Manage the tenant-wide discovery plugin allowlist
+    DiscoveryAllowlist {
+        #[command(subcommand)]
+        command: DiscoveryAllowlistCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -193,6 +198,13 @@ enum HostsCommands {
         /// Optionally filter by plugin config UUID
         #[arg(long)]
         plugin_config: Option<Uuid>,
+    },
+    /// Manage the host-specific discovery plugin allowlist
+    DiscoveryAllowlist {
+        /// Host UUID
+        id: Uuid,
+        #[command(subcommand)]
+        command: HostDiscoveryAllowlistCommands,
     },
 }
 
@@ -886,6 +898,42 @@ enum IgnoresCommands {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum DiscoveryAllowlistCommands {
+    /// List tenant-wide discovery allowlist entries.
+    ///
+    /// An empty list means no restrictions — all discovery plugins run.
+    List,
+    /// Add a plugin type to the tenant-wide discovery allowlist
+    Add {
+        /// Plugin type (e.g. package_manager_homebrew)
+        plugin_type: PluginType,
+    },
+    /// Remove a tenant-wide discovery allowlist entry
+    Remove {
+        /// Entry UUID
+        id: Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum HostDiscoveryAllowlistCommands {
+    /// List host-specific discovery allowlist entries.
+    ///
+    /// An empty list means the host inherits the tenant allowlist.
+    List,
+    /// Add a plugin type to the host's discovery allowlist
+    Add {
+        /// Plugin type (e.g. package_manager_apt)
+        plugin_type: PluginType,
+    },
+    /// Remove a host-specific discovery allowlist entry
+    Remove {
+        /// Entry UUID
+        entry_id: Uuid,
+    },
+}
+
 /// Parse a registration mode string into the typed enum.
 fn parse_registration_mode(
     s: &str,
@@ -1188,6 +1236,49 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                 output::print_output(format, &resp)?;
             }
+            HostsCommands::DiscoveryAllowlist { id, command } => match command {
+                HostDiscoveryAllowlistCommands::List => {
+                    let resp = commands::discovery_allowlist::host_list(
+                        commands::discovery_allowlist::ListHostParams {
+                            host_id: &id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                HostDiscoveryAllowlistCommands::Add { plugin_type } => {
+                    let resp = commands::discovery_allowlist::host_add(
+                        commands::discovery_allowlist::AddHostParams {
+                            host_id: &id,
+                            plugin_type,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                HostDiscoveryAllowlistCommands::Remove { entry_id } => {
+                    let resp = commands::discovery_allowlist::host_remove(
+                        commands::discovery_allowlist::RemoveHostParams {
+                            host_id: &id,
+                            entry_id: &entry_id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+            },
         },
         Commands::SoftwareItems { command } => match command {
             SoftwareItemsCommands::List { page, per_page } => {
@@ -2127,6 +2218,46 @@ async fn run(cli: Cli) -> error::Result<()> {
                     output::print_output(format, &resp)?;
                 }
             },
+        },
+        Commands::DiscoveryAllowlist { command } => match command {
+            DiscoveryAllowlistCommands::List => {
+                let resp = commands::discovery_allowlist::tenant_list(
+                    commands::discovery_allowlist::ListTenantParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            DiscoveryAllowlistCommands::Add { plugin_type } => {
+                let resp = commands::discovery_allowlist::tenant_add(
+                    commands::discovery_allowlist::AddTenantParams {
+                        plugin_type,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            DiscoveryAllowlistCommands::Remove { id } => {
+                let resp = commands::discovery_allowlist::tenant_remove(
+                    commands::discovery_allowlist::RemoveTenantParams {
+                        id: &id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
         },
     }
     Ok(())
