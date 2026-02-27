@@ -48,12 +48,22 @@ fn plugin_config_to_response(
             }
         };
     let config = ops.mask_config_secrets_str(plugin_type.as_str(), &m.config);
+    let capabilities: Vec<String> = ops
+        .capabilities_for_str(plugin_type.as_str())
+        .into_iter()
+        .filter_map(|c| {
+            serde_json::to_value(c)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+        })
+        .collect();
     Some(PluginConfigResponse {
         id: m.id,
         name: m.name,
         plugin_type,
         config,
         enabled: m.enabled,
+        capabilities,
         created_at: m.created_at,
         updated_at: m.updated_at,
     })

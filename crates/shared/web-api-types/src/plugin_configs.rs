@@ -35,6 +35,8 @@ pub struct PluginConfigResponse {
     /// Plugin-specific configuration with secrets masked.
     pub config: serde_json::Value,
     pub enabled: bool,
+    /// Capabilities declared by this plugin type, e.g. `["discover_local_software"]`.
+    pub capabilities: Vec<String>,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
@@ -158,6 +160,7 @@ mod tests {
             plugin_type: PluginType::ReleasesDocker,
             config: serde_json::json!({}),
             enabled: true,
+            capabilities: vec!["discover_local_software".to_string()],
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-06-01 00:00:00 UTC),
         };
