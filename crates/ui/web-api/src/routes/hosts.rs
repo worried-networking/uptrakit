@@ -218,6 +218,7 @@ pub async fn discover_host(
             &state,
             link.service_id,
             tenant_db.tenant_id,
+            host_id,
             &host_record.machine_id,
         )
         .await;

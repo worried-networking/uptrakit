@@ -226,12 +226,13 @@ pub(super) async fn handle_report_hosts(
         )
         .await
         {
-            Ok(Some((_host_id, true))) => {
+            Ok(Some((host_id, true))) => {
                 // New host -- trigger autodiscovery.
                 trigger_discovery_for_agent_host(
                     state,
                     service_id,
                     service_model.tenant_id,
+                    host_id,
                     &host_info.machine_id,
                 )
                 .await;

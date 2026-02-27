@@ -97,6 +97,12 @@ use crate::AppState;
         crate::routes::autodiscovery::list_autodiscovery_ignores,
         crate::routes::autodiscovery::create_autodiscovery_ignore,
         crate::routes::autodiscovery::delete_autodiscovery_ignore,
+        crate::routes::discovery_allowlist::list_tenant_discovery_allowlist,
+        crate::routes::discovery_allowlist::add_tenant_discovery_allowlist_entry,
+        crate::routes::discovery_allowlist::remove_tenant_discovery_allowlist_entry,
+        crate::routes::discovery_allowlist::list_host_discovery_allowlist,
+        crate::routes::discovery_allowlist::add_host_discovery_allowlist_entry,
+        crate::routes::discovery_allowlist::remove_host_discovery_allowlist_entry,
         crate::routes::settings_ca::rotate_ca,
         crate::routes::scheduler::list_scheduled_tasks,
         crate::routes::scheduler::get_scheduled_task,
@@ -180,6 +186,9 @@ use crate::AppState;
             crate::routes::hosts::DiscardDiscoveredResponse,
             crate::routes::autodiscovery::AutodiscoveryIgnoreResponse,
             crate::routes::autodiscovery::CreateAutodiscoveryIgnoreRequest,
+            crate::routes::discovery_allowlist::TenantDiscoveryAllowlistEntry,
+            crate::routes::discovery_allowlist::HostDiscoveryAllowlistEntry,
+            crate::routes::discovery_allowlist::CreateDiscoveryAllowlistEntryRequest,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::enrollment_tokens::EnrollmentTokenResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::services::ServiceResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::hosts::HostResponse>,
@@ -399,6 +408,21 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(
             crate::routes::autodiscovery::delete_autodiscovery_ignore
+        ))
+        // Discovery allowlist
+        .routes(routes!(
+            crate::routes::discovery_allowlist::list_tenant_discovery_allowlist,
+            crate::routes::discovery_allowlist::add_tenant_discovery_allowlist_entry
+        ))
+        .routes(routes!(
+            crate::routes::discovery_allowlist::remove_tenant_discovery_allowlist_entry
+        ))
+        .routes(routes!(
+            crate::routes::discovery_allowlist::list_host_discovery_allowlist,
+            crate::routes::discovery_allowlist::add_host_discovery_allowlist_entry
+        ))
+        .routes(routes!(
+            crate::routes::discovery_allowlist::remove_host_discovery_allowlist_entry
         ));
 
     // OIDC provider management routes require authentication and belong inside auth_routes.

@@ -10,6 +10,7 @@ pub mod agents;
 pub mod api_tokens;
 pub mod auth;
 pub mod autodiscovery;
+pub mod discovery_allowlist;
 pub mod device_auth;
 pub mod enrollment_tokens;
 pub mod error;
