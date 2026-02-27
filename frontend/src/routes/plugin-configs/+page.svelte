@@ -19,7 +19,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
-	import { Permission } from '$lib/types';
+	import { Permission, PluginCapability } from '$lib/types';
 	import type { PluginConfigResponse, AutodiscoveryIgnoreResponse } from '$lib/types';
 
 	type ActiveTab = 'configs' | 'ignores';
@@ -287,7 +287,7 @@
 								<th>Type</th>
 								<th>Status</th>
 								<th>Created</th>
-								{#if canManage}<th class="w-56">Actions</th>{/if}
+								{#if canManage}<th>Actions</th>{/if}
 							</tr>
 						</thead>
 						<tbody>
@@ -307,20 +307,22 @@
 										<td>
 											<div class="flex gap-1 flex-wrap">
 												<button class="btn btn-sm preset-tonal" onclick={() => openEditConfig(config)}>Edit</button>
-												<button
-													class="btn btn-sm preset-tonal"
-													disabled={discoveringId === config.id}
-													onclick={() => triggerDiscover(config)}
-												>
-													{discoveringId === config.id ? '...' : 'Discover'}
-												</button>
-												<button
-													class="btn btn-sm preset-tonal"
-													disabled={discardingId === config.id}
-													onclick={() => triggerDiscard(config)}
-												>
-													{discardingId === config.id ? '...' : 'Discard'}
-												</button>
+												{#if config.capabilities.includes(PluginCapability.DiscoverLocalSoftware)}
+													<button
+														class="btn btn-sm preset-tonal"
+														disabled={discoveringId === config.id}
+														onclick={() => triggerDiscover(config)}
+													>
+														{discoveringId === config.id ? '...' : 'Discover'}
+													</button>
+													<button
+														class="btn btn-sm preset-tonal"
+														disabled={discardingId === config.id}
+														onclick={() => triggerDiscard(config)}
+													>
+														{discardingId === config.id ? '...' : 'Discard'}
+													</button>
+												{/if}
 												<button
 													class="btn btn-sm preset-tonal-error"
 													onclick={() => (configDeleteConfirm = { id: config.id, name: config.name })}

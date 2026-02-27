@@ -303,12 +303,18 @@ export interface HostPluginRoleAssignment {
 	execution_site?: string;
 }
 
+export enum PluginCapability {
+	DiscoverLocalSoftware = 'discover_local_software',
+	RefreshPackageIndex = 'refresh_package_index'
+}
+
 export interface PluginConfigResponse {
 	id: string;
 	name: string;
 	plugin_type: string;
 	config: Record<string, unknown>;
 	enabled: boolean;
+	capabilities: PluginCapability[];
 	created_at: string;
 	updated_at: string;
 }
