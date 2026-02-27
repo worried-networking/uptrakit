@@ -7,6 +7,22 @@
 - `/api/v1/services/{id}/approve`, `/api/v1/services/{id}/reject`,
   `DELETE /api/v1/services/{id}`, and `/api/v1/services/{target_id}/merge`
   manage the service lifecycle (approve, reject, deactivate, merge).
+
+### Service deactivation (`DELETE /api/v1/services/{id}`)
+
+Service deactivation is fully transactional. The handler wraps all three mutations in a single database
+transaction:
+
+1. Soft-delete the service record.
+2. Revoke all certificates associated with the service.
+3. Bump the CRL (Certificate Revocation List) revocation version so that the updated list is published
+   to connected agents without delay.
+
+If any step fails, the entire transaction is rolled back and the service remains active. This prevents a
+partially-deactivated state where the service record is marked deleted but the certificates remain valid
+in the CRL — which would allow a deactivated service to continue authenticating via mTLS until the next
+CRL refresh.
+
 - `/api/v1/agents/{agent_id}/version-check` instructs the controller to send `check_versions` over WebSocket.
 - `/api/v1/agents/{agent_id}/execute-update` triggers `execute_update` with the software item ID(s).
 - `/api/v1/update-history` provides audit logs for updates; each row tracks `status`, `output`, `actor_type`, `actor_id`, and `tenant_id`.

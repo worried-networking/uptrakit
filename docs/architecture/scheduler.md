@@ -83,6 +83,45 @@ The claim pattern mirrors `MqttLeaseCoordinator` (see [Cross-Controller Communic
 
 Manual trigger via the REST API sets `next_run_at = now`, making the task immediately eligible on the next poll cycle.
 
+## Task Execution Timeout and Cancellation
+
+### Per-task execution timeout
+
+Each task execution is wrapped in `tokio::time::timeout` using the constant:
+
+```rust
+const TASK_EXECUTION_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60); // 2 hours
+```
+
+If a task runs longer than this limit, the timeout fires and the task receives
+`SchedulerError::TaskTimedOut`. The claim is then released with the timeout recorded so that
+the next poll cycle can re-claim and retry the task. This prevents a runaway task from holding
+its claim indefinitely, which would otherwise block future executions until the 10-minute stale
+recovery fires.
+
+The timeout is also exposed as `SchedulerConfig.task_execution_timeout` (`Duration`, default 2 hours)
+so that integration tests and unusual deployments can override it without recompiling.
+
+### Cancellation awareness
+
+`poll_cycle` accepts a `CancellationToken`. The scheduler checks `token.is_cancelled()` before
+attempting to claim each due task, skipping any remaining work if shutdown has been requested.
+
+During task execution the scheduler uses a `biased` `tokio::select!` block that gives the
+cancellation branch priority:
+
+```rust
+tokio::select! {
+    biased;
+    _ = token.cancelled() => { /* release claim, stop */ }
+    result = tokio::time::timeout(config.task_execution_timeout, executor.execute(task)) => { /* handle result */ }
+}
+```
+
+The `biased` qualifier means Tokio always checks the cancellation branch first, regardless of
+readiness order. This ensures that a shutdown signal is honoured promptly even while a task is
+mid-execution, rather than waiting for the task to finish or time out.
+
 ## Module Structure
 
 The scheduler engine is a shared library crate:
@@ -193,6 +232,8 @@ All endpoints require the `ManageSoftware` permission.
   explicit user action.
 - Optimistic locking prevents concurrent execution of the same task across controllers.
 - Task claims have a 10-minute stale timeout to prevent permanent locking if a controller crashes.
+- Each task execution is bounded by a 2-hour per-task timeout (`TASK_EXECUTION_TIMEOUT`). A task that exceeds
+  this receives `SchedulerError::TaskTimedOut` and its claim is released immediately.
 - REST API endpoints are protected by JWT authentication and the `ManageSoftware` permission.
 - Cron expressions are validated before persistence.
 

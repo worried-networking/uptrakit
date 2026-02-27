@@ -12,6 +12,19 @@
 | Forwarded cert headers | Reverse proxy | Trusted proxies forward cert info/PEM; issuer CN verified. |
 | Enrollment tokens | Service onboarding | Multiple named tokens stored in the `enrollment_tokens` table (Argon2id hashed). Each token supports capability scoping, usage limits, and TTL. See [Enrollment Tokens API](../api/enrollment-tokens.md). |
 
+## JWT Signing Key Storage
+
+The JWT signing key is stored in the `settings` table under `auth.jwt_signing_key` (global scope, base64
+encoded) and is encrypted at rest using AES-256-GCM via `encrypt_str()` — the same algorithm used for all
+other sensitive fields (`EncryptedString`). On every read the value is decrypted transparently before use.
+
+Legacy unencrypted keys (base64 only, written before encryption was introduced) are transparently
+re-encrypted on the next read. No operator intervention is required; the controller detects the absence of
+the `ENC:v1:` prefix, re-encrypts the value in place, and continues normally.
+
+See [Secrets Handling and Encryption](secrets-and-encryption.md) for the encryption format and master key
+requirements.
+
 ## Session Integrity Validation
 
 Refresh token verification and rotation validate session data integrity before proceeding:

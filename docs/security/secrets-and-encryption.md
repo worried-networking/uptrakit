@@ -78,14 +78,12 @@ domain in full. Original delimiters are preserved.
 
 Sensitive credentials stored in the database are encrypted using AES-256-GCM via the `EncryptedString` SeaORM custom
 type (defined in `crates/shared/db/src/crypto.rs`). `EncryptedString` stores the plaintext (wrapped in `SecretString`
-for redacted debug/display) alongside a pre-computed database representation (encrypted ciphertext, or plaintext in dev
-mode).
+for redacted debug/display) alongside a pre-computed database representation (encrypted ciphertext).
 
 `EncryptedString::new()` is **fallible** — it encrypts eagerly at construction time and returns
-`Result<Self, Report<CryptoError>>`. This prevents silent plaintext fallback: if the master key is present but
-encryption fails, the error propagates immediately instead of silently storing unencrypted secrets in the database.
-When no master key is configured (development mode with `--allow-plaintext-secrets`), construction succeeds with
-plaintext as the database value.
+`Result<Self, Report<CryptoError>>`. The master key **must** be initialized before calling this function. If no master
+key has been configured, `EncryptedString::new()` returns `Err(CryptoError::NotInitialized)`. There is no plaintext
+fallback or development mode: a missing master key is a hard failure that must be resolved before the service starts.
 
 Database columns using encryption:
 
@@ -99,6 +97,23 @@ Database columns using encryption:
 
 Ciphertext format: `ENC:v1:<hex(nonce || ciphertext || tag)>`. The `v1` marker enables future algorithm changes.
 Legacy plaintext detection allows old values to remain readable until rewritten.
+
+### Low-level helpers: `encrypt_str` / `decrypt_str`
+
+Two public functions in `crates/shared/db/src/crypto.rs` provide lower-level access to the same AES-256-GCM
+primitive, used internally for encrypting the JWT signing key at rest:
+
+- **`pub fn encrypt_str(plaintext: &str) -> Result<String>`** — encrypts any UTF-8 string and returns it in
+  the `"ENC:v1:<hex>"` format. Requires the master key to be initialized; returns
+  `Err(CryptoError::NotInitialized)` otherwise.
+- **`pub fn decrypt_str(stored: &str) -> Result<String>`** — decrypts an `"ENC:v1:<hex>"` string produced by
+  `encrypt_str`. Requires the master key to be initialized; returns `Err(CryptoError::NotInitialized)` if the
+  key is absent, or `Err(CryptoError::Decryption)` if the ciphertext is invalid or was encrypted with a
+  different key.
+
+These helpers are **not** a replacement for `EncryptedString`. Use `EncryptedString` for structured entity
+fields backed by SeaORM columns; use `encrypt_str` / `decrypt_str` only for ad-hoc string values (such as
+settings entries) that cannot use the SeaORM custom type.
 
 ### Startup Re-encryption of Legacy Plaintext
 
@@ -133,8 +148,9 @@ encryption.
   `CryptoError` enum in `crates/shared/db/src/crypto.rs` for the full set of typed error variants (e.g.
   `AlreadyInitialized`, `NotInitialized`, `KeyCreation`, `Encryption`, `Decryption`, `MasterKeyMismatch`).
 - The key is never logged or exposed in API responses.
-- `--allow-plaintext-secrets` disables encryption (for development only) and logs a warning. When `EncryptedString::new()`
-  stores plaintext (no master key configured), a `tracing::warn!` is emitted for observability.
+- A missing or uninitialized master key is a **fatal startup error**. All components that call `EncryptedString::new()`,
+  `encrypt_str()`, or `decrypt_str()` will receive `Err(CryptoError::NotInitialized)` and must propagate this
+  failure — there is no plaintext fallback.
 
 | Method | Details |
 | --- | --- |
