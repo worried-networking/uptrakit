@@ -80,6 +80,9 @@ warnings = "deny"
 [workspace.lints.clippy]
 all = "deny"
 
+[profile.dev.package."aws-lc-sys"]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = "fat"
