@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use uptrakit_internal_wire::Capability;
+use crate::Capability;
 
 /// Behavioral profile derived from a service's capability set.
 ///

@@ -189,7 +189,7 @@ pub(super) async fn handle_authenticated(
     // Send ServiceSettings on connect.
     let renewal_window_hours = state.settings.renewal_window_hours();
     let ca_bundle_hash = state.ca_snapshot.borrow().bundle_hash.clone();
-    use crate::service_profile::{ServiceProfile, parse_capabilities};
+    use uptrakit_internal_wire::service_profile::{ServiceProfile, parse_capabilities};
     let capabilities = parse_capabilities(&service.capabilities);
     let profile = ServiceProfile::from_capabilities(&capabilities);
     let shutdown_timeout = profile.shutdown_timeout_secs();
@@ -419,7 +419,7 @@ async fn enroll_service(
         friendly_name: &payload.friendly_name,
         enrollment_token: payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
         ip_address: client_ip,
-        capabilities_json: crate::service_profile::serialize_capabilities(&payload.capabilities),
+        capabilities_json: uptrakit_internal_wire::service_profile::serialize_capabilities(&payload.capabilities),
     })
     .await;
 

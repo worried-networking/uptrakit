@@ -14,7 +14,6 @@ pub mod pki_utils;
 pub mod queries;
 pub mod routes;
 pub mod service_connections;
-pub mod service_profile;
 pub mod setting_key;
 pub mod settings;
 pub mod settings_store;

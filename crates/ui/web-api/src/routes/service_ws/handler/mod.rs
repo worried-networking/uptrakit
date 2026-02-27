@@ -47,7 +47,7 @@ use super::protocol::{
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use crate::routes::agents::do_sign_csr;
-use crate::service_profile::parse_capabilities;
+use uptrakit_internal_wire::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------
 // Constants

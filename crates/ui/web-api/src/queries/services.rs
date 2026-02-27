@@ -12,7 +12,7 @@ use uptrakit_web_api_types::services::{ListServicesQuery, ServiceResponse};
 use uuid::Uuid;
 
 use crate::auth::token;
-use crate::service_profile::{ServiceProfile, parse_capabilities};
+use uptrakit_internal_wire::service_profile::{ServiceProfile, parse_capabilities};
 use crate::tenant_db::TenantDb;
 
 /// Errors returned by service mutation queries.

@@ -1,6 +1,9 @@
 pub mod close_reason;
 pub use close_reason::CloseReason;
 
+pub mod service_profile;
+pub use service_profile::{ServiceProfile, parse_capabilities, serialize_capabilities};
+
 use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;

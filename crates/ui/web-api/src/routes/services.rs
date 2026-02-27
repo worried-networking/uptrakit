@@ -535,7 +535,7 @@ mod tests {
     fn agent_caps_json() -> String {
         use std::collections::BTreeSet;
         use uptrakit_internal_wire::Capability;
-        crate::service_profile::serialize_capabilities(&BTreeSet::from([
+        uptrakit_internal_wire::service_profile::serialize_capabilities(&BTreeSet::from([
             Capability::GracefulShutdown,
             Capability::SoftwareDiscovery,
             Capability::UpdateHooks,
