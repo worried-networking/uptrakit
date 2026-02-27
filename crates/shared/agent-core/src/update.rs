@@ -152,11 +152,21 @@ pub async fn execute_update(
         tracing::debug!("executing plugin update");
         match execute_plugin_update(&payload, &output_tx, Arc::clone(&executor)).await {
             Ok(output) => {
-                tracing::debug!("plugin update returned");
+                tracing::debug!("plugin update returned successfully");
                 append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
             }
             Err(e) => {
-                return Err(AgentCoreError::UpdateExecution(e.to_string()));
+                let error_msg = e.to_string();
+                tracing::warn!(
+                    software_item = %payload.software_item_name,
+                    error = %error_msg,
+                    "plugin update command failed"
+                );
+                let formatted = format!("[error] {error_msg}\n");
+                send_output(&output_tx, &format!("[error] {error_msg}"), OutputStreamType::Stderr)
+                    .await;
+                append_bounded(&mut accumulated_output, &formatted, MAX_OUTPUT_BYTES);
+                return Err(AgentCoreError::UpdateExecution(error_msg));
             }
         }
 
@@ -203,7 +213,7 @@ pub async fn execute_update(
     // Handle timeout or execution result
     let to_version = match execution_result {
         Ok(Ok(())) => {
-            tracing::info!(software_item = %payload.software_item_name, "update completed");
+            tracing::info!(software_item = %payload.software_item_name, "update completed successfully");
             send_output(
                 &output_tx,
                 "[update] Update completed successfully",
@@ -211,28 +221,37 @@ pub async fn execute_update(
             )
             .await;
             // Detect new version after update
-            detect_current_version(&payload, Arc::clone(&executor)).await
+            let to_version = detect_current_version(&payload, Arc::clone(&executor)).await;
+            tracing::debug!(to_version = ?to_version, "post-update version detected");
+            to_version
         }
         Ok(Err(e)) => {
+            // The error was already logged and appended to accumulated_output in the
+            // execute_plugin_update error arm above; here we only set the final state.
             final_status = UpdateFinalStatus::Failed;
             final_error = Some(e.to_string());
             None
         }
         Err(_) => {
-            final_status = UpdateFinalStatus::Failed;
-            final_error = Some(format!(
+            let timeout_msg = format!(
                 "Update timed out after {} seconds",
                 payload.timeout_seconds
-            ));
+            );
+            tracing::warn!(
+                software_item = %payload.software_item_name,
+                timeout_seconds = payload.timeout_seconds,
+                "update timed out"
+            );
+            let formatted = format!("[error] {timeout_msg}\n");
             send_output(
                 &output_tx,
-                &format!(
-                    "[update] Update timed out after {} seconds",
-                    payload.timeout_seconds
-                ),
+                &format!("[update] {timeout_msg}"),
                 OutputStreamType::System,
             )
             .await;
+            append_bounded(&mut accumulated_output, &formatted, MAX_OUTPUT_BYTES);
+            final_status = UpdateFinalStatus::Failed;
+            final_error = Some(timeout_msg);
             None
         }
     };

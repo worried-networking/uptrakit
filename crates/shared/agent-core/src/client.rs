@@ -45,9 +45,22 @@ pub async fn send_update_result(
 ) {
     match result {
         Ok(exec_result) => {
+            let status = exec_result.result.status;
+            let error = exec_result.result.error.clone();
             conn.send_best_effort(ServiceMessage::UpdateResult(exec_result.result))
                 .await;
-            tracing::info!(update_id = %update_history_id, "update execution completed");
+            match status {
+                uptrakit_internal_wire::UpdateFinalStatus::Completed => {
+                    tracing::info!(update_id = %update_history_id, "update execution completed successfully");
+                }
+                _ => {
+                    tracing::warn!(
+                        update_id = %update_history_id,
+                        error = ?error,
+                        "update execution finished with failure"
+                    );
+                }
+            }
         }
         Err(e) => {
             tracing::error!(error = %e, "update task panicked");
