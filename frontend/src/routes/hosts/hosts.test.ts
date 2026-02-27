@@ -181,9 +181,9 @@ describe('Hosts Page', () => {
 		fireEvent.click(screen.getByRole('menuitem', { name: 'Trigger Discovery' }));
 
 		await waitFor(() => expect(vi.mocked(api.triggerHostDiscovery)).toHaveBeenCalledWith('host-001'));
-		await waitFor(() => expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(
-			expect.stringContaining('2 plugin(s) queued')
-		));
+		await waitFor(() =>
+			expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(expect.stringContaining('2 plugin(s) queued'))
+		);
 	});
 
 	it('calls triggerHostDiscovery and shows a no-plugins notification when nothing is queued', async () => {
@@ -199,8 +199,8 @@ describe('Hosts Page', () => {
 
 		fireEvent.click(screen.getByRole('menuitem', { name: 'Trigger Discovery' }));
 
-		await waitFor(() => expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(
-			expect.stringContaining('no plugins queued')
-		));
+		await waitFor(() =>
+			expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(expect.stringContaining('no plugins queued'))
+		);
 	});
 });
