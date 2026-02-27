@@ -1,97 +1,283 @@
 <script lang="ts">
-	import { createEnrollmentToken, revokeEnrollmentToken } from '$lib/api';
-	import type { EnrollmentTokenStatus } from '$lib/types';
-	import { copyToClipboard } from '$lib/utils';
+	import { listEnrollmentTokens, createEnrollmentToken, revokeEnrollmentToken } from '$lib/api';
+	import type {
+		EnrollmentTokenResponse,
+		EnrollmentTokenCreatedResponse,
+		EnrollmentTokensSummary,
+		PaginatedResponse,
+		CreateEnrollmentTokenRequest
+	} from '$lib/types';
+	import { copyToClipboard, formatDate } from '$lib/utils';
 
 	let {
-		status,
+		summary,
 		onSuccess,
 		onError
 	}: {
-		status: EnrollmentTokenStatus | undefined;
+		summary: EnrollmentTokensSummary | undefined;
 		onSuccess: (msg: string) => void;
 		onError: (msg: string) => void;
 	} = $props();
 
-	let configured: boolean = $state(false);
-	let generatedToken: string | null = $state(null);
+	let tokens: PaginatedResponse<EnrollmentTokenResponse> | null = $state(null);
+	let loading: boolean = $state(false);
+	let showCreateDialog: boolean = $state(false);
+	let createdToken: EnrollmentTokenCreatedResponse | null = $state(null);
 	let copied: boolean = $state(false);
 
-	$effect(() => {
-		if (status) {
-			configured = status.configured;
-		}
-	});
+	// Create form fields
+	let newName: string = $state('');
+	let newCapabilities: string = $state('');
+	let newMaxUses: string = $state('');
+	let newExpiresIn: string = $state('');
+	let creating: boolean = $state(false);
 
-	async function handleGenerate() {
+	async function loadTokens() {
+		loading = true;
 		try {
-			const res = await createEnrollmentToken();
-			generatedToken = res.token;
-			configured = true;
-			onSuccess('Enrollment token generated.');
+			tokens = await listEnrollmentTokens();
 		} catch (e) {
-			onError(e instanceof Error ? e.message : 'Failed to generate enrollment token');
+			onError(e instanceof Error ? e.message : 'Failed to load enrollment tokens');
+		} finally {
+			loading = false;
 		}
 	}
 
-	async function handleRevoke() {
+	async function handleCreate() {
+		if (!newName.trim()) {
+			onError('Token name is required');
+			return;
+		}
+		creating = true;
 		try {
-			await revokeEnrollmentToken();
-			configured = false;
-			generatedToken = null;
+			const data: CreateEnrollmentTokenRequest = {
+				name: newName.trim()
+			};
+			if (newCapabilities.trim()) {
+				data.allowed_capabilities = newCapabilities
+					.split(',')
+					.map((c) => c.trim())
+					.filter((c) => c.length > 0);
+			}
+			if (newMaxUses.trim()) {
+				const parsed = parseInt(newMaxUses, 10);
+				if (!isNaN(parsed) && parsed > 0) {
+					data.max_uses = parsed;
+				}
+			}
+			if (newExpiresIn.trim()) {
+				const parsed = parseInt(newExpiresIn, 10);
+				if (!isNaN(parsed) && parsed > 0) {
+					data.expires_in_seconds = parsed;
+				}
+			}
+			createdToken = await createEnrollmentToken(data);
+			showCreateDialog = false;
+			resetForm();
+			onSuccess('Enrollment token created.');
+			await loadTokens();
+		} catch (e) {
+			onError(e instanceof Error ? e.message : 'Failed to create enrollment token');
+		} finally {
+			creating = false;
+		}
+	}
+
+	async function handleRevoke(id: string) {
+		try {
+			await revokeEnrollmentToken(id);
 			onSuccess('Enrollment token revoked.');
+			createdToken = null;
+			await loadTokens();
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to revoke enrollment token');
 		}
 	}
 
 	async function handleCopy() {
-		if (generatedToken && (await copyToClipboard(generatedToken))) {
+		if (createdToken && (await copyToClipboard(createdToken.token))) {
 			copied = true;
 			setTimeout(() => {
 				copied = false;
 			}, 2000);
 		}
 	}
+
+	function resetForm() {
+		newName = '';
+		newCapabilities = '';
+		newMaxUses = '';
+		newExpiresIn = '';
+	}
+
+	function formatCapabilities(caps: string[] | null): string {
+		if (!caps || caps.length === 0) return 'wildcard';
+		return caps.join(', ');
+	}
+
+	function formatUsage(currentUses: number, maxUses: number | null): string {
+		if (maxUses == null) return `${currentUses} / unlimited`;
+		return `${currentUses} / ${maxUses}`;
+	}
+
+	function tokenStatus(token: EnrollmentTokenResponse): string {
+		if (token.revoked_at) return 'revoked';
+		if (token.expires_at && new Date(token.expires_at) < new Date()) return 'expired';
+		if (token.max_uses != null && token.current_uses >= token.max_uses) return 'exhausted';
+		return 'active';
+	}
+
+	function statusBadgeClass(status: string): string {
+		switch (status) {
+			case 'active':
+				return 'preset-filled-success-500';
+			case 'revoked':
+				return 'preset-filled-error-500';
+			case 'expired':
+			case 'exhausted':
+				return 'preset-tonal';
+			default:
+				return 'preset-tonal';
+		}
+	}
 </script>
 
 <div class="card mb-6 p-6">
-	<h2 class="h3 mb-4">Service Enrollment Token</h2>
-	{#if status === undefined}
-		<p class="text-surface-600 dark:text-surface-400">Loading...</p>
-	{:else}
-		<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
-			A single enrollment token is used by all services (agents, MQTT bridges, SSH agents) to register with the
-			controller.
-		</p>
-		<div class="mb-4 flex items-center gap-3">
-			<span>Status:</span>
-			{#if configured}
-				<span class="badge preset-filled-success-500">Configured</span>
+	<div class="mb-4 flex items-center justify-between">
+		<h2 class="h3">Enrollment Tokens</h2>
+		<div class="flex gap-2">
+			{#if tokens === null}
+				<button class="btn preset-filled-primary-500" onclick={loadTokens} disabled={loading}>
+					{loading ? 'Loading...' : 'Load Tokens'}
+				</button>
 			{:else}
-				<span class="badge preset-tonal">Not configured</span>
+				<button class="btn preset-tonal" onclick={loadTokens} disabled={loading}> Refresh </button>
 			{/if}
+			<button
+				class="btn preset-filled-primary-500"
+				onclick={() => {
+					showCreateDialog = true;
+				}}
+			>
+				Create Token
+			</button>
 		</div>
+	</div>
 
-		{#if generatedToken}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
-				<p class="font-bold">Copy it now — it will not be shown again</p>
-				<div class="mt-2 flex items-start gap-2">
-					<code class="flex-1 break-all">{generatedToken}</code>
-					<button class="btn btn-sm preset-tonal flex-shrink-0" onclick={handleCopy}>
-						{copied ? 'Copied!' : 'Copy'}
+	{#if summary !== undefined}
+		<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
+			{summary.active_count} active enrollment {summary.active_count === 1 ? 'token' : 'tokens'} configured. Tokens allow
+			services to enroll automatically with approved status.
+		</p>
+	{/if}
+
+	{#if createdToken}
+		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
+			<p class="font-bold">Token created — copy it now, it will not be shown again</p>
+			<div class="mt-2 flex items-start gap-2">
+				<code class="flex-1 break-all">{createdToken.token}</code>
+				<button class="btn btn-sm preset-tonal flex-shrink-0" onclick={handleCopy}>
+					{copied ? 'Copied!' : 'Copy'}
+				</button>
+			</div>
+		</aside>
+	{/if}
+
+	{#if showCreateDialog}
+		<div class="mb-4 rounded-lg border p-4">
+			<h3 class="h4 mb-3">Create Enrollment Token</h3>
+			<div class="space-y-3">
+				<label class="label">
+					<span>Name *</span>
+					<input class="input" type="text" bind:value={newName} placeholder="e.g. CI Deploy Token" />
+				</label>
+				<label class="label">
+					<span>Allowed Capabilities</span>
+					<input
+						class="input"
+						type="text"
+						bind:value={newCapabilities}
+						placeholder="e.g. software_discovery, mqtt_bridge (empty = wildcard)"
+					/>
+					<span class="text-xs text-surface-500">Comma-separated. Leave empty for a wildcard token.</span>
+				</label>
+				<label class="label">
+					<span>Max Uses</span>
+					<input class="input" type="number" bind:value={newMaxUses} placeholder="Unlimited" min="1" />
+				</label>
+				<label class="label">
+					<span>Expires In (seconds)</span>
+					<input class="input" type="number" bind:value={newExpiresIn} placeholder="Never" min="60" />
+					<span class="text-xs text-surface-500">e.g. 86400 = 24 hours, 604800 = 7 days</span>
+				</label>
+				<div class="flex gap-2">
+					<button class="btn preset-filled-primary-500" onclick={handleCreate} disabled={creating}>
+						{creating ? 'Creating...' : 'Create'}
+					</button>
+					<button
+						class="btn preset-tonal"
+						onclick={() => {
+							showCreateDialog = false;
+							resetForm();
+						}}
+					>
+						Cancel
 					</button>
 				</div>
-			</aside>
-		{/if}
-
-		<div class="flex gap-2">
-			<button class="btn preset-filled-primary-500" onclick={handleGenerate}>
-				{configured ? 'Regenerate' : 'Generate'}
-			</button>
-			{#if configured}
-				<button class="btn preset-filled-error-500" onclick={handleRevoke}> Revoke </button>
-			{/if}
+			</div>
 		</div>
+	{/if}
+
+	{#if loading}
+		<p class="text-surface-600 dark:text-surface-400">Loading tokens...</p>
+	{:else if tokens && tokens.items.length > 0}
+		<div class="table-container">
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Capabilities</th>
+						<th>Usage</th>
+						<th>Expires</th>
+						<th>Status</th>
+						<th>Created</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each tokens.items as token (token.id)}
+						{@const status = tokenStatus(token)}
+						<tr>
+							<td>{token.name}</td>
+							<td>
+								{#if !token.allowed_capabilities || token.allowed_capabilities.length === 0}
+									<span class="badge preset-tonal text-xs">wildcard</span>
+								{:else}
+									{formatCapabilities(token.allowed_capabilities)}
+								{/if}
+							</td>
+							<td>{formatUsage(token.current_uses, token.max_uses)}</td>
+							<td>{token.expires_at ? formatDate(token.expires_at) : 'never'}</td>
+							<td><span class="badge {statusBadgeClass(status)}">{status}</span></td>
+							<td>{formatDate(token.created_at)}</td>
+							<td>
+								{#if status === 'active'}
+									<button class="btn btn-sm preset-filled-error-500" onclick={() => handleRevoke(token.id)}>
+										Revoke
+									</button>
+								{/if}
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+		{#if tokens.total_pages > 1}
+			<p class="mt-2 text-sm text-surface-500">
+				Page {tokens.page} of {tokens.total_pages} ({tokens.total} total)
+			</p>
+		{/if}
+	{:else if tokens}
+		<p class="text-surface-600 dark:text-surface-400">No enrollment tokens configured.</p>
 	{/if}
 </div>

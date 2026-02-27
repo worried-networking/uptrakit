@@ -124,19 +124,46 @@ export interface UpdateAgentCertificateSettings {
 	renewal_window_hours?: number;
 }
 
-export interface EnrollmentTokenStatus {
-	configured: boolean;
+export interface CreateEnrollmentTokenRequest {
+	name: string;
+	allowed_capabilities?: string[];
+	max_uses?: number;
+	expires_in_seconds?: number;
+}
+
+export interface EnrollmentTokenCreatedResponse {
+	id: string;
+	token: string;
+	name: string;
+	allowed_capabilities: string[] | null;
+	max_uses: number | null;
+	current_uses: number;
+	expires_at: string | null;
+	created_at: string;
+	created_by_user_id: string | null;
+}
+
+export interface EnrollmentTokenResponse {
+	id: string;
+	name: string;
+	allowed_capabilities: string[] | null;
+	max_uses: number | null;
+	current_uses: number;
+	expires_at: string | null;
+	created_at: string;
+	revoked_at: string | null;
+	created_by_user_id: string | null;
+}
+
+export interface EnrollmentTokensSummary {
+	active_count: number;
 }
 
 export interface CombinedSettingsResponse {
 	registration: RegistrationSettings;
 	authentication: AuthenticationSettings;
 	agent_certificates: AgentCertificateSettings;
-	enrollment_token: EnrollmentTokenStatus;
-}
-
-export interface EnrollmentTokenResponse {
-	token: string;
+	enrollment_tokens: EnrollmentTokensSummary;
 }
 
 export interface OidcProviderResponse {

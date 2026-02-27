@@ -11,10 +11,11 @@ import type {
 	CreateApiTokenRequest,
 	CreateApiTokenResponse,
 	CreateAutodiscoveryIgnoreRequest,
+	CreateEnrollmentTokenRequest,
 	CreateOidcProviderRequest,
 	DiscardDiscoveredResponse,
+	EnrollmentTokenCreatedResponse,
 	EnrollmentTokenResponse,
-	EnrollmentTokenStatus,
 	HostResponse,
 	LoginRequest,
 	MessageResponse,
@@ -395,20 +396,33 @@ export function updateAgentCertificateSettings(
 	return request('/settings/agent-certificates', { method: 'PUT', body: JSON.stringify(data) });
 }
 
-export function getEnrollmentTokenStatus(): Promise<EnrollmentTokenStatus> {
-	return request('/services/enrollment-token/status');
-}
-
 export function getCombinedSettings(): Promise<CombinedSettingsResponse> {
 	return request('/settings');
 }
 
-export function createEnrollmentToken(): Promise<EnrollmentTokenResponse> {
-	return request('/services/enrollment-token', { method: 'POST' });
+// --- Enrollment Token APIs ---
+
+export function listEnrollmentTokens(
+	page?: number,
+	perPage?: number
+): Promise<PaginatedResponse<EnrollmentTokenResponse>> {
+	const params = new URLSearchParams();
+	if (page != null) params.set('page', String(page));
+	if (perPage != null) params.set('per_page', String(perPage));
+	const query = params.toString();
+	return request(`/enrollment-tokens${query ? `?${query}` : ''}`);
 }
 
-export function revokeEnrollmentToken(): Promise<MessageResponse> {
-	return request('/services/enrollment-token', { method: 'DELETE' });
+export function createEnrollmentToken(data: CreateEnrollmentTokenRequest): Promise<EnrollmentTokenCreatedResponse> {
+	return request('/enrollment-tokens', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function getEnrollmentToken(id: string): Promise<EnrollmentTokenResponse> {
+	return request(`/enrollment-tokens/${encodeURIComponent(id)}`);
+}
+
+export function revokeEnrollmentToken(id: string): Promise<MessageResponse> {
+	return request(`/enrollment-tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // --- Network Settings APIs ---
