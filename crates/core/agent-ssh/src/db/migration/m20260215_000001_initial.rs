@@ -29,8 +29,8 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(SshHosts::PrivateKey).text().not_null())
                     .col(ColumnDef::new(SshHosts::KeyType).text().not_null())
                     .col(ColumnDef::new(SshHosts::HostKeyFingerprint).text())
-                    .col(ColumnDef::new(SshHosts::CreatedAt).integer().not_null())
-                    .col(ColumnDef::new(SshHosts::UpdatedAt).integer().not_null())
+                    .col(ColumnDef::new(SshHosts::CreatedAt).timestamp().not_null())
+                    .col(ColumnDef::new(SshHosts::UpdatedAt).timestamp().not_null())
                     .to_owned(),
             )
             .await

@@ -17,7 +17,7 @@ use crate::error::{Error, Result};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostSnapshot {
     pub id: String,
-    pub updated_at: i64,
+    pub updated_at: time::OffsetDateTime,
 }
 
 /// Return a lightweight snapshot of every row in `ssh_hosts`, ordered by `id`.
@@ -82,7 +82,7 @@ pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<
         bail!(Error::HostNameConflict(params.name));
     }
 
-    let now = now_unix_timestamp();
+    let now = time::OffsetDateTime::now_utc();
     let id = params.host_id.to_string();
 
     let model = ActiveModel {
@@ -196,7 +196,7 @@ pub async fn update_host(
         model.sudo_policy = Set(policy);
     }
 
-    model.updated_at = Set(now_unix_timestamp());
+    model.updated_at = Set(time::OffsetDateTime::now_utc());
 
     model.update(db).await.context_to::<Error>()
 }
@@ -252,7 +252,7 @@ pub async fn update_host_sudo_state(
     if let Some(policy) = sudo_policy {
         model.sudo_policy = Set(policy);
     }
-    model.updated_at = Set(now_unix_timestamp());
+    model.updated_at = Set(time::OffsetDateTime::now_utc());
     model.update(db).await.context_to::<Error>()?;
     Ok(())
 }
@@ -292,13 +292,6 @@ pub async fn find_hosts_by_hostname(
         query = query.filter(Column::Port.eq(i32::from(p)));
     }
     query.all(db).await.context_to::<Error>()
-}
-
-fn now_unix_timestamp() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -794,7 +787,7 @@ mod tests {
         assert!(ids.contains(&h2.id.as_str()));
 
         for snap in &snapshots {
-            assert!(snap.updated_at > 0);
+            assert!(snap.updated_at > time::OffsetDateTime::UNIX_EPOCH);
         }
     }
 

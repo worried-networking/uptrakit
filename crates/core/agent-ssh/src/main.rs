@@ -472,7 +472,7 @@ fn diff_host_snapshots<'a>(
     prev: &'a [host_ops::HostSnapshot],
     curr: &'a [host_ops::HostSnapshot],
 ) -> (Vec<&'a str>, HashSet<&'a str>) {
-    let prev_map: std::collections::HashMap<&str, i64> =
+    let prev_map: std::collections::HashMap<&str, time::OffsetDateTime> =
         prev.iter().map(|s| (s.id.as_str(), s.updated_at)).collect();
     let curr_ids: HashSet<&str> = curr.iter().map(|s| s.id.as_str()).collect();
 
@@ -732,10 +732,11 @@ mod tests {
 
     // ── snapshot diff tests ──────────────────────────────────────────────────
 
-    fn snap(id: &str, updated_at: i64) -> host_ops::HostSnapshot {
+    fn snap(id: &str, ts: i64) -> host_ops::HostSnapshot {
         host_ops::HostSnapshot {
             id: id.to_string(),
-            updated_at,
+            updated_at: time::OffsetDateTime::from_unix_timestamp(ts)
+                .unwrap_or(time::OffsetDateTime::UNIX_EPOCH),
         }
     }
 

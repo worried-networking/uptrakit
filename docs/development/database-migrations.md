@@ -96,6 +96,99 @@ enum MyTable {
 
 ---
 
+## Timestamp Columns
+
+All entity columns that store point-in-time values must use `time::OffsetDateTime`, backed by
+SeaORM's `.timestamp()` column type (mapped to `TEXT` in SQLite via RFC 3339, and to the native
+`TIMESTAMP` type on PostgreSQL and MySQL).
+
+```rust
+// ✓ Correct
+.col(ColumnDef::new(MyTable::CreatedAt).timestamp().not_null())
+.col(ColumnDef::new(MyTable::UpdatedAt).timestamp().not_null())
+
+// ✗ Wrong — i64 unix timestamps silently store 0 on clock error; lose timezone info
+.col(ColumnDef::new(MyTable::CreatedAt).integer().not_null())
+```
+
+In entity models, use `time::OffsetDateTime` directly:
+
+```rust
+// ✓ Correct
+pub created_at: time::OffsetDateTime,
+pub updated_at: time::OffsetDateTime,
+
+// ✗ Wrong — i64 unix timestamps are not acceptable for entity fields
+pub created_at: i64,
+```
+
+Always stamp new rows with `time::OffsetDateTime::now_utc()`. Never use `SystemTime::now()` with
+`.unwrap_or(0)`: a system-clock error silently produces the Unix epoch (1970-01-01), which is
+indistinguishable from a real timestamp and makes stale-detection logic incorrect.
+
+### Converting existing INTEGER timestamps
+
+If an existing table stores timestamps as `INTEGER` (unix seconds), write a data migration using
+SQLite's `strftime` function via `execute_unprepared()` (the typed API cannot express this):
+
+```rust
+// Recreate the table with TEXT timestamps; convert via strftime
+manager
+    .get_connection()
+    .execute_unprepared(
+        "INSERT INTO my_table_new SELECT id, name, \
+         strftime('%Y-%m-%dT%H:%M:%S+00:00', created_at, 'unixepoch'), \
+         strftime('%Y-%m-%dT%H:%M:%S+00:00', updated_at, 'unixepoch') \
+         FROM my_table",
+    )
+    .await?;
+```
+
+The reverse (`down()`) uses `CAST(strftime('%s', col) AS INTEGER)`.
+
+---
+
+## Foreign Key and Sort Column Indexing
+
+Every column that appears in a `WHERE`, `JOIN ON`, or `ORDER BY` clause must have a standalone
+index. SeaORM's `Index::create()` is the preferred API:
+
+```rust
+manager
+    .create_index(
+        Index::create()
+            .name("idx_my_table_fk_col")
+            .table(MyTable::Table)
+            .col(MyTable::FkCol)
+            .to_owned(),
+    )
+    .await?;
+```
+
+Always drop the index in `down()`:
+
+```rust
+manager
+    .drop_index(
+        Index::drop()
+            .name("idx_my_table_fk_col")
+            .table(MyTable::Table)
+            .to_owned(),
+    )
+    .await?;
+```
+
+### Checklist when adding a new table
+
+For each new table, verify:
+
+- Primary key column — always indexed (implicit for `PRIMARY KEY`)
+- `tenant_id` column — included in composite PK or has a standalone index
+- Every FK column referenced in `SELECT … WHERE fk = ?` or `JOIN … ON a.fk = b.id`
+- Any column used in `ORDER BY` in API list endpoints (e.g. `created_at`)
+
+---
+
 ## When to use `execute_unprepared()`
 
 Prefer the typed SeaORM `SchemaManager` API. Raw SQL via `execute_unprepared()` is accepted

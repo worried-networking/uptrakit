@@ -263,8 +263,18 @@ async fn run_show(db: &sea_orm::DatabaseConnection, name_or_id: &str) -> Result<
             .map(|v| if v { "yes" } else { "no" })
             .unwrap_or("unknown")
     );
-    println!("Created at:      {}", format_timestamp(host.created_at));
-    println!("Updated at:      {}", format_timestamp(host.updated_at));
+    println!(
+        "Created at:      {}",
+        host.created_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| format!("{:?}", host.created_at))
+    );
+    println!(
+        "Updated at:      {}",
+        host.updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| format!("{:?}", host.updated_at))
+    );
 
     Ok(())
 }
@@ -541,11 +551,3 @@ fn log_resolved_defaults(
     }
 }
 
-fn format_timestamp(unix_ts: i64) -> String {
-    time::OffsetDateTime::from_unix_timestamp(unix_ts)
-        .map(|dt| {
-            dt.format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_else(|_| unix_ts.to_string())
-        })
-        .unwrap_or_else(|_| unix_ts.to_string())
-}

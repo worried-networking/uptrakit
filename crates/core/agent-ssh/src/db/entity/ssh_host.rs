@@ -69,8 +69,8 @@ pub struct Model {
     /// Machine ID of the remote host, populated from `ReportHosts` data.
     /// Empty string until the host has been connected to at least once.
     pub machine_id: String,
-    pub created_at: i64,
-    pub updated_at: i64,
+    pub created_at: time::OffsetDateTime,
+    pub updated_at: time::OffsetDateTime,
     /// Whether passwordless sudo (`sudo -n true`) is available for this host's agent user.
     ///
     /// `None` means the value has not yet been detected (host was bootstrapped
@@ -165,8 +165,8 @@ mod tests {
             key_type: SshKeyType::Ed25519,
             host_key_fingerprint: None,
             machine_id: String::new(),
-            created_at: 0,
-            updated_at: 0,
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+            updated_at: time::OffsetDateTime::UNIX_EPOCH,
             sudo_available,
             is_root,
             sudo_policy: sudo_policy.to_string(),

@@ -196,33 +196,6 @@ error reporting.
 
 ### Issues
 
-**[SEVERITY: Medium]** `host_ops.rs:197-202` — `now_unix_timestamp()` uses `std::time::SystemTime` instead of `time::OffsetDateTime`
-
-```rust
-// host_ops.rs:197-202
-fn now_unix_timestamp() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-```
-
-The rest of the codebase uses `time::OffsetDateTime::now_utc()`. This function
-introduces a second clock source. The silent `unwrap_or(0)` on error (time
-running backwards, which can happen on VMs) sets `created_at` / `updated_at` to
-the Unix epoch — January 1, 1970 — with no log line. The correct implementation
-is:
-
-```rust
-fn now_unix_timestamp() -> i64 {
-    time::OffsetDateTime::now_utc().unix_timestamp()
-}
-```
-
-This matches the crate's declared `time` workspace dependency, removes the
-silent-zero failure mode, and eliminates the inconsistent clock source.
-
 **[SEVERITY: Low]** `client.rs:158-179` — `establish_ssh_session` error type is `String`
 
 `establish_ssh_session` returns `Result<Arc<SshSession>, String>`. All call
@@ -416,38 +389,6 @@ already present in `uptrakit-service-sdk`) should wrap the enrollment attempt.
   time-ordered, globally unique IDs consistent with the rest of the codebase.
 
 ### Issues
-
-**[SEVERITY: Medium]** `db/entity/ssh_host.rs:71-72` and `db/migration/m20260215_000001_initial.rs:32-33` —
-`created_at` and `updated_at` stored as `INTEGER` (Unix epoch seconds) instead of typed TIMESTAMP columns
-
-```rust
-// ssh_host.rs:71-72
-pub created_at: i64,
-pub updated_at: i64,
-```
-
-```rust
-// m20260215_000001_initial.rs:32-33
-.col(ColumnDef::new(SshHosts::CreatedAt).integer().not_null())
-.col(ColumnDef::new(SshHosts::UpdatedAt).integer().not_null())
-```
-
-All other entities in the workspace use `time::OffsetDateTime` with SeaORM's
-`DateTimeWithTimeZone` column type. Using raw `i64` epoch seconds:
-
-1. Breaks consistency with the rest of the schema — generic tools and future
-   contributors will not recognize these columns as timestamps.
-2. Prevents SeaORM from performing timestamp-aware comparisons or ordering
-   without manual casting.
-3. Is directly linked to the `now_unix_timestamp()` / `SystemTime` issue in
-   `host_ops.rs` (see Code Quality section): had the column type been
-   `OffsetDateTime`, the compiler would have guided the implementer toward
-   `time::OffsetDateTime::now_utc()`.
-
-Migration path: add a new migration that alters the column type to
-`timestamp_with_time_zone`, reads existing `INTEGER` rows, converts them to
-RFC 3339 strings, and updates the entity model field types to
-`time::OffsetDateTime`.
 
 **[SEVERITY: Medium]** `db/entity/ssh_host.rs:70` — `machine_id` stored as empty string sentinel instead
 of `NULL`
