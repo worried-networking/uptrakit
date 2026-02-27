@@ -89,6 +89,7 @@ impl SshConnectionPool {
                     tracing::debug!(
                         host_id = %host.id,
                         host_name = %host.name,
+                        hostname = %host.hostname,
                         "reusing pooled SSH session"
                     );
                     return Ok(Arc::clone(&entry.session));
@@ -97,6 +98,7 @@ impl SshConnectionPool {
                 tracing::debug!(
                     host_id = %host.id,
                     host_name = %host.name,
+                    hostname = %host.hostname,
                     "pooled SSH session expired (idle TTL exceeded), reconnecting"
                 );
                 pool.remove(&host.id);
@@ -108,6 +110,7 @@ impl SshConnectionPool {
         tracing::debug!(
             host_id = %host.id,
             host_name = %host.name,
+            hostname = %host.hostname,
             "establishing new SSH session for pool"
         );
         let session = establish_session(host).await?;

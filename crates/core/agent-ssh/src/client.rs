@@ -284,6 +284,11 @@ pub(crate) async fn handle_check_versions_ssh(
         host.resolved_sudo_context(),
     ));
 
+    tracing::debug!(
+        host_name = %host.name,
+        hostname = %host.hostname,
+        "running version check on SSH host"
+    );
     // The session Arc is returned to the pool (it stays alive via the pool's own Arc).
     // If a channel-open error occurred during version checks, the session may be stale;
     // the pool will detect this on the next acquire via TTL.
@@ -380,6 +385,11 @@ pub(crate) async fn handle_execute_update_ssh(
         host.resolved_sudo_context(),
     ));
 
+    tracing::debug!(
+        host_name = %host.name,
+        hostname = %host.hostname,
+        "running update on SSH host"
+    );
     uptrakit_agent_core::handle_execute_update(payload, executor, in_flight_update, conn, &ctx)
         .await;
 }
@@ -462,6 +472,11 @@ pub(crate) async fn handle_discover_software_ssh(
         host.resolved_sudo_context(),
     ));
 
+    tracing::debug!(
+        host_name = %host.name,
+        hostname = %host.hostname,
+        "running discovery on SSH host"
+    );
     uptrakit_agent_core::handle_discover_software(payload, executor, conn, &ctx).await
 }
 

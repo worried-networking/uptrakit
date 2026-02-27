@@ -56,6 +56,7 @@ pub struct RemoteCommandResult {
 struct BootstrapHandler {
     expected_fingerprint: Option<String>,
     observed_fingerprint: Arc<Mutex<Option<String>>>,
+    hostname: String,
 }
 
 impl client::Handler for BootstrapHandler {
@@ -70,13 +71,22 @@ impl client::Handler for BootstrapHandler {
         if let Some(ref expected) = self.expected_fingerprint {
             let matches = fingerprint == *expected;
             if matches {
+                tracing::debug!(
+                    hostname = %self.hostname,
+                    fingerprint = %fingerprint,
+                    "host key fingerprint verified"
+                );
                 let mut fp = self.observed_fingerprint.lock().await;
                 *fp = Some(fingerprint);
             }
             Ok(matches)
         } else {
             // TOFU: accept and record.
-            tracing::info!(fingerprint = %fingerprint, "accepting host key via trust-on-first-use (TOFU)");
+            tracing::info!(
+                hostname = %self.hostname,
+                fingerprint = %fingerprint,
+                "accepting host key via trust-on-first-use (TOFU)"
+            );
             let mut fp = self.observed_fingerprint.lock().await;
             *fp = Some(fingerprint);
             Ok(true)
@@ -191,6 +201,7 @@ impl LineBuffer {
 /// private handler type does not leak into the public API.
 pub struct SshSession {
     handle: Handle<BootstrapHandler>,
+    pub(crate) hostname: String,
 }
 
 impl SshSession {
@@ -206,6 +217,7 @@ impl SshSession {
         command: &str,
         output_tx: Option<&mpsc::Sender<UpdateOutputLine>>,
     ) -> Result<RemoteCommandResult> {
+        tracing::trace!(hostname = %self.hostname, command = %command, "executing SSH command");
         let mut channel = self.handle.channel_open_session().await.map_err(|e| {
             report!(Error::SshCommand(format!(
                 "failed to open session channel: {e}"
@@ -268,11 +280,13 @@ pub async fn connect_and_authenticate(
     auth: &AuthMethod<'_>,
     expected_fingerprint: Option<&str>,
 ) -> Result<(SshSession, String)> {
+    tracing::debug!(hostname = %config.hostname, port = config.port, "connecting to SSH host");
     let observed_fingerprint = Arc::new(Mutex::new(None));
 
     let handler = BootstrapHandler {
         expected_fingerprint: expected_fingerprint.map(String::from),
         observed_fingerprint: Arc::clone(&observed_fingerprint),
+        hostname: config.hostname.clone(),
     };
 
     let ssh_config = Arc::new(client::Config::default());
@@ -360,7 +374,13 @@ pub async fn connect_and_authenticate(
         }
     }
 
-    Ok((SshSession { handle }, fp))
+    Ok((
+        SshSession {
+            handle,
+            hostname: config.hostname.clone(),
+        },
+        fp,
+    ))
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────
@@ -460,6 +480,7 @@ mod tests {
         let mut handler = BootstrapHandler {
             expected_fingerprint: None,
             observed_fingerprint: Arc::clone(&observed),
+            hostname: "test-host".to_string(),
         };
 
         let (pem, _) = crate::ssh_key::generate_ed25519_keypair().expect("keygen");
@@ -483,6 +504,7 @@ mod tests {
         let mut handler = BootstrapHandler {
             expected_fingerprint: Some("SHA256:wrong_fingerprint".to_string()),
             observed_fingerprint: Arc::clone(&observed),
+            hostname: "test-host".to_string(),
         };
 
         let (pem, _) = crate::ssh_key::generate_ed25519_keypair().expect("keygen");
@@ -511,6 +533,7 @@ mod tests {
         let mut handler = BootstrapHandler {
             expected_fingerprint: Some(expected_fp.clone()),
             observed_fingerprint: Arc::clone(&observed),
+            hostname: "test-host".to_string(),
         };
 
         let result = handler.check_server_key(public_key).await.expect("check");
