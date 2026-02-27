@@ -543,7 +543,30 @@ impl MqttLeaseCoordinator {
                             "failed to update lease".into(),
                         ))?;
                 } else {
-                    // Different instance had the lease - take it over
+                    // Different instance holds the lease — only take it over if the
+                    // existing holder's heartbeat is stale (i.e. it has likely crashed
+                    // or restarted). A recent heartbeat means the holder is still alive
+                    // and a takeover would cause duplicate MQTT connections.
+                    let stale_secs =
+                        time::Duration::seconds(MQTT_LEASE_STALE_AFTER.as_secs() as i64);
+                    let stale_threshold = now - stale_secs;
+                    if existing.heartbeat_at > stale_threshold {
+                        tracing::debug!(
+                            %mqtt_client_id,
+                            existing_instance = %existing.instance_id,
+                            heartbeat_age_secs = (now - existing.heartbeat_at).whole_seconds(),
+                            "skipping lease takeover: existing holder heartbeat is recent"
+                        );
+                        continue;
+                    }
+
+                    // Previous holder's heartbeat is stale — take over the lease.
+                    tracing::info!(
+                        %mqtt_client_id,
+                        existing_instance = %existing.instance_id,
+                        heartbeat_age_secs = (now - existing.heartbeat_at).whole_seconds(),
+                        "taking over stale MQTT lease"
+                    );
                     let mut active: mqtt_lease::ActiveModel = existing.clone().into_active_model();
                     active.instance_id = ActiveValue::Set(instance_id.to_string());
                     active.heartbeat_at = ActiveValue::Set(now);
@@ -927,5 +950,64 @@ mod tests {
         let leases = mqtt_lease::Entity::find().all(&db).await?;
         assert_eq!(leases.len(), 2);
         Ok(())
+    }
+
+    /// `reconcile_mqtt_clients` must NOT take over a lease whose heartbeat is
+    /// still fresh (within `MQTT_LEASE_STALE_AFTER`). Two concurrent controller
+    /// instances can legitimately both attempt reconciliation; the staleness
+    /// guard ensures only one of them actually holds each lease at a time.
+    #[tokio::test]
+    async fn reconcile_skips_takeover_of_fresh_lease() {
+        let db = test_db().await;
+        let tenant = seed_tenant(&db).await;
+        let client = seed_client(&db, tenant.id).await;
+
+        // Seed a recent lease held by a different instance ("instance-2").
+        let now = OffsetDateTime::now_utc();
+        let existing_lease = mqtt_lease::ActiveModel {
+            id: ActiveValue::Set(Uuid::now_v7()),
+            tenant_id: ActiveValue::Set(client.tenant_id),
+            mqtt_client_id: ActiveValue::Set(client.id),
+            instance_id: ActiveValue::Set("instance-2".to_string()),
+            // Fresh heartbeat — NOT stale
+            heartbeat_at: ActiveValue::Set(now),
+            created_at: ActiveValue::Set(now),
+        };
+        existing_lease.insert(&db).await.expect("insert lease");
+
+        // Register a service for "instance-1".
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::now_v7();
+        let _ = registry
+            .register(
+                service_id,
+                mqtt_caps(),
+                Some("instance-1".to_string()),
+                Some(10),
+            )
+            .await;
+
+        let coordinator = MqttLeaseCoordinator::new(db.clone(), registry);
+        let configs = coordinator
+            .reconcile_mqtt_clients(service_id, "instance-1", &[client.id])
+            .await
+            .expect("reconcile");
+
+        // No configs returned — the fresh lease from instance-2 was NOT taken over.
+        assert!(
+            configs.is_empty(),
+            "fresh lease from another instance should not be taken over"
+        );
+
+        // The existing lease must still belong to instance-2.
+        let lease = mqtt_lease::Entity::find()
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("lease exists");
+        assert_eq!(
+            lease.instance_id, "instance-2",
+            "lease owner must remain instance-2 after a skipped takeover"
+        );
     }
 }
