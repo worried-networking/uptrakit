@@ -590,9 +590,13 @@ Polish and additional capabilities for production use.
 
 ### Real-Time Frontend Updates
 
-- [ ] **Real-time frontend updates** — Add a WebSocket or SSE endpoint for the admin UI
+- [x] **Real-time update output streaming** — SSE endpoint (`GET /api/v1/update-history/{id}/output/stream`)
+  for live-tailing update command output in the browser and CLI. In-process `UpdateOutputBroadcaster`
+  fans out lines to SSE subscribers. Frontend uses xterm.js with full ANSI color support. CLI supports
+  `--follow` and `history tail`.
+- [ ] **Real-time software/host state updates** — Add SSE or WebSocket endpoint for the admin UI
   so service status changes, MQTT connection status, and version check completions are
-  pushed to the browser without manual polling.
+  pushed to the browser without manual polling (replaces current `setInterval` polling).
 
 ### Notification System
 

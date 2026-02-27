@@ -166,6 +166,17 @@ Filtering uses `?capability=software_discovery` on the list endpoint. There is n
 All services connect to `/api/v1/ws/service` over mTLS and exchange shared `ServiceMessage`/`ControllerMessage` enums. The
 AsyncAPI definition lives at `crates/shared/wire/asyncapi.yaml` and is described in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 
+## Update output streaming (SSE)
+
+The controller provides a browser-facing SSE endpoint (`GET /api/v1/update-history/{id}/output/stream`) for real-time
+update log tailing. This is a standard HTTP streaming endpoint — separate from the WebSocket wire protocol between
+services and the controller.
+
+An in-process `UpdateOutputBroadcaster` (`crates/ui/web-api/src/update_output_broadcaster.rs`) maintains per-update
+`tokio::sync::broadcast` channels. When an agent sends `UpdateOutput` messages over WebSocket, the handler fans lines
+out to both the database and any SSE subscribers. The SSE handler replays stored lines on connect and then streams new
+lines in real time. The frontend renders output in an xterm.js terminal with full ANSI color support.
+
 ## OpenAPI Client
 
 The `uptrakit-openapi-client` crate (`crates/shared/openapi-client/`) provides a typed HTTP

@@ -155,6 +155,67 @@ Types are defined in `crates/shared/web-api-types/src/services.rs`:
 - `TenantContext` middleware extracts `X-Tenant-Id` from the request or falls back to the default tenant (`AppState.default_tenant_id`).
 - Global tables like `users`, `roles`, `permissions`, `api_tokens`, and `pending_*` remain unscoped.
 
+## Update Output Streaming (SSE)
+
+`GET /api/v1/update-history/{id}/output/stream` — Server-Sent Events (SSE) endpoint for real-time update
+output streaming. Requires the `ViewSoftware` permission (same as the update history endpoints). Supports
+both session cookie and API token (Bearer) authentication.
+
+This endpoint is a standard HTTP streaming endpoint using the `text/event-stream` content type — it is
+**not** part of the WebSocket wire protocol between services and the controller.
+
+### Request
+
+```http
+GET /api/v1/update-history/{id}/output/stream HTTP/1.1
+Accept: text/event-stream
+Authorization: Bearer <token>
+```
+
+### Event format
+
+Two event types are emitted:
+
+**`output`** — a single line of update output:
+
+```text
+event: output
+data: {"id":"<uuid>","text":"Installing package...\n","stream":"stdout","timestamp":"2026-02-27T12:00:00Z","seq":0}
+```
+
+**`completed`** — the update has finished (stream ends after this event):
+
+```text
+event: completed
+data: {"status":"completed","error":null}
+```
+
+### Behavior
+
+1. Subscribes to the in-process broadcast channel **before** loading stored lines (avoids gaps).
+2. Replays all existing `update_output_line` rows from the database (ordered by creation time).
+3. If the update is already completed/failed: replays stored output, sends a `completed` event, and closes.
+4. If the update is in-progress: replays stored output, then streams new lines in real time.
+5. Sequence-based deduplication prevents replayed lines from being sent twice.
+6. A 15-second keep-alive comment (`: keep-alive`) prevents proxies from closing idle connections.
+
+### Response types
+
+Types are defined in `crates/shared/web-api-types/src/update_history.rs`:
+
+| Type | Fields |
+| --- | --- |
+| `OutputLineSSE` | `id` (Uuid), `text` (String), `stream` (String), `timestamp` (OffsetDateTime), `seq` (u64) |
+| `UpdateCompletedSSE` | `status` (String), `error` (Option&lt;String&gt;) |
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/update_history.rs` | SSE handler (`stream_update_output`) |
+| `crates/ui/web-api/src/update_output_broadcaster.rs` | In-process broadcast registry (`UpdateOutputBroadcaster`) |
+| `crates/shared/web-api-types/src/update_history.rs` | SSE event types (`OutputLineSSE`, `UpdateCompletedSSE`) |
+
 ## Service Operations
 
 - `/api/v1/agents/{id}/version-check`: trigger a version check (requires `ManageSoftware`).

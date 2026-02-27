@@ -36,8 +36,9 @@ types via `uptrakit_openapi_client::types::*`,
 `uptrakit_openapi_client::ReqwestError`.
 
 **Full API coverage:** The client covers all JSON REST endpoints exposed by the
-web API. Excluded endpoints are WebSocket (`/api/v1/ws/service`), OIDC browser
-callback (`/api/v1/auth/oidc/callback`), and OCSP binary protocol endpoints
+web API, plus the SSE streaming endpoint for update output. Excluded endpoints
+are WebSocket (`/api/v1/ws/service`), OIDC browser callback
+(`/api/v1/auth/oidc/callback`), and OCSP binary protocol endpoints
 (`/api/v1/pki/ocsp`).
 
 ## Crate structure
@@ -64,7 +65,9 @@ crates/shared/openapi-client/
     ├── settings_mqtt.rs    # MQTT client settings CRUD + limit management
     ├── software_items.rs   # Software item CRUD + host assignment + version check/update
     ├── system_alerts.rs    # System alerts
-    └── update_history.rs   # Update history list/get
+    ├── update_history.rs   # Update history list/get
+    ├── sse.rs              # Lightweight SSE protocol parser (parse_sse_stream)
+    └── update_output_stream.rs  # Typed SSE streaming (stream_update_output)
 ```
 
 ## Client usage
@@ -287,6 +290,19 @@ directly. `Option::None` fields are automatically skipped by
 
 - `list_update_history(&self, query) -> Result<PaginatedResponse<UpdateHistoryResponse>>`
 - `get_update_history(&self, id: &Uuid) -> Result<UpdateHistoryResponse>`
+
+### Update output streaming (`update_output_stream.rs`)
+
+- `stream_update_output(&self, id: &Uuid) -> Result<impl Stream<Item = Result<UpdateOutputEvent, StreamError>>>`
+
+This method connects to the SSE endpoint and returns an async `Stream` of typed events. Unlike
+JSON endpoints, it uses a streaming HTTP connection with `Accept: text/event-stream`. The
+returned stream yields `UpdateOutputEvent::Output(OutputLineSSE)` for each output line and
+`UpdateOutputEvent::Completed(UpdateCompletedSSE)` when the update finishes. The client does
+not set a request timeout (the connection is long-lived).
+
+The SSE protocol parser (`sse.rs`) uses `reqwest::Response::chunk()` for incremental reading
+and handles event boundaries, multi-line data fields, and comment lines.
 
 ## Internal helpers
 

@@ -27,8 +27,10 @@ Use the filter controls at the top of the page to narrow the results:
 - **Software item** — show only updates for a specific software item
 - **Status** — show only entries with a particular status (e.g. only failures)
 
-Filters can be combined. Click any row to view the full entry details, including the command
-output captured during the update.
+Filters can be combined. Click any row to expand the entry and view output in an xterm.js terminal
+with full ANSI color support. For in-progress or pending updates, the terminal streams output in
+real time via SSE — a pulsing "Live" badge indicates an active stream. For completed or failed
+updates, the stored output is rendered in the terminal.
 
 ### CLI
 
@@ -51,7 +53,13 @@ uptrakit history list --host <HOST_ID> --status failed --page 1 --per-page 5
 
 # Show full details for a specific history entry (includes command output)
 uptrakit history show <HISTORY_ID>
+
+# Tail the live output of an in-progress update
+uptrakit history tail <HISTORY_ID>
 ```
+
+The `tail` command streams output in real time. ANSI escape codes pass through natively to
+your terminal. Press Ctrl+C to detach — the update continues in the background.
 
 ## Update Statuses
 
@@ -83,8 +91,12 @@ checks only — it never installs or upgrades software.
 3. Select the target host and the target version.
 4. Confirm the update. A new history entry with status `pending` appears immediately.
 
-You can monitor the entry status in real time on the History page. The status updates as the
-agent progresses through the update.
+When triggering from the **Software** detail page, a live terminal modal opens automatically
+after the update is submitted, showing real-time output with ANSI color support. You can close
+the modal at any time — the update continues in the background.
+
+On the **History** page, expand any in-progress entry to see a live terminal with streaming
+output.
 
 ### CLI
 
@@ -92,11 +104,17 @@ agent progresses through the update.
 # Trigger an update for a software item on a specific host
 uptrakit update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0"
 
+# Trigger and follow the output in real time
+uptrakit update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0" --follow
+
 # Include optional release metadata for traceability
 uptrakit update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0" \
   --release-tag "v2.0.0" \
   --release-url "https://github.com/example/repo/releases/tag/v2.0.0"
 ```
+
+With `--follow` / `-f`, the CLI connects to the SSE stream after triggering and prints output
+lines to stdout in real time. Status changes print to stderr. Press Ctrl+C to detach.
 
 ## Initiated By
 

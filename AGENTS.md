@@ -88,18 +88,18 @@ uptrakit/
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, etc.); feature-gated: sea-orm, openapi
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing
+│   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, cron utils, TaskExecutor trait, SchedulerNotifier trait, 4 built-in executors
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, services, software-items, plugin-configs, autodiscovery, checks, updates, history, scheduler, settings); lib target exposes modules for integration tests
+│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, services, software-items, plugin-configs, autodiscovery, checks, updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; lib target exposes modules for integration tests
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
-│   │   ├── lib/                        # Shared modules: api client, auth store, types, utils, notifications
-│   │   │   └── components/             # Shared UI: ConfirmDialog, ModalBackdrop (focus-trapped), ContextMenu (viewport-aware, keyboard-navigable), Pagination
+│   │   ├── lib/                        # Shared modules: api client, auth store, types, utils, notifications, sse.ts (SSE connection utility)
+│   │   │   └── components/             # Shared UI: ConfirmDialog, ModalBackdrop (focus-trapped), ContextMenu (viewport-aware, keyboard-navigable), Pagination, TerminalOutput (xterm.js wrapper with dark/light theme)
 │   │   └── routes/                     # SvelteKit file-based routes
 │   │       ├── profile/                #   /profile — account info + API token management (create/revoke)
 │   │       ├── history/                #   /history — update history with filters (host, software item, status) + trigger update button
@@ -230,9 +230,11 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Keep the openapi-client in sync with web-api endpoints.** Any web-api endpoint addition or change
    must be reflected in the `uptrakit-openapi-client` crate: new endpoints get client methods, changed
    signatures/response types are updated, removed endpoints have their client methods removed. Excluded
-   endpoints: WebSocket, OIDC browser callback, OCSP binary protocol. All entity ID parameters must use
-   `&Uuid` (not `&str`), and all response ID fields must be `Uuid` (not `String`) — the only exception
-   is `SystemAlert::id` which uses hardcoded string identifiers. See
+   endpoints: WebSocket, OIDC browser callback, OCSP binary protocol. The SSE streaming endpoint
+   (`GET /api/v1/update-history/{id}/output/stream`) is included — see `update_output_stream.rs` and
+   `sse.rs`. All entity ID parameters must use `&Uuid` (not `&str`), and all response ID fields must be
+   `Uuid` (not `String`) — the only exception is `SystemAlert::id` which uses hardcoded string
+   identifiers. See
    [docs/development/openapi-client.md](docs/development/openapi-client.md) for the full method reference.
 1. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. Follow the error handling
    requirements in [docs/development/coding-standards.md](docs/development/coding-standards.md): define typed errors

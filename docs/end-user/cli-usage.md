@@ -277,11 +277,18 @@ Trigger a software update on a specific host. Updates are always manual and user
 # Trigger an update to a specific version
 uptrakit update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0"
 
+# Follow the update output in real time (streams output until the update completes)
+uptrakit update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0" --follow
+
 # With optional release metadata
 uptrakit update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0" \
   --release-tag "v2.0.0" \
   --release-url "https://github.com/example/repo/releases/tag/v2.0.0"
 ```
+
+The `--follow` / `-f` flag connects to the real-time output stream after triggering the update.
+Output lines (including ANSI escape codes) print to stdout; status messages print to stderr. Press
+Ctrl+C to detach — the update continues in the background.
 
 For a convenience shortcut that resolves the current `latest_version` automatically, use the
 `software-items update-latest` subcommand (see the [Software Items](#software-items) section above).
@@ -306,7 +313,15 @@ uptrakit history list --host <HOST_ID> --status failed --page 1 --per-page 5
 
 # Show details for a specific history entry
 uptrakit history show <HISTORY_ID>
+
+# Tail the live output of an in-progress update
+uptrakit history tail <HISTORY_ID>
 ```
+
+The `tail` subcommand streams update output in real time via SSE. Output lines print to
+stdout with native ANSI escape code pass-through. Status changes print to stderr. Press
+Ctrl+C to detach without aborting the update. Exit codes: 0 = completed, 1 = failed,
+2 = detached or other.
 
 See also: [Update History Entity](../architecture/update-history-entity.md).
 
