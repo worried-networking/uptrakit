@@ -48,13 +48,12 @@ impl NotificationService {
 
     /// Push a message to a specific service (local + optional NATS).
     ///
-    /// MQTT-specific messages that may contain credentials (`TenantAssignments`,
-    /// `TenantConfigUpdated`, `TenantRevoked`) are delivered locally but **not**
-    /// published to NATS to prevent credential leakage. The MQTT service
-    /// reconciles its state from the DB on reconnect.
+    /// Messages that contain credentials (`TenantAssignments`, `TenantConfigUpdated`,
+    /// `TenantRevoked`, `ServiceCredentials`) are delivered locally but **not**
+    /// published to NATS to prevent credential leakage.
     pub async fn send(&self, service_id: &Uuid, msg: ControllerMessage) -> bool {
         let local = self.registry.send(service_id, msg.clone()).await;
-        if !is_mqtt_tenant_message(&msg) {
+        if !is_local_only_message(&msg) {
             self.maybe_publish_nats(Some(*service_id), None, msg).await;
         }
         local
@@ -62,11 +61,11 @@ impl NotificationService {
 
     /// Broadcast a message to all connected services (local + optional NATS).
     ///
-    /// MQTT-specific messages that may contain credentials are delivered locally
-    /// but **not** published to NATS (see [`Self::send`] doc comment).
+    /// Messages that contain credentials are delivered locally but **not**
+    /// published to NATS (see [`Self::send`] doc comment).
     pub async fn broadcast(&self, msg: ControllerMessage) {
         self.registry.broadcast(msg.clone()).await;
-        if !is_mqtt_tenant_message(&msg) {
+        if !is_local_only_message(&msg) {
             self.maybe_publish_nats(None, None, msg).await;
         }
     }
@@ -146,18 +145,18 @@ impl NotificationService {
     }
 }
 
-/// Returns `true` for MQTT-specific messages that may contain credentials
-/// (`TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`).
+/// Returns `true` for messages that must only be delivered locally (via
+/// WebSocket) and **never** published to NATS.
 ///
-/// These messages are delivered locally but **not** published to NATS to
-/// prevent credential leakage. The MQTT service reconciles its state from
-/// the DB on reconnect.
-pub(crate) fn is_mqtt_tenant_message(msg: &ControllerMessage) -> bool {
+/// This includes credential-bearing MQTT tenant messages and infrastructure
+/// credential messages (`ServiceCredentials`).
+pub(crate) fn is_local_only_message(msg: &ControllerMessage) -> bool {
     matches!(
         msg,
         ControllerMessage::TenantAssignments(_)
             | ControllerMessage::TenantConfigUpdated(_)
             | ControllerMessage::TenantRevoked(_)
+            | ControllerMessage::ServiceCredentials(_)
     )
 }
 
@@ -182,12 +181,12 @@ mod tests {
     }
 
     #[test]
-    fn is_mqtt_tenant_message_matches_credential_bearing_variants() {
+    fn is_local_only_message_matches_credential_bearing_variants() {
         // Credential-bearing variants must be filtered from NATS.
-        assert!(is_mqtt_tenant_message(
+        assert!(is_local_only_message(
             &ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload { tenants: vec![] })
         ));
-        assert!(is_mqtt_tenant_message(
+        assert!(is_local_only_message(
             &ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
                 tenant: uptrakit_internal_wire::MqttTenantConfig {
                     mqtt_client_id: Uuid::nil(),
@@ -207,7 +206,7 @@ mod tests {
                 },
             })
         ));
-        assert!(is_mqtt_tenant_message(&ControllerMessage::TenantRevoked(
+        assert!(is_local_only_message(&ControllerMessage::TenantRevoked(
             MqttTenantRevokedPayload {
                 mqtt_client_id: Uuid::nil(),
                 reason: "test".into(),
@@ -215,7 +214,7 @@ mod tests {
         )));
 
         // Non-credential variants must NOT be filtered.
-        assert!(!is_mqtt_tenant_message(&ControllerMessage::Approved(
+        assert!(!is_local_only_message(&ControllerMessage::Approved(
             ApprovedPayload {
                 service_id: Uuid::nil(),
             }

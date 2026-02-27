@@ -4,7 +4,10 @@
 //! so that both the NATS consumer and any future transport can reuse the same
 //! routing decisions.
 
+use std::sync::Arc;
+
 use sea_orm::DatabaseConnection;
+use tokio::sync::Notify;
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, MqttClientCreatedPayload, MqttTenantRevokedPayload,
 };
@@ -24,6 +27,11 @@ pub fn parse_capability_str(s: &str) -> Option<Capability> {
         "graceful_shutdown" => Some(Capability::GracefulShutdown),
         "mqtt_bridge" => Some(Capability::MqttBridge),
         "ssh_remote" => Some(Capability::SshRemote),
+        "scheduler" => Some(Capability::Scheduler),
+        "database_access" => Some(Capability::DatabaseAccess),
+        "nats_access" => Some(Capability::NatsAccess),
+        "master_key_access" => Some(Capability::MasterKeyAccess),
+        "ca_management" => Some(Capability::CaManagement),
         _ => None,
     }
 }
@@ -35,13 +43,14 @@ pub fn parse_capability_str(s: &str) -> Option<Capability> {
 pub async fn deliver_event(
     registry: &ServiceConnectionRegistry,
     db: &DatabaseConnection,
+    ca_rotation_trigger: Option<&Arc<Notify>>,
     target_service_id: Option<Uuid>,
     target_capability: Option<&str>,
     msg: ControllerMessage,
 ) -> bool {
     // Controller-targeted events are handled locally (not forwarded to services)
     if target_service_id.is_none() && target_capability == Some("controller") {
-        return deliver_controller_event(db, registry, msg).await;
+        return deliver_controller_event(db, registry, ca_rotation_trigger, msg).await;
     }
 
     match (target_service_id, target_capability) {
@@ -117,12 +126,13 @@ pub async fn deliver_mqtt_event(
     }
 }
 
-/// Handle a controller-targeted event (e.g. `MqttClientCreated`).
+/// Handle a controller-targeted event (e.g. `MqttClientCreated`, `RequestCaRotation`).
 ///
 /// Returns `true` on success, `false` on transient failure.
 pub async fn deliver_controller_event(
     db: &DatabaseConnection,
     registry: &ServiceConnectionRegistry,
+    ca_rotation_trigger: Option<&Arc<Notify>>,
     msg: ControllerMessage,
 ) -> bool {
     match msg {
@@ -145,6 +155,15 @@ pub async fn deliver_controller_event(
                     false
                 }
             }
+        }
+        ControllerMessage::RequestCaRotation(payload) => {
+            if let Some(trigger) = ca_rotation_trigger {
+                tracing::info!(reason = %payload.reason, "CA rotation requested via cross-controller event");
+                trigger.notify_one();
+            } else {
+                tracing::debug!("received RequestCaRotation but no CA rotation trigger configured");
+            }
+            true
         }
         _ => true,
     }
@@ -176,6 +195,26 @@ mod tests {
             parse_capability_str("ssh_remote"),
             Some(Capability::SshRemote)
         );
+        assert_eq!(
+            parse_capability_str("scheduler"),
+            Some(Capability::Scheduler)
+        );
+        assert_eq!(
+            parse_capability_str("database_access"),
+            Some(Capability::DatabaseAccess)
+        );
+        assert_eq!(
+            parse_capability_str("nats_access"),
+            Some(Capability::NatsAccess)
+        );
+        assert_eq!(
+            parse_capability_str("master_key_access"),
+            Some(Capability::MasterKeyAccess)
+        );
+        assert_eq!(
+            parse_capability_str("ca_management"),
+            Some(Capability::CaManagement)
+        );
     }
 
     #[test]
@@ -194,7 +233,7 @@ mod tests {
                 ca_bundle_pem: "pem".to_string(),
             });
         // With no connected services, broadcast succeeds.
-        let result = deliver_event(&registry, &db, None, None, msg).await;
+        let result = deliver_event(&registry, &db, None, None, None, msg).await;
         assert!(result);
     }
 
@@ -209,7 +248,7 @@ mod tests {
                 ca_bundle_pem: "pem".to_string(),
             });
         // Service not on this controller — returns true (not our responsibility).
-        let result = deliver_event(&registry, &db, Some(service_id), None, msg).await;
+        let result = deliver_event(&registry, &db, None, Some(service_id), None, msg).await;
         assert!(result);
     }
 
@@ -221,8 +260,9 @@ mod tests {
         let msg =
             ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
                 ca_bundle_pem: "pem".to_string(),
-            });
-        let result = deliver_event(&registry, &db, None, Some("software_discovery"), msg).await;
+            },
+        );
+        let result = deliver_event(&registry, &db, None, None, Some("software_discovery"), msg).await;
         assert!(result);
     }
 }

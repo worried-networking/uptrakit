@@ -21,31 +21,22 @@
 //! - Max age: 24 hours
 //! - Storage: File
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream;
 use async_nats::jetstream::consumer::PullConsumer;
-use async_nats::jetstream::stream::RetentionPolicy;
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use time::OffsetDateTime;
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::ControllerMessage;
+use uptrakit_nats::{NatsConnection, NatsEventEnvelope};
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
 use crate::service_connections::ServiceConnectionRegistry;
-
-/// Stream name in JetStream.
-const STREAM_NAME: &str = "UPTRAKIT_EVENTS";
-
-/// Subject prefix for all events.
-const SUBJECT_PREFIX: &str = "uptrakit.events";
-
-/// Maximum age for messages in the stream (24 hours).
-const STREAM_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Maximum delivery attempts before a message is dropped.
 const MAX_DELIVER: i64 = 3;
@@ -72,25 +63,12 @@ impl_report_conversion!(async_nats::ConnectError => NatsTransportError,
     |_e| NatsTransportError::Connection
 );
 
-/// Wire envelope for NATS messages.
-///
-/// Contains the routing metadata alongside the actual [`ControllerMessage`].
-#[derive(Serialize, Deserialize)]
-pub(crate) struct NatsEventEnvelope {
-    pub source_controller_id: Uuid,
-    pub target_service_id: Option<Uuid>,
-    pub target_capability: Option<String>,
-    pub message: ControllerMessage,
-    #[serde(with = "time::serde::rfc3339")]
-    pub created_at: OffsetDateTime,
-}
-
 /// NATS transport handle used by
 /// [`NotificationService`](crate::notification_service::NotificationService) to
 /// publish messages across controllers.
 #[derive(Clone)]
 pub struct NatsTransport {
-    js: jetstream::Context,
+    conn: NatsConnection,
     controller_id: Uuid,
 }
 
@@ -104,28 +82,21 @@ impl NatsTransport {
         url: &str,
         controller_id: Uuid,
     ) -> Result<Self, Report<NatsTransportError>> {
-        tracing::info!(url, "connecting to NATS");
-        let client = async_nats::connect(url)
+        let conn = NatsConnection::connect(url)
             .await
-            .context_to::<NatsTransportError>()?;
+            .context_transform(|e| match e {
+                uptrakit_nats::NatsError::Connection => NatsTransportError::Connection,
+                _ => NatsTransportError::JetStream,
+            })?;
 
-        let js = jetstream::new(client);
+        conn.ensure_stream()
+            .await
+            .context_transform(|_| NatsTransportError::JetStream)?;
 
-        // Create or update the stream (idempotent — safe for multi-controller
-        // startup race).
-        js.get_or_create_stream(jetstream::stream::Config {
-            name: STREAM_NAME.to_string(),
-            subjects: vec![format!("{SUBJECT_PREFIX}.>")],
-            max_age: STREAM_MAX_AGE,
-            retention: RetentionPolicy::Limits,
-            ..Default::default()
+        Ok(Self {
+            conn,
+            controller_id,
         })
-        .await
-        .context_transform(|_| NatsTransportError::JetStream)?;
-
-        tracing::info!("NATS JetStream stream ready: {STREAM_NAME}");
-
-        Ok(Self { js, controller_id })
     }
 
     /// Publish a message to NATS JetStream.
@@ -140,26 +111,9 @@ impl NatsTransport {
         target_capability: Option<&str>,
         msg: ControllerMessage,
     ) {
-        let subject = determine_subject(target_service_id, target_capability);
-        let envelope = NatsEventEnvelope {
-            source_controller_id,
-            target_service_id,
-            target_capability: target_capability.map(ToString::to_string),
-            message: msg,
-            created_at: OffsetDateTime::now_utc(),
-        };
-
-        let payload = match serde_json::to_vec(&envelope) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to serialize NATS envelope");
-                return;
-            }
-        };
-
-        if let Err(e) = self.js.publish(subject.clone(), payload.into()).await {
-            tracing::warn!(error = %e, %subject, "NATS publish failed");
-        }
+        self.conn
+            .publish(source_controller_id, target_service_id, target_capability, msg)
+            .await;
     }
 
     /// Main consumer loop: pull messages from JetStream, filter self-originated
@@ -170,6 +124,7 @@ impl NatsTransport {
         self,
         registry: ServiceConnectionRegistry,
         db: DatabaseConnection,
+        ca_rotation_trigger: Option<Arc<Notify>>,
         cancel: CancellationToken,
     ) {
         let consumer = match self.create_consumer().await {
@@ -235,6 +190,7 @@ impl NatsTransport {
                 let delivered = crate::event_delivery::deliver_event(
                     &registry,
                     &db,
+                    ca_rotation_trigger.as_ref(),
                     envelope.target_service_id,
                     envelope.target_capability.as_deref(),
                     envelope.message,
@@ -254,15 +210,21 @@ impl NatsTransport {
 
     /// Access the underlying NATS client (for health checks).
     pub fn nats_client(&self) -> async_nats::Client {
-        self.js.client()
+        self.conn.client().clone()
+    }
+
+    /// Access the underlying `NatsConnection`.
+    pub fn connection(&self) -> &NatsConnection {
+        &self.conn
     }
 
     /// Create a durable pull consumer for this controller instance.
     async fn create_consumer(&self) -> Result<PullConsumer, Report<NatsTransportError>> {
         let consumer_name = format!("controller-{}", self.controller_id.simple());
         let stream = self
-            .js
-            .get_stream(STREAM_NAME)
+            .conn
+            .js()
+            .get_stream(uptrakit_nats::subjects::STREAM_NAME)
             .await
             .context_transform(|_| NatsTransportError::Consumer)?;
 
@@ -274,7 +236,7 @@ impl NatsTransport {
                     deliver_policy: jetstream::consumer::DeliverPolicy::New,
                     ack_policy: jetstream::consumer::AckPolicy::Explicit,
                     max_deliver: MAX_DELIVER,
-                    filter_subject: format!("{SUBJECT_PREFIX}.>"),
+                    filter_subject: format!("{}.>", uptrakit_nats::subjects::SUBJECT_PREFIX),
                     ..Default::default()
                 },
             )
@@ -283,35 +245,21 @@ impl NatsTransport {
     }
 }
 
-/// Determine the NATS subject for a message based on routing metadata.
-fn determine_subject(target_service_id: Option<Uuid>, target_capability: Option<&str>) -> String {
-    match (target_service_id, target_capability) {
-        (Some(id), _) => format!("{SUBJECT_PREFIX}.service.{id}"),
-        (None, Some(cap)) => {
-            if cap == "controller" {
-                format!("{SUBJECT_PREFIX}.controller")
-            } else {
-                format!("{SUBJECT_PREFIX}.capability.{cap}")
-            }
-        }
-        (None, None) => format!("{SUBJECT_PREFIX}.broadcast"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use uptrakit_nats::subjects::determine;
+    use uuid::Uuid;
 
     #[test]
     fn determine_subject_broadcast() {
-        assert_eq!(determine_subject(None, None), "uptrakit.events.broadcast");
+        assert_eq!(determine(None, None), "uptrakit.events.broadcast");
     }
 
     #[test]
     fn determine_subject_service() {
         let id = Uuid::nil();
         assert_eq!(
-            determine_subject(Some(id), None),
+            determine(Some(id), None),
             format!("uptrakit.events.service.{id}")
         );
     }
@@ -319,7 +267,7 @@ mod tests {
     #[test]
     fn determine_subject_capability() {
         assert_eq!(
-            determine_subject(None, Some("mqtt_bridge")),
+            determine(None, Some("mqtt_bridge")),
             "uptrakit.events.capability.mqtt_bridge"
         );
     }
@@ -327,7 +275,7 @@ mod tests {
     #[test]
     fn determine_subject_controller() {
         assert_eq!(
-            determine_subject(None, Some("controller")),
+            determine(None, Some("controller")),
             "uptrakit.events.controller"
         );
     }
@@ -336,13 +284,17 @@ mod tests {
     fn determine_subject_service_takes_precedence_over_capability() {
         let id = Uuid::nil();
         assert_eq!(
-            determine_subject(Some(id), Some("mqtt_bridge")),
+            determine(Some(id), Some("mqtt_bridge")),
             format!("uptrakit.events.service.{id}")
         );
     }
 
     #[test]
     fn envelope_serialization_roundtrip() {
+        use time::OffsetDateTime;
+        use uptrakit_internal_wire::ControllerMessage;
+        use uptrakit_nats::NatsEventEnvelope;
+
         let envelope = NatsEventEnvelope {
             source_controller_id: Uuid::nil(),
             target_service_id: Some(Uuid::nil()),
@@ -374,6 +326,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires running NATS server (nats-server -js)"]
     async fn nats_connect_publish_consume() {
+        use std::time::Duration;
+
         let controller_a = Uuid::now_v7();
         let controller_b = Uuid::now_v7();
 
@@ -381,12 +335,12 @@ mod tests {
             std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
 
         // Controller A publishes
-        let transport_a = NatsTransport::connect(&nats_url, controller_a)
+        let transport_a = super::NatsTransport::connect(&nats_url, controller_a)
             .await
             .expect("failed to connect controller A");
 
         // Controller B consumes
-        let transport_b = NatsTransport::connect(&nats_url, controller_b)
+        let transport_b = super::NatsTransport::connect(&nats_url, controller_b)
             .await
             .expect("failed to connect controller B");
 
@@ -400,8 +354,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Publish from A
-        let msg =
-            ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
+        let msg = uptrakit_internal_wire::ControllerMessage::CaBundleUpdated(
+            uptrakit_internal_wire::CaBundleUpdatedPayload {
                 ca_bundle_pem: "test-pem".to_string(),
             });
         transport_a
@@ -425,7 +379,7 @@ mod tests {
         let mut found = false;
 
         while let Some(Ok(msg)) = messages.next().await {
-            let envelope: NatsEventEnvelope =
+            let envelope: uptrakit_nats::NatsEventEnvelope =
                 serde_json::from_slice(&msg.payload).expect("deserialize failed");
             if envelope.source_controller_id == controller_a {
                 found = true;

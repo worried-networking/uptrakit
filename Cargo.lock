@@ -6563,6 +6563,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-nats"
+version = "0.0.1"
+dependencies = [
+ "async-nats",
+ "futures-util",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uptrakit-internal-wire",
+ "uptrakit-shared-macros",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-openapi-client"
 version = "0.0.1"
 dependencies = [
@@ -6841,6 +6859,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-directories",
  "uptrakit-internal-wire",
+ "uptrakit-nats",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",

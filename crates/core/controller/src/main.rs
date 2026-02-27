@@ -385,6 +385,7 @@ async fn run(args: cli::Args) -> Result<()> {
             nats.clone(),
             service_connections.clone(),
             app_state.db().clone(),
+            Some(Arc::clone(&app_state.ca_rotation_trigger)),
         );
         bg.track("nats-consumer", h);
     }
