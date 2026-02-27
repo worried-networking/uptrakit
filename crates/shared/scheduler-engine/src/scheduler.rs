@@ -307,13 +307,11 @@ mod tests {
         let scheduler = Scheduler::new(db.clone(), config);
 
         let token = CancellationToken::new();
-        let token_clone = token.clone();
 
-        // Cancel after a short delay
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(150)).await;
-            token_clone.cancel();
-        });
+        // Cancel before run() — CancellationToken::cancel() is synchronous and idempotent;
+        // if the token is already cancelled when scheduler.run() enters its select! loop, the
+        // cancelled branch fires immediately on the first poll. No real sleep needed.
+        token.cancel();
 
         // Must complete within a reasonable timeout after cancellation
         let result = tokio::time::timeout(Duration::from_secs(5), scheduler.run(token)).await;
