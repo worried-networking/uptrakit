@@ -162,6 +162,6 @@ Hook output includes clear phase markers for debugging:
 | File | Purpose |
 | :------------------------------------------------ | :-------------------------------------------------- |
 | `crates/shared/web-api-types/src/update_hooks.rs` | Hook config types; re-exports `HookShell`. |
-| `crates/ui/web-api/src/update_hooks.rs` | Hook resolution and merge logic. |
+| `crates/shared/update-hooks/src/lib.rs` | Hook resolution and merge logic (`uptrakit-update-hooks` crate). |
 | `crates/core/agent/src/update.rs` | Hook execution with shell wrapper. |
 | `crates/shared/wire/asyncapi.yaml` | Wire protocol docs (includes `hookCommand` schema). |

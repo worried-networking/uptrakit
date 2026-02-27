@@ -69,7 +69,7 @@ Each assignment carries an `execution_site` column (`auto` | `agent` | `controll
 | Plugin type | Crate | fetch_releases site | Autodiscovery | Notes |
 | --- | --- | --- | --- | --- |
 | `releases_github` | `uptrakit-plugin-releases-github` | Controller (GitHub API) | No | Tracks GitHub release tags; `ControllerSideFetchReleases` capability |
-| `releases_docker` | `uptrakit-plugin-releases-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers; `ControllerSideFetchReleases` capability |
+| `releases_docker` | `uptrakit-plugin-releases-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers; `ControllerSideFetchReleases` capability; `daemon` feature (default) gates bollard for local Docker ops; controller builds exclude it |
 | `package_manager_homebrew` | `uptrakit-plugin-package-manager-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks; detects host compatibility |
 | `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins) |
 | `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
@@ -103,8 +103,9 @@ Each service sends a `BTreeSet<Capability>` in its `EnrollPayload` during enroll
 
 ### ServiceProfile (derived, never stored)
 
-`ServiceProfile` is a runtime-only enum derived from a service's capability set via `ServiceProfile::from_capabilities()`. It drives
-controller-side behavioral defaults (ping interval, shutdown timeout, human-readable label) but is never persisted to the database.
+`ServiceProfile` is a runtime-only enum derived from a service's capability set via `ServiceProfile::from_capabilities()` (defined in
+`uptrakit-internal-wire`). It drives controller-side behavioral defaults (ping interval, shutdown timeout, human-readable label)
+but is never persisted to the database.
 
 | Profile | Key capability | Typical services | Default ping | Shutdown timeout |
 | --- | --- | --- | --- | --- |
@@ -220,8 +221,10 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
   See [Service Lifecycle](docs/development/service-lifecycle.md).
 - **Event Loop**: The SDK owns the unified `tokio::select!` loop that handles ping/pong, certificate renewal, CA staleness checks, signal handling,
   and close-reason dispatch. Services inject custom behaviour through `ServiceHandler` callbacks (`poll_service_event`, `on_service_event`).
-- **Main Helpers**: `init_crypto()`, `print_build_info()`, and `run_lifecycle_and_handle_errors()` reduce `main()`
-  boilerplate. Each binary initializes its own tracing subscriber — the SDK does not configure the global dispatcher.
+- **Main Helpers**: `init_crypto()`, `print_build_info()`, `init_tracing()`, `default_resolve_shutdown()`, and
+  `run_lifecycle_and_handle_errors()` reduce `main()` boilerplate. `init_tracing()` configures the tracing subscriber
+  (each binary calls it explicitly — the SDK does not configure the global dispatcher autonomously).
+  `default_resolve_shutdown()` maps `ShutdownCause` to `(DisconnectReason, LoopOutcome)` for standard binaries.
 - **Signal Handling**: Cross-platform `SignalWatcher` for `SIGINT`, `SIGTERM`, and `SIGHUP`.
 - **Enrollment**: WebSocket-based enrollment with certificate issuance.
 - **Identity**: Service identity state management (service ID, enrollment secret, certificate, private key).

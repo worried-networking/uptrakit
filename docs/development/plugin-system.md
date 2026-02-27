@@ -193,6 +193,15 @@ Current plugins with this capability:
 Plugins **without** this capability (e.g. `HomebrewPlugin`, `AptPlugin`) require a local package
 index and must always run `fetch_releases()` on the agent.
 
+#### Docker `daemon` Feature Gate
+
+The `uptrakit-plugin-releases-docker` crate has a `daemon` feature (enabled by default) that
+gates the bollard Docker client and local Docker operations (`DiscoverLocalSoftware`). Controller
+builds disable this feature (`default-features = false`) since the controller only needs
+`fetch_releases()` (HTTP-based registry queries), not local Docker daemon access. Agent builds
+enable it by default. This avoids pulling the heavy bollard + TLS dependency chain into the
+controller binary.
+
 ### Execution Site Decision Logic
 
 The `execution_site` field on each plugin assignment controls where the operation runs. The three
