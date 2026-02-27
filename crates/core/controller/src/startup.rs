@@ -70,7 +70,7 @@ pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<Option<S
                 );
             }
             let key_bytes = parse_master_key_hex(&key_hex)?;
-            uptrakit_shared_db::crypto::init_master_key(zeroize::Zeroizing::new(key_bytes))
+            uptrakit_crypto::init_master_key(zeroize::Zeroizing::new(key_bytes))
                 .context_to()?;
             tracing::info!("master encryption key initialized");
             Ok(Some(key_hex))
@@ -158,7 +158,7 @@ pub(crate) async fn verify_master_key(
     db: &sea_orm::DatabaseConnection,
     tenant_id: uuid::Uuid,
 ) -> crate::Result<()> {
-    if !uptrakit_shared_db::crypto::master_key_available() {
+    if !uptrakit_crypto::master_key_available() {
         return Ok(());
     }
 
@@ -173,9 +173,9 @@ pub(crate) async fn verify_master_key(
     match stored_token {
         Some(value) => {
             if let Some(token_str) = value.as_str()
-                && uptrakit_shared_db::crypto::is_encrypted(token_str)
+                && uptrakit_crypto::is_encrypted(token_str)
             {
-                uptrakit_shared_db::crypto::verify_key_verification_token(token_str).map_err(
+                uptrakit_crypto::verify_key_verification_token(token_str).map_err(
                     |_| {
                         report!(AppError::Config(
                             "master key mismatch: the current UPTRAKIT_MASTER_KEY cannot \
@@ -189,7 +189,7 @@ pub(crate) async fn verify_master_key(
             }
         }
         None => {
-            let token = uptrakit_shared_db::crypto::create_key_verification_token().context_to()?;
+            let token = uptrakit_crypto::create_key_verification_token().context_to()?;
             let inserted = uptrakit_web_api::settings_store::insert_setting_if_absent(
                 db,
                 tenant_id,
@@ -212,9 +212,9 @@ pub(crate) async fn verify_master_key(
                 .context(AppError::Settings)?;
                 if let Some(value) = raced_value
                     && let Some(token_str) = value.as_str()
-                    && uptrakit_shared_db::crypto::is_encrypted(token_str)
+                    && uptrakit_crypto::is_encrypted(token_str)
                 {
-                    uptrakit_shared_db::crypto::verify_key_verification_token(token_str).map_err(
+                    uptrakit_crypto::verify_key_verification_token(token_str).map_err(
                         |_| {
                             report!(AppError::Config(
                                 "master key mismatch: another controller instance stored a \
@@ -528,7 +528,7 @@ pub(crate) async fn bootstrap_oidc(
 
             let now = OffsetDateTime::now_utc();
             let encrypted_secret =
-                uptrakit_shared_db::crypto::EncryptedString::new(client_secret.to_string())
+                uptrakit_crypto::EncryptedString::new(client_secret.to_string())
                     .context_to()?;
             let provider = oidc_provider::ActiveModel {
                 id: Set(uuid::Uuid::now_v7()),
@@ -559,7 +559,7 @@ pub(crate) async fn bootstrap_oidc(
             use time::OffsetDateTime;
 
             let encrypted_secret =
-                uptrakit_shared_db::crypto::EncryptedString::new(client_secret.to_string())
+                uptrakit_crypto::EncryptedString::new(client_secret.to_string())
                     .context_to()?;
             let mut model = existing_provider.into_active_model();
             model.issuer_url = Set(issuer_url.to_string());

@@ -29,16 +29,6 @@ impl ScheduledTaskType {
         }
     }
 
-    /// Default cron expression for this task type.
-    pub fn default_cron(&self) -> &'static str {
-        match self {
-            Self::AuthCleanup => "*/5 * * * *",
-            Self::StaleLeaseCleanup => "*/5 * * * *",
-            Self::CaRotationCheck => "0 3 * * *",
-            Self::VersionCheck => "0 */6 * * *",
-            Self::ServiceCertCheck => "0 */12 * * *",
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]

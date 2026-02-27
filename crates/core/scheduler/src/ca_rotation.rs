@@ -156,7 +156,7 @@ mod tests {
     #[tokio::test]
     async fn long_lived_cert_does_not_trigger() {
         // Ensure a test master key is set (no-op if already initialized).
-        let _ = uptrakit_shared_db::crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
+        let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
 
         let db = setup_test_db().await;
         let (cert_pem, not_before, not_after) = generate_test_ca_cert(1825);
@@ -166,7 +166,7 @@ mod tests {
         ca_certificate::ActiveModel {
             fingerprint: ActiveValue::Set("test-fingerprint-long".to_string()),
             cert_pem: ActiveValue::Set(cert_pem),
-            key_pem: ActiveValue::Set(uptrakit_shared_db::crypto::EncryptedString::new(
+            key_pem: ActiveValue::Set(uptrakit_crypto::EncryptedString::new(
                 "placeholder-key".to_string(),
             )
             .expect("master key initialized above")),
@@ -194,7 +194,7 @@ mod tests {
     #[tokio::test]
     async fn soon_expiring_cert_triggers() {
         // Ensure a test master key is set (no-op if already initialized).
-        let _ = uptrakit_shared_db::crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
+        let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
 
         let db = setup_test_db().await;
         let (cert_pem, not_before, not_after) = generate_test_ca_cert(30);
@@ -202,7 +202,7 @@ mod tests {
         ca_certificate::ActiveModel {
             fingerprint: ActiveValue::Set("test-fingerprint-short".to_string()),
             cert_pem: ActiveValue::Set(cert_pem),
-            key_pem: ActiveValue::Set(uptrakit_shared_db::crypto::EncryptedString::new(
+            key_pem: ActiveValue::Set(uptrakit_crypto::EncryptedString::new(
                 "placeholder-key".to_string(),
             )
             .expect("master key initialized above")),

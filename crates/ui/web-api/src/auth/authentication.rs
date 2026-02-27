@@ -9,7 +9,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 #[cfg(feature = "oidc")]
 use time::OffsetDateTime;
 #[cfg(feature = "oidc")]
-use uptrakit_shared_db::MaskedEmail;
+use uptrakit_shared_types::MaskedEmail;
 #[cfg(feature = "oidc")]
 use uptrakit_shared_db::entity::{
     oidc_provider, prelude::*, role, user, user_oidc_link, user_role,
@@ -490,7 +490,7 @@ mod tests {
         role_mapping: HashMap<String, String>,
     ) -> oidc_provider::Model {
         use time::OffsetDateTime;
-        use uptrakit_shared_db::crypto::{EncryptedString, init_master_key};
+        use uptrakit_crypto::{EncryptedString, init_master_key};
 
         // Ensure a test master key is set (no-op if already initialized).
         let _ = init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));

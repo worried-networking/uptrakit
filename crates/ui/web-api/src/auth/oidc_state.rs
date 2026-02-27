@@ -4,7 +4,7 @@ use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_shared_db::crypto::EncryptedString;
+use uptrakit_crypto::EncryptedString;
 use uptrakit_shared_db::entity::{
     pending_account_link, pending_oidc_flow, pending_oidc_registration,
     pending_oidc_token_exchange,
@@ -26,7 +26,7 @@ pub enum OidcStoreError {
     Serialization(#[from] serde_json::Error),
 
     #[error("encryption error: {0}")]
-    Crypto(#[from] uptrakit_shared_db::crypto::CryptoError),
+    Crypto(#[from] uptrakit_crypto::CryptoError),
 }
 
 pub type Result<T> = std::result::Result<T, Report<OidcStoreError>>;
@@ -34,7 +34,7 @@ pub type Result<T> = std::result::Result<T, Report<OidcStoreError>>;
 impl_report_conversion! {
     sea_orm::DbErr                        => OidcStoreError::Database,
     serde_json::Error                     => OidcStoreError::Serialization,
-    uptrakit_shared_db::crypto::CryptoError => OidcStoreError::Crypto,
+    uptrakit_crypto::CryptoError => OidcStoreError::Crypto,
 }
 
 /// Pending OIDC authorization flow data returned by `take()`.
@@ -479,7 +479,7 @@ mod tests {
     use sea_orm::{ConnectOptions, ConnectionTrait, Database, Schema};
 
     async fn test_db() -> DatabaseConnection {
-        let _ = uptrakit_shared_db::crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
+        let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.expect("test db");
         let schema = Schema::new(db.get_database_backend());

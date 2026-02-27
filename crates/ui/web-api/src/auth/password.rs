@@ -4,7 +4,7 @@ use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use rootcause::prelude::*;
-use uptrakit_shared_db::SecretString;
+use uptrakit_shared_types::SecretString;
 
 pub const MIN_PASSWORD_LENGTH: usize = 8;
 pub const MAX_PASSWORD_LENGTH: usize = 1024;

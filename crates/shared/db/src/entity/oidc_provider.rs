@@ -77,7 +77,7 @@ pub struct Model {
     pub logo_url: Option<String>,
     pub issuer_url: String,
     pub client_id: String,
-    pub client_secret: crate::crypto::EncryptedString,
+    pub client_secret: uptrakit_crypto::EncryptedString,
     pub scopes: String,
     pub auto_create_users: bool,
     pub role_claim_path: Option<String>,

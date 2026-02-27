@@ -39,7 +39,9 @@ uptrakit-shared-macros = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
 uptrakit-directories = { path = "../../shared/directories" }
+uptrakit-crypto = { path = "../../shared/crypto", features = ["sea-orm"] }
 uptrakit-shared-db = { path = "../../shared/db" }
+uptrakit-shared-types = { workspace = true }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-command = { workspace = true }

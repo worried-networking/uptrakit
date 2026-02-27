@@ -10,7 +10,7 @@ use sea_orm::{
     sea_query::{Expr, OnConflict},
 };
 use time::OffsetDateTime;
-use uptrakit_shared_db::crypto::{decrypt_str, encrypt_str, is_encrypted};
+use uptrakit_crypto::{decrypt_str, encrypt_str, is_encrypted};
 use uptrakit_shared_db::entity::{prelude::*, setting, settings_version};
 use uuid::Uuid;
 

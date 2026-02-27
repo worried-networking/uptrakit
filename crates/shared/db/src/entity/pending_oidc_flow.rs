@@ -1,7 +1,7 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
-use crate::crypto::EncryptedString;
+use uptrakit_crypto::EncryptedString;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "pending_oidc_flows")]

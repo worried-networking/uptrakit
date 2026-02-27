@@ -54,7 +54,7 @@ pub(crate) enum AppError {
 pub(crate) type Result<T> = std::result::Result<T, rootcause::Report<AppError>>;
 
 impl_report_conversion!(
-    uptrakit_shared_db::crypto::CryptoError => AppError,
+    uptrakit_crypto::CryptoError => AppError,
     |e| AppError::Config(e.to_string())
 );
 

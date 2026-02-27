@@ -14,14 +14,14 @@
 //!   the controller still starts successfully.
 
 use sea_orm::{DatabaseConnection, EntityTrait, IntoActiveModel};
-use uptrakit_shared_db::crypto::EncryptedString;
+use uptrakit_crypto::EncryptedString;
 
 /// Re-encrypt all legacy plaintext values across all encrypted columns.
 ///
 /// Should be called once at startup after the master key is initialised and
 /// verified. Skips entirely when no master key is configured (dev mode).
 pub(crate) async fn reencrypt_legacy_plaintext(db: &DatabaseConnection) {
-    if !uptrakit_shared_db::crypto::master_key_available() {
+    if !uptrakit_crypto::master_key_available() {
         return;
     }
 

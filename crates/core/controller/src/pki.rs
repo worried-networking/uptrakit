@@ -127,7 +127,7 @@ pub enum PkiError {
     Directory(#[from] uptrakit_directories::DirectoryError),
 
     #[error("encryption failed")]
-    Crypto(#[from] uptrakit_shared_db::crypto::CryptoError),
+    Crypto(#[from] uptrakit_crypto::CryptoError),
 
     #[error("CA validation failed: {0}")]
     CaValidation(String),
@@ -140,7 +140,7 @@ impl_report_conversion! {
     rcgen::Error => PkiError::Rcgen,
     rustls::Error => PkiError::Rustls,
     uptrakit_directories::DirectoryError => PkiError::Directory,
-    uptrakit_shared_db::crypto::CryptoError => PkiError::Crypto,
+    uptrakit_crypto::CryptoError => PkiError::Crypto,
 }
 
 impl_report_conversion!(sea_orm::DbErr => PkiError, |e| PkiError::Database(e.to_string()));
@@ -289,7 +289,7 @@ pub async fn load_or_init_managed_ca(
     }
 
     let encrypted_key =
-        uptrakit_shared_db::crypto::EncryptedString::new(bundle.key_pem.clone()).context_to()?;
+        uptrakit_crypto::EncryptedString::new(bundle.key_pem.clone()).context_to()?;
     let cert_model = ca_certificate::ActiveModel {
         fingerprint: Set(fingerprint.clone()),
         cert_pem: Set(bundle.cert_pem.clone()),
@@ -422,7 +422,7 @@ pub async fn rotate_managed_ca(
     let not_after = cert_not_after(&new_ca.cert_pem)?;
 
     let encrypted_key =
-        uptrakit_shared_db::crypto::EncryptedString::new(new_ca.key_pem.clone()).context_to()?;
+        uptrakit_crypto::EncryptedString::new(new_ca.key_pem.clone()).context_to()?;
     let cert_model = ca_certificate::ActiveModel {
         fingerprint: Set(new_fp.clone()),
         cert_pem: Set(new_ca.cert_pem.clone()),
@@ -1451,7 +1451,7 @@ mod tests {
         use uptrakit_shared_db::entity::tenant;
 
         // EncryptedString requires a master key for DB writes
-        let _ = uptrakit_shared_db::crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
+        let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
 
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.map_err(|e| e.to_string())?;

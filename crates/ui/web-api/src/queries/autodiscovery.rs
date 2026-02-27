@@ -20,7 +20,7 @@ use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::DiscoveryTarget;
 use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryResultsPayload};
-use uptrakit_shared_db::SoftwareDiscoveryState;
+use uptrakit_shared_types::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
     autodiscovery_ignore, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
     software_item,
@@ -822,7 +822,7 @@ mod tests {
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
         PluginRole, PluginType,
     };
-    use uptrakit_shared_db::SoftwareDiscoveryState;
+    use uptrakit_shared_types::SoftwareDiscoveryState;
     use uptrakit_shared_db::entity::{host, plugin_config, tenant};
 
     async fn setup_db() -> DatabaseConnection {

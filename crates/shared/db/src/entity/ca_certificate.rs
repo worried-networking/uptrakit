@@ -7,7 +7,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub fingerprint: String,
     pub cert_pem: String,
-    pub key_pem: crate::crypto::EncryptedString,
+    pub key_pem: uptrakit_crypto::EncryptedString,
     pub not_before: OffsetDateTime,
     pub not_after: OffsetDateTime,
     pub activated_at: OffsetDateTime,

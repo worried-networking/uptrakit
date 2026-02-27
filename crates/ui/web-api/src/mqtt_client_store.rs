@@ -7,7 +7,7 @@ use sea_orm::{
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{mqtt_client, prelude::MqttClient};
-use uptrakit_shared_db::{MqttClientConnectionStatus, MqttTransport};
+use uptrakit_shared_types::{MqttClientConnectionStatus, MqttTransport};
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
@@ -17,7 +17,7 @@ pub enum MqttClientError {
     Database(#[from] sea_orm::DbErr),
 
     #[error("encryption failed")]
-    Encryption(#[from] uptrakit_shared_db::crypto::CryptoError),
+    Encryption(#[from] uptrakit_crypto::CryptoError),
 
     #[error("mqtt client not found")]
     NotFound,
@@ -29,7 +29,7 @@ pub enum MqttClientError {
 pub type Result<T> = std::result::Result<T, Report<MqttClientError>>;
 
 impl_report_conversion!(sea_orm::DbErr => MqttClientError::Database);
-impl_report_conversion!(uptrakit_shared_db::crypto::CryptoError => MqttClientError::Encryption);
+impl_report_conversion!(uptrakit_crypto::CryptoError => MqttClientError::Encryption);
 
 /// Load all MQTT clients for a given tenant.
 pub async fn load_mqtt_clients(
@@ -119,11 +119,11 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
         client_id: Set(client_id.to_string()),
         username: Set(username.map(String::from)),
         password: Set(password
-            .map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
+            .map(|p| uptrakit_crypto::EncryptedString::new(p.to_string()))
             .transpose()
             .context_to()?),
         ca_cert_pem: Set(ca_cert_pem
-            .map(|c| uptrakit_shared_db::crypto::EncryptedString::new(c.to_string()))
+            .map(|c| uptrakit_crypto::EncryptedString::new(c.to_string()))
             .transpose()
             .context_to()?),
         topic_prefix: Set(topic_prefix.to_string()),
@@ -195,13 +195,13 @@ pub async fn update_mqtt_client(params: UpdateMqttClientParams<'_>) -> Result<mq
     }
     if let Some(v) = password {
         model.password = Set(v
-            .map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
+            .map(|p| uptrakit_crypto::EncryptedString::new(p.to_string()))
             .transpose()
             .context_to()?);
     }
     if let Some(v) = ca_cert_pem {
         model.ca_cert_pem = Set(v
-            .map(|c| uptrakit_shared_db::crypto::EncryptedString::new(c.to_string()))
+            .map(|c| uptrakit_crypto::EncryptedString::new(c.to_string()))
             .transpose()
             .context_to()?);
     }

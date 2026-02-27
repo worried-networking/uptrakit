@@ -6,7 +6,7 @@ use sea_orm::{
     TransactionTrait,
 };
 use time::{Duration, OffsetDateTime};
-use uptrakit_shared_db::SessionTokenType;
+use uptrakit_shared_types::SessionTokenType;
 use uptrakit_shared_db::entity::{prelude::*, session};
 
 use super::AuthMethod;
@@ -234,7 +234,7 @@ impl SessionService {
 mod tests {
     use super::*;
     use sea_orm::{ConnectOptions, Database};
-    use uptrakit_shared_db::MaskedEmail;
+    use uptrakit_shared_types::MaskedEmail;
     use uptrakit_shared_db::entity::user;
 
     async fn setup_test_db() -> DatabaseConnection {

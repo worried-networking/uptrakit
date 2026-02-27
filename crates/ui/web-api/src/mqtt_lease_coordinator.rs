@@ -745,7 +745,7 @@ mod tests {
     };
     use std::collections::BTreeSet;
     use uptrakit_internal_wire::Capability;
-    use uptrakit_shared_db::MqttTransport;
+    use uptrakit_shared_types::MqttTransport;
     use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease, tenant};
 
     fn mqtt_caps() -> BTreeSet<Capability> {
