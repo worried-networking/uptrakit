@@ -18,6 +18,8 @@ use crate::host_ops::{find_host_by_machine_id, list_hosts, update_host_machine_i
 use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_pool::SshConnectionPool;
 
+use std::collections::HashSet;
+
 // Re-export shared update types for use in main.rs.
 pub(crate) use uptrakit_agent_core::{InFlightUpdate, UpdateEvent};
 
@@ -194,6 +196,113 @@ pub(crate) async fn report_enrolled_hosts(
         tracing::info!(
             host_count = hosts.len(),
             "reported enrolled hosts to controller"
+        );
+    }
+}
+
+// ── Dynamic host reload ───────────────────────────────────────────────────────
+
+/// Build `HostInfo` entries for the current host list, using SSH only where
+/// necessary.
+///
+/// For hosts with a known, non-empty `machine_id` that are **not** in
+/// `changed_ids` (neither new nor updated since the last reload), host info is
+/// built directly from the database values — no SSH connection is made.
+///
+/// For hosts with an empty `machine_id` or whose `id` is in `changed_ids`
+/// (new or recently updated), the pool is used to acquire an SSH session,
+/// remote system info is collected, and the `machine_id` is persisted to the
+/// database.  Hosts that fail to connect are skipped with a warning.
+pub(crate) async fn build_reload_host_infos(
+    db: &sea_orm::DatabaseConnection,
+    current_hosts: &[Model],
+    changed_ids: &HashSet<&str>,
+    pool: &SshConnectionPool,
+) -> Vec<HostInfo> {
+    let mut host_infos: Vec<HostInfo> = Vec::with_capacity(current_hosts.len());
+
+    for host in current_hosts {
+        let needs_ssh = host.machine_id.is_empty() || changed_ids.contains(host.id.as_str());
+
+        if needs_ssh {
+            // SSH-connect to discover or refresh machine_id and OS info.
+            let session = match pool.acquire(host).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(
+                        host_name = %host.name,
+                        hostname = %host.hostname,
+                        error = %e,
+                        "failed to acquire SSH session during dynamic reload, skipping host"
+                    );
+                    continue;
+                }
+            };
+
+            let mut info = collect_remote_host_info(&session).await;
+            info.ip_address = Some(host.hostname.clone());
+
+            if let Err(e) = update_host_machine_id(db, &host.id, &info.machine_id).await {
+                tracing::warn!(
+                    host_name = %host.name,
+                    machine_id = %info.machine_id,
+                    error = %e,
+                    "failed to persist machine_id during dynamic host reload"
+                );
+            }
+
+            tracing::debug!(
+                host_name = %host.name,
+                machine_id = %info.machine_id,
+                "collected remote host info during dynamic reload"
+            );
+
+            host_infos.push(info);
+        } else {
+            // Fast path: build HostInfo from DB values; no SSH round-trip.
+            host_infos.push(HostInfo {
+                machine_id: host.machine_id.clone(),
+                os_type: None,
+                os_version: None,
+                architecture: None,
+                hostname: None,
+                ip_address: Some(host.hostname.clone()),
+            });
+        }
+    }
+
+    host_infos
+}
+
+/// Build updated host infos and send a `ReportHosts` message to the controller.
+///
+/// Called from `SshAgentHandler::on_service_event` when a
+/// `SshAgentEvent::HostConfigChanged` event fires and the host snapshot has
+/// actually changed.
+pub(crate) async fn report_hosts_after_config_change(
+    db: &sea_orm::DatabaseConnection,
+    conn: &mut ControllerConnection,
+    current_hosts: &[Model],
+    changed_ids: &HashSet<&str>,
+    pool: &SshConnectionPool,
+) {
+    let host_infos = build_reload_host_infos(db, current_hosts, changed_ids, pool).await;
+    let agent_version = env!("CARGO_PKG_VERSION").to_string();
+    let msg = ServiceMessage::ReportHosts(ReportHostsPayload {
+        hosts: host_infos,
+        agent_version,
+        capabilities: ssh_agent_capabilities(),
+    });
+
+    if let Err(e) = conn.send(msg).await {
+        tracing::warn!(
+            error = %e,
+            "failed to send ReportHosts after dynamic host config change"
+        );
+    } else {
+        tracing::info!(
+            host_count = current_hosts.len(),
+            "sent dynamic ReportHosts to controller after host config change"
         );
     }
 }
