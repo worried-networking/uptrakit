@@ -1,0 +1,25 @@
+[package]
+name = "uptrakit-plugin-package-manager-npm"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true }
+rootcause = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+uptrakit-command = { workspace = true }
+
+[lints]
+workspace = true

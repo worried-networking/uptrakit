@@ -30,6 +30,7 @@ pub enum PluginType {
     ReleasesDocker,
     PackageManagerHomebrew,
     PackageManagerApt,
+    PackageManagerNpm,
     GenericShell,
     /// An unknown plugin type received from a newer peer.
     ///
@@ -50,6 +51,7 @@ impl PluginType {
             Self::ReleasesDocker => "releases_docker",
             Self::PackageManagerHomebrew => "package_manager_homebrew",
             Self::PackageManagerApt => "package_manager_apt",
+            Self::PackageManagerNpm => "package_manager_npm",
             Self::GenericShell => "generic_shell",
             Self::Other(s) => s.as_str(),
         }
@@ -81,6 +83,7 @@ impl FromStr for PluginType {
             "releases_docker" => Ok(Self::ReleasesDocker),
             "package_manager_homebrew" => Ok(Self::PackageManagerHomebrew),
             "package_manager_apt" => Ok(Self::PackageManagerApt),
+            "package_manager_npm" => Ok(Self::PackageManagerNpm),
             "generic_shell" => Ok(Self::GenericShell),
             _ => Err(ParsePluginTypeError::Invalid),
         }
@@ -112,6 +115,7 @@ impl From<String> for PluginType {
             "releases_docker" => Self::ReleasesDocker,
             "package_manager_homebrew" => Self::PackageManagerHomebrew,
             "package_manager_apt" => Self::PackageManagerApt,
+            "package_manager_npm" => Self::PackageManagerNpm,
             "generic_shell" => Self::GenericShell,
             _ => Self::Other(s),
         }
@@ -128,6 +132,7 @@ impl From<PluginType> for String {
             PluginType::ReleasesDocker => "releases_docker".to_string(),
             PluginType::PackageManagerHomebrew => "package_manager_homebrew".to_string(),
             PluginType::PackageManagerApt => "package_manager_apt".to_string(),
+            PluginType::PackageManagerNpm => "package_manager_npm".to_string(),
             PluginType::GenericShell => "generic_shell".to_string(),
             PluginType::Other(s) => s,
         }
@@ -296,6 +301,10 @@ mod tests {
             PluginType::PackageManagerApt
         );
         assert_eq!(
+            PluginType::from("package_manager_npm".to_string()),
+            PluginType::PackageManagerNpm
+        );
+        assert_eq!(
             PluginType::from("generic_shell".to_string()),
             PluginType::GenericShell
         );
@@ -330,6 +339,10 @@ mod tests {
             PluginType::PackageManagerApt.to_string(),
             "package_manager_apt"
         );
+        assert_eq!(
+            PluginType::PackageManagerNpm.to_string(),
+            "package_manager_npm"
+        );
         assert_eq!(PluginType::GenericShell.to_string(), "generic_shell");
         assert_eq!(
             PluginType::Other("custom_type".to_string()).to_string(),
@@ -360,6 +373,10 @@ mod tests {
         assert_eq!(
             "package_manager_apt".parse::<PluginType>().ok(),
             Some(PluginType::PackageManagerApt)
+        );
+        assert_eq!(
+            "package_manager_npm".parse::<PluginType>().ok(),
+            Some(PluginType::PackageManagerNpm)
         );
         assert_eq!(
             "generic_shell".parse::<PluginType>().ok(),
@@ -396,6 +413,7 @@ mod tests {
             PluginType::ReleasesDocker,
             PluginType::PackageManagerHomebrew,
             PluginType::PackageManagerApt,
+            PluginType::PackageManagerNpm,
             PluginType::GenericShell,
         ];
         for pt in &variants {
@@ -415,6 +433,7 @@ mod tests {
             PluginType::ReleasesDocker,
             PluginType::PackageManagerHomebrew,
             PluginType::PackageManagerApt,
+            PluginType::PackageManagerNpm,
             PluginType::GenericShell,
             PluginType::Other("my_plugin".to_string()),
         ];
