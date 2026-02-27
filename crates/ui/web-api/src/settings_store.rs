@@ -10,6 +10,7 @@ use sea_orm::{
     sea_query::{Expr, OnConflict},
 };
 use time::OffsetDateTime;
+use uptrakit_shared_db::crypto::{decrypt_str, encrypt_str, is_encrypted};
 use uptrakit_shared_db::entity::{prelude::*, setting, settings_version};
 use uuid::Uuid;
 
@@ -308,6 +309,10 @@ pub async fn get_revocation_version(db: &DatabaseConnection, tenant_id: Uuid) ->
 /// 64-byte random key, stores it via upsert, and re-reads to handle races
 /// (another instance may have stored a different key concurrently).
 ///
+/// The key is stored encrypted at rest using the master encryption key. Legacy
+/// unencrypted entries (base64-only) are transparently re-encrypted on read and
+/// written back to the database.
+///
 /// This ensures all controller instances in an HA deployment share the same
 /// JWT signing key.
 pub async fn load_or_generate_jwt_key(db: &DatabaseConnection, tenant_id: Uuid) -> Result<Vec<u8>> {
@@ -315,9 +320,33 @@ pub async fn load_or_generate_jwt_key(db: &DatabaseConnection, tenant_id: Uuid) 
 
     // Try loading existing key from DB
     if let Some(value) = load_setting(db, tenant_id, SettingKey::JwtSigningKey).await?
-        && let Some(b64) = value.as_str()
+        && let Some(stored) = value.as_str()
     {
-        return b64_engine.decode(b64).map_err(|e| {
+        let b64 = if is_encrypted(stored) {
+            // Encrypted path (current)
+            decrypt_str(stored).map_err(|e| {
+                report!(AuthError::Internal(format!(
+                    "failed to decrypt JWT signing key from database: {e}"
+                )))
+            })?
+        } else {
+            // Legacy plaintext base64 — re-encrypt and write back
+            tracing::info!("migrating JWT signing key to encrypted storage");
+            let encrypted = encrypt_str(stored).map_err(|e| {
+                report!(AuthError::Internal(format!(
+                    "failed to encrypt legacy JWT signing key: {e}"
+                )))
+            })?;
+            upsert_setting(
+                db,
+                tenant_id,
+                SettingKey::JwtSigningKey,
+                serde_json::json!(encrypted),
+            )
+            .await?;
+            stored.to_string()
+        };
+        return b64_engine.decode(&b64).map_err(|e| {
             report!(AuthError::Internal(format!(
                 "failed to decode JWT signing key from database: {e}"
             )))
@@ -329,20 +358,36 @@ pub async fn load_or_generate_jwt_key(db: &DatabaseConnection, tenant_id: Uuid) 
     rand::Rng::fill(&mut rand::rng(), &mut bytes[..]);
     let b64 = b64_engine.encode(&bytes);
 
+    // Encrypt before storing
+    let encrypted = encrypt_str(&b64).map_err(|e| {
+        report!(AuthError::Internal(format!(
+            "failed to encrypt new JWT signing key: {e}"
+        )))
+    })?;
+
     // Store with upsert (race-safe: another instance may store concurrently)
     upsert_setting(
         db,
         tenant_id,
         SettingKey::JwtSigningKey,
-        serde_json::json!(b64),
+        serde_json::json!(encrypted),
     )
     .await?;
 
     // Re-read to get the canonical value (in case another instance won the race)
     if let Some(value) = load_setting(db, tenant_id, SettingKey::JwtSigningKey).await?
-        && let Some(stored_b64) = value.as_str()
+        && let Some(stored) = value.as_str()
     {
-        return b64_engine.decode(stored_b64).map_err(|e| {
+        let b64 = if is_encrypted(stored) {
+            decrypt_str(stored).map_err(|e| {
+                report!(AuthError::Internal(format!(
+                    "failed to decrypt JWT signing key after store: {e}"
+                )))
+            })?
+        } else {
+            stored.to_string()
+        };
+        return b64_engine.decode(&b64).map_err(|e| {
             report!(AuthError::Internal(format!(
                 "failed to decode JWT signing key after store: {e}"
             )))
@@ -383,14 +428,19 @@ pub async fn migrate_file_jwt_key(
     })?;
 
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let encrypted = encrypt_str(&b64).map_err(|e| {
+        report!(AuthError::Internal(format!(
+            "failed to encrypt JWT signing key during file migration: {e}"
+        )))
+    })?;
     upsert_setting(
         db,
         tenant_id,
         SettingKey::JwtSigningKey,
-        serde_json::json!(b64),
+        serde_json::json!(encrypted),
     )
     .await?;
 
-    tracing::info!("migrated JWT signing key from file to database");
+    tracing::info!("migrated JWT signing key from file to encrypted database storage");
     Ok(true)
 }
