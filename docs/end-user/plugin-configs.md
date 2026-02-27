@@ -11,7 +11,7 @@ same plugin config.
 
 ## Plugin Types
 
-Uptrakit ships with six built-in plugin types:
+Uptrakit ships with seven built-in plugin types:
 
 | Plugin type | Description | Autodiscovery |
 | --- | --- | --- |
@@ -19,8 +19,9 @@ Uptrakit ships with six built-in plugin types:
 | `generic_shell` | Generic agent-side plugin: detects the installed version via a configurable shell command and/or executes updates via a configurable shell command. | No |
 | `releases_docker` | Tracks image tags or SHA digests in a Docker/OCI registry. Can pull images via the local or remote Docker daemon, and discovers running/stopped containers. | Yes |
 | `package_manager_homebrew` | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host. | Yes |
-| `discovery_proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream `releases_github` + `generic_shell` plugin configs automatically. Does not perform version detection or updates directly. | Yes |
+| `discovery_proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream plugin configs automatically. Does not perform version detection or updates directly. | Yes |
 | `package_manager_apt` | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh. | Yes |
+| `package_manager_npm` | Tracks globally installed npm packages. Fetches upstream versions from the npm registry (controller-side). Discovers globally installed packages and executes updates via `npm install -g`. Requires `sudo` access for updates. | Yes |
 
 ### `releases_github` configuration fields
 
@@ -99,6 +100,9 @@ plugin configs automatically:
     `package_identifier`.
   - A `generic_shell` config for `DetectVersion` and `ExecuteUpdate` — pre-configured with the
     PHS-standard version-file read command and the unattended update command.
+- For **npm-managed containers** (CT script runs `npm install -g <pkg>`), a shared `NPM (auto)` config
+  is created for all three roles. The npm package name is carried as the software item's
+  `package_identifier`.
 - For **APT-managed containers**, a shared `APT (auto)` config is created for all three roles.
 
 You may rename or adjust these synthesized configs as needed. Re-running discovery will reuse
@@ -115,6 +119,28 @@ connects and no matching plugin config exists.
 
 For full details and `sudoers` configuration requirements, see
 [APT Plugin](plugins/apt.md).
+
+### `package_manager_npm` configuration fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `include_prereleases` | No | Include pre-release dist-tags (`next`, `beta`, `alpha`, `rc`, `canary`) when fetching upstream releases (default: `false`). |
+
+The npm plugin supports both **plain packages** (e.g. `n8n`, `pm2`) and **scoped packages**
+(e.g. `@angular/cli`). The `package_identifier` must follow npm naming conventions
+(see [npm Plugin](npm-plugin.md) for the full validation rules).
+
+**Package identifier format:**
+
+- Plain: `n8n`, `pm2`, `typescript`
+- Scoped: `@angular/cli`, `@nestjs/cli`
+
+Uptrakit auto-creates a config named `"npm"` when the first agent with npm support connects
+and no matching plugin config exists.
+
+Upstream release versions are fetched from the npm registry by the controller (no local
+package index needed). Updates are executed on the agent via `npm install -g <pkg>@<version>`
+and require `sudo` access. See [npm Plugin](npm-plugin.md) for details.
 
 ## Role-Based Host Assignments
 
@@ -231,8 +257,9 @@ uptrakit plugin-configs delete <PLUGIN_CONFIG_ID>
 
 ## Autodiscovery
 
-The `releases_docker`, `package_manager_homebrew`, `discovery_proxmox_helper_scripts`, and `package_manager_apt` plugin types support
-**autodiscovery**: the agent queries the local runtime (Docker daemon or package manager) and reports installed
+The `releases_docker`, `package_manager_homebrew`, `discovery_proxmox_helper_scripts`,
+`package_manager_apt`, and `package_manager_npm` plugin types support **autodiscovery**: the
+agent queries the local runtime (Docker daemon or package manager) and reports installed
 packages back to the controller, which creates pending software items for your review.
 
 If no plugin config exists for a discovery-capable type when a host registers, Uptrakit
@@ -243,6 +270,7 @@ automatically creates one. Auto-created configs are named:
 - `Homebrew (Casks)`
 - `Proxmox Helper Scripts`
 - `APT`
+- `npm`
 
 **PHS auto-created configs:** In addition to the `"Proxmox Helper Scripts"` config used as a
 discovery anchor, the PHS plugin triggers creation of downstream `releases_github`, `generic_shell`, and

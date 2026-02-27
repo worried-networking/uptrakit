@@ -71,13 +71,16 @@ Each assignment carries an `execution_site` column (`auto` | `agent` | `controll
 | `releases_github` | `uptrakit-plugin-releases-github` | Controller (GitHub API) | No | Tracks GitHub release tags; `ControllerSideFetchReleases` capability |
 | `releases_docker` | `uptrakit-plugin-releases-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers; `ControllerSideFetchReleases` capability; `daemon` feature (default) gates bollard for local Docker ops; controller builds exclude it |
 | `package_manager_homebrew` | `uptrakit-plugin-package-manager-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks; detects host compatibility |
-| `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins) |
+| `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins; classifies GitHub, npm, and APT-managed containers) |
 | `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
+| `package_manager_npm` | `uptrakit-plugin-package-manager-npm` | Controller (npm registry) | Yes | Globally installed npm packages; upstream versions fetched from `registry.npmjs.org`; `ControllerSideFetchReleases` capability; detects host compatibility; requires `sudo` for updates |
 
 Plugins with a local package index (`package_manager_homebrew`,
 `discovery_proxmox_helper_scripts`, `package_manager_apt`) resolve both
 installed and latest versions on the agent.
-All other plugins resolve upstream versions on the controller via `ControllerSideFetchReleases`.
+Plugins with `ControllerSideFetchReleases` (`releases_github`, `releases_docker`,
+`package_manager_npm`) resolve upstream versions on the controller via public HTTP APIs,
+requiring no local package index on the agent.
 
 ## Capability-based service identity
 

@@ -76,9 +76,10 @@ uptrakit/
 │   │   │   └── shell/                  # uptrakit-plugin-generic-shell                  (lib)  — generic agent-side plugin: version_command (detect_installed_version) + update_command (execute_update); supports {package_identifier}, {version}, {tag} placeholders; at least one field required
 │   │   ├── package-managers/
 │   │   │   ├── homebrew/               # uptrakit-plugin-package-manager-homebrew               (lib)  — Homebrew formulae/cask plugin; implements DetectHostCompatibility (checks `which brew`)
-│   │   │   └── apt/                    # uptrakit-plugin-package-manager-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required)
+│   │   │   ├── apt/                    # uptrakit-plugin-package-manager-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required)
+│   │   │   └── npm/                    # uptrakit-plugin-package-manager-npm                    (lib)  — npm global-package plugin; ControllerSideFetchReleases (queries registry.npmjs.org); discovery via `npm list -g --json`; updates via `sudo npm install -g <pkg>@<version>`; implements DetectHostCompatibility (checks `which npm`); validate_identifier exported for registry
 │   │   └── discovery/
-│   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/APT upstream, emits two DiscoveryTarget values per GitHub-managed item: ReleasesGithub/FetchReleases + GenericShell/[DetectVersion,ExecuteUpdate])
+│   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
 │   ├── shared/
 │   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, handle_check_versions/execute_update/graceful_shutdown
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag
@@ -192,8 +193,8 @@ These are non-negotiable design constraints. Do not violate them.
    stored in the `host_software_item_plugins` table. Three roles exist: `detect_version`, `fetch_releases`, and
    `execute_update` (see `PluginRole` enum in `crates/shared/types/src/plugin_role.rs`). Each assignment carries an
    `execution_site` column (`auto`, `agent`, or `controller`) that determines where the operation runs. Plugins
-   declaring the `ControllerSideFetchReleases` capability (e.g. GitHub, Docker) have their `fetch_releases` executed
-   on the controller by default; local package-index plugins (Homebrew, APT) run agent-side via
+   declaring the `ControllerSideFetchReleases` capability (e.g. GitHub, Docker, npm) have their `fetch_releases`
+   executed on the controller by default; local package-index plugins (Homebrew, APT) run agent-side via
    `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in `VersionCheckResult`. Per-host version
    tracking (`installed_version`, `latest_version`) lives on `host_software_items`; the old centralised
    `available_versions` table has been removed. Keep this boundary clear.
