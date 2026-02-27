@@ -3,6 +3,7 @@ pub mod api_token;
 pub mod auth_method;
 pub mod autodiscovery_ignore;
 pub mod ca_certificate;
+pub mod enrollment_token;
 pub mod host;
 pub mod host_software_item;
 pub mod host_software_item_plugin;

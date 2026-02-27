@@ -621,8 +621,82 @@ impl MigrationTrait for Migration {
         .await?;
 
         // ============================================================
-        // 6. Services
+        // 6. Enrollment tokens & services
         // ============================================================
+
+        // --- enrollment_tokens ---
+        manager
+            .create_table(
+                Table::create()
+                    .table(EnrollmentTokens::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(EnrollmentTokens::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(EnrollmentTokens::TenantId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(EnrollmentTokens::Name).text().not_null())
+                    .col(
+                        ColumnDef::new(EnrollmentTokens::TokenHash)
+                            .text()
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(ColumnDef::new(EnrollmentTokens::AllowedCapabilities).text())
+                    .col(ColumnDef::new(EnrollmentTokens::MaxUses).integer())
+                    .col(
+                        integer(EnrollmentTokens::CurrentUses)
+                            .not_null()
+                            .default(0),
+                    )
+                    .col(ColumnDef::new(EnrollmentTokens::ExpiresAt).timestamp())
+                    .col(timestamp(EnrollmentTokens::CreatedAt))
+                    .col(ColumnDef::new(EnrollmentTokens::RevokedAt).timestamp())
+                    .col(ColumnDef::new(EnrollmentTokens::CreatedByUserId).uuid())
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_enrollment_tokens_tenant")
+                            .from(EnrollmentTokens::Table, EnrollmentTokens::TenantId)
+                            .to(Tenants::Table, Tenants::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_enrollment_tokens_created_by")
+                            .from(EnrollmentTokens::Table, EnrollmentTokens::CreatedByUserId)
+                            .to(Users::Table, Users::Id)
+                            .on_delete(ForeignKeyAction::SetNull),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_enrollment_tokens_tenant_id")
+                    .table(EnrollmentTokens::Table)
+                    .col(EnrollmentTokens::TenantId)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_enrollment_tokens_tenant_revoked")
+                    .table(EnrollmentTokens::Table)
+                    .col(EnrollmentTokens::TenantId)
+                    .col(EnrollmentTokens::RevokedAt)
+                    .to_owned(),
+            )
+            .await?;
 
         // --- services ---
         manager
@@ -658,12 +732,24 @@ impl MigrationTrait for Migration {
                             .integer()
                             .null(),
                     )
+                    .col(
+                        ColumnDef::new(Services::EnrollmentTokenId)
+                            .uuid()
+                            .null(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_services_tenant")
                             .from(Services::Table, Services::TenantId)
                             .to(Tenants::Table, Tenants::Id)
                             .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_services_enrollment_token")
+                            .from(Services::Table, Services::EnrollmentTokenId)
+                            .to(EnrollmentTokens::Table, EnrollmentTokens::Id)
+                            .on_delete(ForeignKeyAction::SetNull),
                     )
                     .to_owned(),
             )
@@ -2039,6 +2125,7 @@ impl MigrationTrait for Migration {
             Hosts::Table,
             ServiceCertificates::Table,
             Services::Table,
+            EnrollmentTokens::Table,
             SettingsVersion::Table,
             Settings::Table,
             ApiTokens::Table,
@@ -2381,6 +2468,23 @@ enum Services {
     UpdatedAt,
     DeactivatedAt,
     PingIntervalSeconds,
+    EnrollmentTokenId,
+}
+
+#[derive(DeriveIden)]
+enum EnrollmentTokens {
+    Table,
+    Id,
+    TenantId,
+    Name,
+    TokenHash,
+    AllowedCapabilities,
+    MaxUses,
+    CurrentUses,
+    ExpiresAt,
+    CreatedAt,
+    RevokedAt,
+    CreatedByUserId,
 }
 
 #[derive(DeriveIden)]

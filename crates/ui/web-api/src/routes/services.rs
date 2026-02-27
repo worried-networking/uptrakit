@@ -685,6 +685,7 @@ mod tests {
             updated_at: Set(now),
             deactivated_at: Set(None),
             ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
         };
         let target = target.insert(db).await.unwrap();
 
@@ -703,6 +704,7 @@ mod tests {
             updated_at: Set(now),
             deactivated_at: Set(None),
             ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
         };
         let source = source.insert(db).await.unwrap();
 

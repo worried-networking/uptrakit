@@ -24,6 +24,7 @@ pub struct Model {
     pub updated_at: OffsetDateTime,
     pub deactivated_at: Option<OffsetDateTime>,
     pub ping_interval_seconds: Option<i32>,
+    pub enrollment_token_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -36,6 +37,12 @@ pub enum Relation {
         to = "super::tenant::Column::Id"
     )]
     Tenant,
+    #[sea_orm(
+        belongs_to = "super::enrollment_token::Entity",
+        from = "Column::EnrollmentTokenId",
+        to = "super::enrollment_token::Column::Id"
+    )]
+    EnrollmentToken,
 }
 
 impl Related<super::service_certificate::Entity> for Entity {
@@ -47,6 +54,12 @@ impl Related<super::service_certificate::Entity> for Entity {
 impl Related<super::tenant::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Tenant.def()
+    }
+}
+
+impl Related<super::enrollment_token::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::EnrollmentToken.def()
     }
 }
 

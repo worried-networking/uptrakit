@@ -5,6 +5,7 @@ pub use super::autodiscovery_ignore::{
     Entity as AutodiscoveryIgnore, Model as AutodiscoveryIgnoreModel,
 };
 pub use super::ca_certificate::{Entity as CaCertificate, Model as CaCertificateModel};
+pub use super::enrollment_token::{Entity as EnrollmentToken, Model as EnrollmentTokenModel};
 pub use super::host::{Entity as Host, Model as HostModel};
 pub use super::host_software_item::{Entity as HostSoftwareItem, Model as HostSoftwareItemModel};
 pub use super::host_software_item_plugin::{

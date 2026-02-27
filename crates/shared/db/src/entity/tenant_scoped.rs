@@ -1,8 +1,8 @@
 use sea_orm::EntityTrait;
 
 use super::{
-    host, mqtt_client, oidc_provider, plugin_config, scheduled_task, service, setting,
-    settings_version, software_item, user_role,
+    enrollment_token, host, mqtt_client, oidc_provider, plugin_config, scheduled_task, service,
+    setting, settings_version, software_item, user_role,
 };
 
 /// Marker trait for SeaORM entities that are scoped to a tenant via a `tenant_id` column.
@@ -71,5 +71,11 @@ impl TenantScoped for settings_version::Entity {
 impl TenantScoped for user_role::Entity {
     fn tenant_id_column() -> Self::Column {
         user_role::Column::TenantId
+    }
+}
+
+impl TenantScoped for enrollment_token::Entity {
+    fn tenant_id_column() -> Self::Column {
+        enrollment_token::Column::TenantId
     }
 }

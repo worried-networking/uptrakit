@@ -274,7 +274,8 @@ mod tests {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 deactivated_at INTEGER,
-                ping_interval_seconds INTEGER
+                ping_interval_seconds INTEGER,
+                enrollment_token_id TEXT
             )",
         )
         .await
@@ -300,6 +301,7 @@ mod tests {
             updated_at: Set(now),
             deactivated_at: Set(None),
             ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
         }
         .insert(db)
         .await
