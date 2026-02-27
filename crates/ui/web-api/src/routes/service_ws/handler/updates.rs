@@ -10,7 +10,7 @@ use std::sync::Arc;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::SinkExt;
 use sea_orm::sea_query::{Expr, ExprTrait};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
@@ -435,13 +435,45 @@ pub(super) async fn handle_update_result(
         _ => update_history::UpdateStatus::Failed,
     });
     active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
-    let capped_output = if payload.output.len() > MAX_UPDATE_OUTPUT_BYTES {
+
+    // Load controller-side streaming output lines and compare against the
+    // agent payload. On timeout the agent's accumulated_output is often
+    // incomplete, whereas the controller-side lines were collected in real
+    // time. Use whichever source is longer to preserve the most data.
+    let db_output = {
+        let lines = update_output_line::Entity::find()
+            .filter(update_output_line::Column::UpdateHistoryId.eq(payload.update_history_id))
+            .order_by_asc(update_output_line::Column::CreatedAt)
+            .order_by_asc(update_output_line::Column::Id)
+            .all(state.db())
+            .await
+            .unwrap_or_default();
+        let mut buf = String::new();
+        for line in lines {
+            if buf.len() + line.output.len() > MAX_UPDATE_OUTPUT_BYTES {
+                break;
+            }
+            buf.push_str(&line.output);
+        }
+        buf
+    };
+
+    let final_output = if db_output.len() > payload.output.len() {
+        tracing::info!(
+            update_id = %payload.update_history_id,
+            agent_bytes = payload.output.len(),
+            db_bytes = db_output.len(),
+            "using controller-side streaming output (more complete than agent payload)"
+        );
+        db_output
+    } else if payload.output.len() > MAX_UPDATE_OUTPUT_BYTES {
         payload.output[..MAX_UPDATE_OUTPUT_BYTES].to_string()
     } else {
         payload.output
     };
-    active.output = Set(capped_output.clone());
-    active.output_bytes = Set(capped_output.len() as i64);
+
+    active.output = Set(final_output.clone());
+    active.output_bytes = Set(final_output.len() as i64);
     if payload.from_version.is_some() {
         active.from_version = Set(payload.from_version);
     }
