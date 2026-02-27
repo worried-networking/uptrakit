@@ -479,6 +479,7 @@ mod tests {
     use sea_orm::{ConnectOptions, ConnectionTrait, Database, Schema};
 
     async fn test_db() -> DatabaseConnection {
+        let _ = uptrakit_shared_db::crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.expect("test db");
         let schema = Schema::new(db.get_database_backend());
