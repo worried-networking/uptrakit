@@ -10,4 +10,5 @@ pub mod scheduler;
 pub mod services;
 pub mod settings;
 pub mod software_items;
+pub mod tail;
 pub mod update;

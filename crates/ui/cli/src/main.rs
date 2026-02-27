@@ -308,6 +308,9 @@ enum UpdateCommands {
         /// Release URL
         #[arg(long)]
         release_url: Option<String>,
+        /// Follow (tail) update output in real-time after triggering
+        #[arg(long, short)]
+        follow: bool,
     },
 }
 
@@ -333,6 +336,11 @@ enum HistoryCommands {
     },
     /// Show update history details
     Show {
+        /// Update history UUID
+        id: Uuid,
+    },
+    /// Tail update output in real-time
+    Tail {
         /// Update history UUID
         id: Uuid,
     },
@@ -1336,6 +1344,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                 to_version,
                 release_tag,
                 release_url,
+                follow,
             } => {
                 let resp = commands::update::trigger(commands::update::TriggerParams {
                     item_id: &item_id,
@@ -1350,6 +1359,18 @@ async fn run(cli: Cli) -> error::Result<()> {
                 })
                 .await?;
                 output::print_output(format, &resp)?;
+
+                if follow {
+                    let tail_result =
+                        commands::tail::tail(commands::tail::TailParams {
+                            update_history_id: &resp.update_history_id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                        })
+                        .await?;
+                    std::process::exit(tail_result.exit_code());
+                }
             }
         },
         Commands::History { command } => match command {
@@ -1384,6 +1405,16 @@ async fn run(cli: Cli) -> error::Result<()> {
                 )
                 .await?;
                 output::print_output(format, &resp)?;
+            }
+            HistoryCommands::Tail { id } => {
+                let tail_result = commands::tail::tail(commands::tail::TailParams {
+                    update_history_id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                })
+                .await?;
+                std::process::exit(tail_result.exit_code());
             }
         },
         Commands::Scheduler { command } => match command {
@@ -2286,6 +2317,7 @@ mod tests {
                         to_version,
                         release_tag,
                         release_url,
+                        follow,
                     },
             }) => {
                 assert_eq!(item_id, uuid(ITEM_UUID));
@@ -2293,6 +2325,7 @@ mod tests {
                 assert_eq!(to_version, "2.0.0");
                 assert!(release_tag.is_none());
                 assert!(release_url.is_none());
+                assert!(!follow);
             }
             _ => panic!("expected Update Trigger"),
         }
@@ -2387,6 +2420,43 @@ mod tests {
                 assert_eq!(id, uuid(HIST_UUID));
             }
             _ => panic!("expected History Show"),
+        }
+    }
+
+    #[test]
+    fn history_tail_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "history", "tail", HIST_UUID]).expect("should parse");
+        match args.command {
+            Some(Commands::History {
+                command: HistoryCommands::Tail { id },
+            }) => {
+                assert_eq!(id, uuid(HIST_UUID));
+            }
+            _ => panic!("expected History Tail"),
+        }
+    }
+
+    #[test]
+    fn update_trigger_follow_flag_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "update",
+            "trigger",
+            ITEM_UUID,
+            HOST_UUID,
+            "--to-version",
+            "2.0.0",
+            "--follow",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Update {
+                command: UpdateCommands::Trigger { follow, .. },
+            }) => {
+                assert!(follow);
+            }
+            _ => panic!("expected Update Trigger with follow"),
         }
     }
 
