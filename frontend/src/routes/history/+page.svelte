@@ -1,13 +1,16 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import { listUpdateHistory, triggerSoftwareUpdate, getSoftwareItems } from '$lib/api';
+	import { listUpdateHistory, triggerSoftwareUpdate, getSoftwareItems, getUpdateHistoryEntry } from '$lib/api';
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
+	import { connectOutputStream } from '$lib/sse';
+	import type { SseConnectionState } from '$lib/sse';
 	import { Permission } from '$lib/types';
 	import type { UpdateHistoryResponse, UpdateHistoryStatus, SoftwareItemResponse } from '$lib/types';
 
@@ -27,6 +30,12 @@
 	let totalPages: number = $state(1);
 	let statusFilter: StatusFilter = $state(parseUrlParam(page.url, 'status', STATUS_FILTER_VALUES, 'all'));
 	let expandedId: string | null = $state(null);
+
+	// SSE streaming state for expanded in-progress items
+	let activeDisconnect: (() => void) | null = null;
+	let activeStreamId: string | null = $state(null);
+	let streamState: SseConnectionState = $state('disconnected');
+	let terminalRefs: Record<string, TerminalOutput> = {};
 
 	// Trigger update modal state
 	let showTriggerModal: boolean = $state(false);
@@ -77,8 +86,75 @@
 		}
 	}
 
+	onDestroy(() => {
+		disconnectStream();
+	});
+
+	function disconnectStream() {
+		if (activeDisconnect) {
+			activeDisconnect();
+			activeDisconnect = null;
+			activeStreamId = null;
+			streamState = 'disconnected';
+		}
+	}
+
+	function isLiveStatus(status: UpdateHistoryStatus): boolean {
+		return status === 'pending' || status === 'in_progress';
+	}
+
 	function toggleExpand(id: string) {
-		expandedId = expandedId === id ? null : id;
+		const wasExpanded = expandedId === id;
+		// Disconnect any existing SSE stream
+		disconnectStream();
+
+		if (wasExpanded) {
+			expandedId = null;
+			return;
+		}
+
+		expandedId = id;
+
+		// If the item is in-progress or pending, connect to SSE stream
+		const item = items.find((i) => i.id === id);
+		if (item && isLiveStatus(item.status)) {
+			// Defer SSE connection to next tick so the terminal has mounted
+			setTimeout(() => connectSse(id), 0);
+		}
+	}
+
+	function connectSse(updateHistoryId: string) {
+		const termRef = terminalRefs[updateHistoryId];
+		activeStreamId = updateHistoryId;
+		streamState = 'connecting';
+
+		activeDisconnect = connectOutputStream(updateHistoryId, {
+			onOutput: (line) => {
+				if (termRef) {
+					termRef.write(line.text);
+				}
+			},
+			onCompleted: () => {
+				// Reload the individual item to get the final status
+				reloadItem(updateHistoryId);
+			},
+			onStateChange: (state) => {
+				streamState = state;
+			},
+			onError: (err) => {
+				showError(`Stream error: ${err}`);
+			}
+		});
+	}
+
+	async function reloadItem(id: string) {
+		try {
+			const updated = await getUpdateHistoryEntry(id);
+			items = items.map((i) => (i.id === id ? updated : i));
+		} catch {
+			// Fallback: reload the whole page
+			loadHistory(currentPage);
+		}
 	}
 
 	function statusBadgeClass(status: UpdateHistoryStatus): string {
@@ -224,15 +300,25 @@
 							{#if expandedId === item.id}
 								<tr>
 									<td colspan="6" class="bg-surface-50 dark:bg-surface-900 p-4">
-										<p class="mb-1 text-sm font-medium text-surface-600 dark:text-surface-400">Output</p>
-										{#if item.output}
-											<pre
-												class="rounded-md bg-surface-100 dark:bg-surface-800 p-3 font-mono text-xs whitespace-pre-wrap">{item.output}</pre>
+										<div class="mb-1 flex items-center gap-2">
+											<p class="text-sm font-medium text-surface-600 dark:text-surface-400">Output</p>
+											{#if activeStreamId === item.id && streamState === 'streaming'}
+												<span class="badge preset-filled-success-500 text-xs animate-pulse">Live</span>
+											{:else if activeStreamId === item.id && streamState === 'connecting'}
+												<span class="badge preset-tonal text-xs">Connecting…</span>
+											{/if}
+										</div>
+										{#if isLiveStatus(item.status)}
+											<TerminalOutput bind:this={terminalRefs[item.id]} class="h-80" />
+										{:else if item.output}
+											<TerminalOutput output={item.output} class="h-80" />
 										{:else}
 											<p class="text-sm text-surface-500">No output recorded.</p>
 										{/if}
 										{#if item.actor_type}
-											<p class="mt-2 text-xs text-surface-500">Actor: {item.actor_type} ({item.actor_id})</p>
+											<p class="mt-2 text-xs text-surface-500">
+												Actor: {item.actor_type} ({item.actor_id})
+											</p>
 										{/if}
 									</td>
 								</tr>

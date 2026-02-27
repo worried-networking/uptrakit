@@ -11,6 +11,9 @@
 	import { formatDate } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
+	import { connectOutputStream } from '$lib/sse';
+	import type { SseConnectionState } from '$lib/sse';
 	import { Permission } from '$lib/types';
 	import type { SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
 
@@ -25,6 +28,12 @@
 	// Update confirm modal state
 	let updateModal: { host: SoftwareItemHostSummary; toVersion: string } | null = $state(null);
 	let updateTriggering: boolean = $state(false);
+
+	// Live terminal modal state
+	let liveModal: { updateHistoryId: string; hostName: string } | null = $state(null);
+	let liveStreamState: SseConnectionState = $state('disconnected');
+	let liveDisconnect: (() => void) | null = null;
+	let liveTerminalRef: TerminalOutput | undefined = $state(undefined);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
@@ -42,6 +51,7 @@
 
 	onDestroy(() => {
 		if (refreshInterval) clearInterval(refreshInterval);
+		closeLiveModal();
 	});
 
 	async function loadItem(background = false) {
@@ -105,17 +115,53 @@
 		if (!item || !updateModal || updateTriggering) return;
 		updateTriggering = true;
 		try {
+			const hostName = updateModal.host.hostname;
 			const res = await triggerSoftwareUpdate(item.id, updateModal.host.host_id, {
 				to_version: updateModal.toVersion
 			});
 			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
 			updateModal = null;
-			setTimeout(() => loadItem(true), 1000);
+			// Open the live terminal modal
+			openLiveModal(res.update_history_id, hostName);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger update');
 		} finally {
 			updateTriggering = false;
 		}
+	}
+
+	function openLiveModal(updateHistoryId: string, hostName: string) {
+		liveModal = { updateHistoryId, hostName };
+		liveStreamState = 'connecting';
+		// Defer SSE connection to next tick so the terminal has mounted
+		setTimeout(() => {
+			liveDisconnect = connectOutputStream(updateHistoryId, {
+				onOutput: (line) => {
+					if (liveTerminalRef) {
+						liveTerminalRef.write(line.text);
+					}
+				},
+				onCompleted: () => {
+					// Refresh host data when update finishes
+					loadItem(true);
+				},
+				onStateChange: (state) => {
+					liveStreamState = state;
+				},
+				onError: (err) => {
+					showError(`Stream error: ${err}`);
+				}
+			});
+		}, 0);
+	}
+
+	function closeLiveModal() {
+		if (liveDisconnect) {
+			liveDisconnect();
+			liveDisconnect = null;
+		}
+		liveModal = null;
+		liveStreamState = 'disconnected';
 	}
 
 	function versionStatusLabel(host: SoftwareItemHostSummary): string {
@@ -134,7 +180,13 @@
 
 <svelte:window
 	onkeydown={(e) => {
-		if (e.key === 'Escape' && updateModal) updateModal = null;
+		if (e.key === 'Escape') {
+			if (liveModal) {
+				closeLiveModal();
+			} else if (updateModal) {
+				updateModal = null;
+			}
+		}
 	}}
 />
 
@@ -281,6 +333,40 @@
 				<button class="btn preset-tonal-surface" onclick={() => (updateModal = null)}>Cancel</button>
 				<button class="btn preset-filled-warning-500" onclick={executeUpdate} disabled={updateTriggering}>
 					{updateTriggering ? 'Triggering…' : 'Trigger Update'}
+				</button>
+			</div>
+		</div>
+	</ModalBackdrop>
+{/if}
+
+{#if liveModal}
+	<ModalBackdrop onclose={closeLiveModal}>
+		<div
+			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-3xl space-y-4 p-6 shadow-xl"
+			role="dialog"
+			aria-modal="true"
+		>
+			<div class="flex items-center justify-between">
+				<div class="flex items-center gap-2">
+					<h3 class="h3">Update Output</h3>
+					{#if liveStreamState === 'streaming'}
+						<span class="badge preset-filled-success-500 text-xs animate-pulse">Live</span>
+					{:else if liveStreamState === 'connecting'}
+						<span class="badge preset-tonal text-xs">Connecting…</span>
+					{:else if liveStreamState === 'completed'}
+						<span class="badge preset-filled-success-500 text-xs">Completed</span>
+					{:else if liveStreamState === 'error'}
+						<span class="badge preset-filled-error-500 text-xs">Error</span>
+					{/if}
+				</div>
+				<p class="text-sm text-surface-500">{liveModal.hostName}</p>
+			</div>
+
+			<TerminalOutput bind:this={liveTerminalRef} class="h-96" />
+
+			<div class="flex justify-end">
+				<button class="btn preset-tonal-surface" onclick={closeLiveModal}>
+					{liveStreamState === 'streaming' || liveStreamState === 'connecting' ? 'Close (update continues)' : 'Close'}
 				</button>
 			</div>
 		</div>
