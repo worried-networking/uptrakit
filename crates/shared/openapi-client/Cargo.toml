@@ -14,6 +14,7 @@ mock = ["dep:httpmock"]
 
 [dependencies]
 reqwest = { workspace = true, features = ["query"] }
+futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rootcause = { workspace = true }

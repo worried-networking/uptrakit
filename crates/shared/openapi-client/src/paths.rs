@@ -253,4 +253,8 @@ pub(crate) mod update_history {
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/update-history/{id}")
     }
+    /// `GET /api/v1/update-history/{id}/output/stream`
+    pub(crate) fn output_stream(id: &Uuid) -> String {
+        format!("/api/v1/update-history/{id}/output/stream")
+    }
 }

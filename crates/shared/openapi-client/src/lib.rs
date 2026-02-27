@@ -19,8 +19,10 @@ pub mod services;
 pub mod settings;
 pub mod settings_mqtt;
 pub mod software_items;
+pub mod sse;
 pub mod system_alerts;
 pub mod update_history;
+pub mod update_output_stream;
 
 pub use error::{ClientError, Result};
 
@@ -502,7 +504,7 @@ fn parse_retry_after(resp: &reqwest::Response) -> Option<u64> {
 
 /// Extract an error message from a JSON response body, falling back to
 /// the raw text when the body is not JSON or has no `error` field.
-fn extract_error_message(text: &str) -> String {
+pub(crate) fn extract_error_message(text: &str) -> String {
     serde_json::from_str::<serde_json::Value>(text)
         .ok()
         .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
