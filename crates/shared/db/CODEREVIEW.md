@@ -15,7 +15,7 @@ web-api, and related crates. The foundation is solid: UUID v7 primary keys, a co
 `TenantScoped` trait, typed enums for state columns, and well-declared referential integrity.
 These are meaningful architectural wins that prevent entire classes of runtime errors.
 
-Several Medium-severity schema decisions (soft-delete naming inconsistency, dual output storage, nullable version, missing indexes, duplicate indexes) require remediation before the system scales. One architectural concern — `uptrakit-crypto` unconditionally depending on `sea-orm` — is inherited through this crate's dependency on `uptrakit-crypto`.
+Several Medium-severity schema decisions (soft-delete naming inconsistency, dual output storage, nullable version, duplicate indexes) require remediation before the system scales. One architectural concern — `uptrakit-crypto` unconditionally depending on `sea-orm` — is inherited through this crate's dependency on `uptrakit-crypto`.
 
 ---
 
@@ -233,10 +233,6 @@ both kinds of records and asserts the correct output is returned in each case.
 
 Phase 2 of `process_one_discovery` queries by this combination. Only `plugin_config_id` is indexed alone.
 
-**[SEVERITY: Medium]** `m20260209_000001_initial.rs:862-893` — Missing index on `service_hosts(host_id)` for host-to-agent lookups
-
-Primary key is `(service_id, host_id)`. Queries filtering by `host_id` require a full scan.
-
 **[SEVERITY: Low]** `m20260209_000001_initial.rs:1399-1439` — Missing index on `update_history(host_id, software_item_id, status)` for pending-update lookups
 
 Frequent check requires index intersections without a composite index.
@@ -246,24 +242,6 @@ Frequent check requires index intersections without a composite index.
 Unlike `plugin_configs` and `software_items`, OIDC provider slugs cannot be reused after soft-deletion.
 
 ### Issues
-
-**[SEVERITY: Medium]** `crates/core/agent-ssh/src/db/entity/ssh_host.rs:71-72` — Integer
-epoch timestamps instead of typed TIMESTAMP columns in agent-ssh local DB.
-
-```
-// crates/core/agent-ssh/src/db/entity/ssh_host.rs:71-72
-pub created_at: i64,
-pub updated_at: i64,
-```
-
-The `ssh_hosts` table in the agent-ssh local SQLite DB uses `INTEGER` columns for timestamps.
-Every other entity in the codebase uses `OffsetDateTime` (mapped to `TIMESTAMPTZ` in
-PostgreSQL or `TEXT` in SQLite via SeaORM). This breaks tooling assumptions: log formatters,
-DB inspection tools, and any future migration helper that iterates entity columns will silently
-skip these timestamps or display raw Unix epoch integers. The custom `now_unix_timestamp()`
-helper in `host_ops.rs:197-202` also uses `SystemTime` rather than `time::OffsetDateTime::now_utc()`,
-creating a different clock source from the rest of the codebase and silently returning `0`
-on error. These columns should be migrated to `OffsetDateTime`.
 
 **[SEVERITY: Low]** `crates/shared/db/src/entity/api_token.rs` — No `expires_at` column.
 
@@ -311,20 +289,7 @@ the event poller cursor" would prevent future reviewers from treating this as a 
   for every INSERT/UPDATE.
 - `users.email`: same pattern as `tenants.slug`.
 
-**Missing indexes — Medium severity:**
-
-- `update_history.created_at`: The list query in `queries/update_history.rs` uses
-  `ORDER BY created_at DESC` with pagination. Without an index on `created_at`, every
-  pagination request is a full table scan + sort. As update_history grows this becomes the
-  dominant query cost.
-
-- `host_software_items.software_item_id`: The composite PK starts with `host_id`, so
-  `software_item_id` is not the leading column. Queries that look up "which hosts have
-  this software item" (used in `load_item_hosts`) must do a full scan of the junction table.
-  A standalone index on `software_item_id` fixes this.
-
-- `mqtt_leases.tenant_id`: Lease reconciliation queries filter by `tenant_id`. Without an
-  index, the reconciliation loop scans all leases across all tenants.
+**Missing indexes — Low severity:**
 
 - `sessions(user_id, expires_at)`: "Find active sessions for user" is a common auth query.
   Without a composite index, it scans all sessions for the user and then filters by

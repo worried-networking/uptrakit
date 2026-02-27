@@ -18,6 +18,18 @@ For comprehensive error handling patterns, conventions, and the full decision gu
 - Locking primitives (`Mutex::lock()`, `RwLock::read()`, `RwLock::write()`) may use `.unwrap()` because the release build aborts on panic, rendering
   poisoning impossible.
 - When serialization/parsing can fail, use `match` to handle errors gracefully or propagate them with context.
+- **`Default` impls must not call `.parse().unwrap()` or `.expect()`.** Construct values directly using infallible constructors instead. If no
+  infallible constructor exists, use an `Option` field and populate it lazily, or use a `const`-compatible builder.
+
+```rust
+// ✓ Correct — infallible; no parse path
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+
+https_addr: SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 8443, 0, 0)),
+
+// ✗ Wrong — panics at startup if the string is ever edited incorrectly
+https_addr: "[::]:8443".parse().unwrap(),
+```
 
 ## Public Enum Extensibility
 
@@ -45,6 +57,48 @@ boolean-like enum).
 
 Refer to [docs/security/secure-development.md](../security/secure-development.md) when the change touches PKI, secrets, reverse proxies, or filesystem
 security.
+
+## Service Reconnect Backoff
+
+All reconnect loops in service binaries must use `uptrakit_service_sdk::Backoff` — not a fixed
+sleep. Fixed delays hammer a recovering broker or controller and produce bursty log storms.
+
+```rust
+use uptrakit_service_sdk::Backoff;
+use std::time::Duration;
+
+// Construct once per connection attempt sequence
+let mut backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+
+loop {
+    match connect().await {
+        Ok(conn) => {
+            backoff.reset();   // Reset on successful connection
+            handle(conn).await;
+        }
+        Err(e) => {
+            let delay = backoff.next_delay();
+            tracing::warn!(error = %e, delay = ?delay, "connection failed; retrying");
+            tokio::select! {
+                _ = shutdown_token.cancelled() => break,
+                _ = tokio::time::sleep(delay) => {}
+            }
+        }
+    }
+}
+```
+
+Standard parameters: **base 2 s, cap 60 s** with ~25 % jitter (the `Backoff` default). The
+`tokio::select!` on `shutdown_token` ensures the loop exits promptly on SIGTERM even when the
+delay is long.
+
+**Never** replace this with `tokio::time::sleep(Duration::from_secs(5))`. A fixed delay:
+
+- Does not back off under sustained outages, hammering the broker.
+- Cannot be interrupted by a shutdown signal without an additional `select!`.
+- Has no jitter, causing thundering-herd reconnects when many agents restart simultaneously.
+
+See also: [Service Lifecycle](service-lifecycle.md) for the full reconnect and enrollment flow.
 
 ## String-to-Type Conversions
 

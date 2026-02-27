@@ -132,10 +132,6 @@ The `==` operator short-circuits, but the compared values (CA CNs) are not confi
 
 Same `msg.contains("unique") || msg.contains("duplicate")` pattern as `autodiscovery.rs:673-676`. Should be consolidated into `uptrakit-shared-db` using backend-specific error codes.
 
-**[SEVERITY: Medium]** `src/settings.rs:53` — `unwrap()` on socket address parsing in `Default` impl
-
-`DEFAULT_HTTPS_ADDR.parse().unwrap()` is not an approved exception per AGENTS.md. Should use `expect()` with a reason or parse at compile time.
-
 **[SEVERITY: Low]** `src/notification_service.rs:46-63` — `msg.clone()` on every `send()` and `broadcast()` call
 
 The outbox write only needs serialized JSON, which could be computed first, avoiding a full message clone.

@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -50,7 +50,7 @@ impl Default for NetworkSettings {
             trusted_proxies: Vec::new(),
             real_ip_header: DEFAULT_REAL_IP_HEADER.to_string(),
             extra_sans: Vec::new(),
-            https_addr: DEFAULT_HTTPS_ADDR.parse().unwrap(),
+            https_addr: SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 8443, 0, 0)),
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
             pki_addr: None,
@@ -213,9 +213,7 @@ impl Settings {
             .get_setting(SettingKey::HttpsAddr)
             .and_then(|v| v.as_str()?.parse::<SocketAddr>().ok())
             .unwrap_or_else(|| {
-                DEFAULT_HTTPS_ADDR
-                    .parse()
-                    .expect("valid default HTTPS addr")
+                SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 8443, 0, 0))
             });
 
         let forwarded_client_cert_info_header = raw
