@@ -1,0 +1,48 @@
+[package]
+name = "uptrakit-scheduler"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[features]
+default = ["db-sqlite"]
+db-all = ["db-sqlite", "db-postgres", "db-mysql"]
+db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres"]
+db-mysql = ["sea-orm/sqlx-mysql", "uptrakit-shared-db/db-mysql"]
+oidc = ["uptrakit-scheduler-engine/oidc"]
+
+[dependencies]
+async-trait = { workspace = true }
+clap = { workspace = true }
+rootcause = { workspace = true }
+rustls = { workspace = true }
+sea-orm = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-rustls = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uptrakit-crypto = { path = "../../shared/crypto" }
+uptrakit-internal-wire = { path = "../../shared/wire" }
+uptrakit-nats = { path = "../../shared/nats" }
+uptrakit-scheduler-engine = { path = "../../shared/scheduler-engine" }
+uptrakit-service-sdk = { path = "../../shared/service-sdk" }
+uptrakit-shared-db = { path = "../../shared/db" }
+uptrakit-shared-types = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+rcgen = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+uptrakit-shared-db = { path = "../../shared/db", features = ["db-sqlite"] }
+
+[build-dependencies]
+uptrakit-build-info = { path = "../../shared/build-info" }
+
+[lints]
+workspace = true

@@ -6740,6 +6740,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-scheduler"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "clap",
+ "rcgen",
+ "rootcause",
+ "rustls",
+ "sea-orm",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uptrakit-build-info",
+ "uptrakit-crypto",
+ "uptrakit-internal-wire",
+ "uptrakit-nats",
+ "uptrakit-scheduler-engine",
+ "uptrakit-service-sdk",
+ "uptrakit-shared-db",
+ "uptrakit-shared-types",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "uptrakit-scheduler-engine"
 version = "0.0.1"
 dependencies = [
