@@ -11,6 +11,7 @@ pub mod api_tokens;
 pub mod auth;
 pub mod autodiscovery;
 pub mod device_auth;
+pub mod enrollment_tokens;
 pub mod error;
 pub mod hosts;
 pub mod mqtt_services;

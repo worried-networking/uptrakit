@@ -77,9 +77,7 @@ pub struct UpdateServiceRequest {
 }
 
 // Re-export generic types that are shared across service operations.
-pub use super::agents::{
-    EnrollmentTokenResponse, EnrollmentTokenStatusResponse, MergeAgentRequest, MessageResponse,
-};
+pub use super::agents::{MergeAgentRequest, MessageResponse};
 
 #[cfg(test)]
 mod tests {

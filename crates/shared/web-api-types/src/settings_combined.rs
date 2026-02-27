@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::agents::EnrollmentTokenStatusResponse;
+use crate::enrollment_tokens::EnrollmentTokensSummary;
 use crate::settings::RegistrationSettingsResponse;
 use crate::settings_agent_certs::AgentCertificateSettingsResponse;
 use crate::settings_auth::AuthenticationSettingsResponse;
@@ -11,7 +11,7 @@ pub struct CombinedSettingsResponse {
     pub registration: RegistrationSettingsResponse,
     pub authentication: AuthenticationSettingsResponse,
     pub agent_certificates: AgentCertificateSettingsResponse,
-    pub enrollment_token: EnrollmentTokenStatusResponse,
+    pub enrollment_tokens: EnrollmentTokensSummary,
 }
 
 #[cfg(test)]
@@ -33,7 +33,7 @@ mod tests {
                 lifetime_days: 365,
                 renewal_window_hours: 168,
             },
-            enrollment_token: EnrollmentTokenStatusResponse { configured: true },
+            enrollment_tokens: EnrollmentTokensSummary { active_count: 2 },
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let de: CombinedSettingsResponse =
@@ -41,6 +41,6 @@ mod tests {
         assert_eq!(de.registration.mode, RegistrationMode::Invite);
         assert!(de.authentication.password_auth_enabled);
         assert_eq!(de.agent_certificates.lifetime_days, 365);
-        assert!(de.enrollment_token.configured);
+        assert_eq!(de.enrollment_tokens.active_count, 2);
     }
 }
