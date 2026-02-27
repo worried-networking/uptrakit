@@ -3442,7 +3442,10 @@ mod tests {
         assert!(matches!(
             args.command,
             Some(Commands::EnrollmentTokens {
-                command: EnrollmentTokensCommands::List { page: None, per_page: None }
+                command: EnrollmentTokensCommands::List {
+                    page: None,
+                    per_page: None
+                }
             })
         ));
     }
@@ -3539,9 +3542,8 @@ mod tests {
 
     #[test]
     fn enrollment_tokens_show_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "enrollment-tokens", "show", ET_UUID])
-                .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "enrollment-tokens", "show", ET_UUID])
+            .expect("should parse");
         match args.command {
             Some(Commands::EnrollmentTokens {
                 command: EnrollmentTokensCommands::Show { id },
@@ -3554,9 +3556,8 @@ mod tests {
 
     #[test]
     fn enrollment_tokens_revoke_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "enrollment-tokens", "revoke", ET_UUID])
-                .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "enrollment-tokens", "revoke", ET_UUID])
+            .expect("should parse");
         match args.command {
             Some(Commands::EnrollmentTokens {
                 command: EnrollmentTokensCommands::Revoke { id },

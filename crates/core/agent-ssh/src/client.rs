@@ -62,8 +62,8 @@ impl Drop for SecureKeyFile {
 /// authenticate using the stored key rather than falling back to default
 /// SSH key locations.
 async fn build_connection_context(host: &Model) -> ConnectionContext {
-    let key_path = std::env::temp_dir()
-        .join(format!("uptrakit-ssh-key-{}", host.id.replace('-', "")));
+    let key_path =
+        std::env::temp_dir().join(format!("uptrakit-ssh-key-{}", host.id.replace('-', "")));
 
     let pem_bytes = host.private_key.expose_secret().as_bytes().to_vec();
 
@@ -231,10 +231,13 @@ pub(crate) async fn handle_check_versions_ssh(
                 host_machine_id = %payload.host_machine_id,
                 "no SSH host found for CheckVersions host_machine_id; returning errors"
             );
-            let results = error_results_for_check(&payload, &format!(
-                "SSH host with machine_id '{}' not found",
-                payload.host_machine_id
-            ));
+            let results = error_results_for_check(
+                &payload,
+                &format!(
+                    "SSH host with machine_id '{}' not found",
+                    payload.host_machine_id
+                ),
+            );
             conn.send_best_effort(ServiceMessage::VersionCheckResults(
                 VersionCheckResultsPayload { results },
             ))
@@ -265,10 +268,7 @@ pub(crate) async fn handle_check_versions_ssh(
                 "failed to acquire SSH session for CheckVersions"
             );
             pool.evict(&host.id).await;
-            let results = error_results_for_check(
-                &payload,
-                &format!("SSH connection failed: {e}"),
-            );
+            let results = error_results_for_check(&payload, &format!("SSH connection failed: {e}"));
             conn.send_best_effort(ServiceMessage::VersionCheckResults(
                 VersionCheckResultsPayload { results },
             ))
@@ -405,10 +405,13 @@ pub(crate) async fn handle_discover_software_ssh(
                 host_machine_id = %payload.host_machine_id,
                 "no SSH host found for DiscoverSoftware host_machine_id; returning errors"
             );
-            let results = error_results_for_discovery(&payload, &format!(
-                "SSH host with machine_id '{}' not found",
-                payload.host_machine_id
-            ));
+            let results = error_results_for_discovery(
+                &payload,
+                &format!(
+                    "SSH host with machine_id '{}' not found",
+                    payload.host_machine_id
+                ),
+            );
             conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
                 host_machine_id: payload.host_machine_id,
                 results,
@@ -441,10 +444,8 @@ pub(crate) async fn handle_discover_software_ssh(
                 "failed to acquire SSH session for DiscoverSoftware"
             );
             pool.evict(&host.id).await;
-            let results = error_results_for_discovery(
-                &payload,
-                &format!("SSH connection failed: {e}"),
-            );
+            let results =
+                error_results_for_discovery(&payload, &format!("SSH connection failed: {e}"));
             conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
                 host_machine_id: payload.host_machine_id,
                 results,
@@ -473,10 +474,7 @@ pub(crate) use uptrakit_agent_core::{
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 /// Build per-assignment error results for a failed `CheckVersions` message.
-fn error_results_for_check(
-    payload: &CheckVersionsPayload,
-    error: &str,
-) -> Vec<VersionCheckResult> {
+fn error_results_for_check(payload: &CheckVersionsPayload, error: &str) -> Vec<VersionCheckResult> {
     payload
         .assignments
         .iter()

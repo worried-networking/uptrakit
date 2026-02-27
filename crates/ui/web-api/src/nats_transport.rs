@@ -244,7 +244,9 @@ impl NatsTransport {
                 if delivered {
                     let _ = msg.ack().await;
                 } else {
-                    let _ = msg.ack_with(async_nats::jetstream::AckKind::Nak(None)).await;
+                    let _ = msg
+                        .ack_with(async_nats::jetstream::AckKind::Nak(None))
+                        .await;
                 }
             }
         }
@@ -282,10 +284,7 @@ impl NatsTransport {
 }
 
 /// Determine the NATS subject for a message based on routing metadata.
-fn determine_subject(
-    target_service_id: Option<Uuid>,
-    target_capability: Option<&str>,
-) -> String {
+fn determine_subject(target_service_id: Option<Uuid>, target_capability: Option<&str>) -> String {
     match (target_service_id, target_capability) {
         (Some(id), _) => format!("{SUBJECT_PREFIX}.service.{id}"),
         (None, Some(cap)) => {
@@ -305,10 +304,7 @@ mod tests {
 
     #[test]
     fn determine_subject_broadcast() {
-        assert_eq!(
-            determine_subject(None, None),
-            "uptrakit.events.broadcast"
-        );
+        assert_eq!(determine_subject(None, None), "uptrakit.events.broadcast");
     }
 
     #[test]
@@ -367,10 +363,7 @@ mod tests {
             envelope.source_controller_id
         );
         assert_eq!(deserialized.target_service_id, envelope.target_service_id);
-        assert_eq!(
-            deserialized.target_capability,
-            envelope.target_capability
-        );
+        assert_eq!(deserialized.target_capability, envelope.target_capability);
         assert_eq!(deserialized.created_at, envelope.created_at);
     }
 
@@ -407,11 +400,10 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Publish from A
-        let msg = ControllerMessage::CaBundleUpdated(
-            uptrakit_internal_wire::CaBundleUpdatedPayload {
+        let msg =
+            ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
                 ca_bundle_pem: "test-pem".to_string(),
-            },
-        );
+            });
         transport_a
             .publish(controller_a, None, None, msg.clone())
             .await;

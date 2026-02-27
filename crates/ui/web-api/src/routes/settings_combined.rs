@@ -69,10 +69,7 @@ pub async fn get_combined_settings(
             Ok(count) => count,
             Err(e) => {
                 tracing::error!("Failed to count active enrollment tokens: {}", e);
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                );
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
     let enrollment_tokens = EnrollmentTokensSummary { active_count };

@@ -152,7 +152,10 @@ impl SshConnectionPool {
             return;
         }
 
-        tracing::debug!(count = sessions.len(), "disconnecting all pooled SSH sessions");
+        tracing::debug!(
+            count = sessions.len(),
+            "disconnecting all pooled SSH sessions"
+        );
 
         for session in sessions {
             // At shutdown there should be no other Arc holders.  Skip

@@ -7,7 +7,11 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Alias::new("controller_events")).to_owned())
+            .drop_table(
+                Table::drop()
+                    .table(Alias::new("controller_events"))
+                    .to_owned(),
+            )
             .await
     }
 
@@ -24,7 +28,11 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(Alias::new("source_controller_id")).uuid().not_null())
+                    .col(
+                        ColumnDef::new(Alias::new("source_controller_id"))
+                            .uuid()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Alias::new("target_service_id")).uuid())
                     .col(ColumnDef::new(Alias::new("target_capability")).text())
                     .col(ColumnDef::new(Alias::new("message_json")).json().not_null())

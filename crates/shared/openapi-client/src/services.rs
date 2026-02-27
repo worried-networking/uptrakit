@@ -70,7 +70,6 @@ impl UptrakitClient {
         self.post_json(&crate::paths::services::merge(target_id), req)
             .await
     }
-
 }
 
 #[cfg(test)]

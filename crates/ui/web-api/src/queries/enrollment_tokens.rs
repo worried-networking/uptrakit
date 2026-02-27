@@ -1,7 +1,6 @@
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set,
-    sea_query::Expr,
+    QuerySelect, Set, sea_query::Expr,
 };
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::enrollment_token;
@@ -46,9 +45,9 @@ pub async fn create_enrollment_token(
     tenant_db: &TenantDb,
     params: CreateTokenParams<'_>,
 ) -> Result<enrollment_token::Model, sea_orm::DbErr> {
-    let caps_json = params.allowed_capabilities.map(|caps| {
-        serde_json::to_string(caps).expect("capability list should serialize to JSON")
-    });
+    let caps_json = params
+        .allowed_capabilities
+        .map(|caps| serde_json::to_string(caps).expect("capability list should serialize to JSON"));
 
     let now = OffsetDateTime::now_utc();
     let model = enrollment_token::ActiveModel {
@@ -142,10 +141,10 @@ pub async fn find_active_tokens(
         )
         // Only tokens that have uses remaining (max_uses is NULL = unlimited, or current_uses < max_uses)
         .filter(
-            enrollment_token::Column::MaxUses.is_null().or(
-                Expr::col(enrollment_token::Column::CurrentUses)
-                    .lt(Expr::col(enrollment_token::Column::MaxUses)),
-            ),
+            enrollment_token::Column::MaxUses
+                .is_null()
+                .or(Expr::col(enrollment_token::Column::CurrentUses)
+                    .lt(Expr::col(enrollment_token::Column::MaxUses))),
         )
         .all(db)
         .await
@@ -183,10 +182,10 @@ pub async fn count_active_tokens(
                 .or(enrollment_token::Column::ExpiresAt.gt(now)),
         )
         .filter(
-            enrollment_token::Column::MaxUses.is_null().or(
-                Expr::col(enrollment_token::Column::CurrentUses)
-                    .lt(Expr::col(enrollment_token::Column::MaxUses)),
-            ),
+            enrollment_token::Column::MaxUses
+                .is_null()
+                .or(Expr::col(enrollment_token::Column::CurrentUses)
+                    .lt(Expr::col(enrollment_token::Column::MaxUses))),
         )
         .count(db)
         .await?;

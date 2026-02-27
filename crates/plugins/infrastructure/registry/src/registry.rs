@@ -317,8 +317,7 @@ impl PluginRegistry {
     pub fn capabilities_for(
         plugin_type: PluginType,
     ) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-        let executor =
-            Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+        let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
         let empty = serde_json::Value::Object(serde_json::Map::new());
         if let Ok(p) = Self::create_plugin_for_discovery(plugin_type, &empty, executor) {
             p.capabilities().to_vec()
@@ -958,7 +957,9 @@ mod tests {
     fn capabilities_for_docker_includes_discover() {
         let caps = PluginRegistry::capabilities_for(PluginType::ReleasesDocker);
         assert!(
-            caps.contains(&uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware),
+            caps.contains(
+                &uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+            ),
             "Docker plugin should declare DiscoverLocalSoftware"
         );
     }
@@ -978,7 +979,9 @@ mod tests {
     fn capabilities_for_str_docker_includes_discover() {
         let caps = PluginRegistry::capabilities_for_str("releases_docker");
         assert!(
-            caps.contains(&uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware),
+            caps.contains(
+                &uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
+            ),
             "releases_docker should declare DiscoverLocalSoftware via string lookup"
         );
     }
@@ -997,7 +1000,10 @@ mod tests {
     #[test]
     fn capabilities_for_str_unknown_returns_empty() {
         let caps = PluginRegistry::capabilities_for_str("unknown_type");
-        assert!(caps.is_empty(), "Unknown plugin type should return an empty capabilities vec");
+        assert!(
+            caps.is_empty(),
+            "Unknown plugin type should return an empty capabilities vec"
+        );
     }
 
     #[test]

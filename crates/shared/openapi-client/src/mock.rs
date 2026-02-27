@@ -642,7 +642,6 @@ impl<'a> MockServices<'a> {
     pub fn on_merge(&self, target_id: &Uuid) -> MockEndpoint<'_> {
         MockEndpoint::new(self.server, "POST", &paths::services::merge(target_id))
     }
-
 }
 
 // ── Section: Settings ──────────────────────────────────────────────────────

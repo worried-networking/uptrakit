@@ -636,11 +636,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(EnrollmentTokens::TenantId)
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(EnrollmentTokens::TenantId).uuid().not_null())
                     .col(ColumnDef::new(EnrollmentTokens::Name).text().not_null())
                     .col(
                         ColumnDef::new(EnrollmentTokens::TokenHash)
@@ -650,11 +646,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(EnrollmentTokens::AllowedCapabilities).text())
                     .col(ColumnDef::new(EnrollmentTokens::MaxUses).integer())
-                    .col(
-                        integer(EnrollmentTokens::CurrentUses)
-                            .not_null()
-                            .default(0),
-                    )
+                    .col(integer(EnrollmentTokens::CurrentUses).not_null().default(0))
                     .col(ColumnDef::new(EnrollmentTokens::ExpiresAt).timestamp())
                     .col(timestamp(EnrollmentTokens::CreatedAt))
                     .col(ColumnDef::new(EnrollmentTokens::RevokedAt).timestamp())
@@ -732,11 +724,7 @@ impl MigrationTrait for Migration {
                             .integer()
                             .null(),
                     )
-                    .col(
-                        ColumnDef::new(Services::EnrollmentTokenId)
-                            .uuid()
-                            .null(),
-                    )
+                    .col(ColumnDef::new(Services::EnrollmentTokenId).uuid().null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_services_tenant")

@@ -61,7 +61,10 @@ impl HumanOutput for EnrollmentTokenResponse {
         out.push_str(&format!("Capabilities:   {}\n", caps));
         match self.max_uses {
             Some(max) => out.push_str(&format!("Usage:          {}/{}\n", self.current_uses, max)),
-            None => out.push_str(&format!("Usage:          {} (unlimited)\n", self.current_uses)),
+            None => out.push_str(&format!(
+                "Usage:          {} (unlimited)\n",
+                self.current_uses
+            )),
         }
         if let Some(expires) = self.expires_at {
             out.push_str(&format!(
@@ -175,9 +178,7 @@ pub struct RevokeParams<'a> {
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 /// List enrollment tokens with pagination.
-pub async fn list(
-    params: ListParams<'_>,
-) -> Result<PaginatedResponse<EnrollmentTokenResponse>> {
+pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<EnrollmentTokenResponse>> {
     let client = authenticated_client(
         params.server,
         params.token,

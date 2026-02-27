@@ -79,30 +79,25 @@ pub async fn deliver_event(
 ///
 /// Returns `true` if delivery succeeded or the target is not on this
 /// controller.
-pub async fn deliver_mqtt_event(registry: &ServiceConnectionRegistry, msg: ControllerMessage) -> bool {
+pub async fn deliver_mqtt_event(
+    registry: &ServiceConnectionRegistry,
+    msg: ControllerMessage,
+) -> bool {
     match &msg {
         ControllerMessage::TenantConfigUpdated(payload) => {
             // Route to the specific instance holding this MQTT client
             let mqtt_client_id = payload.tenant.mqtt_client_id;
-            if let Some(service_id) = registry
-                .get_instance_for_mqtt_client(&mqtt_client_id)
-                .await
-            {
+            if let Some(service_id) = registry.get_instance_for_mqtt_client(&mqtt_client_id).await {
                 registry.send(&service_id, msg).await
             } else {
                 // Not on this controller.
                 true
             }
         }
-        ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
-            mqtt_client_id, ..
-        }) => {
+        ControllerMessage::TenantRevoked(MqttTenantRevokedPayload { mqtt_client_id, .. }) => {
             // Route to the specific instance holding this MQTT client
             let mqtt_client_id = *mqtt_client_id;
-            if let Some(service_id) = registry
-                .get_instance_for_mqtt_client(&mqtt_client_id)
-                .await
-            {
+            if let Some(service_id) = registry.get_instance_for_mqtt_client(&mqtt_client_id).await {
                 registry
                     .release_mqtt_client(&service_id, &mqtt_client_id)
                     .await;
@@ -192,15 +187,12 @@ mod tests {
     #[tokio::test]
     async fn deliver_event_broadcast_when_no_filter() {
         let registry = ServiceConnectionRegistry::new();
-        let db = sea_orm::Database::connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
 
-        let msg = ControllerMessage::CaBundleUpdated(
-            uptrakit_internal_wire::CaBundleUpdatedPayload {
+        let msg =
+            ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
                 ca_bundle_pem: "pem".to_string(),
-            },
-        );
+            });
         // With no connected services, broadcast succeeds.
         let result = deliver_event(&registry, &db, None, None, msg).await;
         assert!(result);
@@ -209,16 +201,13 @@ mod tests {
     #[tokio::test]
     async fn deliver_event_service_targeted_not_connected() {
         let registry = ServiceConnectionRegistry::new();
-        let db = sea_orm::Database::connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
 
         let service_id = Uuid::now_v7();
-        let msg = ControllerMessage::CaBundleUpdated(
-            uptrakit_internal_wire::CaBundleUpdatedPayload {
+        let msg =
+            ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
                 ca_bundle_pem: "pem".to_string(),
-            },
-        );
+            });
         // Service not on this controller — returns true (not our responsibility).
         let result = deliver_event(&registry, &db, Some(service_id), None, msg).await;
         assert!(result);
@@ -227,15 +216,12 @@ mod tests {
     #[tokio::test]
     async fn deliver_event_capability_targeted() {
         let registry = ServiceConnectionRegistry::new();
-        let db = sea_orm::Database::connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
 
-        let msg = ControllerMessage::CaBundleUpdated(
-            uptrakit_internal_wire::CaBundleUpdatedPayload {
+        let msg =
+            ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
                 ca_bundle_pem: "pem".to_string(),
-            },
-        );
+            });
         let result = deliver_event(&registry, &db, None, Some("software_discovery"), msg).await;
         assert!(result);
     }
