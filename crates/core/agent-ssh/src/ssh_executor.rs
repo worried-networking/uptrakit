@@ -48,6 +48,7 @@ impl CommandExecutor for SshCommandExecutor {
 
         if result.exit_code != 0 {
             let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);
+            log_failed_command_output(exit_code, &result.stderr, &result.stdout);
             bail!(CommandError::CommandFailed(exit_code));
         }
 
@@ -73,6 +74,7 @@ impl CommandExecutor for SshCommandExecutor {
 
         if result.exit_code != 0 {
             let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);
+            log_failed_command_output(exit_code, &result.stderr, &result.stdout);
             bail!(CommandError::CommandFailed(exit_code));
         }
 
@@ -81,6 +83,25 @@ impl CommandExecutor for SshCommandExecutor {
 
         let exit_code = i32::try_from(result.exit_code).unwrap_or(0);
         Ok(CommandOutput { output, exit_code })
+    }
+}
+
+/// Log stderr (and stdout if stderr is empty) from a failed remote command.
+///
+/// When a remote command fails, the exit code alone is rarely enough to
+/// diagnose the problem. This helper emits a WARN-level log with the
+/// command's stderr output so that failures like "command not found",
+/// "permission denied", or "No such file" are immediately visible in the
+/// agent logs without having to cross-reference streamed output on the
+/// controller.
+fn log_failed_command_output(exit_code: i32, stderr: &str, stdout: &str) {
+    let stderr = stderr.trim();
+    let stdout = stdout.trim();
+    if !stderr.is_empty() {
+        tracing::warn!(exit_code, stderr = %stderr, "remote command failed");
+    } else if !stdout.is_empty() {
+        // Some programs (notably shell scripts) write errors to stdout.
+        tracing::warn!(exit_code, stdout = %stdout, "remote command failed");
     }
 }
 
