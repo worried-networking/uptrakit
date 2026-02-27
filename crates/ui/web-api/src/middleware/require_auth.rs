@@ -8,6 +8,7 @@ use sea_orm::EntityTrait;
 use uptrakit_shared_db::entity::prelude::*;
 
 use crate::AppState;
+use crate::auth::AuthMethod;
 use crate::auth::api_token::ApiTokenService;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;

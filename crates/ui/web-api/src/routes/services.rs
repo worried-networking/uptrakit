@@ -387,8 +387,9 @@ mod tests {
         ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
     };
     use time::OffsetDateTime;
+    use crate::auth::AuthMethod;
     use uptrakit_shared_db::entity::{
-        prelude::{AuthMethod, Service},
+        prelude::Service,
         service, tenant,
     };
 

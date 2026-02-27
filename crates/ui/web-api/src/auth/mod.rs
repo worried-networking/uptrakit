@@ -1,4 +1,5 @@
 pub mod api_token;
+pub mod auth_method;
 pub mod authentication;
 pub mod device_flow;
 pub mod error;
@@ -14,4 +15,5 @@ pub mod session;
 pub mod token;
 pub mod token_denylist;
 
+pub use auth_method::AuthMethod;
 pub use error::{AuthError, Result};

@@ -10,8 +10,9 @@ use axum::{
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, QueryFilter, QueryOrder, Set};
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, oidc_provider::RoleMapping};
+
+use crate::auth::AuthMethod;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 

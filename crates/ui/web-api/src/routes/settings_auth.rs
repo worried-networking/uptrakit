@@ -10,7 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use uptrakit_shared_db::entity::prelude::AuthMethod;
+use crate::auth::AuthMethod;
 #[cfg(feature = "oidc")]
 use {
     sea_orm::{ColumnTrait, QueryFilter},

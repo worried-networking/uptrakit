@@ -121,7 +121,7 @@ mod tests {
     use axum::http::Request;
 
     use crate::auth::permissions::Permission;
-    use uptrakit_shared_db::entity::prelude::AuthMethod;
+    use crate::auth::AuthMethod;
 
     /// Build request `Parts` with an `AuthenticatedUser` pre-inserted.
     fn parts_with_user(permissions: Vec<Permission>) -> axum::http::request::Parts {

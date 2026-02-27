@@ -22,6 +22,8 @@ use time::OffsetDateTime;
 use uptrakit_shared_db::MaskedEmail;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
+
+use crate::auth::AuthMethod;
 use uptrakit_web_api_types::SecretString;
 use uptrakit_web_api_types::validation::Validate;
 
