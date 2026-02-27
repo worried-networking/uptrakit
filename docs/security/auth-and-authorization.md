@@ -10,7 +10,7 @@
 | API tokens | Programmatic access | Long-lived, revocable bearer tokens stored in the database. |
 | mTLS client certs | Agent/MQTT connections | Issued after CSR approval and validated per connection. |
 | Forwarded cert headers | Reverse proxy | Trusted proxies forward cert info/PEM; issuer CN verified. |
-| Enrollment token | Service onboarding | Single shared token (`service_enrollment.token_hash`) for all service types. |
+| Enrollment tokens | Service onboarding | Multiple named tokens stored in the `enrollment_tokens` table (Argon2id hashed). Each token supports capability scoping, usage limits, and TTL. See [Enrollment Tokens API](../api/enrollment-tokens.md). |
 
 ## Session Integrity Validation
 

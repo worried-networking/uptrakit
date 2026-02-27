@@ -53,7 +53,8 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `POST /api/v1/services/{id}/reject`: reject a pending service.
 - `DELETE /api/v1/services/{id}`: deactivate (soft-delete) a service.
 - `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
-- `/api/v1/services/enrollment-token`: manage the single shared enrollment token for all service types.
+- `/api/v1/enrollment-tokens`: CRUD endpoints for enrollment tokens (create, list, get, revoke).
+  See [Enrollment Tokens API](enrollment-tokens.md) for full details.
 - `/api/v1/software-items`: CRUD endpoints for software items. A software item is a named catalog
   entry; plugin configs and package identifiers live on role-specific plugin assignments
   (`host_software_item_plugins`), not on the item itself.
@@ -81,6 +82,7 @@ which actions are valid for a given config — for example, only showing **Disco
 when `"discover_local_software"` is present. Discovery-capable plugin types are `releases_docker`,
 `package_manager_homebrew`, `package_manager_apt`, and `discovery_proxmox_helper_scripts`; non-discovery types
 (`releases_github`, `generic_shell`) return an empty capabilities list for this field.
+
 - `/api/v1/autodiscovery/ignores`: CRUD for permanent suppression rules. See [docs/api/autodiscovery.md](autodiscovery.md) for full details.
 
 `ServiceResponse` includes an optional `ping_interval_seconds` field (`Option<u32>`) that reports the per-service
@@ -480,6 +482,7 @@ All paginated endpoints return a `PaginatedResponse<T>`:
 | `GET /api/v1/software-items` | `PaginationParams` | |
 | `GET /api/v1/update-history` | `UpdateHistoryQuery` (includes `page`/`per_page`) | Filterable by `host_id`, `software_item_id`, `status` |
 | `GET /api/v1/plugin-configs` | `PaginationParams` | |
+| `GET /api/v1/enrollment-tokens` | `ListEnrollmentTokensQuery` (includes `page`/`per_page`) | |
 
 ### Endpoints NOT paginated (already bounded)
 

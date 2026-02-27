@@ -58,7 +58,8 @@ crates/shared/openapi-client/
     ├── pki.rs              # PKI endpoints (CA cert, CRL download)
     ├── plugin_configs.rs   # Plugin configuration CRUD
     ├── scheduler.rs        # Scheduler task list/get/update/trigger
-    ├── services.rs         # Service list/get/approve/reject/remove/merge + enrollment tokens
+    ├── enrollment_tokens.rs # Enrollment token CRUD
+    ├── services.rs         # Service list/get/approve/reject/remove/merge
     ├── settings.rs         # Settings (registration, auth, certs, network, CA, server cert)
     ├── settings_mqtt.rs    # MQTT client settings CRUD + limit management
     ├── software_items.rs   # Software item CRUD + host assignment + version check/update
@@ -223,6 +224,14 @@ directly. `Option::None` fields are automatically skipped by
 - `update_scheduled_task(&self, id: &Uuid, req) -> Result<ScheduledTaskResponse>`
 - `trigger_scheduled_task(&self, id: &Uuid) -> Result<TriggerScheduledTaskResponse>`
 
+### Enrollment tokens (`enrollment_tokens.rs`)
+
+- `create_enrollment_token(&self, req) -> Result<EnrollmentTokenCreatedResponse>`
+- `list_enrollment_tokens(&self, query) -> Result<PaginatedResponse<EnrollmentTokenResponse>>`
+- `list_all_enrollment_tokens(&self, query) -> Result<Vec<EnrollmentTokenResponse>>` -- auto-paginating helper
+- `get_enrollment_token(&self, id: &Uuid) -> Result<EnrollmentTokenResponse>`
+- `revoke_enrollment_token(&self, id: &Uuid) -> Result<MessageResponse>`
+
 ### Services (`services.rs`)
 
 - `list_services(&self, query) -> Result<PaginatedResponse<ServiceResponse>>`
@@ -232,9 +241,6 @@ directly. `Option::None` fields are automatically skipped by
 - `reject_service(&self, id: &Uuid) -> Result<ServiceResponse>`
 - `remove_service(&self, id: &Uuid) -> Result<MessageResponse>`
 - `merge_service(&self, target_id: &Uuid, req) -> Result<ServiceResponse>`
-- `create_enrollment_token(&self) -> Result<EnrollmentTokenResponse>`
-- `revoke_enrollment_token(&self) -> Result<()>`
-- `enrollment_token_status(&self) -> Result<EnrollmentTokenStatusResponse>`
 
 ### Settings (`settings.rs`)
 
@@ -334,9 +340,9 @@ sub-module holds:
 When an API path changes, update `paths.rs`. The compiler will catch every
 stale reference in both the client methods and the mock helpers.
 
-Sub-modules: `auth`, `api_tokens`, `health`, `hosts`, `oidc_auth`,
-`oidc_providers`, `pki`, `plugin_configs`, `scheduler`, `services`,
-`settings`, `settings_mqtt`, `software_items`, `system_alerts`,
+Sub-modules: `auth`, `api_tokens`, `enrollment_tokens`, `health`, `hosts`,
+`oidc_auth`, `oidc_providers`, `pki`, `plugin_configs`, `scheduler`,
+`services`, `settings`, `settings_mqtt`, `software_items`, `system_alerts`,
 `update_history`.
 
 ## Mock testing feature
@@ -431,6 +437,15 @@ provides `on_*` helpers for every endpoint, so tests never hard-code paths.
 | `on_create()` | POST | `/api/v1/auth/api-tokens` |
 | `on_revoke(id)` | DELETE | `/api/v1/auth/api-tokens/{id}` |
 
+#### `server.enrollment_tokens()` → `MockEnrollmentTokens`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list()` | GET | `/api/v1/enrollment-tokens` |
+| `on_create()` | POST | `/api/v1/enrollment-tokens` |
+| `on_get(id)` | GET | `/api/v1/enrollment-tokens/{id}` |
+| `on_revoke(id)` | DELETE | `/api/v1/enrollment-tokens/{id}` |
+
 #### `server.health()` → `MockHealth`
 
 | Method | HTTP | Path |
@@ -504,9 +519,6 @@ provides `on_*` helpers for every endpoint, so tests never hard-code paths.
 | `on_reject(id)` | POST | `/api/v1/services/{id}/reject` |
 | `on_remove(id)` | DELETE | `/api/v1/services/{id}` |
 | `on_merge(target_id)` | POST | `/api/v1/services/{id}/merge` |
-| `on_create_enrollment_token()` | POST | `/api/v1/services/enrollment-token` |
-| `on_revoke_enrollment_token()` | DELETE | `/api/v1/services/enrollment-token` |
-| `on_enrollment_token_status()` | GET | `/api/v1/services/enrollment-token/status` |
 
 #### `server.settings()` → `MockSettings`
 

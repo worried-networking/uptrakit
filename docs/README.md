@@ -37,6 +37,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Settings Runtime](api/settings-runtime.md) | DB-managed settings, reconciliation, and watch channels. See also: [Services and Operations](api/services-operations.md). |
 | [Auth Flows](api/auth-flows.md) | Device auth, tokens, MQTT enrollment, and denylist behavior. See also: [Auth and Authorization](security/auth-and-authorization.md), [Secrets and Encryption](security/secrets-and-encryption.md). |
 | [Services and Operations](api/services-operations.md) | Agent/MQTT flows, update history, and tenant-scoped tables. See also: [Update Workflow](end-user/update-workflow.md). |
+| [Enrollment Tokens](api/enrollment-tokens.md) | Enrollment token CRUD, capability scoping, usage limits, TTL, and enrollment flow. See also: [Auth and Authorization](security/auth-and-authorization.md). |
 
 ## Security
 

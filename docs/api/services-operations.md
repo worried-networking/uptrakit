@@ -13,7 +13,8 @@
 
 ## MQTT Service
 
-- `/api/v1/services/enrollment-token` issues a single enrollment token shared by all service types.
+- `/api/v1/enrollment-tokens` manages multiple named enrollment tokens with optional capability scoping,
+  usage limits, and TTL. See [Enrollment Tokens API](enrollment-tokens.md) for full details.
 - MQTT clients receive `tenant_assignments`, `tenant_config_updated`, and `tenant_revoked` commands after assignment.
 - MQTT services share the same enrollment, certificate, and PKI flows as agents.
 - Agent and MQTT services use the same activity tracking fields in `services`: `ip_address` is refreshed on each WebSocket connect, and `last_seen_at`

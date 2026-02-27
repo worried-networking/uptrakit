@@ -108,12 +108,18 @@ controller-side behavioral defaults (ping interval, shutdown timeout, human-read
 `MqttBridge` takes precedence if both `MqttBridge` and `SoftwareDiscovery` are present. For `Agent` profiles, the `SshRemote` capability
 distinguishes SSH-backed agents from local agents in UI labels (`service_label`).
 
-### Unified enrollment token
+### Enrollment tokens
 
-A single enrollment token covers all service profiles. The separate per-type token endpoints (`?type=mqtt`, `?type=ssh_agent`) and per-type
-settings keys (`MqttEnrollmentTokenHash`, `SshAgentEnrollmentTokenHash`) have been replaced by a single endpoint at
-`/api/v1/services/enrollment-token` and a single settings key. If a valid enrollment token is provided during enrollment, the service is
-auto-approved regardless of its capability set.
+Multiple named enrollment tokens are stored in a dedicated `enrollment_tokens` table. Each token supports:
+
+- **Capability scoping**: restrict which service types the token can approve (intersection matching).
+- **Usage limits**: optional `max_uses` with atomic `current_uses` increment.
+- **TTL**: optional `expires_at` for automatic expiration.
+- **Audit trail**: `created_by_user_id` tracks who created the token; `enrollment_token_id` on the `services` table tracks which token enrolled each service.
+
+Tokens are managed via the `/api/v1/enrollment-tokens` REST API (create, list, get, revoke). A wildcard token (no capability restriction)
+matches any service. During enrollment, the controller iterates active tokens and verifies the provided secret against each Argon2id hash.
+See [Enrollment Tokens API](docs/api/enrollment-tokens.md) for full details.
 
 ### Service connection registry
 

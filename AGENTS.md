@@ -523,11 +523,19 @@ behavioral defaults (ping interval, shutdown timeout, human-readable label). It 
 3. Each side computes `agreed = intersection(controller_caps, service_caps)` excluding `Other` values.
 4. The agreed set is stored on the connection via `ControllerConnection::set_agreed_capabilities()`.
 
-#### Unified enrollment token
+#### Enrollment tokens
 
-The three separate enrollment tokens (agent, MQTT, SSH agent) have been replaced by a single unified enrollment token.
-`SettingKey::EnrollmentTokenHash` maps to DB key `service_enrollment.token_hash`. The former per-type keys
-(`MqttEnrollmentTokenHash`, `SshAgentEnrollmentTokenHash`, `agent_enrollment.token_hash`) no longer exist.
+Multiple named enrollment tokens are stored in the `enrollment_tokens` table (`crates/shared/db/src/entity/enrollment_token.rs`).
+Each token supports capability scoping, usage limits (`max_uses`), and TTL (`expires_at`). The former single-token model
+(`SettingKey::EnrollmentTokenHash`, `service_enrollment.token_hash`) has been removed entirely.
+
+REST API: `POST/GET /api/v1/enrollment-tokens`, `GET/DELETE /api/v1/enrollment-tokens/{id}` (requires `ManageAgents`).
+OpenAPI client: `crates/shared/openapi-client/src/enrollment_tokens.rs`.
+CLI: `uptrakit enrollment-tokens list|create|show|revoke`.
+
+During enrollment, the controller iterates all active tokens for the tenant and verifies the provided secret against each
+Argon2id hash. On match, it checks capability intersection and atomically increments `current_uses`. The `enrollment_token_id`
+FK on the `services` table provides an audit trail of which token enrolled each service.
 
 #### Wire protocol changes
 
@@ -561,7 +569,9 @@ The frontend filters services by capability instead of type and displays `servic
 | `crates/shared/wire/src/lib.rs` | `Capability` enum, serde, `is_known()`, `EnrollPayload` with `capabilities` field |
 | `crates/ui/web-api/src/service_profile.rs` | `ServiceProfile` enum, `from_capabilities()`, `parse_capabilities()`, `serialize_capabilities()` |
 | `crates/ui/web-api/src/service_connections.rs` | `register()`, `broadcast_by_capability()` |
-| `crates/ui/web-api/src/setting_key.rs` | `SettingKey::EnrollmentTokenHash` (`service_enrollment.token_hash`) |
+| `crates/shared/db/src/entity/enrollment_token.rs` | `enrollment_tokens` SeaORM entity |
+| `crates/ui/web-api/src/routes/enrollment_tokens.rs` | Enrollment token REST endpoints |
+| `crates/ui/web-api/src/queries/enrollment_tokens.rs` | Enrollment token DB queries |
 | `crates/shared/service-sdk/src/connection.rs` | `agreed_capabilities` field + accessors |
 | `crates/shared/service-sdk/src/event_loop.rs` | Capability intersection in `ServiceSettings` handler |
 | `crates/ui/web-api/src/routes/service_ws/protocol.rs` | `controller_capabilities()`, `ServiceSettingsPayload` construction |

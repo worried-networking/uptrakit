@@ -26,6 +26,8 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 ## Agent Lifecycle
 
 1. Connect anonymously and send `enroll` with hostname, capabilities, and optional enrollment token.
+   The `enrollment_token` field carries a single plaintext string; the controller resolves it
+   against multiple stored tokens server-side (see [Enrollment Tokens API](enrollment-tokens.md)).
 1. Controller assigns UUIDv7 `service_id` and responds with `enrolled` (includes enrollment secret).
 1. Agent generates an ECDSA P-256 keypair locally and submits a CSR (`request_certificate`).
 1. Controller validates the CSR, signs it, and returns `certificate`.

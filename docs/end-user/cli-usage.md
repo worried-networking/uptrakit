@@ -446,6 +446,40 @@ See also: [Settings Runtime](../api/settings-runtime.md), [HTTP Web API](../api/
 [PKI and Certificate Lifecycle](../security/pki-certificates.md),
 [Auth and Authorization](../security/auth-and-authorization.md).
 
+## Enrollment Tokens
+
+Manage enrollment tokens that allow services to auto-enroll with approved status.
+
+```sh
+# List all enrollment tokens (paginated)
+uptrakit enrollment-tokens list
+uptrakit enrollment-tokens list --page 2 --per-page 10
+
+# Create a new enrollment token
+uptrakit enrollment-tokens create --name "CI Deploy Token"
+uptrakit enrollment-tokens create --name "Agent Token" \
+  --capabilities "software_discovery,update_hooks" \
+  --max-uses 50 \
+  --expires-in 604800
+
+# Show a specific enrollment token
+uptrakit enrollment-tokens show <TOKEN_ID>
+
+# Revoke an enrollment token
+uptrakit enrollment-tokens revoke <TOKEN_ID>
+```
+
+- `--capabilities`: comma-separated list of capabilities to restrict the token to.
+  Omit for a wildcard token that matches any service type.
+- `--max-uses`: maximum number of enrollments. Omit for unlimited.
+- `--expires-in`: TTL in seconds. Omit for no expiration.
+
+The `create` command displays the plaintext token value once. Save it immediately;
+it cannot be retrieved later.
+
+See also: [Enrollment Tokens API](../api/enrollment-tokens.md),
+[Auth and Authorization](../security/auth-and-authorization.md).
+
 ## Raw API Access
 
 For advanced use, the `api` command lets you call any REST endpoint directly.
