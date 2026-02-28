@@ -30,8 +30,11 @@ use crate::nats_notifier::NatsSchedulerNotifier;
 /// Active scheduler runtime spawned after credential delivery.
 struct SchedulerRuntime {
     cancel: CancellationToken,
-    _scheduler_handle: tokio::task::JoinHandle<()>,
+    scheduler_handle: tokio::task::JoinHandle<()>,
 }
+
+/// Maximum time to wait for the scheduler task to finish after cancellation.
+const STOP_SCHEDULER_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// `ServiceHandler` for the external scheduler.
 pub struct SchedulerHandler {
@@ -48,13 +51,28 @@ impl SchedulerHandler {
     }
 
     /// Tear down the running scheduler, releasing DB claims.
-    fn stop_scheduler(&mut self) {
+    ///
+    /// Cancels the token and awaits the scheduler task with a timeout to
+    /// ensure the old scheduler has fully stopped before a new one starts
+    /// (prevents two scheduler instances racing on claim operations).
+    async fn stop_scheduler(&mut self) {
         if let Some(rt) = self.runtime.take() {
             tracing::info!("stopping scheduler engine");
             rt.cancel.cancel();
-            // The scheduler loop will release all claims on cancellation.
-            // We don't await the JoinHandle here because on_shutdown uses a
-            // timeout-bounded drain; the handle will complete soon.
+            match tokio::time::timeout(STOP_SCHEDULER_TIMEOUT, rt.scheduler_handle).await {
+                Ok(Ok(())) => {
+                    tracing::info!("scheduler engine stopped cleanly");
+                }
+                Ok(Err(join_err)) => {
+                    tracing::error!(error = %join_err, "scheduler task panicked during shutdown");
+                }
+                Err(_elapsed) => {
+                    tracing::warn!(
+                        timeout_secs = STOP_SCHEDULER_TIMEOUT.as_secs(),
+                        "scheduler task did not stop within timeout"
+                    );
+                }
+            }
         }
     }
 }
@@ -91,7 +109,7 @@ impl ServiceHandler for SchedulerHandler {
 
                 // If there's already a running scheduler (re-sent credentials),
                 // stop the existing one first.
-                self.stop_scheduler();
+                self.stop_scheduler().await;
 
                 // 1. Initialize master encryption key (if provided and not already set).
                 if let Some(ref hex) = creds.master_key_hex
@@ -217,7 +235,7 @@ impl ServiceHandler for SchedulerHandler {
 
                 self.runtime = Some(SchedulerRuntime {
                     cancel,
-                    _scheduler_handle: handle,
+                    scheduler_handle: handle,
                 });
 
                 tracing::info!("scheduler engine started");
@@ -265,7 +283,7 @@ impl ServiceHandler for SchedulerHandler {
         let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
 
         // Stop the scheduler engine (releases DB claims).
-        self.stop_scheduler();
+        self.stop_scheduler().await;
 
         // Send disconnect message to the controller.
         let _ = conn
