@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use regex::Regex;
 use rootcause::prelude::*;
 use serde_json::json;
 use uptrakit_plugin_infrastructure_core::mpsc;
@@ -17,29 +16,26 @@ use uptrakit_plugin_infrastructure_core::{
 /// Type-erased RAII handle kept alive alongside the Docker client.
 type OpaqueHandle = Option<Box<dyn std::any::Any + Send + Sync>>;
 
-use crate::config::{DockerConfig, TrackingMode};
+use crate::config::DockerConfig;
 #[cfg(feature = "daemon")]
 use uptrakit_plugin_infrastructure_core::HostCompatibility;
 #[cfg(feature = "daemon")]
 use crate::docker_client::BollardDockerClient;
 use crate::docker_client::{DockerClient, NoopDockerClient};
-use crate::error::{DockerError, Result};
+use crate::error::Result;
 use crate::image_ref::ImageRef;
 use crate::registry::RegistryClient;
-use crate::tag::filter_and_sort_tags;
 
 /// Docker plugin implementation.
 ///
-/// Tracks container image tags from OCI/Docker registries.
-/// Supports two tracking modes:
-/// - **SemverTags**: filter tags by pattern, parse as semver, sort descending
-/// - **DigestTracking**: track digest changes of a specific tag
+/// Tracks container image updates by monitoring the SHA-256 manifest digest
+/// of a specific tag (e.g. `latest`). When the remote digest differs from the
+/// locally installed digest, an update is available.
 ///
 /// Also supports autodiscovery of running/stopped containers via Bollard.
 pub struct DockerPlugin {
     config: DockerConfig,
     registry_client: RegistryClient,
-    tag_filters: Vec<Regex>,
     docker_client: Arc<dyn DockerClient>,
     executor: Arc<dyn CommandExecutor>,
     /// RAII handle for the Docker socket proxy (Unix-only, daemon feature).
@@ -125,22 +121,11 @@ impl DockerPlugin {
     ) -> Result<Self> {
         config.validate()?;
 
-        let registry_client = RegistryClient::new(config.auth.clone(), config.page_size)?;
-
-        let tag_filters: Vec<Regex> = config
-            .tag_patterns
-            .iter()
-            .map(|p| {
-                Regex::new(p).context_transform(|e| {
-                    DockerError::InvalidPattern(format!("invalid regex '{p}': {e}"))
-                })
-            })
-            .collect::<Result<_>>()?;
+        let registry_client = RegistryClient::new(config.auth.clone())?;
 
         Ok(Self {
             config,
             registry_client,
-            tag_filters,
             docker_client,
             executor,
             _proxy_handle: proxy_handle,
@@ -168,33 +153,6 @@ impl DockerPlugin {
         docker_client: Arc<dyn DockerClient>,
     ) -> Result<Self> {
         Self::init(config, executor, docker_client, None)
-    }
-
-    /// Convert filtered tags to upstream releases (semver mode).
-    fn tags_to_releases(&self, ir: &ImageRef, tags: Vec<String>) -> Vec<UpstreamRelease> {
-        let sorted = filter_and_sort_tags(
-            &tags,
-            &self.tag_filters,
-            &self.config.tag_strip_prefix,
-            self.config.include_prereleases,
-        );
-
-        sorted
-            .into_iter()
-            .map(|tv| {
-                let is_prerelease = !tv.semver.pre.is_empty();
-                let release_url = ir.web_url(&tv.tag);
-                UpstreamRelease {
-                    version: Version::new(tv.version_str),
-                    tag: tv.tag,
-                    is_prerelease,
-                    release_url,
-                    release_notes: None,
-                    published_at: None,
-                    assets: vec![],
-                }
-            })
-            .collect()
     }
 }
 
@@ -234,60 +192,37 @@ impl Plugin for DockerPlugin {
                     uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
                 })?;
 
-        match self.config.tracking_mode {
-            TrackingMode::SemverTags => {
-                let tags = self
-                    .registry_client
-                    .list_tags(&ir.registry, &ir.repository)
-                    .await
-                    .context_to()?;
+        let tag = self.config.resolved_tracked_tag(&ir.tag);
+        let digest = self
+            .registry_client
+            .get_manifest_digest(&ir.registry, &ir.repository, tag)
+            .await
+            .context_to()?;
 
-                let releases = self.tags_to_releases(&ir, tags);
-                tracing::debug!(
-                    count = releases.len(),
-                    image = %ir.image,
-                    "fetched Docker releases (semver mode)"
-                );
-                Ok(releases)
-            }
-            TrackingMode::DigestTracking => {
-                let tag = self.config.resolved_tracked_tag();
-                let digest = self
-                    .registry_client
-                    .get_manifest_digest(&ir.registry, &ir.repository, tag)
-                    .await
-                    .context_to()?;
+        let release_url = ir.web_url(&digest);
+        let release = UpstreamRelease {
+            version: Version::new(&digest),
+            tag: tag.to_string(),
+            is_prerelease: false,
+            release_url,
+            release_notes: None,
+            published_at: None,
+            assets: vec![],
+        };
 
-                let release_url = ir.web_url(&digest);
-                let release = UpstreamRelease {
-                    version: Version::new(&digest),
-                    tag: tag.to_string(),
-                    is_prerelease: false,
-                    release_url,
-                    release_notes: None,
-                    published_at: None,
-                    assets: vec![],
-                };
-
-                tracing::debug!(
-                    digest = %digest,
-                    tag = %tag,
-                    image = %ir.image,
-                    "fetched Docker release (digest mode)"
-                );
-                Ok(vec![release])
-            }
-        }
+        tracing::debug!(
+            digest = %digest,
+            tag = %tag,
+            image = %ir.image,
+            "fetched Docker release (digest mode)"
+        );
+        Ok(vec![release])
     }
 
     async fn detect_installed_version(
         &self,
         package_identifier: &str,
     ) -> uptrakit_plugin_infrastructure_core::Result<Option<Version>> {
-        if self.config.tracking_mode != TrackingMode::DigestTracking {
-            return Ok(None);
-        }
-
         let ir: ImageRef =
             package_identifier
                 .parse()
@@ -295,7 +230,7 @@ impl Plugin for DockerPlugin {
                     PluginError::PluginInternal(e.to_string())
                 })?;
 
-        let tag = self.config.resolved_tracked_tag();
+        let tag = self.config.resolved_tracked_tag(&ir.tag);
         let full_ref = format!("{}:{tag}", ir.image);
 
         match self.docker_client.inspect_image(&full_ref).await {
@@ -318,7 +253,7 @@ impl Plugin for DockerPlugin {
     async fn execute_update(
         &self,
         package_identifier: &str,
-        to_version: &str,
+        _to_version: &str,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> uptrakit_plugin_infrastructure_core::Result<String> {
@@ -330,8 +265,25 @@ impl Plugin for DockerPlugin {
                 })?;
 
         let image = &ir.image;
-        let tag = to_version;
+        // Always pull by the configured tag (e.g. "latest"), not by digest.
+        let tag = self.config.resolved_tracked_tag(&ir.tag);
+        let full_ref = format!("{image}:{tag}");
         let mut output = String::new();
+
+        // Pre-pull: collect running/stopped state of containers using this image.
+        // Used for compose direction (up -d vs --no-start) and for auto-recreation.
+        let containers_before = self
+            .docker_client
+            .list_containers_for_image(&full_ref)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    image = %full_ref,
+                    error = %e,
+                    "failed to list containers before pull; recreation will be skipped"
+                );
+                vec![]
+            });
 
         send_output(
             output_tx,
@@ -341,7 +293,7 @@ impl Plugin for DockerPlugin {
         .await;
         output.push_str(&format!("Pulling Docker image {image}:{tag}\n"));
 
-        tracing::debug!(image = %image, "pulling Docker image");
+        tracing::debug!(image = %image, tag = %tag, "pulling Docker image");
         let pull_output = self
             .docker_client
             .pull_image(image, tag, self.config.auth.as_ref(), output_tx)
@@ -350,8 +302,12 @@ impl Plugin for DockerPlugin {
         tracing::debug!("Docker image pull completed");
         output.push_str(&pull_output);
 
-        // Run compose_restart if configured
+        // Run compose_restart if configured.
+        // Direction: any containers running before pull → `up -d` (recreate and start);
+        // all stopped → `up --no-start` (recreate without starting).
         if let Some(ref cr) = self.config.compose_restart {
+            let any_running = containers_before.iter().any(|c| c.is_running);
+
             let mut parts: Vec<String> = Vec::new();
 
             if let Some(ref working_dir) = cr.working_dir {
@@ -368,7 +324,11 @@ impl Plugin for DockerPlugin {
             }
 
             parts.push("up".to_string());
-            parts.push("-d".to_string());
+            if any_running {
+                parts.push("-d".to_string());
+            } else {
+                parts.push("--no-start".to_string());
+            }
 
             if let Some(ref service) = cr.service {
                 parts.push(shell_escape(service));
@@ -376,12 +336,10 @@ impl Plugin for DockerPlugin {
 
             let cmd = parts.join(" ");
             tracing::debug!(command = %cmd, "running docker compose restart");
-            send_output(
-                output_tx,
-                &format!("Running docker compose: {cmd}"),
-                OutputStreamType::Stdout,
-            )
-            .await;
+            let compose_msg = format!("Running docker compose: {cmd}");
+            send_output(output_tx, &compose_msg, OutputStreamType::Stdout).await;
+            output.push_str(&compose_msg);
+            output.push('\n');
 
             let cmd_output = self
                 .executor
@@ -391,10 +349,9 @@ impl Plugin for DockerPlugin {
             output.push_str(&cmd_output.output);
         }
 
-        // Run post_pull_command if configured
+        // Run post_pull_command if configured.
         if let Some(ref cmd_str) = self.config.post_pull_command {
-            // Try to get local digest for {digest} substitution
-            let full_ref = format!("{image}:{tag}");
+            // Try to get local digest for {digest} substitution.
             let digest = match self.docker_client.inspect_image(&full_ref).await {
                 Ok(Some(d)) => d.digest,
                 _ => String::new(),
@@ -419,6 +376,32 @@ impl Plugin for DockerPlugin {
                 .await
                 .context_transform(|e| PluginError::InstallFailed(e.to_string()))?;
             output.push_str(&cmd_output.output);
+        }
+
+        // Auto-recreate containers when neither compose_restart nor post_pull_command
+        // is configured.  Containers are recreated in-place, preserving all settings.
+        // Running containers are started again; stopped containers remain stopped.
+        if self.config.compose_restart.is_none() && self.config.post_pull_command.is_none() {
+            for container in &containers_before {
+                tracing::info!(
+                    container = %container.name,
+                    was_running = container.is_running,
+                    "recreating container after image update"
+                );
+                let line = format!(
+                    "Recreating container {} (was {})",
+                    container.name,
+                    if container.is_running { "running" } else { "stopped" }
+                );
+                send_output(output_tx, &line, OutputStreamType::Stdout).await;
+                output.push_str(&line);
+                output.push('\n');
+
+                self.docker_client
+                    .recreate_container(&container.name, container.is_running)
+                    .await
+                    .context_transform(|e| PluginError::InstallFailed(e.to_string()))?;
+            }
         }
 
         Ok(output)
@@ -543,8 +526,7 @@ fn derive_container_name(ir: &ImageRef, container_names: &[String]) -> String {
 #[cfg(all(test, feature = "daemon"))]
 mod tests {
     use super::*;
-    use crate::config::TrackingMode;
-    use crate::docker_client::{LocalContainerInfo, MockDockerClient};
+    use crate::docker_client::{ContainerForImage, LocalContainerInfo, MockDockerClient};
     use uptrakit_plugin_infrastructure_core::LocalCommandExecutor;
     use uptrakit_plugin_infrastructure_core::mpsc;
 
@@ -584,30 +566,13 @@ mod tests {
     }
 
     fn default_mock_client() -> Arc<dyn DockerClient> {
-        Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
-            inspect_result: None,
-            containers: vec![],
-        })
+        Arc::new(MockDockerClient::default())
     }
 
     #[test]
     fn plugin_creation_succeeds_with_empty_config() {
         let config = DockerConfig::default();
         assert!(DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).is_ok());
-    }
-
-    #[test]
-    fn plugin_creation_fails_with_invalid_regex() {
-        let config = DockerConfig {
-            tag_patterns: vec!["[bad".to_string()],
-            ..Default::default()
-        };
-        assert!(
-            DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).is_err()
-        );
     }
 
     #[test]
@@ -647,13 +612,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_host_compatibility_compatible_when_daemon_reachable() {
-        let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
-            inspect_result: None,
-            containers: vec![],
-        });
+        let mock = Arc::new(MockDockerClient::default());
         let plugin =
             DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
         let result = plugin.detect_host_compatibility().await.expect("ok");
@@ -663,11 +622,8 @@ mod tests {
     #[tokio::test]
     async fn detect_host_compatibility_incompatible_when_daemon_unreachable() {
         let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
             ping_should_fail: true,
-            inspect_result: None,
-            containers: vec![],
+            ..Default::default()
         });
         let plugin =
             DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
@@ -684,55 +640,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn detect_installed_version_semver_mode_returns_none() {
-        let config = DockerConfig {
-            tracking_mode: TrackingMode::SemverTags,
-            ..Default::default()
-        };
-        let plugin =
-            DockerPlugin::new_for_test(config, test_executor(), default_mock_client()).unwrap();
-        let result = plugin.detect_installed_version("nginx").await.unwrap();
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn detect_installed_version_digest_mode_returns_digest() {
+    async fn detect_installed_version_returns_digest_when_image_present() {
         let digest = "sha256:abc123def456".to_string();
-        let config = DockerConfig {
-            tracking_mode: TrackingMode::DigestTracking,
-            ..Default::default()
-        };
         let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
             inspect_result: Some(digest.clone()),
-            containers: vec![],
+            ..Default::default()
         });
-        let plugin = DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .unwrap();
         let result = plugin.detect_installed_version("nginx").await.unwrap();
         assert_eq!(result.map(|v| v.to_string()), Some(digest));
     }
 
     #[tokio::test]
-    async fn execute_update_calls_docker_client() {
+    async fn detect_installed_version_returns_none_when_image_absent() {
+        let mock = Arc::new(MockDockerClient {
+            inspect_result: None,
+            ..Default::default()
+        });
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .unwrap();
+        let result = plugin.detect_installed_version("nginx").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    // ── execute_update ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn execute_update_pulls_by_tag_not_digest() {
         let pull_output = "mock pull output".to_string();
         let mock = Arc::new(MockDockerClient {
             pull_output: pull_output.clone(),
-            pull_should_fail: false,
-            ping_should_fail: false,
-            inspect_result: None,
-            containers: vec![],
+            ..Default::default()
         });
         let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
             .expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
+        // `to_version` is the digest — execute_update must pull by tag ("latest"), not by digest.
         let result = plugin
-            .execute_update("nginx", "1.25.0", None, &tx)
+            .execute_update("nginx", "sha256:deadbeef", None, &tx)
             .await
             .expect("execute_update should succeed");
 
-        assert!(result.contains("Pulling Docker image nginx:1.25.0"));
+        assert!(
+            result.contains("Pulling Docker image nginx:latest"),
+            "should pull by tag, not digest: {result}"
+        );
         assert!(result.contains(&pull_output));
 
         rx.close();
@@ -742,16 +695,15 @@ mod tests {
     #[tokio::test]
     async fn execute_update_pull_failure_propagates_error() {
         let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
             pull_should_fail: true,
-            ping_should_fail: false,
-            inspect_result: None,
-            containers: vec![],
+            ..Default::default()
         });
         let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
             .expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
-        let result = plugin.execute_update("nginx", "1.25.0", None, &tx).await;
+        let result = plugin
+            .execute_update("nginx", "sha256:deadbeef", None, &tx)
+            .await;
 
         assert!(result.is_err(), "pull failure should be propagated");
 
@@ -760,13 +712,106 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_update_with_post_pull_command() {
+    async fn execute_update_recreates_running_containers() {
         let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
-            inspect_result: None,
-            containers: vec![],
+            containers_for_image: vec![ContainerForImage {
+                name: "my-nginx".to_string(),
+                is_running: true,
+                labels: Default::default(),
+            }],
+            ..Default::default()
+        });
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = plugin
+            .execute_update("nginx", "sha256:abc", None, &tx)
+            .await
+            .expect("execute_update should succeed");
+
+        assert!(result.contains("Recreating container my-nginx"));
+        assert!(result.contains("running"));
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn execute_update_recreates_stopped_containers() {
+        let mock = Arc::new(MockDockerClient {
+            containers_for_image: vec![ContainerForImage {
+                name: "stopped-nginx".to_string(),
+                is_running: false,
+                labels: Default::default(),
+            }],
+            ..Default::default()
+        });
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = plugin
+            .execute_update("nginx", "sha256:abc", None, &tx)
+            .await
+            .expect("execute_update should succeed");
+
+        assert!(result.contains("Recreating container stopped-nginx"));
+        assert!(result.contains("stopped"));
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn execute_update_recreate_failure_propagates_error() {
+        let mock = Arc::new(MockDockerClient {
+            containers_for_image: vec![ContainerForImage {
+                name: "bad-container".to_string(),
+                is_running: true,
+                labels: Default::default(),
+            }],
+            recreate_should_fail: true,
+            ..Default::default()
+        });
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = plugin
+            .execute_update("nginx", "sha256:abc", None, &tx)
+            .await;
+
+        assert!(result.is_err(), "recreate failure should propagate");
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn execute_update_no_containers_succeeds() {
+        // No containers for this image — pull succeeds, recreation loop is a no-op.
+        let mock = Arc::new(MockDockerClient::default());
+        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
+            .expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = plugin
+            .execute_update("nginx", "sha256:abc", None, &tx)
+            .await
+            .expect("should succeed with no containers");
+
+        assert!(result.contains("Pulling Docker image nginx:latest"));
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn execute_update_with_post_pull_command_skips_recreation() {
+        let mock = Arc::new(MockDockerClient {
+            containers_for_image: vec![ContainerForImage {
+                name: "my-nginx".to_string(),
+                is_running: true,
+                labels: Default::default(),
+            }],
+            ..Default::default()
         });
         let config = DockerConfig {
             post_pull_command: Some("echo post-pull {image}:{tag}".to_string()),
@@ -776,26 +821,32 @@ mod tests {
             DockerPlugin::new_for_test(config, test_executor(), mock).expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
         let result = plugin
-            .execute_update("nginx", "1.25.0", None, &tx)
+            .execute_update("nginx", "sha256:abc", None, &tx)
             .await
             .expect("execute_update with post_pull_command should succeed");
 
-        assert!(result.contains("Pulling Docker image nginx:1.25.0"));
+        assert!(result.contains("Pulling Docker image nginx:latest"));
+        // post_pull_command is set, so auto-recreate must be skipped
+        assert!(
+            !result.contains("Recreating container"),
+            "recreation should be skipped when post_pull_command is set"
+        );
 
         rx.close();
         while rx.recv().await.is_some() {}
     }
 
     #[tokio::test]
-    async fn execute_update_with_compose_restart() {
+    async fn execute_update_with_compose_restart_running_uses_detach() {
         use crate::config::ComposeRestartConfig;
 
         let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
-            inspect_result: None,
-            containers: vec![],
+            containers_for_image: vec![ContainerForImage {
+                name: "my-nginx".to_string(),
+                is_running: true,
+                labels: Default::default(),
+            }],
+            ..Default::default()
         });
         let config = DockerConfig {
             compose_restart: Some(ComposeRestartConfig {
@@ -805,27 +856,98 @@ mod tests {
             }),
             ..Default::default()
         };
-        // Use a mock executor so the docker compose command is not actually run.
         let plugin =
             DockerPlugin::new_for_test(config, mock_executor(), mock).expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
         let result = plugin
-            .execute_update("nginx", "1.25.0", None, &tx)
+            .execute_update("nginx", "sha256:abc", None, &tx)
             .await
             .expect("execute_update with compose_restart should succeed");
 
-        assert!(result.contains("Pulling Docker image nginx:1.25.0"));
+        // When containers were running, compose command must include `-d`
+        assert!(result.contains("docker compose"));
+        assert!(result.contains("-d"), "running state should use -d flag");
+        assert!(
+            !result.contains("--no-start"),
+            "should not use --no-start when containers were running"
+        );
 
         rx.close();
         while rx.recv().await.is_some() {}
     }
 
     #[tokio::test]
+    async fn execute_update_with_compose_restart_stopped_uses_no_start() {
+        use crate::config::ComposeRestartConfig;
+
+        let mock = Arc::new(MockDockerClient {
+            containers_for_image: vec![ContainerForImage {
+                name: "my-nginx".to_string(),
+                is_running: false,
+                labels: Default::default(),
+            }],
+            ..Default::default()
+        });
+        let config = DockerConfig {
+            compose_restart: Some(ComposeRestartConfig {
+                compose_file: None,
+                service: Some("myapp".to_string()),
+                working_dir: None,
+            }),
+            ..Default::default()
+        };
+        let plugin =
+            DockerPlugin::new_for_test(config, mock_executor(), mock).expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = plugin
+            .execute_update("nginx", "sha256:abc", None, &tx)
+            .await
+            .expect("execute_update with compose_restart should succeed");
+
+        // When containers were stopped, compose command must include `--no-start`
+        assert!(result.contains("docker compose"));
+        assert!(
+            result.contains("--no-start"),
+            "stopped state should use --no-start flag"
+        );
+        assert!(
+            !result.contains(" -d "),
+            "should not use -d when containers were stopped"
+        );
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn execute_update_tracked_tag_override_respected() {
+        let mock = Arc::new(MockDockerClient::default());
+        let config = DockerConfig {
+            tracked_tag: Some("stable".to_string()),
+            ..Default::default()
+        };
+        let plugin =
+            DockerPlugin::new_for_test(config, test_executor(), mock).expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = plugin
+            .execute_update("nginx", "sha256:abc", None, &tx)
+            .await
+            .expect("should succeed");
+
+        assert!(
+            result.contains("Pulling Docker image nginx:stable"),
+            "should pull by configured tracked_tag: {result}"
+        );
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    // ── discover_software ─────────────────────────────────────────────────────
+
+    #[tokio::test]
     async fn discover_software_groups_by_image() {
         let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
             inspect_result: Some("sha256:abc123".to_string()),
             containers: vec![
                 LocalContainerInfo {
@@ -837,6 +959,7 @@ mod tests {
                     names: vec!["nginx-2".to_string()],
                 },
             ],
+            ..Default::default()
         });
         let plugin =
             DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
@@ -850,14 +973,12 @@ mod tests {
     #[tokio::test]
     async fn discover_software_skips_sha_images() {
         let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
             inspect_result: Some("sha256:abc123".to_string()),
             containers: vec![LocalContainerInfo {
                 image: "sha256:deadbeef".to_string(),
                 names: vec!["bare-sha-container".to_string()],
             }],
+            ..Default::default()
         });
         let plugin =
             DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
@@ -868,14 +989,12 @@ mod tests {
     #[tokio::test]
     async fn discover_software_skips_images_without_repo_digests() {
         let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
             inspect_result: None, // No digest — locally built
             containers: vec![LocalContainerInfo {
                 image: "my-local-image:dev".to_string(),
                 names: vec!["local-container".to_string()],
             }],
+            ..Default::default()
         });
         let plugin =
             DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
@@ -886,29 +1005,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn tags_to_releases_basic() {
-        let mock = default_mock_client();
-        let config = DockerConfig {
-            tag_strip_prefix: String::new(),
-            ..Default::default()
-        };
-        let plugin = DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
-        let ir: ImageRef = "nginx".parse().unwrap();
-        let tags = vec![
-            "1.25.0".to_string(),
-            "1.24.0".to_string(),
-            "1.26.0".to_string(),
-            "latest".to_string(),
-            "alpine".to_string(),
-        ];
-        let releases = plugin.tags_to_releases(&ir, tags);
-        assert_eq!(releases.len(), 3);
-        assert_eq!(releases[0].version.as_str(), "1.26.0");
-        assert_eq!(releases[1].version.as_str(), "1.25.0");
-        assert_eq!(releases[2].version.as_str(), "1.24.0");
-    }
-
     // ── discover_software target emission ─────────────────────────────────────
 
     #[tokio::test]
@@ -916,14 +1012,12 @@ mod tests {
         use uptrakit_plugin_infrastructure_core::{PluginRole, PluginType};
 
         let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
             inspect_result: Some("sha256:abc123".to_string()),
             containers: vec![LocalContainerInfo {
                 image: "nginx:latest".to_string(),
                 names: vec!["my-nginx".to_string()],
             }],
+            ..Default::default()
         });
         // Default config (empty `{}`) → discover-all mode → targets must be emitted.
         let plugin =
@@ -944,22 +1038,19 @@ mod tests {
     #[tokio::test]
     async fn discover_software_no_targets_when_custom_config() {
         let mock = Arc::new(MockDockerClient {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
             inspect_result: Some("sha256:abc123".to_string()),
             containers: vec![LocalContainerInfo {
                 image: "nginx:latest".to_string(),
                 names: vec!["my-nginx".to_string()],
             }],
+            ..Default::default()
         });
         // Non-default config (docker_host set) → config-ID path → no targets.
         let config = DockerConfig {
             docker_host: Some("unix:///var/run/docker.sock".to_string()),
             ..Default::default()
         };
-        let plugin =
-            DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
+        let plugin = DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
         let discoveries = plugin.discover_software().await.unwrap();
 
         assert_eq!(discoveries.len(), 1);

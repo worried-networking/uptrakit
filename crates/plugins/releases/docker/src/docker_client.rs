@@ -41,6 +41,17 @@ pub struct LocalContainerInfo {
     pub names: Vec<String>,
 }
 
+/// A container that uses a specific image, with its current run state.
+#[derive(Debug, Clone)]
+pub struct ContainerForImage {
+    /// Container name without the leading `'/'`.
+    pub name: String,
+    /// `true` if the container is currently running (or paused).
+    pub is_running: bool,
+    /// Container labels (used to detect compose-managed containers).
+    pub labels: std::collections::HashMap<String, String>,
+}
+
 // ── Trait ────────────────────────────────────────────────────────────────────
 
 /// Docker daemon operations needed by the Docker plugin.
@@ -79,6 +90,20 @@ pub(crate) trait DockerClient: Send + Sync {
     ///
     /// When `all` is `true`, stopped containers are included.
     async fn list_containers(&self, all: bool) -> Result<Vec<LocalContainerInfo>>;
+
+    /// List all containers (running and stopped) whose image matches `full_ref`
+    /// (e.g. `"nginx:latest"`).
+    async fn list_containers_for_image(
+        &self,
+        full_ref: &str,
+    ) -> Result<Vec<ContainerForImage>>;
+
+    /// Recreate a container in-place, preserving its full configuration.
+    ///
+    /// Performs: inspect → (stop if running) → remove → create → (start if was_running).
+    /// Containers with `AutoRemove = true` are skipped because they manage
+    /// their own lifecycle.
+    async fn recreate_container(&self, name: &str, was_running: bool) -> Result<()>;
 }
 
 // ── Noop implementation (always available) ───────────────────────────────────
@@ -120,6 +145,21 @@ impl DockerClient for NoopDockerClient {
     }
 
     async fn list_containers(&self, _all: bool) -> Result<Vec<LocalContainerInfo>> {
+        bail!(DockerError::Configuration(
+            "Docker daemon operations require the 'daemon' Cargo feature".to_string(),
+        ))
+    }
+
+    async fn list_containers_for_image(
+        &self,
+        _full_ref: &str,
+    ) -> Result<Vec<ContainerForImage>> {
+        bail!(DockerError::Configuration(
+            "Docker daemon operations require the 'daemon' Cargo feature".to_string(),
+        ))
+    }
+
+    async fn recreate_container(&self, _name: &str, _was_running: bool) -> Result<()> {
         bail!(DockerError::Configuration(
             "Docker daemon operations require the 'daemon' Cargo feature".to_string(),
         ))
@@ -295,6 +335,160 @@ impl DockerClient for BollardDockerClient {
 
         Ok(infos)
     }
+
+    async fn list_containers_for_image(
+        &self,
+        full_ref: &str,
+    ) -> Result<Vec<ContainerForImage>> {
+        use bollard::models::ContainerSummaryStateEnum;
+        use bollard::query_parameters::ListContainersOptions;
+        use std::collections::HashMap;
+
+        let filters = Some(HashMap::from([(
+            "ancestor".to_string(),
+            vec![full_ref.to_string()],
+        )]));
+
+        let containers = self
+            .docker
+            .list_containers(Some(ListContainersOptions {
+                all: true,
+                filters,
+                ..Default::default()
+            }))
+            .await
+            .context_to::<DockerError>()?;
+
+        let result = containers
+            .into_iter()
+            .filter_map(|c| {
+                let name = c
+                    .names
+                    .as_deref()
+                    .and_then(|ns| ns.first())
+                    .map(|n| n.trim_start_matches('/').to_string())?;
+
+                let is_running = matches!(
+                    c.state,
+                    Some(ContainerSummaryStateEnum::RUNNING)
+                        | Some(ContainerSummaryStateEnum::PAUSED)
+                );
+
+                let labels = c.labels.unwrap_or_default();
+
+                Some(ContainerForImage {
+                    name,
+                    is_running,
+                    labels,
+                })
+            })
+            .collect();
+
+        Ok(result)
+    }
+
+    async fn recreate_container(&self, name: &str, was_running: bool) -> Result<()> {
+        use bollard::models::NetworkingConfig;
+        use bollard::query_parameters::{
+            CreateContainerOptions, RemoveContainerOptions, StopContainerOptions,
+        };
+
+        let inspect = self
+            .docker
+            .inspect_container(name, None)
+            .await
+            .context_to::<DockerError>()?;
+
+        // Skip auto-remove containers — they manage their own lifecycle.
+        if inspect
+            .host_config
+            .as_ref()
+            .and_then(|hc| hc.auto_remove)
+            .unwrap_or(false)
+        {
+            tracing::debug!(
+                container = %name,
+                "skipping auto-remove container recreation"
+            );
+            return Ok(());
+        }
+
+        if was_running {
+            tracing::debug!(container = %name, "stopping container before recreation");
+            self.docker
+                .stop_container(name, None::<StopContainerOptions>)
+                .await
+                .context_to::<DockerError>()?;
+        }
+
+        tracing::debug!(container = %name, "removing container for recreation");
+        self.docker
+            .remove_container(
+                name,
+                Some(RemoveContainerOptions {
+                    force: false,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .context_to::<DockerError>()?;
+
+        // Build the create body from the inspected configuration using a JSON
+        // round-trip. `ContainerConfig` and `ContainerCreateBody` share identical
+        // JSON field names, so deserialising one from the other's serialised
+        // form preserves every shared field automatically — including any new
+        // fields added in future bollard versions — without any manual mapping.
+        let config = inspect.config.unwrap_or_default();
+        let config_json = serde_json::to_value(&config).map_err(|e| {
+            report!(DockerError::Configuration(format!(
+                "failed to serialize container config: {e}"
+            )))
+        })?;
+        let mut body: bollard::models::ContainerCreateBody =
+            serde_json::from_value(config_json).map_err(|e| {
+                report!(DockerError::Configuration(format!(
+                    "failed to deserialize container config: {e}"
+                )))
+            })?;
+
+        body.host_config = inspect.host_config;
+        body.networking_config = inspect
+            .network_settings
+            .and_then(|ns| ns.networks)
+            .map(|networks| NetworkingConfig {
+                endpoints_config: Some(networks),
+            });
+
+        tracing::debug!(container = %name, "creating container from saved config");
+        self.docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: Some(name.to_string()),
+                    ..Default::default()
+                }),
+                body,
+            )
+            .await
+            .context_to::<DockerError>()?;
+
+        if was_running {
+            tracing::debug!(container = %name, "starting recreated container");
+            self.docker
+                .start_container(
+                    name,
+                    None::<bollard::query_parameters::StartContainerOptions>,
+                )
+                .await
+                .context_to::<DockerError>()?;
+        }
+
+        tracing::info!(
+            container = %name,
+            was_running,
+            "container recreated successfully"
+        );
+        Ok(())
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -356,6 +550,23 @@ pub(crate) struct MockDockerClient {
     pub ping_should_fail: bool,
     pub inspect_result: Option<String>, // Some(digest) or None
     pub containers: Vec<LocalContainerInfo>,
+    pub containers_for_image: Vec<ContainerForImage>,
+    pub recreate_should_fail: bool,
+}
+
+#[cfg(all(test, feature = "daemon"))]
+impl Default for MockDockerClient {
+    fn default() -> Self {
+        Self {
+            pull_output: String::new(),
+            pull_should_fail: false,
+            ping_should_fail: false,
+            inspect_result: None,
+            containers: vec![],
+            containers_for_image: vec![],
+            recreate_should_fail: false,
+        }
+    }
 }
 
 #[cfg(all(test, feature = "daemon"))]
@@ -393,6 +604,22 @@ impl DockerClient for MockDockerClient {
 
     async fn list_containers(&self, _all: bool) -> Result<Vec<LocalContainerInfo>> {
         Ok(self.containers.clone())
+    }
+
+    async fn list_containers_for_image(
+        &self,
+        _full_ref: &str,
+    ) -> Result<Vec<ContainerForImage>> {
+        Ok(self.containers_for_image.clone())
+    }
+
+    async fn recreate_container(&self, _name: &str, _was_running: bool) -> Result<()> {
+        if self.recreate_should_fail {
+            bail!(DockerError::DaemonConnection(
+                "mock recreate failure".to_string()
+            ));
+        }
+        Ok(())
     }
 }
 

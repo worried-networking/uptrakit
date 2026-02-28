@@ -7,17 +7,6 @@ use crate::error::{DockerError, Result};
 /// Sentinel value used to indicate a masked secret in API responses.
 const SECRET_MASK: &str = "***";
 
-/// Tracking mode for the Docker plugin.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TrackingMode {
-    /// Track semver-parseable tags, filter and sort by version.
-    #[default]
-    SemverTags,
-    /// Track digest changes of a specific tag.
-    DigestTracking,
-}
-
 /// Authentication configuration for Docker registries.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -52,7 +41,14 @@ pub struct ComposeRestartConfig {
 /// The `package_identifier` on each software item (a Docker image reference
 /// such as `nginx` or `ghcr.io/owner/app:latest`) drives all registry
 /// operations — no `image` field is needed in the config.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// The Docker plugin always tracks the **SHA digest** of a specific tag.
+/// The tag is resolved in this order:
+/// 1. `tracked_tag` field in this config (explicit override).
+/// 2. The tag embedded in `package_identifier` (e.g. `:latest` in
+///    `nginx:latest`).
+/// 3. `"latest"` as the fallback default when neither is set.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DockerConfig {
     /// Docker daemon endpoint override (e.g. `"unix:///var/run/docker.sock"`,
     /// `"tcp://host:2375"`, or `"ssh://user@host"` when the `ssh` feature is
@@ -70,29 +66,12 @@ pub struct DockerConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<DockerAuth>,
 
-    /// Tracking mode: `semver_tags` or `digest_tracking`.
-    #[serde(default)]
-    pub tracking_mode: TrackingMode,
-
-    /// Regex patterns to filter tags (semver mode, OR logic, empty = all).
-    #[serde(default)]
-    pub tag_patterns: Vec<String>,
-
-    /// Prefix to strip from tags before semver parsing (default `"v"`).
-    #[serde(default = "default_tag_strip_prefix")]
-    pub tag_strip_prefix: String,
-
-    /// Whether to include pre-release semver versions.
-    #[serde(default)]
-    pub include_prereleases: bool,
-
-    /// Tag to track in digest mode (default `"latest"`).
+    /// Tag to track, overriding the tag embedded in `package_identifier`.
+    ///
+    /// When absent, the tag is taken from `package_identifier` (defaulting to
+    /// `"latest"` if the identifier has no tag component).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracked_tag: Option<String>,
-
-    /// Maximum tags per API request (pagination, default `1000`).
-    #[serde(default = "default_page_size")]
-    pub page_size: u32,
 
     /// Restart via `docker compose` after pulling a new image.
     ///
@@ -103,36 +82,10 @@ pub struct DockerConfig {
     /// Shell command to run after pulling the new image.
     ///
     /// Supports `{image}`, `{tag}`, and `{digest}` placeholders.
-    /// If absent (and `compose_restart` is also absent), only `docker pull`
-    /// is performed.
+    /// If absent (and `compose_restart` is also absent), the plugin
+    /// automatically recreates all containers that use this image.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_pull_command: Option<String>,
-}
-
-impl Default for DockerConfig {
-    fn default() -> Self {
-        Self {
-            docker_host: None,
-            ssh_key_path: None,
-            auth: None,
-            tracking_mode: TrackingMode::default(),
-            tag_patterns: Vec::new(),
-            tag_strip_prefix: default_tag_strip_prefix(),
-            include_prereleases: false,
-            tracked_tag: None,
-            page_size: default_page_size(),
-            compose_restart: None,
-            post_pull_command: None,
-        }
-    }
-}
-
-fn default_tag_strip_prefix() -> String {
-    "v".to_string()
-}
-
-fn default_page_size() -> u32 {
-    1000
 }
 
 impl DockerConfig {
@@ -141,20 +94,6 @@ impl DockerConfig {
     /// An empty (all-defaults) config is valid — discovery can proceed
     /// without any fields set.
     pub fn validate(&self) -> Result<()> {
-        if self.page_size == 0 {
-            bail!(DockerError::Configuration(
-                "page_size must be greater than 0".to_string()
-            ));
-        }
-
-        for pattern in &self.tag_patterns {
-            regex::Regex::new(pattern).map_err(|e| {
-                report!(DockerError::InvalidPattern(format!(
-                    "invalid regex pattern '{pattern}': {e}"
-                )))
-            })?;
-        }
-
         if let Some(ref cmd) = self.post_pull_command
             && cmd.is_empty()
         {
@@ -185,9 +124,13 @@ impl DockerConfig {
         Ok(())
     }
 
-    /// The tag to track in digest mode.
-    pub fn resolved_tracked_tag(&self) -> &str {
-        self.tracked_tag.as_deref().unwrap_or("latest")
+    /// Returns the configured tag override, if any.
+    ///
+    /// When `Some`, this value takes priority over the tag in
+    /// `package_identifier`. When `None`, callers should fall back to the tag
+    /// parsed from `package_identifier` (which itself defaults to `"latest"`).
+    pub(crate) fn resolved_tracked_tag<'a>(&'a self, image_tag: &'a str) -> &'a str {
+        self.tracked_tag.as_deref().unwrap_or(image_tag)
     }
 
     /// Returns `true` when the config is at all defaults — i.e. it was
@@ -204,12 +147,7 @@ impl DockerConfig {
         self.docker_host.is_none()
             && self.ssh_key_path.is_none()
             && self.auth.is_none()
-            && self.tracking_mode == TrackingMode::SemverTags
-            && self.tag_patterns.is_empty()
-            && self.tag_strip_prefix == default_tag_strip_prefix()
-            && !self.include_prereleases
             && self.tracked_tag.is_none()
-            && self.page_size == default_page_size()
             && self.compose_restart.is_none()
             && self.post_pull_command.is_none()
     }
@@ -303,36 +241,9 @@ mod tests {
     }
 
     #[test]
-    fn is_discover_all_mode_false_when_tracking_mode_digest() {
+    fn is_discover_all_mode_false_when_tracked_tag_set() {
         let config = DockerConfig {
-            tracking_mode: TrackingMode::DigestTracking,
-            ..Default::default()
-        };
-        assert!(!config.is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_tag_patterns_set() {
-        let config = DockerConfig {
-            tag_patterns: vec![r"^\d+\.\d+$".to_string()],
-            ..Default::default()
-        };
-        assert!(!config.is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_tag_strip_prefix_changed() {
-        let config = DockerConfig {
-            tag_strip_prefix: String::new(),
-            ..Default::default()
-        };
-        assert!(!config.is_discover_all_mode());
-    }
-
-    #[test]
-    fn is_discover_all_mode_false_when_include_prereleases_true() {
-        let config = DockerConfig {
-            include_prereleases: true,
+            tracked_tag: Some("stable".to_string()),
             ..Default::default()
         };
         assert!(!config.is_discover_all_mode());
@@ -360,40 +271,11 @@ mod tests {
         assert!(!config.is_discover_all_mode());
     }
 
-    // ── existing tests ────────────────────────────────────────────────────────
+    // ── validate ─────────────────────────────────────────────────────────────
 
     #[test]
     fn empty_config_validates_ok() {
         let config = DockerConfig::default();
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn validation_fails_zero_page_size() {
-        let config = DockerConfig {
-            page_size: 0,
-            ..Default::default()
-        };
-        let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("page_size"));
-    }
-
-    #[test]
-    fn validation_fails_invalid_regex() {
-        let config = DockerConfig {
-            tag_patterns: vec!["[invalid".to_string()],
-            ..Default::default()
-        };
-        let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("invalid regex"));
-    }
-
-    #[test]
-    fn validation_passes_valid_regex() {
-        let config = DockerConfig {
-            tag_patterns: vec![r"^\d+\.\d+\.\d+$".to_string()],
-            ..Default::default()
-        };
         assert!(config.validate().is_ok());
     }
 
@@ -443,20 +325,26 @@ mod tests {
         assert!(config.validate().is_ok());
     }
 
+    // ── resolved_tracked_tag ─────────────────────────────────────────────────
+
     #[test]
-    fn resolved_tracked_tag_default() {
+    fn resolved_tracked_tag_falls_back_to_image_tag() {
         let config = DockerConfig::default();
-        assert_eq!(config.resolved_tracked_tag(), "latest");
+        assert_eq!(config.resolved_tracked_tag("latest"), "latest");
+        assert_eq!(config.resolved_tracked_tag("stable"), "stable");
     }
 
     #[test]
-    fn resolved_tracked_tag_custom() {
+    fn resolved_tracked_tag_config_override_wins() {
         let config = DockerConfig {
-            tracked_tag: Some("stable".to_string()),
+            tracked_tag: Some("main".to_string()),
             ..Default::default()
         };
-        assert_eq!(config.resolved_tracked_tag(), "stable");
+        assert_eq!(config.resolved_tracked_tag("latest"), "main");
+        assert_eq!(config.resolved_tracked_tag("stable"), "main");
     }
+
+    // ── secret masking ───────────────────────────────────────────────────────
 
     #[test]
     fn with_secrets_masked_basic_auth() {
@@ -564,25 +452,6 @@ mod tests {
     }
 
     #[test]
-    fn tracking_mode_serialization() {
-        let semver = TrackingMode::SemverTags;
-        let json = serde_json::to_string(&semver).expect("serialize");
-        assert_eq!(json, r#""semver_tags""#);
-
-        let digest = TrackingMode::DigestTracking;
-        let json = serde_json::to_string(&digest).expect("serialize");
-        assert_eq!(json, r#""digest_tracking""#);
-
-        let roundtrip: TrackingMode =
-            serde_json::from_str(r#""semver_tags""#).expect("deserialize");
-        assert_eq!(roundtrip, TrackingMode::SemverTags);
-
-        let roundtrip: TrackingMode =
-            serde_json::from_str(r#""digest_tracking""#).expect("deserialize");
-        assert_eq!(roundtrip, TrackingMode::DigestTracking);
-    }
-
-    #[test]
     fn auth_basic_serialization() {
         let auth = DockerAuth::Basic {
             username: "user".to_string(),
@@ -631,12 +500,7 @@ mod tests {
                 username: "user".to_string(),
                 password: SecretString::new("pass".to_string()),
             }),
-            tracking_mode: TrackingMode::DigestTracking,
-            tag_patterns: vec![r"^\d+".to_string()],
-            tag_strip_prefix: "v".to_string(),
-            include_prereleases: true,
             tracked_tag: Some("main".to_string()),
-            page_size: 500,
             compose_restart: Some(ComposeRestartConfig {
                 compose_file: Some("docker-compose.yml".to_string()),
                 service: Some("app".to_string()),
@@ -647,11 +511,24 @@ mod tests {
         };
         let json = serde_json::to_string(&config).expect("serialize");
         let deserialized: DockerConfig = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(deserialized.tracking_mode, config.tracking_mode);
-        assert_eq!(deserialized.tag_patterns, config.tag_patterns);
-        assert_eq!(deserialized.include_prereleases, config.include_prereleases);
         assert_eq!(deserialized.tracked_tag, config.tracked_tag);
-        assert_eq!(deserialized.page_size, config.page_size);
         assert_eq!(deserialized.post_pull_command, config.post_pull_command);
+    }
+
+    #[test]
+    fn old_semver_fields_silently_ignored_on_deserialize() {
+        // Existing configs stored in DB may contain the now-removed
+        // tracking_mode / tag_patterns / tag_strip_prefix / include_prereleases /
+        // page_size fields.  They must be ignored gracefully.
+        let json = serde_json::json!({
+            "tracking_mode": "semver_tags",
+            "tag_patterns": ["^v\\d+\\.\\d+\\.\\d+$"],
+            "tag_strip_prefix": "v",
+            "include_prereleases": false,
+            "page_size": 500
+        });
+        let config: DockerConfig = serde_json::from_value(json).expect("deserialize");
+        // Falls back to all defaults because semver fields are ignored
+        assert!(config.is_discover_all_mode());
     }
 }

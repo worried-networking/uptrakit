@@ -25,8 +25,6 @@ thiserror = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 tracing = { workspace = true }
-regex = { workspace = true }
-semver = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["net", "io-util", "rt", "fs"], optional = true }
 

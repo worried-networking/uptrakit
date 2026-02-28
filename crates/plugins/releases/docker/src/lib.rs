@@ -8,7 +8,6 @@ pub mod error;
 pub mod image_ref;
 pub mod plugin;
 pub mod registry;
-pub mod tag;
 
 pub use config::DockerConfig;
 pub use error::{DockerError, Result};
