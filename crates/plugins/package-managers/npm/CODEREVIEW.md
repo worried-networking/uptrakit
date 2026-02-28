@@ -18,9 +18,8 @@ The code quality is high overall, with comprehensive test coverage spanning vali
 parsing, registry response handling, and async plugin trait methods using a well-designed
 `FixedOutputExecutor` mock. Error handling is consistent, using the `rootcause` framework
 throughout. The registry integration correctly handles dist-tag deduplication for pre-release
-versions and gracefully degrades on parsing failures. Notable areas for improvement include
-the lack of HTTP timeouts on the reqwest client, missing `to_version` sanitization in the
-update path, and the absence of retry logic for transient network failures. The hardcoded
+versions and gracefully degrades on parsing failures. Notable areas for improvement include the lack of HTTP timeouts on the reqwest client and
+the absence of retry logic for transient network failures. The hardcoded
 registry URL limits private registry support.
 
 ## Architecture
@@ -64,13 +63,6 @@ plugin instances and makes the HTTP layer harder to mock in integration tests.
   accidental management of tooling infrastructure
 
 ### Issues
-
-**[HIGH]** `plugin.rs:432` -- The `to_version` parameter is interpolated directly into
-the `npm install -g` command as `{package_identifier}@{to_version}` without any
-validation or sanitization. While the command executor likely prevents shell injection,
-a malicious version string could install unintended packages if it contains special npm
-syntax (e.g., `latest`, `file:../malicious`, `git+https://...`). Version format
-validation should be applied before command construction.
 
 **[MEDIUM]** `plugin.rs:140-150` -- The reqwest client is built without connect or
 request timeouts. A slow or unresponsive registry could cause the plugin to hang

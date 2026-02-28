@@ -250,13 +250,6 @@ does NOT write to the outbox.
 
 ### Issues
 
-**[CRITICAL]** `src/middleware/rate_limit.rs:114-115` -- Fallback rate limiter uses
-`std::sync::Mutex` (blocking) in async context. `.unwrap()` on lock means poisoned mutex
-panics all subsequent requests.
-
-**[HIGH]** `src/service_connections.rs:192-203` -- `broadcast` awaits send to each service
-sequentially. Single slow consumer delays all others. Use `try_send` or parallel sends.
-
 **[MEDIUM]** `src/event_poller.rs:59` -- `retry_counts: HashMap<i64, u8>` grows unboundedly
 when cursor is stuck. Add a hard cap or TTL-based eviction.
 

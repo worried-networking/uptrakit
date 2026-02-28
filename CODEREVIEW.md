@@ -20,9 +20,8 @@ for the enrollment-lifecycle-reconnect flow shared across all service binaries.
 Key areas for improvement: the `web-api` crate at ~32K LoC is approaching "god crate" territory
 and would benefit from decomposition; the wire protocol file (`wire/src/lib.rs`) at 3.5K lines
 should be split into domain modules; the systemic `#[tokio::test]` violation (273+ tests without
-`start_paused = true`) should be addressed with a bulk annotation pass; and several remaining HA
-concerns (in-memory-only token denylist, blocking Mutex in rate limiter) should be addressed
-before multi-instance deployment. The previously-reported SSRF in Docker auth realm, the OIDC
+`start_paused = true`) should be addressed with a bulk annotation pass; and several remaining HA concerns (in-memory-only token denylist) should be addressed before
+multi-instance deployment. The previously-reported SSRF in Docker auth realm, the OIDC
 privilege escalation via `unwrap_or(0)`, all `#[cfg(not(feature))]` violations, the unbounded
 MQTT event channel, and the scheduler claim leak on cancellation have been fixed. The OIDC
 registration DB error masking (`unwrap_or(1)`), `count_linked_hosts` DB error swallowing,
@@ -190,9 +189,6 @@ certificate during initial CA fetch. MITM window during initial enrollment.
 **[MEDIUM]** `crates/ui/web-api/src/routes/oidc_auth.rs:349-352` -- OIDC registration code
 exposed in redirect URL query parameter.
 
-**[MEDIUM]** `crates/shared/crypto/src/lib.rs` -- `PLAINTEXT_MODE` uses `Ordering::Relaxed`.
-Use `Ordering::Release` / `Ordering::Acquire` for correctness.
-
 **[MEDIUM]** `crates/ui/web-api/src/auth/jwt.rs:38-61` -- Legacy file-based
 `JwtManager::load_or_generate` writes signing key to disk without at-rest encryption. After
 migration to DB-based storage, the plaintext key persists on disk. File should be deleted after
@@ -283,14 +279,8 @@ verify delay durations. Eight tests assert only eventual success, not backoff ti
 
 ### Issues
 
-**[CRITICAL]** `crates/ui/web-api/src/middleware/rate_limit.rs:114-115` -- Fallback rate limiter
-uses `std::sync::Mutex` (blocking) in async context.
-
 **[HIGH]** `crates/core/controller/src/tasks.rs:105-111` -- Per-task shutdown timeout is only 5
 seconds. The embedded scheduler may need longer for in-progress DB operations.
-
-**[HIGH]** `crates/ui/web-api/src/service_connections.rs:192-203` -- `broadcast` awaits send to
-each service sequentially. Single slow consumer delays broadcasts to all services.
 
 **[HIGH]** `crates/shared/nats/src/connection.rs:24-28` -- No NATS retry at startup. If NATS is
 temporarily unavailable, controller fails to start entirely.

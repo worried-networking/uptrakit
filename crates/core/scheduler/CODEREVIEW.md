@@ -12,9 +12,8 @@ shared `uptrakit-shared-scheduler-engine` library and registers task executors a
 binary itself is thin and correctly structured, with proper feature flag pass-through and clean
 `ServiceHandler` implementation.
 
-The main concerns are the `stop_scheduler` race condition that can allow two scheduler instances
-to operate concurrently during credential re-delivery, and inherited issues from the underlying
-`scheduler-engine` library (sequential execution model, `SchedulerNotifier` leaking `sea_orm`).
+The main concerns are inherited issues from the underlying `scheduler-engine` library (sequential
+execution model, `SchedulerNotifier` leaking `sea_orm`).
 
 ## Architecture
 
@@ -74,12 +73,6 @@ No quality issues found.
   tasks without operator intervention.
 
 ### Issues
-
-**[HIGH]** `src/handler.rs:51-59` -- `stop_scheduler` does not await the scheduler
-`JoinHandle`. If called from `on_message` (line 94, when credentials are re-sent), the old
-scheduler loop may still be running while the new one is constructed, creating a brief window
-where two scheduler instances race on claim operations. Restructure shutdown to: (1) cancel the
-token, (2) `join_handle.await`, (3) only then proceed with new scheduler construction.
 
 **[MEDIUM]** Inherited from `scheduler-engine` -- Sequential task execution within each poll
 cycle. If a registered executor is slow, it blocks all other due tasks from running. Under

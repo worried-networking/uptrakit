@@ -21,11 +21,9 @@ since package identifiers flow into shell commands via `CommandSpec`. The test s
 comprehensive for the parsing and validation logic, with 30+ unit tests covering all parsing
 helpers, edge cases, and mock-executor-driven async paths.
 
-The main areas for improvement are minor: the `to_version` parameter in `execute_update` is
-not validated before being interpolated into the `apt-get install` command, the
-`AptError::ParseOutput` variant is defined but never used, and the async tests do not use
-`start_paused = true` per project testing standards. No critical or high-severity issues were
-found.
+The main areas for improvement are minor: the `AptError::ParseOutput` variant is defined but
+never used, and the async tests do not use `start_paused = true` per project testing standards.
+No critical or high-severity issues were found.
 
 ## Architecture
 
@@ -72,15 +70,7 @@ No architectural issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/plugin.rs:388` -- The `to_version` parameter is interpolated into the
-`apt-get install` command (`format!("{package_identifier}={to_version}")`) without any
-validation. While `package_identifier` is validated by `require_package_identifier`, the
-version string has no corresponding check. A malicious or malformed version containing shell
-metacharacters or apt argument-like strings (e.g., `1.0;rm -rf /` or `--option=value`) could
-produce unexpected behavior. The `CommandSpec` abstraction likely prevents shell injection by
-using `execvp`-style invocation rather than shell interpolation, but a version format
-validation (e.g., Debian version policy: `[A-Za-z0-9.+~:-]`) would provide defense in depth
-at the plugin level, consistent with the identifier validation approach.
+No security issues found.
 
 ## Code Quality
 
