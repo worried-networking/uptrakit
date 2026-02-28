@@ -148,14 +148,6 @@ correctly use `Zeroizing<[u8; 32]>`, but the intermediate hex string could linge
 
 ### Issues
 
-**[MEDIUM]** `src/tasks.rs:98-104` -- `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` is 5 seconds.
-This timeout applies equally to the scheduler task, whose cleanup path runs
-`release_all_claims` — a `UPDATE` query against the database. Under a saturated DB (e.g., at
-shutdown during peak load), 5 seconds may not be enough. If the scheduler task times out, all
-claims held by this controller remain locked for the 600-second `STALE_CLAIM_SECONDS` window.
-A domain-appropriate timeout (30-60 seconds) for the scheduler specifically, distinct from the
-generic 5-second default, would be safer.
-
 **[MEDIUM]** `src/main.rs:83` -- `.expect("valid directive")` on `directive.parse()`. While
 the string literal is hard-coded and always valid, this establishes a pattern that could be
 copied incorrectly.
@@ -213,11 +205,6 @@ and the bind.
   multi-instance safety.
 
 ### Issues
-
-**[HIGH]** `src/tasks.rs:105-111` -- `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` is 5 seconds per task.
-The embedded scheduler may be mid-execution of a task with a 2-hour timeout. If the scheduler
-does not complete in 5 seconds, the task is abandoned, leaving stale claims for up to
-10 minutes.
 
 **[HIGH]** `crates/ui/web-api/src/service_connections.rs:264` -- Untracked `tokio::spawn` tasks
 in `broadcast_server_restarting_scattered`. If the process exits before all scatter tasks fire

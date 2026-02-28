@@ -112,12 +112,6 @@ how all other timing constants in the workspace are handled.
 type with no warning. A `debug_assert!` would surface accidental double-registration during
 development without impacting production.
 
-**[LOW]** Inherited from `scheduler-engine` -- `ScheduledTaskType` enum has no
-`#[non_exhaustive]` attribute or `Other(String)` variant. If a new task type is added and a
-scheduler binary is not yet updated, deserialization from the DB will fail rather than
-gracefully skipping the unknown type. Inconsistent with the forward-compatibility pattern used
-in `wire`'s `Capability` and `CloseReason`.
-
 **[LOW]** Inherited from `scheduler-engine` -- `TaskExecutor` has no registration or discovery
 mechanism ensuring all `ScheduledTaskType` variants have executors. Unlike `register_plugins!`,
 there is no compile-time check that prevents a new variant from being added without a

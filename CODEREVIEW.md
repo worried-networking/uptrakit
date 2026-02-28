@@ -26,7 +26,11 @@ MQTT event channel, and the scheduler claim leak on cancellation have been fixed
 registration DB error masking (`unwrap_or(1)`), `count_linked_hosts` DB error swallowing,
 `Report::new()` macro violations, invalid UUID query parameter handling, HTTP status code
 violations on soft-delete and idempotent-create endpoints, and the `require_auth.rs`
-permission-fetch fallback have since been fixed.
+permission-fetch fallback have since been fixed. The missing 5 capabilities in
+`controller_capabilities()`, the absent `protocol_version` field in wire envelopes, the
+insufficient 5-second scheduler shutdown timeout, the `ScheduledTaskType` rolling-upgrade
+safety (`#[non_exhaustive]` + `find_due_tasks` skip-unknown), and the `machine_id`
+empty-string sentinel in `ssh_host.rs` have also been fixed.
 
 ## Per-Crate Review Files
 
@@ -271,14 +275,8 @@ verify delay durations. Eight tests assert only eventual success, not backoff ti
 
 ### Issues
 
-**[HIGH]** `crates/core/controller/src/tasks.rs:105-111` -- Per-task shutdown timeout is only 5
-seconds. The embedded scheduler may need longer for in-progress DB operations.
-
 **[HIGH]** `crates/shared/nats/src/connection.rs:24-28` -- No NATS retry at startup. If NATS is
 temporarily unavailable, controller fails to start entirely.
-
-**[MEDIUM]** `crates/core/controller/src/tasks.rs:98-104` -- 5-second shutdown timeout may be
-insufficient for `release_all_claims` under slow database.
 
 **[MEDIUM]** `crates/shared/service-sdk/src/event_loop.rs:244-246` -- `tick().await` inside
 `handle_service_settings` suspends the event loop, blocking incoming WebSocket reads and pings.
@@ -337,6 +335,3 @@ cause deserialization errors and are irreversibly lost.
 
 **[MEDIUM]** `crates/shared/service-sdk/src/lifecycle.rs:79,89` -- `ServiceHandler` is not
 object-safe due to associated constants. No documentation or `where Self: Sized` guards.
-
-**[LOW]** No explicit wire protocol version number. A `protocol_version: u8` in `EnrollPayload`
-would provide a safety valve for hard protocol breaks.

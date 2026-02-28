@@ -103,12 +103,6 @@ No coding standards issues found.
 
 ### Issues
 
-**[MEDIUM]** `ScheduledTaskType` enum lacks `#[non_exhaustive]` and an `Other(String)` variant.
-When a new task type is seeded in the DB by a newer migration and the scheduler binary has not
-yet been updated, `find_due_tasks` will attempt to deserialize the unknown string and fail.
-Adding `#[non_exhaustive]` and graceful skip-on-unknown handling (consistent with
-`Capability::Other(String)` in the wire crate) would make rolling upgrades safe.
-
 **[LOW]** `TaskExecutor` trait has no compile-time check ensuring all `ScheduledTaskType`
 variants have registered executors. Unlike `register_plugins!`, there is no mechanism to catch
 a missing executor at startup -- the scheduler will silently skip tasks of an unregistered type.

@@ -305,9 +305,6 @@ No coding standards issues found.
 claim paths. If `role_claim_path = "realm.roles"`, reconstruction places values at `realm` not
 `realm.roles`.
 
-**[MEDIUM]** `src/routes/service_ws/protocol.rs` -- `controller_capabilities()` is a hardcoded
-array. Missing a `Capability` variant means the controller silently disables it.
-
 **[LOW]** `src/routes/oidc_auth.rs` -- No mechanism to add custom OIDC scopes beyond the
 `scopes` column. No documented path for operators to add custom claims processors without code
 changes.

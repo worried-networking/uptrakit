@@ -50,13 +50,6 @@ and spec-conformance against `asyncapi.yaml`.
 
 ### Issues
 
-**[CRITICAL]** `src/lib.rs:1028-1044` -- `ServiceEnvelope` and `ControllerEnvelope` carry no
-`protocol_version` field. Rolling upgrades require a hard cut-over -- there is no mechanism
-for the controller to detect that a connected agent is running an older protocol version.
-This becomes critical when a new required field is added to an existing payload, a variant is
-renamed/removed, or new capability negotiation semantics are introduced. Fix: add
-`protocol_version: u32` with `#[serde(default)]` defaulting to 1.
-
 **[MEDIUM]** `src/lib.rs:214-262` -- `ServiceMessage` and `ControllerMessage` mix agent and MQTT
 concerns in a single monolithic enum. The inline comment sections (`// -- Agent-specific --`,
 `// -- MQTT-specific --`) carry no structural enforcement. An agent handler receives variants

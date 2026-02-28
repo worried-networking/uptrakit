@@ -133,8 +133,8 @@ point of error reporting.
   tests. No shared state, full migration semantics.
 - `src/host_ops.rs` -- Comprehensive coverage: add, find by name/ID, duplicate name rejection,
   list empty/populated, remove by name, remove nonexistent, update fields, update rename
-  conflict, rename to same name (idempotency), machine_id lifecycle, machine_id empty-string
-  guard, and machine_id for nonexistent ID.
+  conflict, rename to same name (idempotency), machine_id lifecycle, and machine_id for
+  nonexistent ID.
 - `src/ssh_transport.rs` -- `BootstrapHandler` TOFU/pin/mismatch paths tested with real
   in-process Ed25519 key generation. `LineBuffer` has nine tests covering partial lines, flush,
   streaming-past-truncation, and no-sender mode.
@@ -242,11 +242,6 @@ handshake error during enrollment causes process exit rather than retry with bac
 **[MEDIUM]** `src/host_ops.rs:28-32,132` -- `Entity::find().all(db)` without tenant scoping.
 While architecturally correct (local SQLite, not multi-tenant), a comment explaining why no
 tenant filter is needed would improve clarity.
-
-**[MEDIUM]** `db/entity/ssh_host.rs:70` -- `machine_id` stored as empty string sentinel
-instead of `NULL`. `String` type with empty-string sentinel conflates "not yet reported" with
-"explicitly empty". Using `Option<String>` with `None` for "not yet connected" would be
-type-safe.
 
 ## Extensibility
 
