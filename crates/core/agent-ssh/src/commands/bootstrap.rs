@@ -3,6 +3,7 @@
 //! database.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use rootcause::prelude::*;
@@ -16,6 +17,7 @@ use crate::commands::sudoers::{
 };
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
+use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_key;
 use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
 
@@ -152,6 +154,10 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         params.host_key_fingerprint.as_deref(),
     )
     .await?;
+
+    // Wrap in Arc so the session can be shared with the plugin executor used
+    // for host-compatibility checks without copying any state.
+    let session = Arc::new(session);
 
     if params.host_key_fingerprint.is_none() {
         println!("Host key (TOFU): {observed_fp}");
@@ -319,8 +325,18 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     }
 
     // Set up sudoers (specific commands per registered plugins).
+    //
+    // Run host-compatibility checks via an SSH executor so that only the
+    // commands applicable to *this* host are included.  For example, the
+    // Proxmox Helper Scripts plugin's helper scripts are only installed on
+    // Proxmox VE nodes; on Flatcar Linux (read-only /usr/local/bin) they
+    // would fail.  The SSH executor is dropped after the call so the session
+    // Arc refcount returns to 1 before we call `disconnect_shared`.
     println!("Configuring sudoers...");
-    let plugin_sudo_cmds = PluginRegistry::all_required_sudo_commands();
+    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
+        as Arc<dyn uptrakit_command::CommandExecutor>;
+    let plugin_sudo_cmds =
+        PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
     for (_plugin_type, entries) in &plugin_sudo_cmds {
@@ -380,7 +396,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     .await?;
 
     // 6. DISCONNECT auth session.
-    session.disconnect().await;
+    SshSession::disconnect_shared(session).await;
 
     // 7. VERIFY — reconnect as target_username with target key.
     println!("Verifying connectivity as '{}'...", params.target_username);

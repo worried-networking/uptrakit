@@ -267,6 +267,25 @@ impl SshSession {
             .disconnect(Disconnect::ByApplication, "bootstrap complete", "en")
             .await;
     }
+
+    /// Disconnect an [`SshSession`] held behind an [`Arc`].
+    ///
+    /// Attempts to unwrap the `Arc` and disconnect. If the `Arc` still has
+    /// other strong owners at call time (which is a programming error — all
+    /// clones should have been dropped before disconnecting), the disconnect
+    /// is skipped and a warning is logged so the bug is visible without
+    /// panicking.
+    pub async fn disconnect_shared(this: Arc<Self>) {
+        match Arc::try_unwrap(this) {
+            Ok(session) => session.disconnect().await,
+            Err(_) => {
+                tracing::warn!(
+                    "SshSession::disconnect_shared called with multiple Arc owners; \
+                     skipping disconnect — this is a programming error"
+                );
+            }
+        }
+    }
 }
 
 // ── Public API ───────────────────────────────────────────────────────

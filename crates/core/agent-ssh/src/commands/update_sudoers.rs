@@ -1,8 +1,12 @@
 //! `update-sudoers` command: regenerate the sudoers file for an enrolled SSH host.
 //!
 //! This command detects whether the agent user is root or has passwordless sudo,
-//! collects required commands from all registered plugins, resolves their
-//! absolute paths on the remote host, and writes a minimal sudoers drop-in file.
+//! collects required commands from compatible plugins (running host-compatibility
+//! checks over SSH), resolves their absolute paths on the remote host, and writes
+//! a minimal sudoers drop-in file.
+
+use std::sync::Arc;
+use std::time::Duration;
 
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
@@ -15,9 +19,9 @@ use crate::commands::sudoers::{
 use crate::db::entity::ssh_host::Model;
 use crate::error::{Error, Result};
 use crate::host_ops::{self, update_host_sudo_state};
+use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_target::SshTarget;
-use crate::ssh_transport::{AuthMethod, SshConnectionConfig};
-use std::time::Duration;
+use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 
 /// Arguments for the `update-sudoers` command.
 pub struct UpdateSudoersArgs {
@@ -165,6 +169,10 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     )
     .await?;
 
+    // Wrap in Arc so the session can be shared with the plugin executor used
+    // for host-compatibility checks without copying any state.
+    let session = Arc::new(session);
+
     // 4. Detect sudo state for the *connection* user.
     println!("Detecting privilege context...");
     let is_root = detect_is_root(&session).await?;
@@ -222,7 +230,17 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     let privileged = !is_root; // root needs no sudo prefix
 
     // 7. Collect plugin commands + resolve paths.
-    let plugin_sudo_cmds = PluginRegistry::all_required_sudo_commands();
+    //
+    // Run host-compatibility checks via an SSH executor so that only the
+    // commands applicable to *this* host are included.  For example, the
+    // Proxmox Helper Scripts plugin's helper scripts are only installed on
+    // Proxmox VE nodes; on Flatcar Linux (read-only /usr/local/bin) they
+    // would fail.  The SSH executor is dropped after the call so the session
+    // Arc refcount returns to 1 before we call `disconnect_shared`.
+    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
+        as Arc<dyn uptrakit_command::CommandExecutor>;
+    let plugin_sudo_cmds =
+        PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
     for (_plugin_type, entries) in &plugin_sudo_cmds {
@@ -295,7 +313,7 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     // 10. Update DB: sudo_available = true (since we just wrote a sudoers file).
     update_host_sudo_state(db, &host.id, Some(true), Some(agent_is_root), None).await?;
 
-    session.disconnect().await;
+    SshSession::disconnect_shared(session).await;
 
     // 11. Success summary.
     println!();
