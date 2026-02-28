@@ -10,6 +10,28 @@ The extensibility seam for plugins is well-designed at the `Plugin` trait and `r
 
 ---
 
+## Per-Crate Review Files
+
+| Crate | Review |
+|---|---|
+| `crates/core/controller` | [CODEREVIEW.md](crates/core/controller/CODEREVIEW.md) |
+| `crates/core/agent-ssh` | [CODEREVIEW.md](crates/core/agent-ssh/CODEREVIEW.md) |
+| `crates/core/agent` | [CODEREVIEW.md](crates/core/agent/CODEREVIEW.md) |
+| `crates/core/mqtt` | [CODEREVIEW.md](crates/core/mqtt/CODEREVIEW.md) |
+| `crates/core/scheduler` | [CODEREVIEW.md](crates/core/scheduler/CODEREVIEW.md) |
+| `crates/shared` (umbrella: crypto, types, macros, command, agent-core, directories, nats, update-hooks, build-info) | [CODEREVIEW.md](crates/shared/CODEREVIEW.md) |
+| `crates/shared/db` | [CODEREVIEW.md](crates/shared/db/CODEREVIEW.md) |
+| `crates/shared/service-sdk` | [CODEREVIEW.md](crates/shared/service-sdk/CODEREVIEW.md) |
+| `crates/shared/wire` | [CODEREVIEW.md](crates/shared/wire/CODEREVIEW.md) |
+| `crates/shared/web-api-types` | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) |
+| `crates/shared/openapi-client` | [CODEREVIEW.md](crates/shared/openapi-client/CODEREVIEW.md) |
+| `crates/shared/scheduler-engine` | [CODEREVIEW.md](crates/shared/scheduler-engine/CODEREVIEW.md) |
+| `crates/ui/web-api` | [CODEREVIEW.md](crates/ui/web-api/CODEREVIEW.md) |
+| `crates/ui/cli` | [CODEREVIEW.md](crates/ui/cli/CODEREVIEW.md) |
+| `crates/plugins` (umbrella: all plugin crates) | [CODEREVIEW.md](crates/plugins/CODEREVIEW.md) |
+
+---
+
 ## Architecture
 
 ### Strengths

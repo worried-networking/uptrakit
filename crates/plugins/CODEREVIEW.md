@@ -76,6 +76,23 @@ Plugins that have no secrets implement an empty `impl SecretMasking for Homebrew
 
 ### Issues
 
+**[SEVERITY: Critical]** `crates/plugins/releases/docker/src/auth.rs:60–86` — SSRF via attacker-controlled registry auth realm URL
+
+The Docker registry authentication flow reads the `realm` URL from the `WWW-Authenticate`
+response header of an HTTP 401 response. This header is set by the registry server, which
+in a misconfiguration or MITM scenario could be under attacker control. The client then
+issues an HTTP GET to that realm URL with the registry credentials as query parameters.
+There is no validation that the realm URL belongs to the expected registry domain.
+
+A malicious registry (or a DNS-hijacked registry) can return a `realm` pointing to an
+internal metadata endpoint (e.g., `http://169.254.169.254/latest/meta-data/`), a corporate
+SSO endpoint, or any other HTTP server, causing the agent to exfiltrate registry credentials
+to an arbitrary host.
+
+Fix: validate that the `realm` URL shares the same host (and optionally scheme and port)
+as the configured registry URL before issuing the auth request. Any `realm` with a different
+host must be rejected.
+
 **[SEVERITY: Low]** `crates/plugins/releases/github/src/plugin.rs:52` — Bearer token is materialized as a plain `String` in memory
 
 The format string `format!("Bearer {}", token.expose_secret())` creates a heap-allocated `String` containing the full credential. This string lives until the `reqwest::Client` is dropped. For long-lived plugin instances this extends the lifetime of the plaintext credential in memory beyond what `SecretString` is designed to allow. A `SecretString` wrapper around the formatted header value, or constructing the header directly from the token bytes without an intermediate allocation, would reduce the exposure window.

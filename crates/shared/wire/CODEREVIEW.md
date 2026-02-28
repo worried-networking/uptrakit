@@ -105,6 +105,26 @@ established by `Capability` and `CloseReason`.
 
 ### Issues
 
+**[SEVERITY: Critical]** `src/lib.rs:1028–1044` — `ServiceEnvelope` and `ControllerEnvelope`
+carry no protocol-version field; rolling upgrades require a hard cut-over
+
+Neither `ServiceEnvelope` nor `ControllerEnvelope` includes a `protocol_version` field.
+When a breaking wire-format change is needed, all agents and the controller must be updated
+atomically — there is no mechanism for the controller to detect that a connected agent is
+running an older protocol version and handle its messages differently.
+
+This becomes critical in the following scenarios:
+- A new required field is added to an existing payload (old agents silently ignore it or
+  fail to deserialise)
+- A variant is renamed or removed from `ServiceMessage` (old agents produce an
+  `ErrorCode::BadRequest` that the new controller cannot contextualise)
+- New capability negotiation semantics are introduced
+
+Fix: add a `protocol_version: u32` field to both envelope types (default 1 for backward
+compatibility via `#[serde(default)]`). The controller can then reject connections from
+agents using incompatible versions with a structured `CloseReason` and a diagnostic log
+message that helps operators identify which agents need updating.
+
 **[SEVERITY: Medium]** `src/lib.rs:214–262` — `ServiceMessage` and
 `ControllerMessage` mix agent and MQTT concerns in a single monolithic enum
 

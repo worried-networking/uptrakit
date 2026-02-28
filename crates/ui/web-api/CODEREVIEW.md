@@ -53,6 +53,31 @@ The crate demonstrates several architectural strengths: a well-designed builder 
 
 The comment explicitly acknowledges the gap: "Cross-instance revocation relies on the natural JWT expiry (15 min)." For a system managing infrastructure access, a 15-minute window after revocation during which a stolen token remains valid on peer instances is a material risk. A DB-backed `revoked_tokens` table checked at validation time (or a Redis pub/sub invalidation) would close this gap.
 
+**[SEVERITY: Medium]** `src/routes/oidc_auth.rs:363-374` — `unwrap_or(1)` during OIDC registration check silently swallows DB errors
+
+```rust
+.count(state.db())
+.await
+.unwrap_or(1)
+> 0;
+```
+
+A DB outage returns `1` (treating the user as "existing"), which either blocks legitimate new registrations silently or skips the token-required path for a brand-new user. Should be propagated as an error with a redirect to `/login?error=oidc_internal_error`.
+
+**[SEVERITY: Medium]** `src/middleware/require_auth.rs:114-116` — Permission fetch failure returns empty permissions
+
+`get_user_permissions(...).await.unwrap_or_default()` on DB failure gives the authenticated user an empty permission set, causing every subsequent resource access to return 403 rather than 500. This masks DB connectivity problems as authorization denials and is difficult to distinguish from a legitimately unprivileged user.
+
+**[SEVERITY: Low]** `src/auth/token.rs:17-22` — API tokens hashed with SHA-256 without a salt
+
+API tokens are stored as unsalted SHA-256 digests. For high-entropy (128-bit+) random tokens
+this is not exploitable in practice, but it diverges from the Argon2id posture used for
+passwords and weakens defence-in-depth: any two users who generated the same token (however
+unlikely) would share a hash, and an offline rainbow table targeting specific short-format
+tokens is theoretically constructable. Adding a per-token salt (even 16 bytes prepended to
+the hash input) eliminates both concerns at negligible cost. The existing `hash_token` in
+`token.rs` is the single call site; the fix is localised.
+
 **[SEVERITY: Low]** `src/middleware/rate_limit.rs:121` — `FALLBACK_LIMITS.lock().unwrap()` in `check_local_fallback`
 
 Mutex poisoning (possible if a thread panics while holding the lock) would panic this function, permanently disabling the in-memory rate-limit fallback for the process lifetime. Use `.unwrap_or_else(|e| e.into_inner())` to recover from poisoning, or replace the `std::sync::Mutex` with `tokio::sync::Mutex` for consistency with the async context.
