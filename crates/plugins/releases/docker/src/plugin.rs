@@ -10,8 +10,8 @@ use uptrakit_plugin_infrastructure_core::command::{
     CommandExecutor, CommandSpec, send_output, shell_escape,
 };
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, OutputStreamType, Plugin, PluginCapability, PluginError, PluginType,
-    ReleaseInfo, UpdateOutputLine, UpstreamRelease, Version,
+    DiscoveredSoftware, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
+    PluginType, ReleaseInfo, UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::{DockerConfig, TrackingMode};
@@ -137,11 +137,33 @@ impl Plugin for DockerPlugin {
             &[
                 PluginCapability::ControllerSideFetchReleases,
                 PluginCapability::DiscoverLocalSoftware,
+                PluginCapability::DetectHostCompatibility,
             ]
         }
         #[cfg(not(feature = "daemon"))]
         {
             &[PluginCapability::ControllerSideFetchReleases]
+        }
+    }
+
+    #[cfg(feature = "daemon")]
+    async fn detect_host_compatibility(
+        &self,
+    ) -> uptrakit_plugin_infrastructure_core::Result<HostCompatibility> {
+        let result = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("which", ["docker".to_string()]))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "which docker failed: {e}"
+                )))
+            })?;
+
+        if result.exit_code == 0 {
+            Ok(HostCompatibility::Compatible)
+        } else {
+            Ok(HostCompatibility::Incompatible("docker not found".to_string()))
         }
     }
 
@@ -478,6 +500,41 @@ mod tests {
         Arc::new(MockCommandExecutor)
     }
 
+    /// Mock executor that returns a configurable exit code for `execute_quiet`.
+    struct FixedExitCodeExecutor {
+        exit_code: i32,
+    }
+
+    impl FixedExitCodeExecutor {
+        fn with_exit_code(exit_code: i32) -> Arc<dyn CommandExecutor> {
+            Arc::new(Self { exit_code })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CommandExecutor for FixedExitCodeExecutor {
+        async fn execute(
+            &self,
+            _spec: &CommandSpec,
+            _output_tx: &mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<uptrakit_plugin_infrastructure_core::CommandOutput> {
+            Ok(uptrakit_plugin_infrastructure_core::CommandOutput {
+                output: String::new(),
+                exit_code: self.exit_code,
+            })
+        }
+
+        async fn execute_quiet(
+            &self,
+            _spec: &CommandSpec,
+        ) -> uptrakit_command::Result<uptrakit_plugin_infrastructure_core::CommandOutput> {
+            Ok(uptrakit_plugin_infrastructure_core::CommandOutput {
+                output: String::new(),
+                exit_code: self.exit_code,
+            })
+        }
+    }
+
     fn default_mock_client() -> Arc<dyn DockerClient> {
         Arc::new(MockDockerClient {
             pull_output: String::new(),
@@ -516,6 +573,17 @@ mod tests {
     }
 
     #[test]
+    fn capabilities_includes_detect_host_compatibility() {
+        let plugin = DockerPlugin::new_for_test(
+            DockerConfig::default(),
+            test_executor(),
+            default_mock_client(),
+        )
+        .unwrap();
+        assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
+    }
+
+    #[test]
     fn capabilities_excludes_refresh_package_index() {
         let plugin = DockerPlugin::new_for_test(
             DockerConfig::default(),
@@ -524,6 +592,37 @@ mod tests {
         )
         .unwrap();
         assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
+    }
+
+    // ── detect_host_compatibility ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn detect_host_compatibility_compatible_when_which_exits_zero() {
+        let plugin = DockerPlugin::new_for_test(
+            DockerConfig::default(),
+            FixedExitCodeExecutor::with_exit_code(0),
+            default_mock_client(),
+        )
+        .unwrap();
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        assert_eq!(result, HostCompatibility::Compatible);
+    }
+
+    #[tokio::test]
+    async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
+        let plugin = DockerPlugin::new_for_test(
+            DockerConfig::default(),
+            FixedExitCodeExecutor::with_exit_code(1),
+            default_mock_client(),
+        )
+        .unwrap();
+        let result = plugin.detect_host_compatibility().await.expect("ok");
+        match result {
+            HostCompatibility::Incompatible(msg) => {
+                assert!(msg.contains("docker"), "reason should mention docker: {msg}");
+            }
+            HostCompatibility::Compatible => panic!("expected Incompatible"),
+        }
     }
 
     #[tokio::test]
