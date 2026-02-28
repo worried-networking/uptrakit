@@ -23,31 +23,31 @@ use uptrakit_web_api::pki_utils::{self, SanCollection};
 /// The AIA extension (OID 1.3.6.1.5.5.7.1.1) contains:
 /// - `id-ad-ocsp` access description pointing to the OCSP responder URL
 /// - `id-ad-caIssuers` access description pointing to the CA certificate URL
-fn build_aia_extension_der(ocsp_url: &str, ca_issuers_url: &str) -> Vec<u8> {
+fn build_aia_extension_der(ocsp_url: &str, ca_issuers_url: &str) -> Result<Vec<u8>> {
     let mut access_descriptions = Vec::new();
 
     // OCSP access description: SEQUENCE { OID(id-ad-ocsp), [6] URI }
     access_descriptions.extend_from_slice(&encode_access_description(
         &[0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01], // id-ad-ocsp OID
         ocsp_url,
-    ));
+    )?);
 
     // CA Issuers access description: SEQUENCE { OID(id-ad-caIssuers), [6] URI }
     access_descriptions.extend_from_slice(&encode_access_description(
         &[0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02], // id-ad-caIssuers OID
         ca_issuers_url,
-    ));
+    )?);
 
     // Wrap in SEQUENCE (AuthorityInfoAccessSyntax)
     encode_der_sequence(&access_descriptions)
 }
 
 /// Encode a single AccessDescription as a DER SEQUENCE.
-fn encode_access_description(method_oid_der: &[u8], uri: &str) -> Vec<u8> {
+fn encode_access_description(method_oid_der: &[u8], uri: &str) -> Result<Vec<u8>> {
     let uri_bytes = uri.as_bytes();
     // GeneralName uniformResourceIdentifier [6] IMPLICIT IA5String
     let mut general_name = vec![0x86]; // context tag 6, primitive
-    general_name.extend_from_slice(&encode_der_length(uri_bytes.len()));
+    general_name.extend_from_slice(&encode_der_length(uri_bytes.len())?);
     general_name.extend_from_slice(uri_bytes);
 
     let mut content = Vec::new();
@@ -58,32 +58,39 @@ fn encode_access_description(method_oid_der: &[u8], uri: &str) -> Vec<u8> {
 }
 
 /// Encode a DER SEQUENCE tag + length + content.
-fn encode_der_sequence(content: &[u8]) -> Vec<u8> {
+fn encode_der_sequence(content: &[u8]) -> Result<Vec<u8>> {
     let mut result = vec![0x30]; // SEQUENCE tag
-    result.extend_from_slice(&encode_der_length(content.len()));
+    result.extend_from_slice(&encode_der_length(content.len())?);
     result.extend_from_slice(content);
-    result
+    Ok(result)
 }
 
 /// Encode a DER length in the minimum number of octets.
-fn encode_der_length(len: usize) -> Vec<u8> {
+///
+/// Only the 1-byte and 2-byte long forms are supported (values up to 0xFFFF).
+/// Returns [`PkiError::LengthOverflow`] for inputs ≥ 65 536 bytes, which would
+/// require 3-byte long form and are not expected in AIA / CDP extension bodies.
+fn encode_der_length(len: usize) -> Result<Vec<u8>> {
+    if len > 0xFFFF {
+        bail!(PkiError::LengthOverflow(len));
+    }
     if len < 0x80 {
-        vec![len as u8]
+        Ok(vec![len as u8])
     } else if len < 0x100 {
-        vec![0x81, len as u8]
+        Ok(vec![0x81, len as u8])
     } else {
-        vec![0x82, (len >> 8) as u8, len as u8]
+        Ok(vec![0x82, (len >> 8) as u8, len as u8])
     }
 }
 
 /// Add AIA and CDP extensions to certificate parameters when a backend URL is set.
-pub fn add_pki_extensions(params: &mut CertificateParams, pki_addr: &str) {
+pub fn add_pki_extensions(params: &mut CertificateParams, pki_addr: &str) -> Result<()> {
     let ocsp_url = format!("{pki_addr}/api/v1/pki/ocsp");
     let ca_issuers_url = format!("{pki_addr}/api/v1/pki/ca.crt");
     let crl_url = format!("{pki_addr}/api/v1/pki/ca.crl");
 
     // AIA extension (OID 1.3.6.1.5.5.7.1.1)
-    let aia_der = build_aia_extension_der(&ocsp_url, &ca_issuers_url);
+    let aia_der = build_aia_extension_der(&ocsp_url, &ca_issuers_url)?;
     params
         .custom_extensions
         .push(rcgen::CustomExtension::from_oid_content(
@@ -95,6 +102,8 @@ pub fn add_pki_extensions(params: &mut CertificateParams, pki_addr: &str) {
     params.crl_distribution_points = vec![rcgen::CrlDistributionPoint {
         uris: vec![crl_url],
     }];
+
+    Ok(())
 }
 
 #[derive(Debug, Error)]
@@ -131,6 +140,9 @@ pub enum PkiError {
 
     #[error("CA validation failed: {0}")]
     CaValidation(String),
+
+    #[error("DER length overflow: {0} bytes exceeds the 2-byte long-form maximum of 65535")]
+    LengthOverflow(usize),
 }
 
 pub type Result<T> = std::result::Result<T, Report<PkiError>>;
@@ -499,7 +511,7 @@ fn generate_ca(pki_addr: Option<&str>) -> Result<CaBundle> {
     params.not_after = OffsetDateTime::now_utc() + time::Duration::days(1825);
 
     if let Some(url) = pki_addr {
-        add_pki_extensions(&mut params, url);
+        add_pki_extensions(&mut params, url)?;
     }
 
     let cert = params.self_signed(&key_pair).context_to::<PkiError>()?;

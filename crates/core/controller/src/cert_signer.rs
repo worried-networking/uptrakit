@@ -143,7 +143,11 @@ fn sign_agent_csr(
     params.not_after = not_after;
 
     if let Some(url) = pki_addr {
-        crate::pki::add_pki_extensions(&mut params, url);
+        crate::pki::add_pki_extensions(&mut params, url).map_err(|e| {
+            report!(CertSignerError::Signing(format!(
+                "failed to add PKI extensions: {e}"
+            )))
+        })?;
     }
 
     // Sign using the public key from the CSR
