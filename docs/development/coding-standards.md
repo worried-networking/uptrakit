@@ -8,7 +8,9 @@ For comprehensive error handling patterns, conventions, and the full decision gu
 - Wrap errors in `rootcause::Report` and define a `Result<T>` alias per boundary.
 - Use `thiserror::Error` with `#[derive(Debug, Error)]` to describe failures.
 - Implement `ReportConversion` (via `impl_report_conversion!`) for all downstream errors and prefer `.context_to()?` to preserve the chain.
-- Use `report!()` for creating new reports and `bail!()` for early returns.
+- Use `report!(MyError::Variant(…))` for creating new error reports. Never call
+  `rootcause::Report::new(…)` directly — the macro additionally captures source location.
+- Use `bail!(MyError::Variant(…))` for early returns.
 - Avoid `Result<T, String>`; prefer typed enums.
 - Logging should never expose secrets (tokens, passwords, keys).
 
@@ -30,6 +32,69 @@ https_addr: SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 8443, 0, 0))
 // ✗ Wrong — panics at startup if the string is ever edited incorrectly
 https_addr: "[::]:8443".parse().unwrap(),
 ```
+
+## Error Masking Anti-Patterns
+
+Never use `.unwrap_or(N)` or `.unwrap_or_default()` as a silent fallback for database errors.
+When the database is unavailable a fallback value produces incorrect program behavior:
+
+- **Security paths:** `count(db).await.unwrap_or(1) > 0` in a registration check treats a DB
+  error as "user exists", silently blocking legitimate registrations or skipping the
+  registration-token-required path.
+- **Data-integrity guards:** `count_linked_hosts(db).await.unwrap_or(0)` treats a DB error as
+  "no linked hosts", potentially allowing a soft-delete that would orphan active records.
+
+### Required pattern — route handlers
+
+Use a `match` and return `StatusCode::INTERNAL_SERVER_ERROR` on `Err`, logging the error at the
+`error` level:
+
+```rust
+let has_user = match User::find()
+    .filter(user::Column::Email.eq(&email))
+    .count(state.db())
+    .await
+{
+    Ok(n) => n > 0,
+    Err(e) => {
+        tracing::error!(err = %e, "DB error checking for duplicate user");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+};
+```
+
+### Required pattern — query functions
+
+Return `Result<T, DbErr>` (or a crate-local `Result`) and propagate errors with `?` at the call
+site. Never collapse errors into a default value:
+
+```rust
+// ✓ Correct — DB error is surfaced to the caller
+async fn count_linked_hosts(
+    db: &DatabaseConnection,
+    item_id: Uuid,
+) -> Result<u64, sea_orm::DbErr> {
+    SoftwareItemHost::find()
+        .filter(software_item_host::Column::SoftwareItemId.eq(item_id))
+        .count(db)
+        .await   // ? at call site propagates the error
+}
+
+// ✗ Wrong — DB outage silently returns 0, making a guard useless
+async fn count_linked_hosts(db: &DatabaseConnection, item_id: Uuid) -> u64 {
+    SoftwareItemHost::find()
+        .filter(...)
+        .count(db)
+        .await
+        .unwrap_or(0)
+}
+```
+
+The narrower `unwrap_or(0)` rule for count queries in paginated list endpoints is documented in
+[Database Query Patterns](#database-query-patterns). This section covers the broader class of
+`.unwrap_or(N)` misuse in security and data-integrity code paths.
+
+See also: [Error Handling](error-handling.md).
 
 ## Public Enum Extensibility
 
@@ -513,6 +578,59 @@ let host_id = match uuid::Uuid::parse_str(&id) {
 
 **Exception:** `Path<String>` is correct for non-UUID path parameters (e.g., base64-encoded OCSP
 requests in `ocsp.rs`).
+
+## UUID Query Parameters
+
+Use `Option<Uuid>` (not `Option<String>`) for UUID-typed query parameters. Axum's serde
+deserialization automatically rejects malformed UUIDs with `422 Unprocessable Entity`. Manual
+`.and_then(|s| Uuid::parse_str(s).ok())` silently swallows invalid values, returning the
+"no filter" behaviour instead of an error.
+
+### Required pattern
+
+```rust
+use uuid::Uuid;
+
+#[derive(Deserialize)]
+struct MyQuery {
+    // Axum returns 422 automatically for malformed UUIDs
+    plugin_config_id: Option<Uuid>,
+}
+
+// In the handler, use params.plugin_config_id directly — no parse needed
+```
+
+### utoipa annotations
+
+Declare `Option<Uuid>` in utoipa `params(…)` so the OpenAPI schema emits `format: uuid`:
+
+```rust
+#[utoipa::path(
+    delete,
+    path = "/api/v1/hosts/{id}/discovered",
+    params(
+        ("id" = Uuid, Path, description = "Host UUID"),
+        ("plugin_config_id" = Option<Uuid>, Query, description = "Filter by plugin config UUID"),
+    ),
+    ...
+)]
+```
+
+### Anti-pattern
+
+```rust
+// WRONG — silently ignores malformed UUIDs; no 422 returned
+#[derive(Deserialize)]
+struct MyQuery {
+    plugin_config_id: Option<String>,
+}
+
+// … then in the handler:
+let id = params.plugin_config_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
+```
+
+See also: [Typed Path Extractors](#typed-path-extractors) for the equivalent rule on path
+parameters.
 
 ## Tenant-Safe Database Queries
 
