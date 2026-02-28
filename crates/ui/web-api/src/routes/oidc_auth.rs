@@ -422,7 +422,13 @@ pub async fn oidc_callback(
             // Atomically check if this is the first user (threshold 1 because the
             // user was just created by resolve_oidc_user) and handle owner role +
             // initial setup inside the same transaction.
-            let user_count = User::find().count(&txn).await.unwrap_or(0);
+            let user_count = match User::find().count(&txn).await {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::error!("Failed to count users during OIDC registration: {e}");
+                    return Redirect::to("/login?error=oidc_internal_error").into_response();
+                }
+            };
             if user_count == 1 {
                 // Delete the default 'user' role assigned by resolve_oidc_user
                 let _ = UserRole::delete_many()
