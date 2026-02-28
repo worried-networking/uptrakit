@@ -60,20 +60,6 @@ by unit tests. One issue requires immediate attention: the CRL manager was previ
 
 ### Issues
 
-#### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `crates/core/controller/src/db/config.rs:13,23,42-45,48,53,58` — Non-additive feature flag pattern: 6 `#[cfg(not(feature))]` usages in database configuration
-
-Uses `#[cfg(not(feature = "..."))]` to provide error messages when a database URL scheme does not match an enabled feature. Violates the additivity principle. The 2 `#[cfg_attr(not(feature), allow(...))]` usages compound the violation with prohibited `#[allow()]` attributes.
-
-**[SEVERITY: Medium]** `crates/core/controller/src/cli.rs:120-122` — Non-additive feature flag: `#[cfg(not(feature = "embed-frontend"))]` conditionally removes a CLI argument
-
-When `embed-frontend` is enabled, the `--static-dir` CLI argument disappears. The additive alternative is to always declare the field but validate at runtime.
-
-**[SEVERITY: Low]** `crates/core/controller/src/startup.rs:584-585,907` — Non-additive feature flag: `#[cfg(not(feature = "embed-frontend"))]` on startup logic
-
-Two additional usages compile out the `resolve_static_dir` function when the frontend is embedded.
-
 ---
 
 ## Security & Safety
@@ -106,27 +92,6 @@ Two additional usages compile out the `resolve_static_dir` function when the fro
   `settings` table and rebuilds the TLS config without a restart.
 
 ### Issues
-
-**[SEVERITY: Medium]** `crates/core/controller/src/pki.rs:69-77` — `encode_der_length` silently truncates lengths >= 65,536 bytes
-
-```rust
-fn encode_der_length(len: usize) -> Vec<u8> {
-    if len < 0x80 {
-        vec![len as u8]
-    } else if len < 0x100 {
-        vec![0x81, len as u8]
-    } else {
-        vec![0x82, (len >> 8) as u8, len as u8]   // only 2-byte long-form
-    }
-}
-```
-
-The function handles lengths up to 65,535 bytes (two-byte DER long-form). Any
-length >= 65,536 produces a silently truncated DER encoding that will fail to
-parse correctly. While OCSP URLs and CA Issuers URLs in practice fit in two bytes,
-there is no assertion or documented invariant enforcing this. The function should
-`panic!` (or return an error) for lengths >= 0x10000, and an inline comment
-should document the `max = 65535` constraint.
 
 ---
 
@@ -355,20 +320,6 @@ Creates a consistency window during concurrent CA rotation + server cert renewal
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/core/controller/src/migration/m20260209_000001_initial.rs:25-41` — `tenants.slug` has both `string_uniq()` and an explicit `Index::create()`
-
-```
-string_uniq(Tenants::Slug)          // implicit unique index
-…
-Index::create().name("idx_tenants_slug").col(Tenants::Slug)   // duplicate index
-```
-
-`string_uniq()` in SeaORM already creates a unique index on the column. Adding a
-second explicit `idx_tenants_slug` index on the same column creates a duplicate
-index that wastes write overhead (two B-tree updates per INSERT/UPDATE on `slug`).
-The explicit `Index::create()` call should be removed; the uniqueness constraint
-from `string_uniq` is sufficient. The same pattern appears for `users.email`.
-
 ---
 
 ## Coding Standards
@@ -410,12 +361,6 @@ from `string_uniq` is sufficient. The same pattern appears for `users.email`.
 `scheduler/mod.rs` without documentation. It should be moved to `durations.rs` as
 `pub(crate) const SCHEDULER_POLL_INTERVAL: Duration` for consistency and
 discoverability.
-
-#### 2026-02-24 Review
-
-**[SEVERITY: Low]** `crates/core/controller/src/db/config.rs:23,48,53,58` — Four `#[cfg(not(feature = "db-*"))]` blocks are defensive guards with no documentation
-
-These are necessary for clear error messages but the pattern contradicts the "features are additive only" principle. Each should carry a justification comment.
 
 ---
 

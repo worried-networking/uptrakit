@@ -109,10 +109,6 @@ No open issues in this section.
 
 #### Issues
 
-**[SEVERITY: Low]** `crates/ui/web-api/src/queries/plugin_configs.rs:155-158` — Second instance of string-based unique violation detection duplicated from autodiscovery.rs
-
-Two independent copies of the same fragile detection logic. Should be consolidated into `uptrakit-shared-db` using backend-specific error codes.
-
 **[SEVERITY: Medium]** `crates/shared/db/src/entity/update_history.rs:28` — Dual output
 storage: `output` column (inline Text) and the `update_output_lines` child table.
 
@@ -229,10 +225,6 @@ both kinds of records and asserts the correct output is returned in each case.
 
 #### Issues
 
-**[SEVERITY: Medium]** `m20260209_000001_initial.rs:1093-1101` — Missing index on `host_software_items(plugin_config_id, package_identifier)` for autodiscovery lookup
-
-Phase 2 of `process_one_discovery` queries by this combination. Only `plugin_config_id` is indexed alone.
-
 **[SEVERITY: Low]** `m20260209_000001_initial.rs:1399-1439` — Missing index on `update_history(host_id, software_item_id, status)` for pending-update lookups
 
 Frequent check requires index intersections without a composite index.
@@ -281,20 +273,6 @@ comment explaining the rationale. A code comment stating "Sequential i64 is inte
 controller_events is an append-only event log; sequential IDs preserve insertion order for
 the event poller cursor" would prevent future reviewers from treating this as a mistake.
 
-### Index Audit
-
-**Duplicate indexes — Low severity waste:**
-- `tenants.slug`: has both `string_uniq()` (which creates a unique index) AND an explicit
-  `Index::create()` in the migration. Two indexes on the same column double write overhead
-  for every INSERT/UPDATE.
-- `users.email`: same pattern as `tenants.slug`.
-
-**Missing indexes — Low severity:**
-
-- `sessions(user_id, expires_at)`: "Find active sessions for user" is a common auth query.
-  Without a composite index, it scans all sessions for the user and then filters by
-  `expires_at`, or scans all non-expired sessions and then filters by `user_id`.
-
 ---
 
 ## Coding Standards
@@ -318,28 +296,6 @@ the event poller cursor" would prevent future reviewers from treating this as a 
   Consistent with the workspace-wide standard.
 
 ### Issues
-
-**[SEVERITY: Low]** `crates/ui/web-api/src/queries/autodiscovery.rs:673-676` —
-`is_unique_violation()` uses string matching on error messages.
-
-```rust
-fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
-    let msg = e.to_string().to_lowercase();
-    msg.contains("unique") || msg.contains("duplicate")
-}
-```
-
-This helper is in `web-api`, not in this crate, but it is called when inserting rows into
-tables defined by this crate (`autodiscovery_ignore`). The implementation matches against
-lowercased error message strings. This is backend-specific and brittle: SQLite uses "UNIQUE
-constraint failed", PostgreSQL uses "duplicate key value violates unique constraint",
-MySQL uses "Duplicate entry". If the DB backend changes or the error message format changes
-in a SeaORM release, the detection silently fails (returns `false` when it should return
-`true`), causing idempotent insert operations to surface as errors. The correct approach is
-to match on `sea_orm::DbErr::RecordNotInserted` or inspect the underlying `sqlx::Error`
-for the backend-specific error code (PostgreSQL error code `23505`, SQLite extended code
-`SQLITE_CONSTRAINT_UNIQUE`). This helper should be moved into `uptrakit-shared-db` as
-a utility function so it is co-located with the entity definitions.
 
 ---
 

@@ -30,22 +30,6 @@ The extensibility seam for plugins is well-designed at the `Plugin` trait and `r
 
 #### 2026-02-24 Review
 
-**[SEVERITY: Medium]** Multiple files across `crates/core/controller/` and `crates/ui/web-api/` — 11 `#[cfg(not(feature = "..."))]` usages across 5 files violate the additive feature flag rule
-
-AGENTS.md states that "Feature flags must be additive (no `#[cfg(not(feature = "..."))]`)." A workspace-wide search identifies 11 occurrences across 5 source files, plus 2 `#[cfg_attr(not(feature), allow(...))]` usages:
-
-| File | Lines | Feature | Purpose |
-|------|-------|---------|---------|
-| `crates/core/controller/src/db/config.rs` | 23, 48, 53, 58 | `db-sqlite`, `db-postgres`, `db-mysql` | Error bail for unsupported DB schemes |
-| `crates/core/controller/src/db/config.rs` | 13, 42-45 | `db-sqlite`, `db-*` | `#[cfg_attr(not(...), allow(...))]` |
-| `crates/core/controller/src/cli.rs` | 120 | `embed-frontend` | Remove `--static-dir` CLI arg |
-| `crates/core/controller/src/startup.rs` | 584, 907 | `embed-frontend` | Remove static-dir resolution |
-| `crates/ui/web-api/src/routes/settings_auth.rs` | 96 | `oidc` | Error when disabling password auth |
-| `crates/ui/web-api/src/middleware/rate_limit.rs` | 228 | `oidc` | Test expectation list |
-| `crates/ui/web-api/src/lib.rs` | 941 | `swagger-ui` | Fallback OpenAPI JSON route |
-
-All can be refactored to use positive `#[cfg(feature = "...")]` gates only.
-
 **[SEVERITY: Low]** `CODEREVIEW.md:23` vs `AGENTS.md` codebase layout — Workspace CODEREVIEW documents "binaries import from `shared/` and `ui/`" but AGENTS.md layout implies a stricter four-tier DAG
 
 The AGENTS.md should include explicit dependency direction statements to eliminate ambiguity about the permitted dependency directions between the four domains.
@@ -170,10 +154,6 @@ Without a CI check, the invariant is documentation-only and will continue to be 
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/core/mqtt/src/mqtt_client.rs:253-254` — MQTT reconnect uses a fixed 5-second delay with no backoff
-
-Unlike WebSocket reconnection (which uses the `backoff.rs` exponential backoff with jitter), MQTT reconnection retries at a flat 5-second interval indefinitely. During an extended broker outage, all MQTT clients hammer the broker at 5-second intervals with no circuit-breaker. The same `backoff.rs` helper already used for WebSocket connections should be applied here for consistency.
-
 **[SEVERITY: Medium]** `crates/core/controller/src/tasks.rs:98-104` — 5-second shutdown timeout may be insufficient for `release_all_claims` under a slow database
 
 `BACKGROUND_TASK_SHUTDOWN_TIMEOUT = 5s` covers the `release_all_claims` DB write. Under a slow or temporarily unavailable database, the write is abandoned after 5 seconds, claims are not released, and the next controller instance must wait the full 10-minute stale recovery window before resuming scheduled work. The timeout should be configurable, or the `release_all_claims` call should carry its own shorter internal deadline with a logged warning on timeout.
@@ -212,12 +192,6 @@ All other 7 soft-deletable entities (`tenants`, `users`, `hosts`, `services`, `s
 **[SEVERITY: Medium]** `crates/shared/db/src/entity/update_history.rs:28` — Dual output storage: `output` column and `update_output_lines` child table
 
 `get_update_history` checks `if record.output.is_empty()` and conditionally loads from the child table. This dual-path design means a partially migrated database (records with neither `output` populated nor `update_output_lines` rows) would silently return empty output with no error. There is no DB constraint enforcing which storage path is canonical.
-
-**[SEVERITY: Medium]** `crates/core/agent-ssh/src/db/entity/ssh_host.rs:72-73` — Timestamp columns stored as `INTEGER` epoch seconds instead of typed TIMESTAMP
-
-`created_at` and `updated_at` are `i64` Unix seconds rather than `time::OffsetDateTime` columns used by every other entity. DB tooling (migrations, generic timestamp queries, `TenantScoped` helpers) will silently miss these columns, and sub-second precision is lost. Aligning with the rest of the codebase requires a migration on the SSH agent's local SQLite database.
-
-**[SEVERITY: Low]** Missing indexes identified across multiple tables: `update_history` has no index on `created_at` despite `ORDER BY created_at DESC` in the list query; `host_software_items` has no index on `software_item_id` alone (the composite PK starts with `host_id`); `mqtt_leases` has no index on `tenant_id`; `sessions` has no composite `(user_id, expires_at)` index for active-session lookups. `tenants.slug` and `users.email` each have both a `string_uniq()` SeaORM constraint and an explicit `Index::create()` call — duplicate indexes waste write overhead.
 
 **[SEVERITY: Low]** `api_tokens` table — No `expires_at` column
 

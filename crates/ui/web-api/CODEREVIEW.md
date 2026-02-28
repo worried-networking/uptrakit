@@ -29,20 +29,6 @@ The crate demonstrates several architectural strengths: a well-designed builder 
 
 `AGENTS.md` documents `rust-version = "1.91"` but no crate declares it. If this crate uses edition 2024 features, build failures on older toolchains have no documented expectation.
 
-#### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `src/routes/settings_auth.rs:96-102` — Non-additive feature flag: `#[cfg(not(feature = "oidc"))]` provides a semantic guard
-
-When OIDC is disabled, this block prevents disabling password auth. Refactor so the default path rejects and the positive `#[cfg(feature = "oidc")]` path conditionally allows.
-
-**[SEVERITY: Low]** `src/middleware/rate_limit.rs:228-236` — Non-additive feature flag: `#[cfg(not(feature = "oidc"))]` in test expectations
-
-Should use `let mut expected = vec![...]` and extend conditionally inside `#[cfg(feature = "oidc")]`.
-
-**[SEVERITY: Low]** `src/lib.rs:941-944` — Non-additive feature flag: `#[cfg(not(feature = "swagger-ui"))]` for fallback OpenAPI JSON route
-
-The plain JSON route should be registered unconditionally; Swagger UI should be an additive overlay.
-
 ---
 
 ## Security & Safety
@@ -66,21 +52,6 @@ The plain JSON route should be registered unconditionally; Swagger UI should be 
 **[SEVERITY: Medium]** `src/auth/token_denylist.rs:15` (acknowledged in code comment) — In-memory denylist provides no cross-instance revocation
 
 The comment explicitly acknowledges the gap: "Cross-instance revocation relies on the natural JWT expiry (15 min)." For a system managing infrastructure access, a 15-minute window after revocation during which a stolen token remains valid on peer instances is a material risk. A DB-backed `revoked_tokens` table checked at validation time (or a Redis pub/sub invalidation) would close this gap.
-
-**[SEVERITY: Medium]** `src/routes/oidc_auth.rs:363-374` — `unwrap_or(1)` during OIDC registration check silently swallows DB errors
-
-```rust
-.count(state.db())
-.await
-.unwrap_or(1)
-> 0;
-```
-
-A DB outage returns `1` (treating the user as "existing"), which either blocks legitimate new registrations silently or skips the token-required path for a brand-new user. Should be propagated as an error with a redirect to `/login?error=oidc_internal_error`.
-
-**[SEVERITY: Medium]** `src/middleware/require_auth.rs:114-116` — Permission fetch failure returns empty permissions
-
-`get_user_permissions(...).await.unwrap_or_default()` on DB failure gives the authenticated user an empty permission set, causing every subsequent resource access to return 403 rather than 500. This masks DB connectivity problems as authorization denials and is difficult to distinguish from a legitimately unprivileged user.
 
 **[SEVERITY: Low]** `src/middleware/rate_limit.rs:121` — `FALLBACK_LIMITS.lock().unwrap()` in `check_local_fallback`
 
@@ -121,16 +92,6 @@ The `==` operator short-circuits, but the compared values (CA CNs) are not confi
 - **`CaKeyStore` `Debug` redaction with dedicated test verification.** `src/lib.rs:98-112` — Manually redacts every key field to `"[REDACTED]"` with a verification test at `src/lib.rs:1284-1303`.
 
 ### Issues
-
-**[SEVERITY: Medium]** `src/routes/oidc_auth.rs:66` and `src/routes/oidc_auth.rs:352` — `unwrap_or_default()` on DB queries silently returns empty results
-
-`OidcProvider::find().all(...).await.unwrap_or_default()` at line 66 returns an empty provider list on DB error, causing `auth_methods` to report "no OIDC providers configured" rather than a server error. At line 352, `count(...).unwrap_or(1)` treats a DB error as "link exists", gating the user out of the OIDC flow. Both should log with `tracing::warn!` or propagate as errors.
-
-#### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `src/queries/plugin_configs.rs:155-158` — Duplicated `is_unique_name_violation` uses brittle string matching
-
-Same `msg.contains("unique") || msg.contains("duplicate")` pattern as `autodiscovery.rs:673-676`. Should be consolidated into `uptrakit-shared-db` using backend-specific error codes.
 
 **[SEVERITY: Low]** `src/notification_service.rs:46-63` — `msg.clone()` on every `send()` and `broadcast()` call
 
@@ -282,39 +243,15 @@ Should have a per-event timeout or overall backlog delivery budget.
 
 ### Issues
 
-**[SEVERITY: Medium]** Missing index: `update_history` has no index on `created_at`
-
-`list_update_history` orders by `created_at DESC` with pagination, but there is no index on this column. The query degrades to a full table scan as update history grows. Add `CREATE INDEX idx_update_history_created_at ON update_history (created_at DESC)`.
-
-**[SEVERITY: Medium]** Missing index: `host_software_items` has no index on `software_item_id` alone
-
-The composite primary key starts with `host_id`. Queries filtering by `software_item_id` alone (e.g., finding all hosts for a given software item) cannot use the primary key and require a full table scan. Add a non-unique index on `software_item_id`.
-
-**[SEVERITY: Medium]** Missing index: `mqtt_leases` has no index on `tenant_id`
-
-Queries filtering leases by tenant cannot use any index beyond the primary key. Add an index on `tenant_id`.
-
-**[SEVERITY: Medium]** `src/queries/autodiscovery.rs:673-676` — `is_unique_violation()` uses string matching on error messages
-
-Checking uniqueness violations by matching substrings in error message strings is brittle and backend-specific (different messages for SQLite vs PostgreSQL vs MySQL). Use SeaORM's typed error variants or a helper that inspects the underlying `sqlx::Error::Database` error code instead.
-
 **[SEVERITY: Low]** `api_tokens` table has no `expires_at` column
 
 API tokens are valid indefinitely once issued. A compromised token that was never explicitly revoked remains valid forever. Add an optional `expires_at` column and enforce expiry at validation time.
-
-**[SEVERITY: Low]** `sessions` table has no composite `(user_id, expires_at)` index
-
-"Find active sessions for user" is a common query path (user detail view, session revocation). A composite index on `(user_id, expires_at)` would serve this filter efficiently.
 
 #### 2026-02-24 Review
 
 **[SEVERITY: Medium]** `src/queries/autodiscovery.rs:36-75` — TOCTOU race in `create_or_ignore_ignore_rule`
 
 Check-then-insert without transaction. The unique violation handler should return `Ok(())`, not propagate the error.
-
-**[SEVERITY: Medium]** `src/queries/autodiscovery.rs:600-610` — Unbounded `host_software_items` scan in `process_one_discovery` Phase 2
-
-Missing index on `(plugin_config_id, package_identifier)`.
 
 **[SEVERITY: Medium]** `src/queries/update_history.rs:148-150` — Output not loaded for list_update_history
 
@@ -351,12 +288,6 @@ REST convention: `DELETE` that has no meaningful response body should return `20
 **[SEVERITY: Medium]** `src/routes/autodiscovery.rs:154,159` — `create_autodiscovery_ignore` returns `201 Created` for both new and pre-existing records
 
 When the ignore entry already exists, the endpoint returns `201 Created`. Standard REST: `201` for new creation, `200` (or `204`) for an idempotent update/pre-existing resource. Return `200 OK` when the record is found to already exist.
-
-#### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `src/routes/settings_auth.rs:96`, `src/lib.rs:941` — `#[cfg(not(feature))]` blocks undocumented
-
-These are pragmatic uses but each should carry an inline comment explaining why the pattern is necessary.
 
 ---
 

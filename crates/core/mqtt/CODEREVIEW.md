@@ -104,8 +104,7 @@ be extended.
 ### Strengths
 
 - **No magic numbers.** The single shared constant `SHUTDOWN_TIMEOUT: Duration =
-  Duration::from_secs(5)` (`mqtt_client.rs:265`) is named and typed. The reconnect delay
-  (`Duration::from_secs(5)`, `mqtt_client.rs:254`) is the one exception — see Issues.
+  Duration::from_secs(5)` (`mqtt_client.rs:265`) is named and typed.
 
 - **Consistent error handling.** `MqttError` uses `thiserror`, the `impl_report_conversion!`
   macro ties it into the workspace-standard `rootcause` chain, and `Result<T>` is a
