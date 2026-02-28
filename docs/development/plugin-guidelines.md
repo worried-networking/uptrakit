@@ -432,6 +432,49 @@ human-readable message when the identifier is invalid.
 Do **not** add plugin-specific identifier validation logic to the web API layer or query helpers. All
 identifier validation must go through `PluginRegistry::validate_package_identifier`.
 
+### Version string validation
+
+Plugins that interpolate a `to_version` parameter into install commands must validate the version
+string before command construction. This provides defense in depth even though `CommandSpec::exec()`
+mode prevents shell injection — package managers have their own argument parsing that can be
+exploited with crafted version strings.
+
+**Required pattern:** Add a `pub fn validate_version(version: &str) -> Result<(), String>` to your
+plugin crate and call it at the top of `execute_update()`:
+
+```rust
+pub fn validate_version(version: &str) -> Result<(), String> {
+    if version.is_empty() {
+        return Err("version must not be empty".to_string());
+    }
+    if version.len() > 256 {
+        return Err("version must not exceed 256 characters".to_string());
+    }
+    // Plugin-specific character whitelist and prefix rejection
+    // ...
+    Ok(())
+}
+```
+
+In `execute_update()`:
+
+```rust
+validate_version(to_version)
+    .map_err(|e| report!(PluginError::Configuration(e)))?;
+```
+
+**Per-plugin validation rules:**
+
+| Plugin | Allowed characters | Additional rejections |
+| :--- | :--- | :--- |
+| npm | `[a-zA-Z0-9._+-]` | Protocol prefixes: `file:`, `git+`, `http:`, `https:` |
+| apt | `[a-zA-Z0-9.+~:-]` | Leading `-` (would be interpreted as a flag) |
+
+**Testing:** Add unit tests covering valid versions, boundary cases (empty, max length), and
+injection attempts (protocol prefixes for npm, flag injection for apt).
+
+See also: [Security — Input Validation](../security/secure-development.md#plugin-input-validation).
+
 ### Secret masking with the `SecretMasking` trait
 
 The `SecretMasking` trait (`crates/plugins/infrastructure/core/src/secrets.rs`, re-exported from

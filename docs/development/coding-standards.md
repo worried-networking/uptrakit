@@ -305,6 +305,114 @@ let mut client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
 
 See also: [Security — Secure Development](../security/secure-development.md).
 
+## Atomic Ordering Requirements
+
+Security-critical `AtomicBool` flags (such as `PLAINTEXT_MODE` in `uptrakit-crypto`) must use
+`Ordering::Release` for stores and `Ordering::Acquire` for loads. `Ordering::Relaxed` is
+incorrect for flags that gate security behavior — on weakly-ordered architectures (ARM), a
+thread could see a stale value and either skip encryption or encrypt when plaintext mode was
+intended.
+
+```rust
+// ✓ Correct — Release/Acquire guarantees cross-thread visibility
+static PLAINTEXT_MODE: AtomicBool = AtomicBool::new(false);
+
+fn enable_plaintext_mode() {
+    PLAINTEXT_MODE.store(true, Ordering::Release);
+}
+
+fn is_plaintext_mode() -> bool {
+    PLAINTEXT_MODE.load(Ordering::Acquire)
+}
+
+// ✗ Wrong — Relaxed allows stale reads on ARM
+PLAINTEXT_MODE.store(true, Ordering::Relaxed);
+PLAINTEXT_MODE.load(Ordering::Relaxed);
+```
+
+**Rule:** Any `AtomicBool` or `AtomicU*` that controls a security-sensitive code path must use
+at minimum `Release`/`Acquire` ordering. `Relaxed` is only acceptable for pure counters or
+statistics where stale reads have no correctness impact.
+
+## Synchronous Locks in Async Middleware
+
+When a synchronous mutex is required inside async middleware (e.g., a fallback rate limiter),
+use `parking_lot::Mutex` rather than `std::sync::Mutex`:
+
+- **Sub-microsecond critical sections** with no `.await` across the lock make a sync mutex
+  correct (no risk of holding across a yield point).
+- `parking_lot::Mutex` is faster under contention and returns the guard directly — no
+  `Result`/`.unwrap()` needed, which aligns with the workspace panic policy.
+- `tokio::sync::Mutex` is unnecessary overhead for non-async critical sections.
+
+```rust
+use parking_lot::Mutex;
+
+// ✓ Correct — parking_lot::Mutex, no .unwrap() needed
+static FALLBACK: LazyLock<Mutex<HashMap<String, Entry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+let mut guard = FALLBACK.lock(); // direct guard, no Result
+
+// ✗ Wrong — std::sync::Mutex requires .unwrap() and is slower under contention
+let mut guard = FALLBACK.lock().unwrap();
+```
+
+**Amortize expensive operations under the lock.** If the critical section includes cleanup
+(e.g., `HashMap::retain()`), do not run it on every call. Use an `AtomicU64` counter to run
+cleanup every N calls, keeping per-request lock hold time O(1):
+
+```rust
+static CALL_COUNT: AtomicU64 = AtomicU64::new(0);
+const CLEANUP_INTERVAL: u64 = 100;
+
+let call_count = CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+if call_count.is_multiple_of(CLEANUP_INTERVAL) {
+    guard.retain(|_, entry| entry.last_seen >= cutoff);
+}
+```
+
+## Parallel Broadcast Pattern
+
+When broadcasting messages to multiple consumers via `mpsc::Sender`, use parallel sends with
+a per-send timeout. Sequential sends allow a single slow consumer (full channel buffer) to
+block all other recipients.
+
+```rust
+use futures_util::future::join_all;
+use tokio::time::timeout;
+
+const BROADCAST_SEND_TIMEOUT: Duration = Duration::from_secs(5);
+
+async fn send_parallel(senders: &[mpsc::Sender<Message>], msg: Message) {
+    let futures: Vec<_> = senders
+        .iter()
+        .map(|sender| {
+            let msg = msg.clone();
+            let sender = sender.clone();
+            async move {
+                if timeout(BROADCAST_SEND_TIMEOUT, sender.send(msg))
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("broadcast send timed out for a consumer");
+                }
+            }
+        })
+        .collect();
+    join_all(futures).await;
+}
+```
+
+**Key points:**
+
+- Use `futures_util::future::join_all()` for parallel sends (already in workspace dependencies).
+- Add a per-send `tokio::time::timeout` to prevent indefinite blocking.
+- Log a warning when a send times out to identify slow consumers.
+- Clone both the message and the sender to avoid lifetime issues in the async closures.
+
+See also: `crates/ui/web-api/src/service_connections.rs` for the reference implementation.
+
 ## Design Principles
 
 - Keep every boundary clear: the controller orchestrates scheduling, upstream checks, API/UI; the MQTT service handles MQTT/Home Assistant
