@@ -111,6 +111,135 @@ router = router.route("/api/openapi.json", get(json_handler));
 
 See also: [Embedded Frontend](embedded-frontend.md) for the `embed-frontend` feature pattern.
 
+### Feature-gated external APIs
+
+When an external crate API (e.g. `bollard::Docker::connect_with_ssh`) is only available under a
+specific feature, the `#[cfg(feature = "X")] return ...; <fallback>` idiom **cannot** be used
+because the fallback code after an unconditional `return` becomes unreachable when the feature is
+on — triggering the `unreachable_code` lint that is denied workspace-wide.
+
+Use one of the following approved patterns instead.
+
+**Pattern A — gate the entire match arm**
+
+Move the feature-specific arm behind `#[cfg(feature = "X")]` and handle the disabled case in the
+default arm with a runtime check:
+
+```rust
+// ✓ Correct — the default arm handles the disabled case at runtime; no #[cfg(not)] needed
+fn connect(docker_host: Option<&str>, ssh_key_path: Option<&str>) -> Result<bollard::Docker> {
+    match docker_host {
+        #[cfg(feature = "ssh")]
+        Some(h) if h.starts_with("ssh://") => {
+            bollard::Docker::connect_with_ssh(h, TIMEOUT, API_VERSION,
+                                              ssh_key_path.map(str::to_string))
+                .context_to::<DockerError>()
+        }
+
+        Some(h) => {
+            // When the `ssh` feature is disabled, give a clear error for SSH URLs.
+            if h.starts_with("ssh://") {
+                let _ = ssh_key_path; // suppress unused-variable warning
+                bail!(DockerError::Configuration(
+                    "SSH Docker connections require the 'ssh' Cargo feature".to_string()
+                ));
+            }
+            bollard::Docker::connect_with_http(h, TIMEOUT, API_VERSION)
+                .context_to::<DockerError>()
+        }
+    }
+}
+```
+
+**Pattern B — stub + upgrade helper**
+
+Initialize with an always-available stub, then override in a `#[cfg(feature = "X")]` block by
+calling a helper that accepts and discards the stub:
+
+```rust
+// ✓ Correct — stub is passed as an argument (counts as "read"), suppressing unused_assignments
+fn new(config: &Config) -> Result<Self> {
+    let docker_client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
+    #[cfg(feature = "daemon")]
+    let docker_client = Self::upgrade_to_daemon_client(docker_client, config)?;
+    Self::init(config, docker_client)
+}
+
+#[cfg(feature = "daemon")]
+fn upgrade_to_daemon_client(
+    _stub: Arc<dyn DockerClient>,
+    config: &Config,
+) -> Result<Arc<dyn DockerClient>> {
+    Ok(Arc::new(RealDockerClient::new(config)?))
+}
+```
+
+**Pattern C — always-present tracking field**
+
+When a struct field only exists under a feature but you need a cfg-free accessor method, add an
+always-present `bool` that mirrors its presence:
+
+```rust
+struct NotificationService {
+    /// Always present so that `has_nats()` needs no `#[cfg]`.
+    nats_configured: bool,
+    #[cfg(feature = "nats")]
+    nats: Option<NatsTransport>,
+}
+
+impl NotificationService {
+    #[cfg(feature = "nats")]
+    pub fn with_nats(mut self, nats: NatsTransport) -> Self {
+        self.nats = Some(nats);
+        self.nats_configured = true; // keep the mirror in sync
+        self
+    }
+
+    // No #[cfg] needed — reads a field that always exists
+    pub fn has_nats(&self) -> bool {
+        self.nats_configured
+    }
+}
+```
+
+**Pattern D — conditional early-return inside a guard**
+
+When the feature-gated code path is guarded by a runtime condition (`if let`, `if`, etc.), the
+`return` is conditional rather than unconditional, so the fallback code remains reachable in all
+builds:
+
+```rust
+// ✓ Correct — `return` is inside `if let Some(...)`, not at the top level
+async fn maybe_publish_nats(&self, msg: ControllerMessage) {
+    #[cfg(feature = "nats")]
+    if let Some(ref nats) = self.nats {
+        nats.publish(msg).await;
+        return; // reachable only when `nats` is Some; fallback below is always compiled
+    }
+    let _ = msg; // suppress unused-variable warning when nats feature is disabled
+}
+```
+
+**Anti-patterns to avoid**
+
+```rust
+// ✗ Wrong — #[cfg(not)] violates the additive rule
+#[cfg(not(feature = "ssh"))]
+bail!(DockerError::Configuration("..."));
+
+// ✗ Wrong — unconditional return makes the fallback unreachable when feature is ON
+#[cfg(feature = "ssh")]
+return bollard::Docker::connect_with_ssh(...).context_to::<DockerError>();
+let _ = (h, ssh_key_path); // unreachable_code lint fires here under --all-features
+
+// ✗ Wrong — init-then-override triggers unused_assignments lint
+let mut client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
+#[cfg(feature = "daemon")]
+{ client = Arc::new(RealDockerClient::new(config)?); } // initial value "never read"
+```
+
+See also: [Security — Secure Development](../security/secure-development.md).
+
 ## Design Principles
 
 - Keep every boundary clear: the controller orchestrates scheduling, upstream checks, API/UI; the MQTT service handles MQTT/Home Assistant
