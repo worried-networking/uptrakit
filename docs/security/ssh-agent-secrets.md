@@ -254,10 +254,11 @@ The SSH private key is decrypted from the local `ssh_hosts` database **only when
 Plaintext key material exists only in process memory during the TCP+SSH handshake and is never written to disk or
 logged. Pooled sessions do not hold any plaintext key material — only the established cryptographic session state.
 
-For Docker plugin operations over SSH, `build_connection_context()` writes the decrypted private key to a
-temporary file (`$TMPDIR/uptrakit-ssh-key-<host-id>`) with 0o600 permissions so that bollard's `connect_with_ssh()`
-can authenticate using the stored host key. The file is deleted via a `Drop` implementation (`SecureKeyFile`) as soon
-as the last clone of the `ConnectionContext` is dropped (after the operation or spawned task completes).
+Docker plugin operations over SSH use a `StdioTunnel` proxy (see
+[Command Executor — StdioTunnel](../development/command-executor.md#stdiotunnel)) that runs
+`docker system dial-stdio` over the existing russh session. No temporary key files are created and no
+second SSH connection is established — Docker API traffic is tunnelled through the already-authenticated
+session, eliminating a previous plaintext key exposure vector.
 
 ### Tradeoff: persistent connections vs. minimal exposure window
 

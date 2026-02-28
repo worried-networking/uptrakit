@@ -318,6 +318,19 @@ transparently.
 - Transport errors map to `CommandError::CommandSpawn` and non-zero exit codes map to
   `CommandError::CommandFailed`, maintaining consistent error semantics across executors.
 
+### StdioTunnel support
+
+`SshCommandExecutor` implements `supports_stdio_tunnel()` (returns `true`) and
+`open_stdio_tunnel(command)`, which opens a dedicated russh channel and runs the given command on
+the remote host. The returned `SshStdioTunnel` wraps `russh::ChannelStream` and implements
+`AsyncRead + AsyncWrite`, providing a bidirectional byte stream connected to the remote command's
+stdin/stdout.
+
+This is used by the Docker plugin to tunnel Docker API traffic via
+`docker system dial-stdio` over the existing SSH session, avoiding a second SSH connection. See
+[Command Executor — StdioTunnel](../development/command-executor.md#stdiotunnel) for the generic
+abstraction.
+
 For usage details, see [Command Executor](../development/command-executor.md).
 
 ## Version Check and Update Execution
@@ -553,7 +566,8 @@ crates/core/agent-ssh/
     │                    # SudoAwareCommandExecutor
     ├── error.rs         # Error types (rootcause + thiserror)
     ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
-    ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH)
+    ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH, StdioTunnel support)
+    ├── ssh_stdio_tunnel.rs  # SshStdioTunnel (AsyncRead + AsyncWrite wrapper around russh ChannelStream)
     ├── ssh_key.rs       # SSH private key reading, key type auto-detection, and Ed25519 keygen
     ├── ssh_target.rs    # SshTarget type with FromStr (parses [user@]host[:port] and ssh:// URLs, validates hostname syntax)
     ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command, LineBuffer

@@ -155,28 +155,32 @@ full image reference including tag.
 > **Note:** Remote Docker via SSH is only available when using the **SSH agent** binary
 > (`uptrakit-agent-ssh`). It is not available in the standard `uptrakit-agent`.
 
-When `agent-ssh` connects to a remote host, it automatically configures the Docker plugin to
-reach the remote host's Docker daemon over the same SSH connection. You do not need to set
-`docker_host` manually for SSH agent deployments; the connection context is injected automatically.
+When `agent-ssh` connects to a remote host, it automatically tunnels Docker API traffic over the
+existing SSH session. The plugin starts a local Unix socket proxy that runs
+`docker system dial-stdio` on the remote host, then connects bollard to that proxy socket.
+You do not need to set `docker_host` manually; the tunnel is established automatically when
+the executor supports stdio tunnels and no explicit `docker_host` is configured.
+
+This approach avoids spawning a second SSH connection (which can fail on hosts without the system
+`ssh` binary, such as Flatcar Container Linux) and reuses the authenticated russh session that is
+already established.
 
 To manually override the Docker daemon endpoint, set `docker_host` in the plugin config:
 
 ```json
-{ "docker_host": "ssh://user@host:22" }
+{ "docker_host": "unix:///var/run/docker.sock" }
 ```
 
-SSH connections require the `ssh` Cargo feature to be enabled on the `uptrakit-plugin-releases-docker`
-crate (automatically enabled in `uptrakit-agent-ssh`). The SSH client uses the default SSH key
-resolution (SSH agent or `~/.ssh/id_*`).
+Setting `docker_host` disables the automatic tunnel — the plugin connects directly to the specified
+endpoint instead.
 
 Supported endpoint formats:
 
 | Format | Description |
 | --- | --- |
-| (omitted) | Platform default (`/var/run/docker.sock` on Linux, or `DOCKER_HOST` env var) |
+| (omitted) | Auto-tunnel via `docker system dial-stdio` when SSH, otherwise platform default |
 | `unix:///path/to/docker.sock` | Unix socket at a custom path |
 | `http://host:2375` | Unencrypted HTTP |
-| `ssh://user@host:port` | SSH tunnel (SSH agent only) |
 
 ## Example Configurations
 

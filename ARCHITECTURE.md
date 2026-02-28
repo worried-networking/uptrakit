@@ -31,7 +31,7 @@ infrastructure credentials (database, NATS, master key) via the wire protocol. S
 - Plugin development expectations: [docs/development/plugin-guidelines.md](docs/development/plugin-guidelines.md)
 - Plugin system architecture: [docs/development/plugin-system.md](docs/development/plugin-system.md)
 
-- Command executor abstraction: [docs/development/command-executor.md](docs/development/command-executor.md)
+- Command executor abstraction: [docs/development/command-executor.md](docs/development/command-executor.md) (includes StdioTunnel for Docker-over-SSH proxy)
 
 ## Project layout
 
@@ -69,7 +69,7 @@ Each assignment carries an `execution_site` column (`auto` | `agent` | `controll
 | Plugin type | Crate | fetch_releases site | Autodiscovery | Notes |
 | --- | --- | --- | --- | --- |
 | `releases_github` | `uptrakit-plugin-releases-github` | Controller (GitHub API) | No | Tracks GitHub release tags; `ControllerSideFetchReleases` capability |
-| `releases_docker` | `uptrakit-plugin-releases-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers; `ControllerSideFetchReleases` capability; `daemon` feature (default) gates bollard for local Docker ops; controller builds exclude it |
+| `releases_docker` | `uptrakit-plugin-releases-docker` | Controller (Registry API) | Yes | Tracks OCI image tags; discovers containers; `ControllerSideFetchReleases` capability; `daemon` feature (default) gates bollard for local Docker ops; Docker-over-SSH via StdioTunnel proxy (no second SSH connection); controller builds exclude it |
 | `package_manager_homebrew` | `uptrakit-plugin-package-manager-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks; detects host compatibility |
 | `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins; classifies GitHub, npm, and APT-managed containers) |
 | `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |

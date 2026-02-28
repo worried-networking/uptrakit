@@ -275,6 +275,44 @@ let output = executor
 Both `SshCommandExecutor` and `LocalCommandExecutor` enforce a 10 MB output limit to prevent OOM
 from runaway commands.
 
+## StdioTunnel
+
+The `StdioTunnel` trait (`crates/shared/command/src/executor.rs`) provides bidirectional byte-stream
+tunnelling through a `CommandExecutor`. It enables plugins to communicate with remote processes over
+raw stdin/stdout channels rather than line-oriented command output.
+
+```rust
+pub trait StdioTunnel: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin {}
+```
+
+Two opt-in methods on `CommandExecutor` expose the capability:
+
+| Method | Default | Description |
+| --- | --- | --- |
+| `supports_stdio_tunnel()` | `false` | Whether this executor can open tunnels |
+| `open_stdio_tunnel(command)` | Returns `UnsupportedOperation` error | Open a tunnel to the given command |
+
+`SudoAwareCommandExecutor` delegates both methods directly to its inner executor — tunnels are raw
+byte streams that bypass sudo wrapping.
+
+### `SshStdioTunnel`
+
+`SshCommandExecutor` (`crates/core/agent-ssh/src/ssh_executor.rs`) implements `supports_stdio_tunnel()`
+returning `true` and opens tunnels via `SshSession::open_channel_for_command()`. The returned
+`SshStdioTunnel` (`crates/core/agent-ssh/src/ssh_stdio_tunnel.rs`) wraps a `russh::ChannelStream` and
+implements `AsyncRead + AsyncWrite` by delegating through pin projection.
+
+### Docker socket proxy
+
+The Docker plugin uses `StdioTunnel` to proxy Docker API traffic over an SSH connection without
+spawning a second SSH session. When `executor.supports_stdio_tunnel()` returns `true` and no explicit
+`docker_host` is configured, `DockerSocketProxy` (`crates/plugins/releases/docker/src/docker_proxy.rs`)
+starts a local Unix socket that bridges each accepted connection to `docker system dial-stdio` via the
+tunnel. Bollard then connects to this local socket using its `unix://` codepath.
+
+See [Docker Plugin — Remote Docker via SSH](../end-user/plugins/docker.md#remote-docker-via-ssh) for
+end-user details.
+
 ## Implementing additional executors
 
 To run commands over a different transport, implement the `CommandExecutor` trait:
