@@ -360,13 +360,9 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
                         });
                     }
                     None => {
-                        tracing::warn!(
+                        tracing::debug!(
                             command = %entry.command,
                             "command not found on remote host, skipping"
-                        );
-                        println!(
-                            "  WARNING: command '{}' not found on remote host, skipping.",
-                            entry.command
                         );
                     }
                 }
@@ -374,26 +370,28 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         }
     }
 
-    let sudoers_content = if !resolved.is_empty() {
-        SudoersContent::SpecificCommands(resolved)
+    let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
+        Some(SudoersContent::SpecificCommands(resolved))
     } else if params.allow_all {
         println!("  No plugin commands resolved; using NOPASSWD: ALL (--allow-all).");
-        SudoersContent::AllCommands
+        Some(SudoersContent::AllCommands)
     } else {
-        bail!(Error::InvalidInput(
-            "No plugin commands could be resolved on the remote host. \
-             Ensure the required tools are installed or re-run with --allow-all."
-                .to_string()
-        ));
+        println!(
+            "  No plugin-specific commands found for this host; no sudoers file will be written."
+        );
+        println!("  Install supported tools or re-run with --allow-all.");
+        None
     };
 
-    write_sudoers_file(
-        &session,
-        &params.target_username,
-        &sudoers_content,
-        use_sudo,
-    )
-    .await?;
+    if let Some(ref content) = sudoers_content {
+        write_sudoers_file(
+            &session,
+            &params.target_username,
+            content,
+            use_sudo,
+        )
+        .await?;
+    }
 
     // 6. DISCONNECT auth session.
     SshSession::disconnect_shared(session).await;
@@ -423,7 +421,12 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         )))
     })?;
 
-    verify_remote(&verify_session, &params.target_username).await?;
+    verify_remote(
+        &verify_session,
+        &params.target_username,
+        sudoers_content.is_some(),
+    )
+    .await?;
     verify_session.disconnect().await;
 
     // 8. SAVE TO DATABASE
@@ -455,22 +458,41 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     }
 
     println!();
-    println!(
-        "NOTE: Sudoers file written to /etc/sudoers.d/uptrakit-{}.",
-        params.target_username
-    );
-    println!(
-        "      Run 'uptrakit-agent-ssh host update-sudoers {}' to refresh \
-         entries when plugins change.",
-        params.name
-    );
+    if sudoers_content.is_some() {
+        println!(
+            "NOTE: Sudoers file written to /etc/sudoers.d/uptrakit-{}.",
+            params.target_username
+        );
+        println!(
+            "      Run 'uptrakit-agent-ssh host update-sudoers {}' to refresh \
+             entries when plugins change.",
+            params.name
+        );
+    } else {
+        println!("NOTE: No sudoers file was written — no compatible plugin commands were found.");
+        println!(
+            "      Run 'uptrakit-agent-ssh host update-sudoers {}' after installing \
+             supported tools to configure sudo grants.",
+            params.name
+        );
+    }
 
     Ok(())
 }
 
 // ── Verification ─────────────────────────────────────────────────────
 
-async fn verify_remote(session: &SshSession, target_username: &str) -> Result<()> {
+/// Verify that the remote connection works as `target_username`.
+///
+/// Always checks `whoami`. When `has_sudo_grants` is `true`, additionally
+/// verifies that `sudo -n -l` succeeds — confirming the written sudoers file
+/// grants at least one NOPASSWD entry. When `false` (no sudoers file was
+/// written) the sudo check is skipped, since there is nothing to verify.
+async fn verify_remote(
+    session: &SshSession,
+    target_username: &str,
+    has_sudo_grants: bool,
+) -> Result<()> {
     // Verify whoami.
     let whoami = session.exec_command("whoami").await?;
     let actual_user = whoami.stdout.trim();
@@ -481,19 +503,21 @@ async fn verify_remote(session: &SshSession, target_username: &str) -> Result<()
         )));
     }
 
-    // Verify sudo. We use `sudo -n -l` (list allowed commands without
-    // prompting) rather than `sudo -n true` because the sudoers file may
-    // only grant specific commands (e.g. `/usr/bin/apt-get`), not the
-    // ability to run arbitrary executables. `-n -l` exits 0 whenever the
-    // user has at least one NOPASSWD entry, which is exactly what we want
-    // to confirm here.
-    let sudo_check = session.exec_command("sudo -n -l").await?;
-    if sudo_check.exit_code != 0 {
-        bail!(Error::BootstrapVerification(format!(
-            "sudo -n -l failed (exit code {}). Sudoers may not be \
-             configured correctly. The remote host has been partially configured.",
-            sudo_check.exit_code
-        )));
+    if has_sudo_grants {
+        // Verify sudo. We use `sudo -n -l` (list allowed commands without
+        // prompting) rather than `sudo -n true` because the sudoers file may
+        // only grant specific commands (e.g. `/usr/bin/apt-get`), not the
+        // ability to run arbitrary executables. `-n -l` exits 0 whenever the
+        // user has at least one NOPASSWD entry, which is exactly what we want
+        // to confirm here.
+        let sudo_check = session.exec_command("sudo -n -l").await?;
+        if sudo_check.exit_code != 0 {
+            bail!(Error::BootstrapVerification(format!(
+                "sudo -n -l failed (exit code {}). Sudoers may not be \
+                 configured correctly. The remote host has been partially configured.",
+                sudo_check.exit_code
+            )));
+        }
     }
 
     Ok(())

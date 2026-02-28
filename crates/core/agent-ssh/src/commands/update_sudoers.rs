@@ -264,13 +264,9 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
                         });
                     }
                     None => {
-                        tracing::warn!(
+                        tracing::debug!(
                             command = %entry.command,
                             "command not found on remote host, skipping"
-                        );
-                        println!(
-                            "  WARNING: command '{}' not found on remote host, skipping.",
-                            entry.command
                         );
                     }
                 }
@@ -279,49 +275,64 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     }
 
     // 8. Determine sudoers content.
-    let sudoers_content = if !resolved.is_empty() {
-        SudoersContent::SpecificCommands(resolved)
+    //
+    // When no commands were resolved and --allow-all was not requested, skip
+    // writing entirely rather than failing — the host may simply not have any
+    // of the supported package managers or tools installed.
+    let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
+        Some(SudoersContent::SpecificCommands(resolved))
     } else if args.allow_all {
         println!("  No plugin commands resolved; using NOPASSWD: ALL (--allow-all).");
-        SudoersContent::AllCommands
+        Some(SudoersContent::AllCommands)
     } else {
-        bail!(Error::InvalidInput(
-            "No plugin commands could be resolved on the remote host. \
-             Ensure the required tools are installed or re-run with --allow-all."
-                .to_string()
-        ));
+        println!("  No plugin-specific commands found for this host; nothing to write.");
+        println!("  Install supported tools or re-run with --allow-all.");
+        None
     };
 
-    // Show preview.
-    let preview_text = sudoers::generate_sudoers_content(&host.username, &sudoers_content);
     let sudoers_file = format!("/etc/sudoers.d/uptrakit-{}", host.username);
 
+    // Handle dry run.
     if args.dry_run {
         println!();
-        println!("Dry run — sudoers file that would be written to {sudoers_file}:");
-        println!("---");
-        print!("{preview_text}");
-        println!("---");
+        if let Some(ref content) = sudoers_content {
+            let preview_text = sudoers::generate_sudoers_content(&host.username, content);
+            println!("Dry run — sudoers file that would be written to {sudoers_file}:");
+            println!("---");
+            print!("{preview_text}");
+            println!("---");
+        } else {
+            println!("Dry run — no sudoers file would be written (no commands resolved).");
+        }
         println!("(no changes made)");
         return Ok(());
     }
 
-    // 9. Write the sudoers file.
-    println!("Writing {sudoers_file}...");
-    write_sudoers_file(&session, &host.username, &sudoers_content, privileged).await?;
+    if let Some(ref content) = sudoers_content {
+        let preview_text = sudoers::generate_sudoers_content(&host.username, content);
 
-    // 10. Update DB: sudo_available = true (since we just wrote a sudoers file).
-    update_host_sudo_state(db, &host.id, Some(true), Some(agent_is_root), None).await?;
+        // 9. Write the sudoers file.
+        println!("Writing {sudoers_file}...");
+        write_sudoers_file(&session, &host.username, content, privileged).await?;
 
-    SshSession::disconnect_shared(session).await;
+        // 10. Update DB: sudo_available = true (since we just wrote a sudoers file).
+        update_host_sudo_state(db, &host.id, Some(true), Some(agent_is_root), None).await?;
 
-    // 11. Success summary.
-    println!();
-    println!("Sudoers updated for host '{}'.", host.name);
-    println!("  File: {sudoers_file}");
-    println!("  Content:");
-    for line in preview_text.lines() {
-        println!("    {line}");
+        SshSession::disconnect_shared(session).await;
+
+        // 11. Success summary.
+        println!();
+        println!("Sudoers updated for host '{}'.", host.name);
+        println!("  File: {sudoers_file}");
+        println!("  Content:");
+        for line in preview_text.lines() {
+            println!("    {line}");
+        }
+    } else {
+        SshSession::disconnect_shared(session).await;
+
+        println!();
+        println!("No sudoers changes for host '{}' — no compatible plugin commands found on this host.", host.name);
     }
 
     Ok(())

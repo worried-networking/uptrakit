@@ -269,7 +269,7 @@ macro_rules! register_plugins {
                                     false
                                 }
                                 Err(e) => {
-                                    tracing::warn!(
+                                    tracing::debug!(
                                         plugin = %PluginType::$variant,
                                         error = %e,
                                         "host compatibility check failed; assuming compatible"

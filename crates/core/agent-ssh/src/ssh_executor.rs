@@ -74,7 +74,10 @@ impl CommandExecutor for SshCommandExecutor {
 
         if result.exit_code != 0 {
             let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);
-            log_failed_command_output(exit_code, &result.stderr, &result.stdout);
+            // Do not log here: quiet execution is used for probing / compatibility
+            // checks where a non-zero exit code is an expected, routine outcome
+            // (e.g. `which brew` returning 1 when Homebrew is not installed).
+            // The error is propagated to the caller, which decides how to handle it.
             bail!(CommandError::CommandFailed(exit_code));
         }
 
