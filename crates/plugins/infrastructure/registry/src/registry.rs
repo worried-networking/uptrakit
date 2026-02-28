@@ -118,6 +118,7 @@ macro_rules! register_plugins {
             ///
             /// Deserializes config, calls [`SecretMasking::with_secrets_masked()`],
             /// and serializes back. Unknown plugin types are returned unchanged.
+            #[must_use]
             pub fn mask_config_secrets(
                 plugin_type: PluginType,
                 config: &serde_json::Value,
@@ -375,6 +376,7 @@ impl PluginRegistry {
     }
 
     /// Mask secrets in plugin configuration JSON (string type version).
+    #[must_use]
     pub fn mask_config_secrets_str(
         plugin_type: &str,
         config: &serde_json::Value,
