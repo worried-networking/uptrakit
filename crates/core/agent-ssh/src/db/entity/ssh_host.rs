@@ -67,8 +67,8 @@ pub struct Model {
     pub key_type: SshKeyType,
     pub host_key_fingerprint: Option<String>,
     /// Machine ID of the remote host, populated from `ReportHosts` data.
-    /// Empty string until the host has been connected to at least once.
-    pub machine_id: String,
+    /// `None` until the host has been connected to at least once.
+    pub machine_id: Option<String>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
     /// Whether passwordless sudo (`sudo -n true`) is available for this host's agent user.
@@ -164,7 +164,7 @@ mod tests {
                 .expect("master key initialized above"),
             key_type: SshKeyType::Ed25519,
             host_key_fingerprint: None,
-            machine_id: String::new(),
+            machine_id: None,
             created_at: time::OffsetDateTime::UNIX_EPOCH,
             updated_at: time::OffsetDateTime::UNIX_EPOCH,
             sudo_available,

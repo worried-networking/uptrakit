@@ -155,12 +155,12 @@ pub(crate) async fn report_enrolled_hosts(
 /// Build `HostInfo` entries for the current host list, using SSH only where
 /// necessary.
 ///
-/// For hosts with a known, non-empty `machine_id` that are **not** in
+/// For hosts with a known `machine_id` (`Some`) that are **not** in
 /// `changed_ids` (neither new nor updated since the last reload), host info is
 /// built directly from the database values — no SSH connection is made.
 ///
-/// For hosts with an empty `machine_id` or whose `id` is in `changed_ids`
-/// (new or recently updated), the pool is used to acquire an SSH session,
+/// For hosts with `machine_id` equal to `None` or whose `id` is in
+/// `changed_ids` (new or recently updated), the pool is used to acquire an SSH session,
 /// remote system info is collected, and the `machine_id` is persisted to the
 /// database.  Hosts that fail to connect are skipped with a warning.
 pub(crate) async fn build_reload_host_infos(
@@ -172,7 +172,7 @@ pub(crate) async fn build_reload_host_infos(
     let mut host_infos: Vec<HostInfo> = Vec::with_capacity(current_hosts.len());
 
     for host in current_hosts {
-        let needs_ssh = host.machine_id.is_empty() || changed_ids.contains(host.id.as_str());
+        let needs_ssh = host.machine_id.is_none() || changed_ids.contains(host.id.as_str());
 
         if needs_ssh {
             // SSH-connect to discover or refresh machine_id and OS info.
@@ -210,8 +210,10 @@ pub(crate) async fn build_reload_host_infos(
             host_infos.push(info);
         } else {
             // Fast path: build HostInfo from DB values; no SSH round-trip.
+            // machine_id is Some here because needs_ssh is false only when
+            // machine_id.is_some() AND the host is not in changed_ids.
             host_infos.push(HostInfo {
-                machine_id: host.machine_id.clone(),
+                machine_id: host.machine_id.clone().unwrap_or_default(),
                 os_type: None,
                 os_version: None,
                 architecture: None,

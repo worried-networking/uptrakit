@@ -6,18 +6,14 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Add machine_id column with a DEFAULT '' so existing rows are valid.
-        // The empty string is overwritten on next connection to each host.
+        // Add machine_id as a nullable column.
+        // NULL means the host has not been connected to yet; the value is
+        // populated on first successful SSH connection.
         manager
             .alter_table(
                 Table::alter()
                     .table(SshHosts::Table)
-                    .add_column(
-                        ColumnDef::new(SshHosts::MachineId)
-                            .text()
-                            .not_null()
-                            .default(""),
-                    )
+                    .add_column(ColumnDef::new(SshHosts::MachineId).text().null())
                     .to_owned(),
             )
             .await

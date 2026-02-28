@@ -94,7 +94,7 @@ pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<
         private_key: Set(params.encrypted_key),
         key_type: Set(params.key_type),
         host_key_fingerprint: Set(params.host_key_fingerprint),
-        machine_id: Set(String::new()),
+        machine_id: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
         sudo_available: sea_orm::ActiveValue::NotSet,
@@ -218,7 +218,7 @@ pub async fn update_host_machine_id(
         .ok_or_else(|| report!(Error::HostNotFound(host_id.to_string())))?;
 
     let mut model: ActiveModel = host.into();
-    model.machine_id = Set(machine_id.to_string());
+    model.machine_id = Set(Some(machine_id.to_string()));
     model.update(db).await.context_to::<Error>()?;
     Ok(())
 }
@@ -260,14 +260,11 @@ pub async fn update_host_sudo_state(
 /// Find an SSH host by its `machine_id`.
 ///
 /// Returns `None` if no host with the given `machine_id` exists (including
-/// hosts that have not yet had their machine_id populated).
+/// hosts whose `machine_id` has not yet been populated and is `NULL`).
 pub async fn find_host_by_machine_id(
     db: &DatabaseConnection,
     machine_id: &str,
 ) -> Result<Option<Model>> {
-    if machine_id.is_empty() {
-        return Ok(None);
-    }
     Entity::find()
         .filter(Column::MachineId.eq(machine_id))
         .one(db)
@@ -577,7 +574,7 @@ mod tests {
         .await
         .expect("add_host");
 
-        // Initially machine_id is empty, so find_host_by_machine_id returns None.
+        // Initially machine_id is None, so find_host_by_machine_id returns None.
         let not_found = find_host_by_machine_id(&db, "abc123")
             .await
             .expect("find_host_by_machine_id");
@@ -594,13 +591,13 @@ mod tests {
             .expect("find_host_by_machine_id")
             .expect("host should be found");
         assert_eq!(found.id, host.id);
-        assert_eq!(found.machine_id, "abc123");
+        assert_eq!(found.machine_id, Some("abc123".to_string()));
     }
 
     #[tokio::test]
     async fn find_host_by_machine_id_empty_string_returns_none() {
         let (_dir, db) = setup_db().await;
-        // Searching for empty machine_id should always return None.
+        // machine_id is stored as NULL until populated; no row has an empty string.
         let result = find_host_by_machine_id(&db, "")
             .await
             .expect("find_host_by_machine_id");
