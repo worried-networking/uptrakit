@@ -4,7 +4,6 @@ use sea_orm_migration::prelude::*;
 mod m20260209_000001_initial;
 mod m20260227_000001_drop_controller_events;
 mod m20260227_000002_remove_event_cleanup_tasks;
-<<<<<<< HEAD
 mod m20260227_000003_discovery_allowlist;
 mod m20260302_000001_add_missing_indexes;
 
@@ -17,7 +16,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20260209_000001_initial::Migration),
             Box::new(m20260227_000001_drop_controller_events::Migration),
             Box::new(m20260227_000002_remove_event_cleanup_tasks::Migration),
-<<<<<<< HEAD
             Box::new(m20260227_000003_discovery_allowlist::Migration),
             Box::new(m20260302_000001_add_missing_indexes::Migration),
         ]
