@@ -95,8 +95,16 @@ pub struct AptPlugin {
 }
 
 impl AptPlugin {
+    /// Compile-time capabilities for the APT plugin.
+    pub const CAPABILITIES: &'static [PluginCapability] = &[
+        PluginCapability::DiscoverLocalSoftware,
+        PluginCapability::RefreshPackageIndex,
+        PluginCapability::DetectHostCompatibility,
+        PluginCapability::PostUpdateHook,
+    ];
+
     /// Create a new APT plugin with the given configuration.
-    pub fn new(config: AptConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
+    pub async fn new(config: AptConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         config
             .validate()
             .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
@@ -156,12 +164,7 @@ impl Plugin for AptPlugin {
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
-        &[
-            PluginCapability::DiscoverLocalSoftware,
-            PluginCapability::RefreshPackageIndex,
-            PluginCapability::DetectHostCompatibility,
-            PluginCapability::PostUpdateHook,
-        ]
+        Self::CAPABILITIES
     }
 
     async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
@@ -651,9 +654,9 @@ mod tests {
 
     // ── required_sudo_commands ───────────────────────────────────────────
 
-    #[test]
-    fn apt_plugin_required_sudo_commands() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+    #[tokio::test]
+    async fn apt_plugin_required_sudo_commands() {
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).await.expect("create plugin");
         let entries = plugin.required_sudo_commands();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].command, "apt-get");
@@ -662,9 +665,9 @@ mod tests {
 
     // ── capabilities ────────────────────────────────────────────────────
 
-    #[test]
-    fn apt_plugin_capabilities() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+    #[tokio::test]
+    async fn apt_plugin_capabilities() {
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).await.expect("create plugin");
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
@@ -676,14 +679,14 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_empty_identifier_fails() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).await.expect("create plugin");
         let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn fetch_releases_empty_identifier_fails() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).expect("create plugin");
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).await.expect("create plugin");
         let result = plugin.fetch_releases("").await;
         assert!(result.is_err());
     }
@@ -696,6 +699,7 @@ mod tests {
             AptConfig::default(),
             FixedExitCodeExecutor::with_exit_code(0),
         )
+        .await
         .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
@@ -707,6 +711,7 @@ mod tests {
             AptConfig::default(),
             FixedExitCodeExecutor::with_exit_code(1),
         )
+        .await
         .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
@@ -726,6 +731,7 @@ mod tests {
             AptConfig::default(),
             FixedExitCodeExecutor::with_exit_code(0),
         )
+        .await
         .expect("create");
         let ctx = UpdateHookContext {
             package_identifier: "nginx".to_string(),
@@ -752,6 +758,7 @@ mod tests {
             AptConfig::default(),
             FixedExitCodeExecutor::with_exit_code(1),
         )
+        .await
         .expect("create");
         let ctx = UpdateHookContext {
             package_identifier: "nginx".to_string(),
@@ -828,6 +835,7 @@ mod tests {
             AptConfig::default(),
             FixedExitCodeExecutor::with_exit_code(1),
         )
+        .await
         .expect("create");
         let ctx = UpdateHookContext {
             package_identifier: "pkg".to_string(),

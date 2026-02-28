@@ -159,8 +159,15 @@ pub struct NpmPlugin {
 }
 
 impl NpmPlugin {
+    /// Compile-time capabilities for the npm plugin.
+    pub const CAPABILITIES: &'static [PluginCapability] = &[
+        PluginCapability::DiscoverLocalSoftware,
+        PluginCapability::DetectHostCompatibility,
+        PluginCapability::ControllerSideFetchReleases,
+    ];
+
     /// Create a new npm plugin with the given configuration.
-    pub fn new(config: NpmConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
+    pub async fn new(config: NpmConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         config
             .validate()
             .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
@@ -333,11 +340,7 @@ impl Plugin for NpmPlugin {
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
-        &[
-            PluginCapability::DiscoverLocalSoftware,
-            PluginCapability::DetectHostCompatibility,
-            PluginCapability::ControllerSideFetchReleases,
-        ]
+        Self::CAPABILITIES
     }
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
@@ -769,10 +772,10 @@ mod tests {
 
     // ── parse_registry_response ───────────────────────────────────────────────
 
-    #[test]
-    fn parse_registry_response_latest_only() {
+    #[tokio::test]
+    async fn parse_registry_response_latest_only() {
         let config = NpmConfig::default();
-        let plugin = NpmPlugin::new(config, test_executor()).expect("create");
+        let plugin = NpmPlugin::new(config, test_executor()).await.expect("create");
         let json = serde_json::json!({
             "dist-tags": { "latest": "1.18.0" },
             "time": { "1.18.0": "2024-01-15T10:00:00.000Z" }
@@ -784,10 +787,10 @@ mod tests {
         assert!(releases[0].published_at.is_some());
     }
 
-    #[test]
-    fn parse_registry_response_with_prereleases() {
+    #[tokio::test]
+    async fn parse_registry_response_with_prereleases() {
         let config = NpmConfig { include_prereleases: true };
-        let plugin = NpmPlugin::new(config, test_executor()).expect("create");
+        let plugin = NpmPlugin::new(config, test_executor()).await.expect("create");
         let json = serde_json::json!({
             "dist-tags": {
                 "latest": "1.18.0",
@@ -803,10 +806,10 @@ mod tests {
         assert!(releases.iter().any(|r| r.tag == "1.19.0-beta.1" && r.is_prerelease));
     }
 
-    #[test]
-    fn parse_registry_response_prerelease_same_as_latest_deduped() {
+    #[tokio::test]
+    async fn parse_registry_response_prerelease_same_as_latest_deduped() {
         let config = NpmConfig { include_prereleases: true };
-        let plugin = NpmPlugin::new(config, test_executor()).expect("create");
+        let plugin = NpmPlugin::new(config, test_executor()).await.expect("create");
         let json = serde_json::json!({
             "dist-tags": {
                 "latest": "1.18.0",
@@ -820,10 +823,10 @@ mod tests {
         assert_eq!(releases[0].tag, "1.18.0");
     }
 
-    #[test]
-    fn parse_registry_response_no_dist_tags() {
+    #[tokio::test]
+    async fn parse_registry_response_no_dist_tags() {
         let config = NpmConfig::default();
-        let plugin = NpmPlugin::new(config, test_executor()).expect("create");
+        let plugin = NpmPlugin::new(config, test_executor()).await.expect("create");
         let json = serde_json::json!({});
         let releases = plugin.parse_registry_response(&json, "n8n");
         assert!(releases.is_empty());
@@ -831,9 +834,9 @@ mod tests {
 
     // ── capabilities ──────────────────────────────────────────────────────────
 
-    #[test]
-    fn npm_plugin_capabilities() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).expect("create");
+    #[tokio::test]
+    async fn npm_plugin_capabilities() {
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).await.expect("create");
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
         assert!(plugin.has_capability(PluginCapability::ControllerSideFetchReleases));
@@ -843,9 +846,9 @@ mod tests {
 
     // ── required_sudo_commands ────────────────────────────────────────────────
 
-    #[test]
-    fn npm_plugin_required_sudo_commands() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).expect("create");
+    #[tokio::test]
+    async fn npm_plugin_required_sudo_commands() {
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).await.expect("create");
         let entries = plugin.required_sudo_commands();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].command, "npm");
@@ -861,6 +864,7 @@ mod tests {
             NpmConfig::default(),
             FixedOutputExecutor::with_output("", 0),
         )
+        .await
         .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
@@ -872,6 +876,7 @@ mod tests {
             NpmConfig::default(),
             FixedOutputExecutor::with_output("", 1),
         )
+        .await
         .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
@@ -888,7 +893,7 @@ mod tests {
     async fn detect_installed_version_found() {
         let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
         let plugin =
-            NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::with_output(json, 0)).expect("create");
+            NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::with_output(json, 0)).await.expect("create");
         let result = plugin.detect_installed_version("n8n").await.expect("ok");
         assert_eq!(result, Some(Version::new("1.18.0")));
     }
@@ -899,6 +904,7 @@ mod tests {
             NpmConfig::default(),
             FixedOutputExecutor::with_output("", 1),
         )
+        .await
         .expect("create");
         let result = plugin.detect_installed_version("n8n").await.expect("ok");
         assert_eq!(result, None);
@@ -906,16 +912,16 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_empty_identifier_fails() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).await.expect("create");
         let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     // ── plugin_type ───────────────────────────────────────────────────────────
 
-    #[test]
-    fn npm_plugin_type() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).expect("create");
+    #[tokio::test]
+    async fn npm_plugin_type() {
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).await.expect("create");
         assert_eq!(plugin.plugin_type(), PluginType::PackageManagerNpm);
     }
 

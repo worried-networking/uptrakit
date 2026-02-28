@@ -67,12 +67,16 @@ pub struct GitHubPlugin {
 }
 
 impl GitHubPlugin {
+    /// Compile-time capabilities for the GitHub plugin.
+    pub const CAPABILITIES: &'static [PluginCapability] =
+        &[PluginCapability::ControllerSideFetchReleases];
+
     /// Create a new `GitHubPlugin` from the given configuration.
     ///
     /// Validates the configuration and pre-compiles asset filter regexes.
     /// The `_executor` parameter is accepted for registry compatibility but unused
     /// (this plugin is controller-side only).
-    pub fn new(
+    pub async fn new(
         config: GitHubConfig,
         _executor: std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::CommandExecutor>,
     ) -> Result<Self> {
@@ -232,7 +236,7 @@ impl Plugin for GitHubPlugin {
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
-        &[PluginCapability::ControllerSideFetchReleases]
+        Self::CAPABILITIES
     }
 
     async fn fetch_releases(
@@ -327,8 +331,10 @@ mod tests {
         std::sync::Arc::new(LocalCommandExecutor)
     }
 
-    fn test_plugin() -> GitHubPlugin {
-        GitHubPlugin::new(test_config(), test_executor()).expect("valid config")
+    async fn test_plugin() -> GitHubPlugin {
+        GitHubPlugin::new(test_config(), test_executor())
+            .await
+            .expect("valid config")
     }
 
     fn make_release(tag: &str, draft: bool, prerelease: bool) -> GitHubRelease {
@@ -385,9 +391,9 @@ mod tests {
 
     // ── URL construction tests ────────────────────────────────────────────────
 
-    #[test]
-    fn url_construction() {
-        let plugin = test_plugin();
+    #[tokio::test]
+    async fn url_construction() {
+        let plugin = test_plugin().await;
         let url = plugin.releases_url("octocat", "hello-world");
         assert_eq!(
             url,
@@ -395,13 +401,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn url_construction_custom_base() {
+    #[tokio::test]
+    async fn url_construction_custom_base() {
         let config = GitHubConfig {
             api_base_url: Some("https://ghe.corp.com/api/v3".to_string()),
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
         let url = plugin.releases_url("octocat", "hello-world");
         assert_eq!(
             url,
@@ -411,9 +419,9 @@ mod tests {
 
     // ── convert_release tests ─────────────────────────────────────────────────
 
-    #[test]
-    fn convert_normal_release() {
-        let plugin = test_plugin();
+    #[tokio::test]
+    async fn convert_normal_release() {
+        let plugin = test_plugin().await;
         let gh = make_release("v1.0.0", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "1.0.0");
@@ -422,68 +430,74 @@ mod tests {
         assert!(release.published_at.is_some());
     }
 
-    #[test]
-    fn skip_draft_release() {
-        let plugin = test_plugin();
+    #[tokio::test]
+    async fn skip_draft_release() {
+        let plugin = test_plugin().await;
         let gh = make_release("v1.0.0", true, false);
         assert!(plugin.convert_release(&gh).is_none());
     }
 
-    #[test]
-    fn skip_prerelease_by_default() {
-        let plugin = test_plugin();
+    #[tokio::test]
+    async fn skip_prerelease_by_default() {
+        let plugin = test_plugin().await;
         let gh = make_release("v1.0.0-beta.1", false, true);
         assert!(plugin.convert_release(&gh).is_none());
     }
 
-    #[test]
-    fn include_prerelease_when_configured() {
+    #[tokio::test]
+    async fn include_prerelease_when_configured() {
         let config = GitHubConfig {
             include_prereleases: true,
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
         let gh = make_release("v1.0.0-beta.1", false, true);
         let release = plugin.convert_release(&gh).expect("should convert");
         assert!(release.is_prerelease);
         assert_eq!(release.version.as_str(), "1.0.0-beta.1");
     }
 
-    #[test]
-    fn tag_stripping() {
-        let plugin = test_plugin();
+    #[tokio::test]
+    async fn tag_stripping() {
+        let plugin = test_plugin().await;
         let gh = make_release("v2.3.4", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "2.3.4");
     }
 
-    #[test]
-    fn tag_without_prefix() {
-        let plugin = test_plugin();
+    #[tokio::test]
+    async fn tag_without_prefix() {
+        let plugin = test_plugin().await;
         let gh = make_release("1.0.0", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "1.0.0");
     }
 
-    #[test]
-    fn custom_tag_prefix() {
+    #[tokio::test]
+    async fn custom_tag_prefix() {
         let config = GitHubConfig {
             tag_strip_prefix: "release-".to_string(),
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
         let gh = make_release("release-3.0.0", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "3.0.0");
     }
 
-    #[test]
-    fn asset_filtering() {
+    #[tokio::test]
+    async fn asset_filtering() {
         let config = GitHubConfig {
             asset_patterns: vec![r".*\.tar\.gz$".to_string()],
             ..GitHubConfig::default()
         };
-        let plugin = GitHubPlugin::new(config, test_executor()).expect("valid config");
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
 
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
@@ -520,9 +534,9 @@ mod tests {
         assert_eq!(release.assets[0].name, "app-linux-amd64.tar.gz");
     }
 
-    #[test]
-    fn no_asset_filter_includes_all() {
-        let plugin = test_plugin();
+    #[tokio::test]
+    async fn no_asset_filter_includes_all() {
+        let plugin = test_plugin().await;
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
             name: None,
@@ -551,9 +565,9 @@ mod tests {
         assert_eq!(release.assets.len(), 2);
     }
 
-    #[test]
-    fn date_parsing() {
-        let plugin = test_plugin();
+    #[tokio::test]
+    async fn date_parsing() {
+        let plugin = test_plugin().await;
         let gh = make_release("v1.0.0", false, false);
         let release = plugin.convert_release(&gh).expect("should convert");
         let published = release.published_at.expect("should have published_at");
@@ -562,9 +576,9 @@ mod tests {
         assert_eq!(published.day(), 28);
     }
 
-    #[test]
-    fn invalid_date_does_not_fail() {
-        let plugin = test_plugin();
+    #[tokio::test]
+    async fn invalid_date_does_not_fail() {
+        let plugin = test_plugin().await;
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
             name: None,
@@ -579,9 +593,9 @@ mod tests {
         assert!(release.published_at.is_none());
     }
 
-    #[test]
-    fn plugin_creation_succeeds_with_empty_config() {
+    #[tokio::test]
+    async fn plugin_creation_succeeds_with_empty_config() {
         let config = GitHubConfig::default();
-        assert!(GitHubPlugin::new(config, test_executor()).is_ok());
+        assert!(GitHubPlugin::new(config, test_executor()).await.is_ok());
     }
 }

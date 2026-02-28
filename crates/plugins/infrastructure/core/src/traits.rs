@@ -130,6 +130,8 @@ pub trait Plugin: Send + Sync {
     /// Returns the capabilities supported by this plugin instance.
     ///
     /// Default implementation returns an empty slice (no capabilities).
+    /// Plugins with capabilities should override this to return their
+    /// inherent `CAPABILITIES` constant.
     fn capabilities(&self) -> &'static [PluginCapability] {
         NO_CAPABILITIES
     }

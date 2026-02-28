@@ -88,6 +88,7 @@ async fn detect_installed(
 
     let plugin =
         PluginRegistry::create_plugin(assignment.plugin_type.clone(), &effective_config, executor)
+            .await
             .map_err(|e| e.to_string())?;
 
     match plugin
@@ -123,6 +124,7 @@ async fn fetch_latest(
 
     let plugin =
         PluginRegistry::create_plugin(assignment.plugin_type.clone(), &effective_config, executor)
+            .await
             .map_err(|e| e.to_string())?;
 
     match plugin.fetch_releases(&assignment.package_identifier).await {

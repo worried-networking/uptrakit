@@ -80,17 +80,6 @@ const PHS_DETECT_VERSION_CMD: &str =
 /// ```
 const PHS_INSTALL_CMD: &str = "sudo /usr/local/bin/uptrakit-phs-update";
 
-/// Capabilities: discovery and host compatibility detection.
-///
-/// Host compatibility is checked by testing for the PHS update script at
-/// [`UPDATE_SCRIPT_PATH`] — a file that only exists on Proxmox VE nodes.
-/// This ensures that PHS helper scripts are not installed on unrelated hosts
-/// (e.g. Flatcar Linux, which has a read-only `/usr/local/bin`).
-const CAPABILITIES: &[PluginCapability] = &[
-    PluginCapability::DiscoverLocalSoftware,
-    PluginCapability::DetectHostCompatibility,
-];
-
 /// Plugin for Proxmox Helper Scripts (discovery-only).
 ///
 /// Discovers PHS-managed software by:
@@ -112,8 +101,14 @@ pub struct ProxmoxHelperScriptsPlugin {
 }
 
 impl ProxmoxHelperScriptsPlugin {
+    /// Compile-time capabilities for the Proxmox Helper Scripts plugin.
+    pub const CAPABILITIES: &'static [PluginCapability] = &[
+        PluginCapability::DiscoverLocalSoftware,
+        PluginCapability::DetectHostCompatibility,
+    ];
+
     /// Create a new Proxmox Helper Scripts plugin.
-    pub fn new(
+    pub async fn new(
         config: ProxmoxHelperScriptsConfig,
         executor: Arc<dyn CommandExecutor>,
     ) -> uptrakit_plugin_infrastructure_core::Result<Self> {
@@ -327,7 +322,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
-        CAPABILITIES
+        Self::CAPABILITIES
     }
 
     async fn detect_host_compatibility(
@@ -592,10 +587,11 @@ mod tests {
         Arc::new(LocalCommandExecutor)
     }
 
-    #[test]
-    fn capabilities_includes_discovery_and_compat_check() {
+    #[tokio::test]
+    async fn capabilities_includes_discovery_and_compat_check() {
         let plugin =
             ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .await
                 .expect("create");
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
@@ -610,6 +606,7 @@ mod tests {
         // /usr/bin/update is present, so we only assert that no error is returned.
         let plugin =
             ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .await
                 .expect("create");
         let result = plugin.detect_host_compatibility().await;
         assert!(result.is_ok(), "detect_host_compatibility must not error");
@@ -621,6 +618,7 @@ mod tests {
         // operators know what to look for.
         let plugin =
             ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .await
                 .expect("create");
         if let Ok(HostCompatibility::Incompatible(reason)) =
             plugin.detect_host_compatibility().await
@@ -633,10 +631,11 @@ mod tests {
         // If Compatible, the test is vacuously true (running on a Proxmox node).
     }
 
-    #[test]
-    fn plugin_type_is_proxmox_helper_scripts() {
+    #[tokio::test]
+    async fn plugin_type_is_proxmox_helper_scripts() {
         let plugin =
             ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .await
                 .expect("create");
         assert_eq!(
             plugin.plugin_type(),
@@ -649,6 +648,7 @@ mod tests {
         // On a non-PHS system /usr/bin/update likely does not exist.
         let plugin =
             ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .await
                 .expect("create");
         let result = plugin.discover_software().await;
         assert!(result.is_ok());
@@ -735,10 +735,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn required_sudo_commands_uses_helper_scripts() {
+    #[tokio::test]
+    async fn required_sudo_commands_uses_helper_scripts() {
         let plugin =
             ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .await
                 .expect("create");
         let entries = plugin.required_sudo_commands();
         assert_eq!(

@@ -187,7 +187,7 @@ pub async fn handle_check_versions(
                     plugin_assignment.plugin_type.clone(),
                     &effective_config,
                     Arc::clone(&executor),
-                ) && plugin.has_capability(
+                ).await && plugin.has_capability(
                     uptrakit_plugin_infrastructure_registry::PluginCapability::RefreshPackageIndex,
                 ) {
                     tracing::info!(plugin_type = %plugin_assignment.plugin_type, "refreshing package index");
@@ -380,7 +380,7 @@ pub async fn handle_discover_software(
                 assignment.plugin_type.clone(),
                 &effective_config,
                 Arc::clone(&executor),
-            ) {
+            ).await {
                 Err(e) => {
                     tracing::warn!(
                         plugin_type = %assignment.plugin_type,

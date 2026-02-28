@@ -63,8 +63,15 @@ pub struct HomebrewPlugin {
 }
 
 impl HomebrewPlugin {
+    /// Compile-time capabilities for the Homebrew plugin.
+    pub const CAPABILITIES: &'static [PluginCapability] = &[
+        PluginCapability::DiscoverLocalSoftware,
+        PluginCapability::RefreshPackageIndex,
+        PluginCapability::DetectHostCompatibility,
+    ];
+
     /// Create a new Homebrew plugin with the given configuration.
-    pub fn new(config: HomebrewConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
+    pub async fn new(config: HomebrewConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         config
             .validate()
             .map_err(|e| report!(PluginError::Configuration(e.to_string())))?;
@@ -274,11 +281,7 @@ impl Plugin for HomebrewPlugin {
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
-        &[
-            PluginCapability::DiscoverLocalSoftware,
-            PluginCapability::RefreshPackageIndex,
-            PluginCapability::DetectHostCompatibility,
-        ]
+        Self::CAPABILITIES
     }
 
     async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
@@ -806,59 +809,66 @@ mod tests {
 
     // ── Plugin trait ──────────────────────────────────────────────────
 
-    #[test]
-    fn homebrew_plugin_capabilities() {
+    #[tokio::test]
+    async fn homebrew_plugin_capabilities() {
         let plugin =
-            HomebrewPlugin::new(HomebrewConfig::default(), test_executor()).expect("create");
+            HomebrewPlugin::new(HomebrewConfig::default(), test_executor())
+                .await
+                .expect("create");
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
         assert_eq!(plugin.capabilities().len(), 3);
     }
 
-    #[test]
-    fn is_cask_returns_false_for_none() {
+    #[tokio::test]
+    async fn is_cask_returns_false_for_none() {
         let plugin = HomebrewPlugin::new(HomebrewConfig { package_type: None }, test_executor())
+            .await
             .expect("create");
         assert!(!plugin.is_cask());
     }
 
-    #[test]
-    fn is_cask_returns_true_for_cask() {
+    #[tokio::test]
+    async fn is_cask_returns_true_for_cask() {
         let plugin = HomebrewPlugin::new(
             HomebrewConfig {
                 package_type: Some(HomebrewPackageType::Cask),
             },
             test_executor(),
         )
+        .await
         .expect("create");
         assert!(plugin.is_cask());
     }
 
-    #[test]
-    fn is_cask_returns_false_for_formula() {
+    #[tokio::test]
+    async fn is_cask_returns_false_for_formula() {
         let plugin = HomebrewPlugin::new(
             HomebrewConfig {
                 package_type: Some(HomebrewPackageType::Formula),
             },
             test_executor(),
         )
+        .await
         .expect("create");
         assert!(!plugin.is_cask());
     }
 
     #[tokio::test]
     async fn homebrew_plugin_detect_installed_empty_identifier_fails() {
-        let plugin =
-            HomebrewPlugin::new(HomebrewConfig::default(), test_executor()).expect("create");
+        let plugin = HomebrewPlugin::new(HomebrewConfig::default(), test_executor())
+            .await
+            .expect("create");
         let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn homebrew_plugin_fetch_releases_empty_identifier_fails() {
-        let plugin =
-            HomebrewPlugin::new(HomebrewConfig::default(), test_executor()).expect("create");
+        let plugin = HomebrewPlugin::new(HomebrewConfig::default(), test_executor())
+            .await
+            .expect("create");
         let result = plugin.fetch_releases("").await;
         assert!(result.is_err());
     }
@@ -871,6 +881,7 @@ mod tests {
             HomebrewConfig::default(),
             FixedExitCodeExecutor::with_exit_code(0),
         )
+        .await
         .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
@@ -882,6 +893,7 @@ mod tests {
             HomebrewConfig::default(),
             FixedExitCodeExecutor::with_exit_code(1),
         )
+        .await
         .expect("create");
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {

@@ -213,8 +213,8 @@ impl VersionCheckExecutor {
             };
 
             // Determine whether this group should run on the controller.
-            // In the "auto" case, instantiate the plugin to check capability; if it
-            // should run on the controller we reuse the same instance for fetch_releases.
+            // In the "auto" case, use static capabilities to check without
+            // instantiation; only create the plugin when it will actually be used.
             let plugin: Option<Box<dyn uptrakit_plugin_infrastructure_core::Plugin>> =
                 match execution_site.as_str() {
                     "controller" => {
@@ -224,6 +224,7 @@ impl VersionCheckExecutor {
                             &merged,
                             noop_executor.clone(),
                         )
+                        .await
                         .map_err(|e| {
                             report!(SchedulerError::Execution(format!(
                                 "failed to create plugin {plugin_type}: {e}"
@@ -233,18 +234,21 @@ impl VersionCheckExecutor {
                     }
                     "agent" => None,
                     _ => {
-                        // "auto" — check capability
-                        let p = PluginRegistry::create_plugin(
-                            plugin_type.clone(),
-                            &merged,
-                            noop_executor.clone(),
-                        )
-                        .map_err(|e| {
-                            report!(SchedulerError::Execution(format!(
-                                "failed to create plugin {plugin_type} for capability check: {e}"
-                            )))
-                        })?;
-                        if p.has_capability(PluginCapability::ControllerSideFetchReleases) {
+                        // "auto" — check static capability, only instantiate if controller-side
+                        if PluginRegistry::capabilities_for(plugin_type.clone())
+                            .contains(&PluginCapability::ControllerSideFetchReleases)
+                        {
+                            let p = PluginRegistry::create_plugin(
+                                plugin_type.clone(),
+                                &merged,
+                                noop_executor.clone(),
+                            )
+                            .await
+                            .map_err(|e| {
+                                report!(SchedulerError::Execution(format!(
+                                    "failed to create plugin {plugin_type}: {e}"
+                                )))
+                            })?;
                             Some(p)
                         } else {
                             None
@@ -411,8 +415,6 @@ impl VersionCheckExecutor {
             return Ok(());
         }
 
-        let noop_executor: Arc<dyn CommandExecutor> = Arc::new(NoopCommandExecutor);
-
         // Build VersionCheckAssignment per (service_id, host_machine_id, software_item_id).
         // Each software item may have up to two roles: detect_version and fetch_releases.
         //
@@ -462,21 +464,9 @@ impl VersionCheckExecutor {
                         "agent" => true,
                         "controller" => false,
                         _ => {
-                            // "auto" — check if plugin lacks ControllerSideFetchReleases
-                            let plugin = PluginRegistry::create_plugin(
-                                assignment.plugin_type.clone(),
-                                &assignment.config,
-                                noop_executor.clone(),
-                            );
-                            match plugin {
-                                Ok(p) => {
-                                    !p.has_capability(PluginCapability::ControllerSideFetchReleases)
-                                }
-                                Err(_) => {
-                                    // If we can't create the plugin, let the agent try
-                                    true
-                                }
-                            }
+                            // "auto" — check static capability (no instantiation)
+                            !PluginRegistry::capabilities_for(assignment.plugin_type.clone())
+                                .contains(&PluginCapability::ControllerSideFetchReleases)
                         }
                     };
                     if should_agent_handle {

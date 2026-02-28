@@ -121,16 +121,15 @@ struct ControllerFetchJob {
 fn is_controller_fetch_site(
     execution_site: &str,
     plugin_type: &PluginType,
-    config: &serde_json::Value,
+    _config: &serde_json::Value,
 ) -> bool {
     match execution_site {
         "controller" => true,
         "agent" => false,
         _ => {
-            // "auto" — check capability by instantiating the plugin.
-            let noop: Arc<dyn CommandExecutor> = Arc::new(NoopCommandExecutor);
-            PluginRegistry::create_plugin(plugin_type.clone(), config, noop)
-                .is_ok_and(|p| p.has_capability(PluginCapability::ControllerSideFetchReleases))
+            // "auto" — check static capability (no instantiation needed)
+            PluginRegistry::capabilities_for(plugin_type.clone())
+                .contains(&PluginCapability::ControllerSideFetchReleases)
         }
     }
 }
@@ -164,7 +163,9 @@ async fn run_controller_fetch_jobs(
             job.plugin_type.clone(),
             &job.merged_config,
             noop_executor.clone(),
-        ) {
+        )
+        .await
+        {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!(

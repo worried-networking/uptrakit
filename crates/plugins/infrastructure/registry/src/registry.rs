@@ -56,7 +56,7 @@ fn restore_secrets_for<T: SecretMasking>(
     }
 }
 
-/// Generates the six `PluginRegistry` dispatch methods from a single
+/// Generates the `PluginRegistry` dispatch methods from a single
 /// declaration list, eliminating manually-maintained match arms.
 macro_rules! register_plugins {
     ($(
@@ -68,7 +68,7 @@ macro_rules! register_plugins {
             /// Deserializes the config, validates it, and constructs the plugin.
             /// All plugins follow the same pattern: deserialize → validate →
             /// construct.
-            pub fn create_plugin(
+            pub async fn create_plugin(
                 plugin_type: PluginType,
                 config: &serde_json::Value,
                 executor: Arc<dyn CommandExecutor>,
@@ -81,7 +81,7 @@ macro_rules! register_plugins {
                             typed_config
                                 .validate()
                                 .map_err(|e| report!(PluginRegistryError::ConfigValidation(e.to_string())))?;
-                            let plugin = <$plugin>::new(typed_config, executor)
+                            let plugin = <$plugin>::new(typed_config, executor).await
                                 .map_err(|e| report!(PluginRegistryError::Instantiation(e.to_string())))?;
                             Ok(Box::new(plugin))
                         }
@@ -155,7 +155,7 @@ macro_rules! register_plugins {
             /// Discovery can proceed with an empty/minimal config.  For plugins
             /// whose `validate()` is a no-op (e.g. `ProxmoxHelperScripts`) the two
             /// construction paths are equivalent.
-            pub fn create_plugin_for_discovery(
+            pub async fn create_plugin_for_discovery(
                 plugin_type: PluginType,
                 config: &serde_json::Value,
                 executor: Arc<dyn CommandExecutor>,
@@ -166,7 +166,7 @@ macro_rules! register_plugins {
                             let typed_config: $config =
                                 serde_json::from_value(config.clone()).context_to()?;
                             // No validate() — discovery can proceed with an empty/minimal config.
-                            let plugin = <$plugin>::new(typed_config, executor)
+                            let plugin = <$plugin>::new(typed_config, executor).await
                                 .map_err(|e| report!(PluginRegistryError::Instantiation(e.to_string())))?;
                             Ok(Box::new(plugin))
                         }
@@ -179,21 +179,34 @@ macro_rules! register_plugins {
 
             /// Returns all plugin types that have the `DiscoverLocalSoftware` capability.
             ///
-            /// Auto-derived from the macro registration — no manual list needed.
+            /// Uses compile-time `CAPABILITIES` constants — no instantiation needed.
             pub fn discovery_plugins() -> Vec<PluginType> {
-                let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-                let empty = serde_json::Value::Object(serde_json::Map::new());
                 let mut result = Vec::new();
                 $(
-                    if let Ok(p) = Self::create_plugin_for_discovery(
-                        PluginType::$variant, &empty, executor.clone())
+                    if <$plugin>::CAPABILITIES
+                        .contains(&uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware)
                     {
-                        if p.has_capability(uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware) {
-                            result.push(PluginType::$variant);
-                        }
+                        result.push(PluginType::$variant);
                     }
                 )+
                 result
+            }
+
+            /// Returns the compile-time capabilities for a plugin type.
+            ///
+            /// Uses `CAPABILITIES` associated constants — no instantiation needed.
+            /// Returns an empty slice for unknown / `Other` types.
+            pub fn static_capabilities(
+                plugin_type: PluginType,
+            ) -> &'static [uptrakit_plugin_infrastructure_core::PluginCapability] {
+                match plugin_type {
+                    $(
+                        PluginType::$variant => {
+                            <$plugin>::CAPABILITIES
+                        }
+                    )+
+                    _ => &[],
+                }
             }
 
             /// Returns required sudo command entries for every registered plugin.
@@ -205,13 +218,13 @@ macro_rules! register_plugins {
             /// Used by the bootstrap process and `update-sudoers` command to generate
             /// minimal, per-command sudoers entries rather than a blanket
             /// `NOPASSWD: ALL` rule.
-            pub fn all_required_sudo_commands() -> Vec<(PluginType, Vec<SudoCommandEntry>)> {
+            pub async fn all_required_sudo_commands() -> Vec<(PluginType, Vec<SudoCommandEntry>)> {
                 let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
                 let empty = serde_json::Value::Object(serde_json::Map::new());
                 let mut result = Vec::new();
                 $(
                     if let Ok(p) = Self::create_plugin_for_discovery(
-                        PluginType::$variant, &empty, executor.clone())
+                        PluginType::$variant, &empty, executor.clone()).await
                     {
                         let entries = p.required_sudo_commands();
                         if !entries.is_empty() {
@@ -253,7 +266,7 @@ macro_rules! register_plugins {
                 let mut result = Vec::new();
                 $(
                     if let Ok(p) = Self::create_plugin_for_discovery(
-                        PluginType::$variant, &empty, Arc::clone(&executor))
+                        PluginType::$variant, &empty, Arc::clone(&executor)).await
                     {
                         let is_compatible = if p.has_capability(
                             uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility)
@@ -386,19 +399,12 @@ impl PluginRegistry {
 
     /// Returns the capabilities declared by the given plugin type.
     ///
-    /// Instantiates the plugin with an empty config (no validation), then calls
-    /// `capabilities()`. Returns an empty vec for unknown types or if instantiation
-    /// fails.
+    /// Uses compile-time `CAPABILITIES` constants — no instantiation needed.
+    /// Returns an empty vec for unknown types.
     pub fn capabilities_for(
         plugin_type: PluginType,
     ) -> Vec<uptrakit_plugin_infrastructure_core::PluginCapability> {
-        let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
-        let empty = serde_json::Value::Object(serde_json::Map::new());
-        if let Ok(p) = Self::create_plugin_for_discovery(plugin_type, &empty, executor) {
-            p.capabilities().to_vec()
-        } else {
-            vec![]
-        }
+        Self::static_capabilities(plugin_type).to_vec()
     }
 
     /// String-accepting convenience wrapper around [`capabilities_for`].
@@ -517,48 +523,52 @@ mod tests {
         assert!(err_msg.contains("unknown plugin type"));
     }
 
-    #[test]
-    fn create_plugin_github() {
+    #[tokio::test]
+    async fn create_plugin_github() {
         let config = serde_json::json!({});
         let plugin =
-            PluginRegistry::create_plugin(PluginType::ReleasesGithub, &config, test_executor());
+            PluginRegistry::create_plugin(PluginType::ReleasesGithub, &config, test_executor())
+                .await;
         assert!(plugin.is_ok());
     }
 
-    #[test]
-    fn create_plugin_docker() {
+    #[tokio::test]
+    async fn create_plugin_docker() {
         // Empty config is valid
         let config = serde_json::json!({});
         let plugin =
-            PluginRegistry::create_plugin(PluginType::ReleasesDocker, &config, test_executor());
+            PluginRegistry::create_plugin(PluginType::ReleasesDocker, &config, test_executor())
+                .await;
         assert!(plugin.is_ok());
     }
 
-    #[test]
-    fn create_plugin_for_discovery_docker() {
+    #[tokio::test]
+    async fn create_plugin_for_discovery_docker() {
         let config = serde_json::json!({});
         let plugin = PluginRegistry::create_plugin_for_discovery(
             PluginType::ReleasesDocker,
             &config,
             test_executor(),
-        );
+        )
+        .await;
         assert!(plugin.is_ok());
     }
 
-    #[test]
-    fn create_plugin_proxmox() {
+    #[tokio::test]
+    async fn create_plugin_proxmox() {
         // PHS config is always `{}`; extra fields are ignored during deserialization.
         let config = serde_json::json!({});
         let plugin = PluginRegistry::create_plugin(
             PluginType::DiscoveryProxmoxHelperScripts,
             &config,
             test_executor(),
-        );
+        )
+        .await;
         assert!(plugin.is_ok());
     }
 
-    #[test]
-    fn proxmox_plugin_capabilities() {
+    #[tokio::test]
+    async fn proxmox_plugin_capabilities() {
         // PHS declares DiscoverLocalSoftware and DetectHostCompatibility.
         // RefreshPackageIndex must not be present.
         let config = serde_json::json!({});
@@ -567,6 +577,7 @@ mod tests {
             &config,
             test_executor(),
         )
+        .await
         .expect("create");
         assert!(plugin.has_capability(
             uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
@@ -598,25 +609,27 @@ mod tests {
         assert_eq!(incoming, serde_json::json!({}));
     }
 
-    #[test]
-    fn create_plugin_homebrew() {
+    #[tokio::test]
+    async fn create_plugin_homebrew() {
         let config = serde_json::json!({});
         let plugin = PluginRegistry::create_plugin(
             PluginType::PackageManagerHomebrew,
             &config,
             test_executor(),
-        );
+        )
+        .await;
         assert!(plugin.is_ok());
     }
 
-    #[test]
-    fn create_plugin_homebrew_cask() {
+    #[tokio::test]
+    async fn create_plugin_homebrew_cask() {
         let config = serde_json::json!({"package_type": "cask"});
         let plugin = PluginRegistry::create_plugin(
             PluginType::PackageManagerHomebrew,
             &config,
             test_executor(),
-        );
+        )
+        .await;
         assert!(plugin.is_ok());
     }
 
@@ -644,14 +657,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn homebrew_plugin_capabilities() {
+    #[tokio::test]
+    async fn homebrew_plugin_capabilities() {
         let config = serde_json::json!({});
         let plugin = PluginRegistry::create_plugin(
             PluginType::PackageManagerHomebrew,
             &config,
             test_executor(),
         )
+        .await
         .unwrap();
         assert!(plugin.has_capability(
             uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
@@ -661,11 +675,12 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn docker_plugin_capabilities() {
+    #[tokio::test]
+    async fn docker_plugin_capabilities() {
         let config = serde_json::json!({});
         let plugin =
             PluginRegistry::create_plugin(PluginType::ReleasesDocker, &config, test_executor())
+                .await
                 .unwrap();
         assert!(plugin.has_capability(
             uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
@@ -684,9 +699,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn all_required_sudo_commands_includes_apt() {
-        let entries = PluginRegistry::all_required_sudo_commands();
+    #[tokio::test]
+    async fn all_required_sudo_commands_includes_apt() {
+        let entries = PluginRegistry::all_required_sudo_commands().await;
         let apt_entry = entries
             .iter()
             .find(|(pt, _)| *pt == PluginType::PackageManagerApt)
@@ -695,9 +710,9 @@ mod tests {
         assert_eq!(apt_entry.1[0].command, "apt-get");
     }
 
-    #[test]
-    fn all_required_sudo_commands_no_duplicates_per_plugin() {
-        let entries = PluginRegistry::all_required_sudo_commands();
+    #[tokio::test]
+    async fn all_required_sudo_commands_no_duplicates_per_plugin() {
+        let entries = PluginRegistry::all_required_sudo_commands().await;
         // All entries in results should have non-empty command lists
         for (pt, cmds) in &entries {
             assert!(
@@ -738,14 +753,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn boxed_plugin_preserves_type() {
+    #[tokio::test]
+    async fn boxed_plugin_preserves_type() {
         let github_config = serde_json::json!({});
         let github = PluginRegistry::create_plugin(
             PluginType::ReleasesGithub,
             &github_config,
             test_executor(),
         )
+        .await
         .expect("create github");
         assert_eq!(github.plugin_type(), PluginType::ReleasesGithub);
 
@@ -755,6 +771,7 @@ mod tests {
             &docker_config,
             test_executor(),
         )
+        .await
         .expect("create docker");
         assert_eq!(docker.plugin_type(), PluginType::ReleasesDocker);
 
@@ -764,6 +781,7 @@ mod tests {
             &proxmox_config,
             test_executor(),
         )
+        .await
         .expect("create proxmox");
         assert_eq!(
             proxmox.plugin_type(),
@@ -776,6 +794,7 @@ mod tests {
             &homebrew_config,
             test_executor(),
         )
+        .await
         .expect("create homebrew");
         assert_eq!(homebrew.plugin_type(), PluginType::PackageManagerHomebrew);
 
@@ -785,6 +804,7 @@ mod tests {
             &apt_config,
             test_executor(),
         )
+        .await
         .expect("create apt");
         assert_eq!(apt.plugin_type(), PluginType::PackageManagerApt);
     }
@@ -830,19 +850,21 @@ mod tests {
         assert_eq!(incoming["auth_token"], "ghp_real_token");
     }
 
-    #[test]
-    fn create_plugin_apt() {
+    #[tokio::test]
+    async fn create_plugin_apt() {
         let config = serde_json::json!({});
         let plugin =
-            PluginRegistry::create_plugin(PluginType::PackageManagerApt, &config, test_executor());
+            PluginRegistry::create_plugin(PluginType::PackageManagerApt, &config, test_executor())
+                .await;
         assert!(plugin.is_ok());
     }
 
-    #[test]
-    fn create_plugin_apt_all_filter() {
+    #[tokio::test]
+    async fn create_plugin_apt_all_filter() {
         let config = serde_json::json!({"discovery_filter": "all"});
         let plugin =
-            PluginRegistry::create_plugin(PluginType::PackageManagerApt, &config, test_executor());
+            PluginRegistry::create_plugin(PluginType::PackageManagerApt, &config, test_executor())
+                .await;
         assert!(plugin.is_ok());
     }
 
@@ -858,11 +880,12 @@ mod tests {
         assert!(PluginRegistry::validate_config(PluginType::PackageManagerApt, &config).is_err());
     }
 
-    #[test]
-    fn apt_plugin_capabilities() {
+    #[tokio::test]
+    async fn apt_plugin_capabilities() {
         let config = serde_json::json!({});
         let plugin =
             PluginRegistry::create_plugin(PluginType::PackageManagerApt, &config, test_executor())
+                .await
                 .unwrap();
         assert!(plugin.has_capability(
             uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
@@ -897,30 +920,33 @@ mod tests {
 
     // ── Shell plugin tests ────────────────────────────────────────────────
 
-    #[test]
-    fn create_plugin_shell_version_only() {
+    #[tokio::test]
+    async fn create_plugin_shell_version_only() {
         let config = serde_json::json!({"version_command": "myapp --version"});
         let plugin =
-            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor());
+            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor())
+                .await;
         assert!(plugin.is_ok());
     }
 
-    #[test]
-    fn create_plugin_shell_update_only() {
+    #[tokio::test]
+    async fn create_plugin_shell_update_only() {
         let config = serde_json::json!({"update_command": "apt-get install -y myapp"});
         let plugin =
-            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor());
+            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor())
+                .await;
         assert!(plugin.is_ok());
     }
 
-    #[test]
-    fn create_plugin_shell_both() {
+    #[tokio::test]
+    async fn create_plugin_shell_both() {
         let config = serde_json::json!({
             "version_command": "myapp --version",
             "update_command": "apt-get install -y myapp"
         });
         let plugin =
-            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor());
+            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor())
+                .await;
         assert!(plugin.is_ok());
     }
 
@@ -976,14 +1002,16 @@ mod tests {
     /// `Other(String)` received from a newer server must fail gracefully at
     /// the registry level (unknown type) rather than causing a deserialization
     /// panic or silent data loss.
-    #[test]
-    fn create_plugin_other_returns_unknown_type_error() {
+    #[tokio::test]
+    async fn create_plugin_other_returns_unknown_type_error() {
         let config = serde_json::json!({});
         let Err(err) = PluginRegistry::create_plugin(
             PluginType::Other("winget".to_string()),
             &config,
             test_executor(),
-        ) else {
+        )
+        .await
+        else {
             panic!("expected Err for Other plugin type");
         };
         assert!(err.to_string().contains("unknown plugin type"));
@@ -1126,19 +1154,21 @@ mod tests {
 
     // ── npm plugin tests ──────────────────────────────────────────────────────
 
-    #[test]
-    fn create_plugin_npm() {
+    #[tokio::test]
+    async fn create_plugin_npm() {
         let config = serde_json::json!({});
         let plugin =
-            PluginRegistry::create_plugin(PluginType::PackageManagerNpm, &config, test_executor());
+            PluginRegistry::create_plugin(PluginType::PackageManagerNpm, &config, test_executor())
+                .await;
         assert!(plugin.is_ok());
     }
 
-    #[test]
-    fn create_plugin_npm_with_prereleases() {
+    #[tokio::test]
+    async fn create_plugin_npm_with_prereleases() {
         let config = serde_json::json!({"include_prereleases": true});
         let plugin =
-            PluginRegistry::create_plugin(PluginType::PackageManagerNpm, &config, test_executor());
+            PluginRegistry::create_plugin(PluginType::PackageManagerNpm, &config, test_executor())
+                .await;
         assert!(plugin.is_ok());
     }
 
@@ -1148,11 +1178,12 @@ mod tests {
         assert!(PluginRegistry::validate_config(PluginType::PackageManagerNpm, &config).is_ok());
     }
 
-    #[test]
-    fn npm_plugin_capabilities() {
+    #[tokio::test]
+    async fn npm_plugin_capabilities() {
         let config = serde_json::json!({});
         let plugin =
             PluginRegistry::create_plugin(PluginType::PackageManagerNpm, &config, test_executor())
+                .await
                 .unwrap();
         assert!(plugin.has_capability(
             uptrakit_plugin_infrastructure_core::PluginCapability::DiscoverLocalSoftware
@@ -1202,9 +1233,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn all_required_sudo_commands_includes_npm() {
-        let entries = PluginRegistry::all_required_sudo_commands();
+    #[tokio::test]
+    async fn all_required_sudo_commands_includes_npm() {
+        let entries = PluginRegistry::all_required_sudo_commands().await;
         let npm_entry = entries
             .iter()
             .find(|(pt, _)| *pt == PluginType::PackageManagerNpm)

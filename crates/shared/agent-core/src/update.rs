@@ -312,6 +312,7 @@ async fn execute_plugin_update(
 ) -> UpdateResult<String> {
     let eu = &payload.execute_update_plugin;
     let plugin = PluginRegistry::create_plugin(eu.plugin_type.clone(), &eu.config, executor)
+        .await
         .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
 
     let hook_ctx = UpdateHookContext {

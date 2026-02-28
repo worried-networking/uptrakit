@@ -7,8 +7,7 @@ use uptrakit_plugin_infrastructure_core::command::{
 };
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    OutputStreamType, Plugin, PluginCapability, PluginError, PluginType, ReleaseInfo,
-    UpdateOutputLine, Version,
+    OutputStreamType, Plugin, PluginError, PluginType, ReleaseInfo, UpdateOutputLine, Version,
 };
 
 use crate::config::ShellConfig;
@@ -28,11 +27,14 @@ pub struct ShellPlugin {
 }
 
 impl ShellPlugin {
+    /// Compile-time capabilities for this plugin type (none).
+    pub const CAPABILITIES: &'static [uptrakit_plugin_infrastructure_core::PluginCapability] = &[];
+
     /// Create a new `ShellPlugin` from the given configuration.
     ///
     /// The executor is stored but config validation is the caller's
     /// responsibility (the registry calls `validate()` before constructing).
-    pub fn new(config: ShellConfig, executor: Arc<dyn CommandExecutor>) -> ShellResult<Self> {
+    pub async fn new(config: ShellConfig, executor: Arc<dyn CommandExecutor>) -> ShellResult<Self> {
         Ok(Self { config, executor })
     }
 }
@@ -41,11 +43,6 @@ impl ShellPlugin {
 impl Plugin for ShellPlugin {
     fn plugin_type(&self) -> PluginType {
         PluginType::GenericShell
-    }
-
-    fn capabilities(&self) -> &'static [PluginCapability] {
-        // Agent-side only; no controller-side capabilities.
-        &[]
     }
 
     async fn detect_installed_version(
@@ -130,7 +127,10 @@ mod tests {
         Arc::new(LocalCommandExecutor)
     }
 
-    fn make_plugin(version_command: Option<&str>, update_command: Option<&str>) -> ShellPlugin {
+    async fn make_plugin(
+        version_command: Option<&str>,
+        update_command: Option<&str>,
+    ) -> ShellPlugin {
         ShellPlugin::new(
             ShellConfig {
                 version_command: version_command.map(String::from),
@@ -138,6 +138,7 @@ mod tests {
             },
             test_executor(),
         )
+        .await
         .expect("plugin creation")
     }
 
@@ -145,14 +146,14 @@ mod tests {
 
     #[tokio::test]
     async fn detect_version_returns_none_when_no_command() {
-        let plugin = make_plugin(None, Some("dummy"));
+        let plugin = make_plugin(None, Some("dummy")).await;
         let result = plugin.detect_installed_version("pkg").await.unwrap();
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn detect_version_returns_first_line() {
-        let plugin = make_plugin(Some("echo '3.14.1'"), None);
+        let plugin = make_plugin(Some("echo '3.14.1'"), None).await;
         let result = plugin
             .detect_installed_version("any-pkg")
             .await
@@ -162,7 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_version_placeholder_replaced() {
-        let plugin = make_plugin(Some("echo '{package_identifier}'"), None);
+        let plugin = make_plugin(Some("echo '{package_identifier}'"), None).await;
         let result = plugin
             .detect_installed_version("booklore")
             .await
@@ -174,7 +175,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_version_empty_output_returns_none() {
-        let plugin = make_plugin(Some("true"), None);
+        let plugin = make_plugin(Some("true"), None).await;
         let result = plugin
             .detect_installed_version("pkg")
             .await
@@ -184,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_version_command_failure_propagates_error() {
-        let plugin = make_plugin(Some("false"), None);
+        let plugin = make_plugin(Some("false"), None).await;
         let result = plugin.detect_installed_version("pkg").await;
         assert!(result.is_err());
     }
@@ -193,7 +194,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_update_returns_error_when_no_command() {
-        let plugin = make_plugin(Some("echo hi"), None);
+        let plugin = make_plugin(Some("echo hi"), None).await;
         let (tx, _rx) = mpsc::channel(100);
         let result = plugin.execute_update("pkg", "1.0.0", None, &tx).await;
         assert!(result.is_err());
@@ -202,7 +203,7 @@ mod tests {
     #[tokio::test]
     async fn execute_update_runs_with_version_replaced() {
         // Use a command that echoes the version arg so we can verify replacement.
-        let plugin = make_plugin(None, Some("echo {version}"));
+        let plugin = make_plugin(None, Some("echo {version}")).await;
         let (tx, mut rx) = mpsc::channel(100);
         let result = plugin
             .execute_update("mypkg", "2.3.4", None, &tx)
@@ -216,7 +217,7 @@ mod tests {
     #[tokio::test]
     async fn execute_update_tag_falls_back_to_version_when_no_release_info() {
         // {tag} should fall back to {version} when release_info is None.
-        let plugin = make_plugin(None, Some("echo {tag}"));
+        let plugin = make_plugin(None, Some("echo {tag}")).await;
         let (tx, mut rx) = mpsc::channel(100);
         let result = plugin
             .execute_update("mypkg", "1.0.0", None, &tx)
@@ -229,7 +230,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_update_tag_uses_release_info_tag() {
-        let plugin = make_plugin(None, Some("echo {tag}"));
+        let plugin = make_plugin(None, Some("echo {tag}")).await;
         let (tx, mut rx) = mpsc::channel(100);
         let release_info = ReleaseInfo {
             tag: "v1.2.3".to_string(),

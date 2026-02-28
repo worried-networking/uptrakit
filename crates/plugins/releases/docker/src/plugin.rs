@@ -57,7 +57,7 @@ impl DockerPlugin {
     /// With the `daemon` feature enabled, connects to the Docker daemon via
     /// bollard. Without it, uses [`NoopDockerClient`] so the plugin can still
     /// serve registry-only capabilities (e.g. `ControllerSideFetchReleases`).
-    pub fn new(config: DockerConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
+    pub async fn new(config: DockerConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         // Always create a NoopDockerClient and a None proxy handle as
         // starting values. When the `daemon` feature is enabled,
         // upgrade_to_daemon_client replaces them with a real
@@ -67,7 +67,8 @@ impl DockerPlugin {
         let proxy_handle: OpaqueHandle = None;
         #[cfg(feature = "daemon")]
         let (docker_client, proxy_handle) =
-            Self::upgrade_to_daemon_client(docker_client, proxy_handle, &config, &executor)?;
+            Self::upgrade_to_daemon_client(docker_client, proxy_handle, &config, &executor)
+                .await?;
         Self::init(config, executor, docker_client, proxy_handle)
     }
 
@@ -83,7 +84,7 @@ impl DockerPlugin {
     /// suppressing `unused_assignments` and `dead_code` lints, while making it
     /// explicit that the daemon path fully replaces the stub.
     #[cfg(feature = "daemon")]
-    fn upgrade_to_daemon_client(
+    async fn upgrade_to_daemon_client(
         _stub: Arc<dyn DockerClient>,
         _proxy_stub: OpaqueHandle,
         config: &DockerConfig,
@@ -96,9 +97,8 @@ impl DockerPlugin {
         // russh session.
         #[cfg(unix)]
         if executor.supports_stdio_tunnel() && config.docker_host.is_none() {
-            let proxy = tokio::runtime::Handle::current().block_on(
-                crate::docker_proxy::DockerSocketProxy::start(Arc::clone(executor)),
-            )?;
+            let proxy =
+                crate::docker_proxy::DockerSocketProxy::start(Arc::clone(executor)).await?;
             let uri = proxy.socket_uri();
             tracing::info!(
                 proxy_socket = %uri,
@@ -147,6 +147,19 @@ impl DockerPlugin {
         })
     }
 
+    /// Compile-time capabilities for the Docker plugin.
+    ///
+    /// Read directly by the registry macro for sync capability queries.
+    pub const CAPABILITIES: &'static [PluginCapability] = if cfg!(feature = "daemon") {
+        &[
+            PluginCapability::ControllerSideFetchReleases,
+            PluginCapability::DiscoverLocalSoftware,
+            PluginCapability::DetectHostCompatibility,
+        ]
+    } else {
+        &[PluginCapability::ControllerSideFetchReleases]
+    };
+
     /// Test constructor that injects a custom [`DockerClient`].
     #[cfg(all(test, feature = "daemon"))]
     pub(crate) fn new_for_test(
@@ -192,15 +205,7 @@ impl Plugin for DockerPlugin {
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
-        if cfg!(feature = "daemon") {
-            &[
-                PluginCapability::ControllerSideFetchReleases,
-                PluginCapability::DiscoverLocalSoftware,
-                PluginCapability::DetectHostCompatibility,
-            ]
-        } else {
-            &[PluginCapability::ControllerSideFetchReleases]
-        }
+        Self::CAPABILITIES
     }
 
     #[cfg(feature = "daemon")]
