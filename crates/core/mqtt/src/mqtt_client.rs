@@ -195,8 +195,13 @@ impl MqttEventReporter {
 
 /// Connect to the MQTT broker described by `config`.
 ///
-/// Publishes a retained `online` message on every successful connection and
-/// registers an LWT so the broker publishes `offline` on unexpected disconnect.
+/// On every successful connection the event loop publishes a retained `online`
+/// status message and subscribes to the optional `ha_status_topic`.  The broker
+/// will publish the LWT `offline` on unexpected disconnect.
+///
+/// The `online` publish and HA subscription are deferred to the event loop and
+/// use non-blocking sends so that the event loop can never deadlock against its
+/// own request channel (see `run_event_loop` for details).
 ///
 /// When `ha_status_topic` is `Some`, the event loop subscribes to that topic
 /// after every `ConnAck` and emits [`MqttServiceEvent::HaOnline`] whenever HA
@@ -206,7 +211,7 @@ pub async fn start(
     event_sender: Option<mpsc::Sender<MqttServiceEvent>>,
     mqtt_client_id: uuid::Uuid,
     ha_status_topic: Option<String>,
-) -> Result<MqttHandle> {
+) -> MqttHandle {
     let topic = status_topic(&config.topic_prefix);
     let options = build_mqtt_options(&config);
     let reporter = event_sender.map(|sender| MqttEventReporter::new(mqtt_client_id, sender));
@@ -214,14 +219,11 @@ pub async fn start(
         r.report_status(MqttClientConnectionStatus::Connecting);
     }
 
-    let (client, event_loop) = AsyncClient::new(options, 10);
+    // Channel capacity of 128 accommodates a full publish_software_states()
+    // batch (≈68 messages for 17 items × 2 hosts × 2 topics) without blocking
+    // the service-SDK task while the event loop is draining.
+    let (client, event_loop) = AsyncClient::new(options, 128);
     let shutdown_token = CancellationToken::new();
-
-    // Publish initial online message.
-    client
-        .publish(&topic, QoS::AtLeastOnce, true, "online")
-        .await
-        .context_to::<MqttError>()?;
 
     let task_topic = topic.clone();
     let task_client = client.clone();
@@ -237,12 +239,12 @@ pub async fn start(
         reconnect_backoff,
     ));
 
-    Ok(MqttHandle {
+    MqttHandle {
         client,
         topic,
         task,
         shutdown_token,
-    })
+    }
 }
 
 fn status_topic(prefix: &str) -> String {
@@ -301,7 +303,47 @@ async fn run_event_loop(
     ha_status_topic: Option<String>,
     mut reconnect_backoff: Backoff,
 ) {
+    // Tracks whether the "online" retained publish and the HA-status
+    // subscription still need to be sent after the most recent ConnAck.
+    //
+    // # Why not `.await` inside the poll() callback?
+    //
+    // `AsyncClient::publish/subscribe` send to the bounded flume channel that
+    // `EventLoop::poll()` drains.  Calling `.await` on those sends *inside* a
+    // `poll()` callback creates a self-deadlock: the channel may already be
+    // full (e.g. a large `publish_software_states` batch was in flight when the
+    // connection was re-established), so the `.await` blocks — but the only
+    // entity that drains the channel is this very task, which is now blocked.
+    // Neither task can make progress; the service loop freezes.
+    //
+    // The fix: use `try_publish`/`try_subscribe` (non-blocking, returns
+    // `Err` when full instead of blocking).  If the channel is full on the
+    // first attempt we set a flag and retry at the top of every subsequent
+    // iteration; `poll()` will have drained at least one slot by then.
+    let mut pending_online = false;
+    let mut pending_ha_subscribe = false;
+
     loop {
+        // Retry the "online" publish / HA subscription that were deferred
+        // from the ConnAck handler.  `try_publish`/`try_subscribe` are O(1)
+        // and never block, so spinning here costs nothing.
+        if pending_online
+            && client
+                .try_publish(&topic, QoS::AtLeastOnce, true, "online")
+                .is_ok()
+        {
+            pending_online = false;
+        }
+        if pending_ha_subscribe {
+            if let Some(ref ha_topic) = ha_status_topic {
+                if client.try_subscribe(ha_topic, QoS::AtLeastOnce).is_ok() {
+                    pending_ha_subscribe = false;
+                }
+            } else {
+                pending_ha_subscribe = false;
+            }
+        }
+
         tokio::select! {
             _ = shutdown_token.cancelled() => {
                 tracing::debug!("MQTT event loop shutdown requested");
@@ -315,19 +357,13 @@ async fn run_event_loop(
                         if let Some(ref r) = reporter {
                             r.report_status(MqttClientConnectionStatus::Online);
                         }
-                        if let Err(e) = client
-                            .publish(&topic, QoS::AtLeastOnce, true, "online")
-                            .await
-                        {
-                            tracing::warn!("failed to publish online status: {e}");
-                        }
+                        // Schedule non-blocking publish/subscribe for the
+                        // next loop iteration.  We cannot .await here — see
+                        // the comment at the top of this function.
+                        pending_online = true;
+                        pending_ha_subscribe = ha_status_topic.is_some();
                         if let Some(ref r) = reporter {
                             r.report_reconnected();
-                        }
-                        if let Some(ref ha_topic) = ha_status_topic
-                            && let Err(e) = client.subscribe(ha_topic, QoS::AtLeastOnce).await
-                        {
-                            tracing::warn!("failed to subscribe to HA status topic: {e}");
                         }
                     }
                     Ok(rumqttc::Event::Incoming(Packet::Publish(publish))) => {
@@ -343,6 +379,10 @@ async fn run_event_loop(
                     }
                     Ok(_) => {}
                     Err(e) => {
+                        // Clear the pending flags: we are disconnected so
+                        // there is nothing to retry until the next ConnAck.
+                        pending_online = false;
+                        pending_ha_subscribe = false;
                         let delay = reconnect_backoff.next_delay();
                         tracing::warn!("MQTT error: {e}; retrying in {delay:?}");
                         if let Some(ref r) = reporter {

@@ -209,32 +209,25 @@ impl TenantManager {
             None
         };
 
-        match crate::mqtt_client::start(
+        let handle = crate::mqtt_client::start(
             mqtt_config,
             self.event_tx.clone(),
             mqtt_client_id,
             ha_status_topic,
         )
-        .await
-        {
-            Ok(handle) => {
-                self.clients.insert(
-                    mqtt_client_id,
-                    ClientState {
-                        handle,
-                        config_hash: new_hash,
-                        tenant_id: config.tenant_id,
-                        topic_prefix: config.topic_prefix.clone(),
-                        ha_discovery: config.ha_discovery,
-                        ha_discovery_prefix: config.ha_discovery_prefix.clone(),
-                    },
-                );
-            }
-            Err(e) => {
-                tracing::warn!(%mqtt_client_id, error = ?e, "MQTT client startup failed");
-                self.report_status(mqtt_client_id, MqttClientConnectionStatus::Offline);
-            }
-        }
+        .await;
+
+        self.clients.insert(
+            mqtt_client_id,
+            ClientState {
+                handle,
+                config_hash: new_hash,
+                tenant_id: config.tenant_id,
+                topic_prefix: config.topic_prefix.clone(),
+                ha_discovery: config.ha_discovery,
+                ha_discovery_prefix: config.ha_discovery_prefix.clone(),
+            },
+        );
     }
 
     /// Publish software state topics and subscribe to command topics for all
