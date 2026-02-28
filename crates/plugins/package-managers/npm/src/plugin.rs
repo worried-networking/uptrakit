@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
@@ -177,6 +178,8 @@ impl NpmPlugin {
                 "uptrakit-plugin-package-manager-npm/",
                 env!("CARGO_PKG_VERSION")
             ))
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(60))
             .build()
             .map_err(|e| {
                 report!(PluginError::PluginInternal(format!(
