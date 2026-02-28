@@ -205,6 +205,31 @@ pub struct SshSession {
 }
 
 impl SshSession {
+    /// Open an SSH channel for the given command and return it before
+    /// consuming any output.
+    ///
+    /// The caller owns the raw [`russh::Channel`] and can call
+    /// `.into_stream()` to obtain a bidirectional `ChannelStream` for
+    /// byte-level I/O (used by [`crate::ssh_stdio_tunnel::SshStdioTunnel`]).
+    pub async fn open_channel_for_command(
+        &self,
+        command: &str,
+    ) -> Result<russh::Channel<russh::client::Msg>> {
+        tracing::trace!(hostname = %self.hostname, command = %command, "opening SSH channel for command");
+        let channel = self.handle.channel_open_session().await.map_err(|e| {
+            report!(Error::SshCommand(format!(
+                "failed to open session channel: {e}"
+            )))
+        })?;
+
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|e| report!(Error::SshCommand(format!("failed to execute command: {e}"))))?;
+
+        Ok(channel)
+    }
+
     /// Execute a command on the remote host and collect stdout/stderr.
     pub async fn exec_command(&self, command: &str) -> Result<RemoteCommandResult> {
         self.exec_command_streaming(command, None).await

@@ -9,6 +9,7 @@ mod ssh_config;
 mod ssh_executor;
 mod ssh_key;
 mod ssh_pool;
+mod ssh_stdio_tunnel;
 mod ssh_target;
 mod ssh_transport;
 

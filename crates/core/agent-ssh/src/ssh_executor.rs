@@ -10,9 +10,11 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use tokio::sync::mpsc;
 use uptrakit_command::{
-    CommandError, CommandExecutor, CommandOutput, CommandSpec, UpdateOutputLine, shell_escape,
+    CommandError, CommandExecutor, CommandOutput, CommandSpec, StdioTunnel, UpdateOutputLine,
+    shell_escape,
 };
 
+use crate::ssh_stdio_tunnel::SshStdioTunnel;
 use crate::ssh_transport::SshSession;
 
 /// Executes commands on a remote host via an SSH session.
@@ -86,6 +88,26 @@ impl CommandExecutor for SshCommandExecutor {
 
         let exit_code = i32::try_from(result.exit_code).unwrap_or(0);
         Ok(CommandOutput { output, exit_code })
+    }
+
+    fn supports_stdio_tunnel(&self) -> bool {
+        true
+    }
+
+    async fn open_stdio_tunnel(
+        &self,
+        command: &str,
+    ) -> uptrakit_command::Result<Box<dyn StdioTunnel>> {
+        let channel = self
+            .session
+            .open_channel_for_command(command)
+            .await
+            .map_err(|e| {
+                report!(CommandError::CommandSpawn(std::io::Error::other(
+                    e.to_string()
+                )))
+            })?;
+        Ok(Box::new(SshStdioTunnel::new(channel)))
     }
 }
 
