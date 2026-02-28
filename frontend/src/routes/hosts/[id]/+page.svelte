@@ -3,13 +3,28 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import { getHost, listUpdateHistory, updateHost, deactivateHost, triggerHostDiscovery } from '$lib/api';
+	import {
+		getHost,
+		listUpdateHistory,
+		updateHost,
+		deactivateHost,
+		triggerHostDiscovery,
+		listHostDiscoveryAllowlist,
+		addHostDiscoveryAllowlistEntry,
+		deleteHostDiscoveryAllowlistEntry
+	} from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import { Permission } from '$lib/types';
-	import type { HostResponse, UpdateHistoryResponse, ServiceStatus, UpdateHistoryStatus } from '$lib/types';
+	import type {
+		HostResponse,
+		UpdateHistoryResponse,
+		ServiceStatus,
+		UpdateHistoryStatus,
+		HostDiscoveryAllowlistEntry
+	} from '$lib/types';
 
 	const id = $derived(page.params.id as string);
 
@@ -23,13 +38,22 @@
 	let confirmDeactivate: boolean = $state(false);
 	let discovering: boolean = $state(false);
 
+	// Discovery allowlist state
+	let hostAllowlist: HostDiscoveryAllowlistEntry[] = $state([]);
+	let hostAllowlistLoading: boolean = $state(false);
+	let showAllowlistModal: boolean = $state(false);
+	let allowlistForm = $state({ plugin_type: 'package_manager_apt' });
+	let allowlistDeleteConfirm: { id: string; plugin_type: string } | null = $state(null);
+
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageHosts) ?? false);
 	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	onMount(() => {
 		loadData();
+		if (canViewSoftware) loadHostAllowlist();
 		refreshInterval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadData(true);
 		}, 30_000);
@@ -57,6 +81,52 @@
 			}
 		} finally {
 			if (!background) loading = false;
+		}
+	}
+
+	async function loadHostAllowlist() {
+		hostAllowlistLoading = true;
+		try {
+			hostAllowlist = await listHostDiscoveryAllowlist(id);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to load host discovery allowlist');
+		} finally {
+			hostAllowlistLoading = false;
+		}
+	}
+
+	function openAddAllowlistEntry() {
+		allowlistForm = { plugin_type: 'package_manager_apt' };
+		showAllowlistModal = true;
+	}
+
+	function closeAllowlistModal() {
+		showAllowlistModal = false;
+	}
+
+	async function saveAllowlistEntry() {
+		try {
+			const created = await addHostDiscoveryAllowlistEntry(id, { plugin_type: allowlistForm.plugin_type });
+			if (!hostAllowlist.some((e) => e.id === created.id)) {
+				hostAllowlist = [...hostAllowlist, created];
+			}
+			showSuccess('Allowlist entry added.');
+			closeAllowlistModal();
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to add allowlist entry');
+		}
+	}
+
+	async function executeDeleteAllowlistEntry() {
+		if (!allowlistDeleteConfirm) return;
+		const { id: entryId } = allowlistDeleteConfirm;
+		allowlistDeleteConfirm = null;
+		try {
+			await deleteHostDiscoveryAllowlistEntry(id, entryId);
+			hostAllowlist = hostAllowlist.filter((e) => e.id !== entryId);
+			showSuccess('Allowlist entry removed.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to remove allowlist entry');
 		}
 	}
 
@@ -158,7 +228,9 @@
 <svelte:window
 	onkeydown={(e) => {
 		if (e.key === 'Escape') {
-			if (editHost) cancelEdit();
+			if (showAllowlistModal) closeAllowlistModal();
+			else if (allowlistDeleteConfirm) allowlistDeleteConfirm = null;
+			else if (editHost) cancelEdit();
 			else if (confirmDeactivate) confirmDeactivate = false;
 		}
 	}}
@@ -260,6 +332,71 @@
 			{/if}
 		</section>
 
+		<!-- Discovery Allowlist -->
+		{#if canViewSoftware}
+			<section class="mb-6">
+				<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+					<div>
+						<h2 class="h3">Discovery Allowlist</h2>
+						<p class="mt-1 text-sm text-surface-500">
+							{#if hostAllowlist.length === 0}
+								No host-specific restrictions — tenant-wide allowlist applies, or all plugins run if none is configured.
+							{:else}
+								Host-specific entries are active. Only the listed plugin types will run discovery on this host,
+								overriding the tenant-wide allowlist entirely.
+							{/if}
+						</p>
+					</div>
+					{#if canManageSoftware}
+						<button class="btn btn-sm preset-filled-primary-500" onclick={openAddAllowlistEntry}>
+							Add Plugin Type
+						</button>
+					{/if}
+				</div>
+
+				{#if hostAllowlistLoading}
+					<p class="text-sm text-center py-4">Loading...</p>
+				{:else if hostAllowlist.length === 0}
+					<aside class="rounded-lg p-4 preset-tonal-surface text-sm">
+						<p>
+							No host-specific allowlist configured. Add an entry to restrict which discovery plugins run on this host —
+							any host-specific entries will override the tenant-wide allowlist completely.
+						</p>
+					</aside>
+				{:else}
+					<div class="table-wrap">
+						<table class="table">
+							<thead>
+								<tr>
+									<th>Plugin Type</th>
+									<th>Added</th>
+									{#if canManageSoftware}<th class="w-24">Actions</th>{/if}
+								</tr>
+							</thead>
+							<tbody>
+								{#each hostAllowlist as entry (entry.id)}
+									<tr>
+										<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
+										<td>{formatDate(entry.created_at)}</td>
+										{#if canManageSoftware}
+											<td>
+												<button
+													class="btn btn-sm preset-tonal-error"
+													onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
+												>
+													Remove
+												</button>
+											</td>
+										{/if}
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+			</section>
+		{/if}
+
 		<!-- Recent Update History -->
 		<section class="mb-6">
 			<div class="mb-3 flex items-center justify-between">
@@ -338,4 +475,47 @@
 			</div>
 		</div>
 	</ModalBackdrop>
+{/if}
+
+<!-- Discovery allowlist modal -->
+{#if showAllowlistModal}
+	<ModalBackdrop onclose={closeAllowlistModal}>
+		<div
+			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
+			role="dialog"
+			aria-modal="true"
+		>
+			<h3 class="h3">Add Discovery Plugin Type</h3>
+			<p class="text-sm text-surface-500">
+				Once any entry exists, only the listed plugin types will run discovery on this host.
+			</p>
+
+			<label class="label">
+				<span>Plugin Type</span>
+				<select class="select" bind:value={allowlistForm.plugin_type}>
+					<option value="package_manager_apt">APT</option>
+					<option value="releases_docker">Docker</option>
+					<option value="package_manager_homebrew">Homebrew</option>
+					<option value="discovery_proxmox_helper_scripts">Proxmox Helper Scripts</option>
+				</select>
+			</label>
+
+			<div class="flex justify-end gap-2">
+				<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
+				<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
+			</div>
+		</div>
+	</ModalBackdrop>
+{/if}
+
+{#if allowlistDeleteConfirm}
+	<ConfirmDialog
+		title="Remove Allowlist Entry"
+		messagePrefix="Remove discovery plugin type"
+		entityName={allowlistDeleteConfirm.plugin_type}
+		confirmLabel="Remove"
+		confirmClass="preset-filled-error-500"
+		onconfirm={executeDeleteAllowlistEntry}
+		oncancel={() => (allowlistDeleteConfirm = null)}
+	/>
 {/if}
