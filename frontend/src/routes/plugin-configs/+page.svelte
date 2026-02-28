@@ -471,14 +471,12 @@
 			<!-- Discovery allowlist tab -->
 			<div class="mb-4">
 				<p class="text-sm text-surface-500 mb-3">
-					When the allowlist is empty, all discovery plugins are active. Once you add at least one
-					entry, only the listed plugin types will run discovery tenant-wide.
+					When the allowlist is empty, all discovery plugins are active. Once you add at least one entry, only the
+					listed plugin types will run discovery tenant-wide.
 				</p>
 				{#if canManage}
 					<div class="flex justify-end">
-						<button class="btn preset-filled-primary-500" onclick={openAddAllowlistEntry}>
-							Add Plugin Type
-						</button>
+						<button class="btn preset-filled-primary-500" onclick={openAddAllowlistEntry}> Add Plugin Type </button>
 					</div>
 				{/if}
 			</div>
@@ -488,9 +486,7 @@
 			{:else if allowlist.length === 0}
 				<aside class="rounded-lg p-4 preset-tonal-surface">
 					<p class="font-medium">No restrictions — all discovery plugins are active.</p>
-					<p class="mt-1 text-sm text-surface-500">
-						Add a plugin type to restrict discovery to only the listed types.
-					</p>
+					<p class="mt-1 text-sm text-surface-500">Add a plugin type to restrict discovery to only the listed types.</p>
 				</aside>
 			{:else}
 				<div class="table-wrap">

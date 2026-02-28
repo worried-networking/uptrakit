@@ -765,18 +765,14 @@ export async function addHostDiscoveryAllowlistEntry(
 	hostId: string,
 	req: CreateDiscoveryAllowlistEntryRequest
 ): Promise<HostDiscoveryAllowlistEntry> {
-	return request<HostDiscoveryAllowlistEntry>(
-		`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist`,
-		{ method: 'POST', body: JSON.stringify(req) }
-	);
+	return request<HostDiscoveryAllowlistEntry>(`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist`, {
+		method: 'POST',
+		body: JSON.stringify(req)
+	});
 }
 
-export async function deleteHostDiscoveryAllowlistEntry(
-	hostId: string,
-	entryId: string
-): Promise<void> {
-	return requestVoid(
-		`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist/${encodeURIComponent(entryId)}`,
-		{ method: 'DELETE' }
-	);
+export async function deleteHostDiscoveryAllowlistEntry(hostId: string, entryId: string): Promise<void> {
+	return requestVoid(`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist/${encodeURIComponent(entryId)}`, {
+		method: 'DELETE'
+	});
 }

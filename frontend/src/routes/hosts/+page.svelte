@@ -192,7 +192,9 @@
 			<tbody>
 				{#each hosts as host (host.id)}
 					<tr>
-						<td>{host.friendly_name}</td>
+						<td>
+							<a href="/hosts/{host.id}" class="hover:underline font-medium">{host.friendly_name}</a>
+						</td>
 						<td>{host.hostname}</td>
 						<td>{host.os_version ?? host.os_type ?? '\u2014'}</td>
 						<td>{host.architecture ?? '\u2014'}</td>

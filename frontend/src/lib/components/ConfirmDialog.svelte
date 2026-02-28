@@ -34,7 +34,7 @@
 		<p>{messagePrefix} <strong>{entityName}</strong>?</p>
 		{#if warnings.length > 0}
 			<aside class="rounded-lg p-3 preset-filled-warning-500 text-sm space-y-1">
-				{#each warnings as warning}
+				{#each warnings as warning (warning)}
 					<p>{warning}</p>
 				{/each}
 			</aside>

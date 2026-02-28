@@ -19,7 +19,12 @@
 	let error: string | null = $state(null);
 	let openMenuId: string | null = $state(null);
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
-	let confirmAction: { serviceId: string; action: 'approve' | 'reject' | 'delete'; name: string; capabilities: string[] } | null = $state(null);
+	let confirmAction: {
+		serviceId: string;
+		action: 'approve' | 'reject' | 'delete';
+		name: string;
+		capabilities: string[];
+	} | null = $state(null);
 	let mergeSource: { id: string; name: string; capabilities: string[] } | null = $state(null);
 	let mergeTargetId: string | null = $state(null);
 	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
@@ -101,7 +106,12 @@
 		closeMenu();
 	}
 
-	function requestConfirm(serviceId: string, action: 'approve' | 'reject' | 'delete', name: string, capabilities: string[] = []) {
+	function requestConfirm(
+		serviceId: string,
+		action: 'approve' | 'reject' | 'delete',
+		name: string,
+		capabilities: string[] = []
+	) {
 		closeMenu();
 		confirmAction = { serviceId, action, name, capabilities };
 	}
