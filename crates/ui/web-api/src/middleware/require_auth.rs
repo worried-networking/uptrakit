@@ -216,7 +216,7 @@ mod tests {
                 _: time::Duration,
             ) -> std::result::Result<SignedCertBundle, rootcause::Report<CertSignerError>>
             {
-                Err(rootcause::Report::new(CertSignerError::Signing(
+                Err(rootcause::report!(CertSignerError::Signing(
                     "noop signer".to_string(),
                 )))
             }

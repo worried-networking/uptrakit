@@ -242,7 +242,7 @@ pub async fn reject_service(
         ("id" = Uuid, Path, description = "Service UUID")
     ),
     responses(
-        (status = 200, description = "Service deactivated", body = MessageResponse),
+        (status = 204, description = "Service deactivated"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
         (status = 404, description = "Service not found")
@@ -261,13 +261,7 @@ pub async fn deactivate_service(
         Ok(true) => {
             state.revocation_notify.notify_one();
             state.service_connections.unregister(&service_id).await;
-            (
-                StatusCode::OK,
-                Json(MessageResponse {
-                    message: "Service deactivated".to_string(),
-                }),
-            )
-                .into_response()
+            StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Service not found"),
         Err(ServiceQueryError::Db(e)) => {
@@ -426,7 +420,7 @@ mod tests {
                 _: time::Duration,
             ) -> std::result::Result<SignedCertBundle, rootcause::Report<CertSignerError>>
             {
-                Err(rootcause::Report::new(CertSignerError::Signing(
+                Err(rootcause::report!(CertSignerError::Signing(
                     "noop signer".to_string(),
                 )))
             }
