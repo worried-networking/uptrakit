@@ -120,7 +120,7 @@ on — triggering the `unreachable_code` lint that is denied workspace-wide.
 
 Use one of the following approved patterns instead.
 
-**Pattern A — gate the entire match arm**
+#### Pattern A — gate the entire match arm
 
 Move the feature-specific arm behind `#[cfg(feature = "X")]` and handle the disabled case in the
 default arm with a runtime check:
@@ -151,7 +151,7 @@ fn connect(docker_host: Option<&str>, ssh_key_path: Option<&str>) -> Result<boll
 }
 ```
 
-**Pattern B — stub + upgrade helper**
+#### Pattern B — stub + upgrade helper
 
 Initialize with an always-available stub, then override in a `#[cfg(feature = "X")]` block by
 calling a helper that accepts and discards the stub:
@@ -174,7 +174,7 @@ fn upgrade_to_daemon_client(
 }
 ```
 
-**Pattern C — always-present tracking field**
+#### Pattern C — always-present tracking field
 
 When a struct field only exists under a feature but you need a cfg-free accessor method, add an
 always-present `bool` that mirrors its presence:
@@ -202,7 +202,7 @@ impl NotificationService {
 }
 ```
 
-**Pattern D — conditional early-return inside a guard**
+#### Pattern D — conditional early-return inside a guard
 
 When the feature-gated code path is guarded by a runtime condition (`if let`, `if`, etc.), the
 `return` is conditional rather than unconditional, so the fallback code remains reachable in all
@@ -220,7 +220,7 @@ async fn maybe_publish_nats(&self, msg: ControllerMessage) {
 }
 ```
 
-**Anti-patterns to avoid**
+#### Anti-patterns to avoid
 
 ```rust
 // ✗ Wrong — #[cfg(not)] violates the additive rule
