@@ -116,12 +116,14 @@ fn host_update_available(installed_version: Option<&str>, latest_version: Option
     }
 }
 
-async fn count_linked_hosts(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> u64 {
+async fn count_linked_hosts(
+    db: &sea_orm::DatabaseConnection,
+    item_id: Uuid,
+) -> Result<u64, sea_orm::DbErr> {
     HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
         .count(db)
         .await
-        .unwrap_or(0)
 }
 
 /// Load the latest version for a single software item across all hosts.
@@ -735,7 +737,9 @@ pub async fn update_software_item(
         .await
         .map_err(SoftwareItemQueryError::Db)?;
     let plugins = load_plugins(tenant_db.db(), id).await;
-    let host_count = count_linked_hosts(tenant_db.db(), id).await;
+    let host_count = count_linked_hosts(tenant_db.db(), id)
+        .await
+        .map_err(SoftwareItemQueryError::Db)?;
     let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
 
     // For update_available we do a quick per-host check.
