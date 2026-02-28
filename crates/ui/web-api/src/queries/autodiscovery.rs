@@ -24,6 +24,7 @@ use uptrakit_shared_db::entity::{
     autodiscovery_ignore, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
     software_item,
 };
+use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_shared_types::SoftwareDiscoveryState;
 use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, DiscardDiscoveredResponse,
@@ -73,7 +74,7 @@ pub async fn create_or_ignore_ignore_rule(
         .map_err(|e| {
             // Suppress unique-constraint violations (race condition between the
             // read above and the insert).
-            if is_unique_violation(&e) {
+            if is_unique_constraint_violation(&e) {
                 return AutodiscoveryError::Db(e);
             }
             AutodiscoveryError::Db(e)
@@ -356,7 +357,7 @@ pub async fn find_or_create_default_plugin_config(
 
     match PluginConfig::insert(record).exec(db).await {
         Ok(_) => Ok(new_id),
-        Err(e) if is_unique_violation(&e) => {
+        Err(e) if is_unique_constraint_violation(&e) => {
             // A concurrent task created this config at the same time.
             // Re-query by name to get the winner's ID.
             PluginConfig::find()
@@ -553,7 +554,7 @@ async fn process_targets_discovery(
                 updated_at: Set(now),
             };
             if let Err(e) = HostSoftwareItemPlugin::insert(plugin_link).exec(db).await
-                && !is_unique_violation(&e)
+                && !is_unique_constraint_violation(&e)
             {
                 return Err(e.into());
             }
@@ -700,7 +701,7 @@ async fn find_or_create_software_item(
                 );
                 new_id
             }
-            Err(e) if is_unique_violation(&e) => {
+            Err(e) if is_unique_constraint_violation(&e) => {
                 // Another target for the same DiscoveredSoftware (or a concurrent
                 // request) already created a software_item with this name.
                 tracing::debug!(
@@ -738,7 +739,7 @@ async fn find_or_create_software_item(
         linked_at: Set(now),
     };
     if let Err(e) = HostSoftwareItem::insert(link).exec(db).await
-        && !is_unique_violation(&e)
+        && !is_unique_constraint_violation(&e)
     {
         return Err(e.into());
     }
@@ -793,7 +794,7 @@ async fn process_one_discovery(
             updated_at: Set(now),
         };
         if let Err(e) = HostSoftwareItemPlugin::insert(plugin_link).exec(db).await
-            && !is_unique_violation(&e)
+            && !is_unique_constraint_violation(&e)
         {
             return Err(e.into());
         }
@@ -809,10 +810,6 @@ struct IdRow {
     id: Uuid,
 }
 
-fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
-    let msg = e.to_string().to_lowercase();
-    msg.contains("unique") || msg.contains("duplicate")
-}
 
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {

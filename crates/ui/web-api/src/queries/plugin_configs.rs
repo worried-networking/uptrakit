@@ -5,6 +5,7 @@ use sea_orm::{
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uptrakit_shared_db::entity::plugin_config;
+use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, UpdatePluginConfigRequest,
@@ -153,7 +154,7 @@ pub async fn create_plugin_config(
     };
 
     let inserted = model.insert(tenant_db.db()).await.map_err(|e| {
-        if is_unique_name_violation(&e) {
+        if is_unique_constraint_violation(&e) {
             CreatePluginConfigError::DuplicateName
         } else {
             CreatePluginConfigError::Db(e)
@@ -163,11 +164,6 @@ pub async fn create_plugin_config(
         .unwrap_or_else(|| unreachable!("plugin_type was just validated by the caller")))
 }
 
-fn is_unique_name_violation(e: &sea_orm::DbErr) -> bool {
-    let msg = e.to_string().to_lowercase();
-    (msg.contains("unique") || msg.contains("duplicate"))
-        && (msg.contains("name") || msg.contains("uq_plugin_configs_active_name"))
-}
 
 pub async fn list_plugin_configs(
     ops: &dyn PluginOps,
