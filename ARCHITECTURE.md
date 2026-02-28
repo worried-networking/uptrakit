@@ -31,7 +31,8 @@ infrastructure credentials (database, NATS, master key) via the wire protocol. S
 - Plugin development expectations: [docs/development/plugin-guidelines.md](docs/development/plugin-guidelines.md)
 - Plugin system architecture: [docs/development/plugin-system.md](docs/development/plugin-system.md)
 
-- Command executor abstraction: [docs/development/command-executor.md](docs/development/command-executor.md) (includes StdioTunnel for Docker-over-SSH proxy)
+- Command executor abstraction: [docs/development/command-executor.md](docs/development/command-executor.md)
+  (includes StdioTunnel for Docker-over-SSH proxy)
 
 ## Project layout
 

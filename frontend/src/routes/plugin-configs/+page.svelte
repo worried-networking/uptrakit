@@ -654,8 +654,9 @@
 			<label class="label">
 				<span>Plugin Type</span>
 				<select class="select" bind:value={allowlistForm.plugin_type}>
-					<option value="package_manager_homebrew">Homebrew</option>
 					<option value="package_manager_apt">APT</option>
+					<option value="releases_docker">Docker</option>
+					<option value="package_manager_homebrew">Homebrew</option>
 					<option value="discovery_proxmox_helper_scripts">Proxmox Helper Scripts</option>
 				</select>
 			</label>
