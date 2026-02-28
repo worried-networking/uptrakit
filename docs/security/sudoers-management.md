@@ -43,8 +43,14 @@ explanation, and an optional `SudoHelperScript`.
 
 During bootstrap or `update-sudoers`:
 
-1. `PluginRegistry::all_required_sudo_commands()` collects declarations from all registered plugins.
-2. For each entry:
+1. `PluginRegistry::compatible_sudo_commands_for_host(ssh_executor)` collects
+   declarations from registered plugins that are **compatible with the target host**.
+   - Plugins that declare the `DetectHostCompatibility` capability first run a
+     compatibility check over SSH (e.g. the Proxmox Helper Scripts plugin checks
+     for `/usr/bin/update`). Incompatible plugins are silently skipped.
+   - Plugins without `DetectHostCompatibility` are always included (assumed
+     compatible with all hosts).
+2. For each entry from a compatible plugin:
    - **With `helper_script`**: the script is written to `install_path` on the remote host
      with mode `0755`, and its path is used directly as the sudoers command.
    - **Without `helper_script`**: `command -v <name>` is run on the remote host to resolve
@@ -52,7 +58,26 @@ During bootstrap or `update-sudoers`:
 3. Resolved entries become `<username> ALL=(root) NOPASSWD: <absolute-path>` lines.
 4. The file is written with permissions `440` and validated with `visudo -cf`.
 
-If no commands resolve (all plugin tools are missing), the command fails unless `--allow-all` is passed.
+If no commands resolve (all plugin tools are missing or incompatible), the command fails unless `--allow-all` is passed.
+
+### Host compatibility checks
+
+Each plugin may declare the `DetectHostCompatibility` capability and implement
+`detect_host_compatibility()` to test whether it makes sense on the target host.
+The check runs over the same SSH session used for bootstrapping, so it reflects
+the actual remote environment.
+
+| Plugin | Compatibility check |
+| --- | --- |
+| Proxmox Helper Scripts | Tests for `/usr/bin/update` (PHS update script, Proxmox VE only) |
+| APT | Tests for `apt-get` via `which` |
+| Homebrew | Tests for `brew` via `which` |
+| npm | Tests for `npm` via `which` |
+
+Plugins that fail their compatibility check are **not** included in the sudoers
+file and their helper scripts are **not** installed. This is important for hosts
+with read-only filesystems (e.g. Flatcar Linux's `/usr/local/bin`) where helper
+script installation would otherwise fail the entire bootstrap.
 
 ## Helper scripts
 
