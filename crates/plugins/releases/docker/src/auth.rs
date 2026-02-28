@@ -256,15 +256,12 @@ mod tests {
         let registry_url = "https://registry.example.com/v2/repo/tags/list";
         let result = auth.fetch_token(&client, &www_auth, registry_url).await;
         // The request will fail (no real server), but NOT because of realm rejection.
-        match result {
-            Err(e) => {
-                let msg = e.to_string();
-                assert!(
-                    !msg.contains("does not match registry host"),
-                    "same-host realm should not be rejected: {msg}"
-                );
-            }
-            Ok(_) => {} // unexpected success is also fine for the security test
+        if let Err(e) = result {
+            let msg = e.to_string();
+            assert!(
+                !msg.contains("does not match registry host"),
+                "same-host realm should not be rejected: {msg}"
+            );
         }
     }
 
