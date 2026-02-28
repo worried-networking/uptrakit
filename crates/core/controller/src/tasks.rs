@@ -17,8 +17,8 @@ use crate::durations;
 /// Holds all background task handles for orderly shutdown.
 pub struct BackgroundTasks {
     shutdown_token: CancellationToken,
-    /// Tasks that respond to the [`CancellationToken`] and are awaited with a timeout.
-    cancellable: Vec<(&'static str, JoinHandle<()>)>,
+    /// Tasks that respond to the [`CancellationToken`] and are awaited with a per-task timeout.
+    cancellable: Vec<(&'static str, JoinHandle<()>, Duration)>,
     /// Tasks that are forcefully aborted.
     abortable: Vec<(&'static str, JoinHandle<()>)>,
 }
@@ -38,8 +38,27 @@ impl BackgroundTasks {
     }
 
     /// Register a task that listens for the [`CancellationToken`].
+    ///
+    /// Uses [`durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT`] as the shutdown timeout.
+    /// For tasks that need more time (e.g. the scheduler), use [`track_with_timeout`](Self::track_with_timeout).
     pub fn track(&mut self, name: &'static str, handle: JoinHandle<()>) {
-        self.cancellable.push((name, handle));
+        self.cancellable
+            .push((name, handle, durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT));
+    }
+
+    /// Register a task with a custom per-task shutdown timeout.
+    ///
+    /// Use this for tasks whose shutdown may take longer than the default
+    /// [`durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT`] — for example, the scheduler
+    /// which may be mid-execution on a database query.
+    #[cfg(feature = "embedded-scheduler")]
+    pub fn track_with_timeout(
+        &mut self,
+        name: &'static str,
+        handle: JoinHandle<()>,
+        timeout: Duration,
+    ) {
+        self.cancellable.push((name, handle, timeout));
     }
 
     /// Register a task to be aborted on shutdown.
@@ -101,12 +120,12 @@ impl BackgroundTasks {
 
         // 5. Wait for token-based tasks to complete
         tracing::debug!("waiting for background tasks to complete");
-        for (name, handle) in self.cancellable {
-            if tokio::time::timeout(durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT, handle)
-                .await
-                .is_err()
-            {
-                tracing::warn!("{name} did not complete within shutdown timeout");
+        for (name, handle, task_timeout) in self.cancellable {
+            if tokio::time::timeout(task_timeout, handle).await.is_err() {
+                tracing::warn!(
+                    timeout_secs = task_timeout.as_secs(),
+                    "{name} did not complete within shutdown timeout"
+                );
             }
         }
 

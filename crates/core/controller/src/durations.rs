@@ -28,6 +28,14 @@ pub const AUTH_CLEANUP_INTERVAL: Duration = Duration::from_secs(300);
 /// Maximum time to wait for each background task during graceful shutdown (5 seconds).
 pub const BACKGROUND_TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Maximum time to wait for the scheduler task during graceful shutdown (60 seconds).
+///
+/// The scheduler runs timed SQL queries and may be mid-execution when a shutdown signal
+/// arrives. 60 seconds allows a running task-claim cycle to finish cleanly rather than
+/// aborting mid-transaction and leaving stale `locked_by` rows.
+#[cfg(feature = "embedded-scheduler")]
+pub const SCHEDULER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Duration over which to scatter `ServerRestarting` notifications to avoid thundering herd
 /// (5 seconds).
 pub const RESTART_NOTIFICATION_SCATTER: Duration = Duration::from_secs(5);

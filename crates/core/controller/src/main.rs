@@ -375,7 +375,7 @@ async fn run(args: cli::Args) -> Result<()> {
         );
 
         let h = tokio::spawn(sched.run(bg.child_token()));
-        bg.track("scheduler", h);
+        bg.track_with_timeout("scheduler", h, durations::SCHEDULER_SHUTDOWN_TIMEOUT);
     }
 
     if ca_managed {
