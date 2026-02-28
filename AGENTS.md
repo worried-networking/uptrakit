@@ -345,7 +345,14 @@ for user review. Key invariants:
    plus display names `"Homebrew (Formulae)"` and `"Homebrew (Casks)"`. When running with an existing
    config, targets are empty and the controller uses the config-ID path.
 
-   **Docker and APT** emit empty `targets` when running with an existing config (config-ID path).
+   **Docker** uses `DockerConfig::is_discover_all_mode()` to decide whether to emit targets.
+   When the plugin is invoked without a pre-existing config (all config fields at defaults — i.e.
+   the server sent `plugin_config_id: None` with `config: {}`), each discovered item emits one
+   `DiscoveryTarget` with `plugin_type: ReleasesDocker`, config `{}`, name `"Docker"`, and all
+   three roles.  When a real config is present (`plugin_config_id: Some(_)`), targets are empty and
+   the controller uses the config-ID path.
+
+   **APT** emits empty `targets` when running with an existing config (config-ID path).
 
    The `extra` field on `DiscoveredSoftware` is purely informational metadata (e.g. Docker's
    `{"containers": ["web-server"]}`) — the controller never interprets it for config synthesis.

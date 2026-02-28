@@ -428,6 +428,7 @@ impl Plugin for DockerPlugin {
         &self,
     ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {
         use std::collections::HashMap;
+        use uptrakit_plugin_infrastructure_core::{DiscoveryTarget, PluginRole};
 
         let containers = self
             .docker_client
@@ -465,6 +466,14 @@ impl Plugin for DockerPlugin {
             entry.1.extend(container.names);
         }
 
+        // When the plugin was invoked without a pre-existing plugin config
+        // (config is all-defaults / `{}`), emit a DiscoveryTarget so the
+        // controller can auto-create a default "Docker" plugin config and
+        // the role assignments.  When a real config exists, the server
+        // sends plugin_config_id and the items are handled via the
+        // config-ID path (no targets needed).
+        let emit_targets = self.config.is_discover_all_mode();
+
         // For each unique image, inspect locally to get its digest.
         let mut discoveries = Vec::new();
 
@@ -487,11 +496,29 @@ impl Plugin for DockerPlugin {
 
             let name = derive_container_name(&ir, &container_names);
 
+            let targets = if emit_targets {
+                vec![DiscoveryTarget {
+                    plugin_type: PluginType::ReleasesDocker,
+                    plugin_config: json!({}),
+                    plugin_config_name: "Docker".to_string(),
+                    roles: vec![
+                        PluginRole::DetectVersion,
+                        PluginRole::FetchReleases,
+                        PluginRole::ExecuteUpdate,
+                    ],
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }]
+            } else {
+                vec![]
+            };
+
             discoveries.push(DiscoveredSoftware {
                 package_identifier: ir.full_ref.clone(),
                 name,
                 installed_version: digest,
-                targets: vec![],
+                targets,
                 extra: Some(json!({ "containers": container_names })),
             });
         }
@@ -880,5 +907,65 @@ mod tests {
         assert_eq!(releases[0].version.as_str(), "1.26.0");
         assert_eq!(releases[1].version.as_str(), "1.25.0");
         assert_eq!(releases[2].version.as_str(), "1.24.0");
+    }
+
+    // ── discover_software target emission ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn discover_software_emits_targets_when_default_config() {
+        use uptrakit_plugin_infrastructure_core::{PluginRole, PluginType};
+
+        let mock = Arc::new(MockDockerClient {
+            pull_output: String::new(),
+            pull_should_fail: false,
+            ping_should_fail: false,
+            inspect_result: Some("sha256:abc123".to_string()),
+            containers: vec![LocalContainerInfo {
+                image: "nginx:latest".to_string(),
+                names: vec!["my-nginx".to_string()],
+            }],
+        });
+        // Default config (empty `{}`) → discover-all mode → targets must be emitted.
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        let discoveries = plugin.discover_software().await.unwrap();
+
+        assert_eq!(discoveries.len(), 1);
+        assert_eq!(discoveries[0].targets.len(), 1);
+        let target = &discoveries[0].targets[0];
+        assert_eq!(target.plugin_type, PluginType::ReleasesDocker);
+        assert_eq!(target.plugin_config_name, "Docker");
+        assert_eq!(target.plugin_config, serde_json::json!({}));
+        assert!(target.roles.contains(&PluginRole::DetectVersion));
+        assert!(target.roles.contains(&PluginRole::FetchReleases));
+        assert!(target.roles.contains(&PluginRole::ExecuteUpdate));
+    }
+
+    #[tokio::test]
+    async fn discover_software_no_targets_when_custom_config() {
+        let mock = Arc::new(MockDockerClient {
+            pull_output: String::new(),
+            pull_should_fail: false,
+            ping_should_fail: false,
+            inspect_result: Some("sha256:abc123".to_string()),
+            containers: vec![LocalContainerInfo {
+                image: "nginx:latest".to_string(),
+                names: vec!["my-nginx".to_string()],
+            }],
+        });
+        // Non-default config (docker_host set) → config-ID path → no targets.
+        let config = DockerConfig {
+            docker_host: Some("unix:///var/run/docker.sock".to_string()),
+            ..Default::default()
+        };
+        let plugin =
+            DockerPlugin::new_for_test(config, test_executor(), mock).unwrap();
+        let discoveries = plugin.discover_software().await.unwrap();
+
+        assert_eq!(discoveries.len(), 1);
+        assert!(
+            discoveries[0].targets.is_empty(),
+            "customized config must not emit targets (config-ID path)"
+        );
     }
 }

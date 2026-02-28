@@ -189,6 +189,30 @@ impl DockerConfig {
     pub fn resolved_tracked_tag(&self) -> &str {
         self.tracked_tag.as_deref().unwrap_or("latest")
     }
+
+    /// Returns `true` when the config is at all defaults — i.e. it was
+    /// produced by deserializing an empty JSON object `{}`.
+    ///
+    /// The server sends an empty config with `plugin_config_id: None` when no
+    /// pre-existing Docker plugin config exists for the tenant. `discover_software()`
+    /// uses this to decide whether to emit [`uptrakit_plugin_infrastructure_core::DiscoveryTarget`]
+    /// values so the controller can auto-create the default plugin config and
+    /// role assignments.  When a real config is present the server sends
+    /// `plugin_config_id: Some(_)` and the items are processed via the
+    /// config-ID path (no targets needed).
+    pub(crate) fn is_discover_all_mode(&self) -> bool {
+        self.docker_host.is_none()
+            && self.ssh_key_path.is_none()
+            && self.auth.is_none()
+            && self.tracking_mode == TrackingMode::SemverTags
+            && self.tag_patterns.is_empty()
+            && self.tag_strip_prefix == default_tag_strip_prefix()
+            && !self.include_prereleases
+            && self.tracked_tag.is_none()
+            && self.page_size == default_page_size()
+            && self.compose_restart.is_none()
+            && self.post_pull_command.is_none()
+    }
 }
 
 impl SecretMasking for DockerConfig {
@@ -249,6 +273,94 @@ impl SecretMasking for DockerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── is_discover_all_mode ──────────────────────────────────────────────────
+
+    #[test]
+    fn is_discover_all_mode_true_for_default_config() {
+        assert!(DockerConfig::default().is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_docker_host_set() {
+        let config = DockerConfig {
+            docker_host: Some("tcp://host:2375".to_string()),
+            ..Default::default()
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_auth_set() {
+        let config = DockerConfig {
+            auth: Some(DockerAuth::Basic {
+                username: "user".to_string(),
+                password: SecretString::new("pass".to_string()),
+            }),
+            ..Default::default()
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_tracking_mode_digest() {
+        let config = DockerConfig {
+            tracking_mode: TrackingMode::DigestTracking,
+            ..Default::default()
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_tag_patterns_set() {
+        let config = DockerConfig {
+            tag_patterns: vec![r"^\d+\.\d+$".to_string()],
+            ..Default::default()
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_tag_strip_prefix_changed() {
+        let config = DockerConfig {
+            tag_strip_prefix: String::new(),
+            ..Default::default()
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_include_prereleases_true() {
+        let config = DockerConfig {
+            include_prereleases: true,
+            ..Default::default()
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_compose_restart_set() {
+        let config = DockerConfig {
+            compose_restart: Some(ComposeRestartConfig {
+                compose_file: None,
+                service: None,
+                working_dir: None,
+            }),
+            ..Default::default()
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_when_post_pull_command_set() {
+        let config = DockerConfig {
+            post_pull_command: Some("systemctl restart myapp".to_string()),
+            ..Default::default()
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    // ── existing tests ────────────────────────────────────────────────────────
 
     #[test]
     fn empty_config_validates_ok() {
