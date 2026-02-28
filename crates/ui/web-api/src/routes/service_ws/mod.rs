@@ -218,7 +218,8 @@ mod tests {
     #[test]
     fn deserialize_unknown_type_returns_none() {
         let mut in_seq = IncomingSeq::new();
-        let json = r#"{"seq":1,"type":"future_message","data":{"foo":"bar"}}"#;
+        let json =
+            r#"{"protocol_version":1,"seq":1,"type":"future_message","data":{"foo":"bar"}}"#;
         let result = deserialize_service_msg(&mut in_seq, json);
         assert!(
             matches!(result, Ok(None)),
@@ -236,7 +237,7 @@ mod tests {
     #[test]
     fn deserialize_sequence_error_returns_err() {
         let mut in_seq = IncomingSeq::new();
-        let json = r#"{"seq":2,"type":"ping","service_ts":12345}"#;
+        let json = r#"{"protocol_version":1,"seq":2,"type":"ping","service_ts":12345}"#;
         let result = deserialize_service_msg(&mut in_seq, json);
         assert!(
             matches!(result, Err(ref e) if matches!(e.current_context(), ServiceWsError::SequenceValidation(_))),

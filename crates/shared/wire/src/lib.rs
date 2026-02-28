@@ -1022,23 +1022,34 @@ pub struct DiscoveryPluginResult {
 // Envelope types for application-level replay protection
 // =============================================================================
 
-/// Envelope wrapping a [`ServiceMessage`] with a monotonically increasing
-/// sequence number for replay protection.
+/// The current wire protocol version stamped on every envelope.
 ///
-/// JSON on the wire: `{"seq":1,"type":"ping","service_ts":123}`.
+/// Increment this constant whenever a breaking change is introduced to the
+/// wire protocol (e.g. a required field is added, a variant renamed, or
+/// capability-negotiation semantics change). Peers that receive a
+/// `protocol_version` value they do not recognise must close the connection
+/// with [`CloseReason::ProtocolError`].
+pub const CURRENT_PROTOCOL_VERSION: u32 = 1;
+
+/// Envelope wrapping a [`ServiceMessage`] with a monotonically increasing
+/// sequence number for replay protection and the current protocol version.
+///
+/// JSON on the wire: `{"protocol_version":1,"seq":1,"type":"ping","service_ts":123}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceEnvelope {
+    pub protocol_version: u32,
     pub seq: u64,
     #[serde(flatten)]
     pub message: ServiceMessage,
 }
 
 /// Envelope wrapping a [`ControllerMessage`] with a monotonically increasing
-/// sequence number for replay protection.
+/// sequence number for replay protection and the current protocol version.
 ///
-/// JSON on the wire: `{"seq":1,"type":"pong","service_ts":123,"controller_ts":456}`.
+/// JSON on the wire: `{"protocol_version":1,"seq":1,"type":"pong","service_ts":123,"controller_ts":456}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerEnvelope {
+    pub protocol_version: u32,
     pub seq: u64,
     #[serde(flatten)]
     pub message: ControllerMessage,
@@ -1058,19 +1069,27 @@ impl OutgoingSeq {
     }
 
     /// Wrap a [`ServiceMessage`] in a [`ServiceEnvelope`], assigning the next
-    /// sequence number.
+    /// sequence number and stamping [`CURRENT_PROTOCOL_VERSION`].
     pub fn wrap_service(&mut self, message: ServiceMessage) -> ServiceEnvelope {
         let seq = self.next;
         self.next += 1;
-        ServiceEnvelope { seq, message }
+        ServiceEnvelope {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
+            seq,
+            message,
+        }
     }
 
     /// Wrap a [`ControllerMessage`] in a [`ControllerEnvelope`], assigning the
-    /// next sequence number.
+    /// next sequence number and stamping [`CURRENT_PROTOCOL_VERSION`].
     pub fn wrap_controller(&mut self, message: ControllerMessage) -> ControllerEnvelope {
         let seq = self.next;
         self.next += 1;
-        ControllerEnvelope { seq, message }
+        ControllerEnvelope {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
+            seq,
+            message,
+        }
     }
 }
 
@@ -2450,6 +2469,7 @@ mod tests {
     #[test]
     fn service_envelope_serde_roundtrip() {
         let envelope = ServiceEnvelope {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 1,
             message: ServiceMessage::Ping(PingPayload {
                 service_ts: 1706400000000,
@@ -2458,7 +2478,7 @@ mod tests {
         let json = serde_json::to_string(&envelope).unwrap();
         assert_eq!(
             json,
-            r#"{"seq":1,"type":"ping","service_ts":1706400000000}"#
+            r#"{"protocol_version":1,"seq":1,"type":"ping","service_ts":1706400000000}"#
         );
         let deserialized: ServiceEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, envelope);
@@ -2467,6 +2487,7 @@ mod tests {
     #[test]
     fn controller_envelope_serde_roundtrip() {
         let envelope = ControllerEnvelope {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 42,
             message: ControllerMessage::Pong(PongPayload {
                 service_ts: 1706400000000,
@@ -2476,15 +2497,30 @@ mod tests {
         let json = serde_json::to_string(&envelope).unwrap();
         assert_eq!(
             json,
-            r#"{"seq":42,"type":"pong","service_ts":1706400000000,"controller_ts":1706400000050}"#
+            r#"{"protocol_version":1,"seq":42,"type":"pong","service_ts":1706400000000,"controller_ts":1706400000050}"#
         );
         let deserialized: ControllerEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, envelope);
     }
 
     #[test]
+    fn service_envelope_missing_protocol_version_fails() {
+        // Old-format envelope without protocol_version must fail deserialization.
+        let json = r#"{"seq":1,"type":"ping","service_ts":1706400000000}"#;
+        assert!(serde_json::from_str::<ServiceEnvelope>(json).is_err());
+    }
+
+    #[test]
+    fn controller_envelope_missing_protocol_version_fails() {
+        // Old-format envelope without protocol_version must fail deserialization.
+        let json = r#"{"seq":42,"type":"pong","service_ts":1706400000000,"controller_ts":1706400000050}"#;
+        assert!(serde_json::from_str::<ControllerEnvelope>(json).is_err());
+    }
+
+    #[test]
     fn service_envelope_complex_message() {
         let envelope = ServiceEnvelope {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 3,
             message: ServiceMessage::Enroll(EnrollPayload {
                 hostname: "test-host".to_string(),
@@ -2494,6 +2530,7 @@ mod tests {
             }),
         };
         let json = serde_json::to_string(&envelope).unwrap();
+        assert!(json.contains(r#""protocol_version":1"#));
         assert!(json.contains(r#""seq":3"#));
         assert!(json.contains(r#""type":"enroll"#));
         let deserialized: ServiceEnvelope = serde_json::from_str(&json).unwrap();
@@ -2503,6 +2540,7 @@ mod tests {
     #[test]
     fn controller_envelope_error_message() {
         let envelope = ControllerEnvelope {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 5,
             message: ControllerMessage::Error(ErrorPayload {
                 code: ErrorCode::SequenceError,
@@ -2510,6 +2548,7 @@ mod tests {
             }),
         };
         let json = serde_json::to_string(&envelope).unwrap();
+        assert!(json.contains(r#""protocol_version":1"#));
         assert!(json.contains(r#""seq":5"#));
         assert!(json.contains(r#""code":"sequence_error""#));
         let deserialized: ControllerEnvelope = serde_json::from_str(&json).unwrap();
@@ -2522,6 +2561,7 @@ mod tests {
         let e1 = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 1 }));
         let e2 = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 2 }));
         let e3 = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 3 }));
+        assert_eq!(e1.protocol_version, CURRENT_PROTOCOL_VERSION);
         assert_eq!(e1.seq, 1);
         assert_eq!(e2.seq, 2);
         assert_eq!(e3.seq, 3);
@@ -2538,6 +2578,7 @@ mod tests {
             service_ts: 3,
             controller_ts: 4,
         }));
+        assert_eq!(e1.protocol_version, CURRENT_PROTOCOL_VERSION);
         assert_eq!(e1.seq, 1);
         assert_eq!(e2.seq, 2);
     }
@@ -2588,6 +2629,7 @@ mod tests {
     fn outgoing_seq_default() {
         let mut seq = OutgoingSeq::default();
         let e = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 1 }));
+        assert_eq!(e.protocol_version, CURRENT_PROTOCOL_VERSION);
         assert_eq!(e.seq, 1);
     }
 
@@ -2754,6 +2796,7 @@ mod tests {
     /// Wrap a service message in an envelope and serialize to JSON value.
     fn service_envelope_json(msg: ServiceMessage) -> serde_json::Value {
         let envelope = ServiceEnvelope {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 1,
             message: msg,
         };
@@ -2763,6 +2806,7 @@ mod tests {
     /// Wrap a controller message in an envelope and serialize to JSON value.
     fn controller_envelope_json(msg: ControllerMessage) -> serde_json::Value {
         let envelope = ControllerEnvelope {
+            protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 1,
             message: msg,
         };

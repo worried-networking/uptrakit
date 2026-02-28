@@ -12,19 +12,20 @@ use rootcause::prelude::*;
 use serde::Deserialize;
 use tokio_rustls::TlsConnector;
 use uptrakit_internal_wire::{
-    Capability, CloseReason, ControllerEnvelope, ControllerMessage, IncomingSeq, OutgoingSeq,
-    ServiceMessage,
+    Capability, CloseReason, CURRENT_PROTOCOL_VERSION, ControllerEnvelope, ControllerMessage,
+    IncomingSeq, OutgoingSeq, ServiceMessage,
 };
 
 use crate::error::{EnrollmentError, ProtocolError, Result};
 use crate::ws::{WsStream, connect_ws, is_peer_closed, log_close_frame};
 
-/// Minimal envelope used to extract the sequence number before full
-/// deserialization. This lets us advance the incoming sequence counter even
-/// when the message payload cannot be parsed (e.g. a new variant the service
-/// doesn't know about yet).
+/// Minimal envelope used to extract protocol version and sequence number before
+/// full deserialization. This lets us validate both fields and advance the
+/// incoming sequence counter even when the message payload cannot be parsed
+/// (e.g. a new variant the service doesn't know about yet).
 #[derive(Deserialize)]
-struct SeqOnly {
+struct EnvelopeHeader {
+    protocol_version: u32,
     seq: u64,
 }
 
@@ -96,13 +97,19 @@ impl ControllerConnection {
         loop {
             match self.ws.next().await {
                 Some(Ok(Message::Text(text))) => {
-                    // Extract and validate the sequence number first, before
-                    // attempting to deserialize the full message. This ensures
-                    // the counter stays in sync even when the payload contains
-                    // an unknown variant.
-                    let seq_only: SeqOnly =
+                    // Extract and validate protocol version and sequence number
+                    // first, before attempting to deserialize the full message.
+                    // This ensures the counter stays in sync even when the
+                    // payload contains an unknown variant.
+                    let header: EnvelopeHeader =
                         serde_json::from_str(&text).context_to::<EnrollmentError>()?;
-                    if let Err(e) = self.in_seq.validate(seq_only.seq) {
+                    if header.protocol_version != CURRENT_PROTOCOL_VERSION {
+                        bail!(EnrollmentError::Protocol(ProtocolError::VersionMismatch {
+                            expected: CURRENT_PROTOCOL_VERSION,
+                            received: header.protocol_version,
+                        }));
+                    }
+                    if let Err(e) = self.in_seq.validate(header.seq) {
                         bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(
                             format!("sequence validation failed: {e}")
                         )));
@@ -118,9 +125,15 @@ impl ControllerConnection {
                     return Ok(Some(envelope.message));
                 }
                 Some(Ok(Message::Binary(data))) => {
-                    let seq_only: SeqOnly =
+                    let header: EnvelopeHeader =
                         serde_json::from_slice(&data).context_to::<EnrollmentError>()?;
-                    if let Err(e) = self.in_seq.validate(seq_only.seq) {
+                    if header.protocol_version != CURRENT_PROTOCOL_VERSION {
+                        bail!(EnrollmentError::Protocol(ProtocolError::VersionMismatch {
+                            expected: CURRENT_PROTOCOL_VERSION,
+                            received: header.protocol_version,
+                        }));
+                    }
+                    if let Err(e) = self.in_seq.validate(header.seq) {
                         bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(
                             format!("sequence validation failed: {e}")
                         )));

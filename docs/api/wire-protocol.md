@@ -70,6 +70,7 @@ Sent by the controller to all connected services before it shuts down (SIGTERM /
 
 ```json
 {
+  "protocol_version": 1,
   "seq": 1,
   "type": "server_restarting",
   "reason": "graceful restart"
@@ -103,6 +104,7 @@ that role on this host-software pair.
 
 ```json
 {
+  "protocol_version": 1,
   "seq": 1,
   "type": "check_versions",
   "host_machine_id": "abc-123",
@@ -151,6 +153,7 @@ and is not sent to the agent.
 
 ```json
 {
+  "protocol_version": 1,
   "seq": 1,
   "type": "execute_update",
   "host_machine_id": "abc-123",
@@ -190,6 +193,7 @@ and is not sent to the agent.
 
 ```json
 {
+  "protocol_version": 1,
   "seq": 1,
   "type": "discover_software",
   "host_machine_id": "abc-123",
@@ -214,6 +218,7 @@ Known `plugin_type` values for discovery: `package_manager_homebrew`, `discovery
 
 ```json
 {
+  "protocol_version": 1,
   "seq": 1,
   "type": "discovery_results",
   "host_machine_id": "abc-123",
@@ -307,15 +312,29 @@ routing lookups succeed.
 See [SSH Agent Architecture — Version Check and Update Execution](../architecture/ssh-agent.md#version-check-and-update-execution)
 for the full dispatch flow.
 
+## Protocol Version
+
+Every envelope (`ServiceEnvelope` / `ControllerEnvelope`) carries a required `protocol_version: u32` field
+(currently `1`). Both the `protocol_version` and `seq` fields are always the first fields serialized so that
+receivers can extract them before attempting a full parse.
+
+When a breaking change is introduced to the wire format (a new required field, a variant renamed or removed,
+or a change to capability-negotiation semantics), `CURRENT_PROTOCOL_VERSION` is incremented. Receivers that
+encounter an unknown `protocol_version` must close the connection immediately with a protocol error and log
+the mismatch. There is **no backwards-compatibility**: both peers must speak the same protocol version.
+
+To upgrade the protocol version in a deployment, update all controllers and services simultaneously.
+
 ## Replay Protection
 
 Every envelope (`ServiceEnvelope` / `ControllerEnvelope`) carries a monotonically increasing `seq` starting at `1`.
 Each connection tracks per-direction counters; mismatched sequences cause the connection to close with
 `ErrorCode::SequenceError`.
 
-Sequence validation is performed before full message deserialization. When a message has a valid sequence number but
-an unrecognized type (e.g., from a newer protocol version), the sequence counter is correctly advanced and the message
-is silently skipped. This ensures that unknown message types do not cause sequence mismatches on subsequent messages.
+Sequence and protocol version validation are performed before full message deserialization. When a message has valid
+header fields but an unrecognized `type` (e.g., a new variant from a future service build running the same protocol
+version), the sequence counter is correctly advanced and the message is silently skipped. This ensures that unknown
+message types do not cause sequence mismatches on subsequent messages.
 
 ## Connection Limits
 
@@ -517,6 +536,7 @@ configured) for cross-controller delivery (contains no credentials). MQTT servic
 
 ```json
 {
+  "protocol_version": 1,
   "seq": 1,
   "type": "software_states",
   "tenant_id": "550e8400-e29b-41d4-a716-446655440001",
@@ -554,6 +574,7 @@ WebSocket connection is not closed).
 
 ```json
 {
+  "protocol_version": 1,
   "seq": 2,
   "type": "mqtt_trigger_update",
   "tenant_id": "550e8400-e29b-41d4-a716-446655440001",

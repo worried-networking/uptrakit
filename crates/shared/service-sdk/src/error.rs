@@ -53,6 +53,8 @@ pub enum ProtocolError {
     ResponseTimeout,
     #[error("TCP connection timed out")]
     ConnectionTimeout,
+    #[error("protocol version mismatch: expected {expected}, received {received}")]
+    VersionMismatch { expected: u32, received: u32 },
 }
 
 /// CA certificate fetch and bootstrap errors.

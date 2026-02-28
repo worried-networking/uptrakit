@@ -54,6 +54,15 @@ info:
     present the `enrollment_secret` via an `Authorization: Bearer` header
     during the WebSocket upgrade handshake.
 
+    ## Protocol Version
+
+    Every message envelope carries a `protocol_version: u32` field (currently `1`).
+    When the wire format changes in a breaking way (new required field, renamed variant,
+    changed capability semantics), this value is incremented. A receiver that sees an
+    unknown `protocol_version` must close the connection with a protocol error and
+    log the mismatch. There is no backwards-compatibility: both peers must speak the
+    same protocol version.
+
     ## Replay Protection
 
     Every message on the wire is wrapped in an envelope containing a monotonically
@@ -955,10 +964,19 @@ components:
     pingPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - service_ts
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -978,11 +996,20 @@ components:
     pongPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - service_ts
         - controller_ts
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1008,12 +1035,21 @@ components:
     enrollPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - hostname
         - friendly_name
         - capabilities
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1062,12 +1098,21 @@ components:
     enrolledPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - service_id
         - enrollment_secret
         - status
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1103,10 +1148,19 @@ components:
     approvedPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - service_id
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1126,10 +1180,19 @@ components:
     rejectedPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - service_id
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1149,10 +1212,19 @@ components:
     requestCertificatePayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - csr_pem
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1175,11 +1247,20 @@ components:
     certificatePayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - cert_pem
         - not_after
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1205,11 +1286,20 @@ components:
     errorPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - code
         - message
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1290,11 +1380,20 @@ components:
     reportHostsPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - hosts
         - agent_version
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1338,10 +1437,19 @@ components:
     renewCertificatePayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - csr_pem
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1365,11 +1473,20 @@ components:
     serviceSettingsPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - renewal_window_hours
         - ping_interval
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1441,10 +1558,19 @@ components:
     caBundleUpdatedPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - ca_bundle_pem
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1465,10 +1591,19 @@ components:
     requestCertRenewalPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - reason
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1489,10 +1624,19 @@ components:
     serverRestartingPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - reason
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1515,11 +1659,20 @@ components:
     checkVersionsPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - host_machine_id
         - assignments
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1602,10 +1755,19 @@ components:
     versionCheckResultsPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - results
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1799,6 +1961,7 @@ components:
     executeUpdatePayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - host_machine_id
@@ -1808,6 +1971,14 @@ components:
         - to_version
         - execute_update_plugin
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1887,10 +2058,19 @@ components:
     updateStartedPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - update_history_id
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1915,11 +2095,20 @@ components:
     updateOutputPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - update_history_id
         - output
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1945,12 +2134,21 @@ components:
     updateResultPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - update_history_id
         - status
         - output
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -1998,10 +2196,19 @@ components:
     disconnectingPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - reason
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2026,10 +2233,19 @@ components:
     mqttRegisterPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - instance_id
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2080,10 +2296,19 @@ components:
     mqttRegisteredPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - instance_id
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2102,10 +2327,19 @@ components:
     mqttReleaseTenantsPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - mqtt_client_ids
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2127,11 +2361,20 @@ components:
     mqttClientStatusPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - mqtt_client_id
         - status
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2161,10 +2404,19 @@ components:
     mqttTenantAssignmentsPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - tenants
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2272,10 +2524,19 @@ components:
     mqttTenantConfigUpdatedPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - tenant
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2292,11 +2553,20 @@ components:
     mqttTenantRevokedPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - mqtt_client_id
         - reason
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2394,11 +2664,20 @@ components:
     softwareStatesPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - tenant_id
         - items
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2423,6 +2702,7 @@ components:
     mqttTriggerUpdatePayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - tenant_id
@@ -2431,6 +2711,14 @@ components:
         - to_version
         - mqtt_client_id
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2584,11 +2872,20 @@ components:
     discoverSoftwarePayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - host_machine_id
         - plugins
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2643,11 +2940,20 @@ components:
     discoveryResultsPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - host_machine_id
         - results
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2671,9 +2977,18 @@ components:
     serviceCredentialsPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64
@@ -2705,10 +3020,19 @@ components:
     requestCaRotationPayload:
       type: object
       required:
+        - protocol_version
         - seq
         - type
         - reason
       properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
         seq:
           type: integer
           format: int64

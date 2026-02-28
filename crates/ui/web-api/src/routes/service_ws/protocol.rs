@@ -13,8 +13,8 @@ use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_internal_wire::{
-    Capability, CloseReason, ControllerMessage, IncomingSeq, OutgoingSeq, PongPayload,
-    ServiceEnvelope, ServiceMessage, now_millis,
+    Capability, CloseReason, ControllerMessage, CURRENT_PROTOCOL_VERSION, IncomingSeq, OutgoingSeq,
+    PongPayload, ServiceEnvelope, ServiceMessage, now_millis,
 };
 use uptrakit_shared_db::entity::service as service_entity;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -81,6 +81,8 @@ pub(crate) enum ServiceWsError {
     Deserialize(String),
     #[error("sequence validation failed: {0}")]
     SequenceValidation(String),
+    #[error("protocol version mismatch: expected {expected}, received {received}")]
+    ProtocolVersionMismatch { expected: u32, received: u32 },
 }
 
 pub(crate) type ServiceWsResult<T> = std::result::Result<T, Report<ServiceWsError>>;
@@ -119,37 +121,49 @@ pub(crate) fn serialize_controller_msg(
     }
 }
 
-/// Minimal envelope used to extract the sequence number before full deserialization.
+/// Minimal envelope used to extract envelope fields before full deserialization.
 ///
 /// Advancing the sequence counter even when the full payload cannot be parsed
 /// (e.g. an unknown message type from a future service) is required for replay
-/// protection to remain accurate.
+/// protection to remain accurate. Extracting `protocol_version` here lets us
+/// reject version-mismatched connections before attempting the full parse.
 #[derive(serde::Deserialize)]
-struct SeqOnly {
+struct EnvelopeHeader {
+    protocol_version: u32,
     seq: u64,
 }
 
 /// Deserialize a [`ServiceMessage`] from a sequenced [`ServiceEnvelope`]
-/// JSON string, validating the sequence number.
+/// JSON string, validating the protocol version and sequence number.
 ///
 /// Returns:
-/// - `Err(_)` on malformed JSON or sequence mismatch (hard errors, connection should close).
-/// - `Ok(None)` on an unrecognized message type from a newer service (soft, log and skip).
+/// - `Err(_)` on malformed JSON, protocol version mismatch, or sequence mismatch
+///   (hard errors — connection should be closed).
+/// - `Ok(None)` on an unrecognized message type from a newer service build
+///   (soft, log and skip — sequence was already advanced).
 /// - `Ok(Some(msg))` on successful parse.
 pub(crate) fn deserialize_service_msg(
     in_seq: &mut IncomingSeq,
     text: &str,
 ) -> ServiceWsResult<Option<ServiceMessage>> {
-    // Step 1: Extract sequence number (hard fail on malformed JSON).
-    let seq_only: SeqOnly = serde_json::from_str(text)
+    // Step 1: Extract protocol version and sequence number (hard fail on malformed JSON).
+    let header: EnvelopeHeader = serde_json::from_str(text)
         .context_transform(|e| ServiceWsError::Deserialize(format!("invalid message: {e}")))?;
 
-    // Step 2: Validate sequence (hard fail on mismatch).
+    // Step 2: Validate protocol version (hard fail on mismatch).
+    if header.protocol_version != CURRENT_PROTOCOL_VERSION {
+        return Err(report!(ServiceWsError::ProtocolVersionMismatch {
+            expected: CURRENT_PROTOCOL_VERSION,
+            received: header.protocol_version,
+        }));
+    }
+
+    // Step 3: Validate sequence (hard fail on mismatch).
     in_seq
-        .validate(seq_only.seq)
+        .validate(header.seq)
         .map_err(|e| report!(ServiceWsError::SequenceValidation(e.to_string())))?;
 
-    // Step 3: Full parse — soft fail for unknown types from future services.
+    // Step 4: Full parse — soft fail for unknown types from newer service builds.
     match serde_json::from_str::<ServiceEnvelope>(text) {
         Ok(envelope) => Ok(Some(envelope.message)),
         Err(e) => {
@@ -174,6 +188,11 @@ pub(crate) fn controller_capabilities() -> BTreeSet<Capability> {
         Capability::GracefulShutdown,
         Capability::MqttBridge,
         Capability::SshRemote,
+        Capability::Scheduler,
+        Capability::DatabaseAccess,
+        Capability::NatsAccess,
+        Capability::MasterKeyAccess,
+        Capability::CaManagement,
     ]
     .into_iter()
     .collect()

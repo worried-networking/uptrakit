@@ -18,9 +18,9 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use uptrakit_internal_wire::{
-    Capability, CertificatePayload, ControllerEnvelope, ControllerMessage, EnrollPayload,
-    EnrolledPayload, EnrollmentStatus, IncomingSeq, OutgoingSeq, RequestCertificatePayload,
-    SecretString, ServiceMessage,
+    Capability, CertificatePayload, CURRENT_PROTOCOL_VERSION, ControllerEnvelope, ControllerMessage,
+    EnrollPayload, EnrolledPayload, EnrollmentStatus, IncomingSeq, OutgoingSeq,
+    RequestCertificatePayload, SecretString, ServiceMessage,
 };
 
 use crate::error::{EnrollmentError, IdentityError, ProtocolError, Result};
@@ -122,6 +122,13 @@ pub async fn send_enroll(
                     let envelope: ControllerEnvelope =
                         serde_json::from_str(&text).context_to::<EnrollmentError>()?;
 
+                    if envelope.protocol_version != CURRENT_PROTOCOL_VERSION {
+                        bail!(EnrollmentError::Protocol(ProtocolError::VersionMismatch {
+                            expected: CURRENT_PROTOCOL_VERSION,
+                            received: envelope.protocol_version,
+                        }));
+                    }
+
                     if let Err(e) = in_seq.validate(envelope.seq) {
                         bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(format!(
                             "sequence validation failed: {e}"
@@ -180,6 +187,13 @@ pub async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> R
                 Message::Text(text) => {
                     let envelope: ControllerEnvelope =
                         serde_json::from_str(&text).context_to::<EnrollmentError>()?;
+
+                    if envelope.protocol_version != CURRENT_PROTOCOL_VERSION {
+                        bail!(EnrollmentError::Protocol(ProtocolError::VersionMismatch {
+                            expected: CURRENT_PROTOCOL_VERSION,
+                            received: envelope.protocol_version,
+                        }));
+                    }
 
                     if let Err(e) = in_seq.validate(envelope.seq) {
                         bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(format!(
@@ -257,6 +271,13 @@ pub async fn request_certificate_ws(
                 Message::Text(text) => {
                     let envelope: ControllerEnvelope =
                         serde_json::from_str(&text).context_to::<EnrollmentError>()?;
+
+                    if envelope.protocol_version != CURRENT_PROTOCOL_VERSION {
+                        bail!(EnrollmentError::Protocol(ProtocolError::VersionMismatch {
+                            expected: CURRENT_PROTOCOL_VERSION,
+                            received: envelope.protocol_version,
+                        }));
+                    }
 
                     if let Err(e) = in_seq.validate(envelope.seq) {
                         bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(format!(

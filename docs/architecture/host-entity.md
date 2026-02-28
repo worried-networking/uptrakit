@@ -100,9 +100,10 @@ Rules:
 
 Key types (defined in `crates/shared/wire/src/lib.rs`):
 
-- `ServiceEnvelope { seq: u64, message: ServiceMessage }` — outgoing from service
-- `ControllerEnvelope { seq: u64, message: ControllerMessage }` — outgoing from controller
-- `OutgoingSeq` — wraps messages with `wrap_service()` or `wrap_controller()`
+- `ServiceEnvelope { protocol_version: u32, seq: u64, message: ServiceMessage }` — outgoing from service
+- `ControllerEnvelope { protocol_version: u32, seq: u64, message: ControllerMessage }` — outgoing from controller
+- `CURRENT_PROTOCOL_VERSION: u32` — current protocol version constant (currently `1`); stamp in all outgoing envelopes
+- `OutgoingSeq` — wraps messages with `wrap_service()` or `wrap_controller()`, stamps `CURRENT_PROTOCOL_VERSION`
 - `IncomingSeq` — validates with `validate(seq) -> Result<(), SeqError>`
 - `SeqError { expected: u64, received: u64 }` — validation error
 
