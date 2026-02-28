@@ -344,7 +344,17 @@ async fn execute_plugin_update(
         let pre_result = plugin
             .pre_update_hook(&hook_ctx, &plugin_tx)
             .await
-            .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())));
+            .map_err(|e| {
+                // Avoid "install command failed: install command failed: ..." by
+                // extracting the inner message when the plugin already wrapped the
+                // error in PluginError::InstallFailed.
+                use uptrakit_plugin_infrastructure_core::PluginError;
+                let msg = match e.current_context() {
+                    PluginError::InstallFailed(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                report!(UpdateError::InstallFailed(msg))
+            });
         drop(plugin_tx);
         let _ = bridge_handle.await;
 
@@ -368,7 +378,17 @@ async fn execute_plugin_update(
             &plugin_tx,
         )
         .await
-        .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())));
+        .map_err(|e| {
+            // Avoid "install command failed: install command failed: ..." by
+            // extracting the inner message when the plugin already wrapped the
+            // error in PluginError::InstallFailed.
+            use uptrakit_plugin_infrastructure_core::PluginError;
+            let msg = match e.current_context() {
+                PluginError::InstallFailed(s) => s.clone(),
+                other => other.to_string(),
+            };
+            report!(UpdateError::InstallFailed(msg))
+        });
     drop(plugin_tx);
     let _ = bridge_handle.await;
     let update_output = update_result?;
