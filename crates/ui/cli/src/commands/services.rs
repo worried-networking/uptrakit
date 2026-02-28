@@ -212,7 +212,10 @@ pub async fn remove(
     request_timeout: Option<std::time::Duration>,
 ) -> Result<MessageResponse> {
     let client = authenticated_client(server, token, insecure, request_timeout)?;
-    client.remove_service(id).await.context_to()
+    client.remove_service(id).await.context_to()?;
+    Ok(MessageResponse {
+        message: "Service deactivated.".to_string(),
+    })
 }
 
 /// Merge a source service into a target service.

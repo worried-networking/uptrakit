@@ -200,7 +200,10 @@ pub async fn deactivate(params: DeactivateParams<'_>) -> Result<HostMessageRespo
         params.insecure,
         params.request_timeout,
     )?;
-    client.deactivate_host(params.id).await.context_to()
+    client.deactivate_host(params.id).await.context_to()?;
+    Ok(HostMessageResponse {
+        message: "Host deactivated.".to_string(),
+    })
 }
 
 pub async fn discover(params: DiscoverParams<'_>) -> Result<TriggerDiscoveryResponse> {

@@ -42,12 +42,14 @@ pub enum AutodiscoveryError {
 // ── Ignore rules ─────────────────────────────────────────────────────────────
 
 /// Insert an autodiscovery ignore rule, silently ignoring duplicates (idempotent).
+///
+/// Returns `true` if a new rule was inserted, `false` if the rule already existed.
 pub async fn create_or_ignore_ignore_rule(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     plugin_config_id: Uuid,
     package_identifier: &str,
-) -> Result<(), AutodiscoveryError> {
+) -> Result<bool, AutodiscoveryError> {
     // Verify the rule does not already exist to avoid the conflict entirely.
     let exists = AutodiscoveryIgnore::find()
         .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
@@ -57,7 +59,7 @@ pub async fn create_or_ignore_ignore_rule(
         .await?;
 
     if exists > 0 {
-        return Ok(());
+        return Ok(false);
     }
 
     let record = autodiscovery_ignore::ActiveModel {
@@ -80,7 +82,7 @@ pub async fn create_or_ignore_ignore_rule(
             AutodiscoveryError::Db(e)
         })?;
 
-    Ok(())
+    Ok(true)
 }
 
 /// List autodiscovery ignore rules for a tenant, with optional plugin-config filter.

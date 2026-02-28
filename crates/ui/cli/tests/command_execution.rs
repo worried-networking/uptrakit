@@ -10,7 +10,7 @@ use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::mock::MockApiServer;
 use uptrakit_openapi_client::types::hosts::{HostAgentSummary, HostResponse};
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
-use uptrakit_openapi_client::types::services::{MessageResponse, ServiceResponse};
+use uptrakit_openapi_client::types::services::ServiceResponse;
 use uptrakit_openapi_client::types::software_items::SoftwareItemResponse;
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -386,10 +386,7 @@ async fn api_500_returns_server_error() {
 async fn services_remove_success() {
     let server = MockApiServer::start();
     let id = service_id();
-    let msg = MessageResponse {
-        message: "Service removed.".to_string(),
-    };
-    let _m = server.services().on_remove(&id).ok(&msg);
+    let _m = server.services().on_remove(&id).no_content();
 
     let result = services::remove(
         &id,
