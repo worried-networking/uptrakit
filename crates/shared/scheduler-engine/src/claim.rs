@@ -1,7 +1,9 @@
 use rootcause::prelude::*;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter};
+use sea_orm::{ActiveEnum, ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter};
+use strum::IntoEnumIterator;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::scheduled_task;
+use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 use uuid::Uuid;
 
 use crate::error::{self, SchedulerError};
@@ -148,14 +150,23 @@ pub async fn release_all_claims(
 }
 
 /// Find tasks that are due for execution (enabled, unlocked, next_run_at <= now).
+///
+/// Only tasks with a known [`ScheduledTaskType`] variant are returned. Rows in the
+/// database with an unrecognised `task_type` string (added during a rolling upgrade
+/// where a newer controller instance created a task this instance doesn't know about)
+/// are silently skipped rather than causing a deserialization failure.
 pub async fn find_due_tasks(
     db: &DatabaseConnection,
     tenant_id: Uuid,
 ) -> error::Result<Vec<scheduled_task::Model>> {
     let now = OffsetDateTime::now_utc();
+    let known_types: Vec<String> = ScheduledTaskType::iter()
+        .map(|t| t.into_value())
+        .collect();
 
     scheduled_task::Entity::find()
         .filter(scheduled_task::Column::TenantId.eq(tenant_id))
+        .filter(scheduled_task::Column::TaskType.is_in(known_types))
         .filter(scheduled_task::Column::Enabled.eq(true))
         .filter(scheduled_task::Column::LockedBy.is_null())
         .filter(scheduled_task::Column::NextRunAt.lte(now))
@@ -405,5 +416,49 @@ mod tests {
             .unwrap();
         // next_run_at should now be close to `now`
         assert!(updated.next_run_at <= OffsetDateTime::now_utc());
+    }
+
+    /// Rows with an unknown `task_type` string (from a newer controller version) must be
+    /// silently excluded rather than causing a deserialization failure.
+    #[tokio::test]
+    async fn find_due_tasks_excludes_unknown_task_type() {
+        let db = setup_test_db().await;
+        let tenant = seed_tenant(&db).await;
+
+        // Insert a known task that is due.
+        seed_task(&db, tenant.id).await;
+
+        // Insert an unknown task type directly via raw SQL — simulates a row
+        // created by a newer controller version during a rolling upgrade.
+        // Temporarily disable FK checks so we can insert without needing a
+        // perfectly formatted timestamp string that matches the SeaORM storage format.
+        use sea_orm::ConnectionTrait;
+        db.execute_unprepared("PRAGMA foreign_keys = OFF")
+            .await
+            .expect("disable fk");
+        db.execute_unprepared(&format!(
+            "INSERT INTO scheduled_tasks \
+            (id, tenant_id, task_type, cron_expression, enabled, task_config, \
+             last_run_at, next_run_at, locked_by, locked_at, last_error, run_count, \
+             created_at, updated_at) VALUES \
+            ('{id}', '{tid}', 'future_unknown_task_type', '*/5 * * * *', 1, NULL, \
+             NULL, datetime('now', '-1 minute'), NULL, NULL, NULL, 0, \
+             datetime('now'), datetime('now'))",
+            id = Uuid::now_v7(),
+            tid = tenant.id,
+        ))
+        .await
+        .expect("insert unknown task type");
+        db.execute_unprepared("PRAGMA foreign_keys = ON")
+            .await
+            .expect("re-enable fk");
+
+        // Only the known task should be returned; no deserialization error.
+        let due = find_due_tasks(&db, tenant.id).await.unwrap();
+        assert_eq!(due.len(), 1, "unknown task type should be excluded");
+        assert_eq!(
+            due[0].task_type,
+            scheduled_task::ScheduledTaskType::AuthCleanup
+        );
     }
 }

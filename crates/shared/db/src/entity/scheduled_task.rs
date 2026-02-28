@@ -2,8 +2,12 @@ use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
 /// Type of scheduled task.
+///
+/// New variants may be added in future versions. External code that matches on this enum
+/// must include a wildcard arm to handle unknown variants added during rolling upgrades.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "Text")]
+#[non_exhaustive]
 pub enum ScheduledTaskType {
     #[sea_orm(string_value = "auth_cleanup")]
     AuthCleanup,
