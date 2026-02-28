@@ -90,7 +90,4 @@ produce a compiler warning.
 
 ### Issues
 
-**[MEDIUM]** `src/registry.rs:151-156` -- No feature-flag gating for platform-specific plugins.
-`HomebrewPlugin` is macOS-specific, `ProxmoxHelperScriptsPlugin` is Proxmox VE-specific. Both
-compiled unconditionally into all agent binaries. A Linux agent accepts valid `HomebrewPlugin`
-configuration and fails only at runtime when `brew` is absent.
+No extensibility issues found.

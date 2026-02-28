@@ -13,11 +13,14 @@ delivery, and database query helpers. It is a library crate consumed by `uptraki
 
 The crate demonstrates strong security primitives (Argon2id, JWT denylist, typed permission
 extractors, PKCE for OIDC), a well-designed `TenantDb` abstraction for tenant isolation, and
-clean `AppState` builder pattern. Key concerns: a critical coding standards violation in OIDC
-auth (`unwrap_or(0)` on user count), the in-memory-only token denylist without cross-instance
-replication, the crate's overall size approaching "god crate" territory, route handlers in
-`src/routes/` lacking inline unit tests for the majority of business-logic paths, and several
-query modules without test coverage.
+clean `AppState` builder pattern. Key concerns: the in-memory-only token denylist without
+cross-instance replication, the crate's overall size approaching "god crate" territory, route
+handlers in `src/routes/` lacking inline unit tests for the majority of business-logic paths,
+and several query modules without test coverage. The OIDC registration DB error masking
+(`unwrap_or(1)`), `count_linked_hosts` DB error swallowing, `Report::new()` macro violations,
+invalid UUID query parameter handling, HTTP status code violations on soft-delete and
+idempotent-create endpoints, and the `require_auth.rs` permission-fetch fallback have been
+fixed.
 
 ## Architecture
 
@@ -129,22 +132,11 @@ filter. Pre-multi-tenancy issue.
 **[MEDIUM]** `src/routes/oidc_auth.rs:349-352` -- Registration code exposed in redirect URL
 query parameter. Appears in browser history and server logs.
 
-**[MEDIUM]** `src/routes/oidc_auth.rs:363-374` -- `unwrap_or(1)` during OIDC registration
-check silently swallows DB errors. A DB outage returns `1` (treating user as "existing"),
-which either blocks legitimate new registrations or skips the token-required path.
-
-**[MEDIUM]** `src/middleware/require_auth.rs:114-116` -- Permission fetch failure returns empty
-permissions (`unwrap_or_default()`), masking DB connectivity problems as 403 denials instead of
-500 errors.
-
 **[LOW]** `src/auth/token.rs:17-22` -- API tokens hashed with unsalted SHA-256. Per-token salt
 would strengthen defense-in-depth.
 
 **[LOW]** `src/routes/oidc_auth.rs:388,535,584,1221` -- `generate_secure_token()` falls back to
 UUID on failure, silently downgrading from 256-bit to 122-bit entropy for security tokens.
-
-**[LOW]** `src/middleware/rate_limit.rs:121` -- `FALLBACK_LIMITS.lock().unwrap()` on poisoned
-mutex would panic. Use `.unwrap_or_else(|e| e.into_inner())`.
 
 **[LOW]** `src/middleware/resolve_proxy_headers.rs:256-258` -- CA CN comparison uses
 non-constant-time string equality. The compared values (CA CNs) are not confidential, making
@@ -299,22 +291,7 @@ sequentially with no timeout.
 
 ### Issues
 
-**[HIGH]** `src/routes/hosts.rs:283-286` and `src/routes/autodiscovery.rs:48-51` -- Query
-parameters use `Option<String>` instead of `Option<Uuid>` for UUID fields, with manual parsing
-that silently ignores invalid UUIDs instead of returning 422.
-
-**[MEDIUM]** `src/lib.rs:57`, `routes/services.rs:429`, `routes/auth.rs:484`,
-`middleware/require_auth.rs:219`, `middleware/resolve_ip.rs:148` -- Uses `Report::new()` instead
-of `report!()` macro.
-
-**[MEDIUM]** `src/routes/services.rs:282` and `src/routes/hosts.rs:141` -- Soft-delete endpoints
-return `200 OK` with body instead of `204 No Content`.
-
-**[MEDIUM]** `src/routes/autodiscovery.rs:154,159` -- Create ignore returns `201 Created` for
-both new and pre-existing records.
-
-**[MEDIUM]** `src/queries/software_items.rs:119-125` -- `count_linked_hosts` uses
-`.count(db).await.unwrap_or(0)`, silently swallowing DB errors.
+No coding standards issues found.
 
 ## Extensibility
 

@@ -13,8 +13,9 @@ execution, and discovery primitives used by both `uptrakit-agent` (local executi
 
 The crate demonstrates correct abstraction boundaries: plugin management delegated to
 `uptrakit-plugin-infrastructure-registry`, transport to `uptrakit-service-sdk`, and execution via
-`CommandExecutor` from `uptrakit-command`. The main concern is that all plugins are linked
-unconditionally, including platform-specific ones.
+`CommandExecutor` from `uptrakit-command`. Compiling platform-specific plugins (Homebrew,
+Proxmox) unconditionally into all agent binaries is an accepted tradeoff — failures surface at
+runtime when the tool is absent, and the plugin set is small and stable.
 
 ## Architecture
 
@@ -31,13 +32,7 @@ unconditionally, including platform-specific ones.
 
 ### Issues
 
-**[MEDIUM]** `Cargo.toml:27` -- `uptrakit-plugin-infrastructure-registry` is an unconditional
-dependency. The registry compiles all plugin crates (GitHub, Docker Registry, Homebrew, Proxmox
-Helper Scripts) into every binary that links `uptrakit-agent-core`. A Linux agent binary
-includes `HomebrewPlugin` even though `brew` will never be present. The plugin's `validate()`
-does not check for `brew` at validation time, so the failure only surfaces at runtime. As the
-plugin set grows, introduce `#[cfg(target_os = "macos")]` guards or plugin-specific Cargo
-features.
+No architectural issues found.
 
 ## Security and Safety
 

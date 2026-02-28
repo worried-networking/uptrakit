@@ -24,7 +24,11 @@ should be split into domain modules; the systemic `#[tokio::test]` violation (27
 concerns (in-memory-only token denylist, blocking Mutex in rate limiter) should be addressed
 before multi-instance deployment. The previously-reported SSRF in Docker auth realm, the OIDC
 privilege escalation via `unwrap_or(0)`, all `#[cfg(not(feature))]` violations, the unbounded
-MQTT event channel, and the scheduler claim leak on cancellation have been fixed.
+MQTT event channel, and the scheduler claim leak on cancellation have been fixed. The OIDC
+registration DB error masking (`unwrap_or(1)`), `count_linked_hosts` DB error swallowing,
+`Report::new()` macro violations, invalid UUID query parameter handling, HTTP status code
+violations on soft-delete and idempotent-create endpoints, and the `require_auth.rs`
+permission-fetch fallback have since been fixed.
 
 ## Per-Crate Review Files
 
@@ -242,9 +246,6 @@ inline unit tests. `hosts.rs`, `agents.rs`, `settings_ca.rs`, `settings_mqtt.rs`
 `crates/shared/scheduler-engine/src/executors/version_check.rs:44,51` -- `NoopCommandExecutor`
 duplicated with `unreachable!()` in two locations.
 
-**[MEDIUM]** Production `Mutex::lock().unwrap()` in `plugins/releases/docker/src/auth.rs:43,130`
-and `web-api/src/middleware/rate_limit.rs:121`. Use `.unwrap_or_else(|e| e.into_inner())`.
-
 **[MEDIUM]** `.expect()` on guarded values in `agent-ssh/src/commands/update_sudoers.rs:72,114`
 is logically safe but fragile to refactoring.
 
@@ -311,26 +312,13 @@ insufficient for `release_all_claims` under slow database.
 - Database-backed rate limiting with atomic SQL upsert, HA-safe across controller instances.
 - Structured tracing with proper levels. No sensitive data in log output.
 - `bail!` / `report!` / `context_to` / `impl_report_conversion!` pattern uniform; `Report::new()`
-  anti-pattern absent; `Result<T, String>` absent from all library boundaries.
+  anti-pattern absent across all 31 crates; `Result<T, String>` absent from all library
+  boundaries.
 - No `StatusCode` numeric literal comparisons anywhere in the codebase.
 - 70+ endpoints carry `x-required-permission` OpenAPI extension annotations.
 - Zero `anyhow` usage across all 31 crates.
 
 ### Issues
-
-**[HIGH]** `crates/ui/web-api/src/routes/hosts.rs:283-286` and
-`crates/ui/web-api/src/routes/autodiscovery.rs:48-51` -- Query parameters use `Option<String>`
-instead of `Option<Uuid>` for UUID fields, silently ignoring invalid UUIDs.
-
-**[MEDIUM]** `crates/ui/web-api/src/lib.rs:57`, `routes/services.rs:429`,
-`routes/auth.rs:484`, `middleware/require_auth.rs:219`, `middleware/resolve_ip.rs:148` -- Uses
-`Report::new()` instead of `report!()` macro (5 instances).
-
-**[MEDIUM]** `crates/ui/web-api/src/routes/services.rs:282` and `routes/hosts.rs:141` --
-Soft-delete `DELETE` endpoints return `200 OK` instead of `204 No Content`.
-
-**[MEDIUM]** `crates/ui/web-api/src/routes/autodiscovery.rs:154,159` -- Create ignore returns
-`201 Created` for pre-existing records.
 
 **[MEDIUM]** `crates/shared/web-api-types/src/permissions.rs:9` -- `Permission` enum lacks
 `#[non_exhaustive]`.
@@ -368,10 +356,6 @@ cause deserialization errors and are irreversibly lost.
 
 **[MEDIUM]** `crates/plugins/infrastructure/registry/src/registry.rs:257-279` --
 `validate_package_identifier` manually maintained outside the `register_plugins!` macro.
-
-**[MEDIUM]** `crates/plugins/infrastructure/registry/src/registry.rs:151-156` --
-Platform-specific plugins compiled unconditionally. `HomebrewPlugin` (macOS-only) and
-`ProxmoxHelperScriptsPlugin` (Proxmox-VE-only) compiled into every agent binary.
 
 **[MEDIUM]** `crates/shared/wire/src/lib.rs:214-234` -- `ServiceMessage` and
 `ControllerMessage` mix agent-specific and MQTT-specific variants.
