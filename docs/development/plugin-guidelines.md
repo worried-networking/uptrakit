@@ -49,37 +49,47 @@ pub enum HostCompatibility {
     /// The plugin is compatible with this host.
     Compatible,
     /// The plugin is not compatible with this host (e.g. required tool not found).
-    Incompatible { reason: String },
+    Incompatible(String),
 }
 ```
 
-This allows the controller to skip discovery or version checks for plugins that are not applicable
-to a given host, and to surface compatibility status in the UI.
+This allows the agent to skip discovery for plugins that are not applicable to the current host
+(e.g. no Docker daemon, no APT), and ensures that helper scripts are only installed on compatible
+hosts during bootstrap (preventing failures on read-only filesystems such as Flatcar Linux).
 
 ### Pattern examples
 
 **APT plugin** — checks whether `apt-get` is available:
 
 ```rust
-fn detect_host_compatibility(&self, executor: &dyn CommandExecutor) -> HostCompatibility {
-    match executor.run(CommandSpec::new("which").arg("apt-get")) {
-        Ok(output) if output.exit_code == 0 => HostCompatibility::Compatible,
-        _ => HostCompatibility::Incompatible {
-            reason: "apt-get not found on this host".to_string(),
-        },
+async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+    let result = self
+        .executor
+        .execute_quiet(&CommandSpec::exec("which", ["apt-get".to_string()]))
+        .await
+        .map_err(|e| report!(PluginError::PluginInternal(format!("which apt-get failed: {e}"))))?;
+    if result.exit_code == 0 {
+        Ok(HostCompatibility::Compatible)
+    } else {
+        Ok(HostCompatibility::Incompatible("apt-get not found".to_string()))
     }
 }
 ```
 
-**Homebrew plugin** — checks whether `brew` is available:
+**Docker plugin** — checks whether `docker` is available (daemon build only):
 
 ```rust
-fn detect_host_compatibility(&self, executor: &dyn CommandExecutor) -> HostCompatibility {
-    match executor.run(CommandSpec::new("which").arg("brew")) {
-        Ok(output) if output.exit_code == 0 => HostCompatibility::Compatible,
-        _ => HostCompatibility::Incompatible {
-            reason: "brew not found on this host".to_string(),
-        },
+#[cfg(feature = "daemon")]
+async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+    let result = self
+        .executor
+        .execute_quiet(&CommandSpec::exec("which", ["docker".to_string()]))
+        .await
+        .map_err(|e| report!(PluginError::PluginInternal(format!("which docker failed: {e}"))))?;
+    if result.exit_code == 0 {
+        Ok(HostCompatibility::Compatible)
+    } else {
+        Ok(HostCompatibility::Incompatible("docker not found".to_string()))
     }
 }
 ```
@@ -324,10 +334,10 @@ Plugin crates:
 | `uptrakit-command` | `crates/shared/command/` | Shell execution, `CommandExecutor` trait, `CommandSpec`, `LocalCommandExecutor`. |
 | `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | Plugin trait/abstractions; re-exports shared types and executor types. |
 | `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | Centralized plugin dispatch and validation; re-exports `PluginType`. |
-| `uptrakit-plugin-releases-docker` | `crates/plugins/releases/docker/` | Docker/OCI image tracking and container discovery. |
+| `uptrakit-plugin-releases-docker` | `crates/plugins/releases/docker/` | Docker/OCI image tracking and container discovery. Implements `DetectHostCompatibility` (daemon build only, checks `which docker`). |
 | `uptrakit-plugin-releases-github` | `crates/plugins/releases/github/` | GitHub Releases: fetches metadata; agent installs. |
 | `uptrakit-plugin-package-manager-homebrew` | `crates/plugins/package-managers/homebrew/` | Homebrew: agent-side version tracking and updates. Implements `DetectHostCompatibility` (checks `which brew`). |
-| `uptrakit-plugin-discovery-proxmox-helper-scripts` | `crates/plugins/discovery/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. |
+| `uptrakit-plugin-discovery-proxmox-helper-scripts` | `crates/plugins/discovery/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. Implements `DetectHostCompatibility` (tests for `/usr/bin/update`, Proxmox VE only). |
 | `uptrakit-plugin-package-manager-apt` | `crates/plugins/package-managers/apt/` | APT: Debian/Ubuntu package management. Implements `DetectHostCompatibility` (checks `which apt-get`) and `PostUpdateHook` (checks `/var/run/reboot-required`). |
 
 ## Adding a New Plugin
@@ -564,38 +574,50 @@ pattern keeps tests fast, deterministic, and independent of the host environment
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_command::{CommandExecutor, CommandOutput, CommandSpec};
+    use std::sync::Arc;
+    use uptrakit_plugin_infrastructure_core::{CommandOutput, HostCompatibility};
+    use uptrakit_command::{CommandExecutor, CommandSpec};
 
     struct FixedExitCodeExecutor {
         exit_code: i32,
-        stdout: String,
     }
 
-    impl CommandExecutor for FixedExitCodeExecutor {
-        fn run(&self, _spec: &CommandSpec) -> Result<CommandOutput, CommandError> {
-            Ok(CommandOutput {
-                exit_code: self.exit_code,
-                stdout: self.stdout.clone(),
-                stderr: String::new(),
-            })
+    impl FixedExitCodeExecutor {
+        fn with_exit_code(exit_code: i32) -> Arc<dyn CommandExecutor> {
+            Arc::new(Self { exit_code })
         }
     }
 
-    #[test]
-    fn detect_host_compatibility_when_tool_present() {
-        let executor = FixedExitCodeExecutor { exit_code: 0, stdout: "/usr/bin/apt-get".into() };
-        let plugin = AptPlugin::new(AptConfig::default(), Arc::new(executor)).unwrap();
-        assert!(matches!(plugin.detect_host_compatibility(), HostCompatibility::Compatible));
+    #[async_trait::async_trait]
+    impl CommandExecutor for FixedExitCodeExecutor {
+        async fn execute(
+            &self,
+            _spec: &CommandSpec,
+            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput { output: String::new(), exit_code: self.exit_code })
+        }
+
+        async fn execute_quiet(
+            &self,
+            _spec: &CommandSpec,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput { output: String::new(), exit_code: self.exit_code })
+        }
     }
 
-    #[test]
-    fn detect_host_compatibility_when_tool_absent() {
-        let executor = FixedExitCodeExecutor { exit_code: 1, stdout: String::new() };
-        let plugin = AptPlugin::new(AptConfig::default(), Arc::new(executor)).unwrap();
-        assert!(matches!(
-            plugin.detect_host_compatibility(),
-            HostCompatibility::Incompatible { .. }
-        ));
+    #[tokio::test]
+    async fn detect_host_compatibility_when_tool_present() {
+        let plugin = AptPlugin::new(AptConfig::default(), FixedExitCodeExecutor::with_exit_code(0)).unwrap();
+        let result = plugin.detect_host_compatibility().await.unwrap();
+        assert_eq!(result, HostCompatibility::Compatible);
+    }
+
+    #[tokio::test]
+    async fn detect_host_compatibility_when_tool_absent() {
+        let plugin = AptPlugin::new(AptConfig::default(), FixedExitCodeExecutor::with_exit_code(1)).unwrap();
+        let result = plugin.detect_host_compatibility().await.unwrap();
+        assert!(matches!(result, HostCompatibility::Incompatible(_)));
     }
 }
 ```
