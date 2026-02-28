@@ -169,6 +169,7 @@ pub(crate) async fn do_enroll(
         ServiceStatus::Approved => service::ServiceStatus::Approved,
         ServiceStatus::Rejected => service::ServiceStatus::Rejected,
         ServiceStatus::Deactivated => service::ServiceStatus::Deactivated,
+        _ => bail!(AgentRouteError::Internal("unknown service status variant".into())),
     };
     let model = service::ActiveModel {
         id: Set(agent_id),

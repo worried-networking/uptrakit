@@ -73,6 +73,10 @@ pub(crate) async fn load_host_agents(tenant_db: &TenantDb, host_id: Uuid) -> Vec
                 service::ServiceStatus::Approved => ServiceStatus::Approved,
                 service::ServiceStatus::Rejected => ServiceStatus::Rejected,
                 service::ServiceStatus::Deactivated => ServiceStatus::Deactivated,
+                _ => {
+                    tracing::warn!("unknown ServiceStatus variant; treating as Pending");
+                    ServiceStatus::Pending
+                }
             },
         })
         .collect()
@@ -164,6 +168,12 @@ pub async fn list_hosts(
                                 service::ServiceStatus::Approved => ServiceStatus::Approved,
                                 service::ServiceStatus::Rejected => ServiceStatus::Rejected,
                                 service::ServiceStatus::Deactivated => ServiceStatus::Deactivated,
+                                _ => {
+                                    tracing::warn!(
+                                        "unknown ServiceStatus variant; treating as Pending"
+                                    );
+                                    ServiceStatus::Pending
+                                }
                             },
                         })
                         .collect()

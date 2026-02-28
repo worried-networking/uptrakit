@@ -195,6 +195,7 @@ pub struct HostPluginRoleSummary {
 }
 
 /// Status returned when triggering an update.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]

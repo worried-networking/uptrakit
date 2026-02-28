@@ -3,6 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 
 /// MQTT connection transport protocol.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "sea-orm",

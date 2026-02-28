@@ -9,6 +9,7 @@ use thiserror::Error;
 /// Items created manually have `discovery_state = NULL`.
 /// Items created by discovery are initially `pending` and must be explicitly
 /// approved or deleted by the user.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "sea-orm",

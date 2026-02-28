@@ -284,6 +284,9 @@ fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
             };
             opts.set_transport(Transport::Tls(tls_config));
         }
+        _ => {
+            tracing::warn!("unknown MqttTransport variant; no TLS configuration applied");
+        }
     }
 
     opts

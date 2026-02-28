@@ -209,6 +209,7 @@ pub(super) async fn handle_mqtt_client_status(
         WireMqttClientConnectionStatus::Online => ApiMqttClientConnectionStatus::Online,
         WireMqttClientConnectionStatus::Offline => ApiMqttClientConnectionStatus::Offline,
         WireMqttClientConnectionStatus::Connecting => ApiMqttClientConnectionStatus::Connecting,
+        _ => ApiMqttClientConnectionStatus::Offline,
     };
 
     if let Err(e) = crate::mqtt_client_store::update_mqtt_client_status(

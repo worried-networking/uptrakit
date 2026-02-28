@@ -151,6 +151,7 @@ impl RegistrationSettings {
                     Err(RegistrationValidationError::InvalidToken)
                 }
             }
+            _ => Err(RegistrationValidationError::Closed),
         }
     }
 

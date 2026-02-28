@@ -89,6 +89,7 @@ fn validate_hook_path(value: &str, field: &'static str) -> Result<(), HookValida
 pub use uptrakit_shared_types::HookShell;
 
 /// Systemd service action - explicit, maps directly to command.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
@@ -118,6 +119,7 @@ impl std::fmt::Display for SystemdAction {
 }
 
 /// Docker-compose action - explicit, maps directly to command.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
@@ -193,6 +195,7 @@ impl DockerComposeHook {
 /// Predefined hook templates with explicit actions.
 ///
 /// Each variant directly maps to a specific command - no hidden magic.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]

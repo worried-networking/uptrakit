@@ -254,6 +254,7 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
 
                 return Ok(());
             }
+            _ => continue,
         }
     }
 }

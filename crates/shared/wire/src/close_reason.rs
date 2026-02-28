@@ -18,6 +18,7 @@ use std::str::FromStr;
 /// Known variants map 1:1 to the wire strings sent in close frames.
 /// [`Unknown`](Self::Unknown) provides forward compatibility for strings
 /// not yet recognized by the receiver.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CloseReason {
     /// The service's TLS certificate was rotated by the controller.

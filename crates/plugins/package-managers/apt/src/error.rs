@@ -7,8 +7,6 @@ use uptrakit_shared_macros::impl_report_conversion;
 pub enum AptError {
     #[error("command execution failed with exit code {0}")]
     CommandFailed(i32),
-    #[error("failed to parse apt output: {0}")]
-    ParseOutput(String),
     #[error("configuration error: {0}")]
     Configuration(String),
 }

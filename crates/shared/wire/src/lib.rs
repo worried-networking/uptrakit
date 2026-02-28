@@ -198,6 +198,7 @@ pub enum EnrollmentStatus {
 ///
 /// Predefined hooks use the `Exec` variant which avoids shell interpretation.
 /// Custom commands use the `Shell` variant which runs through a shell.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HookCommand {

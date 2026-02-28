@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 serde_json = { workspace = true }
+tracing = { workspace = true }
 uptrakit-internal-wire = { path = "../wire" }
 uptrakit-web-api-types = { path = "../web-api-types" }
 

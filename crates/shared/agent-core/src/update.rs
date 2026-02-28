@@ -429,6 +429,12 @@ async fn run_hook_command(
             uptrakit_command::run_command_exec(program, args, working_dir.as_deref(), &plugin_tx)
                 .await
         }
+        _ => {
+            tracing::warn!("unknown HookCommand variant; cannot execute hook");
+            return Err(report!(UpdateError::HookFailed(
+                "unsupported HookCommand variant".to_string()
+            )));
+        }
     };
 
     // Drop the sender so the bridge task finishes

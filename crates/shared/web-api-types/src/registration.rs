@@ -3,6 +3,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 /// Registration mode controlling how new users can sign up.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
