@@ -141,22 +141,13 @@ impl Plugin for AptPlugin {
     }
 
     async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        let result = self
+        match self
             .executor
             .execute_quiet(&CommandSpec::exec("which", ["apt-get".to_string()]))
             .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "which apt-get failed: {e}"
-                )))
-            })?;
-
-        if result.exit_code == 0 {
-            Ok(HostCompatibility::Compatible)
-        } else {
-            Ok(HostCompatibility::Incompatible(
-                "apt-get not found".to_string(),
-            ))
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible("apt-get not found".to_string())),
         }
     }
 
@@ -165,20 +156,18 @@ impl Plugin for AptPlugin {
         _ctx: &UpdateHookContext,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<()> {
-        let result = self
+        // `test -f` exits 0 when the file exists, non-zero when absent.
+        // `execute_quiet` returns Err on any non-zero exit, so Ok(_) means
+        // the reboot-required file is present.
+        if self
             .executor
             .execute_quiet(&CommandSpec::exec(
                 "test",
                 ["-f".to_string(), "/var/run/reboot-required".to_string()],
             ))
             .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "reboot-required check failed: {e}"
-                )))
-            })?;
-
-        if result.exit_code == 0 {
+            .is_ok()
+        {
             send_output(
                 output_tx,
                 "[post-hook] Reboot required to complete the update.",
@@ -466,10 +455,15 @@ mod tests {
             &self,
             _spec: &CommandSpec,
         ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: String::new(),
-                exit_code: self.exit_code,
-            })
+            if self.exit_code == 0 {
+                Ok(CommandOutput {
+                    output: String::new(),
+                    exit_code: 0,
+                })
+            } else {
+                use rootcause::prelude::*;
+                bail!(uptrakit_command::CommandError::CommandFailed(self.exit_code))
+            }
         }
     }
 

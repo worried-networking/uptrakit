@@ -321,20 +321,13 @@ impl Plugin for NpmPlugin {
     }
 
     async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        let result = self
+        match self
             .executor
             .execute_quiet(&CommandSpec::exec("which", ["npm".to_string()]))
             .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "which npm failed: {e}"
-                )))
-            })?;
-
-        if result.exit_code == 0 {
-            Ok(HostCompatibility::Compatible)
-        } else {
-            Ok(HostCompatibility::Incompatible("npm not found".to_string()))
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible("npm not found".to_string())),
         }
     }
 
@@ -342,7 +335,9 @@ impl Plugin for NpmPlugin {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting npm installed version");
 
-        let cmd_output = self
+        // npm exits non-zero when a package is not found; treat any non-zero
+        // (Err from execute_quiet) as not installed.
+        let cmd_output = match self
             .executor
             .execute_quiet(&CommandSpec::exec(
                 "npm",
@@ -355,21 +350,16 @@ impl Plugin for NpmPlugin {
                 ],
             ))
             .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "npm list failed: {e}"
-                )))
-            })?;
-
-        // npm exits non-zero when a package is not found; treat that as not installed.
-        if cmd_output.exit_code != 0 {
-            tracing::debug!(
-                package = %package_identifier,
-                exit_code = cmd_output.exit_code,
-                "npm list returned non-zero; package not installed"
-            );
-            return Ok(None);
-        }
+        {
+            Ok(output) => output,
+            Err(_) => {
+                tracing::debug!(
+                    package = %package_identifier,
+                    "npm list returned non-zero; package not installed"
+                );
+                return Ok(None);
+            }
+        };
 
         let version =
             Self::parse_npm_list_version(&cmd_output.output, package_identifier);
@@ -551,10 +541,15 @@ mod tests {
             &self,
             _spec: &CommandSpec,
         ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: self.output.clone(),
-                exit_code: self.exit_code,
-            })
+            if self.exit_code == 0 {
+                Ok(CommandOutput {
+                    output: self.output.clone(),
+                    exit_code: 0,
+                })
+            } else {
+                use rootcause::prelude::*;
+                bail!(uptrakit_command::CommandError::CommandFailed(self.exit_code))
+            }
         }
     }
 

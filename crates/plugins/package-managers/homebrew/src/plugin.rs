@@ -282,22 +282,13 @@ impl Plugin for HomebrewPlugin {
     }
 
     async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-        let result = self
+        match self
             .executor
             .execute_quiet(&CommandSpec::exec("which", ["brew".to_string()]))
             .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "which brew failed: {e}"
-                )))
-            })?;
-
-        if result.exit_code == 0 {
-            Ok(HostCompatibility::Compatible)
-        } else {
-            Ok(HostCompatibility::Incompatible(
-                "brew not found".to_string(),
-            ))
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible("brew not found".to_string())),
         }
     }
 
@@ -801,10 +792,15 @@ mod tests {
             &self,
             _spec: &CommandSpec,
         ) -> uptrakit_command::Result<CommandOutput> {
-            Ok(CommandOutput {
-                output: String::new(),
-                exit_code: self.exit_code,
-            })
+            if self.exit_code == 0 {
+                Ok(CommandOutput {
+                    output: String::new(),
+                    exit_code: 0,
+                })
+            } else {
+                use rootcause::prelude::*;
+                bail!(uptrakit_command::CommandError::CommandFailed(self.exit_code))
+            }
         }
     }
 
