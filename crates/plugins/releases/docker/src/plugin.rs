@@ -150,20 +150,14 @@ impl Plugin for DockerPlugin {
     async fn detect_host_compatibility(
         &self,
     ) -> uptrakit_plugin_infrastructure_core::Result<HostCompatibility> {
-        let result = self
-            .executor
-            .execute_quiet(&CommandSpec::exec("which", ["docker".to_string()]))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "which docker failed: {e}"
-                )))
-            })?;
-
-        if result.exit_code == 0 {
-            Ok(HostCompatibility::Compatible)
-        } else {
-            Ok(HostCompatibility::Incompatible("docker not found".to_string()))
+        // Ping the Docker daemon directly rather than checking for the CLI binary.
+        // This validates that the daemon is actually running and reachable (including
+        // over SSH tunnels for remote hosts), not just that the docker binary exists.
+        match self.docker_client.ping().await {
+            Ok(()) => Ok(HostCompatibility::Compatible),
+            Err(e) => Ok(HostCompatibility::Incompatible(format!(
+                "Docker daemon not accessible: {e}"
+            ))),
         }
     }
 
@@ -500,45 +494,11 @@ mod tests {
         Arc::new(MockCommandExecutor)
     }
 
-    /// Mock executor that returns a configurable exit code for `execute_quiet`.
-    struct FixedExitCodeExecutor {
-        exit_code: i32,
-    }
-
-    impl FixedExitCodeExecutor {
-        fn with_exit_code(exit_code: i32) -> Arc<dyn CommandExecutor> {
-            Arc::new(Self { exit_code })
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl CommandExecutor for FixedExitCodeExecutor {
-        async fn execute(
-            &self,
-            _spec: &CommandSpec,
-            _output_tx: &mpsc::Sender<UpdateOutputLine>,
-        ) -> uptrakit_command::Result<uptrakit_plugin_infrastructure_core::CommandOutput> {
-            Ok(uptrakit_plugin_infrastructure_core::CommandOutput {
-                output: String::new(),
-                exit_code: self.exit_code,
-            })
-        }
-
-        async fn execute_quiet(
-            &self,
-            _spec: &CommandSpec,
-        ) -> uptrakit_command::Result<uptrakit_plugin_infrastructure_core::CommandOutput> {
-            Ok(uptrakit_plugin_infrastructure_core::CommandOutput {
-                output: String::new(),
-                exit_code: self.exit_code,
-            })
-        }
-    }
-
     fn default_mock_client() -> Arc<dyn DockerClient> {
         Arc::new(MockDockerClient {
             pull_output: String::new(),
             pull_should_fail: false,
+            ping_should_fail: false,
             inspect_result: None,
             containers: vec![],
         })
@@ -597,29 +557,38 @@ mod tests {
     // ── detect_host_compatibility ─────────────────────────────────────────────
 
     #[tokio::test]
-    async fn detect_host_compatibility_compatible_when_which_exits_zero() {
-        let plugin = DockerPlugin::new_for_test(
-            DockerConfig::default(),
-            FixedExitCodeExecutor::with_exit_code(0),
-            default_mock_client(),
-        )
-        .unwrap();
+    async fn detect_host_compatibility_compatible_when_daemon_reachable() {
+        let mock = Arc::new(MockDockerClient {
+            pull_output: String::new(),
+            pull_should_fail: false,
+            ping_should_fail: false,
+            inspect_result: None,
+            containers: vec![],
+        });
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
         let result = plugin.detect_host_compatibility().await.expect("ok");
         assert_eq!(result, HostCompatibility::Compatible);
     }
 
     #[tokio::test]
-    async fn detect_host_compatibility_incompatible_when_which_exits_nonzero() {
-        let plugin = DockerPlugin::new_for_test(
-            DockerConfig::default(),
-            FixedExitCodeExecutor::with_exit_code(1),
-            default_mock_client(),
-        )
-        .unwrap();
+    async fn detect_host_compatibility_incompatible_when_daemon_unreachable() {
+        let mock = Arc::new(MockDockerClient {
+            pull_output: String::new(),
+            pull_should_fail: false,
+            ping_should_fail: true,
+            inspect_result: None,
+            containers: vec![],
+        });
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
         let result = plugin.detect_host_compatibility().await.expect("ok");
         match result {
             HostCompatibility::Incompatible(msg) => {
-                assert!(msg.contains("docker"), "reason should mention docker: {msg}");
+                assert!(
+                    msg.contains("Docker daemon"),
+                    "reason should mention Docker daemon: {msg}"
+                );
             }
             HostCompatibility::Compatible => panic!("expected Incompatible"),
         }
@@ -647,6 +616,7 @@ mod tests {
         let mock = Arc::new(MockDockerClient {
             pull_output: String::new(),
             pull_should_fail: false,
+            ping_should_fail: false,
             inspect_result: Some(digest.clone()),
             containers: vec![],
         });
@@ -661,6 +631,7 @@ mod tests {
         let mock = Arc::new(MockDockerClient {
             pull_output: pull_output.clone(),
             pull_should_fail: false,
+            ping_should_fail: false,
             inspect_result: None,
             containers: vec![],
         });
@@ -684,6 +655,7 @@ mod tests {
         let mock = Arc::new(MockDockerClient {
             pull_output: String::new(),
             pull_should_fail: true,
+            ping_should_fail: false,
             inspect_result: None,
             containers: vec![],
         });
@@ -703,6 +675,7 @@ mod tests {
         let mock = Arc::new(MockDockerClient {
             pull_output: String::new(),
             pull_should_fail: false,
+            ping_should_fail: false,
             inspect_result: None,
             containers: vec![],
         });
@@ -731,6 +704,7 @@ mod tests {
         let mock = Arc::new(MockDockerClient {
             pull_output: String::new(),
             pull_should_fail: false,
+            ping_should_fail: false,
             inspect_result: None,
             containers: vec![],
         });
@@ -762,6 +736,7 @@ mod tests {
         let mock = Arc::new(MockDockerClient {
             pull_output: String::new(),
             pull_should_fail: false,
+            ping_should_fail: false,
             inspect_result: Some("sha256:abc123".to_string()),
             containers: vec![
                 LocalContainerInfo {
@@ -788,6 +763,7 @@ mod tests {
         let mock = Arc::new(MockDockerClient {
             pull_output: String::new(),
             pull_should_fail: false,
+            ping_should_fail: false,
             inspect_result: Some("sha256:abc123".to_string()),
             containers: vec![LocalContainerInfo {
                 image: "sha256:deadbeef".to_string(),
@@ -805,6 +781,7 @@ mod tests {
         let mock = Arc::new(MockDockerClient {
             pull_output: String::new(),
             pull_should_fail: false,
+            ping_should_fail: false,
             inspect_result: None, // No digest — locally built
             containers: vec![LocalContainerInfo {
                 image: "my-local-image:dev".to_string(),

@@ -127,9 +127,10 @@ A custom shell command executed after a successful pull. Supports the following 
 ## Autodiscovery
 
 The Docker plugin supports **local software discovery**. Before querying the Docker daemon the
-agent runs a host-compatibility check (`which docker`). If the `docker` binary is not found, the
-plugin reports zero discoveries and no error — it is expected that some hosts will not have Docker
-installed. This prevents spurious connection errors on non-Docker hosts.
+agent runs a host-compatibility check by pinging the daemon directly (`GET /_ping` via bollard).
+If the daemon is not reachable (not installed, not running, or SSH tunnel failure), the plugin
+reports zero discoveries and no error — it is expected that some hosts will not have Docker running.
+This prevents spurious connection errors on non-Docker hosts.
 
 When discovery runs, the agent queries the local Docker daemon for all containers (running and
 stopped) via `list_containers`. For each container image that is not a bare SHA digest:

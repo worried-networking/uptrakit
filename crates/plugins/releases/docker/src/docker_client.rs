@@ -50,6 +50,14 @@ pub struct LocalContainerInfo {
 /// tested with a mock implementation that does not require a live Docker daemon.
 #[async_trait]
 pub(crate) trait DockerClient: Send + Sync {
+    /// Ping the Docker daemon to verify it is reachable.
+    ///
+    /// Returns `Ok(())` when the daemon responds to `GET /_ping`, or an error
+    /// if the daemon is unreachable (connection refused, SSH tunnel failure,
+    /// etc.). Used by [`crate::plugin::DockerPlugin::detect_host_compatibility`]
+    /// to skip discovery on hosts where Docker is not running.
+    async fn ping(&self) -> Result<()>;
+
     /// Pull `image:tag` from the registry, streaming progress through `output_tx`.
     ///
     /// Returns the accumulated progress output as a `String`.
@@ -86,6 +94,12 @@ pub(crate) struct NoopDockerClient;
 #[cfg(not(feature = "daemon"))]
 #[async_trait]
 impl DockerClient for NoopDockerClient {
+    async fn ping(&self) -> Result<()> {
+        bail!(DockerError::Configuration(
+            "Docker daemon operations require the 'daemon' Cargo feature".to_string(),
+        ))
+    }
+
     async fn pull_image(
         &self,
         _image: &str,
@@ -185,6 +199,11 @@ impl BollardDockerClient {
 #[cfg(feature = "daemon")]
 #[async_trait]
 impl DockerClient for BollardDockerClient {
+    async fn ping(&self) -> Result<()> {
+        self.docker.ping().await.context_to::<DockerError>()?;
+        Ok(())
+    }
+
     async fn pull_image(
         &self,
         image: &str,
@@ -332,6 +351,7 @@ fn format_progress_line(id: Option<&str>, status: Option<&str>, progress: Option
 pub(crate) struct MockDockerClient {
     pub pull_output: String,
     pub pull_should_fail: bool,
+    pub ping_should_fail: bool,
     pub inspect_result: Option<String>, // Some(digest) or None
     pub containers: Vec<LocalContainerInfo>,
 }
@@ -339,6 +359,15 @@ pub(crate) struct MockDockerClient {
 #[cfg(all(test, feature = "daemon"))]
 #[async_trait]
 impl DockerClient for MockDockerClient {
+    async fn ping(&self) -> Result<()> {
+        if self.ping_should_fail {
+            bail!(DockerError::DaemonConnection(
+                "mock ping failure".to_string()
+            ));
+        }
+        Ok(())
+    }
+
     async fn pull_image(
         &self,
         _image: &str,

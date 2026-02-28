@@ -76,20 +76,18 @@ async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
 }
 ```
 
-**Docker plugin** — checks whether `docker` is available (daemon build only):
+**Docker plugin** — pings the Docker daemon directly (daemon build only):
 
 ```rust
 #[cfg(feature = "daemon")]
 async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
-    let result = self
-        .executor
-        .execute_quiet(&CommandSpec::exec("which", ["docker".to_string()]))
-        .await
-        .map_err(|e| report!(PluginError::PluginInternal(format!("which docker failed: {e}"))))?;
-    if result.exit_code == 0 {
-        Ok(HostCompatibility::Compatible)
-    } else {
-        Ok(HostCompatibility::Incompatible("docker not found".to_string()))
+    // Use bollard's ping to verify the daemon is actually reachable,
+    // including over SSH tunnels for remote hosts.
+    match self.docker_client.ping().await {
+        Ok(()) => Ok(HostCompatibility::Compatible),
+        Err(e) => Ok(HostCompatibility::Incompatible(format!(
+            "Docker daemon not accessible: {e}"
+        ))),
     }
 }
 ```
@@ -334,7 +332,7 @@ Plugin crates:
 | `uptrakit-command` | `crates/shared/command/` | Shell execution, `CommandExecutor` trait, `CommandSpec`, `LocalCommandExecutor`. |
 | `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | Plugin trait/abstractions; re-exports shared types and executor types. |
 | `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | Centralized plugin dispatch and validation; re-exports `PluginType`. |
-| `uptrakit-plugin-releases-docker` | `crates/plugins/releases/docker/` | Docker/OCI image tracking and container discovery. Implements `DetectHostCompatibility` (daemon build only, checks `which docker`). |
+| `uptrakit-plugin-releases-docker` | `crates/plugins/releases/docker/` | Docker/OCI image tracking and container discovery. Implements `DetectHostCompatibility` (daemon build only, pings the Docker daemon via bollard `GET /_ping`). |
 | `uptrakit-plugin-releases-github` | `crates/plugins/releases/github/` | GitHub Releases: fetches metadata; agent installs. |
 | `uptrakit-plugin-package-manager-homebrew` | `crates/plugins/package-managers/homebrew/` | Homebrew: agent-side version tracking and updates. Implements `DetectHostCompatibility` (checks `which brew`). |
 | `uptrakit-plugin-discovery-proxmox-helper-scripts` | `crates/plugins/discovery/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. Implements `DetectHostCompatibility` (tests for `/usr/bin/update`, Proxmox VE only). |
