@@ -11,6 +11,7 @@ use axum::{
 };
 use std::sync::Arc;
 use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
+use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
@@ -113,6 +114,10 @@ pub async fn update_service(
     Path(service_id): Path<Uuid>,
     Json(body): Json<UpdateServiceRequest>,
 ) -> Response {
+    if let Err(e) = body.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
     match svc_queries::update_service_settings(&tenant_db, service_id, body.ping_interval_seconds)
         .await
     {

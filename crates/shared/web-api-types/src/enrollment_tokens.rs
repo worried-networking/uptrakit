@@ -3,6 +3,8 @@ use time::OffsetDateTime;
 use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
+use crate::validation::{Validate, ValidationError};
+
 /// Request to create a new enrollment token.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -20,6 +22,34 @@ pub struct CreateEnrollmentTokenRequest {
     /// Token lifetime in seconds from now. `None` means never expires.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_in_seconds: Option<u64>,
+}
+
+impl Validate for CreateEnrollmentTokenRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.name.trim().is_empty() {
+            return Err(ValidationError {
+                field: "name",
+                message: "name must not be empty".to_string(),
+            });
+        }
+        if let Some(max_uses) = self.max_uses
+            && max_uses == 0
+        {
+            return Err(ValidationError {
+                field: "max_uses",
+                message: "max_uses must be greater than 0".to_string(),
+            });
+        }
+        if let Some(expires_in) = self.expires_in_seconds
+            && expires_in == 0
+        {
+            return Err(ValidationError {
+                field: "expires_in_seconds",
+                message: "expires_in_seconds must be greater than 0".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Response returned when a new enrollment token is created.
@@ -191,5 +221,66 @@ mod tests {
         let params = query.pagination();
         assert_eq!(params.page, Some(2));
         assert_eq!(params.per_page, Some(10));
+    }
+
+    // ── Validate ─────────────────────────────────────────────────────
+
+    fn valid_request() -> CreateEnrollmentTokenRequest {
+        CreateEnrollmentTokenRequest {
+            name: "test-token".to_string(),
+            allowed_capabilities: None,
+            max_uses: None,
+            expires_in_seconds: None,
+        }
+    }
+
+    #[test]
+    fn validate_accepts_valid_request() {
+        assert!(valid_request().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_empty_name() {
+        let mut req = valid_request();
+        req.name = "".to_string();
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "name");
+    }
+
+    #[test]
+    fn validate_rejects_whitespace_name() {
+        let mut req = valid_request();
+        req.name = "  ".to_string();
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_zero_max_uses() {
+        let mut req = valid_request();
+        req.max_uses = Some(0);
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "max_uses");
+    }
+
+    #[test]
+    fn validate_accepts_positive_max_uses() {
+        let mut req = valid_request();
+        req.max_uses = Some(1);
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_zero_expires_in_seconds() {
+        let mut req = valid_request();
+        req.expires_in_seconds = Some(0);
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "expires_in_seconds");
+    }
+
+    #[test]
+    fn validate_accepts_positive_expires_in_seconds() {
+        let mut req = valid_request();
+        req.expires_in_seconds = Some(3600);
+        assert!(req.validate().is_ok());
     }
 }

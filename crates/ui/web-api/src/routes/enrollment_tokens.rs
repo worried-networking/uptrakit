@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::auth::{password, token};
 use crate::error_response::error_response;
+use uptrakit_web_api_types::validation::Validate;
 use crate::middleware::permission::CanManageAgents;
 use crate::queries::enrollment_tokens as et_queries;
 use crate::tenant_db::TenantDb;
@@ -40,8 +41,8 @@ pub async fn create_enrollment_token(
     CanManageAgents(user): CanManageAgents,
     Json(body): Json<CreateEnrollmentTokenRequest>,
 ) -> Response {
-    if body.name.trim().is_empty() {
-        return error_response(StatusCode::BAD_REQUEST, "Token name must not be empty");
+    if let Err(e) = body.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     let plaintext = match token::generate_secure_token() {

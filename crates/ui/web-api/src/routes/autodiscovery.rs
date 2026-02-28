@@ -7,6 +7,7 @@
 
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
+use uptrakit_web_api_types::validation::Validate;
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -91,11 +92,8 @@ pub async fn create_autodiscovery_ignore(
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use uptrakit_shared_db::entity::{plugin_config, prelude::*};
 
-    if req.package_identifier.trim().is_empty() {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "package_identifier must not be empty",
-        );
+    if let Err(e) = req.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     // Verify plugin config belongs to this tenant.

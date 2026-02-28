@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::validation::{Validate, ValidationError};
+
 // Canonical types from shared-types with feature-gated OpenAPI derives.
 pub use uptrakit_shared_types::{ParseServiceStatusError, ServiceStatus};
 
@@ -74,6 +76,22 @@ pub struct UpdateServiceRequest {
     /// override the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ping_interval_seconds: Option<u32>,
+}
+
+impl Validate for UpdateServiceRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(interval) = self.ping_interval_seconds {
+            // 0 is a sentinel meaning "clear the override"; any positive value
+            // must be at least 5 seconds to avoid excessive polling.
+            if interval != 0 && interval < 5 {
+                return Err(ValidationError {
+                    field: "ping_interval_seconds",
+                    message: "ping_interval_seconds must be 0 (to clear) or at least 5".to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 // Re-export generic types that are shared across service operations.
@@ -298,5 +316,44 @@ mod tests {
         let parsed: UpdateServiceRequest =
             serde_json::from_str(json).expect("deserialization should succeed");
         assert_eq!(parsed.ping_interval_seconds, Some(0));
+    }
+
+    // ── Validate ─────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_accepts_none_interval() {
+        let req = UpdateServiceRequest {
+            ping_interval_seconds: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_zero_interval_as_clear_sentinel() {
+        let req = UpdateServiceRequest {
+            ping_interval_seconds: Some(0),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_interval_of_five_or_more() {
+        for v in [5u32, 10, 60, 3600] {
+            let req = UpdateServiceRequest {
+                ping_interval_seconds: Some(v),
+            };
+            assert!(req.validate().is_ok(), "expected ok for {v}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_interval_below_five() {
+        for v in [1u32, 2, 3, 4] {
+            let req = UpdateServiceRequest {
+                ping_interval_seconds: Some(v),
+            };
+            let err = req.validate().unwrap_err();
+            assert_eq!(err.field, "ping_interval_seconds", "field mismatch for {v}");
+        }
     }
 }

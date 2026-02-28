@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::auth::api_token::ApiTokenService;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
+use uptrakit_web_api_types::validation::Validate;
 use axum::{
     Json,
     extract::{Path, State},
@@ -34,6 +35,10 @@ pub async fn create_api_token(
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<CreateApiTokenRequest>,
 ) -> Response {
+    if let Err(e) = req.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
     let service = ApiTokenService::new(state.db().clone());
 
     match service.create_token(auth_user.user_id, &req.name).await {

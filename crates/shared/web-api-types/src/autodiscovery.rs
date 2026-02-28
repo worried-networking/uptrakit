@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::validation::{Validate, ValidationError};
+
 /// Response for trigger-discovery endpoints.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -47,4 +49,44 @@ pub struct CreateAutodiscoveryIgnoreRequest {
     pub plugin_config_id: Uuid,
     /// Package identifier to permanently suppress from future discoveries.
     pub package_identifier: String,
+}
+
+impl Validate for CreateAutodiscoveryIgnoreRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.package_identifier.trim().is_empty() {
+            return Err(ValidationError {
+                field: "package_identifier",
+                message: "package_identifier must not be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_request(package_identifier: &str) -> CreateAutodiscoveryIgnoreRequest {
+        CreateAutodiscoveryIgnoreRequest {
+            plugin_config_id: Uuid::nil(),
+            package_identifier: package_identifier.to_string(),
+        }
+    }
+
+    #[test]
+    fn validate_accepts_non_empty_identifier() {
+        assert!(make_request("com.example.package").validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_empty_identifier() {
+        let err = make_request("").validate().unwrap_err();
+        assert_eq!(err.field, "package_identifier");
+    }
+
+    #[test]
+    fn validate_rejects_whitespace_only_identifier() {
+        assert!(make_request("   ").validate().is_err());
+    }
 }

@@ -3,10 +3,24 @@ use time::OffsetDateTime;
 use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
+use crate::validation::{Validate, ValidationError};
+
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateApiTokenRequest {
     pub name: String,
+}
+
+impl Validate for CreateApiTokenRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.name.trim().is_empty() {
+            return Err(ValidationError {
+                field: "name",
+                message: "name must not be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -82,6 +96,33 @@ mod tests {
         let req: CreateApiTokenRequest =
             serde_json::from_str(json).expect("deserialization should succeed");
         assert_eq!(req.name, "");
+    }
+
+    // ── Validate ─────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_rejects_empty_name() {
+        let req = CreateApiTokenRequest {
+            name: "".to_string(),
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "name");
+    }
+
+    #[test]
+    fn validate_rejects_whitespace_only_name() {
+        let req = CreateApiTokenRequest {
+            name: "   ".to_string(),
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn validate_accepts_non_empty_name() {
+        let req = CreateApiTokenRequest {
+            name: "my-token".to_string(),
+        };
+        assert!(req.validate().is_ok());
     }
 
     // ── CreateApiTokenResponse ───────────────────────────────────────
