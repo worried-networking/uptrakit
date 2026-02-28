@@ -18,11 +18,19 @@ use uptrakit_service_sdk::{
 
 use crate::tenant_manager::TenantManager;
 
+/// Capacity of the bounded MQTT service-event channel.
+///
+/// Events are ephemeral status/reconnect notifications. Dropping events when the
+/// channel is full results in at most a missing MQTT publish that auto-recovers on
+/// the next state push from the controller. 512 is generous for typical deployments
+/// (tens of MQTT clients) while bounding memory growth under backpressure.
+const MQTT_EVENT_CHANNEL_CAPACITY: usize = 512;
+
 struct MqttHandler {
     max_tenants: u32,
     instance_id: String,
     tenant_mgr: TenantManager,
-    event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::mqtt_client::MqttServiceEvent>,
+    event_rx: tokio::sync::mpsc::Receiver<crate::mqtt_client::MqttServiceEvent>,
 }
 
 #[async_trait::async_trait]
@@ -195,7 +203,7 @@ async fn main() {
     let instance_id = generate_instance_id();
     tracing::info!(%instance_id, "starting uptrakit-mqtt service");
 
-    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (event_tx, event_rx) = tokio::sync::mpsc::channel(MQTT_EVENT_CHANNEL_CAPACITY);
     let tenant_mgr = TenantManager::new(Some(event_tx));
 
     let mut handler = MqttHandler {

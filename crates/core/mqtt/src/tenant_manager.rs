@@ -24,12 +24,12 @@ struct ClientState {
 /// updates from the controller via WebSocket messages.
 pub struct TenantManager {
     clients: HashMap<Uuid, ClientState>,
-    event_tx: Option<mpsc::UnboundedSender<MqttServiceEvent>>,
+    event_tx: Option<mpsc::Sender<MqttServiceEvent>>,
     software_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttSoftwareStateItem>>,
 }
 
 impl TenantManager {
-    pub fn new(event_tx: Option<mpsc::UnboundedSender<MqttServiceEvent>>) -> Self {
+    pub fn new(event_tx: Option<mpsc::Sender<MqttServiceEvent>>) -> Self {
         Self {
             clients: HashMap::new(),
             event_tx,
@@ -321,12 +321,14 @@ impl TenantManager {
         let Some(sender) = self.event_tx.as_ref() else {
             return;
         };
-        let _ = sender.send(MqttServiceEvent::Status(
+        if let Err(e) = sender.try_send(MqttServiceEvent::Status(
             crate::mqtt_client::MqttClientStatusEvent {
                 mqtt_client_id,
                 status,
             },
-        ));
+        )) {
+            tracing::warn!(error = %e, "MQTT event channel full, dropping status event");
+        }
     }
 }
 

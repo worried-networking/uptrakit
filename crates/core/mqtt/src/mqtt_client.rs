@@ -142,11 +142,11 @@ impl_report_conversion!(rumqttc::ClientError => MqttError::Client);
 #[derive(Clone)]
 struct MqttEventReporter {
     mqtt_client_id: uuid::Uuid,
-    sender: mpsc::UnboundedSender<MqttServiceEvent>,
+    sender: mpsc::Sender<MqttServiceEvent>,
 }
 
 impl MqttEventReporter {
-    fn new(mqtt_client_id: uuid::Uuid, sender: mpsc::UnboundedSender<MqttServiceEvent>) -> Self {
+    fn new(mqtt_client_id: uuid::Uuid, sender: mpsc::Sender<MqttServiceEvent>) -> Self {
         Self {
             mqtt_client_id,
             sender,
@@ -154,31 +154,42 @@ impl MqttEventReporter {
     }
 
     fn report_status(&self, status: MqttClientConnectionStatus) {
-        let _ = self
+        if let Err(e) = self
             .sender
-            .send(MqttServiceEvent::Status(MqttClientStatusEvent {
+            .try_send(MqttServiceEvent::Status(MqttClientStatusEvent {
                 mqtt_client_id: self.mqtt_client_id,
                 status,
-            }));
+            }))
+        {
+            tracing::warn!(error = %e, "MQTT event channel full, dropping status event");
+        }
     }
 
     fn report_reconnected(&self) {
-        let _ = self
+        if let Err(e) = self
             .sender
-            .send(MqttServiceEvent::Reconnected(self.mqtt_client_id));
+            .try_send(MqttServiceEvent::Reconnected(self.mqtt_client_id))
+        {
+            tracing::warn!(error = %e, "MQTT event channel full, dropping reconnected event");
+        }
     }
 
     fn report_ha_online(&self) {
-        let _ = self
+        if let Err(e) = self
             .sender
-            .send(MqttServiceEvent::HaOnline(self.mqtt_client_id));
+            .try_send(MqttServiceEvent::HaOnline(self.mqtt_client_id))
+        {
+            tracing::warn!(error = %e, "MQTT event channel full, dropping ha_online event");
+        }
     }
 
     fn report_command(&self, topic: String) {
-        let _ = self.sender.send(MqttServiceEvent::Command {
+        if let Err(e) = self.sender.try_send(MqttServiceEvent::Command {
             mqtt_client_id: self.mqtt_client_id,
             topic,
-        });
+        }) {
+            tracing::warn!(error = %e, "MQTT event channel full, dropping command event");
+        }
     }
 }
 
@@ -192,7 +203,7 @@ impl MqttEventReporter {
 /// publishes `"online"` to it (HA birth message).
 pub async fn start(
     config: MqttConfig,
-    event_sender: Option<mpsc::UnboundedSender<MqttServiceEvent>>,
+    event_sender: Option<mpsc::Sender<MqttServiceEvent>>,
     mqtt_client_id: uuid::Uuid,
     ha_status_topic: Option<String>,
 ) -> Result<MqttHandle> {
