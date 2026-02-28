@@ -6723,6 +6723,7 @@ dependencies = [
  "async-trait",
  "bollard",
  "futures-util",
+ "parking_lot",
  "regex",
  "reqwest 0.13.2",
  "rootcause",
@@ -6893,6 +6894,7 @@ name = "uptrakit-update-hooks"
 version = "0.0.1"
 dependencies = [
  "serde_json",
+ "tracing",
  "uptrakit-internal-wire",
  "uptrakit-web-api-types",
 ]

@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 
 use rootcause::prelude::*;
@@ -40,7 +40,7 @@ impl RegistryAuth {
     /// Get a valid bearer token, using the cache if available.
     /// Returns `None` if no token is cached and no challenge has been processed.
     pub fn cached_bearer_token(&self) -> Option<String> {
-        let guard = self.cached_token.lock().unwrap();
+        let guard = self.cached_token.lock();
         guard.as_ref().and_then(|ct| {
             if let Some(expires_at) = ct.expires_at
                 && Instant::now() >= expires_at
@@ -155,7 +155,7 @@ impl RegistryAuth {
 
         let token = token_resp.token.clone();
         {
-            let mut guard = self.cached_token.lock().unwrap();
+            let mut guard = self.cached_token.lock();
             *guard = Some(CachedToken {
                 token: token_resp.token,
                 expires_at,
@@ -167,7 +167,7 @@ impl RegistryAuth {
 
     /// Clear the cached token (e.g. on 401 retry).
     pub fn clear_cache(&self) {
-        let mut guard = self.cached_token.lock().unwrap();
+        let mut guard = self.cached_token.lock();
         *guard = None;
     }
 }
@@ -322,7 +322,7 @@ mod tests {
     fn clear_cache_removes_token() {
         let auth = RegistryAuth::new(None);
         {
-            let mut guard = auth.cached_token.lock().unwrap();
+            let mut guard = auth.cached_token.lock();
             *guard = Some(CachedToken {
                 token: "test".to_string(),
                 expires_at: None,
