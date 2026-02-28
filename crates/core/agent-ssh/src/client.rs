@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use std::collections::BTreeSet;
@@ -41,87 +40,16 @@ pub(crate) struct SshInFlightUpdate {
     pub forwarder: tokio::task::JoinHandle<()>,
 }
 
-// ── Temporary key file ────────────────────────────────────────────────────────
-
-/// RAII wrapper that deletes the SSH private key file on drop.
-///
-/// Written to a temporary path with 0o600 permissions by
-/// [`build_connection_context`] so bollard's SSH transport can authenticate
-/// with the stored per-host key.  Stored as `Arc<SecureKeyFile>` inside
-/// [`ConnectionContext::keep_alive`] so the file persists for the full
-/// duration of the operation (including spawned update tasks).
-struct SecureKeyFile {
-    path: PathBuf,
-}
-
-impl Drop for SecureKeyFile {
-    fn drop(&mut self) {
-        // Best-effort cleanup — log on failure but do not panic.
-        if let Err(e) = std::fs::remove_file(&self.path) {
-            tracing::warn!(
-                path = %self.path.display(),
-                error = %e,
-                "failed to remove temporary SSH key file"
-            );
-        }
-    }
-}
-
 // ── Connection context ────────────────────────────────────────────────────────
 
 /// Build a [`ConnectionContext`] for the given SSH host.
 ///
-/// Decrypts the host's private key and writes it to a temporary file at
-/// `$TMPDIR/uptrakit-ssh-key-<host_id>` with 0o600 permissions.  The file
-/// is deleted when the last clone of the returned `ConnectionContext` is
-/// dropped (via [`ConnectionContext::keep_alive`]).
-///
-/// The `docker_host_override` is set to `ssh://user@host:port` so bollard
-/// connects to the remote Docker daemon via the system `ssh` binary.  The
-/// `ssh_key_path` is populated with the temporary file path so bollard can
-/// authenticate using the stored key rather than falling back to default
-/// SSH key locations.
-async fn build_connection_context(host: &Model) -> ConnectionContext {
-    // Write the key inside a dedicated subdirectory (`uptrakit/`) so that
-    // `write_secure_file` can chmod the directory we own, rather than the
-    // system temp directory (which fails with EPERM on macOS).
-    let key_path = std::env::temp_dir()
-        .join("uptrakit")
-        .join(format!("ssh-key-{}", host.id.replace('-', "")));
-
-    let pem_bytes = host.private_key.expose_secret().as_bytes().to_vec();
-
-    match uptrakit_directories::write_secure_file(&key_path, &pem_bytes).await {
-        Ok(()) => {
-            let keep: Arc<dyn std::any::Any + Send + Sync> = Arc::new(SecureKeyFile {
-                path: key_path.clone(),
-            });
-            ConnectionContext {
-                docker_host_override: Some(format!(
-                    "ssh://{}@{}:{}",
-                    host.username, host.hostname, host.port
-                )),
-                ssh_key_path: Some(key_path),
-                keep_alive: vec![keep],
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                host_name = %host.name,
-                error = %e,
-                "failed to write temporary SSH key file; Docker operations \
-                 on this host may not work (bollard will fall back to default key locations)"
-            );
-            ConnectionContext {
-                docker_host_override: Some(format!(
-                    "ssh://{}@{}:{}",
-                    host.username, host.hostname, host.port
-                )),
-                ssh_key_path: None,
-                keep_alive: vec![],
-            }
-        }
-    }
+/// Docker daemon connectivity is now handled by the executor's
+/// [`StdioTunnel`](uptrakit_command::StdioTunnel) support — the context no
+/// longer writes temporary key files or sets docker_host overrides. The
+/// returned context only carries RAII handles when needed.
+fn build_connection_context() -> ConnectionContext {
+    ConnectionContext::default()
 }
 
 // ── ReportHosts ───────────────────────────────────────────────────────────────
@@ -408,7 +336,7 @@ pub(crate) async fn handle_check_versions_ssh(
         }
     };
 
-    let ctx = build_connection_context(&host).await;
+    let ctx = build_connection_context();
     let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
         raw,
@@ -537,7 +465,7 @@ pub(crate) async fn handle_execute_update_ssh(
         return;
     }
 
-    let ctx = build_connection_context(&host).await;
+    let ctx = build_connection_context();
 
     // The session Arc is shared with the executor that travels into the spawned
     // update task, keeping the SSH connection alive for the duration of the
@@ -666,7 +594,7 @@ pub(crate) async fn handle_discover_software_ssh(
         }
     };
 
-    let ctx = build_connection_context(&host).await;
+    let ctx = build_connection_context();
     let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
         raw,

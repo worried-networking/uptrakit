@@ -228,20 +228,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn check_version_docker_context_injects_docker_host() {
+    async fn check_version_docker_default_context_does_not_panic() {
         let assignment = PluginAssignment {
             plugin_type: PluginType::ReleasesDocker,
             package_identifier: "nginx".to_string(),
             config: serde_json::json!({}),
         };
-        let ctx = ConnectionContext {
-            docker_host_override: Some("ssh://user@host:2222".to_string()),
-            ssh_key_path: None,
-            ..Default::default()
-        };
-        // With a valid docker host override, the plugin is created with the
-        // injected host. The check itself will fail (no daemon) but that proves
-        // the injection path runs without panicking.
+        let ctx = ConnectionContext::default();
+        // Default context (no keep-alive handles) should not panic during
+        // plugin creation. The check itself will fail (no daemon) but that
+        // proves the creation path runs without panicking.
         let outcome = check_version(Some(&assignment), None, test_executor(), &ctx).await;
         let _ = outcome;
     }

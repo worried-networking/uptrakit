@@ -9,7 +9,6 @@ publish = false
 
 [features]
 default = []
-ssh = ["uptrakit-plugin-infrastructure-registry/ssh"]
 
 [dependencies]
 async-trait = { workspace = true }
