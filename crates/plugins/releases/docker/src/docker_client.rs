@@ -544,6 +544,7 @@ fn format_progress_line(id: Option<&str>, status: Option<&str>, progress: Option
 // ── Test mock ────────────────────────────────────────────────────────────────
 
 #[cfg(all(test, feature = "daemon"))]
+#[derive(Default)]
 pub(crate) struct MockDockerClient {
     pub pull_output: String,
     pub pull_should_fail: bool,
@@ -552,21 +553,6 @@ pub(crate) struct MockDockerClient {
     pub containers: Vec<LocalContainerInfo>,
     pub containers_for_image: Vec<ContainerForImage>,
     pub recreate_should_fail: bool,
-}
-
-#[cfg(all(test, feature = "daemon"))]
-impl Default for MockDockerClient {
-    fn default() -> Self {
-        Self {
-            pull_output: String::new(),
-            pull_should_fail: false,
-            ping_should_fail: false,
-            inspect_result: None,
-            containers: vec![],
-            containers_for_image: vec![],
-            recreate_should_fail: false,
-        }
-    }
 }
 
 #[cfg(all(test, feature = "daemon"))]
