@@ -221,6 +221,76 @@ macro_rules! register_plugins {
                 )+
                 result
             }
+
+            /// Returns sudo command entries only for plugins that are compatible
+            /// with the target host, as determined by running each plugin's
+            /// [`Plugin::detect_host_compatibility`] check over the provided executor.
+            ///
+            /// Unlike [`all_required_sudo_commands`], this method runs host
+            /// compatibility checks for every plugin that declares the
+            /// [`PluginCapability::DetectHostCompatibility`] capability.  Plugins
+            /// that report incompatibility (e.g. the Proxmox Helper Scripts plugin
+            /// on a Flatcar Linux host where `/usr/bin/update` does not exist) are
+            /// silently skipped so their helper scripts are never installed.
+            ///
+            /// Plugins that do **not** declare `DetectHostCompatibility` are always
+            /// included — they are assumed compatible with all hosts.
+            ///
+            /// If a compatibility check returns an error it is logged as a warning
+            /// and the plugin is treated as compatible (fail-open) to preserve
+            /// existing behaviour on ambiguous targets.
+            ///
+            /// # Arguments
+            ///
+            /// * `executor` — A [`CommandExecutor`] connected to the target host
+            ///   (typically an [`SshCommandExecutor`]).  Commands are executed on
+            ///   the remote side so the compatibility check reflects the actual
+            ///   host environment.
+            pub async fn compatible_sudo_commands_for_host(
+                executor: Arc<dyn CommandExecutor>,
+            ) -> Vec<(PluginType, Vec<SudoCommandEntry>)> {
+                let empty = serde_json::Value::Object(serde_json::Map::new());
+                let mut result = Vec::new();
+                $(
+                    if let Ok(p) = Self::create_plugin_for_discovery(
+                        PluginType::$variant, &empty, Arc::clone(&executor))
+                    {
+                        let is_compatible = if p.has_capability(
+                            uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility)
+                        {
+                            match p.detect_host_compatibility().await {
+                                Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Compatible) => true,
+                                Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(reason)) => {
+                                    tracing::debug!(
+                                        plugin = %PluginType::$variant,
+                                        reason = %reason,
+                                        "plugin not compatible with host; skipping sudo commands"
+                                    );
+                                    false
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        plugin = %PluginType::$variant,
+                                        error = %e,
+                                        "host compatibility check failed; assuming compatible"
+                                    );
+                                    true
+                                }
+                            }
+                        } else {
+                            true
+                        };
+
+                        if is_compatible {
+                            let entries = p.required_sudo_commands();
+                            if !entries.is_empty() {
+                                result.push((PluginType::$variant, entries));
+                            }
+                        }
+                    }
+                )+
+                result
+            }
         }
     };
 }
@@ -489,7 +559,8 @@ mod tests {
 
     #[test]
     fn proxmox_plugin_capabilities() {
-        // PHS is discovery-only; RefreshPackageIndex capability must not be present.
+        // PHS declares DiscoverLocalSoftware and DetectHostCompatibility.
+        // RefreshPackageIndex must not be present.
         let config = serde_json::json!({});
         let plugin = PluginRegistry::create_plugin(
             PluginType::DiscoveryProxmoxHelperScripts,
@@ -634,6 +705,37 @@ mod tests {
                 "plugin {pt} has empty sudo command list but was included"
             );
         }
+    }
+
+    // ── compatible_sudo_commands_for_host tests ───────────────────────────
+
+    #[tokio::test]
+    async fn compatible_sudo_commands_for_host_returns_valid_entries() {
+        let executor = test_executor();
+        let entries = PluginRegistry::compatible_sudo_commands_for_host(executor).await;
+        // Every included plugin must have a non-empty command list.
+        for (pt, cmds) in &entries {
+            assert!(
+                !cmds.is_empty(),
+                "plugin {pt} returned an empty sudo command list but was included"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn compatible_sudo_commands_for_host_excludes_phs_on_non_phs_host() {
+        // On any host that lacks /usr/bin/update the PHS plugin must not be
+        // included — its helper scripts must not be installed on non-Proxmox
+        // machines (e.g. Flatcar Linux with a read-only /usr/local/bin).
+        let executor = test_executor();
+        let entries = PluginRegistry::compatible_sudo_commands_for_host(executor).await;
+        let phs_entry = entries
+            .iter()
+            .find(|(pt, _)| *pt == PluginType::DiscoveryProxmoxHelperScripts);
+        assert!(
+            phs_entry.is_none(),
+            "PHS must not be included on a non-PHS host (no /usr/bin/update found)"
+        );
     }
 
     #[test]
