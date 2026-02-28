@@ -2,11 +2,19 @@ use crate::Result;
 use crate::UptrakitClient;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::plugin_configs::{
-    CreatePluginConfigRequest, PluginConfigResponse, UpdatePluginConfigRequest,
+    CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
 };
 use uuid::Uuid;
 
 impl UptrakitClient {
+    /// List all known plugin types with their display names and capabilities.
+    ///
+    /// Returns static registry metadata. Use this to populate plugin-type
+    /// selectors rather than hard-coding plugin type strings.
+    pub async fn list_plugin_types(&self) -> Result<Vec<PluginTypeInfo>> {
+        self.get(crate::paths::plugin_configs::PLUGIN_TYPES).await
+    }
+
     /// Create a new plugin configuration.
     pub async fn create_plugin_config(
         &self,

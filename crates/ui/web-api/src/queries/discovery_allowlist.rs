@@ -323,6 +323,10 @@ mod tests {
         ) {
         }
 
+        fn known_plugin_types(&self) -> Vec<PluginType> {
+            self.discovery_types.clone()
+        }
+
         fn discovery_plugins(&self) -> Vec<PluginType> {
             self.discovery_types.clone()
         }
@@ -346,6 +350,10 @@ mod tests {
             } else {
                 vec![]
             }
+        }
+
+        fn sample_config_for_str(&self, _plugin_type: &str) -> serde_json::Value {
+            serde_json::Value::Object(serde_json::Map::new())
         }
     }
 

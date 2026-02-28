@@ -73,6 +73,7 @@ use crate::AppState;
         crate::routes::hosts::get_host,
         crate::routes::hosts::update_host,
         crate::routes::hosts::deactivate_host,
+        crate::routes::plugin_configs::list_plugin_types,
         crate::routes::plugin_configs::create_plugin_config,
         crate::routes::plugin_configs::list_plugin_configs,
         crate::routes::plugin_configs::get_plugin_config,
@@ -162,6 +163,8 @@ use crate::AppState;
             crate::routes::hosts::HostResponse,
             crate::routes::hosts::HostAgentSummary,
             crate::routes::hosts::UpdateHostRequest,
+            crate::routes::plugin_configs::PluginTypeInfo,
+            uptrakit_shared_types::PluginCapability,
             crate::routes::plugin_configs::CreatePluginConfigRequest,
             crate::routes::plugin_configs::UpdatePluginConfigRequest,
             crate::routes::plugin_configs::PluginConfigResponse,
@@ -361,6 +364,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::hosts::get_host))
         .routes(routes!(crate::routes::hosts::update_host))
         .routes(routes!(crate::routes::hosts::deactivate_host))
+        .routes(routes!(crate::routes::plugin_configs::list_plugin_types))
         .routes(routes!(
             crate::routes::plugin_configs::create_plugin_config,
             crate::routes::plugin_configs::list_plugin_configs

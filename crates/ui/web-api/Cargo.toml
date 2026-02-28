@@ -42,7 +42,7 @@ uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-crypto = { path = "../../shared/crypto", features = ["sea-orm"] }
 uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-update-hooks = { path = "../../shared/update-hooks" }
-uptrakit-shared-types = { workspace = true }
+uptrakit-shared-types = { workspace = true, features = ["openapi"] }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-command = { workspace = true }

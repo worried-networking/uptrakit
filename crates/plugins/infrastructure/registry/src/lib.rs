@@ -79,6 +79,12 @@ pub trait PluginOps: Send + Sync + 'static {
         existing: &serde_json::Value,
     );
 
+    /// Returns all plugin types registered in the registry.
+    ///
+    /// This is the authoritative list — no hardcoded lists should exist outside
+    /// the registry. Use this to populate plugin-type selectors dynamically.
+    fn known_plugin_types(&self) -> Vec<PluginType>;
+
     /// Returns all plugin types that have the `DiscoverLocalSoftware` capability.
     fn discovery_plugins(&self) -> Vec<PluginType>;
 
@@ -97,6 +103,12 @@ pub trait PluginOps: Send + Sync + 'static {
     ///
     /// Returns an empty vec for unknown plugin types.
     fn capabilities_for_str(&self, plugin_type: &str) -> Vec<PluginCapability>;
+
+    /// Returns a sample/default configuration JSON for the given plugin type string.
+    ///
+    /// Serializes the `Default` implementation of the plugin's config type.
+    /// Returns an empty JSON object `{}` for unknown plugin types.
+    fn sample_config_for_str(&self, plugin_type: &str) -> serde_json::Value;
 }
 
 impl PluginOps for PluginRegistry {
@@ -121,6 +133,10 @@ impl PluginOps for PluginRegistry {
         PluginRegistry::restore_config_secrets_str(plugin_type, incoming, existing);
     }
 
+    fn known_plugin_types(&self) -> Vec<PluginType> {
+        PluginRegistry::known_plugin_types()
+    }
+
     fn discovery_plugins(&self) -> Vec<PluginType> {
         PluginRegistry::discovery_plugins()
     }
@@ -138,5 +154,9 @@ impl PluginOps for PluginRegistry {
 
     fn capabilities_for_str(&self, plugin_type: &str) -> Vec<PluginCapability> {
         PluginRegistry::capabilities_for_str(plugin_type)
+    }
+
+    fn sample_config_for_str(&self, plugin_type: &str) -> serde_json::Value {
+        PluginRegistry::sample_config_str(plugin_type)
     }
 }

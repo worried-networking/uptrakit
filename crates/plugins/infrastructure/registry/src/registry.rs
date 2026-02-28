@@ -178,6 +178,42 @@ macro_rules! register_plugins {
                 }
             }
 
+            /// Returns all plugin types registered in the registry.
+            ///
+            /// This is the authoritative list of known plugin types. Use this
+            /// instead of any hardcoded list outside the registry.
+            pub fn known_plugin_types() -> Vec<PluginType> {
+                vec![$(PluginType::$variant),+]
+            }
+
+            /// Returns a sample/default configuration JSON for the given plugin type.
+            ///
+            /// Serializes the `Default` implementation of the plugin's config type.
+            /// Returns an empty JSON object `{}` for unknown / `Other` types.
+            #[must_use]
+            pub fn sample_config(plugin_type: PluginType) -> serde_json::Value {
+                match plugin_type {
+                    $(
+                        PluginType::$variant => {
+                            serde_json::to_value(<$config>::default())
+                                .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+                        }
+                    )+
+                    _ => serde_json::Value::Object(serde_json::Map::new()),
+                }
+            }
+
+            /// Returns a sample/default configuration JSON for the given plugin type string.
+            ///
+            /// Returns an empty JSON object `{}` for unknown plugin types.
+            #[must_use]
+            pub fn sample_config_str(plugin_type: &str) -> serde_json::Value {
+                let Ok(pt) = plugin_type.parse::<PluginType>() else {
+                    return serde_json::Value::Object(serde_json::Map::new());
+                };
+                Self::sample_config(pt)
+            }
+
             /// Returns all plugin types that have the `DiscoverLocalSoftware` capability.
             ///
             /// Uses compile-time `CAPABILITIES` constants — no instantiation needed.

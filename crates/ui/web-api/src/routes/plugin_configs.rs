@@ -21,8 +21,45 @@ use uuid::Uuid;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::plugin_configs::{
-    CreatePluginConfigRequest, PluginConfigResponse, UpdatePluginConfigRequest,
+    CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
 };
+
+/// List all known plugin types with their display names and capabilities.
+///
+/// Returns static registry metadata — no tenant data is involved. Clients
+/// should call this endpoint to populate plugin-type selectors rather than
+/// hard-coding plugin type strings.
+#[utoipa::path(
+    get,
+    path = "/api/v1/plugin-types",
+    extensions(("x-required-permission" = json!("view_software"))),
+    responses(
+        (status = 200, description = "List of known plugin types", body = Vec<PluginTypeInfo>),
+    ),
+    tag = "Plugin Configs",
+    security(("bearer_token" = []))
+)]
+pub async fn list_plugin_types(
+    State(state): State<Arc<AppState>>,
+    CanViewSoftware(_user): CanViewSoftware,
+) -> Response {
+    let types: Vec<PluginTypeInfo> = state
+        .plugin_ops
+        .known_plugin_types()
+        .into_iter()
+        .map(|pt| {
+            let capabilities = state.plugin_ops.capabilities_for_str(pt.as_str());
+            let sample_config = state.plugin_ops.sample_config_for_str(pt.as_str());
+            PluginTypeInfo {
+                display_name: pt.display_name().to_owned(),
+                plugin_type: pt,
+                capabilities,
+                sample_config,
+            }
+        })
+        .collect();
+    (StatusCode::OK, Json(types)).into_response()
+}
 
 /// Create a new plugin configuration.
 #[utoipa::path(

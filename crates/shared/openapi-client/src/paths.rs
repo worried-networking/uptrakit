@@ -133,6 +133,8 @@ pub(crate) mod pki {
 
 pub(crate) mod plugin_configs {
     use uuid::Uuid;
+    /// `GET /api/v1/plugin-types`
+    pub(crate) const PLUGIN_TYPES: &str = "/api/v1/plugin-types";
     /// `GET /api/v1/plugin-configs` · `POST /api/v1/plugin-configs`
     pub(crate) const BASE: &str = "/api/v1/plugin-configs";
     /// `GET /api/v1/plugin-configs/{id}` · `PUT …` · `DELETE …`

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uptrakit_shared_types::PluginType;
+use uptrakit_shared_types::{PluginCapability, PluginType};
 use uuid::Uuid;
 
 use crate::validation::{Validate, ValidationError};
@@ -45,6 +45,24 @@ pub struct PluginConfigResponse {
     pub updated_at: OffsetDateTime,
 }
 
+/// Static metadata for a single plugin type, returned by `GET /api/v1/plugin-types`.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PluginTypeInfo {
+    /// Wire identifier for the plugin type (e.g. `"releases_github"`).
+    pub plugin_type: PluginType,
+    /// Human-readable display name (e.g. `"GitHub Releases"`).
+    pub display_name: String,
+    /// Capabilities declared by this plugin type.
+    pub capabilities: Vec<PluginCapability>,
+    /// A sample/default configuration JSON for this plugin type.
+    ///
+    /// Clients may pre-fill the config textarea with this value when creating
+    /// a new plugin config, so end-users see all available fields with their
+    /// defaults rather than a blank `{}`.
+    pub sample_config: serde_json::Value,
+}
+
 impl Validate for CreatePluginConfigRequest {
     fn validate(&self) -> Result<(), ValidationError> {
         if self.name.trim().is_empty() {
@@ -61,6 +79,7 @@ impl Validate for CreatePluginConfigRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_shared_types::PluginCapability;
 
     fn sample_uuid() -> Uuid {
         Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6")
@@ -147,6 +166,49 @@ mod tests {
         assert!(de.name.is_none());
         assert!(de.config.is_none());
         assert!(de.enabled.is_none());
+    }
+
+    // ── PluginTypeInfo ─────────────────────────────────────────────
+
+    #[test]
+    fn plugin_type_info_round_trip() {
+        let info = PluginTypeInfo {
+            plugin_type: PluginType::ReleasesDocker,
+            display_name: "Docker".to_string(),
+            capabilities: vec![
+                PluginCapability::DiscoverLocalSoftware,
+                PluginCapability::ControllerSideFetchReleases,
+            ],
+            sample_config: serde_json::json!({"tracking_mode": "semver_tags"}),
+        };
+        let json = serde_json::to_string(&info).expect("serialization should succeed");
+        let de: PluginTypeInfo =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(de.plugin_type, PluginType::ReleasesDocker);
+        assert_eq!(de.display_name, "Docker");
+        assert_eq!(
+            de.capabilities,
+            vec![
+                PluginCapability::DiscoverLocalSoftware,
+                PluginCapability::ControllerSideFetchReleases
+            ]
+        );
+        assert_eq!(de.sample_config["tracking_mode"], "semver_tags");
+    }
+
+    #[test]
+    fn plugin_type_info_capabilities_serialize_snake_case() {
+        let info = PluginTypeInfo {
+            plugin_type: PluginType::ReleasesGithub,
+            display_name: "GitHub Releases".to_string(),
+            capabilities: vec![PluginCapability::ControllerSideFetchReleases],
+            sample_config: serde_json::json!({}),
+        };
+        let json = serde_json::to_string(&info).expect("serialization should succeed");
+        assert!(
+            json.contains("controller_side_fetch_releases"),
+            "capability should serialize as snake_case"
+        );
     }
 
     // ── PluginConfigResponse ───────────────────────────────────────
