@@ -116,21 +116,43 @@ impl DockerSocketProxy {
                         let client_to_docker = tokio::io::copy(&mut stream_read, &mut tunnel_write);
                         let docker_to_client = tokio::io::copy(&mut tunnel_read, &mut stream_write);
 
-                        match tokio::try_join!(client_to_docker, docker_to_client) {
-                            Ok((sent, received)) => {
-                                tracing::trace!(
-                                    sent,
-                                    received,
-                                    "Docker proxy connection closed"
-                                );
+                        // Use select! rather than try_join! so that when either copy
+                        // direction completes (e.g. Docker sends Connection: close after
+                        // a response), the other direction is immediately cancelled and
+                        // both socket halves are dropped.  This gives bollard a clean
+                        // full-close on the connection so it removes it from the Keep-
+                        // Alive pool instead of trying to reuse a half-dead connection
+                        // for the next request, which would cause a hyper "SendRequest"
+                        // error.
+                        tokio::select! {
+                            r = client_to_docker => {
+                                match r {
+                                    Ok(n) => tracing::trace!(
+                                        bytes = n,
+                                        "Docker proxy client-to-docker copy completed"
+                                    ),
+                                    Err(e) if e.kind() != std::io::ErrorKind::ConnectionReset => {
+                                        tracing::debug!(
+                                            error = %e,
+                                            "Docker proxy client-to-docker copy error"
+                                        );
+                                    }
+                                    _ => {}
+                                }
                             }
-                            Err(e) => {
-                                // Connection reset is normal when the client disconnects.
-                                if e.kind() != std::io::ErrorKind::ConnectionReset {
-                                    tracing::debug!(
-                                        error = %e,
-                                        "Docker proxy copy error"
-                                    );
+                            r = docker_to_client => {
+                                match r {
+                                    Ok(n) => tracing::trace!(
+                                        bytes = n,
+                                        "Docker proxy docker-to-client copy completed"
+                                    ),
+                                    Err(e) if e.kind() != std::io::ErrorKind::ConnectionReset => {
+                                        tracing::debug!(
+                                            error = %e,
+                                            "Docker proxy docker-to-client copy error"
+                                        );
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
