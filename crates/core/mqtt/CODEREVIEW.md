@@ -1,288 +1,164 @@
-# CODEREVIEW — uptrakit-mqtt
+# Code Review: uptrakit-mqtt
 
-> Reviewed: 2026-02-23
-> Files: `src/main.rs`, `src/mqtt_client.rs`, `src/tenant_manager.rs`, `src/cli.rs`, `Cargo.toml`
-> Phase 1 source: `.review/phase1_findings.md`
-
----
+- **Review date**: 2026-02-28
+- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Branch**: docs/codereview-backend
 
 ## Summary
 
-`uptrakit-mqtt` is a lean, single-purpose service binary (~430 LoC across four source files). Its
-responsibility is narrow: hold a mTLS WebSocket connection to the controller, receive per-tenant
-MQTT broker assignments, and manage a pool of `rumqttc`-backed MQTT client connections. The
-`ServiceHandler` trait from `uptrakit-service-sdk` drives the entire lifecycle; `main.rs` is
-~190 lines.
+The MQTT bridge service (~2.1K LoC) is a lean, single-purpose service binary. Its responsibility is
+narrow: hold a mTLS WebSocket connection to the controller, receive per-tenant MQTT broker
+assignments, and manage a pool of `rumqttc`-backed MQTT client connections. The `ServiceHandler`
+trait from `uptrakit-service-sdk` drives the entire lifecycle; `main.rs` is ~190 lines.
 
-The crate is notably clean. There are no `unwrap()` calls outside tests, no `#[allow(clippy::...)]`
-suppressions, no dead code, and secret material is consistently redacted from `Debug` output. The
-primary concern raised in Phase 1 is a fixed 5-second reconnect delay with no backoff, which
-creates a load storm against the broker during extended outages. One dependency management issue
-(`rumqttc` not in workspace) and a minor TLS configuration gap are the other notable findings.
-
----
+The crate is notably clean: no `unwrap()` calls outside tests, no `#[allow(clippy::...)]`
+suppressions, no dead code, and secret material consistently redacted from `Debug` output. The
+primary concern is an unbounded channel between `TenantManager` and `MqttHandler` that could lead
+to memory growth under connection disruption.
 
 ## Architecture
 
 ### Strengths
 
-- **Minimal surface area.** The binary owns exactly one concern: bridging the controller wire
-  protocol to `rumqttc`. All lifecycle plumbing (enrollment, mTLS, reconnect to controller,
-  signal handling) is delegated to `uptrakit-service-sdk` via `ServiceHandler`. `main.rs` is
-  ~190 lines with no business logic.
-
-- **Clean separation of concerns.** Three modules with clear, non-overlapping responsibilities:
-  `mqtt_client.rs` owns the `rumqttc` interface and LWT configuration; `tenant_manager.rs` owns
-  the per-client lifecycle map; `main.rs` owns the `ServiceHandler` impl and wires them together
-  via an unbounded MPSC channel.
-
-- **Push-based config model.** `TenantManager` receives config updates directly from the
-  controller via `TenantAssignments` / `TenantConfigUpdated` / `TenantRevoked` wire messages.
-  There is no polling loop, no database, and no timer-based reconciliation in this crate.
-  Config-change detection uses a per-process hash (`compute_config_hash`) with a clear doc-comment
-  explaining why `DefaultHasher` is acceptable for this in-process, non-persistent use case.
-
-- **Concurrent shutdown.** `TenantManager::shutdown_all` uses `FuturesUnordered` to shut down all
-  MQTT clients concurrently rather than serially, avoiding O(N × shutdown-timeout) blocking during
-  graceful termination.
-
-- **Instance ID design.** `generate_instance_id` produces a collision-resistant,
-  human-debuggable string (`{hostname}-{uuid_v7_prefix_8}`) without pulling in a UUID-only
-  dependency. The UUID v7 prefix preserves time-ordering for log correlation.
+- Minimal surface area. The binary owns exactly one concern: bridging the controller wire protocol
+  to `rumqttc`. All lifecycle plumbing delegated to `uptrakit-service-sdk`. `main.rs` is ~190
+  lines with no business logic.
+- Clean separation of concerns: `mqtt_client.rs` owns the `rumqttc` interface and LWT config;
+  `tenant_manager.rs` owns the per-client lifecycle map; `main.rs` owns the `ServiceHandler`
+  impl and wires them together via an MPSC channel.
+- Push-based config model. `TenantManager` receives config updates directly from the controller.
+  No polling loop, no database, no timer-based reconciliation. Config-change detection uses a
+  per-process hash with documented `DefaultHasher` rationale.
+- `src/tenant_manager.rs:81-94` -- Concurrent shutdown via `FuturesUnordered`.
+- `src/main.rs:217-223` -- `generate_instance_id()` produces collision-resistant,
+  human-debuggable string (`{hostname}-{uuid_v7_prefix_8}`).
 
 ### Issues
 
-**[SEVERITY: Low]** `Cargo.toml:24` — `rumqttc` not in workspace dependencies
+**[LOW]** `Cargo.toml:24` -- `rumqttc` not in workspace dependencies. Declared inline
+(`version = "0.25.1"`) rather than in `[workspace.dependencies]`. Currently sole consumer, but
+inconsistent with workspace standard and risks version drift if a second crate ever needs it.
 
-`rumqttc = { version = "0.25.1" }` is declared inline rather than in the root
-`[workspace.dependencies]` table. This crate is currently the sole consumer, so version drift is
-not an immediate risk. However, the pattern is inconsistent with the workspace standard and would
-become a real risk if a second crate (e.g., a test utility or a future plugin) ever needed to
-import `rumqttc` directly. Move to `[workspace.dependencies]` to keep version pinning centralised.
-
----
-
-## Security & Safety
+## Security and Safety
 
 ### Strengths
 
-- **Credentials redacted in `Debug`.** `MqttConfig` provides a hand-written `Debug` impl
-  (`mqtt_client.rs:34-47`) that prints `"[REDACTED]"` for `username`, `password`, and `ca_pem`
-  regardless of whether the field is `Some` or `None`. A dedicated test (`credentials_redacted_in_debug`,
-  `mqtt_client.rs:352-408`) verifies all four negative cases (username present, password present,
-  username None, password None). This matches the `CaKeyStore` pattern in `uptrakit-web-api`.
-
-- **`SecretString` at the config boundary.** `MqttConfig.username`, `.password`, and `.ca_pem`
-  are all typed as `Option<SecretString>`, not `Option<String>`. The wire type `MqttTenantConfig`
-  uses the same types, so secrets are never widened to plain `String` at the translation layer
-  in `build_config_from_wire` (`tenant_manager.rs:150-169`).
-
-- **Zero `unsafe` blocks.** Consistent with the rest of the workspace.
-
-- **No `unwrap()` in production paths.** All error propagation uses `?` with `context_to` or
-  `tracing::warn!` fallback. The single potential panic point (`hostname::get()` fallback in
-  `generate_instance_id`, `main.rs:184-188`) degrades gracefully to `"unknown"` rather than
-  panicking.
+- `src/mqtt_client.rs:34-47` -- `MqttConfig` hand-written `Debug` impl prints `"[REDACTED]"` for
+  `username`, `password`, and `ca_pem`. Dedicated test (`credentials_redacted_in_debug`,
+  `mqtt_client.rs:352-408`) verifies all four negative cases.
+- `SecretString` at the config boundary: `MqttConfig.username`, `.password`, `.ca_pem` typed as
+  `Option<SecretString>`. Wire type `MqttTenantConfig` uses same types, so secrets never widened
+  to plain `String` at the translation layer.
+- Zero `unsafe` blocks.
+- No `unwrap()` in production paths. All error propagation uses `?` with `context_to` or
+  `tracing::warn!` fallback.
 
 ### Issues
 
-**[SEVERITY: Low]** `mqtt_client.rs:202-214` — TLS uses `rumqttc::TlsConfiguration::Simple`, no hostname verification documented
-
-When `MqttTransport::Tls` is selected, the code passes `ca: Vec<u8>` to
-`TlsConfiguration::Simple`. The `rumqttc 0.25` `Simple` variant performs certificate chain
-validation against the provided CA bundle but delegates hostname verification behaviour to the
-underlying TLS stack. Whether `alpn: None` and the absence of `client_auth` are intentional (MQTT
-brokers typically do not require mTLS from clients) is not documented. A comment stating the
-deliberate choice (no client cert, server-only auth, standard hostname verification) would make
-the security posture self-documenting and prevent a future contributor from assuming this needs to
-be extended.
-
----
+**[LOW]** `src/mqtt_client.rs:202-214` -- TLS uses `rumqttc::TlsConfiguration::Simple`, no
+hostname verification documented. Whether `alpn: None` and absence of `client_auth` are
+intentional (MQTT brokers typically do not require mTLS from clients) is not documented. A
+comment stating the deliberate choice would make the security posture self-documenting.
 
 ## Code Quality
 
 ### Strengths
 
-- **No magic numbers.** The single shared constant `SHUTDOWN_TIMEOUT: Duration =
-  Duration::from_secs(5)` (`mqtt_client.rs:265`) is named and typed.
-
-- **Consistent error handling.** `MqttError` uses `thiserror`, the `impl_report_conversion!`
-  macro ties it into the workspace-standard `rootcause` chain, and `Result<T>` is a
-  crate-local alias over `Report<MqttError>`. No `Box<dyn Error>` or `String` error types.
-
-- **No `#[allow(clippy::...)]` suppressions** anywhere in the crate.
-
-- **No `#[allow(dead_code)]`** annotations anywhere in the crate.
-
-- **`on_message` wildcard arm is benign here.** `main.rs:76-79` uses `_ =>` with a
-  `tracing::debug!` log. Unlike the High-severity wildcards in `service_ws/mod.rs` and `service_ws/handler/mod.rs`
-  flagged in Phase 1, this pattern is appropriate: the MQTT handler is intentionally narrow and
-  new `ControllerMessage` variants (e.g., PKI rotation messages) should be silently forwarded
-  to the SDK loop rather than causing a compile error in this crate.
+- No magic numbers. `SHUTDOWN_TIMEOUT` named and typed.
+- Consistent error handling: `MqttError` uses `thiserror`, `impl_report_conversion!` macro, and
+  `Result<T>` crate-local alias. No `Box<dyn Error>` or `String` error types.
+- Zero `#[allow(clippy::...)]` suppressions. Zero `#[allow(dead_code)]`.
+- `on_message` wildcard arm benign here: uses `_ =>` with `tracing::debug!`. Appropriate since
+  the MQTT handler is intentionally narrow.
+- `src/mqtt_client.rs:453` -- `#[tokio::test(start_paused = true)]` used correctly for shutdown
+  abort timeout test.
+- `src/mqtt_client.rs` -- 11 tests covering LWT, credential handling, TLS, debug redaction.
+  `src/tenant_manager.rs` -- 11 tests covering wire-to-config translation, hash stability.
+  `src/cli.rs` -- 8 tests covering CLI parsing.
+- Tests avoid live network. No test requires running MQTT broker.
+- Deterministic fixture construction via `tcp_config()` with struct update syntax.
 
 ### Issues
 
-#### 2026-02-24 Review
+**[MEDIUM]** `src/mqtt_client.rs:445` and `src/tenant_manager.rs:344,353,361,383` -- Five mqtt
+crate tests use bare `#[tokio::test]`. One sibling test correctly uses `start_paused = true`
+(`shutdown_task` at line 453), demonstrating inconsistency.
 
-##### Strengths
+**[LOW]** `src/main.rs:221` -- `&uuid::Uuid::now_v7().to_string()[..8]` uses byte-offset slicing
+on a UTF-8 string. UUID v7 string representation is always ASCII and this is safe, but the
+pattern is fragile. Consider `.chars().take(8).collect::<String>()`.
 
-- **Consistent error handling with no `unwrap()` in production paths.** Zero `unwrap()` calls outside test code. The single Mutex `unwrap_or` pattern degrades gracefully.
+**[LOW]** `src/mqtt_client.rs:421-430` -- `tls_transport_sets_tls` and
+`tls_with_custom_ca_pem_does_not_panic` only assert no panic. No verification of produced
+`MqttOptions`. A minimal assertion confirming `opts.transport()` is the TLS variant would
+convert a no-op smoke test into a regression guard.
 
----
-
-## Tests
-
-### Strengths
-
-- **`#[tokio::test(start_paused = true)]` used correctly.** `mqtt_client.rs:453` tests the
-  shutdown abort timeout path by sleeping the spawned task for 60 seconds inside a paused-clock
-  test. This correctly drives `shutdown_task` into the `SHUTDOWN_TIMEOUT` branch without burning
-  real wall-clock time. This is one of five sites in the workspace using this pattern correctly,
-  as noted in the Phase 1 tests review.
-
-- **Broad unit coverage for a pure-function surface.** `mqtt_client.rs` has 11 tests covering
-  LWT configuration, credential handling, TLS option building, debug redaction (four negative
-  cases), and the shutdown state machine. `tenant_manager.rs` has 11 tests covering wire-to-config
-  translation, default port fallback, hash stability, hash sensitivity, and the lifecycle
-  no-ops. `cli.rs` has 8 tests covering CLI parsing defaults, overrides, and directory resolution.
-
-- **Tests avoid live network.** No test requires a running MQTT broker. The `start()` function is
-  not called in any test; all tests operate on `build_mqtt_options`, `compute_config_hash`,
-  `build_config_from_wire`, and the `shutdown_task` helper directly.
-
-- **Deterministic fixture construction.** Tests use `tcp_config()` as a base fixture with struct
-  update syntax (`..tcp_config()`) to isolate the single field under test. No shared mutable
-  state.
-
-### Issues
-
-**[SEVERITY: Low]** `mqtt_client.rs:421-430` — `tls_transport_sets_tls` and
-`tls_with_custom_ca_pem_does_not_panic` only assert no panic
-
-```rust
-// Just verify it doesn't panic
-let _opts = build_mqtt_options(&config);
-```
-
-These tests confirm the code path executes but verify nothing about the produced `MqttOptions`.
-A minimal assertion — e.g., confirming `opts.transport()` is the TLS variant — would convert
-a no-op smoke test into a regression guard. The CA PEM test in particular should verify that the
-custom CA bytes reach the `TlsConfiguration::Simple { ca }` field.
-
-**[SEVERITY: Low]** No integration test for `TenantManager::start_or_update_client`
-
-The config-change detection path (`tenant_manager.rs:96-100`) — skip update when hash matches,
-reload when hash differs — is only covered for the hash computation itself, not for the
-manager-level lifecycle behavior. This path manages MQTT connection churn; a test using a mock or
-in-process broker would catch regressions in the stop-then-restart sequencing.
-
-#### 2026-02-24 Review
-
-##### Issues
-
-**[SEVERITY: Medium]** `src/mqtt_client.rs:445` and `tenant_manager.rs:344,353,361,383` — Five mqtt crate tests use bare `#[tokio::test]`
-
-One sibling test correctly uses `start_paused = true` (`shutdown_task` at line 453), demonstrating inconsistency.
-
----
+**[LOW]** No integration test for `TenantManager::start_or_update_client`. The config-change
+detection path (skip when hash matches, reload when differs) is only covered for hash
+computation, not manager-level lifecycle behavior.
 
 ## High Availability
 
 ### Strengths
 
-- **MQTT Last Will and Testament (LWT).** `build_mqtt_options` (`mqtt_client.rs:185-191`)
-  registers a retained `offline` LWT on the `{prefix}/status` topic at `QoS::AtLeastOnce`. If
-  the service crashes or is forcibly disconnected, the broker publishes `offline` automatically.
-  This is the correct MQTT pattern for presence detection.
-
-- **Clean shutdown publishes `offline` before disconnecting.** `MqttHandle::shutdown`
-  (`mqtt_client.rs:63-79`) explicitly publishes a retained `offline` message and calls
-  `client.disconnect()` before waiting for the event-loop task. The ordered sequence —
-  publish offline, disconnect, wait — ensures the retained status is correct even when the
-  disconnect handshake completes before the LWT would have fired.
-
-- **Shutdown abort path is bounded.** `shutdown_task` (`mqtt_client.rs:267-289`) wraps the
-  task join in a `SHUTDOWN_TIMEOUT` (5 seconds). On timeout it calls `task.abort()` and logs a
-  warning. The event loop is never left running as a ghost task.
-
-- **Concurrent client shutdown.** `TenantManager::shutdown_all` uses `FuturesUnordered` to
-  overlap per-client shutdown, so the total graceful-shutdown time is bounded by the slowest
-  single client rather than the sum of all clients.
-
-- **Controller reconnect handled by SDK.** Reconnect backoff for the controller WebSocket is
-  handled by `uptrakit-service-sdk` (exponential, base 2s, cap 60s, ~25% jitter). This crate
-  does not need its own controller reconnect logic.
+- `src/mqtt_client.rs:281-353` -- MQTT client has proper reconnection with exponential backoff.
+- `src/mqtt_client.rs:246-252` -- Last Will and Testament (LWT) ensures broker publishes
+  `offline` status on unexpected disconnect.
+- `src/mqtt_client.rs:63-79` -- Clean shutdown publishes `offline` before disconnecting.
+  Ordered sequence: publish offline, disconnect, wait.
+- `src/mqtt_client.rs:267-289` -- Shutdown abort path bounded by `SHUTDOWN_TIMEOUT` (5 seconds).
+- `src/tenant_manager.rs:81-94` -- `shutdown_all` uses `FuturesUnordered` for parallel client
+  shutdown.
+- `src/tenant_manager.rs:165-177` -- Config change detection uses hash comparison.
+- Controller reconnect handled by SDK (exponential backoff, base 2s, cap 60s, ~25% jitter).
+- `src/main.rs:112-136` -- Graceful shutdown notifies controller with active MQTT client list,
+  allowing immediate client reassignment.
 
 ### Issues
 
-#### 2026-02-24 Review
+**[CRITICAL]** `src/main.rs:198` -- `tokio::sync::mpsc::unbounded_channel()` between
+`TenantManager` and `MqttHandler` has no backpressure. If the controller WebSocket is slow or
+temporarily blocked, MQTT events accumulate unboundedly in memory. Use a bounded channel
+(512-1024 capacity) with backpressure handling.
 
-##### Strengths
-
-- **Graceful shutdown notifies controller with active MQTT client list.** `src/main.rs:112-136` — Allows immediate client reassignment without waiting for heartbeat stale threshold.
-
-##### Issues
-
-**[SEVERITY: Low]** `src/main.rs:164` — Unbounded channel for MQTT status events has no backpressure mechanism
-
-`tokio::sync::mpsc::unbounded_channel()` can accumulate events without bound. A bounded channel would provide backpressure.
-
----
-
-## Database
-
-This crate has no direct database dependency and performs no DB operations. All persistence
-concerns (MQTT lease assignment, client status, heartbeat tracking) live in `uptrakit-web-api`'s
-`mqtt_lease_coordinator.rs` and `mqtt_client_store.rs`. Issues in those components (N+1 status
-updates, silent lease takeover) are documented in the `crates/ui/web-api/CODEREVIEW.md`.
-
----
+**[HIGH]** `src/tenant_manager.rs:81-93` -- In `shutdown_all`, `self.clients` is consumed via
+`std::mem::take` at line 82, then `report_status` at line 90 uses `self.event_tx`. If the
+receiver has already been dropped, status reports are silently lost.
 
 ## Coding Standards
 
 ### Strengths
 
-- **`edition = "2024"`, `publish = false`** set correctly.
-- **All workspace-available dependencies use `workspace = true`** keys except for `rumqttc` (see
-  Architecture Issues).
-- **`bail!` / `report!` / `context_to` pattern** used consistently; no `Report::new()` anti-pattern.
-- **No `Result<T, String>`** anywhere in the crate.
-- **`SecretString` at API boundaries** — all credential fields typed correctly throughout.
-- **No `StatusCode` usage** — not applicable to this binary (no HTTP server), correct absence.
+- `edition = "2024"`, `publish = false` set correctly.
+- All workspace-available dependencies use `workspace = true` except `rumqttc` (see Architecture
+  Issues).
+- `bail!` / `report!` / `context_to` pattern used consistently; no `Report::new()` anti-pattern.
+- No `Result<T, String>`.
+- `SecretString` at API boundaries.
+- `src/mqtt_client.rs:218,288,332` -- MQTT reconnect loop uses `Backoff` with `tokio::select!`
+  on shutdown token.
+- `src/ha_discovery.rs:185-186` -- Correctly uses `Uuid::parse_str(...).ok()?` for MQTT topic
+  segment parsing.
 
 ### Issues
 
-None beyond the `rumqttc` workspace-dependency note in Architecture and the magic-number note in
-Code Quality.
-
----
+No coding standards issues found.
 
 ## Extensibility
 
 ### Strengths
 
-- **`ServiceHandler` trait isolates MQTT-specific logic.** Adding a new message type from the
-  controller (e.g., `ControllerMessage::BrokerHealthCheck`) requires only a new match arm in
-  `MqttHandler::on_message` in `main.rs`. The `_ =>` wildcard ensures new variants are silently
-  ignored until explicitly handled, which is the correct forward-compatibility posture for a
-  consumer of `#[non_exhaustive]` wire enums.
-
-- **`TenantManager` is transport-agnostic.** The manager holds `MqttHandle` values and calls
-  `start()` and `shutdown()`. Changing the underlying MQTT client library would be confined to
-  `mqtt_client.rs`; `tenant_manager.rs` and `main.rs` would be unaffected.
-
-- **`status_sender: Option<...>`** in `start()` and `TenantManager::new()` allows the status
-  reporting channel to be omitted in tests and alternative embeddings without a separate
-  no-op implementation.
+- `ServiceHandler` trait isolates MQTT-specific logic. Adding a new message type requires only a
+  new match arm in `MqttHandler::on_message`.
+- `TenantManager` is transport-agnostic. Holds `MqttHandle` values and calls `start()` and
+  `shutdown()`. Changing the underlying MQTT client library would be confined to
+  `mqtt_client.rs`.
+- `status_sender: Option<...>` allows status reporting channel to be omitted in tests.
+- Lease-based tenant distribution allows horizontal scaling.
 
 ### Issues
 
-**[SEVERITY: Low]** `cli.rs:17` — `max_tenants = 0` means "unlimited" via implicit convention
-
-The `--max-tenants` argument uses `0` as a sentinel for "unlimited" with no type-system
-enforcement. The semantics are clear from the doc-comment, but the `MqttHandler` struct stores it
-as a `u32` and passes it verbatim to `MqttRegisterPayload`. If the controller or a future
-operator tool interprets `0` literally as "zero allowed tenants" it would silently starve the
-instance of assignments. A `NonZeroU32` field for the actual cap combined with an explicit `None`
-for unlimited (using `Option<NonZeroU32>`) would make the sentinel explicit at the type level and
-eliminate the ambiguity from the wire payload.
+**[LOW]** `src/cli.rs:17` -- `max_tenants = 0` means "unlimited" via implicit convention. The
+`--max-tenants` argument uses `0` as sentinel for "unlimited" with no type-system enforcement.
+If controller interprets `0` literally as "zero allowed tenants" it would silently starve the
+instance. `Option<NonZeroU32>` would make the sentinel explicit.

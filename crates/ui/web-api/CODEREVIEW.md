@@ -1,348 +1,350 @@
-# CODEREVIEW — uptrakit-web-api
+# Code Review: uptrakit-web-api
+
+- **Review date**: 2026-02-28
+- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Branch**: docs/codereview-backend
 
 ## Summary
 
-`uptrakit-web-api` is the largest and most complex crate in the workspace (~98 `.rs` source files, approximately 1.2 MB of Rust). It implements the full HTTP/WebSocket API server: route handlers (80+ REST endpoints), WebSocket lifecycle management for agents, MQTT services, and SSH agents, OIDC authentication flows, JWT/session management, PKI operations, MQTT lease coordination, cross-controller event delivery, and database query helpers. It is a library crate consumed exclusively by `uptrakit-controller`.
+`uptrakit-web-api` is the largest crate (~32K LoC, ~98 `.rs` files) implementing the full
+HTTP/WebSocket API server: 80+ REST endpoints, WebSocket lifecycle management, OIDC authentication
+flows, JWT/session management, PKI operations, MQTT lease coordination, cross-controller event
+delivery, and database query helpers. It is a library crate consumed by `uptrakit-controller`.
 
-The crate demonstrates several architectural strengths: a well-designed builder pattern for `AppState`, strong security primitives throughout the auth subsystem, consistent use of typed permission extractors, and a clean `CaPublicSnapshot`/`CaKeyStore` split that keeps private key material isolated. The primary concerns are concentrated in two areas: a cluster of High-severity security gaps in the authentication flow (unverified OIDC email, missing JWT audience claim, in-memory-only token revocation), and code quality issues in the largest route handlers where complexity has grown well beyond maintainable bounds. The previously identified N+1 query patterns in `list_update_history`, `load_item_hosts`, and the autodiscovery ignore-list loop have been resolved using batch loading with subqueries and `HashMap` lookups.
-
----
+The crate demonstrates strong security primitives (Argon2id, JWT denylist, typed permission
+extractors, PKCE for OIDC), a well-designed `TenantDb` abstraction for tenant isolation, and
+clean `AppState` builder pattern. Key concerns: a critical coding standards violation in OIDC
+auth (`unwrap_or(0)` on user count), the in-memory-only token denylist without cross-instance
+replication, the crate's overall size approaching "god crate" territory, route handlers in
+`src/routes/` lacking inline unit tests for the majority of business-logic paths, and several
+query modules without test coverage.
 
 ## Architecture
 
 ### Strengths
 
-- **`AppState` builder pattern** — `src/lib.rs:234-493`. `AppStateBuilder` enforces that all required fields are set before construction; `AppStateBuildError` names the first missing field. Partial state cannot escape at compile time. The `plugin_ops` field defaults to the real `PluginRegistry`, making test injection a one-call override.
-- **`CaPublicSnapshot` / `CaKeyStore` split** — `src/lib.rs:52-156`. Public CA data is freely cloneable and shareable. Private key material is isolated in `CaKeyStore` (not `Clone`, not `Debug`), distributed only to the three consumers that legitimately need it (OCSP, CRL, cert signer). The `split_snapshot` function ensures consistent construction.
-- **`CaKeyStore` `Debug` redaction** — `src/lib.rs:98-112`. Every key field prints `"[REDACTED]"`. Verified by a dedicated test at `src/lib.rs:1284-1303`.
-- **Dual-router design** — `src/lib.rs:773-989`. `build_router` (HTTPS, full middleware stack) and `build_pki_router` (plain HTTP, PKI endpoints only) are clearly separated. The PKI router intentionally omits `resolve_proxy_headers` with an explanatory comment.
-- **OIDC feature-gating** — `Cargo.toml:10-12` and throughout `src/lib.rs`. OIDC types, flow stores, and routes are completely absent from the binary when the `oidc` feature is disabled. Feature-conditioned fields in `AppState` and `AppStateBuilder` are consistently paired.
-- **`PluginOps` abstraction** — `src/lib.rs:213-215`. Plugin operations injected as `Arc<dyn PluginOps>`, decoupling all route handlers from the concrete `PluginRegistry`. Enables mock injection in tests without a running plugin ecosystem.
-- **Middleware layering order** — `src/lib.rs:947-960`. `resolve_proxy_headers` → `rate_limit_auth` → `resolve_ip` → `request_log`. Applied in reverse execution order as required by Axum/Tower. Proxy header stripping happens before rate limiting to prevent header-spoofed rate limit bypass.
-- **OIDC state stores as separate per-concern types** — `OidcFlowStore`, `OidcRegistrationStore`, `OidcTokenExchangeStore`, `AccountLinkStore`. Each store is scoped to a single step in the OIDC flow, preventing cross-step state confusion.
-- **`ServiceConnectionRegistry.send()` non-blocking** — `src/service_connections.rs`. Read lock acquired, sender cloned, lock dropped before the async send. No lock held across await points.
-- **Event poller cursor safety** — `src/event_poller.rs:88`. Cursor starts at `max_id - 100` to avoid missing events between startup and first poll. Cursor only advances past events that are successfully delivered or permanently skipped, preventing silent message loss.
+- `src/app_state.rs:114-387` -- Builder pattern for `AppState` with exhaustive field checks
+  catches missing configuration at startup. `AppStateBuildError` names the first missing field.
+  `plugin_ops` field defaults to real `PluginRegistry`, making test injection a one-call
+  override.
+- `src/lib.rs:52-156` -- `CaPublicSnapshot` / `CaKeyStore` split isolates private key material.
+  `CaKeyStore` is not `Clone`, `Debug` redacts all key fields to `[REDACTED]`.
+- `src/tenant_db.rs:14-103` -- `TenantDb` extractor combining database access with tenant
+  scoping provides type-safe tenant-filtered queries (`find`, `find_by_id`, `update_many`,
+  `delete_many`, `find_via_tenant_join`).
+- `src/queries/mod.rs:1-15` -- Clean separation between routes (HTTP concerns) and queries
+  (database concerns).
+- `src/cert_signer.rs:1-41` -- `AgentCertSigner` trait abstracts certificate signing, enabling
+  `NoopCertSigner` test doubles.
+- `src/settings.rs:73-114` -- `tokio::sync::watch` for lock-free reads with write mutex for
+  serialized updates. `SettingsSnapshot` provides atomic reads.
+- `src/router.rs:295-527` -- Router with separate authenticated and public route groups,
+  middleware layering (resolve_ip -> rate_limit -> resolve_proxy_headers).
+- `src/lib.rs:773-989` -- Dual-router design: `build_router` (HTTPS, full middleware stack)
+  and `build_pki_router` (plain HTTP, PKI endpoints only) are clearly separated. The PKI
+  router intentionally omits `resolve_proxy_headers` with explanatory comment.
+- Middleware layering order correct: `resolve_proxy_headers` -> `rate_limit_auth` ->
+  `resolve_ip` -> `request_log`. Proxy header stripping before rate limiting prevents
+  header-spoofed rate limit bypass.
+- OIDC feature-gating is complete: types, flow stores, and routes absent when `oidc` disabled.
+  OIDC state stores as separate per-concern types (`OidcFlowStore`, `OidcRegistrationStore`,
+  `OidcTokenExchangeStore`, `AccountLinkStore`), each scoped to one flow step.
+- `PluginOps` trait decouples route handlers from concrete `PluginRegistry`.
+- `src/event_poller.rs:88` -- Event poller cursor starts at `max_id - 100` to avoid missing
+  events between startup and first poll. Cursor only advances past successfully delivered or
+  permanently skipped events.
+- UUID v7 primary keys throughout entity definitions for time-ordered inserts.
+- `TenantScoped` trait provides compile-time tenant filtering. Transactions used for all
+  multi-step mutations (`oidc_callback`, `oidc_complete_registration`, `enroll_*`,
+  `merge_service`). `lock_exclusive()` before mutation in `merge_service`.
+- Soft-delete partial unique indexes (`WHERE deactivated_at IS NULL`) prevent duplicate names
+  among active records without conflicting with soft-deleted rows.
+- `INSERT ON CONFLICT DO NOTHING` for lease deduplication in MQTT coordinator.
+- Batch plugin config loading in `list_ignore_rules` and JOIN-based `load_plugins` eliminate
+  N+1 patterns.
 
 ### Issues
 
-**[SEVERITY: Low]** No `rust-version` MSRV set anywhere in the workspace
+**[HIGH]** `src/lib.rs:1-24` -- At ~32K LoC, this crate contains auth, middleware, routes,
+queries, settings, MQTT coordination, NATS transport, OCSP, PKI, notifications, and update
+output broadcasting. Consider extracting auth, settings, and MQTT coordination into shared
+crates.
 
-`AGENTS.md` documents `rust-version = "1.91"` but no crate declares it. If this crate uses edition 2024 features, build failures on older toolchains have no documented expectation.
+**[HIGH]** `src/app_state.rs:37-96` -- `AppState` has 22+ public fields. Most have `pub`
+visibility. PKI, notification, and credential fields should have restricted visibility with
+accessor methods.
 
----
+**[MEDIUM]** `src/router.rs:17-209` -- OpenAPI `#[openapi(...)]` lists every path and schema
+explicitly (~200 lines). Adding a new endpoint requires modifying three places: route module,
+router function, and OpenAPI annotation.
 
-## Security & Safety
+**[MEDIUM]** `src/queries/autodiscovery.rs:36-75` -- TOCTOU race in
+`create_or_ignore_ignore_rule`. Check-then-insert without transaction.
+
+**[MEDIUM]** `src/queries/update_history.rs:148-150` -- Output not loaded for
+`list_update_history`. Returns empty output for records using newer `update_output_lines`
+storage, unlike the detail endpoint which correctly falls back.
+
+**[LOW]** `api_tokens` table has no `expires_at` column. API tokens valid indefinitely once
+issued. A compromised token that was never explicitly revoked remains valid forever.
+
+**[LOW]** `src/queries/plugin_configs.rs:87-94` -- `find_raw_active_config` swallows DB errors
+via `.ok().flatten()`. Transient DB issues indistinguishable from "config does not exist".
+
+## Security and Safety
 
 ### Strengths
 
-- **Argon2id with OWASP parameters** — `src/auth/password.rs:32-40`. 19 MiB memory cost, 2 iterations. Directly matches OWASP recommended minimums for interactive authentication.
-- **JWT denylist with two revocation modes** — `src/auth/token_denylist.rs`. JTI-level revocation for single-token logout; user-level revocation (`until` timestamp) for credential rotation/compromise scenarios. Five unit tests cover boundary conditions including purge semantics and "latest timestamp wins" for successive deny calls.
-- **Refresh token rotation in DB transaction with replay protection** — `src/auth/session.rs:109-183`. Rotation is atomic; a replayed refresh token cannot produce two valid sessions.
-- **DB-backed rate limiter, fail-closed** — `src/auth/rate_limit.rs`. `fail_closed: true` causes a DB error to reject rather than allow. Applied at two layers: HTTP auth endpoints (middleware) and WebSocket connection/auth-failure paths (`src/routes/service_ws/mod.rs`).
-- **Reverse-proxy header spoofing mitigation** — `src/middleware/resolve_proxy_headers.rs:56-62`. Cert and forwarded headers stripped from untrusted peer IPs before being re-set from trusted proxy headers.
-- **All tokens stored as SHA-256 hashes** — `src/auth/token.rs:17-22`. Plaintext tokens never persisted; a DB dump reveals no replayable credentials.
-- **Typed permission extractors** — `src/middleware/permission.rs:35-110`. One struct per `Permission` variant, generated by `permission_extractor!` macro. Authorization is enforced at the type level; handler signatures form an auditable access-control inventory. Nine variants, all tested.
-- **Refresh cookie hardening** — `src/auth/refresh_cookie.rs`. HttpOnly, Secure, SameSite=Strict, path-scoped to `/api/v1/auth`. Not accessible to JavaScript.
-- **PKCE enforced on all OIDC flows** — `src/routes/oidc_auth.rs:168`, `308`. `pkce_verifier` stored with the pending flow record and consumed at callback; code injection into a stolen authorization URL is blocked.
-- **Zero `unsafe` blocks** in production code across the entire crate.
-- **`SecretString` at all API input boundaries** — OIDC tokens, device-flow codes, API token responses use `SecretString`; raw bytes are not retained after the response is serialized.
+- `src/auth/password.rs:32-40` -- Argon2id with OWASP parameters (19 MiB, 2 iterations).
+- `src/auth/token_denylist.rs` -- JTI-level and user-level revocation with `iat` cutoff.
+  Five unit tests cover boundary conditions including purge semantics and "latest timestamp
+  wins".
+- `src/auth/session.rs:109-183` -- Refresh token rotation in DB transaction with replay
+  detection.
+- `src/auth/rate_limit.rs` -- DB-backed rate limiter, fail-closed. Applied to all auth
+  endpoints and WebSocket connection/auth-failure paths.
+- `src/middleware/resolve_proxy_headers.rs:56-62` -- Cert and forwarded headers stripped from
+  untrusted peer IPs. Certificate issuer CN verified against known CAs.
+- `src/auth/token.rs:17-22` -- All tokens stored as SHA-256 hashes, never plaintext.
+- `src/middleware/permission.rs:35-110` -- `permission_extractor!` macro generates typed
+  extractors for all 9 permission levels.
+- `src/auth/refresh_cookie.rs` -- HttpOnly, Secure, SameSite=Strict, path-scoped.
+- `src/routes/oidc_auth.rs:168,308` -- PKCE enforced on all OIDC flows. Single-use CSRF state
+  with 10-minute TTL. Email verification enforced. PKCE verifiers encrypted at rest.
+- `src/routes/service_ws/connection.rs:31` -- 1 MB max WebSocket message size. 30-second
+  anonymous timeout. Per-IP connection rate limiting (30/60s). Auth failure rate limiting
+  (10/300s). Sequence number validation. Per-connection message rate limiting (50/s).
+- Zero `unsafe` blocks.
+- `SecretString` at all API input boundaries.
 
 ### Issues
 
-**[SEVERITY: Medium]** `src/auth/token_denylist.rs:15` (acknowledged in code comment) — In-memory denylist provides no cross-instance revocation
+**[HIGH]** `src/auth/token_denylist.rs:14-16` -- In-memory denylist not replicated across
+instances. Revoked tokens remain valid on other instances for up to 15 minutes (JWT TTL).
+A DB-backed `revoked_tokens` table or Redis pub/sub invalidation would close this gap.
 
-The comment explicitly acknowledges the gap: "Cross-instance revocation relies on the natural JWT expiry (15 min)." For a system managing infrastructure access, a 15-minute window after revocation during which a stolen token remains valid on peer instances is a material risk. A DB-backed `revoked_tokens` table checked at validation time (or a Redis pub/sub invalidation) would close this gap.
+**[HIGH]** `src/routes/service_ws/mod.rs:145-157` -- `lookup_by_secret` queries without tenant
+filter. Pre-multi-tenancy issue.
 
-**[SEVERITY: Medium]** `src/routes/oidc_auth.rs:363-374` — `unwrap_or(1)` during OIDC registration check silently swallows DB errors
+**[MEDIUM]** `src/routes/oidc_auth.rs:349-352` -- Registration code exposed in redirect URL
+query parameter. Appears in browser history and server logs.
 
-```rust
-.count(state.db())
-.await
-.unwrap_or(1)
-> 0;
-```
+**[MEDIUM]** `src/routes/oidc_auth.rs:363-374` -- `unwrap_or(1)` during OIDC registration
+check silently swallows DB errors. A DB outage returns `1` (treating user as "existing"),
+which either blocks legitimate new registrations or skips the token-required path.
 
-A DB outage returns `1` (treating the user as "existing"), which either blocks legitimate new registrations silently or skips the token-required path for a brand-new user. Should be propagated as an error with a redirect to `/login?error=oidc_internal_error`.
+**[MEDIUM]** `src/middleware/require_auth.rs:114-116` -- Permission fetch failure returns empty
+permissions (`unwrap_or_default()`), masking DB connectivity problems as 403 denials instead of
+500 errors.
 
-**[SEVERITY: Medium]** `src/middleware/require_auth.rs:114-116` — Permission fetch failure returns empty permissions
+**[LOW]** `src/auth/token.rs:17-22` -- API tokens hashed with unsalted SHA-256. Per-token salt
+would strengthen defense-in-depth.
 
-`get_user_permissions(...).await.unwrap_or_default()` on DB failure gives the authenticated user an empty permission set, causing every subsequent resource access to return 403 rather than 500. This masks DB connectivity problems as authorization denials and is difficult to distinguish from a legitimately unprivileged user.
+**[LOW]** `src/routes/oidc_auth.rs:388,535,584,1221` -- `generate_secure_token()` falls back to
+UUID on failure, silently downgrading from 256-bit to 122-bit entropy for security tokens.
 
-**[SEVERITY: Low]** `src/auth/token.rs:17-22` — API tokens hashed with SHA-256 without a salt
+**[LOW]** `src/middleware/rate_limit.rs:121` -- `FALLBACK_LIMITS.lock().unwrap()` on poisoned
+mutex would panic. Use `.unwrap_or_else(|e| e.into_inner())`.
 
-API tokens are stored as unsalted SHA-256 digests. For high-entropy (128-bit+) random tokens
-this is not exploitable in practice, but it diverges from the Argon2id posture used for
-passwords and weakens defence-in-depth: any two users who generated the same token (however
-unlikely) would share a hash, and an offline rainbow table targeting specific short-format
-tokens is theoretically constructable. Adding a per-token salt (even 16 bytes prepended to
-the hash input) eliminates both concerns at negligible cost. The existing `hash_token` in
-`token.rs` is the single call site; the fix is localised.
-
-**[SEVERITY: Low]** `src/middleware/rate_limit.rs:121` — `FALLBACK_LIMITS.lock().unwrap()` in `check_local_fallback`
-
-Mutex poisoning (possible if a thread panics while holding the lock) would panic this function, permanently disabling the in-memory rate-limit fallback for the process lifetime. Use `.unwrap_or_else(|e| e.into_inner())` to recover from poisoning, or replace the `std::sync::Mutex` with `tokio::sync::Mutex` for consistency with the async context.
-
-**[SEVERITY: Low]** Multiple sites in `src/routes/oidc_auth.rs` — `generate_secure_token()` fallback to UUID on failure
-
-```rust
-generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string())
-```
-
-Found at lines 388, 535, 584, 1221. UUID v4 has 122 bits of entropy versus the intended 256 bits of `generate_secure_token`. A CSPRNG failure is extremely unlikely but should propagate as an error rather than silently downgrade to weaker randomness for security tokens (exchange codes, registration codes, link tokens).
-
-#### 2026-02-24 Review
-
-**[SEVERITY: Low]** `src/middleware/resolve_proxy_headers.rs:256-258` — CA CN comparison uses non-constant-time string equality
-
-The `==` operator short-circuits, but the compared values (CA CNs) are not confidential, making exploitability very low.
-
----
+**[LOW]** `src/middleware/resolve_proxy_headers.rs:256-258` -- CA CN comparison uses
+non-constant-time string equality. The compared values (CA CNs) are not confidential, making
+exploitability very low.
 
 ## Code Quality
 
 ### Strengths
 
-- **Two-pass `deserialize_service_msg`** — `src/routes/service_ws/protocol.rs`. Step 1 extracts only the sequence number (hard fail on malformed JSON). Step 2 validates sequence (hard fail on mismatch). Step 3 performs full deserialization (soft fail for unknown future message types). The three-phase contract is clearly documented and allows replay-protection to remain accurate even when the full payload cannot be parsed.
-- **`MessageRateLimiter` with injected clock for testing** — `src/routes/service_ws/protocol.rs`. `set_window_start` is `#[cfg(test)]`-only; tests directly manipulate the window start to avoid real wall-clock sleeps.
-- **Uniform error propagation** — `bail!`, `report!`, `context_to`, `impl_report_conversion!` used consistently throughout. No `Report::new()` anti-pattern, no `Result<T, String>`.
-- **Zero `#[allow(dead_code)]` or `#[allow(unused)]` annotations** anywhere in the crate.
-- **`WS_MESSAGE_RATE_LIMIT` / `WS_MESSAGE_RATE_WINDOW` named constants** — `src/routes/service_ws/protocol.rs`. WebSocket rate-limit parameters are named and documented, not magic numbers.
-- **`MAX_WS_MESSAGE_SIZE` and `ANONYMOUS_TIMEOUT` named** — `src/routes/service_ws/connection.rs`. Domain-meaningful values with doc comments.
-- **`APPROVAL_POLL_INTERVAL` named constant** — `src/routes/service_ws/handler/mod.rs`. Enrolled-loop poll interval is explicit and documented.
-- **`MAX_UPDATE_OUTPUT_BYTES` named constant** — `src/routes/service_ws/handler/mod.rs`. Output cap is named and the cap-enforcement logic is well-documented.
-- **`model_to_config` isolation in lease coordinator** — `src/mqtt_lease_coordinator.rs:687-712`. The conversion from DB model to wire type is a single private function, not repeated inline across all callers.
-
-#### 2026-02-24 Review
-
-- **`CaKeyStore` `Debug` redaction with dedicated test verification.** `src/lib.rs:98-112` — Manually redacts every key field to `"[REDACTED]"` with a verification test at `src/lib.rs:1284-1303`.
-
-### Issues
-
-**[SEVERITY: Low]** `src/notification_service.rs:46-63` — `msg.clone()` on every `send()` and `broadcast()` call
-
-The outbox write only needs serialized JSON, which could be computed first, avoiding a full message clone.
-
-**[SEVERITY: Low]** `src/notification_service.rs:153` — `event.message_json.clone()` during backlog delivery
-
-`from_value` takes ownership; since the event is consumed, destructuring would eliminate the clone.
-
-**[SEVERITY: Low]** `src/queries/plugin_configs.rs:151-152` — `unreachable!()` in `unwrap_or_else` creates a hidden panic path
-
-Relies on an invariant not enforced by the type system. Should return a proper error.
-
----
-
-## Tests
-
-### Strengths
-
-- **`permission_extractor!` macro fully tested** — `src/middleware/permission.rs:116-209`. Six tests cover: missing auth extension → 401, correct permission → pass, wrong permission → 403, no permissions → 403, multiple permissions with one match → pass, and `new()` constructor bypass semantics.
-- **`MessageRateLimiter` unit-tested with clock injection** — `src/routes/service_ws/protocol.rs` (tests module). No real wall-clock sleep; window start is directly manipulated via the `#[cfg(test)]` helper.
-- **`deserialize_service_msg` three-path coverage** — `src/routes/service_ws/mod.rs` (tests module). Tests cover unknown message type → `Ok(None)`, malformed JSON → `Err`, sequence mismatch → `Err(SequenceValidation)`.
-- **`record_service_activity` DB tests** — `src/routes/service_ws/protocol.rs` (tests module). In-memory SQLite verifies IP update and last-seen-at semantics for both `Some(ip)` and `None` cases.
-- **`MqttLeaseCoordinator` well-covered** — `src/mqtt_lease_coordinator.rs:714-905`. Four integration tests using in-memory SQLite: new client leased, no local service, already leased, batch assignment skips already-leased clients.
-- **`EventPoller` cursor behavior tested** — `src/event_poller.rs:384-427`. Safety margin test verifies cursor = max_id - 100; stale-event-skip test verifies events created before service connect time are skipped without delivery.
-- **`TokenDenylist` comprehensively tested** — `src/auth/token_denylist.rs:104-179`. Five tests including purge semantics, boundary conditions for `iat == until`, and "latest timestamp wins" semantics for successive deny calls.
-- **`base_url_from_headers` unit tests** — `src/routes/oidc_auth.rs:1261-1289`. Three cases: Origin preferred over Host, Host fallback, missing both returns None.
-- **Router integration tests** — `src/lib.rs:1140-1281`. Tower `oneshot` tests verify healthz, CA cert response, 404 handling, `ConnectInfo<SocketAddr>` injection for both main and PKI routers, and trusted proxy IP resolution.
-- **Security-sensitive paths tested** — JWT wrong secret, denylist revocation, OIDC state one-time-use, device-flow consume, session double-approve, rate-limit window reset.
-
-#### 2026-02-24 Review
-
-- **`is_mqtt_tenant_message` test comprehensively covers credential-bearing variant filtering.** `src/notification_service.rs:273-314` — Exercises all three credential-bearing variants.
-- **Backlog delivery test exercises both positive and negative filtering.** `src/notification_service.rs:316-399` — Validates eligible messages are delivered and ineligible types are filtered.
-- **`skips_non_matching_capability_backlog` verifies cross-capability filtering.** `src/notification_service.rs:401-440` — Confirms SQL condition correctly filters by capability.
-- **Lease coordinator tests cover all three outcome branches with DB verification.** `src/mqtt_lease_coordinator.rs:782-890`.
-- **Rate limiter test suite covers seven distinct scenarios.** `src/auth/rate_limit.rs:174-362` — Including window expiry and key isolation.
+- `src/routes/service_ws/protocol.rs` -- Two-pass `deserialize_service_msg`: extract sequence,
+  validate, then full deserialize. Unknown message types handled gracefully.
+- `src/routes/service_ws/protocol.rs` -- `MessageRateLimiter` with injected clock for testing.
+- `src/lib.rs:98-112` -- `CaKeyStore` Debug manually redacts all key fields, verified by test
+  at `src/lib.rs:1284-1303`.
+- Uniform `bail!` / `report!` / `context_to` error propagation throughout.
+- Zero `#[allow(dead_code)]` or `#[allow(unused)]` annotations.
+- Named constants for all timing values: `WS_MESSAGE_RATE_LIMIT`, `MAX_WS_MESSAGE_SIZE`,
+  `ANONYMOUS_TIMEOUT`, `APPROVAL_POLL_INTERVAL`, `MAX_UPDATE_OUTPUT_BYTES`.
+- `src/mqtt_lease_coordinator.rs:687-712` -- `model_to_config` isolation; conversion from DB
+  model to wire type in single private function.
+- `src/middleware/permission.rs:116-209` -- `permission_extractor!` macro fully tested. Six
+  tests cover: missing auth extension -> 401, correct permission -> pass, wrong permission ->
+  403, no permissions -> 403, multiple permissions with one match -> pass, `new()` bypass.
+- `MessageRateLimiter` unit-tested with clock injection — no real wall-clock sleep.
+- `deserialize_service_msg` three-path test coverage: unknown message -> `Ok(None)`, malformed
+  JSON -> `Err`, sequence mismatch -> `Err(SequenceValidation)`.
+- `record_service_activity` DB tests with in-memory SQLite verify IP update and last-seen-at.
+- `MqttLeaseCoordinator` well-covered — four integration tests using in-memory SQLite.
+- `EventPoller` cursor behavior tested — safety margin and stale-event-skip verified.
+- `TokenDenylist` comprehensively tested — five tests including purge and boundary conditions.
+- `base_url_from_headers` unit tests — three cases: Origin preferred, Host fallback, missing
+  both.
+- Router integration tests — Tower `oneshot` tests verify healthz, CA cert, 404, ConnectInfo
+  injection, trusted proxy IP.
+- Security-sensitive paths tested: JWT wrong secret, denylist revocation, OIDC state one-time-
+  use, device-flow consume, session double-approve, rate-limit window reset.
+- Rate limiter test suite covers seven distinct scenarios including window expiry and key
+  isolation.
+- `is_mqtt_tenant_message` test comprehensively covers credential-bearing variant filtering.
+- Lease coordinator tests cover all three outcome branches with DB verification.
 
 ### Issues
 
-**[SEVERITY: High]** Route handlers in `src/routes/` have no inline unit tests for the majority of business-logic paths
+**[HIGH]** Route handlers in `src/routes/` have no inline unit tests for the majority of
+business-logic paths. The following route files have zero `#[cfg(test)]` coverage: `hosts.rs`,
+`agents.rs`, `settings_ca.rs`, `settings_mqtt.rs`, `oidc_providers.rs`, `server_cert.rs`,
+`settings_auth.rs`, `ocsp.rs`. Given the complexity of handlers like `oidc_callback`
+(413 lines), the absence of tests for individual sub-flows means regressions are only caught
+at integration level.
 
-The following route files have zero `#[cfg(test)]` coverage: `hosts.rs`, `agents.rs`, `settings_ca.rs`, `settings_mqtt.rs`, `oidc_providers.rs`, `server_cert.rs`, `settings_auth.rs`, `ocsp.rs`. Given the complexity of handlers like `oidc_callback` (413 lines), the absence of tests for individual sub-flows (token exchange path, role-sync path, registration-required redirect) means regressions are only caught at integration level.
+**[HIGH]** `src/auth/rate_limit.rs:256` -- Rate-limit test manually backdates DB rows instead
+of time-mocking. Couples test to internal DB column name; a rename silently produces wrong SQL.
+Use `#[tokio::test(start_paused = true)]` + `tokio::time::advance` via injectable clock.
 
-**[SEVERITY: High]** `src/auth/rate_limit.rs:256` — Rate-limit test manually backdates DB rows instead of time-mocking
+**[MEDIUM]** `src/routes/auth.rs:458` and `src/middleware/require_auth.rs:202` --
+`test_state(db)` / `NoopCertSigner` construction duplicated across at minimum these two modules
+and `src/lib.rs:1032`. A shared `test_helpers` module would eliminate duplication.
 
-The test directly issues raw SQL to set `attempt_at` to a past timestamp to simulate window expiry. This couples the test to the internal DB column name; a column rename silently produces wrong SQL that appears to succeed but tests the wrong behavior. The root cause is that `RateLimitStore` calls `OffsetDateTime::now_utc()` directly instead of accepting an injectable clock. Use `tokio::time::Instant` or a `Clock` trait to allow `#[tokio::test(start_paused = true)]` + `tokio::time::advance`.
+**[MEDIUM]** `src/mqtt_lease_coordinator.rs:724` and 16 other modules -- `test_db()` /
+`setup_test_db()` helper duplicated across 17+ modules. Shared `test_helpers` module would
+reduce duplication.
 
-**[SEVERITY: Medium]** `src/routes/auth.rs:458` and `src/middleware/require_auth.rs:202` — `test_state(db)` / `NoopCertSigner` construction duplicated
+**[MEDIUM]** `src/queries/` -- Several query modules lack unit tests:
+`scheduled_tasks.rs`, `services.rs`, `autodiscovery.rs`, `plugin_configs.rs`, and
+`update_history.rs` have no inline tests.
 
-The same `NoopCertSigner` struct and full `AppState` construction are verbatim-duplicated across at minimum these two modules and `src/lib.rs:1032`. A shared `test_helpers` module would eliminate this duplication and make it easier to add new `AppState` fields without hunting for all test construction sites.
+**[MEDIUM]** `oidc_callback` has no unit tests despite 413 lines and 7 code paths. All seven
+`OidcUserResolution` branches are untested at the unit level.
 
-**[SEVERITY: Medium]** `src/queries/` — Several query modules lack unit tests
+**[MEDIUM]** `src/notification_service.rs:396,437` -- `tokio::time::timeout(50ms)` in tests
+without `start_paused = true`. Should use `start_paused = true` with `tokio::time::advance`.
 
-`src/queries/scheduled_tasks.rs`, `src/queries/services.rs`, `src/queries/autodiscovery.rs`, `src/queries/plugin_configs.rs`, and `src/queries/update_history.rs` have no inline tests. The N+1 and full-scan issues identified in the Database section would be far easier to detect and prevent regression with query-level tests using in-memory SQLite.
+**[LOW]** `src/notification_service.rs:46-63` -- `msg.clone()` on every `send()` and
+`broadcast()` call. Could compute serialized JSON first.
 
-**[SEVERITY: Medium]** `oidc_callback` has no unit tests despite 413 lines and 7 code paths
+**[LOW]** `src/queries/plugin_configs.rs:151-152` -- `unreachable!()` in `unwrap_or_else`
+creates a hidden panic path.
 
-All seven `OidcUserResolution` branches in `oidc_callback` are untested at the unit level. The registration-required redirect path, the `LinkViaOidcRequired` branch, the first-user detection, and the `sync_oidc_roles` invocation have no automated coverage. Each branch involves distinct DB interactions and redirect construction.
+**[LOW]** `src/auth/authentication.rs` -- `resolve_oidc_user` (most complex function in auth
+module with 7 return paths) has no tests. Orphaned-link fallthrough, `LinkViaOidcRequired`
+detection, and deactivated-user short-circuit are entirely untested.
 
-**[SEVERITY: Low]** `src/auth/authentication.rs` tests cover only `AuthenticationSettings` and `navigate_json_path`/`extract_mapped_roles`
-
-`resolve_oidc_user` — the most complex function in the auth module with 7 distinct return paths — has no tests. The orphaned-link fallthrough, the `LinkViaOidcRequired` detection, and the deactivated-user short-circuit are entirely untested.
-
-#### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `src/notification_service.rs:396,437` — `tokio::time::timeout(50ms)` in tests without `start_paused = true`
-
-Two backlog delivery tests use real wall-clock timeouts. Should use `start_paused = true` with `tokio::time::advance`.
-
-**[SEVERITY: Medium]** `src/mqtt_lease_coordinator.rs:724` and 16 other modules — `test_db()` / `setup_test_db()` helper duplicated across 17+ modules
-
-Beyond the documented `test_state(db)` duplication, the `test_db()` function is duplicated in 17+ modules. A shared `test_helpers` module would reduce duplication.
-
-**[SEVERITY: Low]** `src/notification_service.rs:261-271` — `server_restarting_is_local_only` test asserts only enum construction, not behavioral intent
-
-Should test that `svc.broadcast(msg)` does NOT write to the outbox, verifying the stated design intent.
-
----
+**[LOW]** `src/notification_service.rs:261-271` -- `server_restarting_is_local_only` test
+asserts only enum construction, not behavioral intent. Should test that `svc.broadcast(msg)`
+does NOT write to the outbox.
 
 ## High Availability
 
 ### Strengths
 
-- **`broadcast_server_restarting_scattered`** — `src/service_connections.rs`. Reconnect notifications are spread over a configurable jitter window to prevent thundering-herd reconnects after a controller restart.
-- **`ServiceConnectionRegistry.send()` does not hold a lock across await** — Read lock is acquired, sender cloned, lock released, then the async send executes. No deadlock risk under high connection load.
-- **Event poller advances cursor only past successfully delivered events** — `src/event_poller.rs:102-183`. A delivery failure stops the batch at the failing event and retries from that point. After `MAX_DELIVERY_RETRIES` (3) failures the event is permanently skipped. This prevents a single bad event from blocking all subsequent delivery indefinitely.
-- **`MqttLeaseCoordinator` uses `INSERT ON CONFLICT DO NOTHING`** — `src/mqtt_lease_coordinator.rs:141-161`. Concurrent assignment attempts are idempotent at the DB level; only one instance wins the lease.
-- **Enrolled-loop approval polling decoupled from ping frequency** — `src/routes/service_ws/handler/mod.rs`. A dedicated `APPROVAL_POLL_INTERVAL` (5 seconds) drives DB polls for status changes, independent of whether the service sends pings. A silent service still receives timely approval/rejection.
-- **Cancellation token propagated to WebSocket connection loops** — The unified `handle_authenticated_loop` and `handle_enrolled_loop` in `service_ws/handler/mod.rs` select on `cancel_token.cancelled()`, enabling a new connection for the same service to supersede the old one immediately via `CloseReason::Superseded`.
-
-#### 2026-02-24 Review
-
-- **Settings distributed atomically via watch channel with write serialization.** `src/settings.rs:61-87` — Dual version counters enable efficient cross-instance invalidation polling.
-- **Service connection registry handles reconnection deduplication with CancellationToken.** `src/service_connections.rs:18-36` — Old connections are cancelled via `CloseReason::Superseded`.
-- **Credential-bearing MQTT messages excluded from outbox.** `src/notification_service.rs:40-52` — Prevents plaintext credential persistence.
-- **Event poller cursor advancement is strictly monotonic and failure-safe.** `src/event_poller.rs:102-183`.
-
-### Issues
-
-**[SEVERITY: Medium]** `src/event_poller.rs:59` — `retry_counts: HashMap<i64, u8>` grows unboundedly when cursor is stuck
-
-If the event cursor cannot advance (e.g., the target service never connects), `retry_counts` accumulates entries for every event in the stuck window. The `retain` cleanup on line 180 only fires when `new_cursor` advances. A long outage with many events produces unbounded map growth. Add a hard cap (e.g., 10,000 entries) or a TTL-based eviction that does not depend on cursor progress.
-
-**[SEVERITY: Low]** `src/service_connections.rs:312-319` — `broadcast_server_restarting_scattered` spawns unbounded tasks
-
-Each agent receives a separate `tokio::spawn`'d task with a random delay. With thousands of connected agents, this briefly creates thousands of tasks competing for the event loop. A bounded `tokio::sync::Semaphore` with a reasonable concurrency limit (e.g., 256) would smooth the burst without meaningfully delaying shutdown notification.
-
-**[SEVERITY: Low]** `src/routes/service_ws/handler/mod.rs` — First approval-poll tick consumed immediately
-
-```rust
-let mut approval_poll = tokio::time::interval(APPROVAL_POLL_INTERVAL);
-approval_poll.tick().await; // skip immediate first tick
-```
-
-Consuming the first tick with `.await` suspends the enrolled loop before entering the main `tokio::select!`. During the initial 5-second wait, any push message (approval/rejection) sitting in `push_rx` is not processed. For a fast-approval scenario (API call arrives between enrollment and enrollment loop start), the agent waits the full poll interval. Prefer `approval_poll.set_missed_tick_behavior(MissedTickBehavior::Delay)` and move the first-tick skip inside the select arm.
-
-#### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `src/event_poller.rs:59` — Fixed 1-second poll interval with no configurability or adaptive behavior
-
-Every controller instance polls `controller_events` once per second regardless of activity. Should be configurable or adaptive.
-
-**[SEVERITY: Low]** `src/middleware/rate_limit.rs:114-152` — In-memory fallback rate limiter uses `std::sync::Mutex` with no poisoning recovery and no size bound
-
-Use `.unwrap_or_else(|e| e.into_inner())` for poisoning recovery and add a hard cap on entries.
-
-**[SEVERITY: Low]** `src/notification_service.rs:107-177` — Backlog delivery replays up to 500 events sequentially with no timeout
-
-Should have a per-event timeout or overall backlog delivery budget.
-
----
-
-## Database
-
-### Strengths
-
-- **UUID v7 primary keys** — Time-ordered inserts avoid hot-spot contention on clustered indexes. Used throughout entity definitions.
-- **`TenantScoped` trait** — Compile-time tenant filtering; tenant data leakage is structurally impossible through typed paths.
-- **Transactions used for all multi-step mutations** — `oidc_callback`, `oidc_complete_registration`, `enroll_*`, `merge_service` all begin explicit transactions. Race conditions on first-user detection are explicitly addressed with counts inside the transaction.
-- **Soft-delete partial unique indexes** — `uq_plugin_configs_active_name WHERE deactivated_at IS NULL`, `uq_software_items_active_name WHERE deactivated_at IS NULL`. Deactivated entities do not block name reuse.
-- **`lock_exclusive()` before mutation in `merge_service`** — Prevents concurrent merge operations on the same service record.
-- **`INSERT ON CONFLICT DO NOTHING` for lease deduplication** — `src/mqtt_lease_coordinator.rs:141-161`. Concurrent assignment is safe at the DB level.
-
-#### 2026-02-24 Review
-
-- **Batch plugin config loading in `list_ignore_rules`.** `src/queries/autodiscovery.rs:103-117` — Collects IDs, single `is_in` query, HashMap for O(1) lookup.
-- **`load_plugins` uses JOIN instead of N+1.** `src/queries/software_items.rs:94-124`.
+- `src/service_connections.rs:211-221` -- `send()` acquires read lock, clones sender, drops lock
+  before async send. No lock held across await.
+- `src/service_connections.rs:125-133` -- Connection deduplication: re-registering same
+  service_id cancels old connection via `CloseReason::Superseded`.
+- `src/update_output_broadcaster.rs:18` -- Bounded broadcast channels (256 capacity) with
+  graceful lag handling.
+- `src/notification_service.rs:166-179` -- Credential-bearing messages filtered from NATS
+  outbox, preventing plaintext credential persistence.
+- `src/auth/token_denylist.rs:78-91` -- Token denylist handles monotonic revocation with
+  `iat_cutoff` advancement.
+- Settings use `watch` channel for atomic snapshot publishing with serialized writes. Dual
+  version counters enable efficient cross-instance invalidation polling.
+- `src/event_poller.rs:102-183` -- Event poller advances cursor only past successfully
+  delivered events. After `MAX_DELIVERY_RETRIES` (3) failures the event is permanently skipped.
+- `src/mqtt_lease_coordinator.rs:141-161` -- `INSERT ON CONFLICT DO NOTHING` makes concurrent
+  assignment idempotent.
+- Enrolled-loop approval polling decoupled from ping frequency via dedicated
+  `APPROVAL_POLL_INTERVAL` (5 seconds).
+- Cancellation token propagated to WebSocket connection loops via `cancel_token.cancelled()`.
+- `broadcast_server_restarting_scattered` spreads notifications over jitter window.
 
 ### Issues
 
-**[SEVERITY: Low]** `api_tokens` table has no `expires_at` column
+**[CRITICAL]** `src/middleware/rate_limit.rs:114-115` -- Fallback rate limiter uses
+`std::sync::Mutex` (blocking) in async context. `.unwrap()` on lock means poisoned mutex
+panics all subsequent requests.
 
-API tokens are valid indefinitely once issued. A compromised token that was never explicitly revoked remains valid forever. Add an optional `expires_at` column and enforce expiry at validation time.
+**[HIGH]** `src/service_connections.rs:192-203` -- `broadcast` awaits send to each service
+sequentially. Single slow consumer delays all others. Use `try_send` or parallel sends.
 
-#### 2026-02-24 Review
+**[MEDIUM]** `src/event_poller.rs:59` -- `retry_counts: HashMap<i64, u8>` grows unboundedly
+when cursor is stuck. Add a hard cap or TTL-based eviction.
 
-**[SEVERITY: Medium]** `src/queries/autodiscovery.rs:36-75` — TOCTOU race in `create_or_ignore_ignore_rule`
+**[MEDIUM]** `src/event_poller.rs:59` -- Fixed 1-second poll interval with no configurability
+or adaptive behavior. Every controller instance polls `controller_events` once per second
+regardless of activity.
 
-Check-then-insert without transaction. The unique violation handler should return `Ok(())`, not propagate the error.
+**[MEDIUM]** `src/update_output_broadcaster.rs:80-96` -- `send_line` holds write lock for the
+entire operation. A read lock with per-entry interior mutability would allow concurrent sends to
+different updates.
 
-**[SEVERITY: Medium]** `src/queries/update_history.rs:148-150` — Output not loaded for list_update_history
+**[LOW]** `src/service_connections.rs:312-319` -- `broadcast_server_restarting_scattered` spawns
+unbounded untracked tasks. Consider bounded semaphore.
 
-Returns empty output for records using the newer `update_output_lines` storage, unlike the detail endpoint which correctly falls back.
+**[LOW]** `src/routes/service_ws/handler/mod.rs` -- First approval-poll tick consumed with
+`.await`, blocking the enrolled loop for 5 seconds before entering the main `select!`.
 
-**[SEVERITY: Low]** `src/queries/plugin_configs.rs:87-94` — `find_raw_active_config` swallows DB errors via `.ok().flatten()`
-
-Transient DB issues are indistinguishable from "config does not exist".
-
-**[SEVERITY: Low]** `src/queries/software_items.rs:85-91` — `count_linked_hosts` swallows DB errors via `.unwrap_or(0)`
-
-DB outage causes items to report zero linked hosts silently.
-
----
+**[LOW]** `src/notification_service.rs:107-177` -- Backlog delivery replays up to 500 events
+sequentially with no timeout.
 
 ## Coding Standards
 
 ### Strengths
 
-- **Edition 2024** — Consistent with workspace standard.
-- **`SecretString` at all API input boundaries** — Password, token, OIDC secret fields in `web-api-types` and across all route handlers.
-- **Permission extractors consistently applied** — 70+ endpoints protected. Handler signatures form an auditable access-control inventory.
-- **No `Result<T, String>` anti-pattern** — All error types are `thiserror`-derived with typed variants.
-- **No `StatusCode` numeric literals** — All comparisons use `StatusCode::*` variants or `.is_*()` helpers.
-- **`FromStr` with typed errors** — Used correctly for `AlertSeverity`, `Permission`, etc.
-- **Zero `#[allow(clippy::...)]` in the entire codebase** — All previously allowed lints have been resolved.
+- `SecretString` at all API input boundaries. Typed permission extractors consistently applied.
+- No `Result<T, String>` anti-pattern. No `StatusCode` numeric literals.
+- `FromStr` with typed errors used correctly.
+- Zero `#[allow(clippy::...)]` suppressions.
+- Edition 2024 consistent with workspace standard.
+- 70+ endpoints protected via typed permission extractors. Handler signatures form an auditable
+  access-control inventory.
 
 ### Issues
 
-**[SEVERITY: Medium]** `src/routes/services.rs:282` and `src/routes/hosts.rs:141` — Soft-delete `DELETE` endpoints return `200 OK` with body instead of `204 No Content`
+**[CRITICAL]** `src/routes/oidc_auth.rs:425` -- `unwrap_or(0)` on auth-critical user count
+query. DB failure during this check could allow any OIDC user to become owner/admin. Must
+propagate as 500.
 
-REST convention: `DELETE` that has no meaningful response body should return `204`. Returning `200` with a body is inconsistent with the other delete endpoints in this crate that correctly return `204`, and inconsistent with what REST clients expect. Standardize to `204 No Content` or rename to `POST /deactivate` if a body is required.
+**[HIGH]** `src/routes/hosts.rs:283-286` and `src/routes/autodiscovery.rs:48-51` -- Query
+parameters use `Option<String>` instead of `Option<Uuid>` for UUID fields, with manual parsing
+that silently ignores invalid UUIDs instead of returning 422.
 
-**[SEVERITY: Medium]** `src/routes/autodiscovery.rs:154,159` — `create_autodiscovery_ignore` returns `201 Created` for both new and pre-existing records
+**[MEDIUM]** `src/notification_service.rs:43,159` -- Uses `#[cfg(not(feature = "nats"))]`
+(prohibited by coding standards).
 
-When the ignore entry already exists, the endpoint returns `201 Created`. Standard REST: `201` for new creation, `200` (or `204`) for an idempotent update/pre-existing resource. Return `200 OK` when the record is found to already exist.
+**[MEDIUM]** `src/lib.rs:57`, `routes/services.rs:429`, `routes/auth.rs:484`,
+`middleware/require_auth.rs:219`, `middleware/resolve_ip.rs:148` -- Uses `Report::new()` instead
+of `report!()` macro.
 
----
+**[MEDIUM]** `src/routes/services.rs:282` and `src/routes/hosts.rs:141` -- Soft-delete endpoints
+return `200 OK` with body instead of `204 No Content`.
+
+**[MEDIUM]** `src/routes/autodiscovery.rs:154,159` -- Create ignore returns `201 Created` for
+both new and pre-existing records.
+
+**[MEDIUM]** `src/queries/software_items.rs:119-125` -- `count_linked_hosts` uses
+`.count(db).await.unwrap_or(0)`, silently swallowing DB errors.
 
 ## Extensibility
 
 ### Strengths
 
-- **`PluginOps` trait in `AppState`** — `src/lib.rs:213-215`. Route handlers are fully decoupled from the concrete `PluginRegistry`. Adding a new plugin requires zero changes to web-api route code.
-- **OIDC feature-gate** — The entire OIDC subsystem (15+ files) is compilable out. Deployments that do not need OIDC are not burdened with its code surface.
-- **`swagger-ui` feature gate** — `Cargo.toml:13`. Swagger UI can be excluded from production builds.
-- **`db-sqlite` / `db-postgres` / `db-mysql` feature gates** — `Cargo.toml:14-17`. DB backend is selected at compile time, not at runtime, enabling minimal binary sizes.
-- **`ServiceConnectionRegistry` type-erased service dispatch** — `broadcast_by_capability`, `send`, `is_connected` work uniformly across agent, MQTT, and SSH-agent connection types. Adding a new service role requires only extending the registry's capability-based routing.
-- **Event poller's `deliver_event` is forward-compatible** — Unknown `target_capability` values produce a broadcast (safe default) rather than a hard error. New capabilities introduced by newer controller versions are handled gracefully by older peer instances.
-
-#### 2026-02-24 Review
-
-- **Sequence validation decoupled from full deserialization.** `src/routes/service_ws/protocol.rs` — Two-phase parse enables forward-compatible message handling for unknown message types.
+- `PluginOps` trait in `AppState` decouples routes from `PluginRegistry`. Adding a new plugin
+  requires zero changes to web-api code.
+- OIDC feature-gate compiles out the entire OIDC subsystem. `swagger-ui` and DB backend features
+  similarly gated.
+- `ServiceConnectionRegistry` type-erased dispatch works uniformly across agent types.
+- Event poller's `deliver_event` is forward-compatible with unknown capabilities.
+- Sequence validation decoupled from full deserialization enables forward-compatible message
+  handling.
 
 ### Issues
 
-**[SEVERITY: Medium]** `src/routes/oidc_auth.rs:873` — `fake_claims` reverse-role-mapping ignores nested claim paths
+**[MEDIUM]** `src/routes/oidc_auth.rs:873` -- `fake_claims` reverse-role-mapping ignores nested
+claim paths. If `role_claim_path = "realm.roles"`, reconstruction places values at `realm` not
+`realm.roles`.
 
-The role sync reconstruction only places values at the first dot-separated segment of `role_claim_path`. If the provider is configured with `role_claim_path = "realm.roles"`, the reconstructed claims place values at `realm` not at `realm.roles`. `sync_oidc_roles` then calls `navigate_json_path` which expects the full nested path. The reconstruction is semantically incorrect for any nested claim path. Either store the original OIDC claim values (not the local role names) in the pending registration/link store, or fix the reconstruction to build the full nested JSON structure.
+**[MEDIUM]** `src/routes/service_ws/protocol.rs` -- `controller_capabilities()` is a hardcoded
+array. Missing a `Capability` variant means the controller silently disables it.
 
-**[SEVERITY: Low]** `src/routes/oidc_auth.rs` — No mechanism to add custom OIDC scopes beyond the `scopes` column
-
-Additional claim retrieval (groups, department, cost center) requires custom scopes. The current implementation splits `plugin.scopes` on whitespace and adds each as a separate `Scope`. This works but is the only extensibility point for claims enrichment. There is no documented path for operators to add custom claims processors without code changes.
-
-#### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `src/routes/service_ws/protocol.rs` — `controller_capabilities()` is a hardcoded array
-
-Missing a `Capability` variant means the controller silently disables it. Should auto-generate from all typed variants or carry an invariant comment.
+**[LOW]** `src/routes/oidc_auth.rs` -- No mechanism to add custom OIDC scopes beyond the
+`scopes` column. No documented path for operators to add custom claims processors without code
+changes.

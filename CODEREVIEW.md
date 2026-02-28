@@ -1,309 +1,404 @@
-# CODEREVIEW — Workspace
+# Code Review: Workspace (Root)
+
+- **Review date**: 2026-02-28
+- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Branch**: docs/codereview-backend
 
 ## Summary
 
-The Uptrakit backend is a well-structured Rust workspace of 24 crates spanning four clearly separated domains: `core/` (binaries), `plugins/` (pluggable detection and update drivers), `shared/` (libraries), and `ui/` (HTTP API and CLI). The codebase consistently applies Rust 2024 edition and resolver version 3 across every crate, uses workspace-pinned dependency versions for all major libraries, and leans on strong type-system patterns — typed permission extractors, `SecretString` at API boundaries, `Zeroizing<>` on key material — that enforce security invariants at compile time rather than by convention. The release profile is production-hardened (`lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`), and the overall dependency DAG is sound with one well-defined layering violation.
+The Uptrakit backend (~112K LoC, 31 crates) is a well-structured Rust workspace implementing an
+agent-based update tracking toolkit. The codebase demonstrates mature Rust engineering practices:
+workspace-level `clippy::all = "deny"` and `warnings = "deny"` lints, consistent error handling
+via `rootcause` + `thiserror` + `impl_report_conversion!`, and strong type-system enforcement of
+security invariants (`EncryptedString`, `SecretString`, `TenantScoped`).
 
-The mTLS configuration in `uptrakit-controller` uses `.allow_unauthenticated()`, which is intentional for reverse-proxy deployments — this is documented in `pki.rs` and `mtls_acceptor.rs`.
+The dependency graph is a clean DAG with no circular dependencies. Feature flags are used
+judiciously for database backends, OIDC, NATS, and embedded components. The plugin system is
+well-designed with a macro-generated registry. The service SDK provides an excellent abstraction
+for the enrollment-lifecycle-reconnect flow shared across all service binaries.
 
-The extensibility seam for plugins is well-designed at the `Plugin` trait and `register_plugins!` macro level. Discovery-capable plugin support is now fully registry-driven — `discovery_plugins()` is auto-generated from the macro, and `create_plugin_for_discovery` is macro-generated too; no manual sync is needed. Package-identifier validation is handled through `PluginRegistry::validate_package_identifier`, completing the plugin extensibility story.
-
----
+Key areas for improvement: the `web-api` crate at ~32K LoC is approaching "god crate" territory
+and would benefit from decomposition; the wire protocol file (`wire/src/lib.rs`) at 3.5K lines
+should be split into domain modules; the systemic `#[tokio::test]` violation (273+ tests without
+`start_paused = true`) should be addressed with a bulk annotation pass; and several HA concerns
+(unbounded channels, in-memory-only token denylist, claim release on cancellation) should be
+addressed before multi-instance deployment.
 
 ## Per-Crate Review Files
 
 | Crate | Review |
-|---|---|
+| --- | --- |
 | `crates/core/controller` | [CODEREVIEW.md](crates/core/controller/CODEREVIEW.md) |
 | `crates/core/agent-ssh` | [CODEREVIEW.md](crates/core/agent-ssh/CODEREVIEW.md) |
 | `crates/core/agent` | [CODEREVIEW.md](crates/core/agent/CODEREVIEW.md) |
 | `crates/core/mqtt` | [CODEREVIEW.md](crates/core/mqtt/CODEREVIEW.md) |
 | `crates/core/scheduler` | [CODEREVIEW.md](crates/core/scheduler/CODEREVIEW.md) |
-| `crates/shared` (umbrella: crypto, types, macros, command, agent-core, directories, nats, update-hooks, build-info) | [CODEREVIEW.md](crates/shared/CODEREVIEW.md) |
+| `crates/shared` (umbrella: macros, directories, build-info, update-hooks) | [CODEREVIEW.md](crates/shared/CODEREVIEW.md) |
+| `crates/shared/agent-core` | [CODEREVIEW.md](crates/shared/agent-core/CODEREVIEW.md) |
+| `crates/shared/command` | [CODEREVIEW.md](crates/shared/command/CODEREVIEW.md) |
+| `crates/shared/crypto` | [CODEREVIEW.md](crates/shared/crypto/CODEREVIEW.md) |
 | `crates/shared/db` | [CODEREVIEW.md](crates/shared/db/CODEREVIEW.md) |
-| `crates/shared/service-sdk` | [CODEREVIEW.md](crates/shared/service-sdk/CODEREVIEW.md) |
-| `crates/shared/wire` | [CODEREVIEW.md](crates/shared/wire/CODEREVIEW.md) |
-| `crates/shared/web-api-types` | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) |
+| `crates/shared/nats` | [CODEREVIEW.md](crates/shared/nats/CODEREVIEW.md) |
 | `crates/shared/openapi-client` | [CODEREVIEW.md](crates/shared/openapi-client/CODEREVIEW.md) |
 | `crates/shared/scheduler-engine` | [CODEREVIEW.md](crates/shared/scheduler-engine/CODEREVIEW.md) |
+| `crates/shared/service-sdk` | [CODEREVIEW.md](crates/shared/service-sdk/CODEREVIEW.md) |
+| `crates/shared/types` | [CODEREVIEW.md](crates/shared/types/CODEREVIEW.md) |
+| `crates/shared/web-api-types` | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) |
+| `crates/shared/wire` | [CODEREVIEW.md](crates/shared/wire/CODEREVIEW.md) |
 | `crates/ui/web-api` | [CODEREVIEW.md](crates/ui/web-api/CODEREVIEW.md) |
 | `crates/ui/cli` | [CODEREVIEW.md](crates/ui/cli/CODEREVIEW.md) |
-| `crates/plugins` (umbrella: all plugin crates) | [CODEREVIEW.md](crates/plugins/CODEREVIEW.md) |
-
----
+| `crates/plugins` (umbrella: generic/shell + cross-cutting) | [CODEREVIEW.md](crates/plugins/CODEREVIEW.md) |
+| `crates/plugins/infrastructure/core` | [CODEREVIEW.md](crates/plugins/infrastructure/core/CODEREVIEW.md) |
+| `crates/plugins/infrastructure/registry` | [CODEREVIEW.md](crates/plugins/infrastructure/registry/CODEREVIEW.md) |
+| `crates/plugins/releases/docker` | [CODEREVIEW.md](crates/plugins/releases/docker/CODEREVIEW.md) |
+| `crates/plugins/releases/github` | [CODEREVIEW.md](crates/plugins/releases/github/CODEREVIEW.md) |
+| `crates/plugins/package-managers/apt` | [CODEREVIEW.md](crates/plugins/package-managers/apt/CODEREVIEW.md) |
+| `crates/plugins/package-managers/npm` | [CODEREVIEW.md](crates/plugins/package-managers/npm/CODEREVIEW.md) |
+| `crates/plugins/package-managers/homebrew` | [CODEREVIEW.md](crates/plugins/package-managers/homebrew/CODEREVIEW.md) |
+| `crates/plugins/discovery/proxmox-helper-scripts` | [CODEREVIEW.md](crates/plugins/discovery/proxmox-helper-scripts/CODEREVIEW.md) |
 
 ## Architecture
 
 ### Strengths
 
-- `Cargo.toml` (workspace root): `resolver = "3"` and `edition = "2024"` are set once at workspace root; all 24 crates inherit via `edition.workspace` — no per-crate drift possible.
-- `Cargo.toml:13-60` (`[workspace.dependencies]`): All major external dependencies — `tokio`, `axum`, `sea-orm`, `rustls`, `serde`, `time`, `aws-lc-rs`, `rcgen`, `uuid`, `rand`, and 25+ more — are pinned here with exact version ranges and default-feature overrides. Per-crate declarations only specify `features = [...]`, eliminating duplicate version declarations across 24 crates.
-- `Cargo.toml:62-67` (`[profile.release]`): `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true` — production-hardened single-binary output with minimal attack surface.
-- `[workspace.package]` carries `license`, `authors`, `repository`, and `version` so every crate can use `*.workspace = true`, ensuring metadata consistency across all published artifacts.
-- The four-domain layout (`core/`, `plugins/`, `shared/`, `ui/`) enforces a natural dependency gradient: plugins never import from `ui/`, binaries import from `shared/` and `ui/`, `shared/` libraries only import each other in a defined order. This makes cross-cutting concerns auditable.
-- `uptrakit-shared-types/Cargo.toml:9-13`: `sea-orm` and `openapi` features correctly gate optional ORM and OpenAPI dependencies — the correct pattern for workspace-wide shared type crates.
-- `Cargo.toml` (workspace root): `[workspace.lints]` enforces `warnings = "deny"` and `clippy::all = "deny"` across all 26 crates via `[lints] workspace = true`.
+- `Cargo.toml` (workspace root) -- `resolver = "3"` and `edition = "2024"` set once; all 31
+  crates inherit via `edition.workspace` — no per-crate drift possible.
+- `Cargo.toml:13-60` (`[workspace.dependencies]`) -- All major external dependencies pinned here
+  with exact version ranges and default-feature overrides. Per-crate declarations only specify
+  `features = [...]`, eliminating duplicate version declarations.
+- `Cargo.toml:62-67` (`[profile.release]`) -- `lto = "fat"`, `codegen-units = 1`,
+  `panic = "abort"`, `strip = true` — production-hardened single-binary output.
+- `[workspace.package]` carries `license`, `authors`, `repository`, and `version`.
+- Clean DAG dependency graph flowing from leaf types through shared libraries to core binaries.
+  The four-domain layout (`core/`, `plugins/`, `shared/`, `ui/`) enforces a natural dependency
+  gradient.
+- Feature flags compose correctly: `db-sqlite`/`db-postgres`/`db-mysql` for backends, `oidc` for
+  OIDC support, `nats` for NATS transport, `embedded-scheduler` for in-process scheduling.
+- `ServiceHandler` trait in `service-sdk` is the architectural linchpin enabling agent, MQTT,
+  SSH agent, and scheduler to share enrollment/lifecycle logic with minimal per-service code.
+- `TenantScoped` marker trait (`db/src/entity/tenant_scoped.rs:9-16`) enables `TenantDb`
+  extractor to automatically apply tenant filtering, eliminating an entire class of isolation
+  bugs. Compile-time tenant filtering; tenant data leakage is structurally impossible through
+  typed paths.
+- Plugin system uses trait-based dispatch with `register_plugins!` macro that generates all six
+  dispatch methods from a single declaration.
+- `[workspace.lints]` enforces `warnings = "deny"` and `clippy::all = "deny"` across all 31
+  crates via `[lints] workspace = true`.
+- UUID v7 primary keys throughout all entities -- time-ordered, index-friendly, no hot-spot
+  write contention.
+- Partial (filtered) unique indexes on `software_items` and `plugin_configs`
+  (`WHERE deactivated_at IS NULL`) -- prevents name collisions among active records while
+  allowing post-soft-delete re-creation.
+- Every foreign key has an explicit `ON DELETE` action -- no implicit cascade surprises.
+- `m20260209_000001_initial.rs` -- `down()` drops all tables in correct reverse FK order.
+- Referential integrity CHECK constraint on `sessions`:
+  `auth_method != 'oidc' OR oidc_provider_id IS NOT NULL` -- enforced at DB level.
+- Transactions used consistently for all multi-step mutations; `lock_exclusive()` acquired
+  before `merge_service`.
+- Batch plugin config loading in `list_ignore_rules` and JOIN-based `load_plugins` eliminate
+  N+1 patterns.
 
 ### Issues
 
-**[SEVERITY: Low]** `Cargo.toml` (workspace root) — No `rust-version` MSRV declared
+**[CRITICAL]** `crates/ui/web-api/src/settings_store.rs:13` and
+`crates/core/controller/src/startup.rs:164-197` -- Settings persistence logic lives in the UI
+layer (`web-api/settings_store.rs`) but is called from the core binary (`controller/startup.rs`).
+This creates a logical layering inversion where the controller depends on web-api internals.
 
-`AGENTS.md:109` states "Some specify `rust-version = \"1.91\"`", but zero crates in the workspace actually set `rust-version`. The workspace `[workspace.package]` section has no `rust-version` field. Without an MSRV declaration, `cargo check` on any Rust version will succeed, and edition-2024 features may silently break older toolchains used by downstream packagers or CI matrix jobs. The correct fix is a single `rust-version = "1.85"` (or whichever minimum is validated) in `[workspace.package]` and updating AGENTS.md to reflect the actual state.
+**[HIGH]** `crates/ui/web-api/src/lib.rs:1-24` -- At ~32K LoC, `web-api` is the largest crate
+(~29% of total). Contains authentication, authorization, middleware, routes, queries, settings,
+MQTT coordination, NATS transport, OCSP, PKI, notifications, and update output broadcasting.
 
-#### 2026-02-24 Review
+**[HIGH]** `crates/core/controller/Cargo.toml:22-60` -- Controller depends directly on
+`uptrakit-web-api` (a UI crate), coupling the core binary to the entire web-api surface.
 
-**[SEVERITY: Low]** `CODEREVIEW.md:23` vs `AGENTS.md` codebase layout — Workspace CODEREVIEW documents "binaries import from `shared/` and `ui/`" but AGENTS.md layout implies a stricter four-tier DAG
+**[HIGH]** `crates/shared/wire/src/lib.rs` -- At 3,524 lines in a single file, the entire wire
+protocol definition lives in one module. Should be decomposed into domain modules.
 
-The AGENTS.md should include explicit dependency direction statements to eliminate ambiguity about the permitted dependency directions between the four domains.
+**[HIGH]** `crates/ui/web-api/src/app_state.rs:37-96` -- `AppState` has 22+ public fields, most
+with `pub` visibility.
 
----
+**[MEDIUM]** `crates/shared/db/src/entity/oidc_provider.rs:89` -- Soft-delete column named
+`deleted_at` instead of `deactivated_at`. All other 7 soft-deletable entities use
+`deactivated_at`. Inconsistency prevents generic soft-delete utility.
 
-## Security & Safety
+**[MEDIUM]** `crates/shared/db/src/entity/update_history.rs:28` -- Dual output storage:
+`output` column and `update_output_lines` child table. No DB constraint enforcing which storage
+path is canonical.
+
+**[MEDIUM]** `crates/ui/web-api/src/queries/autodiscovery.rs:36-75` -- TOCTOU race in
+`create_or_ignore_ignore_rule`. Check-then-insert without transaction.
+
+**[MEDIUM]** `crates/ui/web-api/src/queries/update_history.rs:148-150` -- Output not loaded for
+`list_update_history`. Returns empty output for records using newer `update_output_lines`
+storage.
+
+**[MEDIUM]** `crates/core/controller/src/migration/m20260209_000001_initial.rs:615-621` -- Raw
+SQL in migration seed uses `CURRENT_TIMESTAMP` which behaves differently across backends.
+
+**[LOW]** `Cargo.toml` (workspace root) -- No `rust-version` MSRV declared. Without an MSRV
+declaration, edition-2024 features may silently break older toolchains.
+
+**[LOW]** `api_tokens` table -- No `expires_at` column. API tokens valid indefinitely once
+issued.
+
+## Security and Safety
 
 ### Strengths
 
-- `crates/shared/crypto/src/lib.rs`: AES-256-GCM with `aws-lc-rs` (FIPS-validated primitives), 96-bit random nonce per encryption, `Zeroizing<[u8; 32]>` master key stored in `OnceLock` — never serialized or logged.
-- `crates/ui/web-api/src/auth/password.rs:32-40`: Argon2id with OWASP Interactive-tier parameters (19 MiB memory, 2 iterations). Return type is `SecretString` — plaintext password is not retained beyond the hash call.
-- `crates/ui/web-api/src/middleware/permission.rs`: `permission_extractor!` macro generates typed Axum extractors for all 9 permission levels. Authorization is auditable by function signature alone; no `has_permission()` calls in handler bodies.
-- `crates/ui/web-api/src/auth/token_denylist.rs` and `crates/ui/web-api/src/auth/session.rs:109-183`: JWT denylist at JTI and user-id granularity; refresh token rotation in a DB transaction with replay detection.
-- `crates/ui/web-api/src/middleware/resolve_proxy_headers.rs:56-62`: Reverse proxy header spoofing mitigation — cert and forwarded headers stripped from connections not originating from a trusted proxy IP.
-- `crates/shared/web-api-types/`: All password, token, and secret response fields use `secrecy::SecretString`, enforcing the no-secrets-in-logs invariant at the type level across all API response structs.
-- `crates/core/controller/src/pki.rs`: mTLS with `WebPkiClientVerifier` + CRL verification; CA private keys stored AES-256-GCM encrypted in DB and held as `Zeroizing<String>` in memory.
-- Zero `unsafe` blocks in production code across all 24 crates.
+- AES-256-GCM with random 96-bit nonces, master key in `OnceLock<Zeroizing<[u8; 32]>>`,
+  `EncryptedString` with redacted Debug/Display, and `ENC:v1:` prefix for format versioning.
+- Argon2id with OWASP parameters (19 MiB, 2 iterations) for password and enrollment token
+  hashing.
+- JWT with HS256, 15-minute expiry, required `iss`/`aud` claims, and explicit legacy rejection.
+- Refresh token rotation in DB transactions with replay detection,
+  HttpOnly/Secure/SameSite=Strict cookies.
+- mTLS with ECDSA P-256 and `aws-lc-rs` provider. File permissions 0o700/0o600 for secrets.
+- OIDC: PKCE (S256), single-use CSRF state with 10-minute TTL, email verification enforcement,
+  encrypted PKCE verifiers at rest, Referrer-Policy on redirects.
+- Shell escape uses POSIX single-quote wrapping. Direct exec mode bypasses shell entirely.
+  `kill_on_drop(true)` and 10 MB output limit on commands.
+- Proxy headers stripped from non-proxy requests. Certificate issuer CN verified against known
+  CAs.
+- No `unsafe` code outside of test utilities (2 instances in `directories` for env var tests).
+- No secret values found in tracing calls across the entire codebase.
+- `permission_extractor!` macro generates typed Axum extractors for all 9 permission levels.
+  Authorization auditable by function signature alone.
+- `SecretString` at all API input and output boundaries across `web-api-types`.
+- CA private keys stored AES-256-GCM encrypted in DB and held as `Zeroizing<String>`.
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/ui/web-api/src/auth/token_denylist.rs:15` — In-memory JWT denylist provides no cross-instance revocation
+**[HIGH]** `crates/ui/web-api/src/auth/token_denylist.rs:14-16` -- Token denylist is in-memory
+and per-instance only. Revoked tokens valid on other instances for up to 15 minutes (JWT TTL).
 
-The denylist is per-process. A revoked token remains valid on all other running instances for up to the JWT TTL (15 minutes). The code comment at line 15 acknowledges this. For a system managing infrastructure access with potential privilege escalation via compromised tokens, a 15-minute window is operationally significant. A shared DB-backed denylist — consistent with the existing refresh token and rate-limit tables — would close this gap. This is a workspace-level HA and security intersection: the multi-instance architecture described in `docs/development/cross-controller-comm.md` is undermined by per-process revocation state.
+**[HIGH]** `crates/ui/web-api/src/routes/service_ws/mod.rs:145-157` -- WebSocket
+`lookup_by_secret` queries without tenant filter.
 
-**[SEVERITY: Low]** `crates/shared/directories/src/lib.rs:829,837` — Test-only `unsafe` uses unguarded `std::env::set_var` in potentially parallel tests
+**[MEDIUM]** `crates/core/controller/src/startup.rs:61-75` -- Master key hex returned as plain
+`String`, not wrapped in `Zeroizing<String>`.
 
-Two `unsafe` blocks manipulate environment variables without a `Mutex` guard. `std::env::set_var` is not thread-safe when other threads concurrently call `std::env::var`. Under `cargo nextest` (which runs tests in parallel by default), this is a data race. Tests should either use a `Mutex<()>` guard or be marked `#[serial]`.
+**[MEDIUM]** `crates/shared/service-sdk/src/tls.rs` -- TOFU TLS verifier accepts any server
+certificate during initial CA fetch. MITM window during initial enrollment.
 
-#### 2026-02-24 Review
+**[MEDIUM]** `crates/ui/web-api/src/routes/oidc_auth.rs:349-352` -- OIDC registration code
+exposed in redirect URL query parameter.
 
-**[SEVERITY: Medium]** `crates/ui/web-api/src/auth/jwt.rs:38-61` — Legacy file-based `JwtManager::load_or_generate` writes signing key to disk without at-rest encryption
+**[MEDIUM]** `crates/shared/crypto/src/lib.rs` -- `PLAINTEXT_MODE` uses `Ordering::Relaxed`.
+Use `Ordering::Release` / `Ordering::Acquire` for correctness.
 
-Although the controller has migrated to DB-based JWT key storage, the file-based method remains as a public API. After migration, the plaintext key persists on disk indefinitely. The file should be deleted after successful migration, and the method should be marked `#[deprecated]` or `pub(crate)`.
+**[MEDIUM]** `crates/ui/web-api/src/auth/jwt.rs:38-61` -- Legacy file-based
+`JwtManager::load_or_generate` writes signing key to disk without at-rest encryption. After
+migration to DB-based storage, the plaintext key persists on disk. File should be deleted after
+migration and method marked `#[deprecated]` or `pub(crate)`.
 
----
+**[LOW]** `crates/shared/directories/src/lib.rs:829,837` -- Test-only `unsafe` uses unguarded
+`std::env::set_var` in potentially parallel tests. Data race under `cargo nextest`.
 
 ## Code Quality
 
 ### Strengths
 
-- Zero `#[allow(dead_code)]` annotations across all 24 crates — dead code is removed, not suppressed.
-- Zero `#[allow(clippy::...)]` suppressions in the entire workspace, consistent with the AGENTS.md invariant that no approved exceptions exist.
-- `crates/core/controller/src/durations.rs`: All domain-significant durations (shutdown timeout, stale claim window, cert renewal threshold) are named constants with doc-comments. No magic numeric literals for time values in the controller.
-- Uniform error propagation via `rootcause` (`bail!`, `report!`, `context_to`, `impl_report_conversion!`) with no `Report::new()` anti-pattern and no `Result<T, String>` in library boundaries.
-- `crates/ui/web-api/src/lib.rs:98`: `CaKeyStore` `Debug` implementation manually redacts all key fields to `[REDACTED]` — secrets cannot leak via `{:?}` formatting, log macros, or `dbg!()`.
-- `crates/ui/web-api/src/startup.rs`: Discrete startup phases use distinct typed structs (`ReconciledSettings`, `ValidatedConfig`, `PkiRuntime`) — partially initialized state cannot be passed to functions expecting fully initialized state.
+- Consistent `rootcause` + `thiserror` + `impl_report_conversion!` error handling across all 31
+  crates. Every crate with errors defines a custom error type with `#[derive(Debug, Error)]`.
+- 2,363 test functions across 217 files with meaningful assertions and realistic scenarios.
+- Zero `#[allow(dead_code)]` annotations. Zero `#[allow(clippy::...)]` suppressions.
+- 76% of files have doc comments. All public traits, errors, and wire protocol types documented.
+- `Zeroizing` wrapper used consistently for key material in the crypto crate.
+- `CaKeyStore` `Debug` implementation manually redacts all key fields to `[REDACTED]` -- verified
+  by dedicated test.
+- Discrete startup phases use distinct typed structs (`ReconciledSettings`, `ValidatedConfig`,
+  `PkiRuntime`).
+- All domain-significant durations centralized in `durations.rs` with doc-comments.
+- `#[tokio::test(start_paused = true)]` used correctly for all time-dependent tests in
+  controller executors, command executor, and cert handler.
+- Docker integration tests carry `#[ignore = "Docker integration test..."]` with exact runbook
+  invocation commands.
+- In-process SQLite via SeaORM for database tests -- full schema semantics, no external process.
+- Security-sensitive paths have targeted test coverage: JWT wrong-secret rejection, denylist
+  revocation, OIDC state one-time-use, device-flow consumption, session double-approve.
+- Mock server infrastructure (`openapi-client/src/mock.rs`) well-designed for integration tests.
 
 ### Issues
 
-#### 2026-02-24 Review
+**[HIGH]** Workspace-wide (273+ `#[tokio::test]` across 56 `.rs` files) -- Systemic violation
+of `start_paused = true` invariant. Of 295 total `#[tokio::test]` annotations, only 9 across 4
+files use `start_paused = true`. Even tests that appear time-insensitive today become flaky when
+future refactors introduce timeouts. Requires bulk annotation pass and CI grep gate.
 
-##### Strengths
+**[HIGH]** `crates/ui/cli/src/main.rs` -- At 3,870 lines (including ~1,500 lines of tests),
+this is the largest single file.
 
-- **Zero `#[allow(dead_code)]` annotations across all 24 crates.** No crate uses `#[allow(dead_code)]` to suppress warnings. All unused code has been removed.
-- **Zero `#[allow(clippy::...)]` suppressions in the entire workspace.** All previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead code removal.
+**[HIGH]** Route handlers in `crates/ui/web-api/src/routes/` -- Multiple handlers have no
+inline unit tests. `hosts.rs`, `agents.rs`, `settings_ca.rs`, `settings_mqtt.rs`,
+`oidc_providers.rs`, `server_cert.rs`, `settings_auth.rs`, and `ocsp.rs` carry no
+`#[cfg(test)]` module.
 
-##### Issues
+**[MEDIUM]** No CI gate or lint enforces the `#[tokio::test(start_paused = true)]` invariant.
 
----
+**[MEDIUM]** `crates/ui/web-api/src/routes/software_items.rs:98,102` and
+`crates/shared/scheduler-engine/src/executors/version_check.rs:44,51` -- `NoopCommandExecutor`
+duplicated with `unreachable!()` in two locations.
 
-## Tests
+**[MEDIUM]** Production `Mutex::lock().unwrap()` in `plugins/releases/docker/src/auth.rs:43,130`
+and `web-api/src/middleware/rate_limit.rs:121`. Use `.unwrap_or_else(|e| e.into_inner())`.
 
-### Strengths
+**[MEDIUM]** `.expect()` on guarded values in `agent-ssh/src/commands/update_sudoers.rs:72,114`
+is logically safe but fragile to refactoring.
 
-- `crates/shared/command/src/executor.rs:333,351`, `crates/shared/service-sdk/src/cert_handler.rs:385-411`, `crates/core/controller/src/scheduler/executors/ca_rotation_check.rs:103-139`: `#[tokio::test(start_paused = true)]` used correctly for all time-dependent tests — consistent with AGENTS.md invariant requiring virtual time.
-- `crates/core/controller/tests/reverse_proxy/`: All Docker integration tests carry `#[ignore = "Docker integration test — requires Docker: ..."]` with exact runbook invocation commands, satisfying the AGENTS.md requirement for documented ignore reasons.
-- In-process SQLite via SeaORM for database tests — full schema semantics, zero inter-test state leakage, no external process dependency for the majority of tests.
-- Security-sensitive paths have targeted test coverage: JWT wrong-secret rejection, denylist revocation, OIDC state one-time-use, device-flow consumption, session double-approve, rate-limit window reset.
-- `crates/ui/web-api/src/auth/rate_limit.rs` and `crates/shared/service-sdk/src/backoff.rs`: `MessageRateLimiter` and backoff logic tested via `MockApiServer` (`httpmock`) with typed endpoint builders — consistent mock pattern across all consumer crates.
+**[MEDIUM]** `test_state(db)` / `test_db()` / `NoopCertSigner` construction duplicated across
+17+ test modules. Shared `test_helpers` module would eliminate duplication.
 
-### Issues
+**[MEDIUM]** `crates/ui/cli/tests/command_execution.rs` -- Only `hosts`, `services`, and
+`software_items` namespaces covered by integration tests.
 
-**[SEVERITY: Low]** `crates/core/controller/tests/reverse_proxy/nginx_ocsp.rs:46,164,297` — Real `sleep(1 second)` inside Docker integration tests, fragile on slow CI hosts
-
-Three test functions unconditionally sleep one second waiting for Nginx OCSP responder initialization. On a loaded CI host this window is insufficient; on a fast host it is wasteful. The correct pattern is a retry loop polling `/healthz` (or equivalent readiness probe) with a configurable timeout and a short poll interval. Note: these tests carry `#[ignore = "Docker integration test…"]`, so per AGENTS.md Exception 1 this does not violate the no-real-sleeps invariant; the severity is Low.
-
-**[SEVERITY: Medium]** Workspace-wide — `test_state(db)` / `test_db()` / `NoopCertSigner` construction duplicated across test modules
-
-Full `AppState` construction with `NoopCertSigner` is duplicated verbatim in at least `crates/ui/web-api/src/routes/auth.rs:458` and `crates/ui/web-api/src/middleware/require_auth.rs:202`. A shared `crates/ui/web-api/src/tests/helpers.rs` module exposing `test_app_state(db: DatabaseConnection) -> AppState` would eliminate duplication and ensure that new `AppState` fields added in the future are not silently missing in test variants.
-
-**[SEVERITY: Medium]** `crates/ui/cli/`: CLI integration tests cover only `hosts`, `services`, `software_items` command groups
-
-`auth`, `scheduler`, `plugin_configs`, `settings`, `autodiscovery`, `history`, `update`, and `check` command groups have no integration-level test coverage against `MockApiServer`. The AGENTS.md invariant requires covering success and failure paths for new logic; these commands have existing logic that has never been exercised at the integration level.
-
-**[SEVERITY: Medium]** `crates/shared/openapi-client/src/lib.rs:687-885` — Retry-backoff tests do not verify delay durations
-
-Eight backoff tests run with `start_paused = false` and assert only that operations eventually succeed. The actual delay values — the functional correctness of the backoff algorithm — are never asserted. Switching to `start_paused = true` and asserting the elapsed virtual time after each attempt would validate the exponential growth, jitter range, and cap behaviour.
-
-**[SEVERITY: Medium]** Route handlers in `crates/ui/web-api/src/routes/` — Multiple handlers have no inline unit tests
-
-`hosts.rs`, `agents.rs`, `settings_ca.rs`, `settings_mqtt.rs`, `oidc_providers.rs`, `server_cert.rs`, `settings_auth.rs`, and `ocsp.rs` carry no `#[cfg(test)]` module. Given that Axum handlers can be tested cheaply via Tower `oneshot` calls with an in-memory SQLite state (as `auth.rs` already demonstrates), the gap is a coverage deficit rather than a testing infrastructure gap.
-
-**[SEVERITY: Low]** `crates/core/controller/tests/reverse_proxy/nginx_ocsp.rs:424` — `reserve_port()` has a TOCTOU race
-
-The helper binds a port, reads the port number, drops the listener, then starts the OCSP responder on that port. Between the drop and the bind there is a window where another process can claim the port. The correct pattern is to keep the listener alive and pass the bound `TcpListener` directly to the responder if the API supports it, or to use socket activation.
-
-#### 2026-02-24 Review
-
-##### Issues
-
-**[SEVERITY: High]** Workspace-wide (273+ `#[tokio::test]` across 56 `.rs` files) — Systemic violation of `start_paused = true` invariant across nearly all async tests
-
-Of 295 total `#[tokio::test]` annotations, only 9 across 4 files use `start_paused = true`. The remaining 273+ tests run with real wall-clock time. Even tests that appear time-insensitive today become flaky when future refactors introduce timeouts. Fixing requires a bulk annotation pass, ideally enforced by a CI grep gate.
-
-**[SEVERITY: Medium]** Workspace-wide — No CI gate or lint enforces the `#[tokio::test(start_paused = true)]` invariant
-
-Without a CI check, the invariant is documentation-only and will continue to be violated by new code.
-
----
+**[MEDIUM]** `crates/shared/openapi-client/src/lib.rs:687-885` -- Retry-backoff tests do not
+verify delay durations. Eight tests assert only eventual success, not backoff timing.
 
 ## High Availability
 
 ### Strengths
 
-- `crates/core/controller/src/scheduler/claim.rs:22-37`: `try_claim` uses a single `UPDATE WHERE locked_by IS NULL` — optimistic locking without a separate SELECT, TOCTOU-free.
-- `crates/core/controller/src/scheduler/claim.rs:101-126`: `recover_stale_claims` reclaims tasks locked for more than 10 minutes, providing automatic crash recovery.
-- `crates/shared/service-sdk/src/backoff.rs:29-43`: Exponential backoff with jitter (base 2 s, cap 60 s, ~25% jitter) used for WebSocket reconnection — prevents thundering-herd on controller restart.
-- `crates/core/controller/src/tasks.rs:76-83`: `broadcast_server_restarting_scattered` spreads reconnect jitter over a configurable window — no synchronized stampede.
-- `crates/ui/web-api/src/service_connections.rs:211-221`: `send()` acquires read lock, clones sender, drops lock before the async send — no lock held across an `.await` point.
-- `crates/core/controller/src/tasks.rs:36-37`: `CancellationToken` child tokens propagated to all background tasks — clean cooperative shutdown.
+- `CancellationToken` used for cooperative shutdown across all services. `BackgroundTasks` in
+  controller provides named handles with both cooperative and forceful shutdown modes.
+- `ServerRestarting` notifications scattered over 5 seconds to prevent thundering herd.
+- Exponential backoff with jitter in `service-sdk/src/backoff.rs` prevents thundering herd on
+  reconnect. All services use this consistently.
+- Optimistic locking via `UPDATE ... WHERE locked_by IS NULL` in scheduler prevents double
+  execution across instances. Stale claim recovery (10-minute threshold) handles crashes.
+- MQTT client has LWT for offline status, bounded per-service channels (capacity 32), and
+  connection deduplication in `ServiceConnectionRegistry`.
+- Settings use `watch` channel for atomic snapshot publishing with serialized writes.
+- `send()` acquires read lock, clones sender, drops lock before async send -- no lock held
+  across await points.
+- Event poller advances cursor only past successfully delivered events. `MAX_DELIVERY_RETRIES`
+  (3) prevents single bad event from blocking all delivery.
+- User-level token revocation uses latest-timestamp guard (`if until > *entry`) to prevent
+  concurrent revocation from narrowing the window.
+- MQTT event delivery uses targeted routing via `mqtt_client_index` -- routes tenant-specific
+  messages to specific MQTT service instance.
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/core/controller/src/tasks.rs:98-104` — 5-second shutdown timeout may be insufficient for `release_all_claims` under a slow database
+**[CRITICAL]** `crates/shared/scheduler-engine/src/scheduler.rs:175-183` -- Task cancellation
+during execution does not release the claim. When `token.is_cancelled()` fires, the scheduler
+breaks out of the iteration loop, skipping `release_claim`. Claim locked until
+`recover_stale_claims` (up to 10 minutes).
 
-`BACKGROUND_TASK_SHUTDOWN_TIMEOUT = 5s` covers the `release_all_claims` DB write. Under a slow or temporarily unavailable database, the write is abandoned after 5 seconds, claims are not released, and the next controller instance must wait the full 10-minute stale recovery window before resuming scheduled work. The timeout should be configurable, or the `release_all_claims` call should carry its own shorter internal deadline with a logged warning on timeout.
+**[CRITICAL]** `crates/core/mqtt/src/main.rs:198` -- Unbounded channel for MQTT service events.
+If the controller WebSocket is slow, events accumulate without limit.
 
-**[SEVERITY: Medium]** `crates/shared/service-sdk/src/event_loop.rs:244-246` — `tick().await` inside `handle_service_settings` suspends the event loop
+**[CRITICAL]** `crates/ui/web-api/src/middleware/rate_limit.rs:114-115` -- Fallback rate limiter
+uses `std::sync::Mutex` (blocking) in async context.
 
-A new `Interval` is created and its first tick immediately consumed with `.await`. This suspends the event loop while waiting, blocking incoming WebSocket frame reads and ping responses. The initialization should be restructured so the interval is returned to the outer event-loop driver without any intermediate `.await` in the settings handler.
+**[HIGH]** `crates/core/controller/src/tasks.rs:105-111` -- Per-task shutdown timeout is only 5
+seconds. The embedded scheduler may need longer for in-progress DB operations.
 
-#### 2026-02-24 Review
+**[HIGH]** `crates/ui/web-api/src/service_connections.rs:192-203` -- `broadcast` awaits send to
+each service sequentially. Single slow consumer delays broadcasts to all services.
 
-##### Strengths
+**[HIGH]** `crates/shared/nats/src/connection.rs:24-28` -- No NATS retry at startup. If NATS is
+temporarily unavailable, controller fails to start entirely.
 
-- **User-level token revocation uses latest-timestamp guard.** `crates/ui/web-api/src/auth/token_denylist.rs:59-66` — `deny_user` uses `if until > *entry` to prevent concurrent revocation calls from narrowing the window.
-- **MQTT event delivery uses targeted routing via `mqtt_client_index`.** `crates/ui/web-api/src/event_poller.rs:262-305` — Routes tenant-specific messages to the specific MQTT service instance holding that client, avoiding unnecessary broadcasts.
+**[MEDIUM]** `crates/core/controller/src/tasks.rs:98-104` -- 5-second shutdown timeout may be
+insufficient for `release_all_claims` under slow database.
 
----
-
-## Database
-
-### Strengths
-
-- UUID v7 primary keys throughout all entities — time-ordered, index-friendly, no hot-spot write contention.
-- `crates/shared/db/src/`: `TenantScoped` trait makes tenant-scoped queries structurally impossible to omit on typed query paths — tenant data leakage is a compile-time error, not a runtime risk.
-- Partial (filtered) unique indexes on `software_items` (`WHERE deactivated_at IS NULL`) and `plugin_configs` — prevents name collisions among active records while allowing post-soft-delete re-creation.
-- Every foreign key has an explicit `ON DELETE` action — no implicit cascade surprises.
-- `m20260209_000001_initial.rs`: `down()` drops all tables in correct reverse FK order — migrations are fully reversible.
-- Referential integrity CHECK constraint on `sessions`: `auth_method != 'oidc' OR oidc_provider_id IS NOT NULL` — enforced at the DB layer, not the application layer.
-- Transactions used consistently for all multi-step mutations; `lock_exclusive()` acquired before `merge_service` to prevent concurrent modification.
-
-### Issues
-
-**[SEVERITY: Medium]** `crates/shared/db/src/entity/oidc_provider.rs:89` — Soft-delete column named `deleted_at` instead of `deactivated_at`
-
-All other 7 soft-deletable entities (`tenants`, `users`, `hosts`, `services`, `software_items`, `plugin_configs`, `ca_certificates`) use `deactivated_at`. The `oidc_providers` entity uses `deleted_at`. This inconsistency prevents a generic soft-delete utility from working across all entities and confuses developers who expect a uniform column name. A migration renaming the column is the correct fix.
-
-**[SEVERITY: Medium]** `crates/shared/db/src/entity/update_history.rs:28` — Dual output storage: `output` column and `update_output_lines` child table
-
-`get_update_history` checks `if record.output.is_empty()` and conditionally loads from the child table. This dual-path design means a partially migrated database (records with neither `output` populated nor `update_output_lines` rows) would silently return empty output with no error. There is no DB constraint enforcing which storage path is canonical.
-
-**[SEVERITY: Low]** `api_tokens` table — No `expires_at` column
-
-API tokens have no expiry mechanism. A forgotten token remains valid indefinitely. At minimum, an optional `expires_at` column should be supported; for security-sensitive infrastructure access, a mandatory maximum TTL should be enforced.
-
-#### 2026-02-24 Review
-
-##### Strengths
-
-- **CHECK constraint on sessions table enforces OIDC provider requirement at DB level.** `crates/core/controller/src/migration/m20260209_000001_initial.rs:474-478` — `CHECK(auth_method != 'oidc' OR oidc_provider_id IS NOT NULL)`.
-- **`TenantDb` extractor provides compile-time tenant filtering.** `crates/ui/web-api/src/tenant_db.rs:29-51` — Covers SELECT, UPDATE, and DELETE operations uniformly.
-
-##### Issues
-
-**[SEVERITY: Medium]** `crates/core/controller/src/migration/m20260209_000001_initial.rs:615-621` — Raw SQL in migration seed uses `CURRENT_TIMESTAMP` which behaves differently across backends
-
-The `settings_version` seed uses `execute_unprepared` with `CURRENT_TIMESTAMP`. Should be converted to use the query builder with `Expr::current_timestamp()` for backend-agnostic behavior.
-
-**[SEVERITY: Low]** `crates/core/controller/src/migration/m20260209_000001_initial.rs:1942-1994` — Scheduled task seeding uses loop without batch insert
-
-Issues N_tenants x 6 individual INSERT statements. Should use a single multi-row INSERT for consistency.
-
----
+**[MEDIUM]** `crates/shared/service-sdk/src/event_loop.rs:244-246` -- `tick().await` inside
+`handle_service_settings` suspends the event loop, blocking incoming WebSocket reads and pings.
 
 ## Coding Standards
 
 ### Strengths
 
-- All 24 crates use `edition = "2024"` inherited from `[workspace.package]` — no edition fragmentation.
-- `SecretString` used consistently at all HTTP API input and output boundaries across `uptrakit-web-api-types` — compliant with AGENTS.md invariant 6 (no secrets in logs).
-- `bail!` / `report!` / `context_to` / `impl_report_conversion!` pattern is uniform; `Report::new()` anti-pattern is absent; `Result<T, String>` is absent from all library boundaries.
-- No `StatusCode` numeric literal comparisons anywhere in the codebase — all comparisons use `StatusCode::*` variants and `.is_*()` helpers, consistent with AGENTS.md invariant 17.
-- `FromStr` pattern is textbook-correct throughout: typed `Parse{TypeName}Error`, `impl FromStr`, and `s.parse::<MyType>()` at call sites (`AlertSeverity`, `ParseAlertSeverityError` in `system_alerts.rs`).
-- 70+ endpoints carry `x-required-permission` OpenAPI extension annotations with values that match `Permission::as_str()` serialization — auditable authorization coverage by static inspection.
+- All 31 crates use `workspace = true` for shared dependencies and `[lints] workspace = true`.
+- `TenantDb` wrapper used consistently across all tenant-scoped web-api routes.
+- All string-to-type conversions use `FromStr` with dedicated `Parse{Type}Error` types.
+- No N+1 query patterns found. Batch loading with `is_in(ids)` and `HashMap` lookups used.
+- Database-backed rate limiting with atomic SQL upsert, HA-safe across controller instances.
+- Structured tracing with proper levels. No sensitive data in log output.
+- `bail!` / `report!` / `context_to` / `impl_report_conversion!` pattern uniform; `Report::new()`
+  anti-pattern absent; `Result<T, String>` absent from all library boundaries.
+- No `StatusCode` numeric literal comparisons anywhere in the codebase.
+- 70+ endpoints carry `x-required-permission` OpenAPI extension annotations.
+- Zero `anyhow` usage across all 31 crates.
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/ui/web-api/src/routes/hosts.rs:141`, `services.rs:282`, `services.rs:483` — Three `DELETE` endpoints return `200 OK` with a body
+**[CRITICAL]** `crates/ui/web-api/src/routes/oidc_auth.rs:425` -- `unwrap_or(0)` on
+auth-critical user count query. Database failure could allow any OIDC user to become
+owner/admin.
 
-Soft-delete endpoints that use the `DELETE` HTTP method should return `204 No Content`. Returning `200 OK` with a response body on a `DELETE` is inconsistent with the REST conventions applied elsewhere in the API (other delete endpoints correctly return `204`) and violates the principle of least surprise for API consumers. The fix is either to return `204` with no body, or to rename the endpoint to `POST /{id}/deactivate` if a body is semantically necessary.
+**[HIGH]** `crates/plugins/releases/docker/src/plugin.rs:21,56,142` and
+`crates/plugins/releases/docker/src/docker_client.rs:16,83,86,169` -- 7+ instances of
+`#[cfg(not(feature = "X"))]` attribute-style conditionals, explicitly prohibited.
 
-**[SEVERITY: Medium]** `crates/ui/web-api/src/routes/autodiscovery.rs:154,159` — `create_autodiscovery_ignore` returns `201 Created` for pre-existing records
+**[HIGH]** `crates/ui/web-api/src/routes/hosts.rs:283-286` and
+`crates/ui/web-api/src/routes/autodiscovery.rs:48-51` -- Query parameters use `Option<String>`
+instead of `Option<Uuid>` for UUID fields, silently ignoring invalid UUIDs.
 
-The idempotent upsert path returns `201` regardless of whether a new row was inserted or an existing row was found. Standard REST convention: return `201 Created` for newly created resources, `200 OK` for pre-existing ones. The handler should distinguish between insert and no-op outcomes and set the status code accordingly.
+**[MEDIUM]** `crates/ui/web-api/src/notification_service.rs:43,159` -- Uses
+`#[cfg(not(feature = "nats"))]` (2 instances).
 
-#### 2026-02-24 Review
+**[MEDIUM]** `crates/ui/web-api/src/lib.rs:57`, `routes/services.rs:429`,
+`routes/auth.rs:484`, `middleware/require_auth.rs:219`, `middleware/resolve_ip.rs:148` -- Uses
+`Report::new()` instead of `report!()` macro (5 instances).
 
-##### Strengths
+**[MEDIUM]** `crates/ui/web-api/src/routes/services.rs:282` and `routes/hosts.rs:141` --
+Soft-delete `DELETE` endpoints return `200 OK` instead of `204 No Content`.
 
-- **Zero `anyhow` usage and zero `Result<T, String>` in library boundaries.** All 24 crates use `rootcause`/`thiserror` consistently.
-- **All `Mutex::lock().unwrap()` usages comply with the approved exception.** 4 occurrences across 2 files, all on `Mutex::lock()`.
+**[MEDIUM]** `crates/ui/web-api/src/routes/autodiscovery.rs:154,159` -- Create ignore returns
+`201 Created` for pre-existing records.
 
-##### Issues
-
-**[SEVERITY: Medium]** `crates/shared/web-api-types/src/permissions.rs:9` — `Permission` enum lacks `#[non_exhaustive]`
-
-The enum has 9 variants and will grow with new features. Adding `#[non_exhaustive]` now is non-breaking; deferring forces simultaneous downstream updates.
-
-**[SEVERITY: Low]** 7 public enums in `uptrakit-web-api-types` lack `#[non_exhaustive]`
-
-`AlertSeverity`, `TriggerUpdateStatus`, `UpdateStatus`, `RegistrationMode`, `SystemdAction`, `DockerComposeAction`, `PredefinedHook` are all public enums without `#[non_exhaustive]` that could gain variants.
-
----
+**[MEDIUM]** `crates/shared/web-api-types/src/permissions.rs:9` -- `Permission` enum lacks
+`#[non_exhaustive]`.
 
 ## Extensibility
 
 ### Strengths
 
-- `crates/plugins/infrastructure/core/src/traits.rs:22-98`: `Plugin` trait uses default implementations for all optional methods — adding a new plugin requires implementing only the methods relevant to its capability set.
-- `crates/plugins/infrastructure/registry/src/registry.rs:43-135`: `register_plugins!` macro generates all dispatch boilerplate — adding a new plugin type is a one-line change in the macro invocation plus a dependency entry.
-- `crates/shared/wire/src/lib.rs:32` and `crates/shared/types/src/plugin_types.rs:17`: `#[non_exhaustive]` on `PluginCapability`, `ServiceMessage`, `ControllerMessage`, and related wire enums — downstream consumers cannot write exhaustive matches that break on new variants.
-- `crates/shared/wire/src/lib.rs:71`: `Capability::Other(String)` forward-compatibility catch-all — unknown capabilities from newer peers are preserved and excluded from intersection without causing a deserialization error.
-- `crates/shared/wire/src/close_reason.rs:49`: `CloseReason::Unknown(String)` mirrors the same forward-compat pattern for close reason codes.
-- `crates/shared/service-sdk/src/lifecycle.rs:76-160`: `ServiceHandler` trait externalizes the entire service-specific surface — new service roles plug in without modifying the SDK lifecycle machinery.
-- `crates/plugins/infrastructure/core/src/secrets.rs:9-17`: `SecretMasking` trait with no-op defaults — plugins that have no secrets do not need to implement masking.
+- Plugin system: trait with default implementations, capability-based feature declaration,
+  macro-generated registry dispatch, JSON configuration with `SecretMasking`. Adding a new plugin
+  requires one line in `register_plugins!`.
+- Wire protocol: `Other(String)` catch-all on `PluginType`, `PluginRole`, `Capability`, and
+  `CloseReason` for forward-compatible deserialization.
+- `ServiceHandler` trait uses associated type `ServiceEvent` (defaulting to `Infallible`),
+  associated constants, and default implementations for clean extensibility.
+- Feature gates on `shared-types` (`sea-orm`, `openapi`), `shared-db` (`migration`,
+  `db-sqlite/postgres/mysql`), and `plugin-registry` (`daemon`, `ssh`).
+- Migrations follow date-stamped naming with `up()`/`down()` methods. JSON columns for
+  schema-free configuration evolution.
+- `SecretMasking` trait with no-op defaults -- plugins without secrets need no masking code.
+- Sequence validation decoupled from full deserialization enables forward-compatible message
+  handling.
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/plugins/infrastructure/registry/src/registry.rs:151-156` — Platform-specific plugins compiled unconditionally into all agent binaries
+**[HIGH]** `crates/shared/wire/src/lib.rs:254-276` -- `ServiceMessage` and `ControllerMessage`
+use `#[serde(tag = "type")]` without a catch-all variant. Unknown message types from a newer peer
+cause deserialization errors and are irreversibly lost.
 
-`HomebrewPlugin` (macOS-only) and `ProxmoxHelperScriptsPlugin` (Proxmox-VE-only) are compiled into every agent binary regardless of target platform. A Linux agent will accept a `HomebrewPlugin` configuration and fail only when the `brew` executable is absent at runtime. Platform-specific plugins should be gated with `#[cfg(target_os = "macos")]` or behind optional Cargo features in `uptrakit-plugin-infrastructure-registry`, with the macro conditionally including them.
+**[MEDIUM]** 13 public enums across `shared-types`, `web-api-types`, `wire`, `command`, and
+`plugin-infrastructure-core` lack `#[non_exhaustive]`: `DeviceAuthStatus`, `ServiceStatus`,
+`SoftwareDiscoveryState`, `OutputStreamType`, `MqttClientConnectionStatus`, `Permission`,
+`UpdateStatus`, `PluginError`, `ScheduledTaskType`, `HookCommand`, `CommandMode`,
+`MqttTransport`, `RegistrationMode`.
 
-**[SEVERITY: Medium]** `crates/shared/wire/src/lib.rs:214-234` — `ServiceMessage` and `ControllerMessage` mix agent-specific and MQTT-specific variants
+**[MEDIUM]** `crates/plugins/infrastructure/registry/src/registry.rs:257-279` --
+`validate_package_identifier` manually maintained outside the `register_plugins!` macro.
 
-MQTT-specific wire variants are deserializable on agent connections and vice versa. Implementors of `ServiceHandler` must mentally classify each variant to understand which are relevant to their capability set. A per-capability message type (achieved through enums that each contain only the variants relevant to that capability) or a discriminated wrapper would make the extension surface explicit for new service roles.
+**[MEDIUM]** `crates/plugins/infrastructure/registry/src/registry.rs:151-156` --
+Platform-specific plugins compiled unconditionally. `HomebrewPlugin` (macOS-only) and
+`ProxmoxHelperScriptsPlugin` (Proxmox-VE-only) compiled into every agent binary.
 
-**[SEVERITY: Medium]** `crates/shared/service-sdk/src/lifecycle.rs:79,89` — `ServiceHandler` is not object-safe due to associated constants; no documentation or `where Self: Sized` guards
+**[MEDIUM]** `crates/shared/wire/src/lib.rs:214-234` -- `ServiceMessage` and
+`ControllerMessage` mix agent-specific and MQTT-specific variants.
 
-`DIR_NAME` and `SERVICE_LABEL` are `const` items on the trait. Object safety requires that no associated constants be present without a `where Self: Sized` bound. If anyone attempts `Box<dyn ServiceHandler>` or `Arc<dyn ServiceHandler>`, the compiler error is non-obvious. The trait should either document that it is not intended as a trait object, or add `where Self: Sized` to the constant items to produce a clear diagnostic.
+**[MEDIUM]** `crates/shared/service-sdk/src/lifecycle.rs:79,89` -- `ServiceHandler` is not
+object-safe due to associated constants. No documentation or `where Self: Sized` guards.
 
-#### 2026-02-24 Review
+**[LOW]** No explicit wire protocol version number. A `protocol_version: u8` in `EnrollPayload`
+would provide a safety valve for hard protocol breaks.
 
-No workspace-level extensibility findings. All extensibility findings are in crate-specific files.
+**[LOW]** 7 public enums in `uptrakit-web-api-types` lack `#[non_exhaustive]`:
+`AlertSeverity`, `TriggerUpdateStatus`, `UpdateStatus`, `RegistrationMode`, `SystemdAction`,
+`DockerComposeAction`, `PredefinedHook`.

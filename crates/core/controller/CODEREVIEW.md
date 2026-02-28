@@ -1,419 +1,311 @@
-# CODEREVIEW — uptrakit-controller
+# Code Review: uptrakit-controller
 
-> Reviewed: 2026-02-23
-> Reviewer: Senior Rust Engineer (automated phase 2)
-> Scope: `crates/core/controller/` — the primary controller binary
-
----
+- **Review date**: 2026-02-28
+- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Branch**: docs/codereview-backend
 
 ## Summary
 
-`uptrakit-controller` is the most complex binary in the workspace. It orchestrates
-database migrations, a 10-phase startup sequence, full PKI lifecycle management
-(CA generation, CRL signing, OCSP support), a DB-backed HA scheduler, and a suite
-of background tasks. The overall design is solid: startup phases are typed structs,
-the scheduler uses TOCTOU-free optimistic locking, and the PKI layer is well-covered
-by unit tests. One issue requires immediate attention: the CRL manager was previously registered with `track_abort` rather than `track` (now fixed). The mTLS verifier uses `.allow_unauthenticated()` intentionally for reverse-proxy deployments, documented in `pki.rs` and `mtls_acceptor.rs`.
+`uptrakit-controller` is the most complex binary in the workspace (~6K LoC). It orchestrates
+database migrations, a 10-phase startup sequence, full PKI lifecycle management (CA generation,
+CRL signing, OCSP support), a DB-backed HA scheduler, and a suite of background tasks. The
+overall design is solid: startup phases are typed structs, the scheduler uses TOCTOU-free
+optimistic locking, and the PKI layer is well-covered by 30+ unit tests. The `durations.rs`
+module centralizes all timing constants with doc-comments, eliminating magic numbers throughout.
 
----
+The main concerns are the 5-second background task shutdown timeout (too short for the embedded
+scheduler), a direct dependency on the UI-layer `uptrakit-web-api` crate, and the hardcoded
+database connection pool configuration. The PKI module at 1,646 lines could benefit from
+sub-module extraction.
 
 ## Architecture
 
 ### Strengths
 
-- **10-phase startup with typed intermediate structs.** `startup.rs` separates
-  each startup phase into a distinct function returning `ReconciledSettings`,
-  `ValidatedConfig`, or `PkiRuntime`. This makes startup failures immediately
-  attributable to the phase that failed and eliminates accidental partial
-  initialisation. Each phase is named in a comment in `main.rs` (`// Phase N: …`),
-  which is useful for operator log parsing.
-
-- **`BackgroundTasks` registry.** `tasks.rs` provides a clean `track` /
-  `track_abort` separation: tasks that respect a `CancellationToken` are
-  awaited with a per-task timeout, while tasks that cannot be gracefully stopped
-  are aborted. Shutdown is a single `bg.shutdown(…).await` call from `main.rs`.
-
-- **`AppState` builder pattern prevents partial initialisation.** The builder
-  catches the first missing field by name at compile time via `AppStateBuildError`,
-  eliminating runtime panics from forgotten fields.
-
-- **`CaKeyStore` is not `Clone`; `Debug` redacts all key material.** The private
+- `src/main.rs:114-499` -- 10-phase startup with typed intermediate structs. `startup.rs`
+  separates each startup phase into a distinct function returning `ReconciledSettings`,
+  `ValidatedConfig`, or `PkiRuntime`. Each phase is named in a comment in `main.rs`
+  (`// Phase N: …`), making startup failures immediately attributable to the phase that failed
+  and eliminating accidental partial initialization.
+- `src/tasks.rs` -- `BackgroundTasks` registry provides a clean `track` / `track_abort`
+  separation: tasks that respect a `CancellationToken` are awaited with a per-task timeout,
+  while tasks that cannot be gracefully stopped are aborted. Shutdown is a single
+  `bg.shutdown(…).await` call from `main.rs`.
+- `src/startup.rs` -- `AppState` builder pattern prevents partial initialization. The builder
+  catches the first missing field by name at compile time via `AppStateBuildError`, eliminating
+  runtime panics from forgotten fields.
+- `src/pki.rs` -- `CaKeyStore` is not `Clone`; `Debug` redacts all key material. The private
   key store cannot be accidentally duplicated and never leaks key material to logs.
   `Zeroizing<String>` is used for all CA private keys throughout `CaKeyStore`.
-
-- **`spawn_ca_rotation` is trigger-based, not timer-based.** The expensive CA
-  rotation is driven by a `Notify` signal from the scheduler's
-  `CaRotationCheckExecutor`, which fires the trigger only when rotation is
-  genuinely needed. This avoids a fixed 24-hour interval holding a rotation
-  lock on all controller instances simultaneously.
-
-- **HA-safe master key verification at Phase 4.** `verify_master_key` uses
-  `insert_setting_if_absent` to handle the race between two controller instances
-  starting simultaneously. If a race is detected, the lagging instance reads
-  the winner's token and verifies against it, failing hard with a clear error
-  message rather than silently proceeding.
-
-- **Rolling zero-downtime handoff via SIGUSR1 / `--takeover-from`.** The
-  `run()` event loop listens for `SIGUSR1` as a shutdown signal. A new instance
-  sends `SIGUSR1` to the old instance after its server is ready, enabling
-  blue/green restarts without a gap in service.
+- `src/tasks.rs` -- `spawn_ca_rotation` is trigger-based, not timer-based. The expensive CA
+  rotation is driven by a `Notify` signal from the scheduler's `CaRotationCheckExecutor`,
+  which fires only when rotation is genuinely needed. Avoids a fixed 24-hour interval holding
+  a rotation lock on all controller instances simultaneously.
+- `src/startup.rs:157-232` -- HA-safe master key verification at Phase 4. `verify_master_key`
+  uses `insert_setting_if_absent` to handle the race between two controller instances starting
+  simultaneously. If a race is detected, the lagging instance reads the winner's token and
+  verifies against it, failing hard with a clear error message.
+- `src/main.rs:419-445` -- Rolling zero-downtime handoff via SIGUSR1 / `--takeover-from`. The
+  `run()` event loop listens for `SIGUSR1` as a shutdown signal. A new instance sends
+  `SIGUSR1` to the old instance after its server is ready, enabling blue/green restarts
+  without a gap in service.
+- `Cargo.toml:10-19` -- Feature flags for database backends, OIDC, embedded scheduler, and
+  embedded frontend compose correctly via cascading features.
+- `migration/m20260209_000001_initial.rs` -- Squashed single migration with a correct `down()`
+  path that drops tables in correct reverse FK order. Partial unique indexes
+  (`WHERE deactivated_at IS NULL`) prevent duplicate slugs among active records without
+  conflicting with soft-deleted rows, correctly expressed as raw SQL with inline comments.
+- CA rotation uses CAS (`UPDATE WHERE value = expected_fp`) inside a transaction. CA version
+  counter with `bump_setting_i64` gives cross-instance reload tasks a cheap change-detection
+  probe.
 
 ### Issues
 
----
+**[MEDIUM]** `Cargo.toml:22-60` -- Controller depends directly on `uptrakit-web-api`, creating
+a dependency from a core binary upward into the UI layer. The startup code directly constructs
+web-api internal types (`OidcFlowStore`, `DeviceFlowStore`, `RateLimitStore` at
+`src/main.rs:206-219`) that should be constructed inside `AppState::builder().build()`.
 
-## Security & Safety
+**[LOW]** `src/main.rs:324-379` -- Embedded scheduler block directly imports executor types and
+manually registers each task type. This registration should be encapsulated in the
+scheduler-engine crate via a `register_all_executors` function.
+
+## Security and Safety
 
 ### Strengths
 
-- **CA private keys stored AES-256-GCM encrypted in the database.** The
-  `generate_ca` / `rotate_managed_ca` path calls
-  `EncryptedString::new(bundle.key_pem)` before storing. In memory the key lives
-  in `Zeroizing<String>` and is never exposed through `Debug`.
-
-- **CRL revocation integrated into the live TLS configuration.** The
-  `CrlManager` rebuilds `rustls::ServerConfig` from current CA state plus DB
-  revocation records whenever a certificate is revoked or the CA rotates. The
-  rustls `WebPkiClientVerifier` is constructed with `.with_crls(crls)` so
-  revocation checking is enforced at the TLS handshake level.
-
-- **CA rotation uses compare-and-swap in the database.** `rotate_managed_ca`
-  issues an `UPDATE WHERE value = expected_fp` on the active fingerprint setting.
-  If another controller instance raced and rotated first, `rows_affected == 0`
-  and the local instance returns `rotated: false` without applying a double
-  rotation.
-
-- **`recover_stale_claims` limits the crash-recovery window.** Stale claims
-  (locked longer than 600 seconds) are released in every poll cycle. A crashed
-  controller does not permanently block task execution.
-
-- **Server certificate auto-renewal is watch-channel-driven.** `spawn_ca_reload`
-  detects cross-instance CA updates by comparing a version counter in the
-  `settings` table and rebuilds the TLS config without a restart.
+- `src/pki.rs` -- CA private keys stored AES-256-GCM encrypted in the database. The
+  `generate_ca` / `rotate_managed_ca` path calls `EncryptedString::new(bundle.key_pem)` before
+  storing. In memory the key lives in `Zeroizing<String>` and is never exposed through `Debug`.
+- `src/crl_manager.rs` -- CRL revocation integrated into the live TLS configuration. The
+  `CrlManager` rebuilds `rustls::ServerConfig` from current CA state plus DB revocation records
+  whenever a certificate is revoked or the CA rotates. The `WebPkiClientVerifier` is constructed
+  with `.with_crls(crls)` so revocation checking is enforced at the TLS handshake level.
+- CA rotation uses compare-and-swap in the database. `rotate_managed_ca` issues
+  `UPDATE WHERE value = expected_fp` on the active fingerprint setting. If another instance
+  raced first, `rows_affected == 0` and the local instance returns `rotated: false`.
+- `recover_stale_claims` limits the crash-recovery window. Stale claims (locked longer than
+  600 seconds) are released in every poll cycle. A crashed controller does not permanently
+  block task execution.
+- Server certificate auto-renewal is watch-channel-driven. `spawn_ca_reload` detects
+  cross-instance CA updates by comparing a version counter in the `settings` table and
+  rebuilds the TLS config without a restart.
+- `src/startup.rs:77-83` -- Master key initialization requires explicit
+  `--allow-plaintext-secrets` with clear warning.
+- `src/startup.rs:897-910` -- Master key rejected if not exactly 64 hex characters (32 bytes).
+- `src/startup.rs:854-870` -- JWT signing key stored in DB (encrypted), migrated from
+  file-based storage.
+- `src/mtls_acceptor.rs` -- Dual-auth mTLS model supporting both enrolled (no cert) and
+  authenticated (with cert) agents on a single listener.
+- `src/reencrypt.rs` -- Idempotent, HA-safe re-encryption of legacy plaintext values at
+  startup.
+- `src/startup.rs:119` -- Database URL sanitized before logging.
 
 ### Issues
 
----
+**[MEDIUM]** `src/startup.rs:61-75` -- Master key hex returned as `String`, not wrapped in
+`Zeroizing<String>`. The hex form may persist in memory after use. The parsed key bytes
+correctly use `Zeroizing<[u8; 32]>`, but the intermediate hex string could linger.
 
 ## Code Quality
 
 ### Strengths
 
-- **`durations.rs` centralises all timing constants with doc-comments.** There are
-  no magic numbers in the background task and scheduler code paths. Constants such
-  as `BACKGROUND_TASK_SHUTDOWN_TIMEOUT`, `SERVER_CERT_RENEWAL_WINDOW_DAYS`, and
+- `src/durations.rs` -- Centralizes all timing constants with doc-comments. There are no magic
+  numbers in the background task and scheduler code paths. Constants such as
+  `BACKGROUND_TASK_SHUTDOWN_TIMEOUT`, `SERVER_CERT_RENEWAL_WINDOW_DAYS`, and
   `RESTART_NOTIFICATION_SCATTER` are used consistently.
-
-- **Discrete startup phases reduce function complexity.** Each phase function in
-  `startup.rs` is independently readable and testable. `reconcile_all_settings`
-  is long but follows a repetitive, auditable `ReconcileParams` pattern. The
-  `DisplayVec` helper and the `reconcile_setting_vec` / `reconcile_socket_addr`
-  wrappers are clean abstractions.
-
-- **`AppError` error type is minimal and domain-appropriate.** The six variants
-  (`Config`, `Database`, `Settings`, `Pki`, `Server`, one conversion from
-  `CryptoError`) cover exactly the startup failure modes without over-engineering.
-  No `String`-wrapped generic errors.
-
-- **`TrackingExecutor` pattern in scheduler tests avoids mocking frameworks.**
-  `scheduler/mod.rs:417-424` defines an anonymous `TrackingExecutor` struct with
-  an `AtomicBool` flag directly inside the test, keeping the test fully
-  self-contained.
-
-- **PKI functions have comprehensive unit test coverage.** `pki.rs` contains 30+
-  inline unit tests covering CA generation, server certificate round-trips,
-  fingerprint determinism, SAN extraction, AIA/CDP extension embedding, and the
-  `validate_ca_pki_addr` matrix (four cases: addr set / extensions present,
-  addr set / no extensions, no addr / extensions present, neither set).
-
-#### 2026-02-24 Review
-
-- **All domain-significant durations centralized in `durations.rs` with doc-comments.** Every timing constant is in a single file with documentation, eliminating magic numbers.
-
-### Issues
-
-**[SEVERITY: Medium]** `crates/core/controller/src/tasks.rs:98-104` — 5-second shutdown timeout may be too short for `release_all_claims`
-
-```rust
-// tasks.rs:98-104 — applied per task
-if tokio::time::timeout(durations::BACKGROUND_TASK_SHUTDOWN_TIMEOUT, handle)
-    .await
-    .is_err()
-{
-    tracing::warn!("{name} did not complete within shutdown timeout");
-}
-```
-
-`BACKGROUND_TASK_SHUTDOWN_TIMEOUT` is 5 seconds. This timeout applies equally to
-the scheduler task, whose cleanup path runs `release_all_claims` — a `UPDATE`
-query against the database. Under a saturated DB (e.g., at shutdown during peak
-load), 5 seconds may not be enough. If the scheduler task times out, all claims
-held by this controller remain locked. The next poll cycle on any controller
-instance will not reclaim them for 600 seconds (the `STALE_CLAIM_SECONDS`
-window), causing a 10-minute gap in scheduled task execution after every
-non-clean shutdown. A domain-appropriate timeout (30–60 seconds) for the scheduler
-specifically, distinct from the generic 5-second default, would be safer.
-
-#### 2026-02-24 Review
-
-**[SEVERITY: Low]** `crates/core/controller/src/pki.rs:543` — `bundle_from_pem` takes `String` parameters where `&str` would suffice for key parsing
-
-Ownership is eventually needed for the struct, but the parameter naming could clarify this.
-
----
-
-## Tests
-
-### Strengths
-
-- **`#[tokio::test(start_paused = true)]` used correctly in executor tests.**
-  `CaRotationCheckExecutor` tests in `scheduler/executors/ca_rotation_check.rs`
-  all use `start_paused = true`, making the `tokio::time::timeout` assertions
-  deterministic regardless of CI load.
-
-- **`TrackingExecutor` + `AtomicBool` pattern for scheduler integration.**
-  `scheduler/mod.rs` tests verify end-to-end task claim, execution, and release
-  semantics without requiring real executor implementations. The
-  `scheduler_poll_cycle_executes_registered_task` test asserts `run_count == 1`
-  and `locked_by.is_none()` after a cycle, confirming the full claim lifecycle.
-
-- **Reverse-proxy integration tests with six proxies.** The `tests/reverse_proxy/`
-  suite covers Nginx, HAProxy, Caddy, Envoy, and Traefik for both CRL and OCSP
-  revocation scenarios. Every test carries `#[ignore = "Docker integration test…"]`
-  with an exact `cargo test` runbook command, ensuring they are not run in CI
-  accidentally.
-
-- **`claim.rs` unit tests are thorough.** The tests cover claim acquisition,
-  double-claim rejection, release with success, release with error (run_count not
-  incremented), `find_due_tasks` filtering, `release_all_claims` scoped to
-  controller, and `trigger_immediate`. All use an in-memory SQLite DB with no
-  inter-test leakage.
-
-#### 2026-02-24 Review
-
-- **`reconcile_setting` tests cover all five branches.** Five tests systematically cover: no DB + no CLI = default, no DB + CLI = CLI value, DB exists + no CLI = DB value, DB exists + CLI differs + no force = DB wins, DB exists + CLI differs + force = CLI wins. Each verifies both return value and persisted DB state.
+- `src/startup.rs` -- Discrete startup phases reduce function complexity. Each phase function
+  is independently readable and testable. `reconcile_all_settings` follows a repetitive,
+  auditable `ReconcileParams` pattern. The `DisplayVec` helper and the
+  `reconcile_setting_vec` / `reconcile_socket_addr` wrappers are clean abstractions.
+- `src/main.rs` -- `AppError` error type is minimal and domain-appropriate. The six variants
+  cover exactly the startup failure modes without over-engineering. No `String`-wrapped
+  generic errors.
+- `src/scheduler/mod.rs:417-424` -- `TrackingExecutor` pattern avoids mocking frameworks.
+  An anonymous struct with `AtomicBool` flag keeps tests self-contained.
+- `src/pki.rs` -- 30+ inline unit tests covering CA generation, server certificate
+  round-trips, fingerprint determinism, SAN extraction, AIA/CDP extension embedding, and
+  the `validate_ca_pki_addr` matrix (four cases).
+- `src/reconcile.rs` -- `reconcile_setting` tests cover all five branches: no DB + no CLI =
+  default, no DB + CLI = CLI value, DB exists + no CLI = DB value, DB exists + CLI differs +
+  no force = DB wins, DB exists + CLI differs + force = CLI wins. Each verifies both return
+  value and persisted DB state.
+- `tests/reverse_proxy/` -- Reverse-proxy integration tests covering Nginx, HAProxy, Caddy,
+  Envoy, and Traefik for both CRL and OCSP revocation scenarios. Every test carries
+  `#[ignore = "Docker integration test…"]` with an exact `cargo test` runbook command.
+- `src/scheduler/claim.rs` -- Thorough claim tests covering acquisition, double-claim
+  rejection, release with success, release with error (run_count not incremented),
+  `find_due_tasks` filtering, `release_all_claims` scoped to controller, and
+  `trigger_immediate`. All use in-memory SQLite with no inter-test leakage.
+- `src/scheduler/executors/ca_rotation_check.rs` -- `#[tokio::test(start_paused = true)]`
+  used correctly in executor tests, making `tokio::time::timeout` assertions deterministic
+  regardless of CI load.
+- `src/pki.rs:26-107` -- Hand-written DER encoding for AIA/CDP extensions is well documented
+  with correct length encoding bounds checks.
+- `src/crl_manager.rs` -- Atomic counters for CRL number and revocation version prevent data
+  races without lock contention.
 
 ### Issues
 
-**[SEVERITY: Low]** `crates/core/controller/tests/reverse_proxy/nginx_ocsp.rs:46,164,297` — Real `sleep(1 second)` inside Docker tests
+**[MEDIUM]** `src/tasks.rs:98-104` -- `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` is 5 seconds.
+This timeout applies equally to the scheduler task, whose cleanup path runs
+`release_all_claims` — a `UPDATE` query against the database. Under a saturated DB (e.g., at
+shutdown during peak load), 5 seconds may not be enough. If the scheduler task times out, all
+claims held by this controller remain locked for the 600-second `STALE_CLAIM_SECONDS` window.
+A domain-appropriate timeout (30-60 seconds) for the scheduler specifically, distinct from the
+generic 5-second default, would be safer.
 
-```rust
-// nginx_ocsp.rs:46 (and lines 164, 297)
-tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-```
+**[MEDIUM]** `src/reconcile.rs:157,182,206,237,268` -- Five `reconcile_setting` tests use
+`#[tokio::test]` without `start_paused = true`. Per `testing.md`, all async tests require
+`start_paused = true`.
 
-Three OCSP test scenarios wait a fixed 1 second for Nginx to initialise its OCSP
-cache. This is fragile on slow or loaded hosts where Nginx may not be ready within
-1 second, causing intermittent failures. The pattern should be replaced with a
-retry loop polling a `/healthz` endpoint (or the test port directly) with a
-short sleep between attempts and a total timeout, which is more robust and equally
-readable. Note: these tests carry `#[ignore = "Docker integration test…"]`, so
-per AGENTS.md Exception 1 this does not violate the no-real-sleeps invariant;
-severity is Low.
+**[MEDIUM]** `src/scheduler/claim.rs:253,272,285,309,332,342,354,374` -- Eight scheduler claim
+tests use `#[tokio::test]` without `start_paused = true`. Notably,
+`recover_stale_claims_only_old_enough` tests time-dependent logic but uses
+`OffsetDateTime::now_utc()` with manual arithmetic rather than virtual time.
 
-#### 2026-02-24 Review
+**[MEDIUM]** `src/main.rs:83` -- `.expect("valid directive")` on `directive.parse()`. While
+the string literal is hard-coded and always valid, this establishes a pattern that could be
+copied incorrectly.
 
-**[SEVERITY: Medium]** `crates/core/controller/src/reconcile.rs:157,182,206,237,268` — Five `reconcile_setting` tests use `#[tokio::test]` without `start_paused = true`
+**[LOW]** `src/pki.rs:543` -- `bundle_from_pem` takes `String` parameters where `&str` would
+suffice for key parsing. Ownership is eventually needed for the struct, but the parameter
+naming could clarify this.
 
-Per `testing.md`, all async tests require `start_paused = true`.
+**[LOW]** `src/pki.rs` -- 1,646 lines with ~600 lines of production code and ~1,000 lines of
+tests. The DER encoding functions could be extracted to a sub-module.
 
-**[SEVERITY: Medium]** `crates/core/controller/src/scheduler/claim.rs:253,272,285,309,332,342,354,374` — Eight scheduler claim tests use `#[tokio::test]` without `start_paused = true`
+**[LOW]** `tests/reverse_proxy/nginx_ocsp.rs:46,164,297` -- Three OCSP test scenarios wait a
+fixed 1 second for Nginx to initialize its OCSP cache. Fragile on slow or loaded hosts. Should
+be replaced with a retry loop polling a health endpoint. Note: these tests carry
+`#[ignore = "Docker integration test…"]`, so per AGENTS.md Exception 1 this does not violate
+the no-real-sleeps invariant.
 
-Notably, `recover_stale_claims_only_old_enough` tests time-dependent logic but uses `OffsetDateTime::now_utc()` with manual arithmetic rather than virtual time.
-
-**[SEVERITY: Low]** `crates/core/controller/tests/reverse_proxy/nginx_ocsp.rs:424` — TOCTOU port reservation race
-
-`reserve_port()` binds a listener, reads its port, then drops the listener before
-starting the OCSP responder on that port. Another process on the same host can bind
-the port in the window between the drop and the `bind`. This is a low-risk issue in
-CI but should be replaced with a pattern that passes the already-bound listener
-directly to the OCSP responder.
-
-**[SEVERITY: Low]** Scheduler `poll_cycle` tests use `#[tokio::test]` for tests that are purely DB I/O
-
-`scheduler_poll_cycle_empty_db_leaves_no_locked_tasks` and related tests are
-annotated `#[tokio::test]` but do not await any async I/O that requires the Tokio
-runtime beyond what `block_on` would provide. This is a minor style inconsistency
-and has no correctness impact.
-
----
+**[LOW]** `tests/reverse_proxy/nginx_ocsp.rs:424` -- TOCTOU port reservation race.
+`reserve_port()` binds a listener, reads its port, then drops the listener before starting the
+OCSP responder on that port. Another process can bind the port in the window between the drop
+and the bind.
 
 ## High Availability
 
 ### Strengths
 
-- **`try_claim` uses a single atomic `UPDATE WHERE locked_by IS NULL`.**
-  `claim.rs:22-37` updates `locked_by` and `locked_at` in a single SQL statement
-  filtered on `LockedBy.is_null()`. This is a TOCTOU-free optimistic lock: two
-  concurrent controllers racing to claim the same task will have exactly one
-  winner determined by the DB engine, not by application-level reads.
-
-- **`release_all_claims` on cancellation avoids the stale-claim window.**
-  `scheduler/mod.rs:85-91` runs `release_all_claims` in the `token.cancelled()`
-  arm, releasing all holds before the scheduler task exits. This means a clean
-  shutdown does not trigger the 600-second stale recovery wait on restart.
-
-- **`recover_stale_claims` as a safety net for crashed instances.** Every poll
-  cycle calls `recover_stale_claims` before finding due tasks, releasing locks
-  held for more than 10 minutes. This bounds the worst-case re-execution delay
-  after an unclean shutdown.
-
-- **`broadcast_server_restarting_scattered` prevents thundering herd.**
-  `tasks.rs:76-83` spreads `ServerRestarting` messages across a configurable
-  window (`RESTART_NOTIFICATION_SCATTER`) so agents do not all reconnect
+- `src/scheduler/claim.rs:22-37` -- `try_claim` uses a single atomic
+  `UPDATE WHERE locked_by IS NULL`. This is a TOCTOU-free optimistic lock: two concurrent
+  controllers racing to claim the same task will have exactly one winner determined by the
+  DB engine, not by application-level reads.
+- `src/scheduler/mod.rs:85-91` -- `release_all_claims` on cancellation avoids the stale-claim
+  window. The `token.cancelled()` arm releases all holds before the scheduler task exits.
+  A clean shutdown does not trigger the 600-second stale recovery wait on restart.
+- `recover_stale_claims` as a safety net for crashed instances. Every poll cycle calls
+  `recover_stale_claims` before finding due tasks, releasing locks held for more than
+  10 minutes. Bounds the worst-case re-execution delay after an unclean shutdown.
+- `src/tasks.rs:69-91` -- `broadcast_server_restarting_scattered` spreads notifications across
+  a configurable window (`RESTART_NOTIFICATION_SCATTER`) so agents do not all reconnect
   simultaneously after a controller restart.
-
-- **`spawn_settings_reload` skips first tick.** The settings and CA reload tasks
-  call `interval.tick().await` before entering the loop, preventing a redundant
-  reload of settings that were just loaded during startup.
-
-- **Cross-instance CA update propagation via version counter.** `spawn_ca_reload`
-  polls `PkiCaVersion` in the settings table. When the version advances (because
-  another instance rotated the CA), it reloads CA state from the database and
-  rebuilds the CRL manager and TLS config without a restart. This keeps all
-  controller instances in the fleet in sync without inter-process communication.
-
-#### 2026-02-24 Review
-
-- **CRL manager uses version-gated polling with local Notify.** `src/crl_manager.rs:234-282` — Combines 60-second periodic poll with instant local rebuilds via `Notify`.
-- **All HA-critical timing constants are centralised with documentation.** `src/durations.rs:1-34` — Makes HA tuning auditable from a single location.
-
-### Issues
-
-#### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `crates/core/controller/src/db/mod.rs:20-25` — Database connection pool hardcoded at max_connections=10 with no runtime configurability
-
-All timeouts (8 seconds) and pool sizes are hardcoded literals. Under connection exhaustion, cascading failures affect all subsystems simultaneously. These should be configurable.
-
-**[SEVERITY: Low]** `crates/core/controller/src/crl_manager.rs:202-223` — CRL manager `reload_tls_config` acquires two RwLock read guards sequentially without documented ordering
-
-Creates a consistency window during concurrent CA rotation + server cert renewal. The single-threaded invariant is not documented.
-
----
-
-## Database
-
-### Strengths
-
-- **Squashed single migration with a correct `down()` path.**
-  `migration/m20260209_000001_initial.rs` creates all tables in a single
-  migration (pragmatic for a pre-1.0 product) and `down()` drops them in correct
-  reverse FK order. The second migration (`m20260222_000002_add_machine_id.rs`)
-  demonstrates the correct additive pattern for future schema changes.
-
-- **Partial unique index for soft-deleted records.** Filtered unique indexes
-  (`WHERE deactivated_at IS NULL`) prevent duplicate slugs among active records
-  without conflicting with soft-deleted rows. SeaORM's API limitation requires
-  these to be expressed as raw SQL, which is correctly documented with inline
-  comments.
-
-- **CA rotation uses a CAS (`UPDATE WHERE value = expected_fp`) inside a
-  transaction.** `rotate_managed_ca` wraps all mutations in an explicit
-  transaction, uses `update_setting_string_cas` for the fingerprint pointer swap,
-  and returns `rotated: false` on any conflict. Double-rotation is structurally
-  impossible.
-
-- **CA version counter with `bump_setting_i64`.** The CA version is incremented
-  atomically inside the rotation transaction, giving cross-instance reload tasks a
-  simple, cheap change-detection probe.
+- `src/tasks.rs` -- `spawn_settings_reload` skips first tick, preventing a redundant reload of
+  settings that were just loaded during startup.
+- Cross-instance CA update propagation via version counter. `spawn_ca_reload` polls
+  `PkiCaVersion` in the settings table. When the version advances, it reloads CA state and
+  rebuilds the CRL manager and TLS config without a restart.
+- `src/crl_manager.rs:234-282` -- CRL manager uses version-gated polling (60s) with instant
+  local rebuilds via `Notify`. Minimizes unnecessary rebuilds.
+- `src/durations.rs:1-34` -- All HA-critical timing constants centralized with documentation,
+  making HA tuning auditable from a single location.
+- `src/tasks.rs:17-115` -- Well-structured `BackgroundTasks` with both cooperative (`track`)
+  and forceful (`track_abort`) shutdown modes.
+- `src/tasks.rs:125-175` -- Service drain waits for disconnects with polling and timeout.
+- `src/main.rs:419-445` -- SIGUSR1 handler for zero-downtime restarts with `--takeover-from`
+  and `SO_REUSEPORT` support.
+- `src/tasks.rs:335-348` -- CA rotation uses optimistic locking via `expected_fp` for
+  multi-instance safety.
 
 ### Issues
 
----
+**[HIGH]** `src/tasks.rs:105-111` -- `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` is 5 seconds per task.
+The embedded scheduler may be mid-execution of a task with a 2-hour timeout. If the scheduler
+does not complete in 5 seconds, the task is abandoned, leaving stale claims for up to
+10 minutes.
+
+**[HIGH]** `crates/ui/web-api/src/service_connections.rs:264` -- Untracked `tokio::spawn` tasks
+in `broadcast_server_restarting_scattered`. If the process exits before all scatter tasks fire
+(up to 5s window), some services will not receive the notification.
+
+**[MEDIUM]** `src/db/mod.rs:20-25` -- Database connection pool hardcoded at
+`max_connections=10` with no runtime configurability. All timeouts (8 seconds) and pool sizes
+are hardcoded literals. Under connection exhaustion, cascading failures affect all subsystems
+simultaneously.
+
+**[MEDIUM]** `src/crl_manager.rs:202-222` -- CRL rebuild holds two `RwLock` read guards
+simultaneously (`issuers.read()` and `server_cert.read()`). Lock ordering is not documented.
+Creates a consistency window during concurrent CA rotation + server cert renewal.
+
+**[MEDIUM]** `src/main.rs:437` -- Fixed 100ms sleep before SIGUSR1 takeover signal. If the
+server takes longer than 100ms to bind, the old process is signaled before the new one is
+ready.
+
+**[LOW]** `src/main.rs:451-457` -- PKI HTTP server registered with `track_abort`, meaning
+in-flight OCSP/CRL requests are terminated mid-response on shutdown.
 
 ## Coding Standards
 
 ### Strengths
 
-- **`edition = "2024"` with workspace inheritance for all standard fields.**
-  `license`, `authors`, `repository`, and `version` all use `workspace = true`.
-
-- **Consistent use of `bail!`, `report!`, and `context` / `context_to`.** No
-  `Report::new()` anti-pattern. `AppError` conversion is implemented through
-  `impl_report_conversion!`, maintaining a single conversion site.
-
-- **No `unwrap()` in startup, shutdown, or scheduler paths.** The startup
-  sequence propagates all errors as `Report<AppError>` and exits via
-  `std::process::ExitCode::FAILURE` with a formatted error message. No silent
-  panics.
-
-- **Signal handling uses `tokio::signal::unix::signal` typed by `SignalKind`.**
-  `main.rs:364-371` handles `SIGTERM`, `SIGINT`, and `SIGUSR1` with fully typed
-  signal kinds and error-propagating setup, rather than `ctrlc` or raw libc
-  signal registration.
-
-- **`tracing_subscriber` initialised in the binary's `main`, not in a library.**
-  `main.rs:77-82` calls `tracing_subscriber::fmt().with_env_filter(…).init()`.
-  This is the correct location; the binary owns subscriber initialisation, unlike
-  the shared `service-sdk` crate which incorrectly performs this in a library.
-
-#### 2026-02-24 Review
-
-- **All domain-significant duration constants are centralized with documentation.** `src/durations.rs` — No magic numeric literals for time values.
+- `edition = "2024"` with workspace inheritance for all standard fields. `license`, `authors`,
+  `repository`, and `version` all use `workspace = true`.
+- Consistent use of `bail!`, `report!`, and `context` / `context_to`. No `Report::new()`
+  anti-pattern. `AppError` conversion via `impl_report_conversion!`.
+- No `unwrap()` in startup, shutdown, or scheduler paths. The startup sequence propagates all
+  errors as `Report<AppError>` and exits via `std::process::ExitCode::FAILURE` with a
+  formatted error message.
+- `src/main.rs:364-371` -- Signal handling uses `tokio::signal::unix::signal` typed by
+  `SignalKind`. Handles `SIGTERM`, `SIGINT`, and `SIGUSR1` with error-propagating setup.
+- `tracing_subscriber` initialized in the binary's `main`, not in a library. This is the
+  correct location; the binary owns subscriber initialization.
+- All domain-significant duration constants centralized in `src/durations.rs` with
+  doc-comments.
+- Well-organized build metadata handling via `build.rs`.
 
 ### Issues
 
-**[SEVERITY: Low]** `crates/core/controller/src/scheduler/mod.rs:18` — `DEFAULT_POLL_INTERVAL_SECS` is a module-private constant that duplicates domain knowledge in `durations.rs`
+**[MEDIUM]** `src/pki.rs:700` -- `unwrap_or(0)` on CA version query. While the `None` case is
+intentional (default to 0 for new systems), it would benefit from a clarifying comment.
 
-`durations.rs` already contains all other timing constants with doc-comments.
-`DEFAULT_POLL_INTERVAL_SECS = 15` is a plain `const u64` embedded in
-`scheduler/mod.rs` without documentation. It should be moved to `durations.rs` as
-`pub(crate) const SCHEDULER_POLL_INTERVAL: Duration` for consistency and
-discoverability.
-
----
+**[LOW]** `src/scheduler/mod.rs:18` -- `DEFAULT_POLL_INTERVAL_SECS` is a module-private
+`const u64` that duplicates domain knowledge in `durations.rs`. `durations.rs` already contains
+all other timing constants. Move to `durations.rs` as
+`pub(crate) const SCHEDULER_POLL_INTERVAL: Duration` for consistency and discoverability.
 
 ## Extensibility
 
 ### Strengths
 
-- **`TaskExecutor` trait is minimal and object-safe.** The single required method
-  `async fn execute(&self, task: &Model) -> Result<()>` has no associated
-  constants or types, making it fully object-safe. Adding a new executor is a
-  two-step operation: implement the trait, then call `sched.register(TaskType, Box::new(…))`.
-
-- **`ScheduledTaskType` enum drives both DB seed data and runtime executor
-  registration.** There is a clear mapping between the enum variant, the migration
-  seed row, and the executor registered in `main.rs`. A new task type requires
-  additions in only two places: a new enum variant (in `shared-db`) and a
-  `sched.register(…)` call in `main.rs`.
-
-- **`PkiRuntime` struct decouples PKI initialisation from `AppState` building.**
-  All PKI-related fields — `ca_tx`, `ca_rx`, `ca_key_store`, `rustls_config`,
-  `crl_manager`, etc. — flow through a single intermediate struct. This makes it
-  straightforward to add a new PKI-related field without changing the function
-  signature of `init_pki_runtime`.
-
-#### 2026-02-24 Review
-
-- **`TaskExecutor` trait is minimal and correctly object-safe.** `src/scheduler/executor.rs:9` — Single method, `Send + Sync`, works with `Box<dyn TaskExecutor>`.
+- `src/scheduler/executor.rs:9` -- `TaskExecutor` trait is minimal and object-safe. The single
+  required method `async fn execute(&self, task: &Model) -> Result<()>` has no associated
+  constants or types. Adding a new executor is a two-step operation: implement the trait, then
+  call `sched.register(TaskType, Box::new(…))`.
+- `ScheduledTaskType` enum drives both DB seed data and runtime executor registration. A clear
+  mapping between the enum variant, the migration seed row, and the executor registered in
+  `main.rs`. A new task type requires additions in only two places.
+- `src/startup.rs` -- `PkiRuntime` struct decouples PKI initialization from `AppState`
+  building. All PKI-related fields flow through a single intermediate struct.
+- Feature flag pass-through for `oidc` and database backends demonstrates proper cascading.
 
 ### Issues
 
-**[SEVERITY: Medium]** `crates/core/controller/src/scheduler/mod.rs:48` — `executors` field is `HashMap<ScheduledTaskType, Box<dyn TaskExecutor>>`; no check for duplicate registration
+**[MEDIUM]** `src/scheduler/mod.rs:48` -- `executors` field is
+`HashMap<ScheduledTaskType, Box<dyn TaskExecutor>>`; `Scheduler::register` uses
+`HashMap::insert`, which silently replaces any previously registered executor for a given task
+type with no warning. The method should either `debug_assert!` that the key is not already
+present, or return `Option<Box<dyn TaskExecutor>>` to expose the displacement.
 
-`Scheduler::register` uses `HashMap::insert`, which silently replaces any
-previously registered executor for a given task type with no warning. If two
-`sched.register(ScheduledTaskType::VersionCheck, …)` calls appear in `main.rs`
-(for example after a refactor), the second silently shadows the first. The method
-should either `debug_assert!` that the key is not already present, or return
-`Option<Box<dyn TaskExecutor>>` to expose the displacement to the caller.
+**[MEDIUM]** `src/scheduler/executor.rs:9` -- `TaskExecutor` trait has no registration or
+discovery mechanism for new task types. Adding a new scheduled task requires creating a new
+executor, adding a match arm, and registering manually. Unlike the `register_plugins!` macro,
+there is no compile-time check ensuring all `ScheduledTaskType` variants have executors.
 
-#### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `crates/core/controller/src/scheduler/executor.rs:9` — `TaskExecutor` trait has no registration or discovery mechanism for new task types
-
-Adding a new scheduled task requires creating a new executor, adding a match arm, and registering manually. Unlike the `register_plugins!` macro, there is no compile-time check ensuring all `ScheduledTaskType` variants have executors.
-
-**[SEVERITY: Low]** `crates/core/controller/src/scheduler/claim.rs:160-164` — `find_due_tasks` is scoped to a single `tenant_id`
-
-```rust
-.filter(scheduled_task::Column::TenantId.eq(tenant_id))
-```
-
-The `SchedulerConfig` carries a `tenant_id` and the query enforces it. Any future
-multi-tenant extension will require a redesign of how tasks are discovered and
-assigned. This limitation is not documented in the `Scheduler` struct doc-comment.
-Adding a comment noting "single-tenant by design; multi-tenant requires scheduler
-redesign" would make the limitation visible at the definition site.
+**[LOW]** `src/scheduler/claim.rs:160-164` -- `find_due_tasks` is scoped to a single
+`tenant_id`. The `SchedulerConfig` carries a `tenant_id` and the query enforces it. Any future
+multi-tenant extension will require a redesign of how tasks are discovered and assigned.
+Adding a comment noting "single-tenant by design" would make the limitation visible.
