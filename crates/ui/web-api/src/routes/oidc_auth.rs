@@ -298,22 +298,35 @@ pub async fn oidc_callback(
     let reg_settings = state.settings.registration();
     if reg_settings.mode == RegistrationMode::Invite && provider.auto_create_users {
         // Check if an OIDC link already exists for this subject
-        let has_link = UserOidcLink::find()
+        let has_link = match UserOidcLink::find()
             .filter(user_oidc_link::Column::ProviderId.eq(flow.provider_id))
             .filter(user_oidc_link::Column::OidcSubject.eq(&sub))
             .count(state.db())
             .await
-            .unwrap_or(1)
-            > 0;
+        {
+            Ok(n) => n > 0,
+            Err(e) => {
+                tracing::error!(err = %e, "DB error checking OIDC link");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
 
         if !has_link {
             // Check if a user with this email already exists
-            let has_user = User::find()
+            let has_user = match User::find()
                 .filter(uptrakit_shared_db::entity::user::Column::Email.eq(&email))
                 .count(state.db())
                 .await
-                .unwrap_or(1)
-                > 0;
+            {
+                Ok(n) => n > 0,
+                Err(e) => {
+                    tracing::error!(err = %e, "DB error checking user by email");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
 
             if !has_user {
                 // This would be a brand-new user — check if token is required
@@ -671,12 +684,17 @@ pub async fn oidc_complete_registration(
     };
 
     // 4. Race condition guard: verify user still doesn't exist
-    let user_exists = User::find()
+    let user_exists = match User::find()
         .filter(uptrakit_shared_db::entity::user::Column::Email.eq(&pending.email))
         .count(&txn)
         .await
-        .unwrap_or(1)
-        > 0;
+    {
+        Ok(n) => n > 0,
+        Err(e) => {
+            tracing::error!(err = %e, "DB error checking for duplicate user during OIDC registration");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     if user_exists {
         return error_response(
