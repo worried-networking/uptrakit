@@ -13,7 +13,7 @@
 //! synthesis logic lives here.
 
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
 };
 use std::collections::HashSet;
@@ -43,25 +43,15 @@ pub enum AutodiscoveryError {
 
 /// Insert an autodiscovery ignore rule, silently ignoring duplicates (idempotent).
 ///
-/// Returns `true` if a new rule was inserted, `false` if the rule already existed.
+/// Returns `true` if a new rule was inserted, `false` if the rule already
+/// existed (including the case where a concurrent request inserted the same
+/// rule between our call and the DB write).
 pub async fn create_or_ignore_ignore_rule(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     plugin_config_id: Uuid,
     package_identifier: &str,
 ) -> Result<bool, AutodiscoveryError> {
-    // Verify the rule does not already exist to avoid the conflict entirely.
-    let exists = AutodiscoveryIgnore::find()
-        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
-        .filter(autodiscovery_ignore::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(autodiscovery_ignore::Column::PackageIdentifier.eq(package_identifier))
-        .count(db)
-        .await?;
-
-    if exists > 0 {
-        return Ok(false);
-    }
-
     let record = autodiscovery_ignore::ActiveModel {
         id: Set(Uuid::now_v7()),
         tenant_id: Set(tenant_id),
@@ -70,19 +60,11 @@ pub async fn create_or_ignore_ignore_rule(
         created_at: Set(OffsetDateTime::now_utc()),
     };
 
-    AutodiscoveryIgnore::insert(record)
-        .exec(db)
-        .await
-        .map_err(|e| {
-            // Suppress unique-constraint violations (race condition between the
-            // read above and the insert).
-            if is_unique_constraint_violation(&e) {
-                return AutodiscoveryError::Db(e);
-            }
-            AutodiscoveryError::Db(e)
-        })?;
-
-    Ok(true)
+    match AutodiscoveryIgnore::insert(record).exec(db).await {
+        Ok(_) => Ok(true),
+        Err(e) if is_unique_constraint_violation(&e) => Ok(false),
+        Err(e) => Err(AutodiscoveryError::Db(e)),
+    }
 }
 
 /// List autodiscovery ignore rules for a tenant, with optional plugin-config filter.
@@ -816,7 +798,7 @@ struct IdRow {
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+    use sea_orm::{ConnectOptions, Database, DatabaseConnection, PaginatorTrait};
     use uptrakit_internal_wire::{
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
         PluginRole, PluginType,
@@ -1769,5 +1751,73 @@ mod tests {
             .await
             .expect("count");
         assert_eq!(count, 1, "must not create duplicate rows");
+    }
+
+    // ── create_or_ignore_ignore_rule ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn insert_new_rule_returns_true() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        insert_plugin_config(&db, plugin_config_id, tenant_id).await;
+
+        let inserted = create_or_ignore_ignore_rule(
+            &db,
+            tenant_id,
+            plugin_config_id,
+            "my-package",
+        )
+        .await
+        .expect("should succeed");
+
+        assert!(inserted, "first insert must return true");
+
+        let count = AutodiscoveryIgnore::find()
+            .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
+            .filter(autodiscovery_ignore::Column::PackageIdentifier.eq("my-package"))
+            .count(&db)
+            .await
+            .expect("count");
+        assert_eq!(count, 1, "must have created exactly one row");
+    }
+
+    #[tokio::test]
+    async fn insert_duplicate_rule_returns_false() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        insert_plugin_config(&db, plugin_config_id, tenant_id).await;
+
+        let first = create_or_ignore_ignore_rule(
+            &db,
+            tenant_id,
+            plugin_config_id,
+            "dup-package",
+        )
+        .await
+        .expect("first call");
+        assert!(first, "first call must return true (new row)");
+
+        let second = create_or_ignore_ignore_rule(
+            &db,
+            tenant_id,
+            plugin_config_id,
+            "dup-package",
+        )
+        .await
+        .expect("second call");
+        assert!(!second, "second call must return false (duplicate suppressed)");
+
+        // Exactly one row must exist after both calls.
+        let count = AutodiscoveryIgnore::find()
+            .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
+            .filter(autodiscovery_ignore::Column::PackageIdentifier.eq("dup-package"))
+            .count(&db)
+            .await
+            .expect("count");
+        assert_eq!(count, 1, "duplicate insert must not create a second row");
     }
 }
