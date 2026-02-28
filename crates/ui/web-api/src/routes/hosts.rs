@@ -131,7 +131,7 @@ pub async fn update_host(
         ("id" = Uuid, Path, description = "Host UUID")
     ),
     responses(
-        (status = 200, description = "Host deactivated", body = HostMessageResponse),
+        (status = 204, description = "Host deactivated"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
         (status = 404, description = "Host not found")
@@ -146,13 +146,7 @@ pub async fn deactivate_host(
     Path(host_id): Path<Uuid>,
 ) -> Response {
     match host_queries::deactivate_host(&tenant_db, host_id).await {
-        Ok(true) => (
-            StatusCode::OK,
-            Json(HostMessageResponse {
-                message: "Host deactivated".to_string(),
-            }),
-        )
-            .into_response(),
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
             tracing::error!("Failed to deactivate host: {}", e);
@@ -245,7 +239,7 @@ pub async fn discover_host(
     path = "/api/v1/hosts/{id}/discovered",
     params(
         ("id" = Uuid, Path, description = "Host UUID"),
-        ("plugin_config_id" = Option<String>, Query, description = "Filter by plugin config UUID")
+        ("plugin_config_id" = Option<Uuid>, Query, description = "Filter by plugin config UUID")
     ),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -280,16 +274,11 @@ pub async fn discard_host_discovered(
         return error_response(StatusCode::NOT_FOUND, "Host not found");
     }
 
-    let plugin_config_id = params
-        .plugin_config_id
-        .as_deref()
-        .and_then(|s| uuid::Uuid::parse_str(s).ok());
-
     match autodiscovery_queries::discard_pending_items(
         tenant_db.db(),
         tenant_db.tenant_id,
         Some(host_id),
-        plugin_config_id,
+        params.plugin_config_id,
     )
     .await
     {
@@ -303,5 +292,5 @@ pub async fn discard_host_discovered(
 
 #[derive(serde::Deserialize, Default)]
 pub struct DiscardDiscoveredParams {
-    pub plugin_config_id: Option<String>,
+    pub plugin_config_id: Option<uuid::Uuid>,
 }
