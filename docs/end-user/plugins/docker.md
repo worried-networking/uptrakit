@@ -1,8 +1,9 @@
 # Docker Plugin
 
-The `releases_docker` plugin tracks container images in Docker/OCI-compatible registries. It supports two
-tracking modes: semver-based tag tracking and SHA digest-based tracking. It can also discover
-running and stopped containers on the agent host and auto-populate your software catalog.
+The `releases_docker` plugin tracks container image updates in Docker/OCI-compatible registries.
+It monitors the SHA-256 manifest digest of a specific tag (e.g. `latest`) and reports an update
+when the remote digest changes — regardless of whether the tag name itself changes. It can also
+discover running and stopped containers on the agent host and auto-populate your software catalog.
 
 ## Package Identifier Format
 
@@ -19,43 +20,40 @@ A Docker plugin's `package_identifier` is an **image reference** in standard Doc
 | `ghcr.io/owner/app:main` | `ghcr.io` | `owner/app` | `main` |
 | `myhost:5000/app:latest` | `myhost:5000` | `app` | `latest` |
 
-The tag in the `package_identifier` is used as the base reference for digest tracking; in semver
-mode the tag portion is typically omitted (or set to a common value like `latest`).
+The tag embedded in `package_identifier` is used as the default tag to track. It can be
+overridden with the `tracked_tag` config field.
 
-## Tracking Modes
+## How Version Tracking Works
 
-### SemverTags (default)
+The plugin fetches the `Docker-Content-Digest` manifest header from the OCI registry using an
+authenticated `HEAD` request. This digest (`sha256:…`) is used as the "version" — so an update
+is available whenever the remote digest differs from the locally installed image digest, even if
+the tag name (e.g. `latest`) has not changed.
 
-In `semver_tags` mode the plugin lists all tags from the registry, filters them by
-`tag_patterns`, strips `tag_strip_prefix`, parses the remaining string as a semver version, and
-returns the sorted list of releases.
+- **Installed version** — read from the local Docker daemon via `inspect_image` → `RepoDigests`.
+  If the image is not present locally, no installed version is reported.
+- **Available version** — the manifest digest fetched from the registry.
 
-- Pre-release versions are excluded by default (`include_prereleases: false`).
-- Tags that cannot be parsed as semver are silently skipped.
-- Installed version detection is not performed in this mode (`detect_installed_version` always
-  returns `None` — the local image version is not tracked).
+## After Pulling: Container Recreation
 
-### DigestTracking
+After successfully pulling a new image, the plugin automatically recreates all containers that use
+that image, preserving their full configuration (environment variables, volumes, port bindings,
+labels, network settings, resource limits, etc.).
 
-In `digest_tracking` mode the plugin fetches the manifest digest for a specific tag
-(`tracked_tag`, default `"latest"`) and treats the SHA digest as the "version". This is useful for
-mutable tags like `latest` that do not carry a stable version identifier.
+- **Running containers** — stopped, removed, recreated from the saved configuration, and started
+  again.
+- **Stopped containers** — removed and recreated from the saved configuration, but **not**
+  started (they remain stopped after the update).
+- **Auto-remove containers** (`AutoRemove = true`) — skipped; they manage their own lifecycle.
 
-- The plugin checks whether the local Docker daemon has the image by calling `inspect_image`.
-- If the image is present locally, its `RepoDigests` field is compared against the registry
-  manifest digest to determine whether an update is available.
-- The "version" displayed in Uptrakit is the `sha256:…` digest.
+When `compose_restart` or `post_pull_command` is configured, the automatic container recreation
+is **skipped** in favour of those mechanisms.
 
 ## Configuration Fields
 
 ```json
 {
-  "tracking_mode": "semver_tags",
-  "tag_patterns": ["^v?[0-9]+\\.[0-9]+\\.[0-9]+$"],
-  "tag_strip_prefix": "v",
-  "include_prereleases": false,
   "tracked_tag": "latest",
-  "page_size": 1000,
   "auth": null,
   "docker_host": null,
   "compose_restart": null,
@@ -65,16 +63,11 @@ mutable tags like `latest` that do not carry a stable version identifier.
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `tracking_mode` | `"semver_tags"` \| `"digest_tracking"` | No | `"semver_tags"` | How to resolve upstream versions |
-| `tag_patterns` | `Vec<String>` | No | `[]` | Regex patterns to filter tags (OR logic; empty = all) |
-| `tag_strip_prefix` | String | No | `"v"` | Prefix to strip from tag names before semver parsing |
-| `include_prereleases` | bool | No | `false` | Include pre-release versions in semver mode |
-| `tracked_tag` | String | No | `"latest"` | Tag to track in digest mode |
-| `page_size` | u32 | No | `1000` | Maximum number of tags to fetch per registry request |
+| `tracked_tag` | String \| `null` | No | tag from `package_identifier` | Override the tag to track (e.g. `"stable"`) |
 | `auth` | `DockerAuth` \| `null` | No | `null` | Registry authentication credentials |
 | `docker_host` | String \| `null` | No | `null` | Docker daemon endpoint override (see [Remote Docker via SSH](#remote-docker-via-ssh)) |
-| `compose_restart` | `ComposeRestartConfig` \| `null` | No | `null` | Run `docker compose up -d` after pulling |
-| `post_pull_command` | String \| `null` | No | `null` | Custom shell command to run after pulling |
+| `compose_restart` | `ComposeRestartConfig` \| `null` | No | `null` | Run `docker compose up` after pulling instead of auto-recreating containers |
+| `post_pull_command` | String \| `null` | No | `null` | Custom shell command to run after pulling (disables auto-recreate) |
 
 An empty config object `{}` is valid. No field is required.
 
@@ -92,8 +85,13 @@ Credentials are masked in API responses (`"***"` replaces the secret value).
 
 ### ComposeRestartConfig
 
-Runs `docker compose up -d` (with optional service name and file path) after a successful image
-pull.
+Runs `docker compose up` (with optional service name and file path) after a successful image pull,
+instead of the automatic container recreation.
+
+- When any containers using the image were **running** before the pull: `docker compose up -d`
+  (recreate and start).
+- When all containers were **stopped** before the pull: `docker compose up --no-start`
+  (recreate without starting).
 
 ```json
 {
@@ -119,10 +117,11 @@ A custom shell command executed after a successful pull. Supports the following 
 | Placeholder | Value |
 | --- | --- |
 | `{image}` | Image name without tag (e.g. `ghcr.io/owner/app`) |
-| `{tag}` | Tag pulled (e.g. `v1.2.3`) |
+| `{tag}` | Tag pulled (e.g. `latest`) |
 | `{digest}` | SHA digest of the locally installed image (e.g. `sha256:abc…`) |
 
-`compose_restart` and `post_pull_command` can be set simultaneously; `compose_restart` runs first.
+`compose_restart` and `post_pull_command` can be set simultaneously; `compose_restart` runs
+first. When either is set, automatic container recreation is disabled.
 
 ## Autodiscovery
 
@@ -147,8 +146,8 @@ Name derivation:
 
 Auto-created plugin config name: **`"Docker"`** (one config per tenant, shared across all hosts).
 
-Discovered items use `digest_tracking` semantics by default; `package_identifier` is set to the
-full image reference including tag.
+Discovered items use digest tracking semantics; `package_identifier` is set to the full image
+reference including tag.
 
 ## Remote Docker via SSH
 
@@ -184,14 +183,11 @@ Supported endpoint formats:
 
 ## Example Configurations
 
-### Track nginx with semver tags
+### Track a Docker Hub image by digest
 
 ```json
 {
-  "tracking_mode": "semver_tags",
-  "tag_patterns": ["^[0-9]+\\.[0-9]+\\.[0-9]+-alpine$"],
-  "tag_strip_prefix": "",
-  "page_size": 100
+  "tracked_tag": "latest"
 }
 ```
 
@@ -201,10 +197,8 @@ Package identifier: `nginx`
 
 ```json
 {
-  "tracking_mode": "digest_tracking",
   "tracked_tag": "stable",
-  "auth": { "type": "bearer", "token": "ghp_…" },
-  "post_pull_command": "systemctl restart myapp"
+  "auth": { "type": "bearer", "token": "ghp_…" }
 }
 ```
 
@@ -214,7 +208,6 @@ Package identifier: `ghcr.io/myorg/myapp`
 
 ```json
 {
-  "tracking_mode": "digest_tracking",
   "tracked_tag": "latest",
   "compose_restart": {
     "working_dir": "/opt/myapp",
@@ -224,6 +217,24 @@ Package identifier: `ghcr.io/myorg/myapp`
 ```
 
 Package identifier: `ghcr.io/myorg/myapp`
+
+### Track an image and run a custom post-pull command
+
+```json
+{
+  "tracked_tag": "latest",
+  "post_pull_command": "systemctl restart myapp"
+}
+```
+
+Package identifier: `ghcr.io/myorg/myapp`
+
+## Backward Compatibility
+
+Configs created before this change may contain `tracking_mode`, `tag_patterns`,
+`tag_strip_prefix`, `include_prereleases`, or `page_size` fields from the old semver-based
+tracking mode. These fields are silently ignored — existing configs will continue to work and
+will automatically use digest-based tracking.
 
 ## Related Documentation
 

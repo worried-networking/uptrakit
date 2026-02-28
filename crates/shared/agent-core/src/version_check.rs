@@ -175,16 +175,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn check_version_docker_stub_returns_none() {
+    async fn check_version_docker_installed_reflects_local_daemon() {
+        // With digest-based tracking, detect_installed_version always queries the
+        // local Docker daemon for the image digest. The exact outcome depends on
+        // whether the daemon is running and whether the image is installed locally:
+        //
+        // - daemon up + image present  → installed_version = Some(digest), error = None
+        // - daemon up + image absent   → installed_version = None,         error = None
+        // - daemon down                → installed_version = None,         error = Some(...)
+        //
+        // Only the invariants that hold across all cases are asserted here.
         let assignment = PluginAssignment {
             plugin_type: PluginType::ReleasesDocker,
             package_identifier: "nginx".to_string(),
             config: serde_json::json!({}),
         };
         let outcome = check_version(Some(&assignment), None, test_executor(), &no_ctx()).await;
-        assert!(outcome.installed_version.is_none());
+        // No fetch assignment → latest_version must always be None.
         assert!(outcome.latest_version.is_none());
-        assert!(outcome.error.is_none());
+        // installed_version and error are mutually exclusive: a successful inspect
+        // returns a version (or None), while a daemon connection error sets error.
+        assert!(
+            !(outcome.installed_version.is_some() && outcome.error.is_some()),
+            "installed_version and error cannot both be set: {:?} / {:?}",
+            outcome.installed_version,
+            outcome.error,
+        );
     }
 
     #[tokio::test]

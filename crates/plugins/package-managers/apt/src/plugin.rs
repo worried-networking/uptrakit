@@ -494,7 +494,7 @@ mod tests {
 
     impl RoutedOutputExecutor {
         /// Create an executor from a list of `(program, output)` pairs.
-        fn new(routes: Vec<(&'static str, &'static str)>) -> Arc<dyn CommandExecutor> {
+        fn with_routes(routes: Vec<(&'static str, &'static str)>) -> Arc<dyn CommandExecutor> {
             Arc::new(Self {
                 routes: routes
                     .into_iter()
@@ -937,7 +937,7 @@ mod tests {
     async fn discover_software_emits_targets_when_default_config() {
         // Default config (discovery_filter: manual) → discover-all mode.
         // dpkg-query returns "nginx\t1.24.0"; apt-mark showmanual returns "nginx".
-        let executor = RoutedOutputExecutor::new(vec![
+        let executor = RoutedOutputExecutor::with_routes(vec![
             ("dpkg-query", "nginx\t1.24.0\n"),
             ("apt-mark", "nginx\n"),
         ]);
@@ -962,7 +962,7 @@ mod tests {
     async fn discover_software_no_targets_when_all_filter() {
         // discovery_filter: "all" → non-default config → config-ID path → no targets.
         // Only dpkg-query is called (no apt-mark for the "all" filter).
-        let executor = RoutedOutputExecutor::new(vec![("dpkg-query", "nginx\t1.24.0\n")]);
+        let executor = RoutedOutputExecutor::with_routes(vec![("dpkg-query", "nginx\t1.24.0\n")]);
         let plugin = AptPlugin::new(
             AptConfig {
                 discovery_filter: AptDiscoveryFilter::All,
