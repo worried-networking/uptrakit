@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, DiscoveryTarget, Plugin, PluginCapability, PluginRole, PluginType,
-    SudoCommandEntry, SudoHelperScript,
+    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, Plugin, PluginCapability, PluginRole,
+    PluginType, SudoCommandEntry, SudoHelperScript,
 };
 
 use crate::config::ProxmoxHelperScriptsConfig;
@@ -80,8 +80,16 @@ const PHS_DETECT_VERSION_CMD: &str =
 /// ```
 const PHS_INSTALL_CMD: &str = "sudo /usr/local/bin/uptrakit-phs-update";
 
-/// Capabilities: discovery only — no release-index refresh needed.
-const CAPABILITIES: &[PluginCapability] = &[PluginCapability::DiscoverLocalSoftware];
+/// Capabilities: discovery and host compatibility detection.
+///
+/// Host compatibility is checked by testing for the PHS update script at
+/// [`UPDATE_SCRIPT_PATH`] — a file that only exists on Proxmox VE nodes.
+/// This ensures that PHS helper scripts are not installed on unrelated hosts
+/// (e.g. Flatcar Linux, which has a read-only `/usr/local/bin`).
+const CAPABILITIES: &[PluginCapability] = &[
+    PluginCapability::DiscoverLocalSoftware,
+    PluginCapability::DetectHostCompatibility,
+];
 
 /// Plugin for Proxmox Helper Scripts (discovery-only).
 ///
@@ -320,6 +328,29 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
 
     fn capabilities(&self) -> &'static [PluginCapability] {
         CAPABILITIES
+    }
+
+    async fn detect_host_compatibility(
+        &self,
+    ) -> uptrakit_plugin_infrastructure_core::Result<HostCompatibility> {
+        // A Proxmox Helper Scripts host is identified by the presence of
+        // `/usr/bin/update` — the PHS update script installed on all Proxmox VE
+        // nodes.  Any other system (Flatcar Linux, Ubuntu servers, macOS, …)
+        // will not have this file, so the plugin is incompatible and its helper
+        // scripts must not be installed.
+        match self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "test",
+                ["-f".to_string(), UPDATE_SCRIPT_PATH.to_string()],
+            ))
+            .await
+        {
+            Ok(_) => Ok(HostCompatibility::Compatible),
+            Err(_) => Ok(HostCompatibility::Incompatible(format!(
+                "PHS update script not found at {UPDATE_SCRIPT_PATH} — not a Proxmox Helper Scripts host"
+            ))),
+        }
     }
 
     fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
@@ -562,13 +593,44 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_discovery_only() {
+    fn capabilities_includes_discovery_and_compat_check() {
         let plugin =
             ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
                 .expect("create");
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
+        assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
         assert!(!plugin.has_capability(PluginCapability::RefreshPackageIndex));
-        assert_eq!(plugin.capabilities().len(), 1);
+        assert_eq!(plugin.capabilities().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn detect_host_compatibility_returns_ok_on_non_phs_host() {
+        // On a non-PHS system (dev machine, CI) the result must be Ok — never Err.
+        // The exact variant (Compatible / Incompatible) depends on whether
+        // /usr/bin/update is present, so we only assert that no error is returned.
+        let plugin =
+            ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .expect("create");
+        let result = plugin.detect_host_compatibility().await;
+        assert!(result.is_ok(), "detect_host_compatibility must not error");
+    }
+
+    #[tokio::test]
+    async fn detect_host_compatibility_incompatible_carries_update_script_path() {
+        // When incompatible the reason string must mention the expected path so
+        // operators know what to look for.
+        let plugin =
+            ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), test_executor())
+                .expect("create");
+        if let Ok(HostCompatibility::Incompatible(reason)) =
+            plugin.detect_host_compatibility().await
+        {
+            assert!(
+                reason.contains(UPDATE_SCRIPT_PATH),
+                "incompatible reason should mention {UPDATE_SCRIPT_PATH}: {reason}"
+            );
+        }
+        // If Compatible, the test is vacuously true (running on a Proxmox node).
     }
 
     #[test]
