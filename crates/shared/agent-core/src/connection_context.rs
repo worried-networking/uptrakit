@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn apply_is_noop() {
         let ctx = ConnectionContext::default();
-        let original = serde_json::json!({ "tracking_mode": "semver_tags" });
+        let original = serde_json::json!({ "tracked_tag": "stable" });
         let mut config = original.clone();
 
         ctx.apply_to_config(&PluginType::ReleasesDocker, &mut config);

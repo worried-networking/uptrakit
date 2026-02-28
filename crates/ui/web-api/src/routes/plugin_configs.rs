@@ -652,7 +652,6 @@ mod tests {
     #[test]
     fn validate_docker_config_with_auth() {
         let config = serde_json::json!({
-            "tracking_mode": "digest_tracking",
             "tracked_tag": "main",
             "auth": {
                 "type": "bearer",
@@ -663,16 +662,17 @@ mod tests {
     }
 
     #[test]
-    fn validate_invalid_docker_config_zero_page_size() {
-        let config = serde_json::json!({ "page_size": 0 });
-        assert!(PluginRegistry::validate_config_str("releases_docker", &config).is_err());
-    }
-
-    #[test]
-    fn validate_invalid_docker_config_bad_regex() {
+    fn validate_docker_config_old_semver_fields_are_ignored() {
+        // Configs stored before the digest-tracking refactor may contain
+        // tracking_mode / tag_patterns / page_size — they must be silently ignored.
         let config = serde_json::json!({
-            "tag_patterns": ["[invalid"]
+            "tracking_mode": "semver_tags",
+            "tag_patterns": ["^v[0-9]+"],
+            "page_size": 500
         });
-        assert!(PluginRegistry::validate_config_str("releases_docker", &config).is_err());
+        assert!(
+            PluginRegistry::validate_config_str("releases_docker", &config).is_ok(),
+            "old semver fields should be silently ignored"
+        );
     }
 }
