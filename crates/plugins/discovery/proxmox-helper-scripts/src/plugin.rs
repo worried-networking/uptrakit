@@ -9,8 +9,8 @@ use uptrakit_plugin_infrastructure_core::{
 
 use crate::config::ProxmoxHelperScriptsConfig;
 use crate::discovery::{
-    UPDATE_SCRIPT_PATH, analyze_phs_script, extract_apt_package_candidates, parse_phs_scripts,
-    parse_version_file, slug_to_display_name,
+    UPDATE_SCRIPT_PATH, analyze_phs_script, extract_apt_package_candidates, extract_npm_package,
+    parse_phs_scripts, parse_version_file, slug_to_display_name,
 };
 
 /// Absolute path where the PHS version helper script is installed on managed hosts.
@@ -477,6 +477,34 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         "install-script fetch failed; skipping");
                     continue;
                 };
+
+                // Some apps (e.g. n8n) do not reference npm in their CT script
+                // but do install via `npm install -g <pkg>` in the install script.
+                // Try npm detection first so these are discovered as npm-managed
+                // rather than being incorrectly skipped or classified as APT.
+                if let Some(npm_pkg) = extract_npm_package(&install_body) {
+                    let Some(installed_version) = self.npm_global_version(&npm_pkg).await else {
+                        tracing::debug!(slug = %script.slug, package = %npm_pkg,
+                            "npm package not installed globally; skipping");
+                        continue;
+                    };
+
+                    tracing::debug!(
+                        slug = %script.slug,
+                        package = %npm_pkg,
+                        version = %installed_version,
+                        "discovered install-script npm-managed PHS software"
+                    );
+
+                    discovered.push(DiscoveredSoftware {
+                        package_identifier: npm_pkg.clone(),
+                        name: display_name,
+                        installed_version,
+                        targets: vec![Self::npm_target(&npm_pkg)],
+                        extra: None,
+                    });
+                    continue;
+                }
 
                 let candidates = extract_apt_package_candidates(&install_body);
                 if candidates.is_empty() {

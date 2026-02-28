@@ -1369,4 +1369,47 @@ apt install -y grafana
         assert!(result.npm_package.is_none());
         assert_eq!(result.apt_package.as_deref(), Some("grafana"));
     }
+
+    // ── extract_npm_package from install scripts ─────────────────────
+    // These tests document the install-script fallback scenario (e.g. n8n):
+    // the CT script has no npm/GitHub/APT line directly, but the install script
+    // contains `npm install -g <pkg>`.  The fallback path in plugin.rs calls
+    // extract_npm_package on the install script body before trying APT candidates.
+
+    #[test]
+    fn extract_npm_from_install_script_n8n_style() {
+        // Simulates an n8n-install.sh: apt installs only system deps, then npm.
+        let content = r#"
+apt-get install -y curl wget gnupg build-essential nodejs npm git
+$STD npm install -g n8n@latest
+"#;
+        assert_eq!(extract_npm_package(content), Some("n8n".to_string()));
+    }
+
+    #[test]
+    fn extract_npm_from_install_script_only_system_apt() {
+        // Install script has no npm global install → returns None.
+        let content = r#"
+apt-get install -y curl wget gnupg build-essential nodejs npm git
+apt-get upgrade -y
+"#;
+        assert_eq!(extract_npm_package(content), None);
+    }
+
+    #[test]
+    fn extract_npm_preferred_over_apt_candidates_in_install_script() {
+        // When an install script has both npm install -g and apt install of a
+        // non-system package, npm takes priority (matches plugin.rs fallback order).
+        let content = r#"
+apt-get install -y curl wget
+apt-get install -y somepackage
+npm install -g n8n
+"#;
+        // extract_npm_package returns the npm package.
+        assert_eq!(extract_npm_package(content), Some("n8n".to_string()));
+        // extract_apt_package_candidates also finds somepackage, but plugin.rs
+        // checks npm first, so it would emit an npm target, not APT.
+        let candidates = extract_apt_package_candidates(content);
+        assert!(candidates.contains(&"somepackage".to_string()));
+    }
 }
