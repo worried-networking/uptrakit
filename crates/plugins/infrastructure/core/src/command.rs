@@ -10,7 +10,7 @@ pub use uptrakit_command::{send_output, shell_escape};
 
 // Executor abstraction re-exports
 pub use uptrakit_command::{
-    CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor,
+    CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor, StdioTunnel,
 };
 
 // Error conversion: CommandError -> PluginError
@@ -23,6 +23,7 @@ uptrakit_shared_macros::impl_report_conversion!(
             uptrakit_command::CommandError::CommandWait(io) => PluginError::CommandWait(io),
             uptrakit_command::CommandError::TimedOut => PluginError::TimedOut,
             uptrakit_command::CommandError::UnsupportedShell(s) => PluginError::UnsupportedShell(s),
+            uptrakit_command::CommandError::UnsupportedOperation(s) => PluginError::UnsupportedOperation(s),
         }
     }
 );

@@ -37,6 +37,9 @@ pub enum PluginError {
     #[error("unsupported shell variant: {0}")]
     UnsupportedShell(String),
 
+    #[error("unsupported operation: {0}")]
+    UnsupportedOperation(String),
+
     #[error("install command failed: {0}")]
     InstallFailed(String),
 

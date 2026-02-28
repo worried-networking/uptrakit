@@ -13,6 +13,14 @@ use uptrakit_shared_types::HookShell;
 
 use crate::types::UpdateOutputLine;
 
+/// A bidirectional byte stream connected to a remote command's stdin/stdout.
+///
+/// Implementations wrap transport-specific channel types (e.g. russh
+/// `ChannelStream`) and expose them as a unified `AsyncRead + AsyncWrite`
+/// interface. The Docker plugin uses this to run `docker system dial-stdio`
+/// over an SSH channel without spawning a second SSH connection.
+pub trait StdioTunnel: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin {}
+
 /// Specification for a command to execute.
 ///
 /// Plugins build a `CommandSpec` describing *what* to run, and the injected
@@ -183,6 +191,33 @@ pub trait CommandExecutor: Send + Sync {
     ///
     /// Output is still accumulated and returned.
     async fn execute_quiet(&self, spec: &CommandSpec) -> crate::Result<CommandOutput>;
+
+    /// Whether this executor supports opening stdio tunnels.
+    ///
+    /// When `true`, [`open_stdio_tunnel`](Self::open_stdio_tunnel) can be
+    /// called to obtain a bidirectional byte stream connected to a remote
+    /// command's stdin/stdout. The default implementation returns `false`.
+    fn supports_stdio_tunnel(&self) -> bool {
+        false
+    }
+
+    /// Open a bidirectional stdio tunnel to the given command.
+    ///
+    /// The returned [`StdioTunnel`] connects the caller's reads/writes to the
+    /// remote command's stdout/stdin respectively. This is used by the Docker
+    /// plugin to run `docker system dial-stdio` over an existing SSH session
+    /// without spawning a second SSH connection.
+    ///
+    /// The default implementation returns
+    /// [`CommandError::UnsupportedOperation`].
+    async fn open_stdio_tunnel(
+        &self,
+        _command: &str,
+    ) -> crate::Result<Box<dyn StdioTunnel>> {
+        bail!(CommandError::UnsupportedOperation(
+            "stdio tunnel not supported by this executor".into()
+        ))
+    }
 }
 
 /// Executes commands on the local machine via `tokio::process::Command`.

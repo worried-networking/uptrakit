@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::executor::{CommandExecutor, CommandMode, CommandOutput, CommandSpec};
+use crate::executor::{CommandExecutor, CommandMode, CommandOutput, CommandSpec, StdioTunnel};
 use crate::types::UpdateOutputLine;
 
 // ── SudoPolicy ─────────────────────────────────────────────────────────
@@ -191,6 +191,17 @@ impl CommandExecutor for SudoAwareCommandExecutor {
     async fn execute_quiet(&self, spec: &CommandSpec) -> crate::Result<CommandOutput> {
         let modified = self.apply_sudo(spec);
         self.inner.execute_quiet(&modified).await
+    }
+
+    fn supports_stdio_tunnel(&self) -> bool {
+        self.inner.supports_stdio_tunnel()
+    }
+
+    async fn open_stdio_tunnel(
+        &self,
+        command: &str,
+    ) -> crate::Result<Box<dyn StdioTunnel>> {
+        self.inner.open_stdio_tunnel(command).await
     }
 }
 

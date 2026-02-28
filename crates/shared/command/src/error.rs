@@ -21,6 +21,9 @@ pub enum CommandError {
 
     #[error("unsupported shell variant: {0}")]
     UnsupportedShell(String),
+
+    #[error("unsupported operation: {0}")]
+    UnsupportedOperation(String),
 }
 
 /// Result type alias for command operations.
