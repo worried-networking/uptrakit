@@ -31,15 +31,8 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_tenants_slug")
-                    .table(Tenants::Table)
-                    .col(Tenants::Slug)
-                    .to_owned(),
-            )
-            .await?;
+        // Note: idx_tenants_slug is intentionally absent — string_uniq() already
+        // creates a UNIQUE constraint which implies an index on all supported backends.
 
         manager
             .create_index(
@@ -95,15 +88,8 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_users_email")
-                    .table(Users::Table)
-                    .col(Users::Email)
-                    .to_owned(),
-            )
-            .await?;
+        // Note: idx_users_email is intentionally absent — string_uniq() already
+        // creates a UNIQUE constraint which implies an index on all supported backends.
 
         // --- ca_certificates ---
         manager
