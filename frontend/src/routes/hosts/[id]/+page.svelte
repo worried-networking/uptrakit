@@ -11,19 +11,21 @@
 		triggerHostDiscovery,
 		listHostDiscoveryAllowlist,
 		addHostDiscoveryAllowlistEntry,
-		deleteHostDiscoveryAllowlistEntry
+		deleteHostDiscoveryAllowlistEntry,
+		listPluginTypes
 	} from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
-	import { Permission } from '$lib/types';
+	import { Permission, PluginCapability } from '$lib/types';
 	import type {
 		HostResponse,
 		UpdateHistoryResponse,
 		ServiceStatus,
 		UpdateHistoryStatus,
-		HostDiscoveryAllowlistEntry
+		HostDiscoveryAllowlistEntry,
+		PluginTypeInfo
 	} from '$lib/types';
 
 	const id = $derived(page.params.id as string);
@@ -38,11 +40,17 @@
 	let confirmDeactivate: boolean = $state(false);
 	let discovering: boolean = $state(false);
 
+	// Plugin types (loaded lazily when canViewSoftware)
+	let pluginTypes: PluginTypeInfo[] = $state([]);
+	const discoveryPluginTypes = $derived(
+		pluginTypes.filter((t) => t.capabilities.includes(PluginCapability.DiscoverLocalSoftware))
+	);
+
 	// Discovery allowlist state
 	let hostAllowlist: HostDiscoveryAllowlistEntry[] = $state([]);
 	let hostAllowlistLoading: boolean = $state(false);
 	let showAllowlistModal: boolean = $state(false);
-	let allowlistForm = $state({ plugin_type: 'package_manager_apt' });
+	let allowlistForm = $state({ plugin_type: '' });
 	let allowlistDeleteConfirm: { id: string; plugin_type: string } | null = $state(null);
 
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageHosts) ?? false);
@@ -53,7 +61,10 @@
 
 	onMount(() => {
 		loadData();
-		if (canViewSoftware) loadHostAllowlist();
+		if (canViewSoftware) {
+			loadPluginTypes();
+			loadHostAllowlist();
+		}
 		refreshInterval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadData(true);
 		}, 30_000);
@@ -84,6 +95,14 @@
 		}
 	}
 
+	async function loadPluginTypes() {
+		try {
+			pluginTypes = await listPluginTypes();
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to load plugin types');
+		}
+	}
+
 	async function loadHostAllowlist() {
 		hostAllowlistLoading = true;
 		try {
@@ -96,7 +115,7 @@
 	}
 
 	function openAddAllowlistEntry() {
-		allowlistForm = { plugin_type: 'package_manager_apt' };
+		allowlistForm = { plugin_type: discoveryPluginTypes[0]?.plugin_type ?? '' };
 		showAllowlistModal = true;
 	}
 
@@ -493,10 +512,9 @@
 			<label class="label">
 				<span>Plugin Type</span>
 				<select class="select" bind:value={allowlistForm.plugin_type}>
-					<option value="package_manager_apt">APT</option>
-					<option value="releases_docker">Docker</option>
-					<option value="package_manager_homebrew">Homebrew</option>
-					<option value="discovery_proxmox_helper_scripts">Proxmox Helper Scripts</option>
+					{#each discoveryPluginTypes as t (t.plugin_type)}
+						<option value={t.plugin_type}>{t.display_name}</option>
+					{/each}
 				</select>
 			</label>
 

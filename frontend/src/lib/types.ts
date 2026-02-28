@@ -332,7 +332,23 @@ export interface HostPluginRoleAssignment {
 
 export enum PluginCapability {
 	DiscoverLocalSoftware = 'discover_local_software',
-	RefreshPackageIndex = 'refresh_package_index'
+	RefreshPackageIndex = 'refresh_package_index',
+	DetectHostCompatibility = 'detect_host_compatibility',
+	PreUpdateHook = 'pre_update_hook',
+	PostUpdateHook = 'post_update_hook',
+	ControllerSideFetchReleases = 'controller_side_fetch_releases'
+}
+
+/** Static metadata for a plugin type, returned by `GET /api/v1/plugin-types`. */
+export interface PluginTypeInfo {
+	/** Snake_case wire identifier, e.g. `"releases_github"`. */
+	plugin_type: string;
+	/** Human-readable display name, e.g. `"GitHub Releases"`. */
+	display_name: string;
+	/** Capabilities declared by this plugin type. */
+	capabilities: PluginCapability[];
+	/** Sample/default configuration JSON for this plugin type. */
+	sample_config: Record<string, unknown>;
 }
 
 export interface PluginConfigResponse {

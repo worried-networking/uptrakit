@@ -15,7 +15,8 @@
 		deleteAutodiscoveryIgnore,
 		listDiscoveryAllowlist,
 		addDiscoveryAllowlistEntry,
-		deleteDiscoveryAllowlistEntry
+		deleteDiscoveryAllowlistEntry,
+		listPluginTypes
 	} from '$lib/api';
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
@@ -23,19 +24,30 @@
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission, PluginCapability } from '$lib/types';
-	import type { PluginConfigResponse, AutodiscoveryIgnoreResponse, TenantDiscoveryAllowlistEntry } from '$lib/types';
+	import type {
+		PluginConfigResponse,
+		AutodiscoveryIgnoreResponse,
+		TenantDiscoveryAllowlistEntry,
+		PluginTypeInfo
+	} from '$lib/types';
 
 	type ActiveTab = 'configs' | 'ignores' | 'allowlist';
 	const ACTIVE_TAB_VALUES = ['configs', 'ignores', 'allowlist'] as const satisfies readonly ActiveTab[];
 
 	let activeTab: ActiveTab = $state(parseUrlParam(page.url, 'tab', ACTIVE_TAB_VALUES, 'configs'));
 
+	// Plugin types
+	let pluginTypes: PluginTypeInfo[] = $state([]);
+	const discoveryPluginTypes = $derived(
+		pluginTypes.filter((t) => t.capabilities.includes(PluginCapability.DiscoverLocalSoftware))
+	);
+
 	// Plugin configs state
 	let configs: PluginConfigResponse[] = $state([]);
 	let configsLoading: boolean = $state(true);
 	let showConfigModal: boolean = $state(false);
 	let editingConfig: PluginConfigResponse | null = $state(null);
-	let configForm = $state({ name: '', plugin_type: 'releases_github', config: '{}', enabled: true });
+	let configForm = $state({ name: '', plugin_type: '', config: '{}', enabled: true });
 	let configDeleteConfirm: { id: string; name: string } | null = $state(null);
 	let discoveringId: string | null = $state(null);
 	let discardingId: string | null = $state(null);
@@ -53,7 +65,7 @@
 	let allowlist: TenantDiscoveryAllowlistEntry[] = $state([]);
 	let allowlistLoading: boolean = $state(true);
 	let showAllowlistModal: boolean = $state(false);
-	let allowlistForm = $state({ plugin_type: 'package_manager_homebrew' });
+	let allowlistForm = $state({ plugin_type: '' });
 	let allowlistDeleteConfirm: { id: string; plugin_type: string } | null = $state(null);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
@@ -73,6 +85,7 @@
 
 	onMount(() => {
 		if (canView) {
+			loadPluginTypes();
 			loadConfigs();
 			loadIgnores(ignoresPage);
 			loadAllowlist();
@@ -83,6 +96,14 @@
 		if (activeTab === tab) return;
 		ignoresPage = 1;
 		activeTab = tab;
+	}
+
+	async function loadPluginTypes() {
+		try {
+			pluginTypes = await listPluginTypes();
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to load plugin types');
+		}
 	}
 
 	async function loadAllowlist() {
@@ -97,7 +118,7 @@
 	}
 
 	function openAddAllowlistEntry() {
-		allowlistForm = { plugin_type: 'package_manager_homebrew' };
+		allowlistForm = { plugin_type: discoveryPluginTypes[0]?.plugin_type ?? '' };
 		showAllowlistModal = true;
 	}
 
@@ -158,9 +179,15 @@
 		}
 	}
 
+	function sampleConfigJson(pluginType: string): string {
+		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
+		return t ? JSON.stringify(t.sample_config, null, 2) : '{}';
+	}
+
 	function openCreateConfig() {
 		editingConfig = null;
-		configForm = { name: '', plugin_type: 'releases_github', config: '{}', enabled: true };
+		const firstType = pluginTypes[0]?.plugin_type ?? '';
+		configForm = { name: '', plugin_type: firstType, config: sampleConfigJson(firstType), enabled: true };
 		showConfigModal = true;
 	}
 
@@ -541,13 +568,14 @@
 			{#if !editingConfig}
 				<label class="label">
 					<span>Plugin Type</span>
-					<select class="select" bind:value={configForm.plugin_type}>
-						<option value="releases_github">GitHub Releases</option>
-						<option value="releases_docker">Docker Registry</option>
-						<option value="package_manager_homebrew">Homebrew</option>
-						<option value="discovery_proxmox_helper_scripts">Proxmox Helper Scripts</option>
-						<option value="package_manager_apt">APT</option>
-						<option value="generic_shell">Shell</option>
+					<select
+						class="select"
+						bind:value={configForm.plugin_type}
+						onchange={() => (configForm.config = sampleConfigJson(configForm.plugin_type))}
+					>
+						{#each pluginTypes as t (t.plugin_type)}
+							<option value={t.plugin_type}>{t.display_name}</option>
+						{/each}
 					</select>
 				</label>
 			{/if}
@@ -654,10 +682,9 @@
 			<label class="label">
 				<span>Plugin Type</span>
 				<select class="select" bind:value={allowlistForm.plugin_type}>
-					<option value="package_manager_apt">APT</option>
-					<option value="releases_docker">Docker</option>
-					<option value="package_manager_homebrew">Homebrew</option>
-					<option value="discovery_proxmox_helper_scripts">Proxmox Helper Scripts</option>
+					{#each discoveryPluginTypes as t (t.plugin_type)}
+						<option value={t.plugin_type}>{t.display_name}</option>
+					{/each}
 				</select>
 			</label>
 

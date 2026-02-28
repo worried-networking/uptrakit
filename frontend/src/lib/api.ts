@@ -61,7 +61,8 @@ import type {
 	User,
 	TenantDiscoveryAllowlistEntry,
 	HostDiscoveryAllowlistEntry,
-	CreateDiscoveryAllowlistEntryRequest
+	CreateDiscoveryAllowlistEntryRequest,
+	PluginTypeInfo
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -514,7 +515,12 @@ export function renewServerCertificate(): Promise<RenewServerCertResponse> {
 	return request('/settings/renew-server-certificate', { method: 'POST' });
 }
 
-// --- Software Items ---
+// --- Plugin Types & Configs ---
+
+/** Fetch all known plugin types with display names and capabilities from the registry. */
+export function listPluginTypes(): Promise<PluginTypeInfo[]> {
+	return request<PluginTypeInfo[]>('/plugin-types');
+}
 
 export function getPluginConfigs(page?: number, perPage?: number): Promise<PaginatedResponse<PluginConfigResponse>> {
 	const params = new URLSearchParams();
