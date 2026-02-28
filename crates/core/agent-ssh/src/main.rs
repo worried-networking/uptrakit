@@ -72,7 +72,6 @@ enum SshAgentEvent {
 // ---------------------------------------------------------------------------
 
 struct SshAgentHandler {
-    state_dir: std::path::PathBuf,
     local_db: Option<sea_orm::DatabaseConnection>,
     /// Per-host in-flight update state, keyed by `host_machine_id`.
     ///
@@ -151,20 +150,19 @@ impl ServiceHandler for SshAgentHandler {
         conn: &mut ControllerConnection,
         _identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
-        // Open (or create) the local SSH host database.
-        let local_db = crate::db::init_db(&self.state_dir).await.map_err(|e| {
-            report!(LoopError::Other(format!(
-                "failed to initialize local database: {e}"
-            )))
+        // DB is initialized at startup (in main) before the event loop starts.
+        let local_db = self.local_db.as_ref().ok_or_else(|| {
+            report!(LoopError::Other(
+                "local_db not initialized: this is a programming error".to_string()
+            ))
         })?;
-        tracing::debug!("local SSH host database initialized");
 
         // Report enrolled hosts to controller (full SSH-based report).
-        client::report_enrolled_hosts(&local_db, conn, &self.pool).await;
+        client::report_enrolled_hosts(local_db, conn, &self.pool).await;
 
         // Initialize the host snapshot AFTER reporting so any machine_id
         // updates written by report_enrolled_hosts are captured.
-        self.host_snapshot = match host_ops::list_host_snapshots(&local_db).await {
+        self.host_snapshot = match host_ops::list_host_snapshots(local_db).await {
             Ok(snapshot) => snapshot,
             Err(e) => {
                 tracing::warn!(
@@ -184,7 +182,6 @@ impl ServiceHandler for SshAgentHandler {
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         self.reload_ticker = Some(ticker);
 
-        self.local_db = Some(local_db);
         Ok(())
     }
 
@@ -570,12 +567,26 @@ async fn main() {
         }
     };
 
+    // Initialize the local DB and run pending migrations at startup so that the
+    // schema is always up-to-date before any operations — both daemon and CLI.
+    // Waiting until `on_connected` would mean a freshly started service could
+    // not open the DB if it has not yet reached the controller.
+    let local_db = match crate::db::init_db(&state_dir).await {
+        Ok(db) => {
+            tracing::debug!("local SSH host database initialized");
+            db
+        }
+        Err(e) => {
+            tracing::error!("failed to initialize local database: {e}");
+            std::process::exit(1);
+        }
+    };
+
     let (aggregate_tx, aggregate_rx) =
         tokio::sync::mpsc::channel::<(String, client::UpdateEvent)>(256);
 
     let mut handler = SshAgentHandler {
-        state_dir,
-        local_db: None,
+        local_db: Some(local_db),
         in_flight_updates: HashMap::new(),
         aggregate_rx,
         aggregate_tx,
