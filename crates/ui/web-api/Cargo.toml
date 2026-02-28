@@ -70,6 +70,7 @@ spki = { workspace = true }
 x509-cert = { workspace = true }
 const-oid = { workspace = true }
 aws-lc-rs = { workspace = true }
+parking_lot = "0.12"
 tokio-util = { workspace = true }
 zeroize = { workspace = true }
 async-nats = { workspace = true, optional = true }

@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 use http::StatusCode;
+use parking_lot::Mutex;
 
 use crate::AppState;
 use crate::auth::rate_limit::RateLimitOutcome;
@@ -111,14 +112,27 @@ struct LocalRateLimitEntry {
     last_seen: Instant,
 }
 
+/// Fallback rate limit state, protected by `parking_lot::Mutex`.
+///
+/// `parking_lot::Mutex` is used here (rather than `tokio::sync::Mutex`) because this is
+/// a synchronous function called from async middleware with a sub-microsecond critical
+/// section and no `.await` across the lock. `parking_lot` is faster than `std::sync::Mutex`
+/// under contention and returns the guard directly (no `Result`/`.unwrap()` needed).
 static FALLBACK_LIMITS: LazyLock<Mutex<HashMap<String, LocalRateLimitEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Counter for amortized cleanup of stale entries. Cleanup runs every
+/// `CLEANUP_INTERVAL` calls instead of on every request.
+static FALLBACK_CALL_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Run `retain()` cleanup every N calls to avoid O(n) iteration on every request.
+const CLEANUP_INTERVAL: u64 = 100;
 
 fn check_local_fallback(key: &str, max_requests: i32, window_secs: i64) -> RateLimitOutcome {
     let now = Instant::now();
     let window = Duration::from_secs(window_secs as u64);
     let max = max_requests.max(0) as u32;
-    let mut guard = FALLBACK_LIMITS.lock().unwrap();
+    let mut guard = FALLBACK_LIMITS.lock();
 
     if let Some(entry) = guard.get_mut(key) {
         if now.duration_since(entry.window_start) >= window {
@@ -145,8 +159,13 @@ fn check_local_fallback(key: &str, max_requests: i32, window_secs: i64) -> RateL
         );
     }
 
-    let cutoff = now.checked_sub(window.saturating_mul(2)).unwrap_or(now);
-    guard.retain(|_, entry| entry.last_seen >= cutoff);
+    // Amortized cleanup: only run retain() every CLEANUP_INTERVAL calls,
+    // keeping per-request lock hold time O(1) instead of O(n).
+    let call_count = FALLBACK_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+    if call_count.is_multiple_of(CLEANUP_INTERVAL) {
+        let cutoff = now.checked_sub(window.saturating_mul(2)).unwrap_or(now);
+        guard.retain(|_, entry| entry.last_seen >= cutoff);
+    }
 
     RateLimitOutcome::Allowed
 }
@@ -278,7 +297,7 @@ mod tests {
     #[test]
     fn local_fallback_enforces_limits() {
         let key = "test:127.0.0.1";
-        let _ = FALLBACK_LIMITS.lock().unwrap().remove(key);
+        let _ = FALLBACK_LIMITS.lock().remove(key);
 
         let limit = check_local_fallback(key, 2, 60);
         assert!(matches!(limit, RateLimitOutcome::Allowed));
