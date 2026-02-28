@@ -55,6 +55,7 @@ pub(crate) trait DockerClient: Send + Sync {
     /// if the daemon is unreachable (connection refused, SSH tunnel failure,
     /// etc.). Used by [`crate::plugin::DockerPlugin::detect_host_compatibility`]
     /// to skip discovery on hosts where Docker is not running.
+    #[cfg(feature = "daemon")]
     async fn ping(&self) -> Result<()>;
 
     /// Pull `image:tag` from the registry, streaming progress through `output_tx`.
@@ -93,6 +94,7 @@ pub(crate) struct NoopDockerClient;
 
 #[async_trait]
 impl DockerClient for NoopDockerClient {
+    #[cfg(feature = "daemon")]
     async fn ping(&self) -> Result<()> {
         bail!(DockerError::Configuration(
             "Docker daemon operations require the 'daemon' Cargo feature".to_string(),
