@@ -189,6 +189,8 @@ impl ServiceConnectionRegistry {
     ///
     /// Snapshots the senders under the lock and releases it before sending,
     /// so a slow consumer cannot block connection management operations.
+    /// Sends are dispatched in parallel with a per-send timeout to prevent
+    /// a single slow consumer from blocking the entire broadcast.
     pub async fn broadcast(&self, msg: ControllerMessage) {
         let senders: Vec<mpsc::Sender<ControllerMessage>> = {
             let guard = self.inner.read().await;
@@ -198,15 +200,14 @@ impl ServiceConnectionRegistry {
                 .map(|c| c.sender.clone())
                 .collect()
         };
-        for sender in senders {
-            let _ = sender.send(msg.clone()).await;
-        }
+        send_parallel(&senders, msg).await;
     }
 
     /// Broadcast a message to all connected services that advertise the given
     /// capability.
     ///
     /// Snapshots the senders under the lock and releases it before sending.
+    /// Sends are dispatched in parallel with a per-send timeout.
     pub async fn broadcast_by_capability(&self, capability: &Capability, msg: ControllerMessage) {
         let senders: Vec<mpsc::Sender<ControllerMessage>> = {
             let guard = self.inner.read().await;
@@ -217,9 +218,7 @@ impl ServiceConnectionRegistry {
                 .map(|c| c.sender.clone())
                 .collect()
         };
-        for sender in senders {
-            let _ = sender.send(msg.clone()).await;
-        }
+        send_parallel(&senders, msg).await;
     }
 
     /// Get the current number of connected services.
@@ -468,6 +467,33 @@ impl ServiceConnectionRegistry {
     }
 }
 
+/// Timeout for individual send operations during parallel broadcast.
+const BROADCAST_SEND_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Send a message to multiple senders in parallel with a per-send timeout.
+///
+/// Each send is executed concurrently via `futures_util::future::join_all`.
+/// If a single send exceeds [`BROADCAST_SEND_TIMEOUT`], it is abandoned and
+/// a warning is logged so operators can identify slow consumers.
+async fn send_parallel(senders: &[mpsc::Sender<ControllerMessage>], msg: ControllerMessage) {
+    let futures: Vec<_> = senders
+        .iter()
+        .map(|sender| {
+            let msg = msg.clone();
+            let sender = sender.clone();
+            async move {
+                if tokio::time::timeout(BROADCAST_SEND_TIMEOUT, sender.send(msg))
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("broadcast send timed out for a consumer");
+                }
+            }
+        })
+        .collect();
+    futures_util::future::join_all(futures).await;
+}
+
 fn compare_mqtt_service_load(a: &MqttServiceLoad, b: &MqttServiceLoad) -> Ordering {
     let left = u128::from(a.utilization_numerator) * u128::from(b.utilization_denominator);
     let right = u128::from(b.utilization_numerator) * u128::from(a.utilization_denominator);
@@ -488,6 +514,107 @@ mod tests {
     /// Helper: build a capability set for an MQTT bridge service.
     fn mqtt_caps() -> BTreeSet<Capability> {
         BTreeSet::from([Capability::MqttBridge, Capability::GracefulShutdown])
+    }
+
+    #[tokio::test]
+    async fn broadcast_delivers_to_all_services() {
+        let registry = ServiceConnectionRegistry::new();
+        let svc_a = Uuid::now_v7();
+        let svc_b = Uuid::now_v7();
+
+        let caps = BTreeSet::from([Capability::GracefulShutdown]);
+        let (mut rx_a, _) = registry.register(svc_a, caps.clone(), None, None).await;
+        let (mut rx_b, _) = registry.register(svc_b, caps, None, None).await;
+
+        let msg = ControllerMessage::ServerRestarting(
+            uptrakit_internal_wire::ServerRestartingPayload {
+                reason: "test".to_string(),
+            },
+        );
+        registry.broadcast(msg).await;
+
+        assert!(rx_a.recv().await.is_some(), "service A should receive msg");
+        assert!(rx_b.recv().await.is_some(), "service B should receive msg");
+    }
+
+    #[tokio::test]
+    async fn broadcast_by_capability_filters_correctly() {
+        let registry = ServiceConnectionRegistry::new();
+        let svc_mqtt = Uuid::now_v7();
+        let svc_other = Uuid::now_v7();
+
+        let (mut rx_mqtt, _) = registry
+            .register(svc_mqtt, mqtt_caps(), Some("m".to_string()), Some(10))
+            .await;
+        let (mut rx_other, _) = registry
+            .register(
+                svc_other,
+                BTreeSet::from([Capability::GracefulShutdown]),
+                None,
+                None,
+            )
+            .await;
+
+        let msg = ControllerMessage::ServerRestarting(
+            uptrakit_internal_wire::ServerRestartingPayload {
+                reason: "test".to_string(),
+            },
+        );
+        registry
+            .broadcast_by_capability(&Capability::MqttBridge, msg)
+            .await;
+
+        assert!(
+            rx_mqtt.recv().await.is_some(),
+            "mqtt service should receive msg"
+        );
+
+        // The non-MQTT service should NOT have received anything.
+        // Use try_recv to avoid blocking.
+        assert!(
+            rx_other.try_recv().is_err(),
+            "non-mqtt service should not receive msg"
+        );
+    }
+
+    #[tokio::test]
+    async fn broadcast_does_not_block_on_full_channel() {
+        let registry = ServiceConnectionRegistry::new();
+        let svc = Uuid::now_v7();
+
+        let caps = BTreeSet::from([Capability::GracefulShutdown]);
+        let (rx, _) = registry.register(svc, caps, None, None).await;
+
+        // Fill the channel to capacity (PUSH_CHANNEL_CAPACITY = 32)
+        // without consuming from rx so the channel is full.
+        for i in 0..PUSH_CHANNEL_CAPACITY {
+            let msg = ControllerMessage::ServerRestarting(
+                uptrakit_internal_wire::ServerRestartingPayload {
+                    reason: format!("fill-{i}"),
+                },
+            );
+            let _ = registry.send(&svc, msg).await;
+        }
+
+        // Broadcast should complete within the timeout rather than blocking
+        // indefinitely on the full channel.
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
+            let msg = ControllerMessage::ServerRestarting(
+                uptrakit_internal_wire::ServerRestartingPayload {
+                    reason: "overflow".to_string(),
+                },
+            );
+            registry.broadcast(msg).await;
+        })
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "broadcast should not block indefinitely on a full channel"
+        );
+
+        // Keep rx alive to prevent channel closure before broadcast completes.
+        drop(rx);
     }
 
     #[tokio::test]
