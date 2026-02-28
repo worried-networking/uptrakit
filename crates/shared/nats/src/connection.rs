@@ -70,6 +70,12 @@ impl NatsConnection {
     }
 
     /// Publish a message with routing metadata.
+    ///
+    /// # Panics (debug only)
+    ///
+    /// Asserts that `msg.is_nats_publishable()` in debug builds.  In both
+    /// debug and release builds, credential-bearing messages are **dropped**
+    /// and an error is logged instead of being sent to NATS.
     pub async fn publish(
         &self,
         source_controller_id: Uuid,
@@ -77,6 +83,18 @@ impl NatsConnection {
         target_capability: Option<&str>,
         msg: ControllerMessage,
     ) {
+        if !msg.is_nats_publishable() {
+            tracing::error!(
+                msg_type = ?std::mem::discriminant(&msg),
+                "BUG: attempted to publish credential-bearing ControllerMessage to NATS; dropped"
+            );
+            debug_assert!(
+                false,
+                "credential-bearing message must not reach NatsConnection::publish"
+            );
+            return;
+        }
+
         let envelope = NatsEventEnvelope {
             source_controller_id,
             target_service_id,

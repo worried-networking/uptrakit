@@ -319,6 +319,26 @@ pub enum ControllerMessage {
     RequestCaRotation(RequestCaRotationPayload),
 }
 
+impl ControllerMessage {
+    /// Returns `true` if this message may be published to NATS JetStream.
+    ///
+    /// Credential-bearing variants (`ServiceCredentials`, `TenantAssignments`,
+    /// `TenantConfigUpdated`, `TenantRevoked`) must **never** be published to
+    /// NATS — they are delivered exclusively over authenticated WebSocket
+    /// connections.  All other variants are safe to broadcast via NATS.
+    ///
+    /// This is the authoritative gate used by [`NatsConnection::publish`].
+    pub fn is_nats_publishable(&self) -> bool {
+        !matches!(
+            self,
+            ControllerMessage::ServiceCredentials(_)
+                | ControllerMessage::TenantAssignments(_)
+                | ControllerMessage::TenantConfigUpdated(_)
+                | ControllerMessage::TenantRevoked(_)
+        )
+    }
+}
+
 /// Payload for ping messages.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PingPayload {
@@ -3565,5 +3585,70 @@ mod tests {
         assert!(json.contains(r#""reason":"CA certificate expiring in 30 days"#));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
+    }
+
+    // ── is_nats_publishable ───────────────────────────────────────────────────
+
+    #[test]
+    fn is_nats_publishable_blocks_credential_bearing_variants() {
+        // ServiceCredentials must never be published to NATS.
+        assert!(!ControllerMessage::ServiceCredentials(ServiceCredentialsPayload {
+            db_url: Some(SecretString::new("postgres://localhost/db".into())),
+            master_key_hex: None,
+            nats_url: None,
+        })
+        .is_nats_publishable());
+
+        // MQTT tenant credential variants must also be blocked.
+        assert!(!ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
+            tenants: vec![],
+        })
+        .is_nats_publishable());
+
+        assert!(!ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
+            tenant: MqttTenantConfig {
+                mqtt_client_id: TEST_UUID_1,
+                tenant_id: TEST_UUID_2,
+                enabled: true,
+                transport: MqttTransport::Tcp,
+                host: "localhost".into(),
+                port: 1883,
+                client_id: "c".into(),
+                username: None,
+                password: None,
+                ca_pem: None,
+                topic_prefix: "t/".into(),
+                ha_discovery: false,
+                ha_discovery_prefix: "homeassistant".into(),
+                updated_at: time::UtcDateTime::UNIX_EPOCH,
+            },
+        })
+        .is_nats_publishable());
+
+        assert!(!ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
+            mqtt_client_id: TEST_UUID_1,
+            reason: "test".into(),
+        })
+        .is_nats_publishable());
+    }
+
+    #[test]
+    fn is_nats_publishable_allows_non_credential_variants() {
+        // Ordinary messages must be publishable.
+        assert!(ControllerMessage::Pong(PongPayload {
+            service_ts: 0,
+            controller_ts: 0,
+        })
+        .is_nats_publishable());
+
+        assert!(ControllerMessage::Approved(ApprovedPayload {
+            service_id: TEST_UUID_1,
+        })
+        .is_nats_publishable());
+
+        assert!(ControllerMessage::RequestCaRotation(RequestCaRotationPayload {
+            reason: "test".into(),
+        })
+        .is_nats_publishable());
     }
 }

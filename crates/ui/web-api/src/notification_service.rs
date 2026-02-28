@@ -51,7 +51,7 @@ impl NotificationService {
     /// published to NATS to prevent credential leakage.
     pub async fn send(&self, service_id: &Uuid, msg: ControllerMessage) -> bool {
         let local = self.registry.send(service_id, msg.clone()).await;
-        if !is_local_only_message(&msg) {
+        if msg.is_nats_publishable() {
             self.maybe_publish_nats(Some(*service_id), None, msg).await;
         }
         local
@@ -63,7 +63,7 @@ impl NotificationService {
     /// published to NATS (see [`Self::send`] doc comment).
     pub async fn broadcast(&self, msg: ControllerMessage) {
         self.registry.broadcast(msg.clone()).await;
-        if !is_local_only_message(&msg) {
+        if msg.is_nats_publishable() {
             self.maybe_publish_nats(None, None, msg).await;
         }
     }
@@ -89,7 +89,7 @@ impl NotificationService {
         self.registry
             .broadcast_by_capability(&cap, msg.clone())
             .await;
-        if !is_local_only_message(&msg) {
+        if msg.is_nats_publishable() {
             self.maybe_publish_nats(None, Some(capability_str), msg)
                 .await;
         }
@@ -161,28 +161,11 @@ impl NotificationService {
     }
 }
 
-/// Returns `true` for messages that must only be delivered locally (via
-/// WebSocket) and **never** published to NATS.
-///
-/// This includes credential-bearing MQTT tenant messages and infrastructure
-/// credential messages (`ServiceCredentials`).
-pub(crate) fn is_local_only_message(msg: &ControllerMessage) -> bool {
-    matches!(
-        msg,
-        ControllerMessage::TenantAssignments(_)
-            | ControllerMessage::TenantConfigUpdated(_)
-            | ControllerMessage::TenantRevoked(_)
-            | ControllerMessage::ServiceCredentials(_)
-    )
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_internal_wire::{
-        ApprovedPayload, MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload,
-        MqttTenantRevokedPayload, ServerRestartingPayload,
-    };
+    use uptrakit_internal_wire::{ApprovedPayload, ServerRestartingPayload};
 
     #[tokio::test]
     async fn server_restarting_is_local_only() {
@@ -196,45 +179,28 @@ mod tests {
         assert!(matches!(msg, ControllerMessage::ServerRestarting(_)));
     }
 
+    /// Verify that credential-bearing variants are blocked by `is_nats_publishable`.
+    /// The authoritative tests for this are in the wire crate; this test documents
+    /// the integration point used by NotificationService.
     #[test]
-    fn is_local_only_message_matches_credential_bearing_variants() {
-        // Credential-bearing variants must be filtered from NATS.
-        assert!(is_local_only_message(
-            &ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload { tenants: vec![] })
-        ));
-        assert!(is_local_only_message(
-            &ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
-                tenant: uptrakit_internal_wire::MqttTenantConfig {
-                    mqtt_client_id: Uuid::nil(),
-                    tenant_id: Uuid::nil(),
-                    enabled: true,
-                    transport: uptrakit_internal_wire::MqttTransport::Tcp,
-                    host: "localhost".into(),
-                    port: 1883,
-                    client_id: "test".into(),
-                    username: Some(uptrakit_internal_wire::SecretString::new("user".into())),
-                    password: Some(uptrakit_internal_wire::SecretString::new("secret".into())),
-                    ca_pem: None,
-                    topic_prefix: "test/".into(),
-                    ha_discovery: false,
-                    ha_discovery_prefix: "homeassistant".to_string(),
-                    updated_at: time::UtcDateTime::UNIX_EPOCH,
-                },
-            })
-        ));
-        assert!(is_local_only_message(&ControllerMessage::TenantRevoked(
-            MqttTenantRevokedPayload {
-                mqtt_client_id: Uuid::nil(),
-                reason: "test".into(),
-            }
-        )));
+    fn credential_bearing_variants_are_not_nats_publishable() {
+        // Approved is a safe, publishable variant — sanity check.
+        assert!(ControllerMessage::Approved(ApprovedPayload {
+            service_id: Uuid::nil(),
+        })
+        .is_nats_publishable());
 
-        // Non-credential variants must NOT be filtered.
-        assert!(!is_local_only_message(&ControllerMessage::Approved(
-            ApprovedPayload {
-                service_id: Uuid::nil(),
-            }
-        )));
+        // ServiceCredentials must never be published to NATS.
+        assert!(
+            !ControllerMessage::ServiceCredentials(
+                uptrakit_internal_wire::ServiceCredentialsPayload {
+                    db_url: None,
+                    master_key_hex: None,
+                    nats_url: None,
+                }
+            )
+            .is_nats_publishable()
+        );
     }
 
     #[tokio::test]
