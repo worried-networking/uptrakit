@@ -6,9 +6,9 @@ use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
-    PluginType, ReleaseInfo, Result, SudoCommandEntry, UpdateHookContext, UpdateOutputLine,
-    UpstreamRelease, Version,
+    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin,
+    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
+    UpdateHookContext, UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::{AptConfig, AptDiscoveryFilter};
@@ -291,6 +291,14 @@ impl Plugin for AptPlugin {
             AptDiscoveryFilter::All => None,
         };
 
+        // When the plugin was invoked without a pre-existing plugin config
+        // (config is at its default / `{}`), emit a DiscoveryTarget so the
+        // controller can auto-create a default "APT" plugin config and the
+        // role assignments.  When a real config exists (e.g.
+        // discovery_filter: "all"), the server sends plugin_config_id and
+        // the items are handled via the config-ID path (no targets needed).
+        let emit_targets = self.config.is_discover_all_mode();
+
         // Step 3: Filter by the manual set (if applicable) and build results.
         let packages: Vec<DiscoveredSoftware> = all_packages
             .into_iter()
@@ -299,12 +307,31 @@ impl Plugin for AptPlugin {
                     .as_ref()
                     .is_none_or(|set| set.contains(name.as_str()))
             })
-            .map(|(name, version)| DiscoveredSoftware {
-                package_identifier: name.clone(),
-                name,
-                installed_version: version,
-                targets: vec![],
-                extra: None,
+            .map(|(name, version)| {
+                let targets = if emit_targets {
+                    vec![DiscoveryTarget {
+                        plugin_type: PluginType::PackageManagerApt,
+                        plugin_config: serde_json::json!({}),
+                        plugin_config_name: "APT".to_string(),
+                        roles: vec![
+                            PluginRole::DetectVersion,
+                            PluginRole::FetchReleases,
+                            PluginRole::ExecuteUpdate,
+                        ],
+                        package_identifier: None,
+                        config_override: None,
+                        execution_site: None,
+                    }]
+                } else {
+                    vec![]
+                };
+                DiscoveredSoftware {
+                    package_identifier: name.clone(),
+                    name,
+                    installed_version: version,
+                    targets,
+                    extra: None,
+                }
             })
             .collect();
 
@@ -454,6 +481,63 @@ mod tests {
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)
+    }
+
+    /// Mock executor that routes `execute_quiet` output by the command program name.
+    ///
+    /// Matches the program name from `CommandSpec::mode` (Exec variant only).
+    /// Falls back to an empty-output success for Shell-mode or unrecognised programs.
+    struct RoutedOutputExecutor {
+        /// `(program_name, output_to_return)` entries checked in order.
+        routes: Vec<(&'static str, String)>,
+    }
+
+    impl RoutedOutputExecutor {
+        /// Create an executor from a list of `(program, output)` pairs.
+        fn new(routes: Vec<(&'static str, &'static str)>) -> Arc<dyn CommandExecutor> {
+            Arc::new(Self {
+                routes: routes
+                    .into_iter()
+                    .map(|(p, o)| (p, o.to_string()))
+                    .collect(),
+            })
+        }
+
+        fn output_for(&self, spec: &CommandSpec) -> String {
+            use uptrakit_plugin_infrastructure_core::CommandMode;
+            if let CommandMode::Exec { program, .. } = &spec.mode {
+                for (name, out) in &self.routes {
+                    if program == *name {
+                        return out.clone();
+                    }
+                }
+            }
+            String::new()
+        }
+    }
+
+    #[async_trait]
+    impl CommandExecutor for RoutedOutputExecutor {
+        async fn execute(
+            &self,
+            spec: &CommandSpec,
+            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput {
+                output: self.output_for(spec),
+                exit_code: 0,
+            })
+        }
+
+        async fn execute_quiet(
+            &self,
+            spec: &CommandSpec,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput {
+                output: self.output_for(spec),
+                exit_code: 0,
+            })
+        }
     }
 
     /// Mock executor that returns a configurable exit code for `execute_quiet`.
@@ -845,5 +929,54 @@ mod tests {
         let (tx, _rx) = mpsc::channel(10);
         let result = plugin.post_update_hook(&ctx, &tx).await;
         assert!(result.is_ok());
+    }
+
+    // ── discover_software target emission ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn discover_software_emits_targets_when_default_config() {
+        // Default config (discovery_filter: manual) → discover-all mode.
+        // dpkg-query returns "nginx\t1.24.0"; apt-mark showmanual returns "nginx".
+        let executor = RoutedOutputExecutor::new(vec![
+            ("dpkg-query", "nginx\t1.24.0\n"),
+            ("apt-mark", "nginx\n"),
+        ]);
+        let plugin = AptPlugin::new(AptConfig::default(), executor)
+            .await
+            .expect("create plugin");
+
+        let discoveries = plugin.discover_software().await.expect("discover");
+        assert_eq!(discoveries.len(), 1);
+        assert_eq!(discoveries[0].targets.len(), 1);
+
+        let target = &discoveries[0].targets[0];
+        assert_eq!(target.plugin_type, PluginType::PackageManagerApt);
+        assert_eq!(target.plugin_config_name, "APT");
+        assert_eq!(target.plugin_config, serde_json::json!({}));
+        assert!(target.roles.contains(&PluginRole::DetectVersion));
+        assert!(target.roles.contains(&PluginRole::FetchReleases));
+        assert!(target.roles.contains(&PluginRole::ExecuteUpdate));
+    }
+
+    #[tokio::test]
+    async fn discover_software_no_targets_when_all_filter() {
+        // discovery_filter: "all" → non-default config → config-ID path → no targets.
+        // Only dpkg-query is called (no apt-mark for the "all" filter).
+        let executor = RoutedOutputExecutor::new(vec![("dpkg-query", "nginx\t1.24.0\n")]);
+        let plugin = AptPlugin::new(
+            AptConfig {
+                discovery_filter: AptDiscoveryFilter::All,
+            },
+            executor,
+        )
+        .await
+        .expect("create plugin");
+
+        let discoveries = plugin.discover_software().await.expect("discover");
+        assert_eq!(discoveries.len(), 1);
+        assert!(
+            discoveries[0].targets.is_empty(),
+            "non-default config must not emit targets (config-ID path)"
+        );
     }
 }

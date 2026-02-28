@@ -37,11 +37,51 @@ impl AptConfig {
     pub fn validate(&self) -> crate::error::Result<()> {
         Ok(())
     }
+
+    /// Returns `true` when the config is at its default — i.e. it was produced
+    /// by deserialising an empty JSON object `{}`.
+    ///
+    /// The server sends an empty config with `plugin_config_id: None` when no
+    /// pre-existing APT plugin config exists for the tenant. `discover_software()`
+    /// uses this to decide whether to emit
+    /// [`uptrakit_plugin_infrastructure_core::DiscoveryTarget`] values so the
+    /// controller can auto-create the default plugin config and role assignments.
+    /// When a real config is present (e.g. `discovery_filter: "all"`) the server
+    /// sends `plugin_config_id: Some(_)` and items are processed via the
+    /// config-ID path (no targets needed).
+    pub(crate) fn is_discover_all_mode(&self) -> bool {
+        self.discovery_filter == AptDiscoveryFilter::Manual
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── is_discover_all_mode ──────────────────────────────────────────────────
+
+    #[test]
+    fn is_discover_all_mode_true_for_default_config() {
+        assert!(AptConfig::default().is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_true_for_manual_filter() {
+        let config = AptConfig {
+            discovery_filter: AptDiscoveryFilter::Manual,
+        };
+        assert!(config.is_discover_all_mode());
+    }
+
+    #[test]
+    fn is_discover_all_mode_false_for_all_filter() {
+        let config = AptConfig {
+            discovery_filter: AptDiscoveryFilter::All,
+        };
+        assert!(!config.is_discover_all_mode());
+    }
+
+    // ── existing tests ────────────────────────────────────────────────────────
 
     #[test]
     fn default_config_is_manual() {
