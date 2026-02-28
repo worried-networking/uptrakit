@@ -9,7 +9,7 @@ publish = false
 
 [features]
 default = ["daemon"]
-daemon = ["dep:bollard", "dep:futures-util"]
+daemon = ["dep:bollard", "dep:futures-util", "dep:tokio"]
 ssh = ["daemon", "bollard/ssh"]
 
 [dependencies]
@@ -27,6 +27,7 @@ tracing = { workspace = true }
 regex = { workspace = true }
 semver = { workspace = true }
 async-trait = { workspace = true }
+tokio = { workspace = true, features = ["net", "io-util", "rt", "fs"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

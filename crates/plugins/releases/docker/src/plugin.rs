@@ -10,11 +10,16 @@ use uptrakit_plugin_infrastructure_core::command::{
     CommandExecutor, CommandSpec, send_output, shell_escape,
 };
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
+    DiscoveredSoftware, OutputStreamType, Plugin, PluginCapability, PluginError,
     PluginType, ReleaseInfo, UpdateOutputLine, UpstreamRelease, Version,
 };
 
+/// Type-erased RAII handle kept alive alongside the Docker client.
+type OpaqueHandle = Option<Box<dyn std::any::Any + Send + Sync>>;
+
 use crate::config::{DockerConfig, TrackingMode};
+#[cfg(feature = "daemon")]
+use uptrakit_plugin_infrastructure_core::HostCompatibility;
 #[cfg(feature = "daemon")]
 use crate::docker_client::BollardDockerClient;
 use crate::docker_client::{DockerClient, NoopDockerClient};
@@ -37,6 +42,13 @@ pub struct DockerPlugin {
     tag_filters: Vec<Regex>,
     docker_client: Arc<dyn DockerClient>,
     executor: Arc<dyn CommandExecutor>,
+    /// RAII handle for the Docker socket proxy (Unix-only, daemon feature).
+    ///
+    /// When an executor supports stdio tunnels and no explicit `docker_host`
+    /// is configured, a [`crate::docker_proxy::DockerSocketProxy`] is started
+    /// and stored here. The proxy is stopped and the socket removed when the
+    /// plugin is dropped.
+    _proxy_handle: OpaqueHandle,
 }
 
 impl DockerPlugin {
@@ -46,18 +58,25 @@ impl DockerPlugin {
     /// bollard. Without it, uses [`NoopDockerClient`] so the plugin can still
     /// serve registry-only capabilities (e.g. `ControllerSideFetchReleases`).
     pub fn new(config: DockerConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        // Always create a NoopDockerClient as the starting value.
-        // When the `daemon` feature is enabled, upgrade_to_daemon_client replaces it
-        // with a real BollardDockerClient, consuming the noop value in the process.
-        // This ensures NoopDockerClient is always constructed (no dead_code warning)
-        // and the initial binding is always read (no unused_assignments warning).
+        // Always create a NoopDockerClient and a None proxy handle as
+        // starting values. When the `daemon` feature is enabled,
+        // upgrade_to_daemon_client replaces them with a real
+        // BollardDockerClient (and optionally a proxy handle), consuming
+        // the stub values in the process.
         let docker_client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
+        let proxy_handle: OpaqueHandle = None;
         #[cfg(feature = "daemon")]
-        let docker_client = Self::upgrade_to_daemon_client(docker_client, &config)?;
-        Self::init(config, executor, docker_client)
+        let (docker_client, proxy_handle) =
+            Self::upgrade_to_daemon_client(docker_client, proxy_handle, &config, &executor)?;
+        Self::init(config, executor, docker_client, proxy_handle)
     }
 
     /// Replace a stub Docker client with a real [`BollardDockerClient`].
+    ///
+    /// When the executor supports stdio tunnels (e.g. SSH) and no explicit
+    /// `docker_host` is configured, a [`crate::docker_proxy::DockerSocketProxy`]
+    /// is started and the client connects to the local proxy socket. Otherwise
+    /// falls through to the standard bollard connection logic.
     ///
     /// The `_stub` parameter is the [`NoopDockerClient`] created unconditionally
     /// in [`Self::new`]. Accepting it here ensures the initial binding is read,
@@ -66,12 +85,35 @@ impl DockerPlugin {
     #[cfg(feature = "daemon")]
     fn upgrade_to_daemon_client(
         _stub: Arc<dyn DockerClient>,
+        _proxy_stub: OpaqueHandle,
         config: &DockerConfig,
-    ) -> Result<Arc<dyn DockerClient>> {
-        Ok(Arc::new(BollardDockerClient::new(
+        executor: &Arc<dyn CommandExecutor>,
+    ) -> Result<(Arc<dyn DockerClient>, OpaqueHandle)> {
+        // When the executor supports stdio tunnels and no explicit docker_host
+        // is configured, start a local Unix socket proxy. This avoids bollard's
+        // SSH codepath (which spawns a second SSH connection via the system ssh
+        // binary) and instead tunnels Docker API traffic over the existing
+        // russh session.
+        #[cfg(unix)]
+        if executor.supports_stdio_tunnel() && config.docker_host.is_none() {
+            let proxy = tokio::runtime::Handle::current().block_on(
+                crate::docker_proxy::DockerSocketProxy::start(Arc::clone(executor)),
+            )?;
+            let uri = proxy.socket_uri();
+            tracing::info!(
+                proxy_socket = %uri,
+                "Docker socket proxy started; connecting bollard via proxy"
+            );
+            let client = Arc::new(BollardDockerClient::new(Some(&uri), None)?);
+            let handle: Box<dyn std::any::Any + Send + Sync> = Box::new(proxy);
+            return Ok((client, Some(handle)));
+        }
+
+        let client = Arc::new(BollardDockerClient::new(
             config.docker_host.as_deref(),
             config.ssh_key_path.as_deref(),
-        )?))
+        )?);
+        Ok((client, None))
     }
 
     /// Internal constructor that accepts any [`DockerClient`] implementation.
@@ -79,6 +121,7 @@ impl DockerPlugin {
         config: DockerConfig,
         executor: Arc<dyn CommandExecutor>,
         docker_client: Arc<dyn DockerClient>,
+        proxy_handle: OpaqueHandle,
     ) -> Result<Self> {
         config.validate()?;
 
@@ -100,6 +143,7 @@ impl DockerPlugin {
             tag_filters,
             docker_client,
             executor,
+            _proxy_handle: proxy_handle,
         })
     }
 
@@ -110,7 +154,7 @@ impl DockerPlugin {
         executor: Arc<dyn CommandExecutor>,
         docker_client: Arc<dyn DockerClient>,
     ) -> Result<Self> {
-        Self::init(config, executor, docker_client)
+        Self::init(config, executor, docker_client, None)
     }
 
     /// Convert filtered tags to upstream releases (semver mode).
