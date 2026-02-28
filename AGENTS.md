@@ -281,6 +281,11 @@ These are non-negotiable design constraints. Do not violate them.
    Tokio's auto-advance fires pool-internal timers prematurely, causing spurious
    `ConnectionAcquire(Timeout)` failures under stress (nextest `--stress-count`). See
    [Testing](docs/development/testing.md).
+   **Exception 3:** Code that calls `OffsetDateTime::now_utc()` (wall-clock time, not Tokio time)
+   cannot use `start_paused = true` — it has no effect on real wall-clock time. Instead, inject a
+   `Arc<dyn Fn() -> OffsetDateTime + Send + Sync>` clock and advance it in tests using
+   `parking_lot::Mutex<OffsetDateTime>`. See `RateLimitStore::with_clock` for the canonical pattern and
+   [Testing § Wall-Clock Time Injection](docs/development/testing.md#wall-clock-time-injection).
 1. **Use `TenantDb` helpers for all tenant-scoped queries.** Never call `Entity::find().all(tenant_db.db())` directly
    on a `TenantScoped` entity — `tenant_db.db()` carries no tenant filter and loads all tenants' data. For entities
    that implement `TenantScoped`, always use `tenant_db.find::<E>()`, `.find_by_id::<E>(id)`, `.update_many::<E>()`,

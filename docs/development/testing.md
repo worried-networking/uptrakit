@@ -74,6 +74,76 @@ the paused state.
   under stress testing (nextest `--stress-count`). Keep DB-backed tests
   on real time and use only short real-time delays (under 200 ms) where
   needed.
+- Code that calls `OffsetDateTime::now_utc()` (wall-clock time, not
+  Tokio's virtual clock) cannot use `start_paused = true` — it has no
+  effect on `time::OffsetDateTime`. See
+  [**Wall-Clock Time Injection**](#wall-clock-time-injection) below.
+
+## Wall-Clock Time Injection
+
+`start_paused = true` only affects Tokio's virtual clock — calls to
+`tokio::time::sleep`, `tokio::time::Instant::now`, etc. It has **no
+effect** on `time::OffsetDateTime::now_utc()`, which always returns real
+wall-clock time.
+
+Code that uses `OffsetDateTime::now_utc()` for logic (e.g., rate-limit
+windows, expiry checks) must inject a clock to remain deterministic in
+tests.
+
+### Canonical pattern
+
+Use `Arc<dyn Fn() -> OffsetDateTime + Send + Sync>` as the clock type
+and `parking_lot::Mutex<OffsetDateTime>` (a workspace dependency) to
+advance it in tests:
+
+```rust
+// --- In production code ---
+pub struct MyStore {
+    db: DatabaseConnection,
+    now: Arc<dyn Fn() -> OffsetDateTime + Send + Sync>,
+}
+
+impl MyStore {
+    pub fn new(db: DatabaseConnection) -> Self {
+        Self { db, now: Arc::new(OffsetDateTime::now_utc) }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_clock(
+        db: DatabaseConnection,
+        now: Arc<dyn Fn() -> OffsetDateTime + Send + Sync>,
+    ) -> Self {
+        Self { db, now }
+    }
+}
+
+// Replace every OffsetDateTime::now_utc() call inside the struct with:
+let now = (self.now)();
+
+// --- In tests (no start_paused, no DB backdating) ---
+let clock = Arc::new(parking_lot::Mutex::new(OffsetDateTime::now_utc()));
+let clock_fn: Arc<dyn Fn() -> OffsetDateTime + Send + Sync> = {
+    let c = Arc::clone(&clock);
+    Arc::new(move || *c.lock())
+};
+let store = MyStore::with_clock(db, clock_fn);
+
+// Advance the clock past the expiry window:
+*clock.lock() += time::Duration::seconds(120);
+```
+
+See `RateLimitStore::with_clock` (`crates/ui/web-api/src/auth/rate_limit.rs`)
+for the canonical example.
+
+### Rules
+
+- Do **not** add `start_paused = true` to tests that use wall-clock
+  injection — those tests do not call Tokio time APIs.
+- Do **not** backdate database rows directly (fragile: column rename
+  silently breaks the test and does not exercise the production code
+  path).
+- The `#[cfg(test)] with_clock` constructor is the only approved
+  alternative constructor for types with injectable clocks.
 
 ## Testing Expectations -- Overview
 

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use thiserror::Error;
@@ -29,14 +31,45 @@ pub enum RateLimitOutcome {
 /// Uses a sliding-window counter per key (typically `{path}:{ip}`).
 /// HA-safe: all state is in the database, so multiple controller instances
 /// share the same rate limit buckets.
+///
+/// The `now` clock is injectable for deterministic testing (see
+/// [`RateLimitStore::with_clock`]).  Production code uses
+/// `OffsetDateTime::now_utc` via [`RateLimitStore::new`].
 #[derive(Clone)]
 pub struct RateLimitStore {
     db: DatabaseConnection,
+    now: Arc<dyn Fn() -> OffsetDateTime + Send + Sync>,
 }
 
 impl RateLimitStore {
     pub fn new(db: DatabaseConnection) -> Self {
-        Self { db }
+        Self {
+            db,
+            now: Arc::new(OffsetDateTime::now_utc),
+        }
+    }
+
+    /// Construct a `RateLimitStore` with a custom clock.
+    ///
+    /// Use this in tests to advance time without touching the database or
+    /// Tokio's virtual clock.  See [`parking_lot::Mutex<OffsetDateTime>`] for
+    /// the canonical pattern.
+    ///
+    /// ```ignore
+    /// let clock = Arc::new(parking_lot::Mutex::new(OffsetDateTime::now_utc()));
+    /// let clock_fn: Arc<dyn Fn() -> OffsetDateTime + Send + Sync> = {
+    ///     let c = Arc::clone(&clock);
+    ///     Arc::new(move || *c.lock())
+    /// };
+    /// let store = RateLimitStore::with_clock(db, clock_fn);
+    /// *clock.lock() += time::Duration::seconds(120); // advance time
+    /// ```
+    #[cfg(test)]
+    pub(crate) fn with_clock(
+        db: DatabaseConnection,
+        now: Arc<dyn Fn() -> OffsetDateTime + Send + Sync>,
+    ) -> Self {
+        Self { db, now }
     }
 
     /// Check (and count) a request against the rate limit for `key`.
@@ -55,7 +88,7 @@ impl RateLimitStore {
         max_requests: i32,
         window_secs: i64,
     ) -> Result<RateLimitOutcome> {
-        let now = OffsetDateTime::now_utc();
+        let now = (self.now)();
         let window = time::Duration::seconds(window_secs);
         let threshold = now - window;
         let expires_at = now + time::Duration::seconds(window_secs * 2);
@@ -154,8 +187,12 @@ impl RateLimitStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
     use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, Set};
+
+    use super::*;
 
     async fn test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");
@@ -250,10 +287,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_expired_window_resets() {
+        // Uses an injectable clock so we can advance wall-clock time without
+        // touching Tokio's virtual clock or backdating database rows.
+        //
+        // Note: start_paused = true is NOT used here because this test does
+        // not call any Tokio time API (sleep / advance / Instant::now).  See
+        // docs/development/testing.md §"Wall-Clock Time Injection".
         let db = test_db().await;
-        let store = RateLimitStore::new(db.clone());
+        let clock = Arc::new(Mutex::new(OffsetDateTime::now_utc()));
+        let clock_fn: Arc<dyn Fn() -> OffsetDateTime + Send + Sync> = {
+            let c = Arc::clone(&clock);
+            Arc::new(move || *c.lock())
+        };
+        let store = RateLimitStore::with_clock(db, clock_fn);
 
-        // Use up all 10 requests
+        // Exhaust the window.
         for _ in 0..10 {
             store
                 .check_rate_limit("test:127.0.0.1", 10, 60)
@@ -261,24 +309,17 @@ mod tests {
                 .expect("check");
         }
 
-        // Verify we're limited
+        // Verify we're limited.
         let outcome = store
             .check_rate_limit("test:127.0.0.1", 10, 60)
             .await
             .expect("check");
         assert!(matches!(outcome, RateLimitOutcome::Limited { .. }));
 
-        // Backdate the window_start to make the window expired
-        let past = OffsetDateTime::now_utc() - time::Duration::seconds(120);
-        let model = api_rate_limit::ActiveModel {
-            key: Set("test:127.0.0.1".to_string()),
-            window_start: Set(past),
-            request_count: Set(10),
-            expires_at: Set(past + time::Duration::seconds(120)),
-        };
-        model.update(&db).await.expect("backdate");
+        // Advance the clock past the window — no DB writes, no Tokio time.
+        *clock.lock() += time::Duration::seconds(120);
 
-        // Should be allowed again (window expired, resets)
+        // The window has now expired; the next request must reset the counter.
         let outcome = store
             .check_rate_limit("test:127.0.0.1", 10, 60)
             .await
