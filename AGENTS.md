@@ -249,8 +249,11 @@ These are non-negotiable design constraints. Do not violate them.
    requirements in [docs/development/coding-standards.md](docs/development/coding-standards.md): define typed errors
    with `thiserror` and attach/propagate context with `rootcause` (including match-with-fallback and serialization
    helper patterns where applicable).
-   **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe
-   because `panic = "abort"` in the release profile makes lock poisoning impossible.
+   **Approved exceptions**: `RwLock::read().unwrap()` and `RwLock::write().unwrap()` on `std::sync::RwLock`
+   are safe because `panic = "abort"` in the release profile makes lock poisoning impossible. However,
+   prefer `parking_lot::Mutex` (workspace dependency) over `std::sync::Mutex` in all async code —
+   `parking_lot::Mutex::lock()` returns the guard directly with no `Result`, so no `.unwrap()` is
+   needed at all. See [Coding Standards — Synchronous Locks in Async Code](docs/development/coding-standards.md#synchronous-locks-in-async-code).
 1. **Use `StatusCode` for HTTP status codes.** Never compare against numeric literals (`== 404`, `>= 400`). Use
    `reqwest::StatusCode` variants (`StatusCode::NOT_FOUND`, `StatusCode::FORBIDDEN`) and helper methods
    (`.is_client_error()`, `.is_success()`). Store status codes as `StatusCode`, not `u16`, in error enums and structs.
@@ -265,13 +268,19 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Do not test upstream crate behavior.** Tests must verify internal logic only -- not the behavior of dependencies
    like `thiserror` formatting, `serde` roundtrips on plain derives, or `argon2` salt randomness. See the decision
    table in [Testing Expectations](docs/development/testing.md).
-1. **Tests must use `start_paused = true` -- never real sleeps.** All time-dependent tests must use virtual time via
-   `#[tokio::test(start_paused = true)]` and `tokio::time::advance()` for deterministic, fast execution. Do not call
-   `tokio::time::pause()` explicitly inside the test body; the attribute starts the runtime paused from the very
-   beginning. **Exception 1:** Docker-based integration tests (`#[ignore]`) that wait for real external processes.
-   **Exception 2:** Tests that use SQLx/SeaORM database connections must NOT use `start_paused = true` — Tokio's
-   auto-advance fires pool-internal timers prematurely, causing spurious `ConnectionAcquire(Timeout)` failures under
-   stress (nextest `--stress-count`). See [Testing](docs/development/testing.md).
+1. **Time-dependent tests must use `start_paused = true` — never real sleeps.** A test is
+   *time-dependent* when it calls any of `tokio::time::sleep()`, `tokio::time::timeout()`,
+   `tokio::time::advance()`, `tokio::time::Instant::now()`, or `tokio::time::interval()` inside the
+   test body. Such tests must use virtual time via `#[tokio::test(start_paused = true)]` and
+   `tokio::time::advance()` for deterministic, fast execution. Tests that do not call any Tokio time
+   API do **not** need `start_paused = true` — adding it to non-time-dependent tests is incorrect.
+   Do not call `tokio::time::pause()` explicitly inside the test body; the attribute starts the runtime
+   paused from the very beginning.
+   **Exception 1:** Docker-based integration tests (`#[ignore]`) that wait for real external processes.
+   **Exception 2:** Tests that use SQLx/SeaORM database connections must NOT use `start_paused = true` —
+   Tokio's auto-advance fires pool-internal timers prematurely, causing spurious
+   `ConnectionAcquire(Timeout)` failures under stress (nextest `--stress-count`). See
+   [Testing](docs/development/testing.md).
 1. **Use `TenantDb` helpers for all tenant-scoped queries.** Never call `Entity::find().all(tenant_db.db())` directly
    on a `TenantScoped` entity — `tenant_db.db()` carries no tenant filter and loads all tenants' data. For entities
    that implement `TenantScoped`, always use `tenant_db.find::<E>()`, `.find_by_id::<E>(id)`, `.update_many::<E>()`,

@@ -73,8 +73,7 @@ No high availability issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/plugin.rs` -- All async plugin tests use bare `#[tokio::test]`. Per
-`testing.md`, `start_paused = true` is required for all async tests.
+No coding standards issues found.
 
 ## Extensibility
 

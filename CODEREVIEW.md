@@ -19,9 +19,8 @@ for the enrollment-lifecycle-reconnect flow shared across all service binaries.
 
 Key areas for improvement: the `web-api` crate at ~32K LoC is approaching "god crate" territory
 and would benefit from decomposition; the wire protocol file (`wire/src/lib.rs`) at 3.5K lines
-should be split into domain modules; the systemic `#[tokio::test]` violation (273+ tests without
-`start_paused = true`) should be addressed with a bulk annotation pass; and several remaining HA concerns (in-memory-only token denylist) should be addressed before
-multi-instance deployment. The previously-reported SSRF in Docker auth realm, the OIDC
+should be split into domain modules; and several remaining HA concerns (in-memory-only token
+denylist) should be addressed before multi-instance deployment. The previously-reported SSRF in Docker auth realm, the OIDC
 privilege escalation via `unwrap_or(0)`, all `#[cfg(not(feature))]` violations, the unbounded
 MQTT event channel, and the scheduler claim leak on cancellation have been fixed. The OIDC
 registration DB error masking (`unwrap_or(1)`), `count_linked_hosts` DB error swallowing,
@@ -223,11 +222,6 @@ migration and method marked `#[deprecated]` or `pub(crate)`.
 
 ### Issues
 
-**[HIGH]** Workspace-wide (273+ `#[tokio::test]` across 56 `.rs` files) -- Systemic violation
-of `start_paused = true` invariant. Of 295 total `#[tokio::test]` annotations, only 9 across 4
-files use `start_paused = true`. Even tests that appear time-insensitive today become flaky when
-future refactors introduce timeouts. Requires bulk annotation pass and CI grep gate.
-
 **[HIGH]** `crates/ui/cli/src/main.rs` -- At 3,870 lines (including ~1,500 lines of tests),
 this is the largest single file.
 
@@ -235,8 +229,6 @@ this is the largest single file.
 inline unit tests. `hosts.rs`, `agents.rs`, `settings_ca.rs`, `settings_mqtt.rs`,
 `oidc_providers.rs`, `server_cert.rs`, `settings_auth.rs`, and `ocsp.rs` carry no
 `#[cfg(test)]` module.
-
-**[MEDIUM]** No CI gate or lint enforces the `#[tokio::test(start_paused = true)]` invariant.
 
 **[MEDIUM]** `crates/ui/web-api/src/routes/software_items.rs:98,102` and
 `crates/shared/scheduler-engine/src/executors/version_check.rs:44,51` -- `NoopCommandExecutor`
@@ -310,8 +302,7 @@ insufficient for `release_all_claims` under slow database.
 
 ### Issues
 
-**[MEDIUM]** `crates/shared/web-api-types/src/permissions.rs:9` -- `Permission` enum lacks
-`#[non_exhaustive]`.
+No coding standards issues found.
 
 ## Extensibility
 
@@ -338,12 +329,6 @@ insufficient for `release_all_claims` under slow database.
 use `#[serde(tag = "type")]` without a catch-all variant. Unknown message types from a newer peer
 cause deserialization errors and are irreversibly lost.
 
-**[MEDIUM]** 13 public enums across `shared-types`, `web-api-types`, `wire`, `command`, and
-`plugin-infrastructure-core` lack `#[non_exhaustive]`: `DeviceAuthStatus`, `ServiceStatus`,
-`SoftwareDiscoveryState`, `OutputStreamType`, `MqttClientConnectionStatus`, `Permission`,
-`UpdateStatus`, `PluginError`, `ScheduledTaskType`, `HookCommand`, `CommandMode`,
-`MqttTransport`, `RegistrationMode`.
-
 **[MEDIUM]** `crates/plugins/infrastructure/registry/src/registry.rs:257-279` --
 `validate_package_identifier` manually maintained outside the `register_plugins!` macro.
 
@@ -355,7 +340,3 @@ object-safe due to associated constants. No documentation or `where Self: Sized`
 
 **[LOW]** No explicit wire protocol version number. A `protocol_version: u8` in `EnrollPayload`
 would provide a safety valve for hard protocol breaks.
-
-**[LOW]** 7 public enums in `uptrakit-web-api-types` lack `#[non_exhaustive]`:
-`AlertSeverity`, `TriggerUpdateStatus`, `UpdateStatus`, `RegistrationMode`, `SystemdAction`,
-`DockerComposeAction`, `PredefinedHook`.

@@ -61,10 +61,7 @@ No security issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/version_check.rs` and `src/update.rs` -- Eight async tests use bare
-`#[tokio::test]`. The `update.rs` module uses `tokio::time::timeout` in production code,
-creating a maintenance hazard if tests are ever time-sensitive. Per `testing.md`,
-`start_paused = true` is required for all async tests.
+No code quality issues found.
 
 ## High Availability
 

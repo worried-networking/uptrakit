@@ -156,15 +156,6 @@ claims held by this controller remain locked for the 600-second `STALE_CLAIM_SEC
 A domain-appropriate timeout (30-60 seconds) for the scheduler specifically, distinct from the
 generic 5-second default, would be safer.
 
-**[MEDIUM]** `src/reconcile.rs:157,182,206,237,268` -- Five `reconcile_setting` tests use
-`#[tokio::test]` without `start_paused = true`. Per `testing.md`, all async tests require
-`start_paused = true`.
-
-**[MEDIUM]** `src/scheduler/claim.rs:253,272,285,309,332,342,354,374` -- Eight scheduler claim
-tests use `#[tokio::test]` without `start_paused = true`. Notably,
-`recover_stale_claims_only_old_enough` tests time-dependent logic but uses
-`OffsetDateTime::now_utc()` with manual arithmetic rather than virtual time.
-
 **[MEDIUM]** `src/main.rs:83` -- `.expect("valid directive")` on `directive.parse()`. While
 the string literal is hard-coded and always valid, this establishes a pattern that could be
 copied incorrectly.

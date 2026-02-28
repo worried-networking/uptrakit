@@ -103,9 +103,34 @@ changes for downstream consumers. External crates matching on these enums must i
 
 Enums currently annotated with `#[non_exhaustive]`:
 
-- `PluginType` (`shared-types`)
-- `ServiceMessage`, `ControllerMessage` (`wire`)
-- `PluginCapability` (`plugin-infrastructure-core`)
+**`uptrakit-shared-types`:**
+
+- `PluginType`
+- `SoftwareDiscoveryState`
+- `MqttTransport`
+- `MqttClientConnectionStatus`
+- `OutputStreamType`
+- `DeviceAuthStatus`
+- `ServiceStatus`
+
+**`uptrakit-internal-wire`:**
+
+- `HookCommand`
+- `CloseReason`
+- `ServiceMessage`, `ControllerMessage`
+
+**`uptrakit-web-api-types`:**
+
+- `AlertSeverity`
+- `TriggerUpdateStatus`
+- `Permission`
+- `UpdateStatus`
+- `RegistrationMode`
+- `SystemdAction`, `DockerComposeAction`, `PredefinedHook`
+
+**`uptrakit-plugin-infrastructure-core`:**
+
+- `PluginCapability`
 
 When adding a new public enum, apply `#[non_exhaustive]` by default unless the enum is explicitly guaranteed to be closed (e.g., a two-variant
 boolean-like enum).
@@ -334,10 +359,11 @@ PLAINTEXT_MODE.load(Ordering::Relaxed);
 at minimum `Release`/`Acquire` ordering. `Relaxed` is only acceptable for pure counters or
 statistics where stale reads have no correctness impact.
 
-## Synchronous Locks in Async Middleware
+## Synchronous Locks in Async Code
 
-When a synchronous mutex is required inside async middleware (e.g., a fallback rate limiter),
-use `parking_lot::Mutex` rather than `std::sync::Mutex`:
+When a synchronous mutex is required anywhere in async code (e.g., a cached token, a fallback
+rate limiter, or any short-lived critical section without `.await` across the lock), use
+`parking_lot::Mutex` rather than `std::sync::Mutex`:
 
 - **Sub-microsecond critical sections** with no `.await` across the lock make a sync mutex
   correct (no risk of holding across a yield point).
@@ -554,11 +580,19 @@ if let Err(e) = req.validate() {
 
 ### Currently validated request types
 
-| Type | Key validations | | --- | --- | | `RegisterRequest` | email format (contains `@`, max 254 chars), `first_name` non-empty, password 8-1024
-chars | | `LoginRequest` | email format, password non-empty | | `CreateOidcProviderRequest` | name non-empty, slug format (lowercase+digits+hyphens,
-1-64), issuer_url scheme, client_id non-empty | | `UpdateScheduledTaskRequest` | cron_expression non-empty, 5 whitespace-separated fields | |
-`UpdateNetworkSettingsRequest` | trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format | | `CreateSoftwareItemRequest` | name
-non-empty, exactly one of plugin_config_id/plugin_config | | `CreatePluginConfigRequest` | name non-empty |
+| Type | Key validations |
+| --- | --- |
+| `RegisterRequest` | email format (contains `@`, max 254 chars), `first_name` non-empty, password 8–1024 chars |
+| `LoginRequest` | email format, password non-empty |
+| `CreateOidcProviderRequest` | name non-empty, slug format (lowercase+digits+hyphens, 1–64), issuer_url scheme, client_id non-empty |
+| `UpdateScheduledTaskRequest` | cron_expression non-empty, 5 whitespace-separated fields |
+| `UpdateNetworkSettingsRequest` | trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format |
+| `CreateSoftwareItemRequest` | name non-empty, exactly one of plugin_config_id/plugin_config |
+| `CreatePluginConfigRequest` | name non-empty |
+| `CreateApiTokenRequest` | `name` non-empty (after trim) |
+| `CreateEnrollmentTokenRequest` | `name` non-empty; `max_uses` if present must be > 0; `expires_in_seconds` if present must be > 0 |
+| `UpdateServiceRequest` | `ping_interval_seconds` if present must be 0 (sentinel: clear override) or ≥ 5 |
+| `CreateAutodiscoveryIgnoreRequest` | `package_identifier` non-empty (after trim) |
 
 See also: the `update_hooks.rs` module provides a similar validation pattern (`HookValidationError`) for hook configuration types.
 

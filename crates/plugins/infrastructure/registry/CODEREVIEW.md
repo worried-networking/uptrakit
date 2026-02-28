@@ -74,10 +74,7 @@ No high availability issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/registry.rs` -- No `#[must_use]` on `mask_config_secrets` and
-`mask_config_secrets_str`. Both return a `serde_json::Value` representing the masked config.
-If a caller forgets to use the return value, masking has no effect. Adding `#[must_use]` would
-produce a compiler warning.
+No coding standards issues found.
 
 ## Extensibility
 

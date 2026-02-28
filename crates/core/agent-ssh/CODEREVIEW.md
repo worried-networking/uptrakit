@@ -159,11 +159,6 @@ tests using a mock `ControllerConnection` and an in-memory DB.
 tested, but the CLI-to-ops translation (key reading, encryption, field mapping, stdout
 formatting) is exercised only by manual invocation.
 
-**[MEDIUM]** `src/ssh_transport.rs:457,480,502,525,540,559,575,595,619,630` and
-`host_ops.rs:237-509` and `db/mod.rs:28,44` -- All 24 agent-ssh async tests use
-`#[tokio::test]` without `start_paused = true`. Several `ssh_transport.rs` tests exercise
-timeout and connection logic. Per `testing.md`, all async tests require `start_paused = true`.
-
 **[MEDIUM]** `src/commands/update_sudoers.rs:72` -- `.expect("length checked above")` after a
 `match matches.len()` guard. Logically safe but fragile to refactoring. Replace with
 `.into_iter().next().ok_or_else(...)`.

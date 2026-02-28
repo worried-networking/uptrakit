@@ -21,8 +21,6 @@ since package identifiers flow into shell commands via `CommandSpec`. The test s
 comprehensive for the parsing and validation logic, with 30+ unit tests covering all parsing
 helpers, edge cases, and mock-executor-driven async paths.
 
-The main areas for improvement are minor: the `AptError::ParseOutput` variant is defined but
-never used, and the async tests do not use `start_paused = true` per project testing standards.
 No critical or high-severity issues were found.
 
 ## Architecture
@@ -95,11 +93,6 @@ No security issues found.
 
 ### Issues
 
-**[LOW]** `src/error.rs:11` -- `AptError::ParseOutput(String)` is defined but never
-constructed anywhere in the crate. All parsing functions return `Option` or `Vec` instead of
-using this error variant. Either remove the dead variant or use it in the parsing functions
-for clearer error reporting when parse failures occur.
-
 **[LOW]** `src/plugin.rs:35-37` -- The `let Some(first) = value.chars().next() else` guard
 is unreachable because the empty check at line 24 already returns `Err` when `value.is_empty()`.
 The redundant check does not cause incorrect behavior but adds dead code to the validation
@@ -150,10 +143,7 @@ No high availability issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/plugin.rs:657-770` -- All seven async tests use bare `#[tokio::test]`
-instead of `#[tokio::test(start_paused = true)]`. Per the project testing standard in
-`AGENTS.md`, all async tests must use `start_paused = true` for deterministic execution.
-These tests do not involve database connections, so the SQLx exception does not apply.
+No coding standards issues found.
 
 ## Extensibility
 

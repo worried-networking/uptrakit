@@ -18,9 +18,9 @@ The code quality is high overall, with comprehensive test coverage spanning vali
 parsing, registry response handling, and async plugin trait methods using a well-designed
 `FixedOutputExecutor` mock. Error handling is consistent, using the `rootcause` framework
 throughout. The registry integration correctly handles dist-tag deduplication for pre-release
-versions and gracefully degrades on parsing failures. Notable areas for improvement include the lack of HTTP timeouts on the reqwest client and
-the absence of retry logic for transient network failures. The hardcoded
-registry URL limits private registry support.
+versions and gracefully degrades on parsing failures. Notable areas for improvement include the
+absence of retry logic for transient network failures and the hardcoded registry URL, which
+limits private registry support.
 
 ## Architecture
 
@@ -64,10 +64,7 @@ plugin instances and makes the HTTP layer harder to mock in integration tests.
 
 ### Issues
 
-**[MEDIUM]** `plugin.rs:140-150` -- The reqwest client is built without connect or
-request timeouts. A slow or unresponsive registry could cause the plugin to hang
-indefinitely, creating a denial-of-service vector. Timeouts (e.g., 30s connect, 60s
-total) should be configured on the client builder.
+No security issues found.
 
 ## Code Quality
 

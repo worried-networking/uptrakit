@@ -80,10 +80,6 @@ comment stating the deliberate choice would make the security posture self-docum
 
 ### Issues
 
-**[MEDIUM]** `src/mqtt_client.rs:445` and `src/tenant_manager.rs:344,353,361,383` -- Five mqtt
-crate tests use bare `#[tokio::test]`. One sibling test correctly uses `start_paused = true`
-(`shutdown_task` at line 453), demonstrating inconsistency.
-
 **[LOW]** `src/main.rs:221` -- `&uuid::Uuid::now_v7().to_string()[..8]` uses byte-offset slicing
 on a UTF-8 string. UUID v7 string representation is always ASCII and this is safe, but the
 pattern is fragile. Consider `.chars().take(8).collect::<String>()`.

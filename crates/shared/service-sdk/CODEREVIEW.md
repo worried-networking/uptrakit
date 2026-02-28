@@ -85,10 +85,6 @@ unit test coverage. This is the central bootstrap-enrollment-reconnect loop. The
 `ServiceHandler` trait is designed for mockability but no test exercises the lifecycle state
 machine.
 
-**[MEDIUM]** `src/cert_handler.rs:293,312,324,345,436` -- Five `CertificateRenewalHandler` tests
-use bare `#[tokio::test]`. Same file has correctly-annotated tests at lines 385, 397, 411 --
-inconsistency within one file.
-
 **[LOW]** `src/event_loop.rs:105` -- `expect()` on `ping_timer` inside `tokio::select!` arm is
 not an approved exception. Guarded by `is_some()` check so will never fire. Refactor to pattern
 match to eliminate the `expect()`.

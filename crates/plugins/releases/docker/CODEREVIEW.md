@@ -53,9 +53,7 @@ No security issues found.
 
 ### Issues
 
-**[LOW]** `src/auth.rs` -- `Mutex::lock().unwrap()` on `cached_token` uses
-`std::sync::Mutex` in an async context. Risks blocking the Tokio runtime thread if contended.
-`tokio::sync::Mutex` would be idiomatic.
+No code quality issues found.
 
 ## High Availability
 

@@ -164,7 +164,3 @@ No coding standards issues found.
 MQTT concerns without structural separation. When a new `ServiceHandler` author writes a custom
 service role, they face a flat enum with no type-level guidance about which variants are
 relevant. This is a latent correctness hazard as new service roles are added.
-
-**[LOW]** `src/lib.rs:160-177` -- `HookCommand` enum is not `#[non_exhaustive]`. Nested within
-`ExecuteUpdatePayload`, which crosses the wire boundary. Older agents would fail to deserialize
-new hook types.

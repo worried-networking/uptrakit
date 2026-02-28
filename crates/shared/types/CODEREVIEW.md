@@ -10,11 +10,7 @@
 used throughout the workspace: `PluginType`, `HookShell`, `SecretString`, `ServiceStatus`,
 `DeviceAuthStatus`, `MqttTransport`, and more. Each type follows a consistent pattern: typed
 `FromStr` with a dedicated error type, `Display` via `as_str()`, and optional SeaORM/OpenAPI
-integration behind feature gates. The crate is high quality with no Critical or High issues.
-
-The main concern is that several public enums that could plausibly gain new variants in future
-releases lack `#[non_exhaustive]`, unlike the wire-protocol enums in `uptrakit-internal-wire`
-which correctly apply it.
+integration behind feature gates. The crate is high quality with no outstanding issues.
 
 ## Architecture
 
@@ -96,10 +92,4 @@ No coding standards issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/software_discovery_state.rs:23`, `src/service_status.rs`,
-`src/output_stream_type.rs`, `src/mqtt_connection_status.rs`, `src/device_auth_status.rs` --
-Five public domain enums lack `#[non_exhaustive]` despite being cross-crate types.
-`SoftwareDiscoveryState`, `ServiceStatus`, `OutputStreamType`, `MqttClientConnectionStatus`,
-and `DeviceAuthStatus` could plausibly gain new variants. This is inconsistent with
-`PluginType` and `HookShell` which correctly have the attribute. Similarly, `MqttTransport`
-in `src/mqtt_transport.rs` lacks it.
+No extensibility issues found.

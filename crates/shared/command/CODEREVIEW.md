@@ -92,9 +92,7 @@ No high availability issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/command.rs` and `src/executor.rs` -- 21 tests use bare `#[tokio::test]`.
-Only 2 of 5 executor tests use `start_paused`. Per `testing.md`, `start_paused = true` is
-required for all async tests regardless of time-dependence.
+No coding standards issues found.
 
 ## Extensibility
 

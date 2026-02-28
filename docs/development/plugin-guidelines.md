@@ -227,6 +227,38 @@ re-exports commonly needed types:
 
 See [Dependency Policy](dependency-policy.md) for the full re-export strategy.
 
+## HTTP Client Requirements
+
+Any plugin that builds its own `reqwest::Client` (e.g. for fetching upstream release metadata) **must**
+configure at minimum a connect timeout and a total request timeout. An unconfigured client will hang
+indefinitely against an unresponsive or slow registry, creating a denial-of-service vector against the
+agent or controller process that loaded the plugin.
+
+```rust
+use std::time::Duration;
+
+let client = reqwest::Client::builder()
+    .user_agent(concat!(
+        "uptrakit-plugin-my-plugin/",
+        env!("CARGO_PKG_VERSION")
+    ))
+    .connect_timeout(Duration::from_secs(10))   // prevents hangs on unreachable hosts
+    .timeout(Duration::from_secs(60))            // caps total request duration
+    .build()
+    .context_to::<MyPluginError>()?;
+```
+
+**Required timeouts:**
+
+- `.connect_timeout(Duration::from_secs(10))` — prevents hanging on a host that accepts the TCP
+  connection but never sends data.
+- `.timeout(Duration::from_secs(60))` — caps the total wall-clock time of any single request
+  (connect + read + write). Adjust upward only for endpoints with documented large response bodies.
+
+**User-Agent:** Set a descriptive `User-Agent` that includes the crate name and version so that
+upstream services can identify traffic originating from uptrakit. Use `env!("CARGO_PKG_VERSION")` to
+keep the version in sync automatically.
+
 ## Command Executor Pattern
 
 Plugins do not spawn processes directly. Instead, each plugin receives an `Arc<dyn CommandExecutor>`
