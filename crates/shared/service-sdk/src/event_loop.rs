@@ -102,7 +102,12 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
             }
 
             // 2. Ping keepalive (only active after ServiceSettings arrives).
-            _ = async { ping_timer.as_mut().expect("ping timer should be set").tick().await }, if ping_timer.is_some() => {
+            // The `if ping_timer.is_some()` guard ensures we only enter this
+            // branch when the timer is set; the inner `if let` avoids the
+            // `.expect()` call while communicating the same invariant.
+            // The trailing `;` discards the `Instant` return so both branches
+            // of the `if let` return `()`, which tokio's select! requires.
+            _ = async { if let Some(t) = ping_timer.as_mut() { t.tick().await; } }, if ping_timer.is_some() => {
                 let service_ts = now_millis();
                 tracing::trace!(service_ts, "sending ping");
                 conn.send(ServiceMessage::Ping(PingPayload { service_ts }))

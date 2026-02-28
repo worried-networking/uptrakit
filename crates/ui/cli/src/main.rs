@@ -981,12 +981,15 @@ async fn run(cli: Cli) -> error::Result<()> {
             3 => "uptrakit=debug",
             _ => "uptrakit=trace",
         };
+        let filter = EnvFilter::from_default_env();
+        let filter = if let Ok(d) = directive.parse() {
+            filter.add_directive(d)
+        } else {
+            filter
+        };
         tracing_subscriber::fmt()
             .with_writer(std::io::stderr)
-            .with_env_filter(
-                EnvFilter::from_default_env()
-                    .add_directive(directive.parse().expect("valid directive")),
-            )
+            .with_env_filter(filter)
             .init();
     }
 

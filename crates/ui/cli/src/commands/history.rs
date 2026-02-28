@@ -113,7 +113,7 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<UpdateHist
             .status
             .map(|s| s.parse())
             .transpose()
-            .map_err(|e: ParseUpdateStatusError| Report::new(CliError::Other(e.to_string())))?,
+            .map_err(|e: ParseUpdateStatusError| report!(CliError::Other(e.to_string())))?,
         page: params.page,
         per_page: params.per_page,
     };

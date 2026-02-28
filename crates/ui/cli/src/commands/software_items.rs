@@ -420,13 +420,11 @@ pub async fn update_latest(params: UpdateLatestParams<'_>) -> Result<TriggerUpda
         .or(detail.latest_version.clone());
 
     let Some(version) = latest_version else {
-        use crate::error::CliError;
-        use rootcause::report;
-        return Err(report!(CliError::Other(format!(
+        bail!(crate::error::CliError::Other(format!(
             "No latest version known for software item {}.\n\
              Run `uptrakit check item {}` first, or use `uptrakit update trigger` to specify a version explicitly.",
             params.id, params.id
-        ))));
+        )));
     };
 
     let req = TriggerUpdateRequest {

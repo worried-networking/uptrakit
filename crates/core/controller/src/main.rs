@@ -77,12 +77,13 @@ async fn main() -> std::process::ExitCode {
         2 => "uptrakit=debug",
         _ => "uptrakit=trace",
     };
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env()
-                .add_directive(directive.parse().expect("valid directive")),
-        )
-        .init();
+    let filter = EnvFilter::from_default_env();
+    let filter = if let Ok(d) = directive.parse() {
+        filter.add_directive(d)
+    } else {
+        filter
+    };
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     // Dispatch optional subcommands before entering the normal server path.
     if let Some(cli::ControllerCommand::DbMigrate(ref db_args)) = args.command {

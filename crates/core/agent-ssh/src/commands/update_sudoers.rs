@@ -73,7 +73,10 @@ async fn resolve_host(
         match matches.len() {
             0 => bail!(Error::HostNotFound(name_or_id.to_string())),
             1 => Ok((
-                matches.into_iter().next().expect("length checked above"),
+                matches
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| report!(Error::HostNotFound(name_or_id.to_string())))?,
                 target.username,
             )),
             _ => bail!(Error::InvalidInput(format!(
@@ -115,7 +118,11 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
         .unwrap_or(false);
 
     if auth_override {
-        let override_user = url_username.as_deref().expect("checked above");
+        let override_user = url_username.as_deref().ok_or_else(|| {
+            report!(Error::InvalidInput(
+                "expected username from SSH address but none was present".to_string()
+            ))
+        })?;
         connect_username = override_user;
         auth = match (
             &args.auth_password,

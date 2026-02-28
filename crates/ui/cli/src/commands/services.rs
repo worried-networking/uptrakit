@@ -143,7 +143,7 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<ServiceRes
         ListServicesQuery {
             capability: params.capability.map(|s| s.to_string()),
             status: params.status.map(|s| s.parse()).transpose().map_err(
-                |e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())),
+                |e: ParseServiceStatusError| report!(CliError::Other(e.to_string())),
             )?,
             page: params.page,
             per_page: params.per_page,
