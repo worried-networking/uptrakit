@@ -18,7 +18,7 @@ mod renewal;
 mod updates;
 
 pub(crate) use discovery::trigger_discovery_for_agent_host;
-use mqtt::handle_mqtt_register_phase;
+use mqtt::{complete_mqtt_registration, handle_mqtt_register_handshake};
 use updates::{deliver_pending_updates, load_linked_host_ids};
 
 use std::collections::{BTreeSet, HashSet};
@@ -182,10 +182,12 @@ pub(crate) async fn handle_authenticated_loop(
     }
 
     // ------------------------------------------------------------------
-    // MQTT pre-loop phase: wait for Register, set up leases
+    // MQTT pre-loop phase: wait for Register message (handshake only)
     // ------------------------------------------------------------------
-    let mqtt_context = if is_mqtt {
-        match handle_mqtt_register_phase(
+    // Lease assignment happens AFTER service registration so that capacity
+    // queries inside the lease coordinator can find the service entry.
+    let mqtt_handshake = if is_mqtt {
+        match handle_mqtt_register_handshake(
             sink,
             stream,
             state,
@@ -196,24 +198,24 @@ pub(crate) async fn handle_authenticated_loop(
         )
         .await
         {
-            Some(ctx) => Some(ctx),
-            None => return, // registration failed or connection closed
+            Some(h) => Some(h),
+            None => return, // connection closed before Register
         }
     } else {
         None
     };
 
     // ------------------------------------------------------------------
-    // Register in service_connections
+    // Register in service_connections (must happen before lease assignment)
     // ------------------------------------------------------------------
-    let (mut push_rx, cancel_token) = if let Some(ref mctx) = mqtt_context {
+    let (mut push_rx, cancel_token) = if let Some(ref h) = mqtt_handshake {
         state
             .service_connections
             .register(
                 service_id,
                 capabilities.clone(),
-                Some(mctx.instance_id.clone()),
-                Some(mctx.max_tenants),
+                Some(h.instance_id.clone()),
+                Some(h.max_tenants),
             )
             .await
     } else {
@@ -221,6 +223,16 @@ pub(crate) async fn handle_authenticated_loop(
             .service_connections
             .register(service_id, capabilities.clone(), None, None)
             .await
+    };
+
+    // ------------------------------------------------------------------
+    // MQTT post-registration: assign/reconcile leases now that the service
+    // entry exists in the registry
+    // ------------------------------------------------------------------
+    let mqtt_context = if let Some(h) = mqtt_handshake {
+        Some(complete_mqtt_registration(state, service_id, h).await)
+    } else {
+        None
     };
 
     // ------------------------------------------------------------------

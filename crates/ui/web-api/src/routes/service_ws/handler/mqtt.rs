@@ -26,26 +26,38 @@ use crate::routes::service_ws::protocol::{
 };
 
 // ---------------------------------------------------------------------------
-// MqttContext
+// MqttHandshake / MqttContext
 // ---------------------------------------------------------------------------
 
-/// Context returned by the MQTT register phase.
-pub(super) struct MqttContext {
+/// Intermediate result of the MQTT `Register` handshake.
+///
+/// Returned before the service is registered in `ServiceConnectionRegistry`
+/// so that the caller can register first, then call
+/// [`complete_mqtt_registration`] to assign or reconcile leases.
+pub(super) struct MqttHandshake {
     pub(super) instance_id: String,
     pub(super) max_tenants: u32,
+    pub(super) active_mqtt_clients: Vec<uuid::Uuid>,
+}
+
+/// Full MQTT context available after registration and lease assignment.
+pub(super) struct MqttContext {
+    pub(super) instance_id: String,
     pub(super) tenant_configs: Vec<MqttTenantConfig>,
 }
 
 // ---------------------------------------------------------------------------
-// handle_mqtt_register_phase
+// handle_mqtt_register_handshake
 // ---------------------------------------------------------------------------
 
-/// Handle the MQTT Register handshake (pre-loop phase).
+/// Wait for the MQTT `Register` message and return a [`MqttHandshake`].
 ///
-/// Waits for a `Register` message, reconciles or assigns tenants, and returns
-/// the MQTT context. Returns `None` if the connection is closed or the phase
-/// fails.
-pub(super) async fn handle_mqtt_register_phase(
+/// This is the first phase of MQTT setup and deliberately does **not** touch
+/// `ServiceConnectionRegistry` or perform any lease operations.  The caller
+/// must register the service before calling [`complete_mqtt_registration`].
+///
+/// Returns `None` if the connection is closed or the phase fails.
+pub(super) async fn handle_mqtt_register_handshake(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
@@ -53,8 +65,7 @@ pub(super) async fn handle_mqtt_register_phase(
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
     rate_limiter: &mut MessageRateLimiter,
-) -> Option<MqttContext> {
-    // Wait for Register message.
+) -> Option<MqttHandshake> {
     let (instance_id, max_tenants, active_mqtt_clients) = loop {
         let msg = match stream.next().await {
             Some(Ok(m)) => m,
@@ -124,14 +135,33 @@ pub(super) async fn handle_mqtt_register_phase(
         }
     };
 
-    // Create lease coordinator for tenant reconciliation.
+    Some(MqttHandshake {
+        instance_id,
+        max_tenants,
+        active_mqtt_clients,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// complete_mqtt_registration
+// ---------------------------------------------------------------------------
+
+/// Assign or reconcile MQTT tenant leases after service registration.
+///
+/// Must be called **after** the service has been added to
+/// `ServiceConnectionRegistry` so that capacity queries succeed.
+/// Returns the [`MqttContext`] used by the main authenticated loop.
+pub(super) async fn complete_mqtt_registration(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    handshake: MqttHandshake,
+) -> MqttContext {
     let lease_coordinator =
         MqttLeaseCoordinator::new(state.db().clone(), state.service_connections.clone());
 
-    // Reconcile MQTT clients if reconnecting with active clients.
-    let tenant_configs = if !active_mqtt_clients.is_empty() {
+    let tenant_configs = if !handshake.active_mqtt_clients.is_empty() {
         match lease_coordinator
-            .reconcile_mqtt_clients(service_id, &instance_id, &active_mqtt_clients)
+            .reconcile_mqtt_clients(service_id, &handshake.instance_id, &handshake.active_mqtt_clients)
             .await
         {
             Ok(configs) => configs,
@@ -141,9 +171,9 @@ pub(super) async fn handle_mqtt_register_phase(
             }
         }
     } else {
-        let requested = if max_tenants == 0 { 100 } else { max_tenants };
+        let requested = if handshake.max_tenants == 0 { 100 } else { handshake.max_tenants };
         match lease_coordinator
-            .assign_available_tenants(service_id, &instance_id, requested)
+            .assign_available_tenants(service_id, &handshake.instance_id, requested)
             .await
         {
             Ok(configs) => configs,
@@ -154,11 +184,10 @@ pub(super) async fn handle_mqtt_register_phase(
         }
     };
 
-    Some(MqttContext {
-        instance_id,
-        max_tenants,
+    MqttContext {
+        instance_id: handshake.instance_id,
         tenant_configs,
-    })
+    }
 }
 
 // ---------------------------------------------------------------------------
