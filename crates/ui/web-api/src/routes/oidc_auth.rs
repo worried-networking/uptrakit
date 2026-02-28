@@ -71,13 +71,19 @@ struct ExtractedOidcClaims {
 pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
     let auth_settings = state.settings.authentication();
 
-    let providers = OidcProvider::find()
+    let providers = match OidcProvider::find()
         .filter(oidc_provider::Column::TenantId.eq(state.default_tenant_id))
         .filter(oidc_provider::Column::IsActive.eq(true))
         .filter(oidc_provider::Column::DeactivatedAt.is_null())
         .all(state.db())
         .await
-        .unwrap_or_default();
+    {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(err = %e, "Failed to load OIDC providers");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     let oidc_providers: Vec<OidcProviderInfo> = providers
         .into_iter()
@@ -89,11 +95,13 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
         })
         .collect();
 
-    let setup_required = User::find()
-        .count(state.db())
-        .await
-        .map(|c| c == 0)
-        .unwrap_or(false);
+    let setup_required = match User::find().count(state.db()).await {
+        Ok(count) => count == 0,
+        Err(e) => {
+            tracing::error!(err = %e, "Failed to count users for setup check");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     let reg_settings = state.settings.registration();
     let registration_token_required = reg_settings.needs_token_for_oidc(setup_required);

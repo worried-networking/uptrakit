@@ -114,7 +114,10 @@ async fn authenticate_api_token(
     // Fetch permissions from DB
     let permissions = get_user_permissions(state.db(), state.default_tenant_id, user_id)
         .await
-        .unwrap_or_default();
+        .map_err(|e| {
+            tracing::error!(err = %e, user_id = %user_id, "Failed to load user permissions");
+            AuthFailure::InternalError
+        })?;
 
     Ok(AuthenticatedUser {
         user_id,
