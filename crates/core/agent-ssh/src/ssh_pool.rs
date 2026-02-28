@@ -115,14 +115,23 @@ impl SshConnectionPool {
         );
         let session = establish_session(host).await?;
 
-        // Store in the pool under the lock.
-        self.sessions.lock().await.insert(
-            host.id.clone(),
-            PoolEntry {
-                session: Arc::clone(&session),
-                last_used: Instant::now(),
-            },
-        );
+        // Re-acquire the lock and use the Entry API to handle a concurrent
+        // acquire() that may have inserted a session while we were connecting.
+        let session = {
+            let mut pool = self.sessions.lock().await;
+            match pool.entry(host.id.clone()) {
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    Arc::clone(&v.insert(PoolEntry { session, last_used: Instant::now() }).session)
+                }
+                std::collections::hash_map::Entry::Occupied(mut o) => {
+                    // A concurrent acquire() beat us to the insert — reuse its
+                    // session and let our newly-established one drop (russh
+                    // closes the TCP connection on Drop).
+                    o.get_mut().last_used = Instant::now();
+                    Arc::clone(&o.get().session)
+                }
+            }
+        };
 
         Ok(session)
     }
@@ -180,6 +189,7 @@ impl SshConnectionPool {
     pub async fn len(&self) -> usize {
         self.sessions.lock().await.len()
     }
+
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -274,6 +284,53 @@ mod tests {
     async fn len_zero_for_empty_pool() {
         let pool = SshConnectionPool::new();
         assert_eq!(pool.len().await, 0);
+    }
+
+    // ── acquire() TOCTOU fix — Entry API semantics ───────────────────────────
+    //
+    // The TOCTOU race in acquire() is: two concurrent callers both see no
+    // cached entry, both call establish_session(), and then both try to insert.
+    // The fix uses HashMap::entry() so only one session is kept and the other
+    // is dropped immediately.
+    //
+    // SshSession requires a real TCP connection so we cannot create it in unit
+    // tests.  The Entry API logic is tested here at the HashMap level using a
+    // plain sentinel value as a proxy — this verifies that whichever "session"
+    // arrives at the occupied branch is discarded and the first-inserted value
+    // is returned, maintaining pool.len() == 1.
+
+    #[test]
+    fn entry_api_first_insert_wins_and_pool_stays_at_one() {
+        // Simulate the fixed code path in acquire() using a plain HashMap
+        // (same Entry API, same branch logic, no real SSH needed).
+        let mut map: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let host_id = "test-host-id";
+
+        // --- First "acquire" (vacant) ---
+        let first_id = 1u32;
+        let result1 = match map.entry(host_id.to_string()) {
+            std::collections::hash_map::Entry::Vacant(v) => *v.insert(first_id),
+            std::collections::hash_map::Entry::Occupied(o) => *o.get(),
+        };
+        assert_eq!(result1, first_id, "first insert should return inserted value");
+        assert_eq!(map.len(), 1, "pool must have exactly one entry after first insert");
+
+        // --- Second "acquire" (occupied — concurrent caller beat us) ---
+        let second_id = 2u32;
+        let result2 = match map.entry(host_id.to_string()) {
+            std::collections::hash_map::Entry::Vacant(v) => *v.insert(second_id),
+            // Occupied → reuse existing; second_id is dropped (never stored).
+            std::collections::hash_map::Entry::Occupied(o) => *o.get(),
+        };
+        assert_eq!(
+            result2, first_id,
+            "concurrent insert must return the first-inserted session"
+        );
+        assert_eq!(
+            map.len(),
+            1,
+            "pool must still have exactly one entry after concurrent insert"
+        );
     }
 
     // Acquire with a real SSH server is covered by ignored integration tests.
