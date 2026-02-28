@@ -13,6 +13,9 @@ use crate::service_connections::ServiceConnectionRegistry;
 pub struct NotificationService {
     registry: ServiceConnectionRegistry,
     controller_id: Uuid,
+    /// Tracks whether a NATS transport has been attached. Always present so
+    /// that `has_nats()` can be implemented without any `#[cfg]`.
+    nats_configured: bool,
     #[cfg(feature = "nats")]
     nats: Option<crate::nats_transport::NatsTransport>,
 }
@@ -22,6 +25,7 @@ impl NotificationService {
         Self {
             registry,
             controller_id,
+            nats_configured: false,
             #[cfg(feature = "nats")]
             nats: None,
         }
@@ -31,19 +35,13 @@ impl NotificationService {
     #[cfg(feature = "nats")]
     pub fn with_nats(mut self, nats: crate::nats_transport::NatsTransport) -> Self {
         self.nats = Some(nats);
+        self.nats_configured = true;
         self
     }
 
     /// Returns `true` if a NATS transport is configured.
     pub fn has_nats(&self) -> bool {
-        #[cfg(feature = "nats")]
-        {
-            self.nats.is_some()
-        }
-        #[cfg(not(feature = "nats"))]
-        {
-            false
-        }
+        self.nats_configured
     }
 
     /// Push a message to a specific service (local + optional NATS).
@@ -155,11 +153,11 @@ impl NotificationService {
                 msg,
             )
             .await;
+            return;
         }
-        #[cfg(not(feature = "nats"))]
-        {
-            let _ = (target_service_id, target_capability, msg);
-        }
+        // Suppress unused-variable warnings when nats feature is disabled or no
+        // transport is configured. Events are ephemeral; dropping them is safe.
+        let _ = (target_service_id, target_capability, msg);
     }
 }
 

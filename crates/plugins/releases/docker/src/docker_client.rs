@@ -13,13 +13,12 @@ use async_trait::async_trait;
 #[cfg(feature = "daemon")]
 use futures_util::StreamExt;
 use rootcause::prelude::*;
-#[cfg(not(feature = "daemon"))]
-use uptrakit_plugin_infrastructure_core::UpdateOutputLine;
 #[cfg(feature = "daemon")]
 use uptrakit_plugin_infrastructure_core::command::send_output;
 use uptrakit_plugin_infrastructure_core::mpsc;
 #[cfg(feature = "daemon")]
-use uptrakit_plugin_infrastructure_core::{OutputStreamType, UpdateOutputLine};
+use uptrakit_plugin_infrastructure_core::OutputStreamType;
+use uptrakit_plugin_infrastructure_core::UpdateOutputLine;
 
 use crate::config::DockerAuth;
 use crate::error::{DockerError, Result};
@@ -81,17 +80,17 @@ pub(crate) trait DockerClient: Send + Sync {
     async fn list_containers(&self, all: bool) -> Result<Vec<LocalContainerInfo>>;
 }
 
-// ── Noop implementation (when daemon is disabled) ───────────────────────────
+// ── Noop implementation (always available) ───────────────────────────────────
 
-/// Stub Docker client returned when the `daemon` feature is disabled.
+/// Stub Docker client that returns [`DockerError::Configuration`] for every
+/// operation.
 ///
-/// Every method returns [`DockerError::Configuration`], making it clear at
-/// runtime that local Docker daemon operations require a build with the
-/// `daemon` feature enabled.
-#[cfg(not(feature = "daemon"))]
+/// Used as a default when the `daemon` Cargo feature is disabled so the plugin
+/// can compile and serve registry-only capabilities without pulling in bollard
+/// and its TLS stack. It is always compiled (unconditionally) and replaced by
+/// [`BollardDockerClient`] at runtime when the `daemon` feature is enabled.
 pub(crate) struct NoopDockerClient;
 
-#[cfg(not(feature = "daemon"))]
 #[async_trait]
 impl DockerClient for NoopDockerClient {
     async fn ping(&self) -> Result<()> {
@@ -164,34 +163,35 @@ impl BollardDockerClient {
                     .context_to::<DockerError>()
             }
 
+            // SSH connector — only compiled when the `ssh` Cargo feature is
+            // enabled (openssh crate, system ssh binary with docker
+            // system-dial-stdio).  Pass the key path directly so the stored
+            // per-host key is used rather than falling back to ~/.ssh/.
+            #[cfg(feature = "ssh")]
             Some(h) if h.starts_with("ssh://") => {
-                #[cfg(feature = "ssh")]
-                {
-                    // Use bollard's first-class SSH connector (openssh crate, system ssh
-                    // binary with docker system dial-stdio).  Pass the key path directly
-                    // so the stored per-host key is used rather than relying on default
-                    // ~/.ssh/ locations.  When ssh_key_path is None bollard falls back to
-                    // SSH agent or default key files.
-                    bollard::Docker::connect_with_ssh(
-                        h,
-                        TIMEOUT,
-                        API_DEFAULT_VERSION,
-                        ssh_key_path.map(str::to_string),
-                    )
-                    .context_to::<DockerError>()
-                }
-                #[cfg(not(feature = "ssh"))]
-                {
-                    let _ = (h, ssh_key_path);
+                bollard::Docker::connect_with_ssh(
+                    h,
+                    TIMEOUT,
+                    API_DEFAULT_VERSION,
+                    ssh_key_path.map(str::to_string),
+                )
+                .context_to::<DockerError>()
+            }
+
+            Some(h) => {
+                // Give a clear error for SSH URLs when the `ssh` feature is
+                // disabled, rather than silently falling through to an HTTP
+                // connection attempt that would produce a confusing error.
+                if h.starts_with("ssh://") {
+                    let _ = ssh_key_path;
                     bail!(DockerError::Configuration(
                         "SSH Docker connections require the 'ssh' Cargo feature to be enabled"
                             .to_string()
-                    ))
+                    ));
                 }
+                bollard::Docker::connect_with_http(h, TIMEOUT, API_DEFAULT_VERSION)
+                    .context_to::<DockerError>()
             }
-
-            Some(h) => bollard::Docker::connect_with_http(h, TIMEOUT, API_DEFAULT_VERSION)
-                .context_to::<DockerError>(),
         }
     }
 }

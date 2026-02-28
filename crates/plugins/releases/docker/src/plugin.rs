@@ -17,9 +17,7 @@ use uptrakit_plugin_infrastructure_core::{
 use crate::config::{DockerConfig, TrackingMode};
 #[cfg(feature = "daemon")]
 use crate::docker_client::BollardDockerClient;
-use crate::docker_client::DockerClient;
-#[cfg(not(feature = "daemon"))]
-use crate::docker_client::NoopDockerClient;
+use crate::docker_client::{DockerClient, NoopDockerClient};
 use crate::error::{DockerError, Result};
 use crate::image_ref::ImageRef;
 use crate::registry::RegistryClient;
@@ -48,14 +46,32 @@ impl DockerPlugin {
     /// bollard. Without it, uses [`NoopDockerClient`] so the plugin can still
     /// serve registry-only capabilities (e.g. `ControllerSideFetchReleases`).
     pub fn new(config: DockerConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
+        // Always create a NoopDockerClient as the starting value.
+        // When the `daemon` feature is enabled, upgrade_to_daemon_client replaces it
+        // with a real BollardDockerClient, consuming the noop value in the process.
+        // This ensures NoopDockerClient is always constructed (no dead_code warning)
+        // and the initial binding is always read (no unused_assignments warning).
+        let docker_client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
         #[cfg(feature = "daemon")]
-        let docker_client: Arc<dyn DockerClient> = Arc::new(BollardDockerClient::new(
+        let docker_client = Self::upgrade_to_daemon_client(docker_client, &config)?;
+        Self::init(config, executor, docker_client)
+    }
+
+    /// Replace a stub Docker client with a real [`BollardDockerClient`].
+    ///
+    /// The `_stub` parameter is the [`NoopDockerClient`] created unconditionally
+    /// in [`Self::new`]. Accepting it here ensures the initial binding is read,
+    /// suppressing `unused_assignments` and `dead_code` lints, while making it
+    /// explicit that the daemon path fully replaces the stub.
+    #[cfg(feature = "daemon")]
+    fn upgrade_to_daemon_client(
+        _stub: Arc<dyn DockerClient>,
+        config: &DockerConfig,
+    ) -> Result<Arc<dyn DockerClient>> {
+        Ok(Arc::new(BollardDockerClient::new(
             config.docker_host.as_deref(),
             config.ssh_key_path.as_deref(),
-        )?);
-        #[cfg(not(feature = "daemon"))]
-        let docker_client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
-        Self::init(config, executor, docker_client)
+        )?))
     }
 
     /// Internal constructor that accepts any [`DockerClient`] implementation.
@@ -132,16 +148,13 @@ impl Plugin for DockerPlugin {
     }
 
     fn capabilities(&self) -> &'static [PluginCapability] {
-        #[cfg(feature = "daemon")]
-        {
+        if cfg!(feature = "daemon") {
             &[
                 PluginCapability::ControllerSideFetchReleases,
                 PluginCapability::DiscoverLocalSoftware,
                 PluginCapability::DetectHostCompatibility,
             ]
-        }
-        #[cfg(not(feature = "daemon"))]
-        {
+        } else {
             &[PluginCapability::ControllerSideFetchReleases]
         }
     }
