@@ -299,16 +299,9 @@ sequentially with no timeout.
 
 ### Issues
 
-**[CRITICAL]** `src/routes/oidc_auth.rs:425` -- `unwrap_or(0)` on auth-critical user count
-query. DB failure during this check could allow any OIDC user to become owner/admin. Must
-propagate as 500.
-
 **[HIGH]** `src/routes/hosts.rs:283-286` and `src/routes/autodiscovery.rs:48-51` -- Query
 parameters use `Option<String>` instead of `Option<Uuid>` for UUID fields, with manual parsing
 that silently ignores invalid UUIDs instead of returning 422.
-
-**[MEDIUM]** `src/notification_service.rs:43,159` -- Uses `#[cfg(not(feature = "nats"))]`
-(prohibited by coding standards).
 
 **[MEDIUM]** `src/lib.rs:57`, `routes/services.rs:429`, `routes/auth.rs:484`,
 `middleware/require_auth.rs:219`, `middleware/resolve_ip.rs:148` -- Uses `Report::new()` instead

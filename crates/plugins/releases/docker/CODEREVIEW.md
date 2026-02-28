@@ -12,9 +12,8 @@ Registry, and private registries with both basic and bearer authentication. The 
 handles all six reference formats correctly, and `DockerConfig` exposes `page_size` as a
 user-configurable field.
 
-The main concern is a Critical SSRF vulnerability in the Docker registry authentication flow where
-an attacker-controlled `realm` URL from a `WWW-Authenticate` header is followed without domain
-validation.
+The SSRF vulnerability in the Docker registry authentication flow has been fixed: the auth realm
+URL is now validated against the configured registry host before following it.
 
 ## Architecture
 
@@ -41,14 +40,7 @@ No architectural issues found.
 
 ### Issues
 
-**[CRITICAL]** `src/auth.rs:60-86` -- SSRF via attacker-controlled registry auth realm URL.
-The Docker registry authentication flow reads the `realm` URL from the `WWW-Authenticate`
-response header of an HTTP 401 response. The client then issues an HTTP GET to that realm URL
-with the registry credentials as query parameters. There is no validation that the realm URL
-belongs to the expected registry domain. A malicious registry (or DNS-hijacked registry) can
-return a `realm` pointing to an internal metadata endpoint (e.g.,
-`http://169.254.169.254/latest/meta-data/`), causing credential exfiltration. Fix: validate
-that the `realm` URL shares the same host as the configured registry URL.
+No security issues found.
 
 ## Code Quality
 

@@ -20,9 +20,11 @@ for the enrollment-lifecycle-reconnect flow shared across all service binaries.
 Key areas for improvement: the `web-api` crate at ~32K LoC is approaching "god crate" territory
 and would benefit from decomposition; the wire protocol file (`wire/src/lib.rs`) at 3.5K lines
 should be split into domain modules; the systemic `#[tokio::test]` violation (273+ tests without
-`start_paused = true`) should be addressed with a bulk annotation pass; and several HA concerns
-(unbounded channels, in-memory-only token denylist, claim release on cancellation) should be
-addressed before multi-instance deployment.
+`start_paused = true`) should be addressed with a bulk annotation pass; and several remaining HA
+concerns (in-memory-only token denylist, blocking Mutex in rate limiter) should be addressed
+before multi-instance deployment. The previously-reported SSRF in Docker auth realm, the OIDC
+privilege escalation via `unwrap_or(0)`, all `#[cfg(not(feature))]` violations, the unbounded
+MQTT event channel, and the scheduler claim leak on cancellation have been fixed.
 
 ## Per-Crate Review Files
 
@@ -280,14 +282,6 @@ verify delay durations. Eight tests assert only eventual success, not backoff ti
 
 ### Issues
 
-**[CRITICAL]** `crates/shared/scheduler-engine/src/scheduler.rs:175-183` -- Task cancellation
-during execution does not release the claim. When `token.is_cancelled()` fires, the scheduler
-breaks out of the iteration loop, skipping `release_claim`. Claim locked until
-`recover_stale_claims` (up to 10 minutes).
-
-**[CRITICAL]** `crates/core/mqtt/src/main.rs:198` -- Unbounded channel for MQTT service events.
-If the controller WebSocket is slow, events accumulate without limit.
-
 **[CRITICAL]** `crates/ui/web-api/src/middleware/rate_limit.rs:114-115` -- Fallback rate limiter
 uses `std::sync::Mutex` (blocking) in async context.
 
@@ -324,20 +318,9 @@ insufficient for `release_all_claims` under slow database.
 
 ### Issues
 
-**[CRITICAL]** `crates/ui/web-api/src/routes/oidc_auth.rs:425` -- `unwrap_or(0)` on
-auth-critical user count query. Database failure could allow any OIDC user to become
-owner/admin.
-
-**[HIGH]** `crates/plugins/releases/docker/src/plugin.rs:21,56,142` and
-`crates/plugins/releases/docker/src/docker_client.rs:16,83,86,169` -- 7+ instances of
-`#[cfg(not(feature = "X"))]` attribute-style conditionals, explicitly prohibited.
-
 **[HIGH]** `crates/ui/web-api/src/routes/hosts.rs:283-286` and
 `crates/ui/web-api/src/routes/autodiscovery.rs:48-51` -- Query parameters use `Option<String>`
 instead of `Option<Uuid>` for UUID fields, silently ignoring invalid UUIDs.
-
-**[MEDIUM]** `crates/ui/web-api/src/notification_service.rs:43,159` -- Uses
-`#[cfg(not(feature = "nats"))]` (2 instances).
 
 **[MEDIUM]** `crates/ui/web-api/src/lib.rs:57`, `routes/services.rs:429`,
 `routes/auth.rs:484`, `middleware/require_auth.rs:219`, `middleware/resolve_ip.rs:148` -- Uses

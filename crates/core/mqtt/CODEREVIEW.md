@@ -116,11 +116,6 @@ computation, not manager-level lifecycle behavior.
 
 ### Issues
 
-**[CRITICAL]** `src/main.rs:198` -- `tokio::sync::mpsc::unbounded_channel()` between
-`TenantManager` and `MqttHandler` has no backpressure. If the controller WebSocket is slow or
-temporarily blocked, MQTT events accumulate unboundedly in memory. Use a bounded channel
-(512-1024 capacity) with backpressure handling.
-
 **[HIGH]** `src/tenant_manager.rs:81-93` -- In `shutdown_all`, `self.clients` is consumed via
 `std::mem::take` at line 82, then `report_status` at line 90 uses `self.event_tx`. If the
 receiver has already been dropped, status reports are silently lost.
