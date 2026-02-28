@@ -491,15 +491,20 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(crate::routes::ocsp::ocsp_get),
         );
 
+    // Always serve the raw OpenAPI JSON at a stable URL.
+    let api_for_json = api.clone();
+    router = router.route(
+        "/api/openapi.json",
+        get(move || async move { axum::Json(api_for_json) }),
+    );
+
+    // When swagger-ui is compiled in, additionally serve the Swagger UI.
+    // It uses a separate spec path (/api/docs/openapi.json) to avoid
+    // conflicting with the always-present /api/openapi.json route.
     #[cfg(feature = "swagger-ui")]
     {
         use utoipa_swagger_ui::SwaggerUi;
-        router = router.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api));
-    }
-
-    #[cfg(not(feature = "swagger-ui"))]
-    {
-        router = router.route("/api/openapi.json", get(|| async move { axum::Json(api) }));
+        router = router.merge(SwaggerUi::new("/api/docs").url("/api/docs/openapi.json", api));
     }
 
     router

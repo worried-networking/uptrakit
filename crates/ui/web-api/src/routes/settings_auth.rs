@@ -93,8 +93,7 @@ pub async fn update_authentication_settings(
                 }
             }
 
-            #[cfg(not(feature = "oidc"))]
-            {
+            if !cfg!(feature = "oidc") {
                 return error_response(
                     StatusCode::CONFLICT,
                     "Cannot disable password authentication: OIDC support is not enabled",

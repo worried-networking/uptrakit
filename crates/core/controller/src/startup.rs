@@ -588,10 +588,13 @@ pub(crate) fn validate_configuration(
     args: &crate::cli::Args,
     reconciled: &ReconciledSettings,
 ) -> crate::Result<ValidatedConfig> {
-    #[cfg(not(feature = "embed-frontend"))]
-    let static_dir = resolve_static_dir(args.static_dir.clone())?;
-    #[cfg(feature = "embed-frontend")]
-    let static_dir: Option<PathBuf> = None;
+    // If --static-dir is given explicitly, always resolve and use it (overrides embedded assets).
+    // Without an explicit path: auto-detect only when embed-frontend is not compiled in.
+    let static_dir = if args.static_dir.is_some() || !cfg!(feature = "embed-frontend") {
+        resolve_static_dir(args.static_dir.clone())?
+    } else {
+        None
+    };
 
     // Validate TLS args
     if args.tls_cert.is_some() != args.tls_key.is_some() {
@@ -911,7 +914,9 @@ pub(crate) fn parse_master_key_hex(key_hex: &str) -> crate::Result<[u8; 32]> {
 /// If `--static-dir` is given, validates that it contains `index.html`.
 /// Otherwise, auto-detects by probing `frontend/build` and `frontend`
 /// relative to the current working directory.
-#[cfg(not(feature = "embed-frontend"))]
+///
+/// This function is always compiled so that `--static-dir` can override the
+/// embedded frontend assets even when the `embed-frontend` feature is active.
 fn resolve_static_dir(explicit: Option<PathBuf>) -> crate::Result<Option<PathBuf>> {
     if let Some(dir) = explicit {
         let index = dir.join("index.html");

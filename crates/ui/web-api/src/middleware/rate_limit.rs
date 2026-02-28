@@ -215,7 +215,6 @@ mod tests {
 
     #[test]
     fn rate_limited_paths_list() {
-        #[cfg(feature = "oidc")]
         let mut expected = vec![
             "/api/v1/auth/login",
             "/api/v1/auth/register",
@@ -224,23 +223,13 @@ mod tests {
             "/api/v1/auth/device/poll",
             "/api/v1/auth/device/approve",
         ];
-
-        #[cfg(not(feature = "oidc"))]
-        let expected = vec![
-            "/api/v1/auth/login",
-            "/api/v1/auth/register",
-            "/api/v1/auth/refresh",
-            "/api/v1/auth/device",
-            "/api/v1/auth/device/poll",
-            "/api/v1/auth/device/approve",
-        ];
-
-        #[cfg(feature = "oidc")]
-        expected.extend_from_slice(&[
-            "/api/v1/auth/oidc/exchange",
-            "/api/v1/auth/oidc/link",
-            "/api/v1/auth/oidc/complete-registration",
-        ]);
+        if cfg!(feature = "oidc") {
+            expected.extend_from_slice(&[
+                "/api/v1/auth/oidc/exchange",
+                "/api/v1/auth/oidc/link",
+                "/api/v1/auth/oidc/complete-registration",
+            ]);
+        }
 
         for path in &expected {
             assert!(
