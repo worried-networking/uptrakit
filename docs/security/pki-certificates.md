@@ -80,6 +80,16 @@ At startup, the controller validates the existing CA certificate's embedded URLs
 Changing the PKI address requires CA rotation (the URLs are embedded in the CA certificate). See the
 [reverse proxy security guide](reverse-proxy-security.md) for the full flow.
 
+### DER encoding implementation
+
+AIA and CDP extension bodies are manually DER-encoded in `crates/core/controller/src/pki.rs`.
+The encoder supports the 2-byte long-form length encoding (`0x82`), which covers extension bodies
+up to 65 535 bytes. Extension bodies exceeding this limit are rejected with `PkiError::LengthOverflow`
+rather than silently truncating the high byte and producing a structurally malformed extension.
+
+In practice, AIA/CDP extension bodies are small (two or three short URLs; typically under 300 bytes)
+so the overflow guard is a safety net, not an expected code path.
+
 ## OCSP Responder
 
 The controller provides an OCSP responder at `/api/v1/pki/ocsp` (both POST and GET). It accepts standard RFC 6960 OCSP

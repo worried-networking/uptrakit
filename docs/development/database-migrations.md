@@ -178,6 +178,56 @@ manager
     .await?;
 ```
 
+### Avoiding duplicate indexes
+
+A `UNIQUE` constraint (created via `.unique_key()` on a column, `string_uniq()`, or
+`Index::create().unique()`) already creates an implicit index in all three supported
+backends (SQLite, PostgreSQL, MySQL). Do **not** add a separate non-unique index on the same
+column — it wastes disk space and slows every write:
+
+```rust
+// ✗ Wrong — the UNIQUE key already creates an index on "slug"
+.col(ColumnDef::new(Tenant::Slug).string().not_null().unique_key())
+// ... and then separately ...
+manager.create_index(
+    Index::create().name("idx_tenants_slug").table(Tenant::Table).col(Tenant::Slug)
+        .to_owned(),
+).await?;
+
+// ✓ Correct — the unique constraint's implicit index is sufficient
+.col(ColumnDef::new(Tenant::Slug).string().not_null().unique_key())
+```
+
+The only case where an explicit index alongside a unique constraint is justified is a
+**partial (filtered) unique index**, which requires raw SQL via `execute_unprepared()`:
+
+```sql
+CREATE UNIQUE INDEX uq_plugin_configs_active_name
+    ON plugin_configs (name) WHERE deactivated_at IS NULL;
+```
+
+### Composite indexes for multi-column queries
+
+When a query filters or sorts on multiple columns together (e.g.
+`WHERE user_id = ? ORDER BY expires_at`), create a composite index covering both columns
+in query order:
+
+```rust
+manager
+    .create_index(
+        Index::create()
+            .name("idx_sessions_user_expires")
+            .table(Sessions::Table)
+            .col(Sessions::UserId)       // equality filter — leftmost
+            .col(Sessions::ExpiresAt)    // range/sort — second
+            .to_owned(),
+    )
+    .await?;
+```
+
+Column order matters: put the equality-filtered column first; the range or sort column
+second. The composite index also supports single-column lookups on the leftmost column.
+
 ### Checklist when adding a new table
 
 For each new table, verify:

@@ -45,6 +45,72 @@ Enums currently annotated with `#[non_exhaustive]`:
 When adding a new public enum, apply `#[non_exhaustive]` by default unless the enum is explicitly guaranteed to be closed (e.g., a two-variant
 boolean-like enum).
 
+## Feature Flags
+
+All feature flags in this workspace are **additive** — enabling a feature adds functionality;
+it never removes or restricts code compiled without the feature.
+
+### Additive-only rule
+
+**Never** use `#[cfg(not(feature = "X"))]` attribute-style conditionals. This syntax makes
+feature `X` subtract from the binary, which violates the additive model and can cause
+incorrect builds when features are combined.
+
+Instead, use the `cfg!()` macro in expression position:
+
+```rust
+// ✓ Correct — expression form; compiles the same code path in all builds
+if !cfg!(feature = "embed-frontend") {
+    let dir = resolve_static_dir(args.static_dir.clone())?;
+    // ...
+}
+
+// ✗ Wrong — attribute conditionally excludes a function from the compilation unit
+#[cfg(not(feature = "embed-frontend"))]
+fn resolve_static_dir(...) -> Result<Option<PathBuf>> { ... }
+```
+
+The expression form `cfg!(feature = "X")` evaluates to a `bool` at compile time (the dead
+branch is eliminated by the optimizer), but every code path still compiles under every
+feature combination — which is what "additive" means.
+
+**Exception:** `#[cfg(feature = "X")]` (without `not`) is allowed for blocks that are
+*purely additive* — they add code only when the feature is enabled and are never present
+in the base build. Only `#[cfg(not(feature = "X"))]` is prohibited.
+
+### Additive patterns in tests
+
+Test modules that vary expected values by feature should build a single vec and extend it:
+
+```rust
+let mut expected = vec!["/api/v1/auth/login", /* ... */];
+if cfg!(feature = "oidc") {
+    expected.extend_from_slice(&["/api/v1/auth/oidc/exchange", /* ... */]);
+}
+```
+
+This keeps a single test that compiles and runs correctly under every feature combination.
+
+### Additive route registration
+
+When a route is only meaningful with a specific feature (e.g. Swagger UI), use
+`#[cfg(feature = "swagger-ui")]` on the *additive* registration block only — never to
+remove an existing route:
+
+```rust
+// Always present — raw JSON route is always available
+router = router.route("/api/openapi.json", get(json_handler));
+
+// Additive — UI overlay only when the feature is enabled
+#[cfg(feature = "swagger-ui")]
+{
+    use utoipa_swagger_ui::SwaggerUi;
+    router = router.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api));
+}
+```
+
+See also: [Embedded Frontend](embedded-frontend.md) for the `embed-frontend` feature pattern.
+
 ## Design Principles
 
 - Keep every boundary clear: the controller orchestrates scheduling, upstream checks, API/UI; the MQTT service handles MQTT/Home Assistant
@@ -140,7 +206,7 @@ impl FromStr for MyType {
 
 - **Ad-hoc `parse(&str)` methods** returning `Option<Self>` or `Result<Self, String>` -- always implement `FromStr` instead.
 
-The full error handling reference (19 patterns, anti-patterns, decision table, approved exceptions, and rules summary)
+The full error handling reference (20 patterns, anti-patterns, decision table, approved exceptions, and rules summary)
 is in [Error Handling](error-handling.md).
 
 ## Request Type Validation

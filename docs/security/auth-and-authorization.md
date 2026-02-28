@@ -77,6 +77,37 @@ or linked for an unverified email regardless of `auto_create` or role-mapping co
 See also: [`docs/development/coding-standards.md`](../development/coding-standards.md) for the security guard
 placement convention.
 
+## Database Error Propagation in Auth Handlers
+
+Database errors in authentication and authorization handlers must always propagate as HTTP 500
+Internal Server Error. **Silently defaulting on DB failure is a security defect, not a
+graceful fallback.**
+
+### Why defaults are dangerous
+
+| Site | Anti-pattern | Effect |
+| --- | --- | --- |
+| `require_auth.rs` — load user permissions | `.unwrap_or_default()` | DB outage → empty permission set → 403 Forbidden; legitimate requests blocked silently |
+| `oidc_auth.rs` — count existing users | `.unwrap_or(false)` | DB outage → assume zero users → unintended first-admin OIDC registration allowed |
+| `oidc_auth.rs` — list OIDC providers | `.unwrap_or_default()` | DB outage → empty provider list → correct behavior obscured, outage masked |
+
+### Required pattern
+
+All auth-path DB queries must be propagated with `?` after mapping to an appropriate error:
+
+```rust
+// ✓ Correct — DB outage surfaces as 500; access never silently granted or denied
+let permissions = get_user_permissions(db, user_id)
+    .await
+    .map_err(|e| {
+        tracing::error!(err = %e, user_id = %user_id, "failed to load user permissions");
+        AuthFailure::InternalError
+    })?;
+```
+
+See [Error Handling — Pattern 20](../development/error-handling.md#pattern-20-db-errors-in-authentication-and-authorization-handlers)
+for the full pattern with examples.
+
 ## OIDC Link Token URL Exposure
 
 **Risk level:** Low (accepted)

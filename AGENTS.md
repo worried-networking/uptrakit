@@ -224,6 +224,13 @@ These are non-negotiable design constraints. Do not violate them.
    codebase; all previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead
    code removal. Workspace lints (`[workspace.lints]` in root `Cargo.toml`) enforce `warnings = "deny"` and
    `clippy::all = "deny"` across all crates via `[lints] workspace = true`.
+1. **Feature flags are additive only.** `#[cfg(not(feature = "X"))]` is **prohibited**. This attribute makes feature
+   `X` subtract from the binary, breaking additive semantics and producing incorrect builds when features are combined.
+   Use the `cfg!()` macro in expression position instead: `if !cfg!(feature = "embed-frontend") { ... }`. The expression
+   form compiles all code paths regardless of enabled features; the dead branch is eliminated by the optimizer. The sole
+   allowed exception is `#[cfg(feature = "X")]` (without `not`) on purely additive blocks — code that only exists when
+   the feature is enabled. See [Feature Flags](docs/development/coding-standards.md#feature-flags) in the coding
+   standards for patterns and examples.
 1. **Use `FromStr` for all string-to-type conversions.** Do not add ad-hoc `parse(&str)` methods. Follow the pattern in
    [docs/development/coding-standards.md](docs/development/coding-standards.md) (section "String-to-Type Conversions"):
    typed `Parse{TypeName}Error`, `impl FromStr`, and `s.parse::<MyType>()` at call sites. Route handlers accepting

@@ -401,6 +401,44 @@ fn rejects_empty_input() {
 
 This is more resilient than string matching because it survives error message changes.
 
+### Pattern 20: DB errors in authentication and authorization handlers
+
+When a database query determines an authentication or authorization outcome, propagate DB
+failures as a 500 Internal Server Error. **Never silently substitute a default on DB failure.**
+
+Two dangerous anti-patterns:
+
+```rust
+// ✗ Wrong — DB outage silently grants empty permissions → 403 Forbidden instead of 500
+let permissions = get_user_permissions(db, user_id)
+    .await
+    .unwrap_or_default();
+
+// ✗ Wrong — DB outage returns 0 users, allowing unintended first-admin OIDC registration
+let user_count = User::find().count(db).await.unwrap_or(false);
+```
+
+The correct pattern propagates the error:
+
+```rust
+// ✓ Correct — DB outage becomes 500; access is never silently granted or denied
+let permissions = get_user_permissions(db, user_id)
+    .await
+    .map_err(|e| {
+        tracing::error!(err = %e, user_id = %user_id, "failed to load user permissions");
+        AuthFailure::InternalError
+    })?;
+```
+
+This rule applies to all queries whose result controls access decisions:
+
+- Loading user permissions (affects 403/200 outcome)
+- Counting users for first-admin detection (affects whether new admin registration is allowed)
+- Querying revocation lists or session validity
+
+Outside of auth paths, `unwrap_or_default()` on non-critical display queries (e.g. a count
+displayed in a dashboard) is covered by Pattern 16.
+
 ## Mutex and RwLock Locks
 
 The release profile uses `panic = "abort"`, so lock poisoning **cannot occur in production**. `.unwrap()` is allowed
