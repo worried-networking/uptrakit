@@ -150,6 +150,42 @@ pub async fn list_update_history(
         .map(|si| (si.id, si.name))
         .collect();
 
+    // Batch-load output lines for records that used the streaming path
+    // (inline `output` column is empty for those).  A single query covers all
+    // such records instead of one query per record (N+1 avoidance).
+    let streamed_ids: Vec<uuid::Uuid> = records
+        .iter()
+        .filter(|r| r.output.is_empty())
+        .map(|r| r.id)
+        .collect();
+
+    let all_lines: HashMap<uuid::Uuid, String> = if streamed_ids.is_empty() {
+        HashMap::new()
+    } else {
+        let rows = update_output_line::Entity::find()
+            .filter(
+                update_output_line::Column::UpdateHistoryId.is_in(streamed_ids),
+            )
+            .order_by_asc(update_output_line::Column::CreatedAt)
+            .order_by_asc(update_output_line::Column::Id)
+            .all(tenant_db.db())
+            .await?;
+
+        let mut map: HashMap<uuid::Uuid, String> = HashMap::new();
+        for line in rows {
+            let entry = map.entry(line.update_history_id).or_default();
+            if entry.len() < UPDATE_OUTPUT_BYTES_CAP {
+                let remaining = UPDATE_OUTPUT_BYTES_CAP.saturating_sub(entry.len());
+                if line.output.len() <= remaining {
+                    entry.push_str(&line.output);
+                } else {
+                    entry.push_str(&line.output[..remaining]);
+                }
+            }
+        }
+        map
+    };
+
     let items: Vec<UpdateHistoryResponse> = records
         .iter()
         .map(|record| {
@@ -161,7 +197,12 @@ pub async fn list_update_history(
                 .get(&record.software_item_id)
                 .cloned()
                 .unwrap_or_else(|| "Unknown Software Item".to_string());
-            build_response(record, host_name, si_name, record.output.clone())
+            let output = if record.output.is_empty() {
+                all_lines.get(&record.id).cloned().unwrap_or_default()
+            } else {
+                record.output.clone()
+            };
+            build_response(record, host_name, si_name, output)
         })
         .collect();
 
