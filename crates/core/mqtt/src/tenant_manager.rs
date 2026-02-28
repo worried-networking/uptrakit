@@ -93,8 +93,12 @@ impl TenantManager {
         while tasks.next().await.is_some() {}
     }
 
-    /// Store new software state data for a tenant and push to all HA-enabled
+    /// Store new software state data for a tenant and push to all connected
     /// clients for that tenant.
+    ///
+    /// State and version topics are published for every connected client.
+    /// Home Assistant discovery config topics are published only for clients
+    /// that have `ha_discovery` enabled.
     pub async fn update_software_states(
         &mut self,
         payload: uptrakit_internal_wire::MqttSoftwareStatesPayload,
@@ -102,21 +106,40 @@ impl TenantManager {
         self.software_states
             .insert(payload.tenant_id, payload.items.clone());
 
-        // Collect client IDs for this tenant that have HA discovery enabled.
+        // Collect client IDs for this tenant (all of them, not just HA-enabled).
         let client_ids: Vec<uuid::Uuid> = self
             .clients
             .iter()
-            .filter(|(_, s)| s.tenant_id == payload.tenant_id && s.ha_discovery)
+            .filter(|(_, s)| s.tenant_id == payload.tenant_id)
             .map(|(id, _)| *id)
             .collect();
 
         for client_id in client_ids {
-            self.publish_ha_state_full(client_id, &payload.items).await;
+            self.publish_software_states(client_id, &payload.items).await;
         }
     }
 
-    /// Called on MQTT broker reconnect: republish HA discovery configs and state.
+    /// Called on MQTT broker reconnect: republish all state and discovery topics.
+    ///
+    /// Republishes both state/version topics (for all clients) and HA discovery
+    /// config topics (only for HA-enabled clients) from the in-memory cache.
     pub async fn handle_reconnected(&mut self, mqtt_client_id: &uuid::Uuid) {
+        let Some(state) = self.clients.get(mqtt_client_id) else {
+            return;
+        };
+        let tenant_id = state.tenant_id;
+        if let Some(items) = self.software_states.get(&tenant_id).cloned() {
+            self.publish_software_states(*mqtt_client_id, &items).await;
+        }
+    }
+
+    /// Called when HA sends its birth message (restarted): republish only HA
+    /// discovery config topics.
+    ///
+    /// State and version topics are retained on the broker and do not need
+    /// re-sending after an HA restart. Only the HA entity discovery configs
+    /// need to be republished so that HA re-registers the `update` entities.
+    pub async fn handle_ha_online(&mut self, mqtt_client_id: &uuid::Uuid) {
         let Some(state) = self.clients.get(mqtt_client_id) else {
             return;
         };
@@ -125,13 +148,8 @@ impl TenantManager {
         }
         let tenant_id = state.tenant_id;
         if let Some(items) = self.software_states.get(&tenant_id).cloned() {
-            self.publish_ha_state_full(*mqtt_client_id, &items).await;
+            self.publish_ha_configs_only(*mqtt_client_id, &items).await;
         }
-    }
-
-    /// Called when HA sends its birth message (restarted): republish discovery configs.
-    pub async fn handle_ha_online(&mut self, mqtt_client_id: &uuid::Uuid) {
-        self.handle_reconnected(mqtt_client_id).await;
     }
 
     /// Given an inbound MQTT command topic, resolve it to an
@@ -219,7 +237,123 @@ impl TenantManager {
         }
     }
 
-    async fn publish_ha_state_full(
+    /// Publish software state topics and subscribe to command topics for all
+    /// `(item, host)` pairs, then publish HA discovery config topics for clients
+    /// that have `ha_discovery` enabled.
+    ///
+    /// Called on every `SoftwareStates` push and on broker reconnect.
+    async fn publish_software_states(
+        &self,
+        mqtt_client_id: uuid::Uuid,
+        items: &[uptrakit_internal_wire::MqttSoftwareStateItem],
+    ) {
+        let Some(state) = self.clients.get(&mqtt_client_id) else {
+            return;
+        };
+
+        let tenant_id = state.tenant_id;
+        let topic_prefix = &state.topic_prefix;
+        let ha_prefix = &state.ha_discovery_prefix;
+
+        for item in items {
+            for host in &item.hosts {
+                // Always: publish installed version (empty string if unknown).
+                let st = crate::ha_discovery::state_topic(
+                    topic_prefix,
+                    item.software_item_id,
+                    host.host_id,
+                );
+                let installed = host
+                    .installed_version
+                    .as_deref()
+                    .unwrap_or("")
+                    .as_bytes()
+                    .to_vec();
+                if let Err(e) = state.handle.publish_retained(&st, installed).await {
+                    tracing::warn!(
+                        error = ?e,
+                        %mqtt_client_id,
+                        "failed to publish state topic"
+                    );
+                }
+
+                // Always: publish latest version.
+                let lt = crate::ha_discovery::latest_version_topic(
+                    topic_prefix,
+                    item.software_item_id,
+                    host.host_id,
+                );
+                let latest = host
+                    .latest_version
+                    .as_deref()
+                    .unwrap_or("")
+                    .as_bytes()
+                    .to_vec();
+                if let Err(e) = state.handle.publish_retained(&lt, latest).await {
+                    tracing::warn!(
+                        error = ?e,
+                        %mqtt_client_id,
+                        "failed to publish latest version topic"
+                    );
+                }
+
+                // Always: subscribe to command topic.
+                let ct = crate::ha_discovery::command_topic(
+                    topic_prefix,
+                    item.software_item_id,
+                    host.host_id,
+                );
+                if let Err(e) = state.handle.subscribe_topic(&ct).await {
+                    tracing::warn!(
+                        error = ?e,
+                        %mqtt_client_id,
+                        "failed to subscribe to command topic"
+                    );
+                }
+
+                // HA-only: publish HA discovery config so HA creates an update entity.
+                if state.ha_discovery {
+                    let uid = crate::ha_discovery::unique_id(
+                        tenant_id,
+                        item.software_item_id,
+                        host.host_id,
+                    );
+                    let config_topic =
+                        crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
+                    let config_json = crate::ha_discovery::build_discovery_config(
+                        ha_prefix,
+                        topic_prefix,
+                        tenant_id,
+                        item.software_item_id,
+                        host.host_id,
+                        &item.name,
+                        &host.hostname,
+                    );
+                    let config_bytes = config_json.to_string().into_bytes();
+                    if let Err(e) = state
+                        .handle
+                        .publish_retained(&config_topic, config_bytes)
+                        .await
+                    {
+                        tracing::warn!(
+                            error = ?e,
+                            %mqtt_client_id,
+                            "failed to publish HA discovery config"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Republish only the Home Assistant discovery config topics for an
+    /// HA-enabled client.
+    ///
+    /// Used exclusively by [`handle_ha_online`](Self::handle_ha_online): when HA
+    /// restarts, state and version topics are already retained on the broker and
+    /// do not need re-sending. Only the `{ha_prefix}/update/.../config` messages
+    /// need to be republished so that HA re-registers its `update` entities.
+    async fn publish_ha_configs_only(
         &self,
         mqtt_client_id: uuid::Uuid,
         items: &[uptrakit_internal_wire::MqttSoftwareStateItem],
@@ -259,58 +393,6 @@ impl TenantManager {
                         error = ?e,
                         %mqtt_client_id,
                         "failed to publish HA discovery config"
-                    );
-                    continue;
-                }
-                // Publish installed version (empty string if unknown).
-                let st = crate::ha_discovery::state_topic(
-                    topic_prefix,
-                    item.software_item_id,
-                    host.host_id,
-                );
-                let installed = host
-                    .installed_version
-                    .as_deref()
-                    .unwrap_or("")
-                    .as_bytes()
-                    .to_vec();
-                if let Err(e) = state.handle.publish_retained(&st, installed).await {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        "failed to publish HA state topic"
-                    );
-                }
-                // Publish latest version.
-                let lt = crate::ha_discovery::latest_version_topic(
-                    topic_prefix,
-                    item.software_item_id,
-                    host.host_id,
-                );
-                let latest = host
-                    .latest_version
-                    .as_deref()
-                    .unwrap_or("")
-                    .as_bytes()
-                    .to_vec();
-                if let Err(e) = state.handle.publish_retained(&lt, latest).await {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        "failed to publish HA latest version topic"
-                    );
-                }
-                // Subscribe to command topic.
-                let ct = crate::ha_discovery::command_topic(
-                    topic_prefix,
-                    item.software_item_id,
-                    host.host_id,
-                );
-                if let Err(e) = state.handle.subscribe_topic(&ct).await {
-                    tracing::warn!(
-                        error = ?e,
-                        %mqtt_client_id,
-                        "failed to subscribe to HA command topic"
                     );
                 }
             }
@@ -640,5 +722,84 @@ mod tests {
         let unknown_id = Uuid::parse_str("019471a0-0000-7000-8000-000000000099").unwrap();
         let result = manager.resolve_update_trigger(unknown_id, "uptrakit/update/anything/set");
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn update_software_states_stores_for_all_tenants() {
+        // update_software_states must cache state regardless of ha_discovery.
+        let mut manager = TenantManager::new(None);
+        let tenant_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+
+        let payload = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+            tenant_id,
+            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+                software_item_id: Uuid::nil(),
+                name: "nginx".to_string(),
+                hosts: vec![],
+            }],
+        };
+
+        // No connected clients — but the cache must still be updated.
+        manager.update_software_states(payload).await;
+
+        // Verify the cache was populated (resolve_update_trigger won't find an
+        // unknown client, but the internal cache entry is what matters here).
+        assert!(manager.software_states.contains_key(&tenant_id));
+        assert_eq!(manager.software_states[&tenant_id].len(), 1);
+        assert_eq!(manager.software_states[&tenant_id][0].name, "nginx");
+    }
+
+    #[tokio::test]
+    async fn handle_reconnected_noop_for_unknown_client() {
+        // handle_reconnected must not panic for a client that isn't in the map.
+        let mut manager = TenantManager::new(None);
+        let unknown_id = Uuid::parse_str("019471a0-0000-7000-8000-000000000099").unwrap();
+        // Should return without panicking even with no clients and no states.
+        manager.handle_reconnected(&unknown_id).await;
+    }
+
+    #[tokio::test]
+    async fn handle_ha_online_noop_for_unknown_client() {
+        // handle_ha_online must not panic for a client that isn't in the map.
+        let mut manager = TenantManager::new(None);
+        let unknown_id = Uuid::parse_str("019471a0-0000-7000-8000-000000000099").unwrap();
+        manager.handle_ha_online(&unknown_id).await;
+    }
+
+    #[tokio::test]
+    async fn update_software_states_replaces_cached_items() {
+        // A second update for the same tenant replaces the first in the cache.
+        let mut manager = TenantManager::new(None);
+        let tenant_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+
+        let first = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+            tenant_id,
+            items: vec![uptrakit_internal_wire::MqttSoftwareStateItem {
+                software_item_id: Uuid::nil(),
+                name: "nginx".to_string(),
+                hosts: vec![],
+            }],
+        };
+        manager.update_software_states(first).await;
+
+        let second = uptrakit_internal_wire::MqttSoftwareStatesPayload {
+            tenant_id,
+            items: vec![
+                uptrakit_internal_wire::MqttSoftwareStateItem {
+                    software_item_id: Uuid::nil(),
+                    name: "nginx".to_string(),
+                    hosts: vec![],
+                },
+                uptrakit_internal_wire::MqttSoftwareStateItem {
+                    software_item_id: Uuid::from_u128(1),
+                    name: "redis".to_string(),
+                    hosts: vec![],
+                },
+            ],
+        };
+        manager.update_software_states(second).await;
+
+        assert_eq!(manager.software_states[&tenant_id].len(), 2);
+        assert_eq!(manager.software_states[&tenant_id][1].name, "redis");
     }
 }
