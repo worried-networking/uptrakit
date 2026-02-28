@@ -90,12 +90,12 @@ pub fn init_master_key(key: Zeroizing<[u8; 32]>) -> Result<()> {
 /// **Never call this in production.** It is intended solely for development
 /// runs started with `--allow-plaintext-secrets` and no master key.
 pub fn enable_plaintext_mode() {
-    PLAINTEXT_MODE.store(true, Ordering::Relaxed);
+    PLAINTEXT_MODE.store(true, Ordering::Release);
 }
 
 /// Returns `true` if plaintext mode is enabled (no master key, dev only).
 pub fn is_plaintext_mode() -> bool {
-    PLAINTEXT_MODE.load(Ordering::Relaxed)
+    PLAINTEXT_MODE.load(Ordering::Acquire)
 }
 
 /// Returns `true` if the master key has been initialized.
@@ -171,7 +171,7 @@ pub fn decrypt_str(stored: &str) -> Result<String> {
 }
 
 fn encrypt_value(plaintext: &str) -> Result<String> {
-    if PLAINTEXT_MODE.load(Ordering::Relaxed) {
+    if PLAINTEXT_MODE.load(Ordering::Acquire) {
         return Ok(plaintext.to_string());
     }
 
@@ -723,11 +723,11 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
 
         // Save and set plaintext mode; restore on exit to avoid affecting other tests.
-        let was_plaintext = PLAINTEXT_MODE.load(Ordering::Relaxed);
-        PLAINTEXT_MODE.store(true, Ordering::Relaxed);
+        let was_plaintext = PLAINTEXT_MODE.load(Ordering::Acquire);
+        PLAINTEXT_MODE.store(true, Ordering::Release);
 
         let result = encrypt_value("dev secret");
-        PLAINTEXT_MODE.store(was_plaintext, Ordering::Relaxed);
+        PLAINTEXT_MODE.store(was_plaintext, Ordering::Release);
 
         let encrypted = result.expect("plaintext mode encrypt should succeed");
         assert_eq!(
@@ -744,11 +744,11 @@ mod tests {
     fn test_plaintext_mode_encrypted_string_new() {
         let _lock = TEST_LOCK.lock().unwrap();
 
-        let was_plaintext = PLAINTEXT_MODE.load(Ordering::Relaxed);
-        PLAINTEXT_MODE.store(true, Ordering::Relaxed);
+        let was_plaintext = PLAINTEXT_MODE.load(Ordering::Acquire);
+        PLAINTEXT_MODE.store(true, Ordering::Release);
 
         let es = EncryptedString::new("plain dev value".to_string());
-        PLAINTEXT_MODE.store(was_plaintext, Ordering::Relaxed);
+        PLAINTEXT_MODE.store(was_plaintext, Ordering::Release);
 
         let es = es.expect("EncryptedString::new should succeed in plaintext mode");
         assert_eq!(es.expose_secret(), "plain dev value");
