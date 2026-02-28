@@ -178,8 +178,28 @@ impl Scheduler {
                     tracing::debug!(
                         task_id = %task.id,
                         task_type = ?task.task_type,
-                        "scheduler shutdown requested during task execution"
+                        "scheduler shutdown requested during task execution; releasing claim"
                     );
+                    // Release the claim so other scheduler instances can pick up the
+                    // task immediately rather than waiting for the stale-claim
+                    // recovery window (up to 10 minutes).
+                    let now = time::OffsetDateTime::now_utc();
+                    let next_run_at = cron_utils::next_run_after(&task.cron_expression, now)
+                        .unwrap_or_else(|| now + time::Duration::hours(1));
+                    if let Err(e) = claim::release_claim(
+                        &self.db,
+                        task.id,
+                        next_run_at,
+                        &Err("scheduler shutdown during execution".to_string()),
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            task_id = %task.id,
+                            error = %e,
+                            "failed to release task claim on scheduler shutdown"
+                        );
+                    }
                     break;
                 }
                 res = tokio::time::timeout(
@@ -431,6 +451,122 @@ mod tests {
         assert_eq!(
             task.run_count, 0,
             "task with no executor should not be executed"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_releases_claim() {
+        let db = setup_test_db().await;
+        let tenant = seed_tenant(&db).await;
+        let controller_id = Uuid::now_v7();
+
+        // Insert a task that is due now.
+        let now = time::OffsetDateTime::now_utc();
+        let task = scheduled_task::ActiveModel {
+            id: ActiveValue::Set(Uuid::now_v7()),
+            tenant_id: ActiveValue::Set(tenant.id),
+            task_type: ActiveValue::Set(ScheduledTaskType::StaleLeaseCleanup),
+            cron_expression: ActiveValue::Set("*/5 * * * *".to_string()),
+            enabled: ActiveValue::Set(true),
+            task_config: ActiveValue::Set(None),
+            last_run_at: ActiveValue::Set(None),
+            next_run_at: ActiveValue::Set(now - time::Duration::minutes(1)),
+            locked_by: ActiveValue::Set(None),
+            locked_at: ActiveValue::Set(None),
+            last_error: ActiveValue::Set(None),
+            run_count: ActiveValue::Set(0),
+            created_at: ActiveValue::Set(now),
+            updated_at: ActiveValue::Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert task");
+
+        // Register an executor that blocks until a signal, so we can cancel mid-execution.
+        let (exec_started_tx, mut exec_started_rx) = tokio::sync::oneshot::channel::<()>();
+        let (unblock_tx, unblock_rx) = tokio::sync::oneshot::channel::<()>();
+
+        struct BlockingExecutor {
+            started: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+            unblock: std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl TaskExecutor for BlockingExecutor {
+            async fn execute(&self, _task: &scheduled_task::Model) -> crate::error::Result<()> {
+                // Signal that execution has started.
+                if let Some(tx) = self.started.lock().unwrap().take() {
+                    let _ = tx.send(());
+                }
+                // Block until unblocked (simulating long-running work).
+                // Extract the receiver *before* awaiting so the MutexGuard is
+                // dropped — holding it across an await makes the future !Send.
+                let rx = self.unblock.lock().unwrap().take();
+                if let Some(rx) = rx {
+                    let _ = rx.await;
+                }
+                Ok(())
+            }
+        }
+
+        let config = SchedulerConfig {
+            poll_interval: Duration::from_millis(50),
+            controller_id,
+            tenant_id: tenant.id,
+            task_execution_timeout: TASK_EXECUTION_TIMEOUT,
+        };
+        let mut scheduler = Scheduler::new(db.clone(), config);
+        scheduler.register(
+            ScheduledTaskType::StaleLeaseCleanup,
+            Box::new(BlockingExecutor {
+                started: std::sync::Mutex::new(Some(exec_started_tx)),
+                unblock: std::sync::Mutex::new(Some(unblock_rx)),
+            }),
+        );
+
+        let token = CancellationToken::new();
+        let token_clone = token.clone();
+
+        // Run the scheduler in a background task.
+        let scheduler_handle = tokio::spawn(async move {
+            scheduler.run(token_clone).await;
+        });
+
+        // Wait until the executor has started (i.e. the task has been claimed).
+        tokio::time::timeout(Duration::from_secs(5), &mut exec_started_rx)
+            .await
+            .expect("executor should start within 5s")
+            .expect("channel closed");
+
+        // Verify the task is now locked by our controller.
+        let locked = scheduled_task::Entity::find_by_id(task.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("task exists");
+        assert_eq!(locked.locked_by, Some(controller_id), "task should be claimed");
+
+        // Cancel the scheduler while the executor is still running.
+        token.cancel();
+        // Unblock the executor so its task can observe the cancellation.
+        let _ = unblock_tx.send(());
+
+        // Wait for the scheduler to finish.
+        tokio::time::timeout(Duration::from_secs(5), scheduler_handle)
+            .await
+            .expect("scheduler should shut down within 5s")
+            .expect("scheduler task panicked");
+
+        // After shutdown the claim MUST be released (locked_by IS NULL).
+        let after = scheduled_task::Entity::find_by_id(task.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("task exists");
+        assert!(
+            after.locked_by.is_none(),
+            "claim must be released on cancellation; got locked_by = {:?}",
+            after.locked_by
         );
     }
 
