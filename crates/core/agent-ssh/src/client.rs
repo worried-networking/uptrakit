@@ -82,8 +82,12 @@ impl Drop for SecureKeyFile {
 /// authenticate using the stored key rather than falling back to default
 /// SSH key locations.
 async fn build_connection_context(host: &Model) -> ConnectionContext {
-    let key_path =
-        std::env::temp_dir().join(format!("uptrakit-ssh-key-{}", host.id.replace('-', "")));
+    // Write the key inside a dedicated subdirectory (`uptrakit/`) so that
+    // `write_secure_file` can chmod the directory we own, rather than the
+    // system temp directory (which fails with EPERM on macOS).
+    let key_path = std::env::temp_dir()
+        .join("uptrakit")
+        .join(format!("ssh-key-{}", host.id.replace('-', "")));
 
     let pem_bytes = host.private_key.expose_secret().as_bytes().to_vec();
 
