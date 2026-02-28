@@ -471,18 +471,23 @@ topics for each tracked software item, creating `update` entities in HA — one 
 
 Key invariants:
 
-1. **Discovery is opt-in per MQTT client.** Two columns on `mqtt_clients` control it:
-   `ha_discovery BOOL` and `ha_discovery_prefix TEXT DEFAULT 'homeassistant'`.
+1. **HA Discovery is opt-in per MQTT client.** Two columns on `mqtt_clients` control it:
+   `ha_discovery BOOL` and `ha_discovery_prefix TEXT DEFAULT 'homeassistant'`. This flag controls
+   **only** the publication of `{ha_prefix}/update/.../config` discovery topics. State and version
+   topics under `{topic_prefix}` are always published for all connected, enabled clients.
 2. **State push is controller-initiated.** The controller sends `SoftwareStates` (wire type
    `software_states`) to MQTT services whenever version data changes (version check completed, update
-   result received). The MQTT service stores the states in memory and publishes to the broker.
+   result received). The MQTT service stores the states in memory and publishes state/version topics to
+   the broker for **all** connected clients, plus HA discovery config topics for HA-enabled clients.
 3. **`SoftwareStates` is safe for cross-controller delivery.** It contains no credentials and is published
    to NATS (when configured) with `target_capability = "mqtt_bridge"` so only MQTT services receive it.
 4. **Reconnect resilience.** On every `ConnAck` the MQTT service emits a `Reconnected` event, causing
-   `TenantManager` to republish all discovery configs and state topics from the in-memory cache.
+   `TenantManager` to republish all state/version topics (for all clients) and HA discovery config topics
+   (for HA-enabled clients) from the in-memory cache.
 5. **HA restart resilience.** HA publishes `"online"` to `{ha_discovery_prefix}/status` on startup
-   (birth message). The MQTT service subscribes to this topic and republishes discovery configs when
-   `"online"` is received (`HaOnline` event).
+   (birth message). The MQTT service subscribes to this topic and republishes **only** the HA discovery
+   config topics when `"online"` is received (`HaOnline` event). State and version topics are retained on
+   the broker and do not need re-sending after an HA restart.
 6. **Updates triggered via MQTT.** When a user presses Install in HA, HA publishes `"install"` to the
    entity's command topic. The MQTT service resolves `to_version` from the in-memory state cache and
    sends `ServiceMessage::MqttTriggerUpdate` to the controller. The controller validates the request

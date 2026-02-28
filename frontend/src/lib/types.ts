@@ -241,6 +241,8 @@ export interface MqttClientResponse {
 	has_password: boolean;
 	has_ca_cert: boolean;
 	topic_prefix: string;
+	ha_discovery: boolean;
+	ha_discovery_prefix: string;
 	connection_status: MqttConnectionStatus;
 }
 
@@ -255,6 +257,8 @@ export interface CreateMqttClient {
 	password?: string;
 	ca_pem?: string;
 	topic_prefix?: string;
+	ha_discovery?: boolean;
+	ha_discovery_prefix?: string;
 }
 
 export interface UpdateMqttClient {
@@ -268,6 +272,8 @@ export interface UpdateMqttClient {
 	password?: string;
 	ca_pem?: string | null;
 	topic_prefix?: string;
+	ha_discovery?: boolean;
+	ha_discovery_prefix?: string;
 }
 
 export interface MqttLimitResponse {

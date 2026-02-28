@@ -1,12 +1,30 @@
 # Home Assistant and MQTT Integration
 
-Uptrakit can publish software version information to Home Assistant via MQTT Discovery. This creates
-`update` entities in Home Assistant — one per tracked software item per host — that display installed and
-available versions and let you trigger updates directly from the Home Assistant UI.
+Uptrakit integrates with MQTT brokers to publish software version state. Once an MQTT client is
+configured and connected, Uptrakit publishes the installed and latest versions for every tracked software
+item to the broker automatically. Home Assistant Discovery is an optional layer on top that creates
+`update` entities in Home Assistant — one per tracked software item per host — so you can view versions
+and trigger updates from the Home Assistant UI.
+
+## MQTT State Topics (always active)
+
+Once an MQTT client is **enabled** and connected to the broker, Uptrakit publishes the following retained
+topics for every `(software item, host)` pair regardless of whether Home Assistant Discovery is enabled:
+
+| Topic | Purpose |
+| --- | --- |
+| `{prefix}/update/{item_id}/{host_id}/state` | Installed version string (empty if unknown) |
+| `{prefix}/update/{item_id}/{host_id}/latest_version` | Latest available version string (empty if unknown) |
+| `{prefix}/update/{item_id}/{host_id}/set` | Command topic — publish `"install"` to trigger an update |
+
+Where `{prefix}` is the **Topic Prefix** configured on the MQTT client (default: `uptrakit`).
+
+These topics update automatically whenever a version check completes or an update finishes. No extra
+configuration is required.
 
 ## Prerequisites
 
-Before enabling Home Assistant discovery:
+Before enabling Home Assistant Discovery:
 
 1. **An MQTT broker** is reachable by both Uptrakit and Home Assistant (e.g. Mosquitto).
 2. **An MQTT client** is configured in Uptrakit under **Settings > MQTT Clients** and the MQTT service is
@@ -83,12 +101,14 @@ time Uptrakit pushes updated version data (after the update completes or fails).
 ## Reconnect Resilience
 
 If the MQTT broker restarts or the connection is interrupted, Uptrakit automatically republishes all
-discovery configs and current version states when the connection is re-established. This ensures Home
-Assistant always has current data after network events.
+state and version topics (and Home Assistant discovery configs, if HA Discovery is enabled) when the
+connection is re-established. This ensures the broker always has current retained data after network
+events.
 
 If Home Assistant restarts while the broker and Uptrakit remain connected, Uptrakit detects the HA birth
-message (`online` on `{ha_discovery_prefix}/status`) and immediately republishes all discovery configs so
-HA picks them up fresh. This follows the standard [HA MQTT birth/will pattern](https://www.home-assistant.io/integrations/mqtt/#birth-and-last-will-messages).
+message (`online` on `{ha_discovery_prefix}/status`) and immediately republishes all HA discovery configs
+so HA picks them up fresh. State and version topics remain retained on the broker and do not need
+re-sending. This follows the standard [HA MQTT birth/will pattern](https://www.home-assistant.io/integrations/mqtt/#birth-and-last-will-messages).
 
 ## Why Some Software Items May Not Appear
 
@@ -101,6 +121,7 @@ HA picks them up fresh. This follows the standard [HA MQTT birth/will pattern](h
 | No entities at all | HA discovery not enabled on the MQTT client |
 | No entities at all | MQTT service is not connected to the broker |
 | No entities at all | HA MQTT integration not configured for the same broker |
+| State topics absent on broker | MQTT client not enabled or MQTT service not running |
 
 ## Custom CA Certificates for Private Brokers
 

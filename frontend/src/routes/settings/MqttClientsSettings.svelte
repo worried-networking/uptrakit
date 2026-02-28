@@ -30,7 +30,9 @@
 		username: '',
 		password: '',
 		ca_pem: '',
-		topic_prefix: 'uptrakit'
+		topic_prefix: 'uptrakit',
+		ha_discovery: false,
+		ha_discovery_prefix: 'homeassistant'
 	});
 	let mqttDeleteConfirm: { id: string; url: string } | null = $state(null);
 	let mqttLimit: number | null = $state(null);
@@ -78,7 +80,9 @@
 			username: '',
 			password: '',
 			ca_pem: '',
-			topic_prefix: 'uptrakit'
+			topic_prefix: 'uptrakit',
+			ha_discovery: false,
+			ha_discovery_prefix: 'homeassistant'
 		};
 		showMqttModal = true;
 	}
@@ -92,7 +96,9 @@
 			username: client.username ?? '',
 			password: '',
 			ca_pem: '',
-			topic_prefix: client.topic_prefix
+			topic_prefix: client.topic_prefix,
+			ha_discovery: client.ha_discovery,
+			ha_discovery_prefix: client.ha_discovery_prefix
 		};
 		showMqttModal = true;
 	}
@@ -111,6 +117,8 @@
 					client_id: mqttForm.client_id,
 					username: mqttForm.username || null,
 					topic_prefix: mqttForm.topic_prefix,
+					ha_discovery: mqttForm.ha_discovery,
+					ha_discovery_prefix: mqttForm.ha_discovery_prefix || undefined,
 					...(mqttForm.password ? { password: mqttForm.password } : {}),
 					...(mqttForm.ca_pem ? { ca_pem: mqttForm.ca_pem } : {})
 				};
@@ -129,7 +137,9 @@
 					username: mqttForm.username || undefined,
 					password: mqttForm.password || undefined,
 					ca_pem: mqttForm.ca_pem || undefined,
-					topic_prefix: mqttForm.topic_prefix || undefined
+					topic_prefix: mqttForm.topic_prefix || undefined,
+					ha_discovery: mqttForm.ha_discovery,
+					ha_discovery_prefix: mqttForm.ha_discovery_prefix || undefined
 				};
 				const res = await createMqttClient(data);
 				mqttClients = [...mqttClients, res];
@@ -214,6 +224,7 @@
 							<th>URL</th>
 							<th>Client ID</th>
 							<th>Topic Prefix</th>
+							<th>HA Discovery</th>
 							<th>Status</th>
 							<th class="w-48">Actions</th>
 						</tr>
@@ -224,6 +235,13 @@
 								<td>{client.url}</td>
 								<td>{client.client_id}</td>
 								<td>{client.topic_prefix}</td>
+								<td>
+									{#if client.ha_discovery}
+										<span class="badge preset-filled-success-500">Enabled</span>
+									{:else}
+										<span class="badge preset-tonal">Disabled</span>
+									{/if}
+								</td>
 								<td>
 									{#if client.enabled}
 										{@const connectionText = connectionLabel(client.connection_status)}
@@ -367,6 +385,24 @@
 					bind:value={mqttForm.ca_pem}
 				></textarea>
 			</label>
+
+			<div class="rounded-container-token border border-surface-200 p-4 dark:border-surface-700">
+				<p class="mb-3 font-medium">Home Assistant Integration</p>
+				<label class="flex cursor-pointer items-center gap-3">
+					<input class="checkbox" type="checkbox" bind:checked={mqttForm.ha_discovery} />
+					<span>Enable Home Assistant Discovery</span>
+				</label>
+				{#if mqttForm.ha_discovery}
+					<label class="label mt-3">
+						<span>Discovery Prefix</span>
+						<input class="input" type="text" placeholder="homeassistant" bind:value={mqttForm.ha_discovery_prefix} />
+						<p class="text-surface-500 dark:text-surface-400 mt-1 text-sm">
+							Must match the MQTT discovery prefix configured in Home Assistant (default:
+							<code>homeassistant</code>).
+						</p>
+					</label>
+				{/if}
+			</div>
 
 			<div class="flex justify-end gap-2 items-center">
 				{#if !getIsOnline()}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
