@@ -99,6 +99,34 @@ fn validate_npm_name_part(part: &str, role: &str) -> std::result::Result<(), Str
     Ok(())
 }
 
+/// Validate an npm version string before it is interpolated into install commands.
+///
+/// Allows only semver-compatible characters (`[a-zA-Z0-9._+-]`). Rejects:
+/// - Empty strings
+/// - Protocol prefixes (`file:`, `git+`, `http:`, `https:`) that could redirect npm
+///   to attacker-controlled sources
+/// - Strings exceeding 256 characters
+pub fn validate_version(version: &str) -> std::result::Result<(), String> {
+    if version.is_empty() {
+        return Err("version must not be empty".to_string());
+    }
+    if version.len() > 256 {
+        return Err("version must not exceed 256 characters".to_string());
+    }
+    // Reject protocol prefixes that npm would interpret as non-registry sources.
+    for prefix in &["file:", "git+", "http:", "https:"] {
+        if version.starts_with(prefix) {
+            return Err(format!("version must not start with protocol prefix '{prefix}'"));
+        }
+    }
+    for ch in version.chars() {
+        if !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '_' | '+' | '-') {
+            return Err(format!("version contains invalid character: '{ch}'"));
+        }
+    }
+    Ok(())
+}
+
 /// Build the npm registry URL for a package identifier.
 ///
 /// Scoped packages (`@scope/name`) are URL-encoded: the `/` is encoded as `%2F`.
@@ -418,6 +446,8 @@ impl Plugin for NpmPlugin {
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
+        validate_version(to_version)
+            .map_err(|e| report!(PluginError::Configuration(e)))?;
 
         let pkg_version = format!("{package_identifier}@{to_version}");
         let args = vec!["install".to_string(), "-g".to_string(), pkg_version];
@@ -887,5 +917,58 @@ mod tests {
     fn npm_plugin_type() {
         let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).expect("create");
         assert_eq!(plugin.plugin_type(), PluginType::PackageManagerNpm);
+    }
+
+    // ── validate_version ────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_version_semver() {
+        assert!(validate_version("1.18.0").is_ok());
+        assert!(validate_version("0.0.1-beta.1").is_ok());
+        assert!(validate_version("2.0.0-rc.1+build.123").is_ok());
+    }
+
+    #[test]
+    fn validate_version_empty_fails() {
+        let err = validate_version("").expect_err("should fail");
+        assert!(err.contains("empty"));
+    }
+
+    #[test]
+    fn validate_version_too_long_fails() {
+        let long = "1".repeat(257);
+        assert!(validate_version(&long).is_err());
+    }
+
+    #[test]
+    fn validate_version_file_protocol_fails() {
+        assert!(validate_version("file:../malicious").is_err());
+    }
+
+    #[test]
+    fn validate_version_git_protocol_fails() {
+        assert!(validate_version("git+https://attacker.com").is_err());
+    }
+
+    #[test]
+    fn validate_version_http_protocol_fails() {
+        assert!(validate_version("http://evil.com").is_err());
+        assert!(validate_version("https://evil.com").is_err());
+    }
+
+    #[test]
+    fn validate_version_space_fails() {
+        assert!(validate_version("1.0 --flag").is_err());
+    }
+
+    #[test]
+    fn validate_version_at_sign_fails() {
+        assert!(validate_version("1.0@latest").is_err());
+    }
+
+    #[test]
+    fn validate_version_max_length_ok() {
+        let v = "1".repeat(256);
+        assert!(validate_version(&v).is_ok());
     }
 }

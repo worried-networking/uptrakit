@@ -58,6 +58,30 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Validate a Debian APT version string before it is interpolated into install commands.
+///
+/// Allows Debian version characters (`[a-zA-Z0-9.+~:-]`). Rejects:
+/// - Empty strings
+/// - Strings starting with `-` (could be interpreted as a command-line flag by apt-get)
+/// - Strings exceeding 256 characters
+pub fn validate_version(version: &str) -> std::result::Result<(), String> {
+    if version.is_empty() {
+        return Err("version must not be empty".to_string());
+    }
+    if version.len() > 256 {
+        return Err("version must not exceed 256 characters".to_string());
+    }
+    if version.starts_with('-') {
+        return Err("version must not start with '-' (would be interpreted as a flag)".to_string());
+    }
+    for ch in version.chars() {
+        if !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '+' | '~' | ':' | '-') {
+            return Err(format!("version contains invalid character: '{ch}'"));
+        }
+    }
+    Ok(())
+}
+
 /// Plugin for APT (Debian/Ubuntu package manager).
 ///
 /// Supports installed version detection, package index refresh, autodiscovery,
@@ -373,6 +397,8 @@ impl Plugin for AptPlugin {
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
+        validate_version(to_version)
+            .map_err(|e| report!(PluginError::Configuration(e)))?;
 
         let pkg_version = format!("{package_identifier}={to_version}");
         let args = vec![
@@ -744,6 +770,54 @@ mod tests {
             !found_any,
             "expected no output when reboot-required file is absent"
         );
+    }
+
+    // ── validate_version ────────────────────────────────────────────────
+
+    #[test]
+    fn validate_version_debian_standard() {
+        assert!(validate_version("1.24.0-2ubuntu7.3").is_ok());
+        assert!(validate_version("3.11.0-5ubuntu2").is_ok());
+        assert!(validate_version("1:2.3.4-5").is_ok()); // epoch format
+    }
+
+    #[test]
+    fn validate_version_with_tilde() {
+        assert!(validate_version("1.0~beta1").is_ok());
+    }
+
+    #[test]
+    fn validate_version_empty_fails() {
+        let err = validate_version("").expect_err("should fail");
+        assert!(err.contains("empty"));
+    }
+
+    #[test]
+    fn validate_version_too_long_fails() {
+        let long = "1".repeat(257);
+        assert!(validate_version(&long).is_err());
+    }
+
+    #[test]
+    fn validate_version_leading_dash_fails() {
+        let err = validate_version("--allow-unauthenticated").expect_err("should fail");
+        assert!(err.contains("flag"));
+    }
+
+    #[test]
+    fn validate_version_space_fails() {
+        assert!(validate_version("1.0 --allow-unauthenticated").is_err());
+    }
+
+    #[test]
+    fn validate_version_equals_fails() {
+        assert!(validate_version("1.0=extra").is_err());
+    }
+
+    #[test]
+    fn validate_version_max_length_ok() {
+        let v = "1".repeat(256);
+        assert!(validate_version(&v).is_ok());
     }
 
     #[tokio::test]
