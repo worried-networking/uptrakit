@@ -2,44 +2,11 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 pub use uptrakit_shared_types::{
-    DiscoveredSoftware, DiscoveryTarget, PluginRole, PluginType, ReleaseAsset, ReleaseInfo,
+    DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole, PluginType, ReleaseAsset,
+    ReleaseInfo,
 };
 
 use crate::version::Version;
-
-/// Capabilities that a plugin may support.
-///
-/// # Design note
-///
-/// This is a closed, centralized enum rather than a trait-based capability system.
-/// All plugins in this project are first-party and registered exclusively through
-/// `uptrakit-plugin-registry` (see AGENTS.md: "adding a new plugin only through
-/// the registry is an acceptable tradeoff"). `#[non_exhaustive]` allows adding new
-/// variants in future releases without requiring downstream match-arm updates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[non_exhaustive]
-#[serde(rename_all = "snake_case")]
-pub enum PluginCapability {
-    /// Plugin can discover locally installed software.
-    DiscoverLocalSoftware,
-    /// Plugin can refresh/sync the local package index from remote sources.
-    RefreshPackageIndex,
-    /// Plugin can determine whether it is applicable to the current host.
-    DetectHostCompatibility,
-    /// Plugin can run logic before an update is applied.
-    PreUpdateHook,
-    /// Plugin can run logic after an update is applied.
-    PostUpdateHook,
-    /// Plugin's `fetch_releases()` does not require any local system state
-    /// (no package index, no filesystem access, no local commands) and can
-    /// be called from the controller process directly rather than through
-    /// an agent.
-    ///
-    /// All `fetch_releases` calls default to agent-side. This capability is
-    /// an explicit opt-in to controller-side execution. The user can override
-    /// via `execution_site` on the plugin assignment.
-    ControllerSideFetchReleases,
-}
 
 /// Metadata for an upstream software release.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

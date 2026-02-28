@@ -56,6 +56,23 @@ impl PluginType {
             Self::Other(s) => s.as_str(),
         }
     }
+
+    /// Returns a human-readable display name for this plugin type.
+    ///
+    /// For [`PluginType::Other`], returns the raw wire string as-is.
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::ReleasesGithub => "GitHub Releases",
+            Self::ReleasesDocker => "Docker",
+            Self::DiscoveryProxmoxHelperScripts => "Proxmox Helper Scripts",
+            Self::PackageManagerHomebrew => "Homebrew",
+            Self::PackageManagerApt => "APT",
+            Self::PackageManagerNpm => "npm",
+            Self::GenericShell => "Shell",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+
 }
 
 /// Error returned when parsing a string that does not match any *known*
@@ -405,6 +422,26 @@ mod tests {
     }
 
     /// Known variants round-trip through `FromStr`.
+    #[test]
+    fn display_name_known_variants() {
+        assert_eq!(PluginType::ReleasesGithub.display_name(), "GitHub Releases");
+        assert_eq!(PluginType::ReleasesDocker.display_name(), "Docker");
+        assert_eq!(
+            PluginType::DiscoveryProxmoxHelperScripts.display_name(),
+            "Proxmox Helper Scripts"
+        );
+        assert_eq!(PluginType::PackageManagerHomebrew.display_name(), "Homebrew");
+        assert_eq!(PluginType::PackageManagerApt.display_name(), "APT");
+        assert_eq!(PluginType::PackageManagerNpm.display_name(), "npm");
+        assert_eq!(PluginType::GenericShell.display_name(), "Shell");
+    }
+
+    #[test]
+    fn display_name_other_returns_raw_string() {
+        let pt = PluginType::Other("custom_plugin".to_string());
+        assert_eq!(pt.display_name(), "custom_plugin");
+    }
+
     #[test]
     fn plugin_type_display_round_trips_through_from_str() {
         let variants = [
