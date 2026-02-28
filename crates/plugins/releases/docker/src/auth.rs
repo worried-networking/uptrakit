@@ -52,16 +52,44 @@ impl RegistryAuth {
     }
 
     /// Fetch a new bearer token from the realm endpoint after a 401 challenge.
+    ///
+    /// # SSRF protection
+    ///
+    /// The `registry_url` parameter is used to validate that the `realm` host in the
+    /// `WWW-Authenticate` header matches the registry host. An attacker-controlled
+    /// registry that returns a `realm` pointing to an internal endpoint (e.g.
+    /// `http://169.254.169.254/`) would otherwise cause credentials to be sent there.
     pub async fn fetch_token(
         &self,
         client: &reqwest::Client,
         www_authenticate: &str,
+        registry_url: &str,
     ) -> Result<String> {
         let realm = extract_quoted_param(www_authenticate, "realm").ok_or_else(|| {
             report!(DockerError::AuthFailed(
                 "missing realm in WWW-Authenticate header".to_string()
             ))
         })?;
+
+        // SSRF protection: validate that the realm host matches the registry host.
+        let realm_parsed = url::Url::parse(realm).map_err(|e| {
+            report!(DockerError::AuthFailed(format!(
+                "invalid realm URL in WWW-Authenticate header: {e}"
+            )))
+        })?;
+        let registry_parsed = url::Url::parse(registry_url).map_err(|e| {
+            report!(DockerError::AuthFailed(format!(
+                "invalid registry URL for realm validation: {e}"
+            )))
+        })?;
+        if realm_parsed.host_str() != registry_parsed.host_str() {
+            bail!(DockerError::AuthFailed(format!(
+                "auth realm host '{}' does not match registry host '{}'; \
+                 possible SSRF attempt rejected",
+                realm_parsed.host_str().unwrap_or("<none>"),
+                registry_parsed.host_str().unwrap_or("<none>"),
+            )));
+        }
 
         let service = extract_quoted_param(www_authenticate, "service");
         let scope = extract_quoted_param(www_authenticate, "scope");
@@ -209,6 +237,82 @@ mod tests {
         let header = r#"Bearer realm="https://example.com""#;
         // "real" should not match "realm"
         assert_eq!(extract_quoted_param(header, "real"), None);
+    }
+
+    // ── Realm host validation tests ───────────────────────────────────────────
+
+    /// Helper: build a minimal WWW-Authenticate header for a given realm.
+    fn make_www_auth(realm: &str) -> String {
+        format!(r#"Bearer realm="{realm}",service="registry.example.com""#)
+    }
+
+    #[tokio::test]
+    async fn realm_same_host_allowed() {
+        // Realm on the same host as the registry → allowed (token fetch will fail
+        // because there is no real server, but the SSRF check must pass).
+        let auth = RegistryAuth::new(None);
+        let client = reqwest::Client::new();
+        let www_auth = make_www_auth("https://registry.example.com/token");
+        let registry_url = "https://registry.example.com/v2/repo/tags/list";
+        let result = auth.fetch_token(&client, &www_auth, registry_url).await;
+        // The request will fail (no real server), but NOT because of realm rejection.
+        match result {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    !msg.contains("does not match registry host"),
+                    "same-host realm should not be rejected: {msg}"
+                );
+            }
+            Ok(_) => {} // unexpected success is also fine for the security test
+        }
+    }
+
+    #[tokio::test]
+    async fn realm_different_host_rejected() {
+        let auth = RegistryAuth::new(None);
+        let client = reqwest::Client::new();
+        // Attacker redirects realm to a cloud metadata endpoint.
+        let www_auth = make_www_auth("http://169.254.169.254/latest/meta-data/");
+        let registry_url = "https://registry.example.com/v2/repo/tags/list";
+        let result = auth.fetch_token(&client, &www_auth, registry_url).await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("does not match registry host"),
+            "different-host realm must be rejected, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn realm_subdomain_rejected() {
+        let auth = RegistryAuth::new(None);
+        let client = reqwest::Client::new();
+        // Subdomain of the registry host is NOT the same host.
+        let www_auth = make_www_auth("https://evil.registry.example.com/token");
+        let registry_url = "https://registry.example.com/v2/repo/tags/list";
+        let result = auth.fetch_token(&client, &www_auth, registry_url).await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("does not match registry host"),
+            "subdomain realm must be rejected, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn realm_invalid_url_rejected() {
+        let auth = RegistryAuth::new(None);
+        let client = reqwest::Client::new();
+        let www_auth = make_www_auth("not-a-valid-url");
+        let registry_url = "https://registry.example.com/v2/repo/tags/list";
+        let result = auth.fetch_token(&client, &www_auth, registry_url).await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("invalid realm URL"),
+            "invalid realm URL must be rejected, got: {msg}"
+        );
     }
 
     #[test]

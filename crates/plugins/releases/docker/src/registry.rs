@@ -116,7 +116,7 @@ impl RegistryClient {
                 .to_string();
 
             tracing::debug!("fetching new registry auth token");
-            let token = self.auth.fetch_token(&self.client, &www_auth).await?;
+            let token = self.auth.fetch_token(&self.client, &www_auth, url).await?;
 
             tracing::debug!("retrying registry request after auth refresh");
             let retry_response = self
@@ -168,7 +168,7 @@ impl RegistryClient {
                 .unwrap_or("")
                 .to_string();
 
-            let token = self.auth.fetch_token(&self.client, &www_auth).await?;
+            let token = self.auth.fetch_token(&self.client, &www_auth, url).await?;
 
             let retry_response = self
                 .client
