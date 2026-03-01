@@ -161,3 +161,135 @@ No coding standards issues found.
 MQTT concerns without structural separation. When a new `ServiceHandler` author writes a custom
 service role, they face a flat enum with no type-level guidance about which variants are
 relevant. This is a latent correctness hazard as new service roles are added.
+
+## Tests
+
+### Strengths
+
+- `src/lib.rs:1287-1808+` -- The test module exceeds 2,000 lines with 50+ tests covering
+  every `ServiceMessage` and `ControllerMessage` variant for JSON round-trip serialisation,
+  `#[serde(other)] Unknown` handling, backward-compatibility deserialization (missing new
+  fields, extra ignored fields), and the serde helper utilities (`utc_datetime_millis`,
+  `duration_seconds`) at boundary values (Unix epoch, year 9999, pre-epoch).
+- `src/lib.rs` -- `IncomingSeq` / `OutgoingSeq` state machine fully tested: sequential
+  acceptance, replay rejection, skip rejection, and zero-seq rejection.
+- `src/close_reason.rs:131-205` -- `CloseReason` exhaustive coverage: all 11 known variants
+  in the `KNOWN_VARIANTS` constant, four tests per variant (serialise, deserialise, round-trip,
+  `Unknown` fallback).
+- 26+ spec-conformance tests against `asyncapi.yaml`: required-field lists, const
+  discriminators, enum constraints, and field-type checks.
+- `CertificatePayload` guard test at `lib.rs:1465` verifies that the struct contains only
+  `cert_pem` (no private key field), acting as a permanent regression guard against accidental
+  key material exposure.
+
+### Issues
+
+**[LOW]** `src/lib.rs:2397-2484` -- `AsyncApiSpec::validate` does not check field types or
+object/array shapes. A field present with the wrong JSON type (e.g., `"seq": "one"` instead of
+`"seq": 1`) would pass the spec-conformance validator. The existing validation detects missing
+required fields and unknown field names, but type-level constraints are not enforced. This
+limits the spec-conformance tests' ability to catch schema regressions in payload structure.
+
+## Consistency
+
+### Strengths
+
+- All duration fields that cross the wire use one of two consistent encoding strategies: a
+  bare `u32` with an explicit `_seconds` suffix in the field name, or a `std::time::Duration`
+  with `#[serde(with = "duration_seconds")]`. Both strategies produce the same JSON
+  representation (an integer number of seconds), and the two serde helpers (`duration_seconds`,
+  `utc_datetime_millis`) are shared and documented at `src/lib.rs:559-577`.
+- `#[non_exhaustive]` is applied consistently to every extensible enum:
+  `Capability`, `EnrollmentStatus`, `ErrorCode`, `UpdateFinalStatus`, `DisconnectReason`,
+  `ServiceMessage`, `ControllerMessage`. No public enum in the crate is accidentally exhaustive.
+  `#[serde(other)] Unknown` is consistently paired with `#[non_exhaustive]` on both message
+  enums, ensuring forward compatibility at both compile time and runtime.
+- All credential-bearing fields across every payload type use `SecretString`:
+  `EnrollPayload.enrollment_token`, `EnrolledPayload.enrollment_secret`,
+  `MqttTenantConfig.username`, `.password`, `.ca_pem`. No credential field is a bare `String`.
+  This is enforced uniformly; there is no payload that carries a credential without
+  `SecretString`.
+- `#[serde(skip_serializing_if = "Option::is_none")]` is consistently applied to all optional
+  fields across all payloads. There are no optional fields that serialize as `null` when
+  absent; omission is the uniform convention. This is verified by the backward-compatibility
+  deserialization tests which confirm that older receivers ignoring unknown fields continue to
+  work.
+
+### Issues
+
+**[MEDIUM]** `src/lib.rs:596` (`ServiceSettingsPayload.shutdown_timeout_seconds`) and
+`src/lib.rs:748` (`ExecuteUpdatePayload.timeout_seconds`) vs `src/lib.rs:600`
+(`ServiceSettingsPayload.ping_interval`) -- Duration fields are encoded inconsistently across
+`ServiceSettingsPayload`. `shutdown_timeout_seconds` is a bare `Option<u32>` with the
+`_seconds` suffix encoded directly in the field name. `timeout_seconds` in
+`ExecuteUpdatePayload` is a bare `u32` with the same suffix convention. By contrast,
+`ping_interval` is typed as `std::time::Duration` and relies on `#[serde(with =
+"duration_seconds")]` for serialization — with no `_seconds` suffix in the field name. The
+on-wire representation is identical (integer seconds), but the Rust API surface is not: callers
+of `ping_interval` use `Duration::from_secs(n)` while callers of `shutdown_timeout_seconds`
+use a raw `u32`. Both conventions appear within the same struct, creating an inconsistent
+authoring experience when adding new duration fields. Preferred pattern: adopt one convention
+throughout — either all durations as `u32` with `_seconds` suffix (simpler, no serde helper
+needed), or all as `std::time::Duration` with `#[serde(with = "duration_seconds")]` (more
+type-safe). The `duration_seconds` module is already well-tested and available; the bare-u32
+fields are legacy.
+
+**[LOW]** `src/lib.rs:396-403` (`PingPayload`, `PongPayload`) -- `PingPayload` and
+`PongPayload` are empty structs (`pub struct PingPayload {}`, `pub struct PongPayload {}`),
+while all other payload types that carry no data are omitted from the enum entirely (the
+tag-only variant is handled by `#[serde(tag = "type")]` with an empty payload struct). The
+empty structs themselves are fine, but they are not annotated with `#[non_exhaustive]` unlike
+every other named payload type that could evolve. If a future protocol version adds a
+`PingPayload.timestamp` for round-trip latency measurement, adding that field without
+`#[non_exhaustive]` on `PingPayload` would be a breaking API change for any code constructing
+the struct with `PingPayload {}`. Preferred fix: add `#[non_exhaustive]` to `PingPayload` and
+`PongPayload` consistent with the project's stated policy for extensible public types.
+
+## Maintainability
+
+### Strengths
+
+- Every public type in the production section (lines 1–1266) has a doc comment. Enum variants
+  carry their wire-format string, deprecation intent, and intersection semantics. This makes the
+  file self-documenting as a protocol reference.
+- The test module (lines 1267–3790) is larger than the production code (~2,524 vs ~1,266 lines),
+  demonstrating thorough investment in test coverage. The asymmetry is deliberate and appropriate
+  for a wire-protocol library where correctness is critical.
+- Section headers (`// =====`, `// MQTT Service Specific`, `// Infrastructure Credential`) divide
+  the production code into named domains that mirror the `asyncapi.yaml` spec structure.
+- `asyncapi.yaml` is versioned alongside the Rust types with spec-conformance tests that fail
+  when the spec drifts from the implementation, providing automated documentation correctness.
+
+### Issues
+
+**[HIGH]** `src/lib.rs:1-3790` -- The entire wire protocol library — production types, serde
+helpers, sequence counters, and 2,524 lines of tests — lives in a single file. While the
+section headers divide it logically, navigating between a payload type definition (e.g.,
+`ExecuteUpdatePayload` at line ~720) and its tests (scattered through the 1267–3790 range)
+requires manual searching. Splitting into modules (`src/messages.rs`, `src/envelopes.rs`,
+`src/serde_helpers.rs`, `src/sequence.rs`) with a `src/lib.rs` that only re-exports public
+items would make each concern independently navigable. The tests could move to
+`src/messages/tests.rs` etc. This is a pure refactor with no behavioral change.
+
+**[MEDIUM]** `src/lib.rs:266-371` -- `ServiceMessage` and `ControllerMessage` are documented
+with inline section comments (`// -- Agent-specific --`, `// -- MQTT-specific --`) but those
+comments carry no structural enforcement. A new `ServiceHandler` implementation — say, an
+HTTP-bridge service — will see a flat enum containing MQTT variants (`Register`,
+`ReleaseTenants`, `MqttClientStatus`) with no compile-time guidance that those variants are
+irrelevant to it. As the number of service roles grows, the lack of variant grouping becomes a
+maintenance hazard. Already noted in Architecture and Extensibility; included here because the
+maintenance cost compounds with each new service role added.
+
+**[LOW]** `src/lib.rs:102-116` -- `ParseCapabilityError(std::convert::Infallible)` is a dead
+struct: it wraps `Infallible` and is never constructed, but because it is `pub` it compiles
+without a lint warning. The comment at lines 102–106 explains that `Capability::from_str`
+declares `type Err = std::convert::Infallible` directly, making the struct redundant. The fix
+is either to remove the struct or to annotate it `#[deprecated = "Use std::convert::Infallible
+directly"]` to signal intent to future readers.
+
+**[LOW]** `src/lib.rs:978` -- `RequestCrlRenewalPayload {}` is an empty struct with no fields
+and no doc comment beyond the type-level doc. Empty payload structs are correct (future fields
+can be added without breaking changes due to `#[non_exhaustive]`) but `RequestCrlRenewalPayload`
+does not carry `#[non_exhaustive]`. If a future protocol version adds a `reason: String` field
+to this payload, callers constructing `RequestCrlRenewalPayload {}` will have a compile error.
+Apply `#[non_exhaustive]` for consistency with the stated policy.

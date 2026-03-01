@@ -153,3 +153,112 @@ No coding standards issues found.
 `--max-tenants` argument uses `0` as sentinel for "unlimited" with no type-system enforcement.
 If controller interprets `0` literally as "zero allowed tenants" it would silently starve the
 instance. `Option<NonZeroU32>` would make the sentinel explicit.
+
+## Consistency
+
+### Strengths
+
+- `src/tenant_manager.rs:43-73` -- All three entry points that modify tenant state
+  (`apply_assignments`, `reload_client`, `stop_client`) funnel through `start_or_update_client`
+  or `stop_client` as their sole leaf operations. No alternative path bypasses the config-hash
+  check or the lifecycle sequence.
+- `src/main.rs:59-178` -- All inbound `ControllerMessage` variants are handled inside the
+  single `on_message` match block. The wildcard arm uses `tracing::debug!` with an explicit
+  comment ("ignoring unrecognized message"), consistent with the `#[non_exhaustive]` handling
+  standard across the workspace.
+- `src/tenant_manager.rs:67-73` and `src/tenant_manager.rs:197-200` -- Both `stop_client` and
+  `start_or_update_client` (the reload path) call `self.report_status(..., Offline)` before
+  shutting down the handle. The offline status report is never omitted on the stop path.
+
+### Issues
+
+**[HIGH]** `src/tenant_manager.rs:81-93` vs `src/tenant_manager.rs:67-73` -- `shutdown_all`
+calls `self.report_status(mqtt_client_id, Offline)` on line 90 after `std::mem::take` has
+already moved `self.clients` out at line 82. The `report_status` helper itself accesses only
+`self.event_tx`, so it does not panic — but if the event channel receiver has already been
+dropped (which happens when the `MqttHandler` is being torn down), the status reports are
+silently lost via the `try_send` `Err` branch. In contrast, `stop_client` at line 70 calls
+`report_status` while `self.clients` is still intact and the channel is live. The two shutdown
+paths have different delivery guarantees for the final `Offline` status, but neither documents
+this difference.
+
+**[MEDIUM]** `src/main.rs:111-118` (`on_service_event` / `None` arm) vs
+`src/main.rs:93-97` (`on_message` wildcard arm) -- When the MPSC event channel closes, `None`
+is returned from `poll_service_event` and the code returns
+`Ok(Some(LoopOutcome::Disconnected))`. When an unknown `ControllerMessage` arrives, the wildcard
+arm logs at `debug` and returns `Ok(None)` (continue). Both are reasonable choices for their
+respective conditions, but the pattern is inconsistent with how `uptrakit-service-sdk`'s own
+event loop handles the `None` recv case (where `conn.recv()` returning `None` dispatches
+`close_reason`). The `None` from a closed local channel is more severe than a missing message
+type, yet both produce the same `LoopOutcome::Disconnected`; a `warn!` log on channel close
+would signal the abnormal condition more clearly.
+
+**[LOW]** `src/tenant_manager.rs:126-133` (`handle_reconnected`) vs
+`src/tenant_manager.rs:142-153` (`handle_ha_online`) -- Both methods start with
+`let Some(state) = self.clients.get(...) else { return; }` but then take different paths:
+`handle_reconnected` delegates to `publish_software_states` (which re-checks
+`self.clients.get`), while `handle_ha_online` checks `state.ha_discovery` before delegating to
+`publish_ha_configs_only` (which also re-checks `self.clients.get`). Both methods call into
+helpers that repeat the same guard lookup. Extracting the `clients.get` result and passing it
+directly to the helper would eliminate the redundant map lookup and make the two flows
+structurally identical.
+
+## Tests
+
+### Strengths
+
+- `src/ha_discovery.rs:329-926` -- ~55 unit tests covering topic format for all five topic types
+  (`discovery_config_topic`, `state_topic`, `latest_version_topic`, `command_topic`,
+  `json_attributes_topic`), `unique_id` format determinism and no-dash requirement,
+  `build_discovery_config` field correctness (platform, name, state topic, command topic,
+  availability, device identifiers, entity ID, release metadata, serialization), and
+  `parse_command_topic` round-trip plus six failure modes. Excellent coverage of a
+  high-correctness pure function module.
+- `src/mqtt_client.rs:452-600` -- 11 tests covering LWT config, credential presence/absence,
+  status topic format, debug redaction of all four secret fields, TLS transport selection, and
+  shutdown task timing. `#[tokio::test(start_paused = true)]` used correctly at line 591 for
+  the shutdown abort timeout test because it uses `tokio::time::timeout` internally; the four
+  non-time tests use plain `#[tokio::test]`.
+- `src/tenant_manager.rs:486-780` -- 11 tests covering wire-to-config translation (port
+  defaults, credential presence/absence, no-credentials case), config hash stability and
+  change-detection, empty manager state, disabled-config filtering, per-client stop noop,
+  shutdown on empty manager, `resolve_update_trigger` for unknown client, and
+  `handle_reconnected`/`handle_ha_online` noop for unknown clients.
+- `src/cli.rs` -- 8 tests covering CLI defaults, custom values, optional URL, version-flag
+  parsing, directory resolution (defaults and overrides), and `friendly_name_or_hostname`
+  fallback.
+- Tests avoid all live network dependencies. No test requires a running MQTT broker, which is
+  correct per AGENTS.md (never test upstream crate behavior).
+- `src/mqtt_client.rs` -- Debug redaction test (`credentials_redacted_in_debug`) uses four
+  negative assertions, verifying that username, password, CA PEM, and the raw string each do
+  not appear in `format!("{:?}", config)`. This is a meaningful security regression guard.
+
+### Issues
+
+**[MEDIUM]** `src/tenant_manager.rs` -- `start_or_update_client` (lines 183-236) has no test
+coverage for its two runtime branches: skip when config hash matches an existing client, and
+restart when hash differs. Both paths modify `self.clients` and interact with `event_tx`. The
+hash-computation tests confirm the hash value is stable, but the manager-level lifecycle
+behavior — whether the existing client is stopped before the new one is started, and whether the
+status event is emitted — is exercised only by a live MQTT broker integration. A test using a
+fake `MqttHandle` (or refactoring `start_or_update_client` to accept a `start_fn` seam) would
+cover these branches.
+
+**[MEDIUM]** `src/tenant_manager.rs:746-780` -- `update_software_states_stores_for_all_tenants`
+and `handle_reconnected_noop_for_unknown_client` / `handle_ha_online_noop_for_unknown_client`
+test the noop paths for unknown clients, but the success paths for `handle_reconnected` and
+`handle_ha_online` (where a known client exists) are not tested. These paths trigger
+`publish_software_states` and `publish_ha_configs_only`, respectively, which are the primary
+side effects of HA broker reconnection events.
+
+**[LOW]** `src/mqtt_client.rs:560-581` -- `tls_transport_sets_tls` and
+`tls_with_custom_ca_pem_does_not_panic` assert only that the call does not panic. Neither test
+asserts that `build_mqtt_options` returns an `MqttOptions` with the TLS transport variant set.
+A minimal `assert!(matches!(opts.transport(), Transport::Tls(_)))` would convert smoke tests
+into regression guards.
+
+**[LOW]** `src/main.rs` -- `on_message`, `on_connected`, and `on_shutdown` for `MqttHandler`
+have no unit tests. The `on_connected` path parses the initial MQTT config delivery (or absence)
+and sends a status event; the `on_message` dispatch arms handle config updates and HA-online
+events. These are thin wires over `TenantManager`, but the wiring itself (including the
+unbounded channel send at line 148 noted as a HA concern) is untested.

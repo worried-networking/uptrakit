@@ -1,7 +1,7 @@
 # Code Review: uptrakit-cli
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-01
+- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility | NATS settings subcommand)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -44,13 +44,21 @@ The main concerns are the plaintext API token storage, `main.rs` at 3,870 lines 
 
 ### Issues
 
-**[LOW]** `src/commands/services.rs` and `src/commands/settings.rs` -- Inconsistent
+**[LOW]** `src/commands/settings.rs` and `src/commands/settings.rs` -- Inconsistent
 parameter-passing: some commands use `*Params<'a>` structs, others use naked positional
-arguments. No documented rationale for the split.
+arguments. No documented rationale for the split. The new NATS commands (`nats_show`,
+`nats_set`, `nats_clear`) follow the naked-positional pattern rather than introducing a
+`NatsParams<'a>` struct, widening the inconsistency (compare `SmtpSetParams<'a>`).
+
+**[LOW]** `src/main.rs:529` -- `NatsCommands::Get` uses variant name `Get` while all other
+read-only subcommands in the codebase use `Show` (e.g. `SmtpCommands::Show`,
+`RegistrationCommands::Show`, `NetworkCommands::Show`, `MqttCommands::Show`). The
+function backing it is even named `nats_show`. This breaks the naming convention and
+produces `uptrakit settings nats get` instead of the expected `uptrakit settings nats show`.
 
 **[LOW]** `src/main.rs` (dispatch section, ~834-1300 LoC) -- Monolithic dispatch block. The
-`run()` function's `match command { ... }` handles all eleven namespaces in a single function.
-Splitting into per-namespace dispatch helpers would reduce navigation complexity.
+`run()` function's `match command { ... }` handles all twelve namespaces in a single
+function. Splitting into per-namespace dispatch helpers would reduce navigation complexity.
 
 ## Security and Safety
 
@@ -75,6 +83,14 @@ or root.
 **[MEDIUM]** `src/commands/settings.rs:596-598` -- MQTT password and CA PEM passed as plain
 `serde_json::Value::String` in `mqtt_update`, bypassing `SecretString` wrapping used in
 `mqtt_create` (line 576-577). Inconsistent secret handling.
+
+**[LOW]** `src/commands/settings.rs:901` -- `nats_set` receives `url: String` (not
+`SecretString`) from the CLI layer in `main.rs`. A URL containing embedded credentials
+(`nats://user:secret@host:4222`) is stored as a plain `String` on the stack and passed
+directly into `serde_json::Value::String(url)` without any zeroization. Compare with
+`mqtt_create`, which wraps `password` in `SecretString::new(...)` at the call site. The NATS
+URL should be received as a `SecretString` (or at minimum the intermediate `String` should be
+cleared after the request is dispatched) to be consistent.
 
 **[LOW]** `src/commands/api.rs:83-84` -- `StatusCode.as_u16()` in serialization helper outside
 an approved site. Function lacks inline comment justifying the exception.
@@ -103,6 +119,13 @@ an approved site. Function lacks inline comment justifying the exception.
 - `validate_url_scheme` exhaustively tested. Eight unit tests cover every scheme category.
 - `chrono_date` format validated structurally (`auth.rs:564-578`).
 - 84 unit tests covering all CLI subcommand parsing variations.
+- `src/commands/settings.rs:1066-1090` -- `NatsSettingsResponse::to_human_string` tests
+  explicitly assert that passwords embedded in a NATS URL (`nats://user:secret@host:4222`)
+  do not appear in the output and that the masked form is present. This is the correct level
+  of security-focused test coverage for a display formatter.
+- `src/main.rs:3831-3887` -- Three parse-only tests for `settings nats get`, `set`, and
+  `clear` cover every NatsCommands variant. The `set` test uses the `match` form to extract
+  and assert the URL value directly.
 
 ### Issues
 
@@ -111,10 +134,13 @@ largest single file. Command enum definitions (~900 lines), main dispatch, and t
 be split into separate modules.
 
 **[MEDIUM]** `tests/command_execution.rs` -- Only `hosts`, `services`, and `software_items`
-namespaces covered by integration tests. Nine of twelve command namespaces have zero integration
-coverage against `MockApiServer`: `auth`, `scheduler`, `settings`, `plugin_configs`,
-`autodiscovery`, `check`, `update`, `history`, and `api`. The `check::all` two-step interaction
-(list tasks, trigger by ID) would benefit particularly from a mock test.
+namespaces covered by integration tests. Ten of thirteen command namespaces have zero
+integration coverage against `MockApiServer`: `auth`, `scheduler`, `settings` (including the
+new NATS subcommand), `plugin_configs`, `autodiscovery`, `check`, `update`, `history`, and
+`api`. No mock endpoint for `settings_nats` was added to `MockApiServer`, so the round-trip
+behaviour of `nats_show`, `nats_set`, and `nats_clear` is unverified against an HTTP server.
+The `check::all` two-step interaction (list tasks, trigger by ID) would benefit particularly
+from a mock test.
 
 **[MEDIUM]** `tests/command_execution.rs:195-210` -- `hosts_list_json_format` test does not
 assert JSON output. Asserts only `result.is_ok()`. The test is a duplicate of
@@ -186,3 +212,129 @@ for callers to capture output. Accepting `&mut dyn Write` would enable test asse
 
 **[LOW]** `src/commands/check.rs:43-69` -- `check::all` makes two sequential API calls where
 one would suffice with a dedicated endpoint. TOCTOU window between list and trigger.
+
+## Consistency
+
+### Strengths
+
+- All command functions follow the same invocation pattern: call `authenticated_client(server,
+  token, insecure, request_timeout)?`, call the API client method, return the typed response.
+  There are no direct `reqwest` calls or hand-rolled HTTP in any command module.
+- Every command module that renders tabular data follows the same empty-list guard: return early
+  with `"No X found.\n"` before entering the table header/row loop. Consistent across `hosts`,
+  `services`, `software_items`, `plugin_configs`, `notifications`, `enrollment_tokens`,
+  and `settings` (MQTT list, OIDC list). See `src/commands/settings.rs:162`.
+- `HumanOutput` unit tests exist in every command module. Each module's `#[cfg(test)]` section
+  exercises at least the happy-path human-string rendering for every response type defined in
+  that module.
+- Multi-field create/update operations consistently use `*Params<'a>` structs (e.g.,
+  `MqttCreateParams<'a>`, `MqttUpdateParams<'a>`, `SmtpSetParams<'a>`, `OidcCreateParams<'a>`,
+  `OidcUpdateParams<'a>`, `RegistrationUpdateParams<'a>`) rather than naked positional
+  arguments, keeping `main.rs` call sites readable and avoiding argument-order bugs.
+
+### Issues
+
+**[MEDIUM]** `src/commands/settings.rs:892` (vs `src/commands/settings.rs:846`) --
+`nats_set` uses bare positional arguments (`url: String`), while every other mutating settings
+command with connection parameters uses a `*Params<'a>` struct (`SmtpSetParams`,
+`MqttCreateParams`, `OidcCreateParams`, etc.). The NATS `set` operation currently carries
+only a single payload field, but the inconsistency creates an established-pattern exception.
+If NATS gains additional fields (credentials, TLS options) the function would need ad-hoc
+refactoring while smtp/mqtt equivalents already have the struct. Preferred pattern: introduce
+`NatsSetParams<'a>` to match `SmtpSetParams<'a>`.
+
+**[MEDIUM]** `src/commands/settings.rs:1066-1095` (vs integration tests for `hosts`,
+`services`, `software_items` in `tests/command_execution.rs`) -- The `NatsSettingsResponse`
+`HumanOutput` tests verify display content but no integration test exercises `nats_show`,
+`nats_set`, or `nats_clear` against a `MockApiServer`. This is the same gap as the nine
+other untested namespaces noted in Code Quality, but the NATS commands are additionally the
+most recently added, making regression risk higher before they accumulate operational history.
+
+**[LOW]** `src/commands/settings.rs:159-176` (vs `src/commands/hosts.rs` and other list
+renderers) -- `Vec<MqttClientResponse>::to_human_string` and
+`Vec<OidcProviderResponse>::to_human_string` render fixed-width table columns without
+truncation guards. If a host value or provider name exceeds the column width (25 and 20 chars
+respectively), the alignment breaks for subsequent columns. All other list `HumanOutput`
+implementations share this weakness, but there is no project-wide policy or helper that
+enforces consistent truncation or wrapping. A shared `truncate(s, n)` helper would make this
+consistent and testable across all table-rendering implementations.
+
+## Tests
+
+### Strengths
+
+- `src/main.rs` -- 84 named parse tests covering all eleven command namespaces: every subcommand
+  variant is instantiated via `Cli::try_parse_from`, and the parsed variant is pattern-matched
+  to assert correct field values. This is the primary regression guard for CLI argument wiring.
+- `src/main.rs:3835-3883` -- NATS settings commands (`settings nats get`, `settings nats set
+  --url`, `settings nats clear`) each have a parse test asserting the correct enum variant and
+  field value. New code is covered at the argument-parsing level immediately.
+- `tests/command_execution.rs` -- `MockApiServer`-based integration tests covering
+  `hosts_list_success`, `hosts_list_empty`, `hosts_show_success`, `hosts_show_not_found`,
+  `services_list_success`, `services_approve_success`, `services_approve_not_found`,
+  `software_items_list_success`, `api_401_returns_not_authenticated`,
+  `api_429_returns_rate_limited`, `api_500_returns_server_error`, `services_remove_success`,
+  `hosts_show_with_agents`. HTTP-level error code mapping to `CliError` variants is
+  well-exercised.
+- `src/commands/settings.rs:1065-1088` -- `nats_settings_human_output_with_url` asserts that
+  the NATS URL is displayed with the password masked (`***`) and that the raw password string
+  does not appear. `nats_settings_human_output_no_url` asserts the no-URL state renders
+  without panic. Both tests cover the newly added NATS output path.
+- `src/commands/auth.rs:578-607` -- 8 tests for `validate_url_scheme` covering every scheme
+  category: HTTPS allowed, HTTP requiring `--insecure`, `file://` rejected, `javascript:`
+  rejected, `data:` rejected, `ftp://` rejected, empty string rejected, relative path
+  rejected. Security-critical function is fully covered.
+- `src/output.rs:103-153` -- `default_format_is_human`, `display_formats`, and
+  `print_output_human_uses_human_string` / `print_output_json_serializes_value` cover the
+  output formatter's two format paths and the `Display` format string.
+- `src/commands/tail.rs:107-130` -- `exit_code_completed_is_zero`, `exit_code_failed_is_one`,
+  `exit_code_other_is_two` provide regression coverage for the SSE tail exit-code mapping used
+  in the `tail` command's process exit path.
+- Unit tests co-located in every command file cover `HumanOutput::to_human_string` for all
+  response types. All use plain `#[test]` (no Tokio time API), which is correct.
+- `tests/command_execution.rs` -- All integration tests use `#[tokio::test]` without
+  `start_paused`. These tests make HTTP requests to a `MockApiServer`; `start_paused` would
+  cause connection timeouts. The absence of `start_paused` is correct per AGENTS.md rule 2.
+
+### Issues
+
+**[HIGH]** `tests/command_execution.rs:201-210` -- `hosts_list_json_format` is named to suggest
+it tests JSON output but only asserts `result.is_ok()`. No assertion on the actual output
+content or format is made. The test is a duplicate of `hosts_list_success` under a misleading
+name and provides no additional coverage. It should either assert the stdout is valid JSON
+containing the expected fields, or be removed.
+
+**[MEDIUM]** `tests/command_execution.rs` -- Nine of twelve command namespaces have zero
+integration test coverage against `MockApiServer`: `auth`, `scheduler`, `settings`,
+`plugin_configs`, `autodiscovery`, `enrollment_tokens`, `check`, `update`, and `history`.
+The NATS settings commands (`nats_show`, `nats_set`, `nats_clear`) are tested at the parse
+level but have no mock-server integration test verifying the API call and output. The
+`check::all` two-step sequence (list tasks, then trigger by ID) is particularly valuable to
+test because it involves two sequential API calls and a TOCTOU dependency.
+
+**[MEDIUM]** `src/commands/auth.rs` -- The `login` function (device-flow polling loop,
+rate-limit backoff, timeout handling, file I/O, browser launch) at ~130 lines has zero test
+coverage. The polling loop logic — how it handles `AuthorizationPending`, `SlowDown`,
+`AccessDenied`, and `ExpiredToken` responses — is the most complex stateful behavior in the
+CLI binary and is exercised only by live OIDC integration. Extracting `poll_until_authorized`
+as a testable function accepting an injectable time source and a mock client would allow unit
+coverage of all the polling states.
+
+**[LOW]** `src/commands/settings.rs:1065-1088` -- The NATS output tests assert `has_url` or
+`Has URL` appears using `||` (either string). This is weaker than asserting the exact label
+used by `to_human_string`. The test should assert the exact field label that appears in output
+so that a label rename is caught immediately.
+
+**[LOW]** `src/commands/tail.rs` -- `tail::tail()` (the SSE streaming loop at line 44) has no
+test. The function parses the SSE stream, formats each event type, and maps the final
+`TailResult` to an exit code. The three exit-code tests cover the `TailResult` enum variants
+in isolation, but the SSE event parsing and formatting are untested. A test providing a mock
+SSE byte stream would cover the parsing path.
+
+**[LOW]** `src/output.rs` -- No test calls `print_output(OutputFormat::Yaml, &val)`. A
+`serde_yaml_ng` serialization regression would not be caught by any current test.
+
+**[LOW]** `src/commands/notifications.rs` -- `HumanOutput` tests cover `channel_detail_human_output_contains_key_fields`
+and empty/non-empty channel list. Rule log and notification log entries are not covered in
+`HumanOutput` tests; `notification_log_response` and `rule_detail_human_output` outputs could
+be asserted to match expected field labels.

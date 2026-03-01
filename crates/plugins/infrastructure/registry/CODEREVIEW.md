@@ -91,3 +91,76 @@ No coding standards issues found.
 ### Issues
 
 No extensibility issues found.
+
+## Consistency
+
+### Strengths
+
+- The `register_plugins!` macro enforces strict uniformity across all registered plugins: every
+  plugin must provide a `Config` type with `validate()`, a `Plugin` type constructible via
+  `Plugin::new(config, executor).await`, and `Config::validate_identifier`. No plugin can be
+  registered without satisfying all three requirements at compile time. This is stronger than a
+  documentation convention.
+- All six plugins that handle secrets (`DockerConfig`, `GitHubConfig`, `GitLabConfig`,
+  `ForgejoConfig`, `GitLabConfig`, and `ShellConfig`) implement `SecretMasking` via the same
+  JSON round-trip pattern in `src/registry.rs:27-41`. Plugins without secrets (`AptConfig`,
+  `HomebrewConfig`, `NpmConfig`, `ProxmoxHelperScriptsConfig`) implement the trait with a
+  no-op `with_secrets_masked` using the default implementation from the trait. The distinction
+  is enforced by the trait rather than convention.
+- All four plugins that perform HTTP requests (`DockerPlugin` at `registry.rs:34-35`,
+  `GitLabPlugin` at `plugin.rs:112-113`, `ForgejoPlugin` at `plugin.rs:113-114`,
+  `NpmPlugin` at `plugin.rs:181-182`) set `.connect_timeout(10s)` and `.timeout(60s)`.
+  The timeout values are consistent across all four. (See issue below for the two exceptions.)
+
+### Issues
+
+**[HIGH]** `crates/plugins/releases/github/src/plugin.rs:107-115` and
+`crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs:115-127`
+(vs `crates/plugins/releases/docker/src/registry.rs:34-35`,
+`crates/plugins/releases/gitlab/src/plugin.rs:112-113`,
+`crates/plugins/releases/forgejo/src/plugin.rs:113-114`,
+`crates/plugins/package-managers/npm/src/plugin.rs:181-182`) -- The GitHub and
+Proxmox-helper-scripts plugins construct `reqwest::Client` without `.connect_timeout()` or
+`.timeout()`. Both plugins make external network requests: GitHub fetches release tags from
+`api.github.com`; Proxmox fetches the community scripts JSON index from an external URL. In a
+network partition or slow-server scenario, these plugins can hang indefinitely, blocking the
+agent's update processing loop. Every other HTTP-using plugin in the workspace applies
+`connect_timeout(10s)` and `timeout(60s)`. Preferred fix: add the same two timeout calls to
+`GitHubPlugin::new` and `ProxmoxHelperScriptsPlugin::new`.
+
+**[MEDIUM]** `crates/plugins/package-managers/npm/src/plugin.rs` and
+`crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`
+(vs `crates/plugins/releases/github/src/error.rs:8`,
+`crates/plugins/releases/docker/src/error.rs:8`,
+`crates/plugins/releases/gitlab/src/error.rs:8`,
+`crates/plugins/releases/forgejo/src/error.rs:8`,
+`crates/plugins/package-managers/homebrew/src/error.rs:7`,
+`crates/plugins/package-managers/apt/src/error.rs:7`) -- Six plugins define a dedicated
+`<PluginName>Error` enum (e.g., `GitHubError`, `DockerError`, `AptError`, `HomebrewError`).
+The NPM and Proxmox-helper-scripts plugins do not; they use `PluginError` from the
+infrastructure core directly. This means NPM and Proxmox errors cannot carry plugin-specific
+context variants and cannot be individually matched by consumers. Preferred pattern: introduce
+`NpmError` and `ProxmoxHelperScriptsError` enums consistent with all other plugins, even if
+they initially mirror `PluginError`. The dedicated types also make `impl_report_conversion!`
+usage uniform across all plugins.
+
+## Tests
+
+### Strengths
+
+- `src/registry.rs:244-597` -- Tests cover: config parsing success for all 9+ registered
+  plugins, invalid config rejection for each, `create_plugin` round-trip for all plugins,
+  `mask_config_secrets` and `restore_config_secrets` for all plugins with secrets (GitHub,
+  Docker, Forgejo, GitLab), capability verification on constructed plugins, and
+  string-type dispatch variants of all `PluginOps` methods.
+- The registry tests serve as an integration-level smoke test for the `register_plugins!`
+  macro: adding a new plugin without updating the test suite causes a compilation failure on
+  the exhaustiveness check.
+
+### Issues
+
+**[LOW]** `src/registry.rs:243` -- Tests use `LocalCommandExecutor` directly rather than a
+mock. For `create_plugin` tests this is benign (plugins are constructed but not invoked),
+but it means no test verifies that `CommandExecutor` calls are forwarded correctly from the
+registry dispatch methods down to individual plugins. A `MockCommandExecutor` that records
+calls and returns canned stdout/stderr would enable dispatch-correctness tests.

@@ -222,3 +222,29 @@ pathway and it always targets JetStream. If a future requirement needs
 core NATS publish (without JetStream persistence) for ephemeral notifications,
 there is no API surface for that. This is not a current problem but worth
 noting as the messaging patterns evolve.
+
+## Tests
+
+### Strengths
+
+- `src/subjects.rs:29-71` -- Five synchronous tests cover all four routing cases (broadcast,
+  service-targeted, capability-targeted, controller-targeted) plus the precedence rule that
+  a service ID overrides a capability target. Every branch of `determine()` is exercised.
+- `src/envelope.rs:19-47` -- `envelope_serialization_roundtrip` covers the struct's serde
+  cycle: serialise to JSON, deserialise, and assert all routing metadata fields round-trip
+  correctly. The `created_at` RFC 3339 serde helper is implicitly verified.
+
+### Issues
+
+**[LOW]** `src/envelope.rs:38-46` -- The roundtrip test asserts on `source_controller_id`,
+`target_service_id`, `target_capability`, and `created_at`, but does not assert on the
+`message` field. If `ControllerMessage` serialization were to regress, this test would still
+pass. Adding an assertion on the deserialized message discriminant (e.g.,
+`matches!(deserialized.message, ControllerMessage::CaBundleUpdated(_))`) would detect such
+regressions.
+
+**[MEDIUM]** `src/connection.rs` -- `NatsConnection::connect`, `ensure_stream`, and
+`publish_envelope` have no unit or integration tests. These require a live NATS server,
+but no ignored integration test exists to exercise them. The connection and publish paths
+are covered only by end-to-end system tests, making regressions harder to catch during
+development.

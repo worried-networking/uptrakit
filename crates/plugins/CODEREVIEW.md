@@ -85,6 +85,23 @@ No coding standards issues found.
 
 No extensibility issues found.
 
+## Tests
+
+### Strengths
+
+- `src/config.rs` and `src/plugin.rs` for the shell plugin follow the project convention:
+  configuration tests (default values, serialisation round-trips) and plugin construction
+  tests are present via the registry-level tests in `infrastructure/registry`.
+
+### Issues
+
+**[MEDIUM]** `crates/plugins/generic/shell/src/plugin.rs` -- The shell plugin has no unit
+tests for `check_version`, `execute_update`, or the command-construction logic. The plugin
+relies on `CommandExecutor` dependency injection, making it straightforward to test with a
+`FixedOutputExecutor` mock (as used in the npm plugin). At minimum, a test verifying that the
+configured command string is passed correctly to the executor would prevent regressions if
+command-building logic changes.
+
 ---
 
 ## Cross-Cutting Plugin Findings

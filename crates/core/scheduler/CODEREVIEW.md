@@ -116,3 +116,52 @@ development without impacting production.
 mechanism ensuring all `ScheduledTaskType` variants have executors. Unlike `register_plugins!`,
 there is no compile-time check that prevents a new variant from being added without a
 corresponding executor registration in `main.rs`.
+
+## Tests
+
+### Strengths
+
+- `src/cli.rs:17-80` -- 4 tests covering CLI defaults, custom `--poll-interval`, version flag
+  parsing without other flags, and directory resolution. Adequate for the narrow argument surface.
+- `src/handler.rs:308-319` -- `scheduler_handler_capabilities` verifies the advertised
+  capability set (`Scheduler`, `DatabaseAccess`, `NatsAccess`, `MasterKeyAccess`,
+  `CaManagement`, `GracefulShutdown`) and asserts the count is exactly 6, guarding against
+  accidental removals.
+- `src/ca_rotation.rs:162-260` -- Three tests for `ExternalCaRotationCheckExecutor` using
+  in-memory SQLite and a `TrackingNotifier` mock: empty DB skips rotation, long-lived cert does
+  not trigger, and near-expiry cert triggers. Tests use plain `#[tokio::test]` without
+  `start_paused` -- correct because they connect to SQLite (AGENTS.md rule 2).
+- `src/ca_rotation.rs:88-114` -- `TrackingNotifier` is a minimal `SchedulerNotifier` mock using
+  `Arc<AtomicBool>` to record whether `signal_ca_rotation` was called. Self-contained, no
+  mocking framework required, mirrors the `TrackingExecutor` pattern in the controller.
+- `src/nats_notifier.rs:83-90` -- `nats_scheduler_notifier_new` verifies construction does not
+  panic and that `scheduler_id` is stored. Minimal but meaningful smoke test.
+
+### Issues
+
+**[HIGH]** `src/handler.rs` -- `on_connected` (lines 88-210) and `on_message` (lines 213-254)
+have no test coverage. `on_connected` performs the critical credential-delivery sequence:
+receives `SchedulerCredentials`, initializes the database connection, initializes the master
+key, and starts the scheduler engine. `on_message` handles re-delivery and the `Disconnect`
+case. Both the success path and the failure path (e.g., invalid DB URL, master key already
+initialized with a different key) are exercised only by live integration. A stub
+`ServiceIdentityState` and a mock `ControllerConnection` would allow unit testing of the
+credential parsing, startup sequencing, and error-return logic without a running controller.
+
+**[MEDIUM]** `src/ca_rotation.rs` -- The boundary between the rotation threshold (33% of
+lifetime remaining) and "no rotation needed" is tested with 1825-day and 30-day certificates.
+The exact threshold (cert lifetime / 3) is not directly tested at its boundary value. A
+certificate at precisely 33.3% remaining lifetime should trigger; one at 33.4% remaining should
+not. An off-by-one in the threshold formula would not be caught by the current tests.
+
+**[MEDIUM]** `src/handler.rs:94-96` -- `stop_scheduler` is called on credential re-delivery to
+tear down the previous runtime before starting a new one. This path — receiving credentials a
+second time while a scheduler is already running — has no test. A regression here could cause
+a double-start or a leaked `CancellationToken` child task.
+
+**[LOW]** `src/nats_notifier.rs` -- `send_to_service`, `broadcast`, `send_by_capability`,
+`signal_ca_rotation`, `push_software_states_for_tenant`, and `signal_crl_renewal` all have no
+tests. These are thin NATS publish wrappers, but the topic construction and payload serialization
+inside each method are exercised only by integration. At minimum, the `signal_ca_rotation`
+topic format should be asserted with a mock NATS connection to guard against breaking the
+topic contract between the external scheduler and the controller's subscription.

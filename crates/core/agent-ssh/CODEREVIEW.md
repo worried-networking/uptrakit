@@ -227,3 +227,115 @@ tenant filter is needed would improve clarity.
 ### Issues
 
 No extensibility issues found.
+
+## Tests
+
+### Strengths
+
+- `src/host_ops.rs` -- 18 tests using in-memory SQLite with full migrations: add, find by
+  name/ID, duplicate name rejection, list empty/populated, remove by name, remove nonexistent,
+  update fields, update rename conflict, rename to same name (idempotency), `machine_id`
+  lifecycle, and `machine_id` for nonexistent ID. No shared state between tests.
+- `src/ssh_transport.rs` -- `BootstrapHandler` TOFU/pin/mismatch paths tested with real
+  in-process Ed25519 key generation. `LineBuffer` has nine tests covering partial line
+  accumulation, flush, streaming-past-truncation (10 MB cap), and no-sender mode.
+- `src/cli.rs` -- 26 named parse tests covering defaults, SSH target parsing, and conflict
+  detection. All `panic!` calls in test-only fallback arms.
+- `src/ssh_pool.rs:235-310` -- `is_expired` extracted as a free function and tested with
+  `#[tokio::test(start_paused = true)]` correctly: three tests use `tokio::time::advance`, which
+  is a Tokio time API, justifying `start_paused`. Four additional non-time pool tests use plain
+  `#[tokio::test]` without `start_paused`, which is correct per AGENTS.md rule 1.
+- `src/commands/bootstrap.rs:516-597` -- Command builder tests cover all nine steps of the
+  provisioning sequence; injection prevention test verifies `user'; rm -rf /; echo '` is
+  correctly escaped via `shell_escape`.
+- `src/ssh_executor.rs:111-183` -- SSH executor builder tests verify command wrapping and three
+  shell-injection vectors (`$(whoami)`, `; rm -rf /`, `` `id` ``) are safely single-quoted.
+- `src/ssh_key.rs:257-464` -- 16 tests for key-type detection (RSA PKCS#1, ECDSA SEC1,
+  Ed25519 OpenSSH, RSA OpenSSH, PKCS#8 variants), Ed25519 keypair generation, public-key
+  extraction, and truncation/corruption edge cases.
+- `src/host_info.rs` -- OS-type normalization, `ioreg` UUID parsing, OS-release `PRETTY_NAME`
+  parsing, macOS `sw_vers` parsing — all tested with unit functions.
+- `src/client.rs:780-896` -- Per-host concurrency guard tests (`test_per_host_guard_rejects_same_host`,
+  `test_per_host_guard_allows_different_host`), `host_needs_ssh` four-branch coverage, and
+  `build_fast_path_host_info` fields and fallback — well exercised.
+- `src/commands/bootstrap.rs` and `src/commands/sudoers.rs` -- `generate_sudoers_content`
+  tested for all-commands variant, specific-command list, and header presence.
+
+### Issues
+
+**[HIGH]** `src/client.rs` -- The three primary protocol handlers (`handle_check_versions_ssh`,
+`handle_execute_update_ssh`, `handle_discover_software_ssh`) and `report_enrolled_hosts` have
+no test coverage. These functions constitute the entire protocol-to-SSH bridge. The error paths
+— host not found in DB, SSH session establishment failure, machine-ID mismatch — are exercised
+only by manual integration. A mock `ControllerConnection` (or extraction of the response-
+building logic into testable helpers) would allow unit coverage of at least the host-not-found
+and SSH-failure branches without a live SSH server.
+
+**[MEDIUM]** `src/commands/host.rs` -- `run_add`, `run_list`, `run_show`, `run_update`, and
+`run_remove` are untested. The `host_ops` layer they call is well tested, but the CLI-to-ops
+translation (private-key file reading via `ssh_key::read_private_key`, AES-256-GCM encryption
+wrapping, field mapping, and stdout formatting) is exercised only by manual invocation. Tests
+using an in-memory DB and a temp-file key could cover the encryption and output formatting
+paths without a live DB or SSH server.
+
+**[LOW]** `src/ssh_pool.rs:308` -- The test at line 308 (`acquire_returns_error_for_bad_host`)
+is annotated with `#[test]` (synchronous) but calls `pool.acquire()`, which is an async
+function. Verify whether this test compiles and runs; if the inner function call is wrapped in
+`block_on`, the pattern works, but it should be `#[tokio::test]` for consistency with the
+other pool tests.
+
+**[LOW]** `src/commands/bootstrap.rs` -- The full `run_bootstrap` orchestration path (nine
+remote steps) is not covered. Adding a trait seam for `connect_and_authenticate` would allow
+testing the orchestration logic (step sequencing, error messages, partial-state annotations)
+without a live SSH server.
+
+## Maintainability
+
+### Strengths
+
+- Clear module decomposition: each file has a single responsibility and a module-level doc
+  comment. `ssh_pool.rs` documents the multiplexing model; `ssh_transport.rs` documents
+  `LineBuffer` dual-mode semantics; `commands/bootstrap.rs` documents all nine provisioning
+  steps with partial-state warnings.
+- Named constants throughout: `IDLE_TTL`, `CONNECT_TIMEOUT`, `OUTPUT_CAP_BYTES` in their
+  respective modules. No numeric literals in pool or transport logic.
+- Command builder functions are pure string-returning functions, independent of SSH context,
+  making them trivially testable and the commands they produce auditable in isolation.
+
+### Issues
+
+**[HIGH]** `src/client.rs:158-500` -- Error response construction is duplicated across the three
+protocol handlers (`handle_check_versions_ssh`, `handle_execute_update_ssh`,
+`handle_discover_software_ssh`). Each handler contains two near-identical blocks for "host not
+found" and "SSH connection failed" — approximately 40 lines of structural duplication per
+handler. A shared `make_ssh_error_response(host_name, error)` helper would make the error
+format consistent and reduce the surface area for future format changes. Already noted as
+`[LOW]` in the Code Quality section; elevated here because it will compound as new SSH-backed
+message types are added.
+
+**[MEDIUM]** `src/ssh_pool.rs:22` -- `tokio::sync::Mutex` used instead of `parking_lot::Mutex`.
+The workspace standard documented in `MEMORY.md` requires `parking_lot::Mutex` in async code
+because `std::sync::Mutex::lock()` requires `.unwrap()` and `tokio::sync::Mutex` holds the lock
+across `.await` boundaries. The pool lock in `acquire` is held across the SSH connection
+handshake (`connect_to_host.await`) at `ssh_pool.rs:109`, meaning the Tokio mutex guard is
+held across an `.await` — the exact case where `parking_lot::Mutex` is preferred. If the pool
+lock is needed across an await, the lock should be dropped before the await (acquire the lock,
+clone/extract the needed value, drop the guard, then await).
+
+**[MEDIUM]** `src/commands/host.rs` -- The file contains no doc comments on any of the five
+`run_*` public functions (`run_add`, `run_list`, `run_show`, `run_update`, `run_remove`). The
+command-line-to-database field mapping (key reading, encryption, `HostUpdates` struct
+population) is the most likely place for regressions and has zero inline documentation. Each
+function should document its preconditions (e.g., that the DB is already initialized) and any
+notable behaviors (e.g., that `--private-key-file` encrypts at rest).
+
+**[LOW]** `src/ssh_target.rs` -- At 635 lines for what is essentially a parse-and-display type
+with tests, `ssh_target.rs` has grown beyond the complexity of the concern it addresses. The
+test module (lines 200–635) is well-written but could be in a separate test file under
+`tests/` to keep the source module focused on the type definition.
+
+**[LOW]** `src/host_ops.rs:28-32` -- `Entity::find().all(db)` without a tenant filter carries a
+comment in the existing review noting that a clarifying comment is needed. This also means that
+any future operator mistake of pointing the agent-ssh binary at a shared (multi-tenant) database
+would silently return all tenants' hosts. The clarifying comment should explicitly state
+"single-tenant local SQLite — no tenant filter required by design".

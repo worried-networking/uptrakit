@@ -146,3 +146,136 @@ design-note comment.
 undocumented. This future is used as an arm in `tokio::select!`. When another arm fires, Tokio
 drops the future mid-poll. The trait documentation should state the cancellation-safety
 requirement explicitly.
+
+## Tests
+
+### Strengths
+
+- `src/cert_handler.rs:251-448` -- 14 tests cover the certificate renewal handler: state
+  transitions (idle, pending, handling response), the cert-expiry check (`is_expired`),
+  `should_renew` threshold logic, and timer-based renewal scheduling. Three tests correctly
+  use `#[tokio::test(start_paused = true)]` with `tokio::time::advance` for the timer
+  tests; the remaining async tests do not use time APIs and correctly omit `start_paused`.
+- `src/error.rs:188-280` -- 13 synchronous tests exercise every `LoopError` and
+  `EnrollmentError` variant, the `is_transient_network()` predicate (all transient and
+  non-transient paths), and `Display` output for each variant.
+- `src/event_loop.rs` -- `dispatch_close_reason` is tested for cert-rotation (immediate
+  reconnect path) and revocation (backoff reconnect path), verifying that the
+  `LoopOutcome` variant returned is correct for each `CloseReason`.
+- `src/signal.rs:91-103` -- Two synchronous tests verify `SignalWatcher` construction and
+  that `signal_watcher_new` returns `Ok` on the test platform.
+
+### Issues
+
+**[HIGH]** `src/lifecycle.rs` -- `run_service_lifecycle` has zero test coverage. This is
+the entire enrollment-reconnect-shutdown state machine. The `ServiceHandler` trait is
+intentionally mockable (all methods have defaults or clear signatures), but no test
+exercises the full lifecycle transitions: enrollment success, enrollment failure with retry,
+reconnect after `CertExpired`, reconnect after `Disconnected`, or graceful `Shutdown`.
+
+**[LOW]** `src/signal.rs:104-108` -- `signal_watcher_new` test asserts only `is_ok()`
+without delivering a signal. The signal dispatch path (e.g., `recv().await` returning after
+a simulated SIGTERM) is untested. While sending OS signals from tests is non-trivial,
+verifying that the watcher properly closes the channel on signal would increase confidence
+in the shutdown path.
+
+## Consistency
+
+### Strengths
+
+- `src/lifecycle.rs:295-314` (enrollment retry) and `src/lifecycle.rs:380-437`
+  (reconnect loop) -- Both loops construct a fresh `Backoff::new(2s, 60s)` and call
+  `backoff.next_delay()` before `tokio::time::sleep`. Neither loop shares a backoff
+  instance between phases, so a long enrollment retry does not accumulate into the
+  reconnect backoff and vice versa. The two retry loops are structurally symmetric.
+- `src/event_loop.rs:94` -- The `tokio::select!` loop uses `biased` with a documented
+  priority ordering. Service-specific events are arm 1 (highest priority), then ping, then
+  renewal, then controller messages, then OS signals. This matches the design intent stated
+  in the module doc-comment and is applied consistently for a single loop, not split across
+  multiple loops.
+- `src/connection.rs:100-182` -- `recv()` applies the same validation pipeline (header
+  parse → protocol version check → sequence check → full envelope deserialize) identically
+  for both `Message::Text` and `Message::Binary` frames. Neither branch skips a step.
+
+### Issues
+
+**[MEDIUM]** `src/lifecycle.rs:297-314` (enrollment backoff) vs `src/lifecycle.rs:423-429`
+(reconnect backoff on `Disconnected`) -- In the reconnect loop, `LoopOutcome::Reconnect`
+(certificate rotated) resets the backoff with `reconnect_backoff.reset()` before a fixed
+2-second delay, while `LoopOutcome::Disconnected` advances the backoff with
+`reconnect_backoff.next_delay()`. These two outcomes are explicitly differentiated. In the
+enrollment retry loop, all transient errors advance the backoff with
+`enrollment_backoff.next_delay()`, including `ReceiveClosed` which is semantically the same
+as a clean `Disconnected` event. A cert-rotation–driven enrollment disconnect would
+accumulate backoff in the enrollment phase that it would not accumulate in the reconnect
+phase. Adding a `ReceiveClosed`-specific reset in the enrollment loop would mirror the
+reconnect behavior.
+
+**[LOW]** `src/lifecycle.rs:263-285` (early cert-expiry path) vs `src/lifecycle.rs:274-284`
+(run-authenticated-with-reconnect error path) -- Both paths detect cert expiry, log a
+warning, and call `identity.clear_enrollment_state()`. The log messages differ slightly:
+`"certificate expired, falling back to fresh enrollment"` vs `"certificate expired, falling
+back to enrollment"`. These two log messages describe the same event but use slightly
+different wording, making log search by pattern inconsistent. Both should use the same
+canonical message.
+
+**[LOW]** `src/connection.rs:73-83` (`send`) -- `send` propagates errors via `?` with
+`context_to::<EnrollmentError>()`, making the caller responsible for handling send
+failures. `send_best_effort` on line 212 wraps `send` and logs at `warn!` on failure.
+The agent-core `client.rs` uses `send_best_effort` for update output and `send` for
+`VersionCheckResults` and `DiscoveryResults`. The choice between the two is not documented
+by a convention: critical responses use `send` (error propagates), status messages use
+`send_best_effort` (error absorbed). This distinction is implicit and has no trait-level
+documentation in `ServiceHandler`.
+
+## Maintainability
+
+### Strengths
+
+- `src/lifecycle.rs` -- `ServiceHandler` trait methods are all doc-commented, including the
+  table in `ShutdownCause` mapping cause to `DisconnectReason` and `LoopOutcome`. A new
+  implementor has a complete reference in one place.
+- `src/cert_handler.rs` -- Module doc comment lists every public export and explains the
+  `CertificateRenewalHandler` per-connection invariant. Adding a new certificate lifecycle
+  event is a one-method addition to `CertificateRenewalHandler`.
+- Named constants throughout (`FAR_FUTURE`, `CERT_RECONNECT_DELAY`, `DEFAULT_SHUTDOWN_TIMEOUT`)
+  with doc comments. No magic numbers in the lifecycle logic.
+- `src/event_loop.rs:212-218` -- `LoopState` struct groups mutable references that would
+  otherwise form a long parameter list. The struct makes the function signature `handle_service_settings(state, settings)` instead of a 5+ parameter list.
+
+### Issues
+
+**[HIGH]** `src/lifecycle.rs:481` (entire function) -- `run_service_lifecycle` is the central
+function of the crate with zero unit tests. The trait is designed for testability (all
+service-specific behavior is injected through `ServiceHandler`), yet no test exercises the
+enrollment → reconnect → shutdown state machine. A future refactor of the lifecycle transitions
+— adding a new `LoopOutcome` variant, changing backoff behavior, modifying enrollment retry
+conditions — will have no regression safety net. Adding even a minimal mock `ServiceHandler`
+that exercises the happy path (fresh enrollment, authenticated connection, graceful shutdown)
+would catch most lifecycle regressions.
+
+**[MEDIUM]** `src/identity.rs` -- `ServiceIdentityState` at 866 lines mixes three distinct
+concerns: file I/O for identity state (load/save), cryptographic operations (keypair generation,
+CSR generation), and state interrogation accessors (`is_fresh`, `is_enrolled_only`, `is_certified`,
+`cert_not_after`, etc.). These are independent operations that could be organized into logical
+sections or sub-modules. As written, a maintainer working on CSR generation must navigate past
+15+ accessor methods to find the crypto operations.
+
+**[LOW]** `src/lifecycle.rs:79,89` -- `ServiceHandler` has two associated constants
+(`DIR_NAME: &'static str`, `SERVICE_LABEL: &'static str`) that make it non-object-safe. The
+existing Extensibility review notes this; it is also a maintainability issue because any future
+attempt to store a `Box<dyn ServiceHandler>` (e.g., for dynamic service loading) will receive a
+cryptic compiler error referencing object safety rather than a clear note in the trait doc. A
+comment on the trait explaining the non-object-safety and the reason for the design would
+prevent future confusion.
+
+**[LOW]** `src/event_loop.rs:62` -- `DEFAULT_SHUTDOWN_TIMEOUT: u32 = 120` is defined as a
+local constant inside `run_event_loop` rather than in a `durations` module. This makes it
+invisible to operators looking for tunable timeouts. The constant is sent to the controller as
+the initial `ServiceSettings` fallback. Moving it to `src/lib.rs` or a `durations.rs` with a
+doc comment would make it discoverable.
+
+**[LOW]** `src/ca.rs` -- The CA bundle management module has no module-level doc comment. The
+module handles CA certificate loading, validation, and trust-chain building — operations that
+interact with the TLS and TOFU subsystems. A brief doc comment explaining the module's role in
+the identity lifecycle would aid navigation.

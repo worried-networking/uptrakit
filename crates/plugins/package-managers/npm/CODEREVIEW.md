@@ -159,3 +159,27 @@ default fallback would enable private registry support without breaking existing
 **[LOW]** `plugin.rs:23` -- The `PRERELEASE_DIST_TAGS` list is a compile-time constant.
 Moving it to `NpmConfig` as an optional override would allow users to track custom
 dist-tags (e.g., `nightly`, `experimental`) without code changes.
+
+## Tests
+
+### Strengths
+
+- `plugin.rs:514-896` -- 30+ tests cover: identifier validation (valid plain and scoped
+  packages, `..` traversal, uppercase, invalid start characters, scope format errors),
+  `parse_npm_list_all` (normal output, malformed JSON, empty), `parse_registry_response`
+  (normal, with prerelease dist-tags, version deduplication via `HashSet`, HTTP 404 empty
+  list), `capabilities`, host compatibility (npm present, npm absent), and
+  `detect_installed_version` using a `FixedOutputExecutor` mock.
+- `config.rs:30-94` -- Config tests cover default values, serialisation round-trips, and
+  secret masking (no-op, correct for a config with no secrets).
+- Version deduplication test explicitly verifies that the same version appearing under
+  multiple dist-tags is deduplicated to a single entry in the result set.
+- Both success and failure paths tested: npm not found → `Unsupported`, non-zero exit
+  from `npm list` → empty installed list, HTTP 404 → empty release list.
+
+### Issues
+
+**[LOW]** `plugin.rs` -- `execute_update` is not tested. This is the most privileged method
+(runs `npm install -g` with `.privileged()`) and accumulates output for the audit log.
+A mock executor test verifying that the correct command is constructed and output lines are
+streamed would mirror the pattern used by the APT plugin's `execute_update` tests.

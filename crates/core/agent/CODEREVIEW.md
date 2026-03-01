@@ -146,3 +146,44 @@ No coding standards issues found.
 ### Issues
 
 No extensibility issues found.
+
+## Tests
+
+### Strengths
+
+- `src/cli.rs:13-186` -- 11 tests covering CLI defaults, directory resolution with defaults and
+  overrides, `--tofu` + `--ca-cert` conflict, `--tofu` + `--pki-addr` conflict, URL parsing edge
+  cases, and scheme enforcement. These guard the user-visible argument surface exercised on every
+  invocation.
+- `src/host_info.rs:125-138` -- `collect_host_info_returns_valid_data` asserts that the returned
+  `HostInfo` carries a non-empty `machine_id`, correct `os_type` from `std::env::consts::OS`,
+  correct `architecture`, and `ip_address == None`. Covers the happy path for all host-info
+  fields collected at startup.
+
+### Issues
+
+**[HIGH]** `src/main.rs` -- `AgentHandler::on_message` has zero test coverage. The machine-ID
+mismatch guard is the primary correctness property owned by this crate: three separate match
+arms (lines 60-67, 71-78, 83-90) silently discard messages when `host_machine_id` differs from
+`self.machine_id`. Neither the mismatch path (returns `Ok(None)`) nor the success path
+(delegates to the handler) is directly asserted. A free function
+`fn validate_machine_id(expected: &str, received: &str) -> bool` extracted from the match arms
+would be testable without a mock `ControllerConnection`.
+
+**[HIGH]** `src/main.rs` -- `on_connected`, `on_service_event`, and `agent_capabilities()` have
+no unit tests. `agent_capabilities()` in particular is the single source of truth for the three
+advertised capabilities; a trivial `#[test]` asserting the returned `BTreeSet` contains
+`SoftwareDiscovery`, `UpdateHooks`, and `GracefulShutdown` would serve as a regression guard
+against accidental removals.
+
+**[MEDIUM]** `src/client.rs` -- `handle_check_versions`, `handle_execute_update`, and
+`handle_discover_software` have no tests. The `in_flight_update` already-in-progress guard
+inside `handle_execute_update` and the `send_best_effort` error-suppression semantics in the
+other two handlers are exercised only by end-to-end integration runs. Factoring the guard
+predicate and response-building logic into testable free functions (accepting a mock executor)
+would allow unit coverage of the success and rejection paths without a live connection.
+
+**[LOW]** `src/host_info.rs:135` -- `collect_host_info_returns_valid_data` asserts
+`info.hostname.is_some()` unconditionally. On CI containers where `hostname` is not in `PATH`
+the production code correctly returns `None` but the test will fail. The assertion should be
+conditionalized or replaced with a non-panic expectation.

@@ -93,3 +93,26 @@ No coding standards issues found.
 ### Issues
 
 No extensibility issues found.
+
+## Tests
+
+### Strengths
+
+- `src/plugin.rs:428-724` -- All JSON parsing helpers tested with in-process fixtures: no
+  live `brew` binary required. Tests cover `parse_installed_formulae` (normal, empty name,
+  missing version), `parse_installed_casks` (normal, empty name, missing version),
+  `parse_installed_version` (formula found, cask found, not found), and
+  `parse_latest_version` (formula, cask, not found).
+- `src/config.rs` -- Config tests cover default values, `HomebrewPackageType` serialisation
+  (`formula`, `cask`, absent), and validation.
+- Parsing helpers are pure synchronous functions that are tested in isolation without
+  constructing the full plugin, making each test fast and focused.
+
+### Issues
+
+**[LOW]** `src/plugin.rs:708-722` -- The async `detect_installed_version` and `fetch_releases`
+methods are tested only for the empty-identifier guard path. No test exercises the JSON
+parsing code path inside these methods end-to-end using a mock executor that returns a
+pre-built `brew info --json=v2` fixture. The gap means that the executor invocation logic
+(argument assembly, JSON capture, error handling) is untested even though the underlying
+parsers are well-tested.

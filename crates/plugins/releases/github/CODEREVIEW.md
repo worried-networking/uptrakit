@@ -104,3 +104,25 @@ No coding standards issues found.
 ### Issues
 
 No extensibility issues found.
+
+## Tests
+
+### Strengths
+
+- `src/config.rs:160-310` -- 15+ tests cover `GitHubReleaseSource` validation (valid,
+  missing owner, missing repo, slash in owner, `..` in repo, slash in repo), `GitHubConfig`
+  validation, serialisation round-trips, `SecretMasking` (mask replaces token, restore
+  recovers masked, new token kept), and `TrackingMode` permutations.
+- `src/tag.rs:16-46` -- Six tests for the tag-strip helper covering the v-prefix, release-
+  prefix, no-prefix, empty prefix, empty tag, and prefix-longer-than-tag cases.
+- Path traversal validation tests (`slash in owner`, `.. in repo`) are explicitly present,
+  directly confirming the primary security boundary holds.
+
+### Issues
+
+**[MEDIUM]** `src/plugin.rs` -- `fetch_releases` (the primary controller-side operation) has
+no test. No mock HTTP server exercises: successful 200 with release list, 403 rate-limited
+response with `x-ratelimit-remaining: 0`, 404 not-found, or invalid JSON body. The
+`uptrakit-openapi-client` and npm plugin both use `httpmock` for this pattern; this plugin
+should follow suit. A mock returning a fixture JSON array would verify the asset filter
+path, the date-parse path, and the pre-release exclusion path end-to-end.

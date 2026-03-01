@@ -102,3 +102,27 @@ No coding standards issues found.
 ### Issues
 
 No extensibility issues found.
+
+## Tests
+
+### Strengths
+
+- `src/executor.rs` -- `execute_quiet_timeout_fires` and `execute_timeout_fires` correctly use
+  `#[tokio::test(start_paused = true)]` and call `tokio::time::advance`, triggering the
+  timeout without burning wall-clock time. The `start_paused` annotation is justified by
+  direct use of Tokio time APIs.
+- `src/command.rs` -- Comprehensive suite covering `CommandSpec` construction, CLI argument
+  assembly for both `Exec` and `Shell` modes, working directory inclusion, shell
+  wrapping correctness, and `shell_escape` edge cases (spaces, quotes, empty string, Unicode).
+- `src/sudo.rs` -- `SudoPolicy` parsing tests cover all three policy variants (`Always`,
+  `Never`, `Auto`), case-insensitive input, and the conflict error when `always` and `never`
+  are combined.
+- Both success path (exit 0) and failure path (non-zero exit) are exercised in
+  `execute_quiet` and `execute` tests.
+
+### Issues
+
+**[LOW]** `src/executor.rs` -- The `execute` streaming path (with `output_tx`) has tests for
+timeout but no test for the interleaved stdout/stderr ordering guarantee. A test with
+interleaved output lines would verify that `UpdateOutputLine::Stdout` and `::Stderr` are
+tagged correctly and that neither channel starves the other.

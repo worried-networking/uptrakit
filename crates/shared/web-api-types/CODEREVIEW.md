@@ -92,3 +92,36 @@ three locations across `mqtt`, `agent`, and `web-api`. Centralize the conversion
 **[LOW]** API version is embedded in route paths (`/api/v1/`) but not in response types or
 envelope headers. Future breaking changes to response shapes will require either a new route
 version or a migration period. Consider adding an `X-API-Version` header response field.
+
+## Tests
+
+### Strengths
+
+- `src/hosts.rs` -- Nine tests cover `HostSortField` `FromStr` (valid, invalid, case-sensitive),
+  `SortOrder` `FromStr` (valid, invalid), and `ListHostsParams` serialisation edge cases.
+- `src/settings_mqtt.rs` -- 13 tests cover `MqttUrlValidation` (scheme validation, host
+  validation, port bounds, full valid URL), `UpdateMqttSettingsRequest` nullable-field
+  semantics (all combinations of set/clear/omit for username, password, CA), and MQTT URL
+  parsing against valid and invalid URLs.
+- `src/settings_nats.rs` -- Nine tests cover `NatsSettings` serialisation, validation (valid
+  URL, HTTP rejected, private IP rejected, missing host, not-a-URL), and nullable-field
+  semantics for the NATS URL.
+- `src/settings_combined.rs` -- One test verifies `CombinedSettingsResponse` round-trips.
+- `src/oidc_providers.rs` -- Eight tests cover `CreateOidcProviderRequest::validate`
+  (empty name, empty client ID, empty client secret, empty discovery URL, invalid URL,
+  valid request, URL format enforcement).
+- All tests use synchronous `#[test]` (correct -- no async I/O in this crate).
+
+### Issues
+
+**[MEDIUM]** `src/validation.rs` -- The `Validate` trait and its implementations for
+`RegisterRequest`, `LoginRequest`, `UpdateScheduledTaskRequest`, `UpdateNetworkSettingsRequest`,
+`CreateSoftwareItemRequest`, `CreatePluginConfigRequest`, `CreateApiTokenRequest`,
+`CreateEnrollmentTokenRequest`, `UpdateServiceRequest`, and `CreateAutodiscoveryIgnoreRequest`
+have no tests. Validation logic is the primary security boundary for all HTTP endpoints; a
+regression in any `validate()` implementation (e.g., accepting an empty field that should be
+rejected) would not be caught before deployment.
+
+**[LOW]** `src/masked_url.rs` -- `MaskedUrl` has no tests for its `Debug`/`Display`
+redaction behaviour. A regression that accidentally exposes embedded credentials in a URL
+(e.g., `mqtt://user:password@host`) would go undetected.

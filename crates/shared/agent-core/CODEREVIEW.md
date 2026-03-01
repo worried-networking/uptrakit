@@ -101,3 +101,81 @@ No coding standards issues found.
 ### Issues
 
 No extensibility issues found.
+
+## Tests
+
+### Strengths
+
+- `src/update.rs` -- Seven tests exercise `select_executor` (correct executor selected for
+  each plugin type), `format_update_command` (flag assembly), and three async tests for
+  `execute_update` success path, failure propagation, and output streaming using an in-process
+  mock executor. Both success and error paths are covered.
+- `src/version_check.rs` -- Seven async tests cover: single-plugin version check, multi-plugin
+  check, already-up-to-date case, outdated detection, partial failure when one plugin fails,
+  and the case where no executors match the requested plugin type. The full `check_versions`
+  control flow is exercised.
+- `src/connection_context.rs` -- Three synchronous tests cover initial state, `set_update_in_flight`,
+  and `clear_update_in_flight`.
+
+### Issues
+
+**[MEDIUM]** `src/client.rs` -- `handle_execute_update` and `handle_check_versions` (the top-level
+message-dispatch paths) have no dedicated tests. The lower-level helpers are tested but the
+integration path from wire message receipt through response dispatch is untested. A mock
+`CommandExecutor` and mock `PluginOps` would allow testing the full `client` dispatch
+state machine without an active WebSocket connection.
+
+## Consistency
+
+### Strengths
+
+- `src/client.rs:157-239` (`handle_check_versions`) and `src/client.rs:354-500`
+  (`handle_discover_software`) -- Both functions return `Some(LoopOutcome::Disconnected)` when
+  the final `conn.send(response)` fails and log at `tracing::error!`. Neither function absorbs
+  the send error silently. The error-propagation convention for critical response sends is
+  applied uniformly.
+- `src/version_check.rs:75-108` (`detect_installed`) and `src/version_check.rs:111-139`
+  (`fetch_latest`) -- Both helpers apply `ctx.apply_to_config` before plugin creation, then
+  map errors to `String` via `.map_err(|e| e.to_string())`. The config-context injection
+  pattern is identical across both roles, so adding a third role (e.g., `verify_signature`)
+  would follow an obvious template.
+- `src/update.rs:86-270` -- Pre-update hooks and post-update hooks both use the same
+  `make_bridge` closure, `drop(plugin_tx)` + `bridge_handle.await` teardown sequence, and
+  `run_hook_command` dispatch. The structure is symmetric even though the error semantics
+  differ (pre-hook failure is fatal; post-hook failure is non-fatal warn-and-continue).
+
+### Issues
+
+**[HIGH]** `src/client.rs:234` vs `src/client.rs:139-144` -- `handle_check_versions` uses
+`conn.send` (error-propagating) for the `VersionCheckResults` response and returns
+`Some(LoopOutcome::Disconnected)` on failure. `handle_discover_software` at line 495 does
+the same. But the update output path — `send_update_output` at line 27-38 — uses
+`conn.send_best_effort` (error-absorbed) for individual `UpdateOutput` chunks, and
+`send_update_result` uses `conn.send_best_effort` for the final `UpdateResult` at line 50.
+The treatment is inconsistent: version-check and discovery results are treated as fatal if
+undeliverable, while the final update result (which the controller needs to mark the update
+complete) is silently absorbed on send failure. A dropped `UpdateResult` leaves the update
+in a permanent in-progress state on the controller side until a timeout, with no reconnect
+triggered.
+
+**[MEDIUM]** `src/update.rs:282-297` (`detect_current_version`) -- This helper calls
+`crate::version_check::check_version` with `&crate::connection_context::ConnectionContext::default()`.
+The caller (`execute_update`) has already merged the connection context into the plugin config
+via `ctx.apply_to_config` at `client.rs:261-267` before spawning the update task. However,
+the `detect_current_version` function constructs its own default `ConnectionContext`, meaning
+any context injections (e.g., SSH host overrides) that were not already embedded in the
+serialized config at spawn time will be missing during post-update version detection. The
+`handle_check_versions` path at `client.rs:183-199` uses the live `ctx` reference for the
+same plugin type. The two code paths treat context injection differently: one uses the live
+`ctx`, the other uses a static default.
+
+**[LOW]** `src/update.rs:440-458` (unknown `HookCommand` arm) -- The wildcard arm for
+unrecognized `HookCommand` variants (`_ =>`) logs at `tracing::warn!` and returns an error.
+This is the correct `#[non_exhaustive]` handling pattern per workspace standards. However,
+`handle_check_versions` in `client.rs` handles unknown `ControllerMessage` variants (via the
+SDK's `ControllerMessage::Unknown` arm in `event_loop.rs`) by logging at `warn!` and
+continuing — a non-fatal path. The unknown `HookCommand` arm is fatal (returns `Err`), while
+the workspace standard for `#[non_exhaustive]` enums in dispatch is to warn-and-skip. The
+difference is intentional (a hook command that cannot be executed must fail the hook), but a
+comment explaining why the fallback is fatal rather than skipped would clarify the deviation
+from the workspace pattern.

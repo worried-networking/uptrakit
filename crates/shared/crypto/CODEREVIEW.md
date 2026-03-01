@@ -114,3 +114,26 @@ No coding standards issues found.
 ### Issues
 
 No extensibility issues found.
+
+## Tests
+
+### Strengths
+
+- `src/lib.rs:416-761` -- 18 inline tests covering: AES-GCM round-trip (empty, ASCII,
+  Unicode, 10 KB), nonce uniqueness, `is_encrypted` prefix detection, `Debug`/`Display`
+  redaction, ciphertext tampering (tag corruption), SeaORM `Value` round-trip, `ValueType`
+  error cases, `Nullable` contract, clone/equality semantics, key-verification token creation
+  and tampering, all `CryptoError` variants (`AlreadyInitialized`, `CiphertextTooShort`,
+  `Decryption`, `HexDecode`), and plaintext migration mode.
+- `tests/not_initialized.rs` -- Isolated integration-test binary runs in a fresh process
+  so that `MASTER_KEY` (a `OnceLock`) is guaranteed unset. Tests `EncryptedString::new` and
+  `encrypt_str` both return `CryptoError::NotInitialized`. Using a separate binary is the
+  correct approach; it would be impossible to test this invariant reliably inside the same
+  binary that also initialises the key.
+- `src/lib.rs:423` -- `TEST_LOCK: Mutex<()>` serialises all tests sharing the global
+  `MASTER_KEY` within the same binary, preventing order-dependent failures when tests are
+  run in parallel.
+
+### Issues
+
+No test coverage issues found.

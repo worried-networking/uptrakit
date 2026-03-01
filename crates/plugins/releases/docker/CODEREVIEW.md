@@ -88,3 +88,28 @@ No coding standards issues found.
 ### Issues
 
 No extensibility issues found.
+
+## Tests
+
+### Strengths
+
+- `src/config.rs:227-316` -- 15+ tests cover `DockerConfig` validation (valid, page size
+  bounds), `ImageRef::from_str` for all six reference formats (official, user, GHCR,
+  private, localhost, port), `ImageRef::web_url` and `server_address`, serialisation
+  round-trips, `DockerAuth` masking and secret restore for both Basic and Bearer variants,
+  and `TrackingMode` permutations.
+- `src/error.rs:59-140` -- 11 tests cover all `DockerError` variants for `Display`
+  correctness, HTTP error mapping, and the `from_registry_error` conversion path.
+- `src/image_ref.rs` -- Round-trip parsing tests cover every image reference format the
+  plugin supports, including edge cases like `localhost` addresses and port-qualified registries.
+- `src/registry.rs:151` -- One test exercises tag pagination result merging logic.
+
+### Issues
+
+**[MEDIUM]** `src/docker_client.rs` and `src/plugin.rs` -- The `fetch_tags` and HTTP
+authentication exchange paths have no mock-server tests. The `DockerClient::fetch_tags`
+method (tag listing, pagination, auth token exchange) and the `plugin.rs` `fetch_releases`
+method are the primary operations of the plugin, but neither has an HTTP interaction test.
+The rest of the release plugins (GitHub, npm) use `httpmock` or in-process fixtures for
+this; Docker should follow the same pattern, exercising at least: successful tag list,
+authentication challenge-and-response, 401 unauthenticated, and empty tag list.

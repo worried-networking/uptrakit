@@ -112,3 +112,37 @@ No coding standards issues found.
 ### Issues
 
 No extensibility issues found.
+
+## Tests
+
+### Strengths
+
+- `crates/shared/macros/tests/report_conversion.rs` -- Integration test (separate binary)
+  exercises all three arms of `impl_report_conversion!`: single variant-mapping, single
+  closure-based, and multi-variant. Verifies that the generated `ReportConversion` impls
+  produce the expected error types via `context_transform`.
+- `crates/shared/build-info/src/lib.rs` -- `render_human_uses_stable_keys_and_order` is a
+  snapshot test asserting the exact human-readable string for `BuildInfo::current()`.
+  Acts as a change-detection guard for the output format.
+- `crates/shared/directories/src/lib.rs` -- Test suite covers `expand_tilde` (user syntax
+  unchanged, home dir expansion), `validate_path_name` (valid, invalid characters, empty
+  string), and directory creation.
+
+### Issues
+
+**[LOW]** `crates/shared/directories/src/lib.rs:829,837` -- Tests that call
+`std::env::remove_var("HOME")` / `std::env::set_var("HOME", val)` mutate the process
+environment without synchronization. The default Rust test harness runs tests across multiple
+threads, making concurrent `env` mutation a data race. Fix: use `#[serial_test::serial]` or
+acquire a shared mutex before calling `remove_var`/`set_var`.
+
+**[LOW]** `crates/shared/directories/src/lib.rs` -- Several `#[tokio::test]` tests perform
+only synchronous filesystem or string operations with no `await` points (e.g.,
+`expand_tilde_user_syntax_unchanged`, `validate_path_name_*`). These should use `#[test]`
+instead of `#[tokio::test]` -- spinning up a Tokio runtime for synchronous tests adds
+overhead and misleads readers.
+
+**[LOW]** `crates/shared/update-hooks/src/lib.rs` -- The update-hooks crate has no tests.
+The hook execution logic (command dispatch, output streaming, error handling) is not complex,
+but it is used in the post-update path of the APT and other package-manager plugins. A unit
+test using a mock `CommandExecutor` would document the expected hook lifecycle.

@@ -93,3 +93,29 @@ remain an error from `validate()`.
 
 **[LOW]** No shared abstraction for "config valid for discovery but not for update". A future
 plugin with a similar split will face the same design challenge and may solve it differently.
+
+## Tests
+
+### Strengths
+
+- `src/discovery.rs:836-1003+` -- 15+ tests cover the full discovery parsing pipeline: empty
+  output, single script, multiple scripts, script with missing fields, duplicate URL
+  deduplication, output with comment lines, malformed JSON lines, and target synthesis
+  (converting a discovered script into a `DiscoveryTarget` with the correct `package_identifier`
+  and metadata).
+- `src/config.rs:49-90` -- Five tests cover `GitHubReleaseSource` validation: valid source,
+  missing owner, missing repo, owner containing `/`, and repo containing `..`. Path traversal
+  validation is tested explicitly.
+- Tests for parsing are pure synchronous functions requiring no async runtime or subprocess,
+  making the suite fast and fully deterministic.
+
+### Issues
+
+**[MEDIUM]** `src/plugin.rs` -- `fetch_releases`, `detect_installed_version`, and
+`execute_update` have no tests. These are the primary update-path operations and each
+involves HTTP requests (for release fetching via GitHub API). No mock executor or mock HTTP
+server exercises the command-construction logic or HTTP interaction paths. The Proxmox
+plugin shares the GitHub release-fetching pattern with the GitHub plugin, which also lacks
+HTTP mock tests. At minimum, a mock executor test for `detect_installed_version` (runs a
+shell command, parses the version from stdout) would verify the command construction and
+output parsing without requiring a network connection.

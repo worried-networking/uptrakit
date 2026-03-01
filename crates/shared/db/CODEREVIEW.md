@@ -160,3 +160,132 @@ ORM boundary.
 **[LOW]** `src/entity/plugin_config.rs:14` -- `plugin_type` as `String` provides forward
 compatibility at storage level (new plugin types work without migration), but typos in manual
 edits produce runtime errors rather than constraint violations.
+
+## Tests
+
+### Strengths
+
+- `src/entity/oidc_provider.rs:130-220` -- Seven tests for `RoleMapping`: normal round-trip,
+  empty map, `serde_json` round-trip, special characters in role names, default-is-empty,
+  non-JSON rejection, and wrong JSON shape rejection. These are exemplary unit tests at the
+  ORM type boundary.
+- `src/migration/mod.rs:43` -- Migration smoke test runs all 28 table creations and
+  rollback against an in-memory SQLite instance, verifying the migration `up()` and `down()`
+  sequences are syntactically valid and execute without error.
+
+### Issues
+
+**[MEDIUM]** No unit tests for any entity other than `oidc_provider.rs`. Entities with
+custom ORM type implementations are untested in isolation: `EncryptedString` round-trip
+through the SeaORM mock driver is not exercised (even though `uptrakit-crypto` tests it at
+the primitive level); `UpdateStatus`, `OutputStreamType`, `SoftwareDiscoveryState`, and
+`SessionTokenType` `DeriveActiveEnum` serialisations have no per-entity tests confirming
+the DB column values match their Rust strings.
+
+**[LOW]** `src/entity/update_output_line.rs` and `src/entity/update_history.rs` -- No tests
+for the dual-storage fallback logic. The conditional `output` vs `update_output_lines`
+branching path mentioned in the Code Quality section is too complex for implicit coverage
+from the migration test alone.
+
+## Database
+
+### Strengths
+
+- `src/entity/tenant_scoped.rs` -- The `TenantScoped` trait is the single most important DB safety
+  feature in the codebase. It makes cross-tenant data leakage structurally impossible at the ORM
+  level for all ten tenant-scoped entity types. Any new entity that carries a `tenant_id` merely
+  needs one `impl TenantScoped` block to gain the full protection.
+- `src/entity/revoked_token_jti.rs` and `src/entity/revoked_token_user.rs` -- These two tables are
+  an elegant persistence layer for an in-memory security structure. The `expires_at` / `purge_after`
+  columns carry exactly enough metadata for the `auth_cleanup` scheduler task to reclaim rows
+  precisely when the underlying tokens would have expired naturally, preventing unbounded table growth.
+- UUID v7 primary keys across all 30+ entities. Time-ordered UUIDs eliminate B-tree index hot-spot
+  contention on high-insert tables like `update_history`, `notification_log`, and `sessions`, which
+  would otherwise experience significant page splits with random UUIDs or sequential integers.
+- `src/entity/session.rs` -- The compound `(user_id, expires_at)` index added in
+  `m20260302_000001_add_missing_indexes.rs` is a proper covering index for the frequent
+  "list active sessions for user" query pattern, avoiding table reads after the index scan.
+- `src/entity/crl_cache.rs` -- Intentional absence of a foreign key on `ca_fingerprint` is
+  correctly documented: it allows the CRL cache row to survive a CA record deletion without
+  cascading. The trade-off is documented in both the entity doc comment and the migration.
+- `src/entity/host_software_item.rs:15-16` -- The `JsonBinary` column type on
+  `latest_release_metadata` is correctly chosen over plain `Json`: binary JSON avoids
+  re-parsing on every read in SQLite, which stores the serialized form directly.
+- `src/migration/m20260302_000001_add_missing_indexes.rs` -- Dedicated follow-up migration
+  adding six missing indexes is cleaner than retrofitting the initial migration. The composite
+  `(plugin_config_id, package_identifier)` index on `host_software_item_plugins` directly
+  supports the autodiscovery ignore-rule lookup pattern used in `queries/autodiscovery.rs`.
+- `src/entity/settings_version.rs` -- Three-column versioning table (`version`,
+  `global_version`, `revocation_version`) provides a cheap cross-instance change-detection
+  probe without scanning the full `settings` table. Polling a single integer row is
+  O(1) regardless of how many settings exist.
+
+### Issues
+
+**[HIGH]** `src/entity/update_history.rs:32` -- `update_history.output` is declared as a
+`not_null()` TEXT column with no default in the migration DDL, yet the application always
+inserts it as an empty string (`output: Set(String::new())`) and then reads it conditionally
+(`if record.output.is_empty()`). An empty string and NULL are semantically different in
+SQL but are being used interchangeably here. More critically, the `output_bytes` column is a
+second source of truth about the content: a record can have `output = ""`, `output_bytes = 0`,
+and non-empty rows in `update_output_lines` simultaneously. No DB CHECK constraint prevents
+`output` being non-empty while `update_output_lines` rows also exist for the same record,
+leaving both paths populated. This is a data integrity gap -- there is no enforcement at the
+database level that the two storage paths are mutually exclusive.
+
+**[MEDIUM]** `src/entity/notification_log.rs:11` -- `notification_log.status` is `String` with a
+DB default of `"pending"` but no CHECK constraint restricting values to `{pending, delivered,
+failed}`. An application bug or direct DB write can insert an arbitrary string that
+`NotificationDeliveryStatus::parse()` in `queries/notifications.rs:439-448` cannot handle,
+silently defaulting to `Pending` with a `tracing::warn!`. The `notification_channel.channel_type`
+and `notification_rule.event_type` columns have the same vulnerability: unconstrained TEXT
+with parse-time fallback. Adding CHECK constraints (or migrating to `DeriveActiveEnum` typed
+columns where the DB backend supports it) would catch invalid values at write time.
+
+**[MEDIUM]** `src/entity/enrollment_token.rs:15` -- `allowed_capabilities` is stored as a
+JSON-serialized string (`Option<String>` with JSON content) in a plain TEXT column rather than
+using the `Json` column type. This means the DB has no knowledge that the column contains
+JSON. The `model_to_response` deserializer in `queries/enrollment_tokens.rs:26-29` uses
+`.and_then(|s| serde_json::from_str(s).ok())`, silently treating a parse failure as an absent
+value. If the column contains malformed JSON (e.g., from a direct DB edit), the capability
+restriction is silently dropped instead of causing an error. Storing as `Json` column type
+would enable DB-level structural validation.
+
+**[MEDIUM]** `src/entity/user_oidc_link.rs` -- No unique constraint on
+`(user_id, provider_id)` or `(provider_id, oidc_subject)`. A user linked to the same OIDC
+provider twice (possible via a race in `oidc_callback`) would produce two rows.
+`(provider_id, oidc_subject)` in particular should be globally unique: a given external
+identity should map to exactly one Uptrakit user. Without this constraint, concurrent OIDC
+logins with the same subject can race and create duplicate links or even link the same
+external identity to two different users.
+
+**[MEDIUM]** `src/entity/host_discovery_allowlist.rs` and
+`src/entity/tenant_discovery_allowlist.rs` -- Both tables lack a unique constraint on
+`(tenant_id, host_id, plugin_type)` and `(tenant_id, plugin_type)` respectively. The
+`add_host_allowlist_entry` / `add_tenant_allowlist_entry` functions in
+`queries/discovery_allowlist.rs` perform a read-then-insert (select existing, return early if
+found, else insert) pattern without holding a transaction lock. A concurrent request can
+create duplicate entries in the window between the existence check and the insert. A unique
+constraint at the DB level would turn the race into a constraint error that the application
+can handle idempotently via `ON CONFLICT DO NOTHING`, matching the MQTT lease pattern.
+
+**[LOW]** `src/entity/revoked_token_jti.rs:20` and `src/entity/revoked_token_user.rs:15-22`
+-- `expires_at`, `iat_cutoff`, and `purge_after` are stored as `i64` Unix timestamps (seconds
+since epoch) rather than `OffsetDateTime`. This is inconsistent with every other timestamp
+column in the codebase, which uses `OffsetDateTime` (stored as `TIMESTAMP WITH TIME ZONE`).
+The `i64` choice means the DB cannot apply timestamp-aware comparisons or timezone formatting,
+and a direct SQL query (`SELECT * FROM revoked_token_jtis WHERE expires_at < ?`) requires
+knowing the epoch convention. A note explaining the rationale (e.g., "matches the JWT `exp`
+claim which is always a Unix timestamp integer") would prevent future confusion.
+
+**[LOW]** `src/entity/notification_log.rs` -- `notification_log` has no `updated_at` column.
+The `delivered_at` column partially fills this role, but the `action_taken` column (populated
+when a user acts on a notification email link) can change after delivery without any audit
+trail of when the action was recorded. An `updated_at` column would provide a complete
+write history.
+
+**[LOW]** `src/entity/mqtt_client.rs` -- The `mqtt_clients` table has no unique constraint on
+`(tenant_id, client_id)`. MQTT `client_id` values must be unique within an MQTT broker
+namespace. If two `mqtt_client` rows for the same tenant share a `client_id`, the second
+connection attempt will evict the first from the broker, causing a disconnect loop. A unique
+constraint on `(tenant_id, client_id)` would prevent this misconfiguration at the DB layer.

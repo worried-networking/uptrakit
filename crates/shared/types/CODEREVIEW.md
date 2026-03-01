@@ -1,7 +1,7 @@
 # Code Review: uptrakit-shared-types
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-01
+- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility | ZeroizeOnDrop on MaskedEmail)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -38,7 +38,17 @@ No architectural issues found.
 
 ### Issues
 
-No security issues found.
+**[LOW]** `src/masked_email.rs:26` -- `ZeroizeOnDrop` added to `MaskedEmail` is a
+category mismatch. `MaskedEmail` stores a plain email address (e.g.
+`user@example.com`) that is routinely serialised to JSON, stored in the database in
+cleartext, and displayed (masked) to operators in logs and API responses. It is not a
+secret: it is shared with users and persists on disk. Adding `ZeroizeOnDrop` alongside
+`SecretString` (which stores passwords and bearer tokens) may mislead future readers
+into thinking email addresses have the same secrecy requirements as credentials. The
+`ZeroizeOnDrop` derive also has no measurable security effect here: any clones produced
+before the value is dropped (e.g. by `Clone`, iterator adaptors, or JSON serialisation
+intermediates) are not covered by the zeroization. Consider reverting and documenting
+why `MaskedEmail` differs from `SecretString`.
 
 ## Code Quality
 
@@ -55,7 +65,12 @@ No security issues found.
 
 ### Issues
 
-No code quality issues found.
+**[LOW]** `src/masked_email.rs:26` -- No test verifies the zeroization behaviour introduced
+in commit `5da34db`. `SecretString` has a comparable test gap, but there at least the type's
+secrecy justification is unambiguous. If `ZeroizeOnDrop` is retained on `MaskedEmail`, a
+test using a raw pointer read after drop (in a `#[test]` with `unsafe`) or a canary-value
+check would document the intent and catch future regressions (e.g. if the inner `String` is
+moved out before drop).
 
 ## High Availability
 
@@ -93,3 +108,34 @@ No coding standards issues found.
 ### Issues
 
 No extensibility issues found.
+
+## Tests
+
+### Strengths
+
+- `src/plugin_types.rs` -- 11 tests cover all `PluginType` variants for `as_str()`,
+  `Display`, `FromStr` (valid and invalid), the `Other(String)` passthrough, `ReleaseAsset`
+  and `ReleaseInfo` optional-field omission on serialisation.
+- `src/masked_email.rs` -- 16+ tests cover `MaskedEmail` validation: valid addresses, Unicode
+  local-part, empty local-part rejection, missing-at rejection, empty domain rejection,
+  domain-only forms, and round-trip `Display` / `Debug` formatting.
+- `src/hook_shell.rs` -- 10 tests cover `HookShell` `FromStr` (all shell variants, invalid),
+  `as_str`/`Display` consistency, and `#[serde(rename_all)]` alignment.
+- `src/service_status.rs` -- Four tests cover `ServiceStatus` `as_str`, `Display`, `FromStr`
+  valid and invalid paths.
+- `src/session_token_type.rs` -- Five tests cover `SessionTokenType` round-trips.
+- `src/discovered_software.rs` -- Two tests for `DiscoveredSoftware` field validation.
+- All tests use synchronous `#[test]` (correct -- no async I/O anywhere in this crate).
+
+### Issues
+
+**[LOW]** `src/secret_string.rs` -- `SecretString` has no inline tests for `Debug` redaction
+(`"***"`), `Display` redaction, or `Zeroize` on drop. Although `SecretString` is a thin
+wrapper over a well-known pattern, a one-line `assert_eq!(format!("{:?}", s), "***")` test
+would prevent inadvertent removal of the redaction during future refactors.
+
+**[LOW]** `src/mqtt_transport.rs`, `src/mqtt_connection_status.rs`, `src/output_stream_type.rs`,
+`src/device_auth_status.rs`, `src/plugin_role.rs`, `src/plugin_capability.rs`, and
+`src/software_discovery_state.rs` have no tests despite following the same `as_str`/`FromStr`
+pattern as the tested types. A regression in any `FromStr` implementation would not be
+detected until runtime.
