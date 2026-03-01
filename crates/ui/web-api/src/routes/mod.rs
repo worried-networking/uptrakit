@@ -26,6 +26,8 @@ pub mod settings_ca;
 pub mod settings_combined;
 pub mod settings_mqtt;
 pub mod settings_network;
+#[cfg(feature = "nats")]
+pub mod settings_nats;
 pub mod settings_smtp;
 pub mod software_items;
 pub mod system_alerts;

@@ -28,6 +28,7 @@ pub use app_state::{AppState, AppStateBuildError, AppStateBuilder, ServiceCreden
 pub use ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
 pub use router::{api_not_found, build_pki_router, build_router};
 pub use setting_key::SettingKey;
+pub use uptrakit_web_api_types::MaskedUrl;
 
 #[cfg(test)]
 mod tests {

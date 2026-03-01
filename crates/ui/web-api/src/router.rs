@@ -241,6 +241,21 @@ use crate::AppState;
 )]
 struct ApiDoc;
 
+/// NATS-specific OpenAPI paths and schemas, merged conditionally.
+#[cfg(feature = "nats")]
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        crate::routes::settings_nats::get_nats_settings,
+        crate::routes::settings_nats::update_nats_settings,
+    ),
+    components(schemas(
+        crate::routes::settings_nats::NatsSettingsResponse,
+        crate::routes::settings_nats::UpdateNatsSettingsRequest,
+    ))
+)]
+struct NatsApiDoc;
+
 /// OIDC-specific OpenAPI paths and schemas, merged conditionally.
 #[cfg(feature = "oidc")]
 #[derive(OpenApi)]
@@ -469,7 +484,16 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(
             crate::routes::settings_smtp::get_smtp_settings,
             crate::routes::settings_smtp::update_smtp_settings
-        ))
+        ));
+
+    // NATS settings
+    #[cfg(feature = "nats")]
+    let auth_routes = auth_routes.routes(routes!(
+        crate::routes::settings_nats::get_nats_settings,
+        crate::routes::settings_nats::update_nats_settings
+    ));
+
+    let auth_routes = auth_routes
         // Discovery allowlist
         .routes(routes!(
             crate::routes::discovery_allowlist::list_tenant_discovery_allowlist,
@@ -506,6 +530,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     // All OpenAPI routes merged into a single router so the spec is complete
     let openapi = ApiDoc::openapi();
+
+    #[cfg(feature = "nats")]
+    let openapi = {
+        let mut openapi = openapi;
+        openapi.merge(NatsApiDoc::openapi());
+        openapi
+    };
 
     #[cfg(feature = "oidc")]
     let openapi = {
