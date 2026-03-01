@@ -347,6 +347,17 @@ pub enum ControllerMessage {
     /// Receiving controllers fire `revocation_notify.notify_one()` so that
     /// `CrlManager::run()` rebuilds and hot-reloads the TLS configuration.
     RequestCrlRenewal(RequestCrlRenewalPayload),
+    /// Token revocation event published by the originating controller to the
+    /// "controller" NATS subject so that all other instances update their
+    /// in-memory denylist caches without a per-request DB query.
+    ///
+    /// A message carries either a JTI-level revocation (when `jti` and `exp`
+    /// are set) or a user-level revocation (when `user_id`, `iat_cutoff`, and
+    /// `purge_after` are set). Both kinds may be present in a single message
+    /// (e.g. when revoking a specific token *and* all prior tokens for a user).
+    ///
+    /// **Safe to publish via NATS** — contains no credential material.
+    TokenRevoked(TokenRevokedPayload),
     /// Unknown message type from a newer controller build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
@@ -965,6 +976,34 @@ pub struct RequestCaRotationPayload {
 /// task.  Receiving controllers fire `revocation_notify.notify_one()`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestCrlRenewalPayload {}
+
+/// Cross-controller token revocation event.
+///
+/// Published to the `controller` NATS subject by the controller that wrote
+/// the revocation to the DB. Receiving controllers apply the revocation to
+/// their in-memory denylist only — they do **not** write to DB (the
+/// originating controller already did that).
+///
+/// A message may carry a JTI-level revocation, a user-level revocation, or
+/// both. Fields not relevant to the revocation type are `None`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenRevokedPayload {
+    /// JWT ID to deny (`exp` must also be set for JTI-level revocations).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jti: Option<String>,
+    /// Token expiry unix timestamp (seconds). Required when `jti` is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exp: Option<i64>,
+    /// User UUID for user-level revocations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<Uuid>,
+    /// Deny tokens with `iat < iat_cutoff`. Required when `user_id` is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iat_cutoff: Option<i64>,
+    /// Remove the user entry after this unix timestamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purge_after: Option<i64>,
+}
 
 fn default_ha_discovery_prefix() -> String {
     "homeassistant".to_string()

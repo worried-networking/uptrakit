@@ -10,6 +10,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::Notify;
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, MqttClientCreatedPayload, MqttTenantRevokedPayload,
+    TokenRevokedPayload,
 };
 use uuid::Uuid;
 
@@ -45,13 +46,14 @@ pub async fn deliver_event(
     db: &DatabaseConnection,
     ca_rotation_trigger: Option<&Arc<Notify>>,
     revocation_notify: Option<&Arc<Notify>>,
+    token_denylist: Option<&Arc<crate::auth::token_denylist::TokenDenylist>>,
     target_service_id: Option<Uuid>,
     target_capability: Option<&str>,
     msg: ControllerMessage,
 ) -> bool {
     // Controller-targeted events are handled locally (not forwarded to services)
     if target_service_id.is_none() && target_capability == Some("controller") {
-        return deliver_controller_event(db, registry, ca_rotation_trigger, revocation_notify, msg)
+        return deliver_controller_event(db, registry, ca_rotation_trigger, revocation_notify, token_denylist, msg)
             .await;
     }
 
@@ -128,7 +130,8 @@ pub async fn deliver_mqtt_event(
     }
 }
 
-/// Handle a controller-targeted event (e.g. `MqttClientCreated`, `RequestCaRotation`).
+/// Handle a controller-targeted event (e.g. `MqttClientCreated`, `RequestCaRotation`,
+/// `TokenRevoked`).
 ///
 /// Returns `true` on success, `false` on transient failure.
 pub async fn deliver_controller_event(
@@ -136,6 +139,7 @@ pub async fn deliver_controller_event(
     registry: &ServiceConnectionRegistry,
     ca_rotation_trigger: Option<&Arc<Notify>>,
     revocation_notify: Option<&Arc<Notify>>,
+    token_denylist: Option<&Arc<crate::auth::token_denylist::TokenDenylist>>,
     msg: ControllerMessage,
 ) -> bool {
     match msg {
@@ -179,7 +183,35 @@ pub async fn deliver_controller_event(
             }
             true
         }
-        _ => true,
+        ControllerMessage::TokenRevoked(TokenRevokedPayload {
+            jti,
+            exp,
+            user_id,
+            iat_cutoff,
+            purge_after,
+        }) => {
+            if let Some(denylist) = token_denylist {
+                // JTI-level revocation from another controller instance.
+                if let (Some(jti), Some(exp)) = (jti, exp) {
+                    denylist.deny_token_remote(&jti, exp).await;
+                }
+                // User-level revocation from another controller instance.
+                if let (Some(uid), Some(cutoff), Some(purge)) = (user_id, iat_cutoff, purge_after)
+                {
+                    denylist.deny_user_remote(uid, cutoff, purge).await;
+                }
+            } else {
+                tracing::debug!("received TokenRevoked but no token denylist configured");
+            }
+            true
+        }
+        _ => {
+            tracing::warn!(
+                msg_type = ?std::mem::discriminant(&msg),
+                "unhandled controller-targeted event"
+            );
+            true
+        }
     }
 }
 
@@ -247,7 +279,7 @@ mod tests {
                 ca_bundle_pem: "pem".to_string(),
             });
         // With no connected services, broadcast succeeds.
-        let result = deliver_event(&registry, &db, None, None, None, None, msg).await;
+        let result = deliver_event(&registry, &db, None, None, None, None, None, msg).await;
         assert!(result);
     }
 
@@ -263,7 +295,7 @@ mod tests {
             });
         // Service not on this controller — returns true (not our responsibility).
         let result =
-            deliver_event(&registry, &db, None, None, Some(service_id), None, msg).await;
+            deliver_event(&registry, &db, None, None, None, Some(service_id), None, msg).await;
         assert!(result);
     }
 
@@ -277,7 +309,7 @@ mod tests {
                 ca_bundle_pem: "pem".to_string(),
             });
         let result =
-            deliver_event(&registry, &db, None, None, None, Some("software_discovery"), msg)
+            deliver_event(&registry, &db, None, None, None, None, Some("software_discovery"), msg)
                 .await;
         assert!(result);
     }

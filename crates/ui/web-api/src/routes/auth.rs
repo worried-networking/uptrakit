@@ -379,12 +379,27 @@ pub async fn logout(
             // keeps the entry alive long enough for pre-logout tokens to expire
             // naturally (max lifetime = 15 minutes).
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            let purge_after = now + crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS;
             state
                 .token_denylist
-                .deny_user(
-                    verified.user_id,
-                    now,
-                    now + crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS,
+                .deny_user(verified.user_id, now, purge_after)
+                .await;
+
+            // Propagate to other controller instances via NATS (best-effort).
+            // Failure is logged but does not abort the logout — the local
+            // denylist and DB write already took effect.
+            state
+                .notification_service
+                .publish_controller_event(
+                    uptrakit_internal_wire::ControllerMessage::TokenRevoked(
+                        uptrakit_internal_wire::TokenRevokedPayload {
+                            jti: None,
+                            exp: None,
+                            user_id: Some(verified.user_id),
+                            iat_cutoff: Some(now),
+                            purge_after: Some(purge_after),
+                        },
+                    ),
                 )
                 .await;
         }

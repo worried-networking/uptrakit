@@ -239,7 +239,9 @@ async fn run(args: cli::Args) -> Result<()> {
         None
     };
 
-    let token_denylist = Arc::new(uptrakit_web_api::auth::token_denylist::TokenDenylist::new());
+    let token_denylist = Arc::new(
+        uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
+    );
 
     let channel_registry = Arc::new(
         uptrakit_notification_channels::ChannelRegistry::new()
@@ -304,6 +306,14 @@ async fn run(args: cli::Args) -> Result<()> {
             .build()
             .map_err(|e| report!(AppError::Config(format!("failed to build AppState: {e}"))))?,
     );
+
+    // Seed the in-memory token denylist from DB before accepting traffic.
+    // This ensures revocations made before a controller restart are honoured.
+    app_state
+        .token_denylist
+        .load_from_db()
+        .await
+        .map_err(|e| report!(AppError::Config(format!("failed to seed token denylist: {e}"))))?;
 
     // Spawn background tasks
     let mut bg = tasks::BackgroundTasks::new(CancellationToken::new());
@@ -427,6 +437,7 @@ async fn run(args: cli::Args) -> Result<()> {
             app_state.db().clone(),
             Some(Arc::clone(&app_state.ca_rotation_trigger)),
             Some(Arc::clone(&app_state.revocation_notify)),
+            Some(Arc::clone(&app_state.token_denylist)),
         );
         bg.track("nats-consumer", h);
     }
