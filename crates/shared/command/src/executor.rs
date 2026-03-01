@@ -46,6 +46,14 @@ pub struct CommandSpec {
     /// non-root and passwordless sudo is available. Has no effect on `Shell`
     /// mode — shell commands must handle privilege escalation themselves.
     pub privileged: bool,
+    /// Extra environment variables to set for the process.
+    ///
+    /// Each entry is a `(name, value)` pair. For local execution these are set
+    /// directly on the spawned process. For SSH execution they are prepended
+    /// as `NAME='VALUE'` assignments in the remote command string. When sudo
+    /// is in use they are forwarded as `sudo env NAME=VALUE …` so they
+    /// survive the privilege-boundary environment reset.
+    pub envs: Vec<(String, String)>,
 }
 
 /// How a command is invoked.
@@ -91,6 +99,7 @@ impl CommandSpec {
             working_dir: None,
             timeout: None,
             privileged: false,
+            envs: vec![],
         }
     }
 
@@ -104,6 +113,7 @@ impl CommandSpec {
             working_dir: None,
             timeout: None,
             privileged: false,
+            envs: vec![],
         }
     }
 
@@ -117,6 +127,7 @@ impl CommandSpec {
             working_dir: None,
             timeout: None,
             privileged: false,
+            envs: vec![],
         }
     }
 
@@ -135,6 +146,17 @@ impl CommandSpec {
     #[must_use]
     pub fn with_working_dir(mut self, dir: impl Into<String>) -> Self {
         self.working_dir = Some(dir.into());
+        self
+    }
+
+    /// Add an environment variable to the command (builder pattern).
+    ///
+    /// For local execution the variable is set directly on the spawned process.
+    /// For SSH execution it is prepended as a `NAME='VALUE'` assignment.
+    /// When sudo is used it is forwarded via `sudo env NAME=VALUE …`.
+    #[must_use]
+    pub fn with_env(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.envs.push((name.into(), value.into()));
         self
     }
 
@@ -255,6 +277,7 @@ impl CommandExecutor for LocalCommandExecutor {
             &program,
             &args,
             spec.working_dir.as_deref(),
+            &spec.envs,
             Some(output_tx),
         );
         let (output, exit_code) = apply_timeout(fut, spec.timeout).await?;
@@ -265,7 +288,7 @@ impl CommandExecutor for LocalCommandExecutor {
     async fn execute_quiet(&self, spec: &CommandSpec) -> crate::Result<CommandOutput> {
         tracing::debug!("executing command (quiet)");
         let (program, args) = spec.resolve()?;
-        let fut = run_command_exec_impl(&program, &args, spec.working_dir.as_deref(), None);
+        let fut = run_command_exec_impl(&program, &args, spec.working_dir.as_deref(), &spec.envs, None);
         let (output, exit_code) = apply_timeout(fut, spec.timeout).await?;
         tracing::debug!(exit_code, "command completed");
         Ok(CommandOutput { output, exit_code })
@@ -287,6 +310,24 @@ mod tests {
         assert!(spec.working_dir.is_none());
         assert!(spec.timeout.is_none());
         assert!(!spec.privileged);
+        assert!(spec.envs.is_empty());
+    }
+
+    #[test]
+    fn with_env_builder_single() {
+        let spec = CommandSpec::exec("apt-get", Vec::<String>::new())
+            .with_env("DEBIAN_FRONTEND", "noninteractive");
+        assert_eq!(spec.envs, vec![("DEBIAN_FRONTEND".to_string(), "noninteractive".to_string())]);
+    }
+
+    #[test]
+    fn with_env_builder_chained() {
+        let spec = CommandSpec::exec("env", Vec::<String>::new())
+            .with_env("FOO", "bar")
+            .with_env("BAZ", "qux");
+        assert_eq!(spec.envs.len(), 2);
+        assert_eq!(spec.envs[0], ("FOO".to_string(), "bar".to_string()));
+        assert_eq!(spec.envs[1], ("BAZ".to_string(), "qux".to_string()));
     }
 
     #[test]

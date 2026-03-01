@@ -153,7 +153,15 @@ impl SudoAwareCommandExecutor {
 
         match &spec.mode {
             CommandMode::Exec { program, args } => {
-                let mut new_args = Vec::with_capacity(1 + args.len());
+                // If there are extra env vars, use `sudo env NAME=VALUE … PROGRAM ARGS`
+                // so the variables survive sudo's environment reset.
+                let mut new_args = Vec::with_capacity(2 * spec.envs.len() + 1 + args.len());
+                if !spec.envs.is_empty() {
+                    new_args.push("env".to_string());
+                    for (name, value) in &spec.envs {
+                        new_args.push(format!("{name}={value}"));
+                    }
+                }
                 new_args.push(program.clone());
                 new_args.extend(args.iter().cloned());
                 CommandSpec {
@@ -164,6 +172,8 @@ impl SudoAwareCommandExecutor {
                     working_dir: spec.working_dir.clone(),
                     timeout: spec.timeout,
                     privileged: false,
+                    // Envs have been forwarded via `sudo env`; clear to avoid double-setting.
+                    envs: vec![],
                 }
             }
             CommandMode::Shell { .. } => {
@@ -408,6 +418,67 @@ mod tests {
         let result = exec.apply_sudo(&spec);
         assert_eq!(result.working_dir.as_deref(), Some("/tmp"));
         assert_eq!(result.timeout, Some(Duration::from_secs(60)));
+    }
+
+    // ── SudoAwareCommandExecutor: env var forwarding ────────────────────
+
+    #[test]
+    fn env_vars_forwarded_via_sudo_env_when_sudo_required() {
+        let exec = make_executor(SudoContext::default()); // non-root, sudo available, auto
+        let spec = CommandSpec::exec("apt-get", ["install".to_string()])
+            .privileged()
+            .with_env("DEBIAN_FRONTEND", "noninteractive");
+        let result = exec.apply_sudo(&spec);
+        match &result.mode {
+            CommandMode::Exec { program, args } => {
+                assert_eq!(program, "sudo");
+                // Expected: sudo env DEBIAN_FRONTEND=noninteractive apt-get install
+                assert_eq!(args[0], "env");
+                assert_eq!(args[1], "DEBIAN_FRONTEND=noninteractive");
+                assert_eq!(args[2], "apt-get");
+                assert_eq!(args[3], "install");
+            }
+            other => panic!("expected Exec mode, got: {other:?}"),
+        }
+        // Envs must be cleared after forwarding via `sudo env`
+        assert!(result.envs.is_empty(), "envs must be cleared after forwarding via sudo env");
+    }
+
+    #[test]
+    fn multiple_env_vars_forwarded_in_order_via_sudo_env() {
+        let exec = make_executor(SudoContext::default());
+        let spec = CommandSpec::exec("my-cmd", Vec::<String>::new())
+            .privileged()
+            .with_env("FOO", "bar")
+            .with_env("BAZ", "qux");
+        let result = exec.apply_sudo(&spec);
+        match &result.mode {
+            CommandMode::Exec { program, args } => {
+                assert_eq!(program, "sudo");
+                assert_eq!(&args[..4], &["env", "FOO=bar", "BAZ=qux", "my-cmd"]);
+            }
+            other => panic!("expected Exec mode, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn env_vars_preserved_when_sudo_not_required() {
+        // ForceWithout: sudo not prepended, envs stay in the spec
+        let exec = make_executor(SudoContext {
+            is_root: false,
+            sudo_available: true,
+            policy: SudoPolicy::ForceWithout,
+        });
+        let spec = CommandSpec::exec("apt-get", ["install".to_string()])
+            .privileged()
+            .with_env("DEBIAN_FRONTEND", "noninteractive");
+        let result = exec.apply_sudo(&spec);
+        // No sudo; envs remain on the spec for the underlying executor to handle
+        assert_eq!(result.envs, vec![("DEBIAN_FRONTEND".to_string(), "noninteractive".to_string())]);
+        match &result.mode {
+            CommandMode::Exec { program, .. } => assert_eq!(program, "apt-get"),
+            other => panic!("expected Exec mode, got: {other:?}"),
+        }
     }
 
     // ── SudoAwareCommandExecutor: end-to-end execute ────────────────────

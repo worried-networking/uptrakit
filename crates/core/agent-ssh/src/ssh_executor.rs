@@ -170,7 +170,12 @@ fn log_failed_command_output(exit_code: i32, stderr: &str, stdout: &str) {
 fn build_remote_command_string(spec: &CommandSpec) -> uptrakit_command::Result<String> {
     let (program, args) = spec.resolve()?;
 
-    let mut parts = Vec::with_capacity(1 + args.len());
+    // Prepend env-var assignments before the command so they are visible to the
+    // remote shell without requiring `SendEnv` SSH option support.
+    let mut parts = Vec::with_capacity(spec.envs.len() + 1 + args.len());
+    for (name, value) in &spec.envs {
+        parts.push(format!("{name}={}", shell_escape(value)));
+    }
     parts.push(shell_escape(&program));
     for arg in &args {
         parts.push(shell_escape(arg));
@@ -259,5 +264,30 @@ mod tests {
             .with_working_dir("/opt/dir with spaces; rm -rf /");
         let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
         assert!(result.starts_with("cd '/opt/dir with spaces; rm -rf /'"));
+    }
+
+    #[test]
+    fn env_vars_prepended_to_command() {
+        let spec = CommandSpec::exec("apt-get", ["install".to_string()])
+            .with_env("DEBIAN_FRONTEND", "noninteractive");
+        let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
+        assert_eq!(result, "DEBIAN_FRONTEND='noninteractive' 'apt-get' 'install'");
+    }
+
+    #[test]
+    fn multiple_env_vars_prepended_in_order() {
+        let spec = CommandSpec::exec("env_test", Vec::<String>::new())
+            .with_env("FOO", "bar")
+            .with_env("BAZ", "qux");
+        let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
+        assert_eq!(result, "FOO='bar' BAZ='qux' 'env_test'");
+    }
+
+    #[test]
+    fn env_var_value_with_special_chars_is_escaped() {
+        let spec = CommandSpec::exec("echo", Vec::<String>::new())
+            .with_env("MSG", "it's fine");
+        let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
+        assert_eq!(result, "MSG='it'\\''s fine' 'echo'");
     }
 }

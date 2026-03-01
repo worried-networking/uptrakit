@@ -55,6 +55,7 @@ pub(crate) async fn run_command_exec_impl(
     program: &str,
     args: &[String],
     working_dir: Option<&str>,
+    envs: &[(String, String)],
     output_tx: Option<&mpsc::Sender<UpdateOutputLine>>,
 ) -> crate::Result<(String, i32)> {
     tracing::debug!(program, args = ?args, working_dir = ?working_dir, "spawning command");
@@ -68,6 +69,10 @@ pub(crate) async fn run_command_exec_impl(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+
+    for (name, value) in envs {
+        cmd.env(name, value);
+    }
 
     if let Some(dir) = working_dir {
         cmd.current_dir(dir);
@@ -190,7 +195,7 @@ pub async fn run_command_exec(
     working_dir: Option<&str>,
     output_tx: &mpsc::Sender<UpdateOutputLine>,
 ) -> crate::Result<(String, i32)> {
-    run_command_exec_impl(program, args, working_dir, Some(output_tx)).await
+    run_command_exec_impl(program, args, working_dir, &[], Some(output_tx)).await
 }
 
 /// Run a program directly with arguments, without streaming output.
@@ -202,7 +207,7 @@ pub async fn run_command_exec_quiet(
     args: &[String],
     working_dir: Option<&str>,
 ) -> crate::Result<(String, i32)> {
-    run_command_exec_impl(program, args, working_dir, None).await
+    run_command_exec_impl(program, args, working_dir, &[], None).await
 }
 
 /// Wrap a command with fail-early shell settings.
@@ -613,5 +618,27 @@ mod tests {
         assert!(output.contains("line1"));
         assert!(output.contains("line2"));
         assert!(output.contains("line3"));
+    }
+
+    // -- Environment variable tests --
+
+    #[tokio::test]
+    async fn run_command_exec_impl_sets_env_vars() {
+        let envs = vec![("MY_TEST_VAR".to_string(), "hello_env".to_string())];
+        // Use printenv to echo the env var value.
+        let result = run_command_exec_impl(
+            "printenv",
+            &["MY_TEST_VAR".to_string()],
+            None,
+            &envs,
+            None,
+        )
+        .await;
+        let (output, exit_code) = result.expect("printenv should succeed");
+        assert_eq!(exit_code, 0);
+        assert!(
+            output.trim() == "hello_env",
+            "expected 'hello_env', got: {output:?}"
+        );
     }
 }
