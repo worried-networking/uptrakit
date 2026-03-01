@@ -441,6 +441,22 @@ pub async fn migrate_file_jwt_key(
     )
     .await?;
 
+    // Remove the plaintext key file now that it has been migrated to encrypted
+    // DB storage. Failure is non-fatal: warn and continue so the controller
+    // still starts, but log clearly so operators know to remove it manually.
+    if let Err(e) = std::fs::remove_file(&key_path) {
+        tracing::warn!(
+            path = %key_path.display(),
+            error = %e,
+            "JWT key migration: could not delete plaintext key file — remove it manually"
+        );
+    } else {
+        tracing::info!(
+            path = %key_path.display(),
+            "deleted plaintext JWT signing key file after migration to encrypted DB storage"
+        );
+    }
+
     tracing::info!("migrated JWT signing key from file to encrypted database storage");
     Ok(true)
 }
