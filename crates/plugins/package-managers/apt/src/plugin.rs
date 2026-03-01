@@ -220,6 +220,7 @@ impl Plugin for AptPlugin {
             .executor
             .execute_quiet(
                 &CommandSpec::exec("apt-get", ["update".to_string(), "-q".to_string()])
+                    .with_env("DEBIAN_FRONTEND", "noninteractive")
                     .privileged(),
             )
             .await
@@ -458,7 +459,12 @@ impl Plugin for AptPlugin {
 
         let cmd_output = self
             .executor
-            .execute(&CommandSpec::exec("apt-get", args).privileged(), output_tx)
+            .execute(
+                &CommandSpec::exec("apt-get", args)
+                    .with_env("DEBIAN_FRONTEND", "noninteractive")
+                    .privileged(),
+                output_tx,
+            )
             .await
             .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
 
