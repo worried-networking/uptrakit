@@ -247,15 +247,53 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     let read_result = session.exec_command(&read_cmd).await?;
     let existing = parse_existing_authorized_keys(&read_result.stdout);
 
-    // 5d. Decide which lines are stale for this run.
+    // 5c. Compute auto-removal candidates: keys written by this service on
+    //     previous bootstrap runs.  These are removed unconditionally (no
+    //     flag required) whenever a service UUID is available.  This keeps
+    //     authorized_keys clean when the same service re-bootstraps a machine
+    //     (e.g. after key rotation or host reassignment) without affecting
+    //     keys that belong to other Uptrakit services or external users.
+    let same_service_lines: Vec<String> = params
+        .service_id
+        .as_ref()
+        .map(|svc_id| {
+            existing
+                .all_key_lines
+                .iter()
+                .filter(|l| is_same_service_key_line(l, svc_id))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // 5d. Determine which additional lines are stale under --remove-stale-keys.
+    //     For the `uptrakit` target user all existing entries are considered
+    //     Uptrakit-managed (the account is exclusively managed by the agent).
+    //     For other users only entries whose comment starts with `uptrakit`
+    //     are treated as stale.
     let stale_lines: Vec<String> = if params.target_username == "uptrakit" {
         existing.all_key_lines.clone()
     } else {
         existing.uptrakit_key_lines.clone()
     };
 
-    // 5e. Print notice if any stale keys found.
-    if !stale_lines.is_empty() {
+    // 5e. Print notice for auto-removed (same-service) keys.
+    if !same_service_lines.is_empty() {
+        println!(
+            "Removing {} key(s) written by this service on a previous bootstrap...",
+            same_service_lines.len()
+        );
+        for line in &same_service_lines {
+            println!("  {line}");
+        }
+    }
+
+    // 5f. Print notice for remaining stale keys not covered by auto-removal.
+    let remaining_stale: Vec<&String> = stale_lines
+        .iter()
+        .filter(|l| !same_service_lines.contains(l))
+        .collect();
+    if !remaining_stale.is_empty() {
         let uptrakit_user_note = if params.target_username == "uptrakit" {
             " — all are considered Uptrakit-managed"
         } else {
@@ -263,9 +301,9 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         };
         println!(
             "NOTE: Found {} existing key(s) in authorized_keys{uptrakit_user_note}:",
-            stale_lines.len()
+            remaining_stale.len()
         );
-        for line in &stale_lines {
+        for line in &remaining_stale {
             println!("  {line}");
         }
         if !params.remove_stale_keys {
@@ -273,20 +311,54 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         }
     }
 
-    if params.remove_stale_keys && !stale_lines.is_empty() {
-        // 5f. Remove stale keys and write the new entry atomically.
-        println!(
-            "Removing {} stale key(s) from authorized_keys...",
-            stale_lines.len()
-        );
+    // 5g. Build the unified set of lines to remove in this run:
+    //       - always: same_service_lines
+    //       - with --remove-stale-keys: stale_lines (superset of same_service_lines)
+    let mut to_remove: std::collections::HashSet<&str> =
+        same_service_lines.iter().map(String::as_str).collect();
+    if params.remove_stale_keys {
+        for l in &stale_lines {
+            to_remove.insert(l.as_str());
+        }
+    }
 
-        let stale_set: std::collections::HashSet<&str> =
-            stale_lines.iter().map(String::as_str).collect();
+    // 5h. Write the authorized_keys file.
+    if to_remove.is_empty() {
+        // No removals: append the new key entry (also creates .ssh if absent).
+        let ak_cmd = cmd_setup_authorized_keys(
+            &home_dir,
+            &stripped_pubkey,
+            &params.target_username,
+            use_sudo,
+            &service_comment,
+        );
+        let ak_result = session.exec_command(&ak_cmd).await?;
+        if ak_result.exit_code != 0 {
+            bail!(Error::SshCommand(format!(
+                "failed to deploy authorized_keys: {}",
+                ak_result.stderr.trim()
+            )));
+        }
+    } else {
+        // Removals required: rewrite the entire file atomically.
+        if params.remove_stale_keys && !remaining_stale.is_empty() {
+            let qualifier = if same_service_lines.is_empty() {
+                ""
+            } else {
+                "additional "
+            };
+            println!(
+                "Removing {}{} stale key(s) from authorized_keys...",
+                qualifier,
+                remaining_stale.len()
+            );
+        }
+
         let keep_lines: Vec<&str> = existing
             .all_key_lines
             .iter()
             .map(String::as_str)
-            .filter(|l| !stale_set.contains(l))
+            .filter(|l| !to_remove.contains(l))
             .collect();
 
         let new_entry =
@@ -304,22 +376,6 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
             bail!(Error::SshCommand(format!(
                 "failed to write authorized_keys: {}",
                 write_result.stderr.trim()
-            )));
-        }
-    } else {
-        // Normal path: append new key entry (may include mkdir / chmod setup).
-        let ak_cmd = cmd_setup_authorized_keys(
-            &home_dir,
-            &stripped_pubkey,
-            &params.target_username,
-            use_sudo,
-            &service_comment,
-        );
-        let ak_result = session.exec_command(&ak_cmd).await?;
-        if ak_result.exit_code != 0 {
-            bail!(Error::SshCommand(format!(
-                "failed to deploy authorized_keys: {}",
-                ak_result.stderr.trim()
             )));
         }
     }
@@ -699,6 +755,25 @@ fn is_uptrakit_key_line(line: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Returns `true` if `line` is an Uptrakit key written by the service with
+/// `service_id`.
+///
+/// Matches comments of the form `uptrakit-svc:<service_id>-host:<host_id>`.
+/// Keys with other service UUIDs, plain `uptrakit-host:<host_id>` entries,
+/// and non-Uptrakit keys all return `false`.
+fn is_same_service_key_line(line: &str, service_id: &uuid::Uuid) -> bool {
+    if !is_uptrakit_key_line(line) {
+        return false;
+    }
+    let expected_prefix = format!("uptrakit-svc:{service_id}-host:");
+    // `split_whitespace` already skips leading/trailing whitespace, so no
+    // explicit `.trim()` is needed here.
+    line.split_whitespace()
+        .next_back()
+        .map(|tok| tok.starts_with(&expected_prefix))
+        .unwrap_or(false)
+}
+
 /// Classification of the current `authorized_keys` file content.
 struct ExistingAuthorizedKeys {
     /// Non-blank, non-comment lines (actual key entries).
@@ -908,6 +983,81 @@ mod tests {
     fn is_uptrakit_key_line_rejects_comment_line() {
         assert!(!is_uptrakit_key_line("# uptrakit"));
         assert!(!is_uptrakit_key_line("# ssh-ed25519 AAAA... uptrakit"));
+    }
+
+    // ── is_same_service_key_line tests ──────────────────────────────
+
+    #[test]
+    fn same_service_key_line_matches_correct_service_and_host() {
+        let svc_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let host_id = uuid::Uuid::parse_str("018d7f12-3e4a-7000-b1a9-4d8e6c0f2a1b").unwrap();
+        let line = format!(
+            "no-pty,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... \
+             uptrakit-svc:{svc_id}-host:{host_id}"
+        );
+        assert!(is_same_service_key_line(&line, &svc_id));
+    }
+
+    #[test]
+    fn same_service_key_line_rejects_different_service() {
+        let svc_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let other_svc = uuid::Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
+        let host_id = uuid::Uuid::parse_str("018d7f12-3e4a-7000-b1a9-4d8e6c0f2a1b").unwrap();
+        let line = format!(
+            "no-pty ssh-ed25519 AAAA... uptrakit-svc:{other_svc}-host:{host_id}"
+        );
+        assert!(!is_same_service_key_line(&line, &svc_id));
+    }
+
+    #[test]
+    fn same_service_key_line_rejects_host_only_comment() {
+        let svc_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let host_id = uuid::Uuid::parse_str("018d7f12-3e4a-7000-b1a9-4d8e6c0f2a1b").unwrap();
+        // uptrakit-host: format has no service prefix — must not match
+        let line = format!("no-pty ssh-ed25519 AAAA... uptrakit-host:{host_id}");
+        assert!(!is_same_service_key_line(&line, &svc_id));
+    }
+
+    #[test]
+    fn same_service_key_line_rejects_non_uptrakit_key() {
+        let svc_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        assert!(!is_same_service_key_line(
+            "ssh-ed25519 AAAA... user@host",
+            &svc_id
+        ));
+    }
+
+    #[test]
+    fn same_service_key_line_rejects_blank() {
+        let svc_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        assert!(!is_same_service_key_line("", &svc_id));
+        assert!(!is_same_service_key_line("   ", &svc_id));
+    }
+
+    #[test]
+    fn same_service_key_line_rejects_comment_line() {
+        let svc_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let host_id = uuid::Uuid::parse_str("018d7f12-3e4a-7000-b1a9-4d8e6c0f2a1b").unwrap();
+        let line = format!("# uptrakit-svc:{svc_id}-host:{host_id}");
+        assert!(!is_same_service_key_line(&line, &svc_id));
+    }
+
+    #[test]
+    fn same_service_key_line_matches_any_host_id_for_same_service() {
+        let svc_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        for host_id in [
+            "018d7f12-3e4a-7000-b1a9-4d8e6c0f2a1b",
+            "11111111-2222-3333-4444-555555555555",
+            "ffffffff-ffff-ffff-ffff-ffffffffffff",
+        ] {
+            let line = format!(
+                "no-pty ssh-ed25519 AAAA... uptrakit-svc:{svc_id}-host:{host_id}"
+            );
+            assert!(
+                is_same_service_key_line(&line, &svc_id),
+                "should match host_id={host_id}"
+            );
+        }
     }
 
     // ── parse_existing_authorized_keys tests ────────────────────────

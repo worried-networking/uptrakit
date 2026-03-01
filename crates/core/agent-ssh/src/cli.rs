@@ -189,9 +189,12 @@ pub enum HostCommands {
         /// Remove existing Uptrakit-managed keys from `authorized_keys` before
         /// writing the new key.
         ///
-        /// For the `uptrakit` target user all existing keys are removed.
-        /// For other target users only keys whose comment starts with `uptrakit`
-        /// are removed.
+        /// Keys written by this service (matching
+        /// `uptrakit-svc:<service-uuid>-host:*`) are always removed
+        /// automatically, regardless of this flag.  Use this flag to extend
+        /// removal to all Uptrakit-managed keys: for the `uptrakit` target
+        /// user all existing keys are removed; for other target users only
+        /// keys whose comment starts with `uptrakit` are removed.
         #[arg(long, default_value_t = false)]
         remove_stale_keys: bool,
     },
