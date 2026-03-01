@@ -57,17 +57,23 @@ struct PoolEntry {
 
 /// A pool of authenticated SSH sessions, keyed by SSH host ID.
 ///
+/// `SshConnectionPool` is a cheaply-cloneable handle: cloning it produces a
+/// second handle that shares the same underlying session map.  This allows
+/// the pool to be moved into `tokio::spawn` tasks without wrapping the entire
+/// handler in an `Arc`.
+///
 /// A single pool instance lives on `SshAgentHandler` for the lifetime of the
 /// controller connection.
+#[derive(Clone)]
 pub struct SshConnectionPool {
-    sessions: Mutex<HashMap<String, PoolEntry>>,
+    sessions: Arc<Mutex<HashMap<String, PoolEntry>>>,
 }
 
 impl SshConnectionPool {
     /// Create a new, empty pool.
     pub fn new() -> Self {
         Self {
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
