@@ -531,8 +531,16 @@ fields are included in the config hash computation for change detection.
 ## `software_states` Payload
 
 The controller pushes this message to all locally connected MQTT services for a tenant whenever version
-data changes (e.g. after a version check or an update completes). It is also published to NATS (when
-configured) for cross-controller delivery (contains no credentials). MQTT services filter by `tenant_id`.
+data changes. It is also published to NATS (when configured) for cross-controller delivery (contains no
+credentials). MQTT services filter by `tenant_id`.
+
+**Push triggers:**
+
+- Version check results received from an agent
+- An update is triggered (REST, MQTT command, or scheduler) — sets `update_in_progress: true`
+- An agent sends `update_started` (status transitions to `in_progress`) — `update_in_progress` stays `true`
+- An update result (completed or failed) is received — clears `update_in_progress: false`
+- An MQTT service first connects and receives its tenant assignments
 
 ```json
 {
@@ -551,6 +559,7 @@ configured) for cross-controller delivery (contains no credentials). MQTT servic
           "installed_version": "1.2.3",
           "latest_version": "1.3.0",
           "update_available": true,
+          "update_in_progress": false,
           "release_url": "https://github.com/owner/repo/releases/tag/v1.3.0",
           "release_notes": "## What's New\n- Feature A\n- Bug fix B"
         }
@@ -573,6 +582,7 @@ The `hosts` entries use the following fields:
 | `installed_version` | `Option<String>` | Currently installed version (omitted if unknown) |
 | `latest_version` | `Option<String>` | Latest available version (omitted if unknown) |
 | `update_available` | bool | `true` when `latest_version` differs from `installed_version` |
+| `update_in_progress` | bool | `true` while an `update_history` record with status `pending` or `in_progress` exists for this `(host_id, software_item_id)` pair; defaults to `false` when absent (older controller) |
 | `release_url` | `Option<String>` | URL to the upstream release page (omitted when unavailable) |
 | `release_notes` | `Option<String>` | Full release notes or changelog text (omitted when unavailable) |
 
@@ -580,7 +590,10 @@ The `hosts` entries use the following fields:
 Releases). They are absent (`null` / omitted) for plugins that track only version numbers.
 
 When `ha_discovery = true` for an MQTT client, the MQTT service publishes HA discovery configs and retained
-state topics from this payload. See [Home Assistant Integration](../end-user/home-assistant-mqtt.md).
+state topics from this payload. The `update_in_progress` field is published to the
+`{prefix}/update/{item_id}/{host_id}/attributes` MQTT topic as `{"in_progress": true/false}`, which
+Home Assistant uses to display a live installing indicator on the `update` entity. See
+[Home Assistant Integration](../end-user/home-assistant-mqtt.md).
 
 ## `mqtt_trigger_update` Payload
 

@@ -916,6 +916,30 @@ components:
       name: software_states
       title: Software States Message
       summary: Controller pushes software version state for a tenant to MQTT services (MQTT-only)
+      description: |
+        Sent whenever version data changes for any software item in a tenant.
+        Push triggers include:
+
+        - Version check results received from an agent
+        - An update is triggered (REST, MQTT command, or scheduler)
+        - An agent sends `update_started` (status transitions to `in_progress`)
+        - An update result (completed or failed) is received from an agent
+        - An MQTT service first connects and receives its tenant assignments
+
+        The `update_in_progress` field in each host entry reflects whether an
+        `update_history` record with status `pending` or `in_progress` exists
+        for that `(host_id, software_item_id)` pair at query time.
+
+        The MQTT service publishes the received state to three retained broker
+        topics per `(software_item, host)` pair:
+
+        - `{prefix}/update/{item_id}/{host_id}/state` — installed version string
+        - `{prefix}/update/{item_id}/{host_id}/latest_version` — latest version string
+        - `{prefix}/update/{item_id}/{host_id}/attributes` — JSON attributes: `{"in_progress": true/false}`
+
+        The `attributes` topic payload is recognised by the Home Assistant
+        `update` entity as a first-class `in_progress` attribute, which causes
+        HA to display a spinner while an update is executing.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/softwareStatesPayload"
@@ -2636,6 +2660,16 @@ components:
         update_available:
           type: boolean
           description: Whether an update is available
+        update_in_progress:
+          type: boolean
+          default: false
+          description: |
+            Whether an update is currently pending dispatch or executing on
+            the agent for this host-item pair. Set to `true` from the moment
+            the controller queues an update until the `update_history` record
+            reaches a terminal state (`completed` or `failed`). Absent (or
+            `false`) when no update is active. Older controllers that predate
+            this field always omit it; receivers must default it to `false`.
         release_url:
           type: string
           format: uri

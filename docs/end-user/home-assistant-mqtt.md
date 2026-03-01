@@ -11,16 +11,22 @@ and trigger updates from the Home Assistant UI.
 Once an MQTT client is **enabled** and connected to the broker, Uptrakit publishes the following retained
 topics for every `(software item, host)` pair regardless of whether Home Assistant Discovery is enabled:
 
-| Topic | Purpose |
-| --- | --- |
-| `{prefix}/update/{item_id}/{host_id}/state` | Installed version string (empty if unknown) |
-| `{prefix}/update/{item_id}/{host_id}/latest_version` | Latest available version string (empty if unknown) |
-| `{prefix}/update/{item_id}/{host_id}/set` | Command topic — publish `"install"` to trigger an update |
+| Topic | Retained | Purpose |
+| --- | :---: | --- |
+| `{prefix}/update/{item_id}/{host_id}/state` | ✓ | Installed version string (empty if unknown) |
+| `{prefix}/update/{item_id}/{host_id}/latest_version` | ✓ | Latest available version string (empty if unknown) |
+| `{prefix}/update/{item_id}/{host_id}/attributes` | ✓ | JSON attributes: `{"in_progress": true/false}` |
+| `{prefix}/update/{item_id}/{host_id}/set` | — | Command topic — publish `"install"` to trigger an update |
 
 Where `{prefix}` is the **Topic Prefix** configured on the MQTT client (default: `uptrakit`).
 
-These topics update automatically whenever a version check completes or an update finishes. No extra
-configuration is required.
+The `attributes` topic carries a JSON payload with an `in_progress` boolean flag. It transitions to
+`true` the moment an update is queued (either from the HA Install button, the web UI, or the CLI) and
+returns to `false` once the update completes or fails. This flag is used by the Home Assistant `update`
+entity to display a live "Installing…" spinner.
+
+All four topics update automatically whenever a version check completes, an update is triggered, or an
+update finishes. No extra configuration is required.
 
 ## Prerequisites
 
@@ -76,6 +82,7 @@ Each entity displays:
 | Installed version | The currently installed version on the host (blank if unknown) |
 | Latest version | The newest available version (blank if unknown) |
 | Update available | `true` when latest > installed |
+| In progress | `true` while an update is pending or executing (displays a spinner in the HA UI) |
 | Release URL | Link to the upstream release page (GitHub releases only; absent otherwise) |
 | Release summary | First 500 characters of the release notes (GitHub releases only; absent otherwise) |
 
@@ -109,8 +116,12 @@ Uptrakit validates the request and, if accepted, creates an `update_history` rec
 - `actor_id = <mqtt_client_id>`
 
 The update is then dispatched to the appropriate agent exactly as if it had been triggered from the web UI
-or CLI. Progress is not streamed back to Home Assistant — the update entity state will refresh the next
-time Uptrakit pushes updated version data (after the update completes or fails).
+or CLI.
+
+**In-progress state feedback:** Uptrakit immediately publishes `{"in_progress": true}` to the
+`{prefix}/update/{item_id}/{host_id}/attributes` topic after accepting the update command. Home Assistant
+recognises this attribute on the `update` entity and displays a spinner. Once the agent reports the final
+result (completed or failed), Uptrakit publishes updated state topics including `{"in_progress": false}`.
 
 > **Note:** Uptrakit never triggers updates automatically. Update execution always requires an explicit
 > user action — from the web UI, CLI, or Home Assistant.

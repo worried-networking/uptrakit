@@ -481,9 +481,12 @@ Key invariants:
    **only** the publication of `{ha_prefix}/update/.../config` discovery topics. State and version
    topics under `{topic_prefix}` are always published for all connected, enabled clients.
 2. **State push is controller-initiated.** The controller sends `SoftwareStates` (wire type
-   `software_states`) to MQTT services whenever version data changes (version check completed, update
-   result received). The MQTT service stores the states in memory and publishes state/version topics to
-   the broker for **all** connected clients, plus HA discovery config topics for HA-enabled clients.
+   `software_states`) to MQTT services whenever version data changes. Push triggers: version check
+   completed, update triggered (REST/MQTT/scheduler), `update_started` received from agent, update
+   result received. The `update_in_progress` field in each host entry reflects whether a `Pending` or
+   `InProgress` update exists at query time. The MQTT service stores the states in memory and publishes
+   state, `latest_version`, and `attributes` (JSON `in_progress` flag) retained topics to the broker
+   for **all** connected clients, plus HA discovery config topics for HA-enabled clients.
 3. **`SoftwareStates` is safe for cross-controller delivery.** It contains no credentials and is published
    to NATS (when configured) with `target_capability = "mqtt_bridge"` so only MQTT services receive it.
 4. **Reconnect resilience.** On every `ConnAck` the MQTT service emits a `Reconnected` event, causing
@@ -509,6 +512,7 @@ All topics use the MQTT client's `topic_prefix` field.
 | --- | :---: | --- | --- |
 | `{prefix}/update/{item_id}/{host_id}/state` | ✓ | publish | Installed version string |
 | `{prefix}/update/{item_id}/{host_id}/latest_version` | ✓ | publish | Latest available version string |
+| `{prefix}/update/{item_id}/{host_id}/attributes` | ✓ | publish | JSON attributes: `{"in_progress": true/false}` |
 | `{prefix}/update/{item_id}/{host_id}/set` | — | subscribe | Receives `"install"` from HA |
 | `{ha_prefix}/update/uptrakit_{t}_{i}_{h}/config` | ✓ | publish | HA discovery config (JSON) |
 | `{ha_prefix}/status` | — | subscribe | HA birth/will (`"online"` / `"offline"`) |
