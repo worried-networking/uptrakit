@@ -14,7 +14,7 @@ pub use traits::{
 };
 pub use types::{
     DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole, PluginType, ReleaseAsset,
-    ReleaseInfo, UpstreamRelease,
+    ReleaseInfo, UpdateCategory, UpstreamRelease,
 };
 pub use version::Version;
 

@@ -8,7 +8,7 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin,
     PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
-    UpdateHookContext, UpdateOutputLine, UpstreamRelease, Version,
+    UpdateCategory, UpdateHookContext, UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::{AptConfig, AptDiscoveryFilter};
@@ -94,6 +94,12 @@ pub struct AptPlugin {
     executor: Arc<dyn CommandExecutor>,
 }
 
+/// Parsed result from a single `apt-cache madison` line.
+struct MadisonEntry {
+    version: String,
+    source: String,
+}
+
 impl AptPlugin {
     /// Compile-time capabilities for the APT plugin.
     pub const CAPABILITIES: &'static [PluginCapability] = &[
@@ -136,20 +142,31 @@ impl AptPlugin {
     /// Each line has the format:
     /// `   <package> | <version> | <source>`
     ///
-    /// Returns the version string from the first valid line (highest-priority
-    /// candidate), or `None` if the output is empty or contains no parseable
-    /// lines.
-    fn parse_madison_output(output: &str) -> Option<String> {
+    /// Returns the version and source from the first valid line
+    /// (highest-priority candidate), or `None` if the output is empty or
+    /// contains no parseable lines.
+    fn parse_madison_output(output: &str) -> Option<MadisonEntry> {
         output.lines().find_map(|line| {
             let mut parts = line.splitn(3, '|');
             let _package = parts.next()?;
             let version = parts.next()?.trim();
             if version.is_empty() {
-                None
-            } else {
-                Some(version.to_string())
+                return None;
             }
+            let source = parts.next().map(|s| s.trim().to_string()).unwrap_or_default();
+            Some(MadisonEntry {
+                version: version.to_string(),
+                source,
+            })
         })
+    }
+
+    /// Detect whether a madison source string indicates a security repository.
+    ///
+    /// APT security updates typically come from URLs containing "security"
+    /// (e.g. `http://security.ubuntu.com/ubuntu noble-security/main`).
+    fn is_security_source(source: &str) -> bool {
+        source.to_ascii_lowercase().contains("security")
     }
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
@@ -403,21 +420,32 @@ impl Plugin for AptPlugin {
             bail!(PluginError::CommandFailed(cmd_output.exit_code));
         }
 
-        let Some(version_str) = Self::parse_madison_output(&cmd_output.output) else {
+        let Some(entry) = Self::parse_madison_output(&cmd_output.output) else {
             // Package not found in any configured repository.
             return Ok(vec![]);
         };
 
-        tracing::debug!(version = %version_str, "APT upstream version resolved");
+        let category = if Self::is_security_source(&entry.source) {
+            Some(UpdateCategory::Security)
+        } else {
+            None
+        };
+
+        tracing::debug!(
+            version = %entry.version,
+            ?category,
+            source = %entry.source,
+            "APT upstream version resolved"
+        );
         Ok(vec![UpstreamRelease {
-            version: Version::new(&version_str),
-            tag: version_str,
+            version: Version::new(&entry.version),
+            tag: entry.version,
             is_prerelease: false,
             release_url: String::new(),
             release_notes: None,
             published_at: None,
             assets: vec![],
-            category: None,
+            category,
         }])
     }
 
@@ -679,10 +707,9 @@ mod tests {
     #[test]
     fn parse_madison_output_single_entry() {
         let output = "   nginx | 1.24.0-2ubuntu7.3 | http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages\n";
-        assert_eq!(
-            AptPlugin::parse_madison_output(output),
-            Some("1.24.0-2ubuntu7.3".to_string())
-        );
+        let entry = AptPlugin::parse_madison_output(output).unwrap();
+        assert_eq!(entry.version, "1.24.0-2ubuntu7.3");
+        assert!(entry.source.contains("archive.ubuntu.com"));
     }
 
     #[test]
@@ -691,24 +718,71 @@ mod tests {
             "   nginx | 1.24.0-2ubuntu7.3 | http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages\n",
             "   nginx | 1.18.0-6ubuntu14 | http://archive.ubuntu.com/ubuntu focal/main amd64 Packages\n",
         );
-        assert_eq!(
-            AptPlugin::parse_madison_output(output),
-            Some("1.24.0-2ubuntu7.3".to_string())
-        );
+        let entry = AptPlugin::parse_madison_output(output).unwrap();
+        assert_eq!(entry.version, "1.24.0-2ubuntu7.3");
     }
 
     #[test]
     fn parse_madison_output_malformed_line_skipped_gracefully() {
         let output = concat!("no pipe here\n", "   nginx | 1.24.0 | source\n",);
-        assert_eq!(
-            AptPlugin::parse_madison_output(output),
-            Some("1.24.0".to_string())
-        );
+        let entry = AptPlugin::parse_madison_output(output).unwrap();
+        assert_eq!(entry.version, "1.24.0");
     }
 
     #[test]
     fn parse_madison_output_empty() {
-        assert_eq!(AptPlugin::parse_madison_output(""), None);
+        assert!(AptPlugin::parse_madison_output("").is_none());
+    }
+
+    #[test]
+    fn parse_madison_output_security_source() {
+        let output = "   openssl | 3.0.2-0ubuntu1.16 | http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages\n";
+        let entry = AptPlugin::parse_madison_output(output).unwrap();
+        assert_eq!(entry.version, "3.0.2-0ubuntu1.16");
+        assert!(AptPlugin::is_security_source(&entry.source));
+    }
+
+    #[test]
+    fn parse_madison_output_non_security_source() {
+        let output = "   nginx | 1.24.0-2 | http://archive.ubuntu.com/ubuntu noble/main amd64 Packages\n";
+        let entry = AptPlugin::parse_madison_output(output).unwrap();
+        assert!(!AptPlugin::is_security_source(&entry.source));
+    }
+
+    #[test]
+    fn is_security_source_detects_security_urls() {
+        // Ubuntu security repo
+        assert!(AptPlugin::is_security_source(
+            "http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages"
+        ));
+        // Debian security repo
+        assert!(AptPlugin::is_security_source(
+            "http://security.debian.org/debian-security bookworm-security/main amd64 Packages"
+        ));
+        // Mixed case
+        assert!(AptPlugin::is_security_source(
+            "http://SECURITY.ubuntu.com/ubuntu noble-Security/main amd64 Packages"
+        ));
+    }
+
+    #[test]
+    fn is_security_source_rejects_non_security_urls() {
+        assert!(!AptPlugin::is_security_source(
+            "http://archive.ubuntu.com/ubuntu noble/main amd64 Packages"
+        ));
+        assert!(!AptPlugin::is_security_source(
+            "http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages"
+        ));
+        assert!(!AptPlugin::is_security_source(""));
+    }
+
+    #[test]
+    fn parse_madison_output_missing_source_field() {
+        let output = "   nginx | 1.24.0\n";
+        let entry = AptPlugin::parse_madison_output(output).unwrap();
+        assert_eq!(entry.version, "1.24.0");
+        assert!(entry.source.is_empty());
+        assert!(!AptPlugin::is_security_source(&entry.source));
     }
 
     // ── parse_dpkg_output ───────────────────────────────────────────────
