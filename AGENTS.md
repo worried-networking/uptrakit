@@ -176,6 +176,27 @@ All changes must pass defined quality gates. See [docs/development/quality-gates
   - IP detection / `ClientIp`, forwarded headers, trusted-proxy logic
   - reverse proxy middleware/settings and related TLS behavior
 
+### Dependency registration
+
+All new dependencies — external third-party crates and internal workspace crates alike — must be
+added to `[workspace.dependencies]` in the root `Cargo.toml` **first**. Individual crate
+`Cargo.toml` files must reference them via `workspace = true`. Never pin a version number or path
+locally inside a crate's own `Cargo.toml`.
+
+```toml
+# ✅ Correct
+[dependencies]
+serde = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
+
+# ❌ Wrong — do not do this
+serde = "1"
+uptrakit-internal-wire = { path = "../../shared/wire" }
+```
+
+See [docs/development/dependency-policy.md](docs/development/dependency-policy.md) for the full
+policy including feature specification rules and optional dependency guidelines.
+
 ### Commit Messages
 
 Conventional Commits are required. See [docs/development/commit-messages.md](docs/development/commit-messages.md) for details.
