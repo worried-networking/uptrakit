@@ -154,13 +154,14 @@ mod tests {
     use super::*;
     use time::macros::datetime;
     use uptrakit_openapi_client::Uuid;
+    use uptrakit_openapi_client::types::scheduler::TASK_TYPE_VERSION_CHECK;
 
     fn sample_task() -> ScheduledTaskResponse {
         ScheduledTaskResponse {
             id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                 .parse::<Uuid>()
                 .unwrap(),
-            task_type: "version_check".to_string(),
+            task_type: TASK_TYPE_VERSION_CHECK.to_string(),
             label: "Version Check".to_string(),
             cron_expression: "0 * * * *".to_string(),
             enabled: true,

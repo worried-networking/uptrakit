@@ -4,6 +4,13 @@ use uuid::Uuid;
 
 use crate::validation::{Validate, ValidationError};
 
+/// Task type string for the version-check scheduler task.
+///
+/// Use this constant instead of a raw string literal wherever the `task_type`
+/// field of [`ScheduledTaskResponse`] is compared or displayed, to avoid a
+/// silent mismatch if the DB-side string value is ever changed.
+pub const TASK_TYPE_VERSION_CHECK: &str = "version_check";
+
 /// Response for a single scheduled task.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

@@ -3,7 +3,9 @@ use crate::error::Result;
 use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::scheduler::TriggerScheduledTaskResponse;
+use uptrakit_openapi_client::types::scheduler::{
+    TASK_TYPE_VERSION_CHECK, TriggerScheduledTaskResponse,
+};
 use uptrakit_openapi_client::types::software_items::TriggerVersionCheckResponse;
 
 // ── Human output ────────────────────────────────────────────────────────────
@@ -56,14 +58,14 @@ pub async fn all(params: AllParams<'_>) -> Result<TriggerScheduledTaskResponse> 
 
     // Find the version_check scheduler task
     let tasks = client.list_scheduled_tasks().await.context_to()?;
-    let task = tasks.iter().find(|t| t.task_type == "version_check");
+    let task = tasks.iter().find(|t| t.task_type == TASK_TYPE_VERSION_CHECK);
 
     let task = match task {
         Some(t) => t,
         None => {
             return Ok(TriggerScheduledTaskResponse {
                 triggered: false,
-                message: "No version_check scheduler task found".to_string(),
+                message: format!("No {TASK_TYPE_VERSION_CHECK} scheduler task found"),
             });
         }
     };
