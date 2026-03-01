@@ -55,6 +55,7 @@ impl HumanOutput for UpdateHistoryResponse {
         }
         out.push_str(&format!("To Version:    {}\n", self.to_version));
         out.push_str(&format!("Status:        {}\n", self.status.as_str()));
+        out.push_str(&format!("Category:      {}\n", self.update_category));
         out.push_str(&format!(
             "Actor:         {} ({})\n",
             self.actor_type, self.actor_id
@@ -163,6 +164,7 @@ mod tests {
             completed_at: Some(datetime!(2025-01-01 00:01:00 UTC)),
             output: "Success".to_string(),
             created_at: datetime!(2025-01-01 00:00:00 UTC),
+            update_category: "security".to_string(),
         }
     }
 

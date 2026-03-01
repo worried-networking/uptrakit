@@ -342,6 +342,7 @@ async fn load_item_hosts(
                 latest_version: link.latest_version,
                 latest_release_metadata: link.latest_release_metadata,
                 update_available: update_avail,
+                update_category: link.update_category,
                 last_updated_at: link.last_updated_at,
                 linked_at: link.linked_at,
             })
@@ -1206,6 +1207,7 @@ mod tests {
             latest_version: Some("7.4.0".to_string()),
             latest_release_metadata: None,
             update_available: true,
+            update_category: "unknown".to_string(),
             last_updated_at: None,
             linked_at: now,
         }];

@@ -172,6 +172,8 @@ pub struct SoftwareItemHostSummary {
     pub latest_release_metadata: Option<serde_json::Value>,
     /// `true` when `installed_version` and `latest_version` are both `Some` and differ.
     pub update_available: bool,
+    /// Classification of the available update (security, bugfix, feature, unknown).
+    pub update_category: String,
     #[serde(with = "time::serde::rfc3339::option")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_updated_at: Option<OffsetDateTime>,

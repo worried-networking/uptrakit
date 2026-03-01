@@ -46,6 +46,7 @@ fn build_response(
         started_at: record.started_at,
         completed_at: record.completed_at,
         created_at: record.created_at,
+        update_category: record.update_category.clone(),
     }
 }
 
@@ -276,6 +277,7 @@ mod tests {
             started_at: now,
             completed_at: Some(now),
             created_at: now,
+            update_category: "unknown".to_string(),
         };
 
         let resp = build_response(
@@ -313,6 +315,7 @@ mod tests {
             started_at: now,
             completed_at: Some(now),
             created_at: now,
+            update_category: "security".to_string(),
         };
 
         let resp = build_response(
@@ -348,6 +351,7 @@ mod tests {
             started_at: now,
             completed_at: None,
             created_at: now,
+            update_category: "unknown".to_string(),
         };
 
         let resp = build_response(

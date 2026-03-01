@@ -102,6 +102,8 @@ pub struct UpdateHistoryResponse {
         schema(value_type = String, format = DateTime)
     )]
     pub created_at: OffsetDateTime,
+    /// Classification of the update (security, bugfix, feature, unknown).
+    pub update_category: String,
 }
 
 // ---------------------------------------------------------------------------
