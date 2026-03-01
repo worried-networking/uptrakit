@@ -130,6 +130,11 @@ enum Commands {
         #[command(subcommand)]
         command: NotificationsCommands,
     },
+    /// Manage update batches
+    UpdateBatches {
+        #[command(subcommand)]
+        command: UpdateBatchesCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -328,6 +333,60 @@ enum UpdateCommands {
         /// Follow (tail) update output in real-time after triggering
         #[arg(long, short)]
         follow: bool,
+    },
+    /// Trigger a batch update for all outdated items on a host
+    BatchHost {
+        /// Host UUID
+        host_id: Uuid,
+        /// Only update items in this category (e.g. security)
+        #[arg(long)]
+        category: Option<String>,
+        /// Exclude these software item UUIDs from the batch
+        #[arg(long, value_delimiter = ',')]
+        exclude: Vec<Uuid>,
+        /// Follow batch progress in real-time after triggering
+        #[arg(long, short)]
+        follow: bool,
+    },
+    /// Trigger a batch update to roll out a software item to hosts
+    BatchItem {
+        /// Software item UUID
+        item_id: Uuid,
+        /// Target version to update to
+        #[arg(long)]
+        to_version: String,
+        /// Limit to these host UUIDs (default: all assigned hosts)
+        #[arg(long, value_delimiter = ',')]
+        host: Vec<Uuid>,
+        /// Follow batch progress in real-time after triggering
+        #[arg(long, short)]
+        follow: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum UpdateBatchesCommands {
+    /// List update batches
+    List {
+        /// Filter by status (in_progress, completed, partially_completed)
+        #[arg(long)]
+        status: Option<String>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show update batch details
+    Show {
+        /// Batch UUID
+        id: Uuid,
+    },
+    /// Follow batch progress in real-time via SSE
+    Follow {
+        /// Batch UUID
+        id: Uuid,
     },
 }
 
@@ -1661,6 +1720,118 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                     std::process::exit(tail_result.exit_code());
                 }
+            }
+            UpdateCommands::BatchHost {
+                host_id,
+                category,
+                exclude,
+                follow,
+            } => {
+                let resp = commands::batch_update::trigger_host_batch(
+                    commands::batch_update::HostBatchParams {
+                        host_id: &host_id,
+                        category: category.as_deref(),
+                        exclude: &exclude,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+
+                if follow && let Some(batch_id) = resp.batch_id {
+                    let result = commands::batch_update::follow_batch(
+                        commands::batch_update::FollowBatchParams {
+                            batch_id: &batch_id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                        },
+                    )
+                    .await?;
+                    std::process::exit(result.exit_code());
+                }
+            }
+            UpdateCommands::BatchItem {
+                item_id,
+                to_version,
+                host,
+                follow,
+            } => {
+                let resp = commands::batch_update::trigger_item_batch(
+                    commands::batch_update::ItemBatchParams {
+                        item_id: &item_id,
+                        to_version: &to_version,
+                        host_ids: &host,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+
+                if follow && let Some(batch_id) = resp.batch_id {
+                    let result = commands::batch_update::follow_batch(
+                        commands::batch_update::FollowBatchParams {
+                            batch_id: &batch_id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                        },
+                    )
+                    .await?;
+                    std::process::exit(result.exit_code());
+                }
+            }
+        },
+        Commands::UpdateBatches { command } => match command {
+            UpdateBatchesCommands::List {
+                status,
+                page,
+                per_page,
+            } => {
+                let resp = commands::batch_update::list_batches(
+                    commands::batch_update::ListBatchParams {
+                        status: status.as_deref(),
+                        page,
+                        per_page,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            UpdateBatchesCommands::Show { id } => {
+                let resp = commands::batch_update::show_batch(
+                    commands::batch_update::ShowBatchParams {
+                        batch_id: &id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            UpdateBatchesCommands::Follow { id } => {
+                let result = commands::batch_update::follow_batch(
+                    commands::batch_update::FollowBatchParams {
+                        batch_id: &id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                    },
+                )
+                .await?;
+                std::process::exit(result.exit_code());
             }
         },
         Commands::History { command } => match command {
@@ -3100,6 +3271,194 @@ mod tests {
                 assert!(follow);
             }
             _ => panic!("expected Update Trigger with follow"),
+        }
+    }
+
+    #[test]
+    fn update_batch_host_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "update", "batch-host", HOST_UUID])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::Update {
+                command:
+                    UpdateCommands::BatchHost {
+                        host_id,
+                        category,
+                        exclude,
+                        follow,
+                    },
+            }) => {
+                assert_eq!(host_id, uuid(HOST_UUID));
+                assert!(category.is_none());
+                assert!(exclude.is_empty());
+                assert!(!follow);
+            }
+            _ => panic!("expected Update BatchHost"),
+        }
+    }
+
+    #[test]
+    fn update_batch_host_with_options_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "update",
+            "batch-host",
+            HOST_UUID,
+            "--category",
+            "security",
+            "--exclude",
+            ITEM_UUID,
+            "--follow",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Update {
+                command:
+                    UpdateCommands::BatchHost {
+                        category,
+                        exclude,
+                        follow,
+                        ..
+                    },
+            }) => {
+                assert_eq!(category.as_deref(), Some("security"));
+                assert_eq!(exclude.len(), 1);
+                assert_eq!(exclude[0], uuid(ITEM_UUID));
+                assert!(follow);
+            }
+            _ => panic!("expected Update BatchHost"),
+        }
+    }
+
+    #[test]
+    fn update_batch_item_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "update",
+            "batch-item",
+            ITEM_UUID,
+            "--to-version",
+            "3.0.0",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Update {
+                command:
+                    UpdateCommands::BatchItem {
+                        item_id,
+                        to_version,
+                        host,
+                        follow,
+                    },
+            }) => {
+                assert_eq!(item_id, uuid(ITEM_UUID));
+                assert_eq!(to_version, "3.0.0");
+                assert!(host.is_empty());
+                assert!(!follow);
+            }
+            _ => panic!("expected Update BatchItem"),
+        }
+    }
+
+    #[test]
+    fn update_batch_item_with_hosts_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "update",
+            "batch-item",
+            ITEM_UUID,
+            "--to-version",
+            "3.0.0",
+            "--host",
+            HOST_UUID,
+            "--follow",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Update {
+                command:
+                    UpdateCommands::BatchItem {
+                        host,
+                        follow,
+                        ..
+                    },
+            }) => {
+                assert_eq!(host.len(), 1);
+                assert_eq!(host[0], uuid(HOST_UUID));
+                assert!(follow);
+            }
+            _ => panic!("expected Update BatchItem"),
+        }
+    }
+
+    #[test]
+    fn update_batches_list_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "update-batches", "list"]).expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::UpdateBatches {
+                command: UpdateBatchesCommands::List { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn update_batches_list_with_filters() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "update-batches",
+            "list",
+            "--status",
+            "in_progress",
+            "--page",
+            "2",
+            "--per-page",
+            "10",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::UpdateBatches {
+                command:
+                    UpdateBatchesCommands::List {
+                        status,
+                        page,
+                        per_page,
+                    },
+            }) => {
+                assert_eq!(status.as_deref(), Some("in_progress"));
+                assert_eq!(page, Some(2));
+                assert_eq!(per_page, Some(10));
+            }
+            _ => panic!("expected UpdateBatches List"),
+        }
+    }
+
+    #[test]
+    fn update_batches_show_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "update-batches", "show", HIST_UUID])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::UpdateBatches {
+                command: UpdateBatchesCommands::Show { id },
+            }) => {
+                assert_eq!(id, uuid(HIST_UUID));
+            }
+            _ => panic!("expected UpdateBatches Show"),
+        }
+    }
+
+    #[test]
+    fn update_batches_follow_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "update-batches", "follow", HIST_UUID])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::UpdateBatches {
+                command: UpdateBatchesCommands::Follow { id },
+            }) => {
+                assert_eq!(id, uuid(HIST_UUID));
+            }
+            _ => panic!("expected UpdateBatches Follow"),
         }
     }
 

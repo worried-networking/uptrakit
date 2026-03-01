@@ -1,6 +1,7 @@
 pub mod api;
 pub mod auth;
 pub mod autodiscovery;
+pub mod batch_update;
 pub mod discovery_allowlist;
 pub mod check;
 pub mod enrollment_tokens;
