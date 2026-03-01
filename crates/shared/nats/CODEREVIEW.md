@@ -23,14 +23,17 @@ interoperability. Stream configuration uses `get_or_create_stream` for
 idempotent startup across concurrent controller instances.
 
 The primary concerns are: the `connect()` function accepts only a bare URL
-string with no support for TLS or authentication configuration, which limits
+string with no support for TLS authentication configuration or credentials, which limits
 production deployment hardening; and the `NatsEventEnvelope` lacks `Debug` to
 aid troubleshooting. The `NatsError` enum defines `Publish` and `Serialization`
 variants that are never constructed anywhere in the codebase. Test coverage is
 adequate for the subject routing logic but the envelope roundtrip test does not
 assert on the `message` field content. The previously-reported absence of a
 compile-time or runtime guard preventing `ServiceCredentials` from being
-published to NATS has been fixed via `is_nats_publishable()`.
+published to NATS has been fixed via `is_nats_publishable()`. The absence of
+an operator warning when connecting over plaintext `nats://` has been fixed —
+`NatsConnection::connect()` now emits `tracing::warn!` when the URL scheme is
+`nats` (not `nats-tls`).
 
 ## Architecture
 
@@ -87,15 +90,6 @@ future contributors from attempting to "optimize" it away.
   propagation. No `.unwrap()` calls exist in production code paths.
 
 ### Issues
-
-**[MEDIUM]** `src/connection.rs:24-29` -- The connection uses
-`async_nats::connect(url)` which defaults to plaintext `nats://` unless the URL
-scheme is `tls://`. There is no validation that the URL uses a secure transport
-scheme, no warning logged when connecting over plaintext, and no option to
-provide TLS certificates. In a multi-controller deployment where NATS carries
-`ControllerMessage` payloads (which may contain PEM certificate data,
-capability strings, and service identifiers), plaintext transport is a
-confidentiality risk.
 
 **[LOW]** `src/subjects.rs:15-27` -- The `target_capability` parameter is
 interpolated directly into the NATS subject string without validation. A

@@ -25,7 +25,10 @@ records using the `update_output_lines` storage path, the rate-limit test DB bac
 the `find_raw_active_config` `.ok().flatten()` DB error swallowing, the
 `notification_service.rs` 50 ms timeout tests missing `start_paused`, and the
 `broadcast_server_restarting_scattered` untracked `tokio::spawn` tasks
-have all been fixed.
+have all been fixed. The `generate_secure_token()` UUID fallback (OIDC auth now returns
+HTTP 500 on RNG failure instead of silently downgrading entropy), and the `lookup_by_secret`
+bearer-secret query without a `service_id` filter (now narrowed via optional URL query
+parameter for defence-in-depth during the enrollment window) have been fixed.
 
 ## Architecture
 
@@ -121,17 +124,11 @@ issued. A compromised token that was never explicitly revoked remains valid fore
 instances. Revoked tokens remain valid on other instances for up to 15 minutes (JWT TTL).
 A DB-backed `revoked_tokens` table or Redis pub/sub invalidation would close this gap.
 
-**[HIGH]** `src/routes/service_ws/mod.rs:145-157` -- `lookup_by_secret` queries without tenant
-filter. Pre-multi-tenancy issue.
-
 **[MEDIUM]** `src/routes/oidc_auth.rs:349-352` -- Registration code exposed in redirect URL
 query parameter. Appears in browser history and server logs.
 
 **[LOW]** `src/auth/token.rs:17-22` -- API tokens hashed with unsalted SHA-256. Per-token salt
 would strengthen defense-in-depth.
-
-**[LOW]** `src/routes/oidc_auth.rs:388,535,584,1221` -- `generate_secure_token()` falls back to
-UUID on failure, silently downgrading from 256-bit to 122-bit entropy for security tokens.
 
 **[LOW]** `src/middleware/resolve_proxy_headers.rs:256-258` -- CA CN comparison uses
 non-constant-time string equality. The compared values (CA CNs) are not confidential, making
@@ -156,8 +153,9 @@ exploitability very low.
   tests cover: missing auth extension -> 401, correct permission -> pass, wrong permission ->
   403, no permissions -> 403, multiple permissions with one match -> pass, `new()` bypass.
 - `MessageRateLimiter` unit-tested with clock injection — no real wall-clock sleep.
-- `deserialize_service_msg` three-path test coverage: unknown message -> `Ok(None)`, malformed
-  JSON -> `Err`, sequence mismatch -> `Err(SequenceValidation)`.
+- `deserialize_service_msg` three-path test coverage: unknown message ->
+  `Ok(Some(ServiceMessage::Unknown))`, malformed JSON -> `Err`, sequence mismatch ->
+  `Err(SequenceValidation)`.
 - `record_service_activity` DB tests with in-memory SQLite verify IP update and last-seen-at.
 - `MqttLeaseCoordinator` well-covered — four integration tests using in-memory SQLite.
 - `EventPoller` cursor behavior tested — safety margin and stale-event-skip verified.

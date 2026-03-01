@@ -16,9 +16,12 @@ truth for the protocol.
 This is the most carefully engineered crate in the workspace. It is the only crate with
 `warnings = "deny"` and `clippy::all = "deny"` enforced at the `[lints]` level. Every public type
 that callers may match exhaustively carries `#[non_exhaustive]`, and the forward-compatibility
-`Other`/`Unknown` catch-all pattern is applied consistently to `Capability` and `CloseReason`.
-Tests cover every message variant, the full sequence-counter state machine, all serde edge cases,
-and spec-conformance against `asyncapi.yaml`.
+`Other`/`Unknown` catch-all pattern is applied consistently to `Capability`, `CloseReason`,
+`ServiceMessage`, and `ControllerMessage`. The `#[serde(other)] Unknown` variant on both message
+enums ensures serde never returns a hard error on an unrecognised `"type"` tag, keeping WebSocket
+connections alive across rolling upgrades. Tests cover every message variant, the full
+sequence-counter state machine, all serde edge cases (including `Unknown` round-trips), and
+spec-conformance against `asyncapi.yaml`.
 
 ## Architecture
 
@@ -146,8 +149,9 @@ No coding standards issues found.
 - `Capability::Other(String)` with `is_known()` guard is the correct pattern for additive
   protocol extension. New capabilities deployed to controller before all agents are updated.
 - `CloseReason::Unknown(String)` provides forward compatibility in the reverse direction.
-- `#[non_exhaustive]` on `ServiceMessage` and `ControllerMessage` correctly forces caller code
-  to handle future variants.
+- `#[non_exhaustive]` on `ServiceMessage` and `ControllerMessage` forces caller code to handle
+  future variants at compile time; `#[serde(other)] Unknown` ensures serde handles unknown `"type"`
+  tags at runtime without hard errors, enabling safe rolling upgrades.
 - `ServiceSettingsPayload.capabilities` uses `BTreeSet<Capability>` with `#[serde(default)]`.
 - `asyncapi.yaml` is versioned alongside the Rust types. Spec-conformance tests prevent drift.
 
