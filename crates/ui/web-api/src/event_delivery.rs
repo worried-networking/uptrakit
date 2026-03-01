@@ -44,13 +44,15 @@ pub async fn deliver_event(
     registry: &ServiceConnectionRegistry,
     db: &DatabaseConnection,
     ca_rotation_trigger: Option<&Arc<Notify>>,
+    revocation_notify: Option<&Arc<Notify>>,
     target_service_id: Option<Uuid>,
     target_capability: Option<&str>,
     msg: ControllerMessage,
 ) -> bool {
     // Controller-targeted events are handled locally (not forwarded to services)
     if target_service_id.is_none() && target_capability == Some("controller") {
-        return deliver_controller_event(db, registry, ca_rotation_trigger, msg).await;
+        return deliver_controller_event(db, registry, ca_rotation_trigger, revocation_notify, msg)
+            .await;
     }
 
     match (target_service_id, target_capability) {
@@ -133,6 +135,7 @@ pub async fn deliver_controller_event(
     db: &DatabaseConnection,
     registry: &ServiceConnectionRegistry,
     ca_rotation_trigger: Option<&Arc<Notify>>,
+    revocation_notify: Option<&Arc<Notify>>,
     msg: ControllerMessage,
 ) -> bool {
     match msg {
@@ -162,6 +165,17 @@ pub async fn deliver_controller_event(
                 trigger.notify_one();
             } else {
                 tracing::debug!("received RequestCaRotation but no CA rotation trigger configured");
+            }
+            true
+        }
+        ControllerMessage::RequestCrlRenewal(_) => {
+            if let Some(notify) = revocation_notify {
+                tracing::debug!("CRL rebuild requested via cross-controller event");
+                notify.notify_one();
+            } else {
+                tracing::debug!(
+                    "received RequestCrlRenewal but no revocation notify configured"
+                );
             }
             true
         }
@@ -233,7 +247,7 @@ mod tests {
                 ca_bundle_pem: "pem".to_string(),
             });
         // With no connected services, broadcast succeeds.
-        let result = deliver_event(&registry, &db, None, None, None, msg).await;
+        let result = deliver_event(&registry, &db, None, None, None, None, msg).await;
         assert!(result);
     }
 
@@ -248,7 +262,8 @@ mod tests {
                 ca_bundle_pem: "pem".to_string(),
             });
         // Service not on this controller — returns true (not our responsibility).
-        let result = deliver_event(&registry, &db, None, Some(service_id), None, msg).await;
+        let result =
+            deliver_event(&registry, &db, None, None, Some(service_id), None, msg).await;
         assert!(result);
     }
 
@@ -262,7 +277,8 @@ mod tests {
                 ca_bundle_pem: "pem".to_string(),
             });
         let result =
-            deliver_event(&registry, &db, None, None, Some("software_discovery"), msg).await;
+            deliver_event(&registry, &db, None, None, None, Some("software_discovery"), msg)
+                .await;
         assert!(result);
     }
 }

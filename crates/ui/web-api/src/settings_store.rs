@@ -433,21 +433,6 @@ pub async fn bump_revocation_version(db: &impl ConnectionTrait, tenant_id: Uuid)
     Ok(())
 }
 
-/// Read the revocation version counter for a tenant.
-///
-/// Returns `0` if no row exists yet.
-pub async fn get_revocation_version(db: &DatabaseConnection, tenant_id: Uuid) -> Result<i64> {
-    let row = SettingsVersion::find_by_id(tenant_id)
-        .one(db)
-        .await
-        .context_to()?;
-
-    match row {
-        Some(model) => Ok(model.revocation_version),
-        None => Ok(0),
-    }
-}
-
 // ── JWT key management ───────────────────────────────────────────────────────
 
 /// Load or generate the JWT signing key from the database.

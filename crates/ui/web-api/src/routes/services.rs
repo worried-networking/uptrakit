@@ -10,7 +10,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
+use uptrakit_internal_wire::{
+    ApprovedPayload, ControllerMessage, RejectedPayload, RequestCrlRenewalPayload,
+};
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -293,6 +295,12 @@ pub async fn deactivate_service(
     match svc_queries::deactivate_service(&tenant_db, service_id, state.default_tenant_id).await {
         Ok(true) => {
             state.revocation_notify.notify_one();
+            state
+                .notification_service
+                .publish_controller_event(ControllerMessage::RequestCrlRenewal(
+                    RequestCrlRenewalPayload {},
+                ))
+                .await;
             state.service_connections.unregister(&service_id).await;
             StatusCode::NO_CONTENT.into_response()
         }
@@ -382,6 +390,12 @@ pub async fn merge_service(
     };
 
     state.revocation_notify.notify_one();
+    state
+        .notification_service
+        .publish_controller_event(ControllerMessage::RequestCrlRenewal(
+            RequestCrlRenewalPayload {},
+        ))
+        .await;
     state.service_connections.unregister(&source_uuid).await;
 
     tracing::info!(

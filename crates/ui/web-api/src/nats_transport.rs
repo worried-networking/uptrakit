@@ -130,6 +130,7 @@ impl NatsTransport {
         registry: ServiceConnectionRegistry,
         db: DatabaseConnection,
         ca_rotation_trigger: Option<Arc<Notify>>,
+        revocation_notify: Option<Arc<Notify>>,
         cancel: CancellationToken,
     ) {
         let consumer = match self.create_consumer().await {
@@ -196,6 +197,7 @@ impl NatsTransport {
                     &registry,
                     &db,
                     ca_rotation_trigger.as_ref(),
+                    revocation_notify.as_ref(),
                     envelope.target_service_id,
                     envelope.target_capability.as_deref(),
                     envelope.message,

@@ -13,7 +13,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use uptrakit_internal_wire::{
     CertificatePayload, CloseReason, ControllerMessage, DiscoveryResultsPayload, ErrorCode,
-    ErrorPayload, OutgoingSeq, ReportHostsPayload, VersionCheckResultsPayload,
+    ErrorPayload, OutgoingSeq, ReportHostsPayload, RequestCrlRenewalPayload,
+    VersionCheckResultsPayload,
 };
 use uptrakit_shared_db::entity::{host, host_software_item, service, service_host, software_item};
 
@@ -144,6 +145,12 @@ pub(super) async fn handle_renew_certificate(
                 );
             }
             state.revocation_notify.notify_one();
+            state
+                .notification_service
+                .publish_controller_event(ControllerMessage::RequestCrlRenewal(
+                    RequestCrlRenewalPayload {},
+                ))
+                .await;
             tracing::info!(
                 %service_id,
                 old_serial = %cert.serial,
