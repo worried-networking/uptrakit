@@ -38,15 +38,29 @@ impl CommandExecutor for SshCommandExecutor {
     ) -> uptrakit_command::Result<CommandOutput> {
         let remote_cmd = build_remote_command_string(spec)?;
 
-        let result = self
+        let fut = self
             .session
-            .exec_command_streaming(&remote_cmd, Some(output_tx))
-            .await
-            .map_err(|e| {
+            .exec_command_streaming(&remote_cmd, Some(output_tx));
+
+        let result = if let Some(dur) = spec.timeout {
+            tokio::time::timeout(dur, fut)
+                .await
+                .map_err(|_| {
+                    tracing::warn!(timeout = ?dur, "SSH command timed out");
+                    report!(CommandError::TimedOut)
+                })?
+                .map_err(|e| {
+                    report!(CommandError::CommandSpawn(std::io::Error::other(
+                        e.to_string()
+                    )))
+                })?
+        } else {
+            fut.await.map_err(|e| {
                 report!(CommandError::CommandSpawn(std::io::Error::other(
                     e.to_string()
                 )))
-            })?;
+            })?
+        };
 
         if result.exit_code != 0 {
             let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);
@@ -64,15 +78,29 @@ impl CommandExecutor for SshCommandExecutor {
     async fn execute_quiet(&self, spec: &CommandSpec) -> uptrakit_command::Result<CommandOutput> {
         let remote_cmd = build_remote_command_string(spec)?;
 
-        let result = self
+        let fut = self
             .session
-            .exec_command_streaming(&remote_cmd, None)
-            .await
-            .map_err(|e| {
+            .exec_command_streaming(&remote_cmd, None);
+
+        let result = if let Some(dur) = spec.timeout {
+            tokio::time::timeout(dur, fut)
+                .await
+                .map_err(|_| {
+                    tracing::warn!(timeout = ?dur, "SSH command timed out");
+                    report!(CommandError::TimedOut)
+                })?
+                .map_err(|e| {
+                    report!(CommandError::CommandSpawn(std::io::Error::other(
+                        e.to_string()
+                    )))
+                })?
+        } else {
+            fut.await.map_err(|e| {
                 report!(CommandError::CommandSpawn(std::io::Error::other(
                     e.to_string()
                 )))
-            })?;
+            })?
+        };
 
         if result.exit_code != 0 {
             let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);
