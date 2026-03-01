@@ -4,7 +4,10 @@
 //! (`UPTRAKIT_EVENTS`), where controllers consume them and deliver to the
 //! appropriate connected services via their WebSocket connections.
 
-use uptrakit_internal_wire::{ControllerMessage, MqttSoftwareStatesPayload, RequestCaRotationPayload};
+use uptrakit_internal_wire::{
+    ControllerMessage, MqttSoftwareStatesPayload, RequestCaRotationPayload,
+    RequestCrlRenewalPayload,
+};
 use uptrakit_nats::NatsConnection;
 use uptrakit_scheduler_engine::SchedulerNotifier;
 use uuid::Uuid;
@@ -57,6 +60,18 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
         let msg = ControllerMessage::SoftwareStates(payload);
         self.nats
             .publish(self.scheduler_id, None, Some("mqtt_bridge"), msg)
+            .await;
+    }
+
+    async fn signal_crl_renewal(&self) {
+        tracing::info!("external scheduler triggering CRL rebuild via NATS");
+        self.nats
+            .publish(
+                self.scheduler_id,
+                None,
+                Some("controller"),
+                ControllerMessage::RequestCrlRenewal(RequestCrlRenewalPayload {}),
+            )
             .await;
     }
 }

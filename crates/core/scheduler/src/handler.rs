@@ -13,7 +13,8 @@ use sea_orm::{ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter};
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectingPayload, ServiceMessage};
 use uptrakit_scheduler_engine::executors::{
-    auth_cleanup::AuthCleanupExecutor, service_cert_check::ServiceCertCheckExecutor,
+    auth_cleanup::AuthCleanupExecutor, crl_renewal::CrlRenewalExecutor,
+    service_cert_check::ServiceCertCheckExecutor,
     stale_lease_cleanup::StaleLeaseCleanupExecutor, version_check::VersionCheckExecutor,
 };
 use uptrakit_scheduler_engine::{Scheduler, SchedulerConfig, SchedulerNotifier};
@@ -223,7 +224,11 @@ impl ServiceHandler for SchedulerHandler {
                 );
                 scheduler.register(
                     ScheduledTaskType::CaRotationCheck,
-                    Box::new(ExternalCaRotationCheckExecutor::new(db, notifier)),
+                    Box::new(ExternalCaRotationCheckExecutor::new(db, notifier.clone())),
+                );
+                scheduler.register(
+                    ScheduledTaskType::CrlRenewal,
+                    Box::new(CrlRenewalExecutor::new(notifier)),
                 );
 
                 // 7. Spawn the scheduler loop.

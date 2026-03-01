@@ -110,6 +110,7 @@ mod tests {
             _payload: uptrakit_internal_wire::MqttSoftwareStatesPayload,
         ) {
         }
+        async fn signal_crl_renewal(&self) {}
     }
 
     fn dummy_task() -> scheduled_task::Model {
