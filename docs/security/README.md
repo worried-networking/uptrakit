@@ -17,6 +17,7 @@ This folder contains security architecture, cryptography, PKI, authentication, s
 | [Reverse Proxy Security](reverse-proxy-security.md) | Reverse proxy trust model, header validation, revocation strategy, and per-proxy guide links. |
 | [SSH Agent Secrets](ssh-agent-secrets.md) | SSH credential encryption, master key management, bootstrap security, and TOFU vs pinned fingerprints. |
 | [Sudoers Management](sudoers-management.md) | Per-command sudoers generation, sudo policy, detecting/persisting sudo state, and operator guidance. |
+| [Notification Subsystem Security](notifications-security.md) | Secret storage, webhook HMAC signing, Telegram callback verification, action tokens, and tenant isolation. |
 
 ## Related Documentation
 

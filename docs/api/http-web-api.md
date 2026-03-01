@@ -419,6 +419,28 @@ Types are defined in `crates/shared/web-api-types/src/scheduler.rs`:
 | `crates/shared/web-api-types/src/scheduler.rs` | Request/response types |
 | `crates/shared/db/src/entity/scheduled_task.rs` | SeaORM entity |
 
+## Notification Endpoints
+
+Full CRUD for notification channels, rules, and a delivery log. See [Notifications API](notifications.md) for
+the complete endpoint reference with request/response examples.
+
+- `POST /api/v1/notifications/channels`: create a channel (requires `ManageNotifications`).
+- `GET /api/v1/notifications/channels`: list channels, paginated (requires `ViewNotifications`).
+- `GET /api/v1/notifications/channels/{id}`: get a channel (requires `ViewNotifications`).
+- `PUT /api/v1/notifications/channels/{id}`: update a channel (requires `ManageNotifications`).
+- `DELETE /api/v1/notifications/channels/{id}`: delete a channel (requires `ManageNotifications`).
+- `POST /api/v1/notifications/channels/{id}/test`: send a test notification (requires `ManageNotifications`).
+- `POST /api/v1/notifications/rules`: create a rule (requires `ManageNotifications`).
+- `GET /api/v1/notifications/rules`: list rules, paginated and filterable (requires `ViewNotifications`).
+- `GET /api/v1/notifications/rules/{id}`: get a rule (requires `ViewNotifications`).
+- `PUT /api/v1/notifications/rules/{id}`: update a rule (requires `ManageNotifications`).
+- `DELETE /api/v1/notifications/rules/{id}`: delete a rule (requires `ManageNotifications`).
+- `GET /api/v1/notifications/log`: list delivery log, paginated (requires `ViewNotifications`).
+- `POST /api/v1/notifications/callback/telegram/{channel_id}`: Telegram callback (public,
+  verified via `X-Telegram-Bot-Api-Secret-Token` header).
+
+Channel types: `webhook` (always available), `telegram` (feature-gated).
+
 ## API Error Responses - Detailed
 
 All web API error responses use a consistent JSON format defined by `ErrorResponse`
@@ -550,6 +572,9 @@ All paginated endpoints return a `PaginatedResponse<T>`:
 | `GET /api/v1/update-history` | `UpdateHistoryQuery` (includes `page`/`per_page`) | Filterable by `host_id`, `software_item_id`, `status` |
 | `GET /api/v1/plugin-configs` | `PaginationParams` | |
 | `GET /api/v1/enrollment-tokens` | `ListEnrollmentTokensQuery` (includes `page`/`per_page`) | |
+| `GET /api/v1/notifications/channels` | `PaginationParams` | |
+| `GET /api/v1/notifications/rules` | `ListRulesQuery` (includes `page`/`per_page`) | Filterable by `channel_id`, `event_type` |
+| `GET /api/v1/notifications/log` | `PaginationParams` | |
 
 ### Endpoints NOT paginated (already bounded)
 

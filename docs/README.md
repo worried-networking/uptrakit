@@ -22,7 +22,8 @@ This directory holds audience-specific documentation split into five sections, p
 | [Deployment Map](end-user/deployment-map.md) | Deployment navigation map and pointers. See also: [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
 | [SSH Agent Host Management](end-user/ssh-agent-host-management.md) | Managing SSH host entries via the `uptrakit-agent-ssh` CLI. See also: [SSH Agent Architecture](architecture/ssh-agent.md), [SSH Agent Secrets](security/ssh-agent-secrets.md). |
 | [SSH Agent Bootstrap](end-user/ssh-agent-bootstrap.md) | Automated remote host setup (user creation, key deployment, sudoers). See also: [SSH Agent Secrets](security/ssh-agent-secrets.md), [SSH Agent Architecture](architecture/ssh-agent.md). |
-| [CLI Usage Guide](end-user/cli-usage.md) | Command reference for the `uptrakit` binary (all command groups: hosts, software-items, plugin-configs, autodiscovery, check, update, history, scheduler, settings). See also: [CLI Output](development/cli-output.md), [Auth Flows](api/auth-flows.md). |
+| [Notifications](end-user/notifications.md) | Setting up notification channels (Webhook, Telegram), creating rules, scoping, actionable notifications. See also: [Notifications API](api/notifications.md), [Notifications Security](security/notifications-security.md). |
+| [CLI Usage Guide](end-user/cli-usage.md) | Command reference for the `uptrakit` binary (all command groups: hosts, software-items, plugin-configs, autodiscovery, check, update, history, scheduler, settings, notifications). See also: [CLI Output](development/cli-output.md), [Auth Flows](api/auth-flows.md). |
 | [Plugin Configurations](end-user/plugin-configs.md) | Plugin config management, supported plugin types, autodiscovery, and ignore rules. See also: [Autodiscovery](end-user/autodiscovery.md), [Software Item Entity](architecture/software-item-entity.md). |
 | [Update History](end-user/update-history.md) | Viewing update history, status reference, filters, and triggering updates. See also: [Update Workflow](end-user/update-workflow.md), [Update History Entity](architecture/update-history-entity.md). |
 | [Profile and API Tokens](end-user/profile-tokens.md) | Account info, API token lifecycle, security best practices. See also: [Auth Flows](api/auth-flows.md), [Auth and Authorization](security/auth-and-authorization.md). |
@@ -38,6 +39,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Auth Flows](api/auth-flows.md) | Device auth, tokens, MQTT enrollment, and denylist behavior. See also: [Auth and Authorization](security/auth-and-authorization.md), [Secrets and Encryption](security/secrets-and-encryption.md). |
 | [Services and Operations](api/services-operations.md) | Agent/MQTT flows, update history, and tenant-scoped tables. See also: [Update Workflow](end-user/update-workflow.md). |
 | [Enrollment Tokens](api/enrollment-tokens.md) | Enrollment token CRUD, capability scoping, usage limits, TTL, and enrollment flow. See also: [Auth and Authorization](security/auth-and-authorization.md). |
+| [Notifications](api/notifications.md) | Notification channel, rule, and delivery log REST API reference. See also: [Notifications Guide](end-user/notifications.md), [Notifications Security](security/notifications-security.md). |
 
 ## Security
 
@@ -53,6 +55,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Filesystem and Dependency Security](security/filesystem-dependency-security.md) | Secure permissions and dependency controls. See also: [Dependency Policy](development/dependency-policy.md). |
 | [Secure Development](security/secure-development.md) | Security requirements for contributors. See also: [Coding Standards](development/coding-standards.md), [Testing](development/testing.md). |
 | [SSH Agent Secrets](security/ssh-agent-secrets.md) | SSH agent secret storage, master key management, and threat model. See also: [SSH Agent Architecture](architecture/ssh-agent.md), [Secrets and Encryption](security/secrets-and-encryption.md). |
+| [Notifications Security](security/notifications-security.md) | Notification secret storage, callback verification, action token lifecycle, and tenant isolation. See also: [Notifications API](api/notifications.md), [Notifications Development](development/notifications.md). |
 
 ## Architecture
 
@@ -89,6 +92,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Service Lifecycle](development/service-lifecycle.md) | `ServiceHandler` trait and `run_service_lifecycle()` for building new services. See also: [Services and Operations](api/services-operations.md). |
 | [OpenAPI Client](development/openapi-client.md) | Typed HTTP client for the web API (`uptrakit-openapi-client`). See also: [HTTP Web API](api/http-web-api.md), [CLI Usage](end-user/cli-usage.md). |
 | [Scheduler Engine](development/scheduler-engine.md) | Scheduler engine crate internals: `TaskExecutor`, `SchedulerNotifier`, executor details. See also: [Scheduler](architecture/scheduler.md), [External Scheduler Deployment](end-user/deployment/external-scheduler.md). |
+| [Notifications](development/notifications.md) | Notification subsystem architecture: dispatcher, channel trait, adding new channels, feature flags, event hooks. See also: [Notifications API](api/notifications.md), [Notifications Security](security/notifications-security.md). |
 | [Embedded Frontend](development/embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). See also: [Setup](development/setup.md), [Deployment Guides](end-user/deployment/README.md). |
 
 ## Deployment Guides

@@ -94,6 +94,7 @@ Database columns using encryption:
 | `ca_certificates` | `key_pem` | CA private key |
 | `pending_oidc_flows` | `pkce_verifier` | PKCE code verifier for in-flight OIDC authorization |
 | `ssh_hosts` | `private_key` | SSH private key (agent-ssh local DB) |
+| `notification_channels` | `config` | Channel config JSON (bot tokens, webhook secrets, HMAC keys) |
 
 Ciphertext format: `ENC:v1:<hex(nonce || ciphertext || tag)>`. The `v1` marker enables future algorithm changes.
 Legacy plaintext detection allows old values to remain readable until rewritten.

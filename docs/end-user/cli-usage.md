@@ -539,6 +539,74 @@ it cannot be retrieved later.
 See also: [Enrollment Tokens API](../api/enrollment-tokens.md),
 [Auth and Authorization](../security/auth-and-authorization.md).
 
+## Notifications
+
+Manage notification channels, rules, and view the delivery log. Notifications alert you when
+events occur (updates available, updates completed/failed, new software discovered, new services
+enrolled, CA rotation).
+
+### Channels
+
+```sh
+# List all notification channels (paginated)
+uptrakit notifications channels list
+uptrakit notifications channels list --page 1 --per-page 10
+
+# Show channel details
+uptrakit notifications channels get <CHANNEL_ID>
+
+# Create a webhook channel
+uptrakit notifications channels create --name "My Webhook" --type webhook \
+  --config '{"url":"https://example.com/hooks/uptrakit","secret":"my-hmac-secret"}'
+
+# Create a Telegram channel
+uptrakit notifications channels create --name "Ops Telegram" --type telegram \
+  --config '{"bot_token":"123456:ABC-DEF","chat_id":"-100123456789","webhook_secret":"random"}'
+
+# Update a channel
+uptrakit notifications channels update <CHANNEL_ID> --name "New Name"
+uptrakit notifications channels update <CHANNEL_ID> --enabled false
+
+# Delete a channel
+uptrakit notifications channels delete <CHANNEL_ID>
+
+# Test a channel (sends a test notification)
+uptrakit notifications channels test <CHANNEL_ID>
+```
+
+### Rules
+
+```sh
+# List all rules (paginated, with optional filters)
+uptrakit notifications rules list
+uptrakit notifications rules list --channel-id <CHANNEL_ID>
+uptrakit notifications rules list --event-type update_available
+
+# Show rule details
+uptrakit notifications rules get <RULE_ID>
+
+# Create a rule
+uptrakit notifications rules create --channel-id <CHANNEL_ID> --event-type update_available
+uptrakit notifications rules create --channel-id <CHANNEL_ID> --event-type update_failed \
+  --host-id <HOST_ID>
+
+# Update a rule
+uptrakit notifications rules update <RULE_ID> --enabled false
+
+# Delete a rule
+uptrakit notifications rules delete <RULE_ID>
+```
+
+### Delivery Log
+
+```sh
+# View delivery history (paginated)
+uptrakit notifications log
+uptrakit notifications log --page 1 --per-page 50
+```
+
+See also: [Notifications Guide](notifications.md), [Notifications API](../api/notifications.md).
+
 ## Raw API Access
 
 For advanced use, the `api` command lets you call any REST endpoint directly.

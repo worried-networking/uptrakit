@@ -127,6 +127,7 @@ Enums currently annotated with `#[non_exhaustive]`:
 - `UpdateStatus`
 - `RegistrationMode`
 - `SystemdAction`, `DockerComposeAction`, `PredefinedHook`
+- `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus`
 
 **`uptrakit-plugin-infrastructure-core`:**
 

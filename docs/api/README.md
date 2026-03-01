@@ -11,6 +11,7 @@ This folder documents the controller HTTP API, service/controller wire protocol,
 | [Settings Runtime](settings-runtime.md) | Settings storage, reconciliation, snapshots, and runtime reload behavior. |
 | [Auth Flows](auth-flows.md) | Login/device authorization, token lifecycle, and enrollment-related auth flows. |
 | [Services and Operations](services-operations.md) | Agent and MQTT service lifecycle operations, update execution, and state transitions. |
+| [Notifications](notifications.md) | Notification channels, rules, delivery log, and Telegram callback endpoints. |
 
 ## Related Documentation
 
