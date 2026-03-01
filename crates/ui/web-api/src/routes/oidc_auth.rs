@@ -339,8 +339,16 @@ pub async fn oidc_callback(
                 if reg_settings.needs_token_for_oidc(is_first_user) {
                     // Store pending registration and redirect to token input form
                     let mapped_roles = extract_mapped_roles(&provider, &additional_claims);
-                    let code =
-                        generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string());
+                    let code = match generate_secure_token() {
+                        Ok(t) => t,
+                        Err(e) => {
+                            tracing::error!(err = %e, "failed to generate secure registration code");
+                            return error_response(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "internal server error",
+                            );
+                        }
+                    };
 
                     if let Err(e) = state
                         .oidc_registration_store
@@ -492,8 +500,16 @@ pub async fn oidc_callback(
 
             // Store pending link and redirect to frontend
             let mapped_roles = extract_mapped_roles(&provider, &additional_claims);
-            let link_token_value =
-                generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string());
+            let link_token_value = match generate_secure_token() {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::error!(err = %e, "failed to generate secure link token");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "internal server error",
+                    );
+                }
+            };
             let link_token = match store_pending_link(
                 &state,
                 crate::auth::oidc_state::PendingAccountLinkParams {
@@ -541,8 +557,16 @@ pub async fn oidc_callback(
             drop(txn);
 
             let mapped_roles = extract_mapped_roles(&provider, &additional_claims);
-            let link_token_value =
-                generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string());
+            let link_token_value = match generate_secure_token() {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::error!(err = %e, "failed to generate secure link token");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "internal server error",
+                    );
+                }
+            };
             let link_token = match store_pending_link(
                 &state,
                 crate::auth::oidc_state::PendingAccountLinkParams {
@@ -1154,7 +1178,13 @@ async fn create_oidc_exchange_and_redirect(
     provider_id: uuid::Uuid,
 ) -> Response {
     // Generate exchange code
-    let exchange_code = generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string());
+    let exchange_code = match generate_secure_token() {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(err = %e, "failed to generate secure exchange code");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error");
+        }
+    };
 
     if let Err(e) = state
         .oidc_token_exchange_store
