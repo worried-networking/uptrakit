@@ -107,6 +107,10 @@ permission_extractor! {
     CanViewHosts => Permission::ViewHosts,
     /// Extractor that requires [`Permission::ManageHosts`].
     CanManageHosts => Permission::ManageHosts,
+    /// Extractor that requires [`Permission::ViewNotifications`].
+    CanViewNotifications => Permission::ViewNotifications,
+    /// Extractor that requires [`Permission::ManageNotifications`].
+    CanManageNotifications => Permission::ManageNotifications,
 }
 
 // ---------------------------------------------------------------------------

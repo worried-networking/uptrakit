@@ -17,6 +17,8 @@ pub enum Permission {
     ManageSoftware,
     ViewHosts,
     ManageHosts,
+    ViewNotifications,
+    ManageNotifications,
 }
 
 impl Permission {
@@ -31,6 +33,8 @@ impl Permission {
             Permission::ManageSoftware => "manage_software",
             Permission::ViewHosts => "view_hosts",
             Permission::ManageHosts => "manage_hosts",
+            Permission::ViewNotifications => "view_notifications",
+            Permission::ManageNotifications => "manage_notifications",
         }
     }
 }
@@ -54,6 +58,8 @@ impl FromStr for Permission {
             "manage_software" => Ok(Self::ManageSoftware),
             "view_hosts" => Ok(Self::ViewHosts),
             "manage_hosts" => Ok(Self::ManageHosts),
+            "view_notifications" => Ok(Self::ViewNotifications),
+            "manage_notifications" => Ok(Self::ManageNotifications),
             _ => Err(ParsePermissionError),
         }
     }
