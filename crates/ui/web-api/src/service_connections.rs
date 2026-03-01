@@ -248,6 +248,7 @@ impl ServiceConnectionRegistry {
         let msg = ControllerMessage::ServerRestarting(payload);
         let scatter_ms = scatter_duration.as_millis() as u64;
 
+        let mut futures = Vec::with_capacity(count);
         for service_id in service_ids {
             // Random delay within scatter window
             let delay_ms = if scatter_ms > 0 {
@@ -260,7 +261,7 @@ impl ServiceConnectionRegistry {
             let msg_clone = msg.clone();
             let inner = Arc::clone(&self.inner);
 
-            tokio::spawn(async move {
+            futures.push(async move {
                 tokio::time::sleep(delay).await;
                 let guard = inner.read().await;
                 if let Some(conn) = guard.connections.get(&service_id) {
@@ -268,6 +269,7 @@ impl ServiceConnectionRegistry {
                 }
             });
         }
+        futures_util::future::join_all(futures).await;
     }
 
     // ---------------------------------------------------------------
