@@ -1,7 +1,4 @@
-use std::path::Path;
-
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
-use rand::Rng;
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -10,8 +7,6 @@ use super::token::generate_uuid;
 use super::{AuthError, Result};
 
 pub const ACCESS_TOKEN_EXPIRY_SECS: i64 = 900; // 15 minutes
-const KEY_FILE_NAME: &str = "jwt_signing.key";
-const KEY_LENGTH: usize = 64;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AccessTokenClaims {
@@ -41,37 +36,7 @@ pub struct JwtManager {
 }
 
 impl JwtManager {
-    /// Load or generate a JWT signing key from the data directory.
-    ///
-    /// Creates `{data_dir}/jwt_signing.key` with 64 random bytes if it doesn't exist.
-    /// Sets file permissions to 0o600.
-    pub fn load_or_generate(data_dir: &Path) -> Result<Self> {
-        let key_path = data_dir.join(KEY_FILE_NAME);
-
-        let secret = if key_path.exists() {
-            std::fs::read(&key_path).context_to::<AuthError>()?
-        } else {
-            let mut rng = rand::rng();
-            let mut bytes = vec![0u8; KEY_LENGTH];
-            rng.fill(&mut bytes[..]);
-
-            std::fs::write(&key_path, &bytes).context_to::<AuthError>()?;
-
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
-                    .context_to::<AuthError>()?;
-            }
-
-            tracing::info!("generated new JWT signing key at {}", key_path.display());
-            bytes
-        };
-
-        Ok(Self::from_secret(&secret))
-    }
-
-    /// Create a JwtManager from a raw secret (for tests).
+    /// Create a `JwtManager` from a raw secret.
     pub fn from_secret(secret: &[u8]) -> Self {
         Self {
             encoding_key: EncodingKey::from_secret(secret),
@@ -247,22 +212,20 @@ mod tests {
         );
     }
 
+    /// Two `JwtManager` instances built from the same secret must accept each
+    /// other's tokens — `from_secret` is deterministic (no internal state).
     #[test]
-    fn test_load_or_generate_creates_key() {
-        let dir = std::env::temp_dir().join(format!("jwt_test_{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn test_from_secret_is_deterministic() {
+        let secret = b"deterministic-secret-for-jwt-testing-only";
+        let manager1 = JwtManager::from_secret(secret);
+        let manager2 = JwtManager::from_secret(secret);
 
-        let manager = JwtManager::load_or_generate(&dir).unwrap();
         let user_id = uuid::Uuid::now_v7();
-        let token = manager
+        let token = manager1
             .create_access_token(user_id, &[], "password", None)
             .unwrap();
 
-        // Load again and verify token still works
-        let manager2 = JwtManager::load_or_generate(&dir).unwrap();
         let claims = manager2.decode_access_token(&token).unwrap();
         assert_eq!(claims.sub, user_id.to_string());
-
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
