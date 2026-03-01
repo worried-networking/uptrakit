@@ -7,6 +7,8 @@ use ipnet::IpNet;
 use sea_orm::DatabaseConnection;
 use uuid::Uuid;
 
+use uptrakit_web_api_types::MaskedUrl;
+
 use crate::SettingKey;
 use crate::auth;
 use crate::auth::authentication::AuthenticationSettings;
@@ -111,6 +113,9 @@ pub struct SettingsSnapshot {
     pub network: NetworkSettings,
     pub mqtt_max_clients_per_tenant: u16,
     pub smtp: SmtpSettingsSnapshot,
+    /// NATS server URL (raw, decrypted). `None` when not configured.
+    /// Stored as `Option<MaskedUrl>` so `Debug` automatically masks any password.
+    pub nats_url: Option<MaskedUrl>,
 }
 
 #[derive(Clone)]
@@ -153,6 +158,7 @@ impl Settings {
             network: NetworkSettings::default(),
             mqtt_max_clients_per_tenant: DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT,
             smtp: SmtpSettingsSnapshot::default(),
+            nats_url: None,
         };
         let (tx, rx) = tokio::sync::watch::channel(snapshot);
         Self {
@@ -206,6 +212,7 @@ impl Settings {
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
         let smtp = Self::load_smtp_settings(&combined);
+        let nats_url = Self::load_nats_url(&global_raw);
 
         // Read initial version counters
         let (version, global_version) =
@@ -219,6 +226,7 @@ impl Settings {
             network,
             mqtt_max_clients_per_tenant,
             smtp,
+            nats_url,
         };
         let (tx, rx) = tokio::sync::watch::channel(snapshot);
         let settings = Self {
@@ -334,6 +342,9 @@ impl Settings {
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
         let smtp = Self::load_smtp_settings(&combined);
+        // NatsUrl is a global-only key, so it is present in `combined`
+        // (which started as a copy of global_raw extended with per-tenant rows).
+        let nats_url = Self::load_nats_url(&combined);
 
         // Publish complete snapshot atomically
         let _guard = self.inner.write_mutex.lock().await;
@@ -345,6 +356,7 @@ impl Settings {
             network,
             mqtt_max_clients_per_tenant,
             smtp,
+            nats_url,
         });
 
         // Update cached version counters
@@ -599,6 +611,50 @@ impl Settings {
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.smtp = smtp);
+    }
+
+    // --- NATS settings ---
+
+    /// Read the NATS URL snapshot (synchronous).
+    pub fn nats_url(&self) -> Option<MaskedUrl> {
+        self.inner.snapshot_rx.borrow().nats_url.clone()
+    }
+
+    /// Replace the NATS URL (acquires write mutex for atomic publish).
+    pub async fn set_nats_url(&self, url: Option<MaskedUrl>) {
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.nats_url = url);
+    }
+
+    /// Load the NATS URL from a [`RawSettings`] map.
+    ///
+    /// The stored value may be encrypted (`uptrakit_crypto::encrypt_str`) or
+    /// plaintext (legacy / first-startup seed). Both are handled transparently.
+    /// Returns `None` if the key is absent or the stored value is empty.
+    pub fn load_nats_url(raw: &RawSettings) -> Option<MaskedUrl> {
+        let stored = raw
+            .get_setting(SettingKey::NatsUrl)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())?;
+
+        let raw_url = if uptrakit_crypto::is_encrypted(stored) {
+            uptrakit_crypto::decrypt_str(stored)
+                .map_err(|e| {
+                    tracing::warn!("failed to decrypt nats.url: {e}");
+                })
+                .ok()?
+        } else {
+            // Plaintext (legacy seed from CLI flag before encryption was set up)
+            stored.to_string()
+        };
+
+        if raw_url.is_empty() {
+            None
+        } else {
+            Some(MaskedUrl::new(raw_url))
+        }
     }
 
     /// Load SMTP settings from a [`RawSettings`] map.

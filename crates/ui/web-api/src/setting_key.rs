@@ -34,6 +34,7 @@ pub enum SettingKey {
     SmtpFromAddress,
     SmtpFromName,
     SmtpTlsMode,
+    NatsUrl,
 }
 
 impl SettingKey {
@@ -66,6 +67,7 @@ impl SettingKey {
             Self::SmtpFromAddress => "smtp.from_address",
             Self::SmtpFromName => "smtp.from_name",
             Self::SmtpTlsMode => "smtp.tls_mode",
+            Self::NatsUrl => "nats.url",
         }
     }
 
@@ -100,6 +102,7 @@ impl SettingKey {
             "smtp.from_address" => Some(Self::SmtpFromAddress),
             "smtp.from_name" => Some(Self::SmtpFromName),
             "smtp.tls_mode" => Some(Self::SmtpTlsMode),
+            "nats.url" => Some(Self::NatsUrl),
             _ => None,
         }
     }
@@ -121,6 +124,7 @@ impl SettingKey {
                 | Self::MqttMaxClientsPerTenant
                 | Self::JwtSigningKey
                 | Self::MasterKeyVerification
+                | Self::NatsUrl
         )
     }
 }
