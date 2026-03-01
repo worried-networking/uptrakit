@@ -651,6 +651,13 @@ The `controller_events` DB table has been dropped. Cross-controller event routin
 (feature-gated behind the `nats` Cargo feature). When NATS is not configured, the controller operates in
 single-instance mode with local-only delivery.
 
+The NATS server URL is persisted in the global `settings` table under key `nats.url` (AES-256-GCM encrypted).
+It is reconciled with the `--nats-url` CLI flag at startup using the standard 5-case priority. Changing the
+URL via `PUT /api/v1/settings/nats` or `uptrakit settings nats set` requires a controller restart to take
+effect. The `SettingsSnapshot.nats_url` field is a `MaskedUrl` that redacts the password in all
+serialized/logged output. See `crates/ui/web-api/src/setting_key.rs` (`NatsUrl` variant) and
+`docs/development/nats-integration.md` for full details.
+
 #### REST API
 
 `ServiceResponse` contains `capabilities: Vec<String>` and `service_label: String` instead of the former

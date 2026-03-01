@@ -4,6 +4,46 @@ This document covers the NATS JetStream integration from a development perspecti
 guidance, see [NATS Deployment](../end-user/deployment/nats.md). For the high-level design, see
 [Cross-Controller Communication](cross-controller-comm.md).
 
+## NATS URL — DB Persistence and Configuration
+
+The NATS server URL is stored in the global `settings` table under the key `nats.url` (encrypted with
+AES-256-GCM). This allows the URL to be configured without modifying startup scripts and persists across
+restarts.
+
+### Configuration priority at startup
+
+The `--nats-url` CLI flag is reconciled with the database value using the standard 5-case priority (see
+[Settings Runtime](../api/settings-runtime.md#nats-settings-feature-nats)):
+
+1. DB value + CLI provided (different) + `--force-settings-override`: CLI wins, DB updated.
+2. DB value + CLI provided (different): DB wins, warning logged.
+3. DB value + CLI same or absent: DB value used.
+4. No DB value + CLI provided: CLI value encrypted and saved to DB.
+5. No DB value + CLI absent: NATS transport disabled.
+
+After the first run with `--nats-url`, the flag is no longer required. The stored URL is re-encrypted using
+the controller's master key on any write.
+
+### Runtime API
+
+The NATS URL can be updated at runtime via `PUT /api/v1/settings/nats` or `uptrakit settings nats set`.
+**Hot-reload is intentionally not supported** — changing the URL updates the DB and in-memory snapshot,
+but does not reconnect the live NATS transport. The controller must be restarted for the change to take
+effect.
+
+The `SettingsSnapshot.nats_url` field holds a `MaskedUrl` whose `Display`/`Debug`/`Serialize` automatically
+replace the password component with `***`, ensuring credentials are never leaked into logs or API responses.
+
+### `MaskedUrl` type
+
+`MaskedUrl` (`crates/shared/web-api-types/src/masked_url.rs`) is a newtype around a URL string:
+
+- `MaskedUrl::new(raw)` — wraps the raw URL (may contain password).
+- `MaskedUrl::as_raw_str()` — returns the raw URL for internal use (connecting, encrypting).
+- `MaskedUrl::masked()` — returns the URL with the password replaced by `***`.
+- `Display`, `Debug`, `Serialize` all call `masked()` — safe for logs and API responses.
+- `Deserialize` accepts a plain string and wraps it.
+
 ## Connection URL and TLS
 
 `NatsConnection::connect(url)` accepts any NATS connection URL. The URL scheme determines whether the

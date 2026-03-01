@@ -7172,6 +7172,7 @@ dependencies = [
  "uptrakit-shared-types",
  "utoipa",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

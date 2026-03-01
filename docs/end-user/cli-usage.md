@@ -389,7 +389,7 @@ See also: [Scheduler](../architecture/scheduler.md), [HTTP Web API](../api/http-
 ## Settings
 
 View and manage server settings: registration, authentication, certificates, network, MQTT, OIDC providers,
-and system alerts.
+NATS URL, and system alerts.
 
 ### Combined overview
 
@@ -494,6 +494,25 @@ uptrakit settings oidc delete <ID>
 uptrakit settings oidc activate <ID>
 uptrakit settings oidc deactivate <ID>
 ```
+
+### NATS URL (feature: `nats`)
+
+Configure the NATS server URL used for cross-controller messaging. Changes require a controller restart.
+
+```sh
+# Show the current NATS URL (password is masked in output)
+uptrakit settings nats get
+
+# Set the NATS URL
+uptrakit settings nats set --url nats://host:4222
+uptrakit settings nats set --url nats://user:password@host:4222
+
+# Clear the stored NATS URL (disables NATS transport on next restart)
+uptrakit settings nats clear
+```
+
+> **Note:** The NATS URL is encrypted at rest. After a `set` or `clear`, the CLI prints a reminder that the
+> change takes effect after the controller is restarted.
 
 ### System alerts
 

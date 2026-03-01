@@ -20,6 +20,7 @@ Settings are stored in the database and reconciled with CLI flags during startup
 | Authentication | `authentication.*` | `/settings/authentication` | Runtime-changeable. |
 | Service Certificates | `service_certificates.*` | `/settings/service-certificates` | Runtime-changeable. |
 | SMTP | `smtp.*` | `/settings/smtp` | Runtime-changeable; read by dispatcher on each delivery. |
+| NATS | `nats.url` | `/settings/nats` | Stored in DB; **requires restart** to change the live connection. |
 
 Not DB-managed: `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--oidc-*` bootstrap flags.
 
@@ -378,6 +379,81 @@ uptrakit settings smtp show
 uptrakit settings smtp set --host smtp.example.com --port 587 --from-address noreply@example.com --tls-mode starttls
 uptrakit settings smtp set --password mysecret
 uptrakit settings smtp set --clear-password
+```
+
+### NATS settings (feature: `nats`)
+
+The `nats.url` global setting stores the NATS server URL used by the controller for cross-instance messaging.
+This setting is only applicable when the controller is compiled with the `nats` feature.
+
+**Settings stored in the `settings` key-value table (global):**
+
+| DB key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `nats.url` | string? | `null` | NATS server URL (encrypted with AES-256-GCM). |
+
+The stored URL is encrypted at rest using `uptrakit_crypto::encrypt_str` and decrypted at startup during reconciliation.
+
+**Startup reconciliation with `--nats-url` CLI flag:**
+
+The `nats.url` DB setting is reconciled with the `--nats-url` CLI flag using the standard 5-case priority:
+
+1. DB value + CLI provided (different) + `--force-settings-override`: CLI wins, DB updated and re-encrypted.
+1. DB value + CLI provided (different) + no force: DB wins, warning logged. CLI flag is ignored.
+1. DB value + CLI absent or same: DB value used as-is.
+1. No DB value + CLI provided: CLI value encrypted and saved to DB.
+1. No DB value + CLI absent: no URL stored; NATS transport is disabled.
+
+After reconciliation the `ReconciledSettings.nats_url` field holds the raw (decrypted) URL, which is used to
+initialise the NATS transport and to populate the `SettingsSnapshot.nats_url` field as a `MaskedUrl` (password
+redacted in all serialized/logged output).
+
+**Hot-reload:** Changing the NATS URL via the API updates the DB and the in-memory `SettingsSnapshot`, but does
+**not** replace the live NATS connection. The change takes effect on the next controller restart.
+
+**`GET /api/v1/settings/nats` — Response (`NatsSettingsResponse`):**
+
+```json
+{
+  "url": "nats://user:***@nats.internal:4222",
+  "has_url": true
+}
+```
+
+`url` shows the password component replaced with `***` (via `MaskedUrl`). `has_url: true` indicates a URL is
+configured. `url` is omitted from the response when `has_url: false`.
+
+**`PUT /api/v1/settings/nats` — Request (`UpdateNatsSettingsRequest`):**
+
+```json
+{ "url": "nats://user:password@nats.internal:4222" }
+```
+
+- Omit `url` (or omit the field entirely) to leave the stored value unchanged.
+- Set `url` to `null` to clear the stored URL.
+- The URL is validated: must start with `nats://` or `nats-tls://`, must not be empty, max 1024 chars.
+
+**Validation rules:**
+
+- `url`: must start with `nats://` or `nats-tls://` if non-null
+- Maximum length: 1024 characters
+
+**Security:** The URL may contain embedded credentials (`nats://user:password@host`). It is stored encrypted
+at rest with AES-256-GCM and never returned in plaintext via the API — only the masked form is returned.
+See [Security — Credential Storage](../security/secure-development.md).
+
+**CLI:**
+
+```bash
+uptrakit settings nats get
+uptrakit settings nats set --url nats://user:password@host:4222
+uptrakit settings nats clear
+```
+
+After `set` or `clear`, the CLI prints:
+
+```text
+NATS URL updated. The change will take effect after the controller is restarted.
 ```
 
 ## MQTT Service (Standalone Binary)

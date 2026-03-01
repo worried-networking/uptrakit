@@ -40,6 +40,11 @@ Access tokens are short-lived, refresh tokens rotate on each use, and logout add
 - GET/PUT `/api/v1/settings/registration`
 - GET/PUT `/api/v1/settings/authentication`
 - GET/PUT `/api/v1/settings/service-certificates`
+- GET/PUT `/api/v1/settings/smtp` — global SMTP settings (requires `CanManageGlobalSettings`)
+- GET/PUT `/api/v1/settings/nats` *(feature: `nats`)* — NATS server URL (requires `CanManageGlobalSettings`).
+  The URL is stored encrypted at rest. The response returns the masked URL with password replaced by `***`.
+  Changes take effect after a controller restart (hot-reload not supported). See
+  [Settings Runtime — NATS settings](settings-runtime.md#nats-settings-feature-nats) for full details.
 
 Settings persist in the `settings` table and are reconciled with CLI arguments following priority rules defined in
 [docs/api/settings-runtime.md](settings-runtime.md). Runtime changes propagate immediately via a `tokio::sync::watch` channel (`SettingsSnapshot`).
