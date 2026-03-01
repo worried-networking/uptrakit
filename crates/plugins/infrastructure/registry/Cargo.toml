@@ -17,6 +17,8 @@ uptrakit-shared-types = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-plugin-releases-github = { path = "../../releases/github" }
+uptrakit-plugin-releases-gitlab = { path = "../../releases/gitlab" }
+uptrakit-plugin-releases-forgejo = { path = "../../releases/forgejo" }
 uptrakit-plugin-releases-docker = { path = "../../releases/docker" }
 uptrakit-plugin-discovery-proxmox-helper-scripts = { path = "../../discovery/proxmox-helper-scripts" }
 uptrakit-plugin-package-manager-homebrew = { path = "../../package-managers/homebrew" }

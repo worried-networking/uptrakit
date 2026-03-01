@@ -11,8 +11,10 @@ use uptrakit_plugin_infrastructure_core::{Plugin, PluginType, SecretMasking, Sud
 use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
 use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
 use uptrakit_plugin_package_manager_npm::{NpmConfig, NpmPlugin};
+use uptrakit_plugin_releases_forgejo::{ForgejoConfig, ForgejoPlugin};
 use uptrakit_plugin_releases_docker::{DockerConfig, DockerPlugin};
 use uptrakit_plugin_releases_github::{GitHubConfig, GitHubPlugin};
+use uptrakit_plugin_releases_gitlab::{GitLabConfig, GitLabPlugin};
 
 use crate::error::{PluginRegistryError, Result};
 
@@ -361,6 +363,8 @@ pub struct PluginRegistry;
 
 register_plugins! {
     ReleasesGithub                => { config: GitHubConfig,                   plugin: GitHubPlugin },
+    ReleasesGitlab                => { config: GitLabConfig,                   plugin: GitLabPlugin },
+    ReleasesForgejo              => { config: ForgejoConfig,                 plugin: ForgejoPlugin },
     ReleasesDocker                => { config: DockerConfig,                   plugin: DockerPlugin },
     DiscoveryProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig,     plugin: ProxmoxHelperScriptsPlugin },
     PackageManagerHomebrew        => { config: HomebrewConfig,                 plugin: HomebrewPlugin },
@@ -381,6 +385,12 @@ impl PluginRegistry {
         match plugin_type {
             PluginType::ReleasesGithub => {
                 uptrakit_plugin_releases_github::validate_identifier(value)
+            }
+            PluginType::ReleasesGitlab => {
+                uptrakit_plugin_releases_gitlab::validate_identifier(value)
+            }
+            PluginType::ReleasesForgejo => {
+                uptrakit_plugin_releases_forgejo::validate_identifier(value)
             }
             PluginType::ReleasesDocker => {
                 uptrakit_plugin_releases_docker::validate_identifier(value)
@@ -470,6 +480,14 @@ mod tests {
         assert_eq!(
             "releases_github".parse::<PluginType>().ok(),
             Some(PluginType::ReleasesGithub)
+        );
+        assert_eq!(
+            "releases_gitlab".parse::<PluginType>().ok(),
+            Some(PluginType::ReleasesGitlab)
+        );
+        assert_eq!(
+            "releases_forgejo".parse::<PluginType>().ok(),
+            Some(PluginType::ReleasesForgejo)
         );
         assert_eq!(
             "releases_docker".parse::<PluginType>().ok(),
@@ -1040,6 +1058,100 @@ mod tests {
     fn validate_package_identifier_github_empty_repo_fails() {
         assert!(
             PluginRegistry::validate_package_identifier(PluginType::ReleasesGithub, "octocat/")
+                .is_err()
+        );
+    }
+
+    // ── validate_package_identifier GitLab tests ──────────────────────────
+
+    #[test]
+    fn validate_package_identifier_gitlab_simple_valid() {
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::ReleasesGitlab,
+                "owner/project"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_gitlab_nested_namespace_valid() {
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::ReleasesGitlab,
+                "group/subgroup/project"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_gitlab_no_slash_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::ReleasesGitlab, "project")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_gitlab_traversal_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::ReleasesGitlab,
+                "../evil/project"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_gitlab_empty_component_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::ReleasesGitlab,
+                "owner//project"
+            )
+            .is_err()
+        );
+    }
+
+    // ── validate_package_identifier Forgejo tests ─────────────────────────
+
+    #[test]
+    fn validate_package_identifier_forgejo_valid() {
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::ReleasesForgejo,
+                "owner/repo"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_forgejo_no_slash_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::ReleasesForgejo, "owner")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_forgejo_traversal_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(
+                PluginType::ReleasesForgejo,
+                "owner/../evil"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_forgejo_empty_repo_fails() {
+        assert!(
+            PluginRegistry::validate_package_identifier(PluginType::ReleasesForgejo, "owner/")
                 .is_err()
         );
     }
