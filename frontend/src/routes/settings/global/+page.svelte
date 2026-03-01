@@ -6,6 +6,8 @@
 		renewServerCertificate,
 		getNetworkSettings,
 		updateNetworkSettings,
+		getNatsSettings,
+		updateNatsSettings,
 		rotateCA
 	} from '$lib/api';
 	import { Permission, type SystemAlert } from '$lib/types';
@@ -26,6 +28,13 @@
 	let showRotateCaConfirm: boolean = $state(false);
 	let rotatingCa: boolean = $state(false);
 
+	// --- NATS Settings ---
+	let natsAvailable: boolean = $state(false);
+	let natsCurrentUrl: string | null = $state(null);
+	let natsUrlInput: string = $state('');
+	let natsSaving: boolean = $state(false);
+	let natsClearing: boolean = $state(false);
+
 	// --- Loading ---
 	let loading: boolean = $state(true);
 
@@ -45,7 +54,7 @@
 
 	async function loadGlobalSettings() {
 		loading = true;
-		const results = await Promise.allSettled([getNetworkSettings(), getSystemAlerts()]);
+		const results = await Promise.allSettled([getNetworkSettings(), getSystemAlerts(), getNatsSettings()]);
 
 		if (results[0].status === 'fulfilled') {
 			const net = results[0].value;
@@ -59,8 +68,46 @@
 				(a) => a.id === 'server_cert_old_ca' || a.id === 'server_cert_expiring'
 			);
 		}
+		if (results[2].status === 'fulfilled') {
+			natsAvailable = true;
+			natsCurrentUrl = results[2].value.url ?? null;
+		} else {
+			// 404 means the NATS feature is not compiled in — hide the section gracefully
+			natsAvailable = false;
+		}
 
 		loading = false;
+	}
+
+	// --- NATS Settings ---
+	async function saveNatsUrl() {
+		clearError();
+		natsSaving = true;
+		try {
+			const res = await updateNatsSettings({ url: natsUrlInput.trim() || null });
+			natsCurrentUrl = res.url ?? null;
+			natsUrlInput = '';
+			showSuccess('NATS URL updated. Changes take effect after the controller is restarted.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to save NATS URL');
+		} finally {
+			natsSaving = false;
+		}
+	}
+
+	async function clearNatsUrl() {
+		clearError();
+		natsClearing = true;
+		try {
+			const res = await updateNatsSettings({ url: null });
+			natsCurrentUrl = res.url ?? null;
+			natsUrlInput = '';
+			showSuccess('NATS URL cleared. Changes take effect after the controller is restarted.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to clear NATS URL');
+		} finally {
+			natsClearing = false;
+		}
 	}
 
 	// --- Network Settings ---
@@ -129,7 +176,50 @@
 			<p>Loading global settings...</p>
 		</div>
 	{:else}
-		<!-- Section 1: Network Settings -->
+		<!-- Section 1: NATS Configuration -->
+		{#if natsAvailable}
+			<div class="card mb-6 p-6">
+				<h2 class="h3 mb-4">NATS Configuration</h2>
+				<p class="mb-4 text-surface-600 dark:text-surface-400">
+					Configure the NATS server URL used for inter-service messaging. The URL may include embedded credentials (e.g. <code
+						>nats://user:password@host:4222</code
+					>).
+				</p>
+
+				<aside class="mb-4 rounded-lg bg-surface-100-900 p-3 text-sm">
+					<strong>Requires restart:</strong> Changes to the NATS URL take effect after the controller is restarted.
+				</aside>
+
+				<div class="mb-4">
+					<span class="label-text text-sm font-medium">Current URL</span>
+					<p class="mt-1 font-mono text-sm text-surface-700 dark:text-surface-300">
+						{natsCurrentUrl ?? '— not configured —'}
+					</p>
+				</div>
+
+				<label class="label mb-4">
+					<span>New NATS URL</span>
+					<input class="input font-mono" type="text" placeholder="nats://host:4222" bind:value={natsUrlInput} />
+				</label>
+
+				<div class="flex gap-2">
+					<button
+						class="btn preset-filled-primary-500"
+						onclick={saveNatsUrl}
+						disabled={natsSaving || !natsUrlInput.trim()}
+					>
+						{natsSaving ? 'Saving…' : 'Save'}
+					</button>
+					{#if natsCurrentUrl}
+						<button class="btn preset-tonal-error" onclick={clearNatsUrl} disabled={natsClearing}>
+							{natsClearing ? 'Clearing…' : 'Clear'}
+						</button>
+					{/if}
+				</div>
+			</div>
+		{/if}
+
+		<!-- Section 3: Network Settings -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Network Settings</h2>
 			<p class="mb-4 text-surface-600 dark:text-surface-400">
@@ -176,7 +266,7 @@
 			<button class="btn preset-filled-primary-500" onclick={saveNetworkSettings}> Save </button>
 		</div>
 
-		<!-- Section 2: Controller TLS Certificate -->
+		<!-- Section 4: Controller TLS Certificate -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Controller TLS Certificate</h2>
 			<p class="mb-4 text-surface-600 dark:text-surface-400">
@@ -201,7 +291,7 @@
 			</button>
 		</div>
 
-		<!-- Section 3: CA Certificate -->
+		<!-- Section 5: CA Certificate -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">CA Certificate</h2>
 			<p class="mb-4 text-surface-600 dark:text-surface-400">

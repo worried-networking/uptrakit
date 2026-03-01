@@ -582,3 +582,14 @@ export interface HostDiscoveryAllowlistEntry {
 export interface CreateDiscoveryAllowlistEntryRequest {
 	plugin_type: string;
 }
+
+// NATS settings
+
+export interface NatsSettingsResponse {
+	url?: string;
+	has_url: boolean;
+}
+
+export interface UpdateNatsSettingsRequest {
+	url?: string | null;
+}

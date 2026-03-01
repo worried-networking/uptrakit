@@ -62,6 +62,8 @@ import type {
 	TenantDiscoveryAllowlistEntry,
 	HostDiscoveryAllowlistEntry,
 	CreateDiscoveryAllowlistEntryRequest,
+	NatsSettingsResponse,
+	UpdateNatsSettingsRequest,
 	PluginTypeInfo
 } from './types';
 
@@ -513,6 +515,16 @@ export function getSystemAlerts(): Promise<SystemAlertsResponse> {
 
 export function renewServerCertificate(): Promise<RenewServerCertResponse> {
 	return request('/settings/renew-server-certificate', { method: 'POST' });
+}
+
+// --- NATS Settings ---
+
+export function getNatsSettings(): Promise<NatsSettingsResponse> {
+	return request('/settings/nats');
+}
+
+export function updateNatsSettings(data: UpdateNatsSettingsRequest): Promise<NatsSettingsResponse> {
+	return request('/settings/nats', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- Plugin Types & Configs ---
