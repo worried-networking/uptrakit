@@ -8,7 +8,10 @@
 use std::sync::Arc;
 
 use tokio::sync::Notify;
-use uptrakit_internal_wire::{ControllerMessage, MqttSoftwareStatesPayload, RequestCaRotationPayload};
+use uptrakit_internal_wire::{
+    ControllerMessage, MqttSoftwareStatesPayload, RequestCaRotationPayload,
+    RequestCrlRenewalPayload,
+};
 use uptrakit_scheduler_engine::{SchedulerNotifier, TaskExecutor};
 use uptrakit_shared_db::entity::scheduled_task;
 use uuid::Uuid;
@@ -71,16 +74,19 @@ impl TaskExecutor for CaRotationCheckExecutor {
 pub struct ControllerSchedulerNotifier {
     notification_service: uptrakit_web_api::notification_service::NotificationService,
     ca_rotation_trigger: Arc<Notify>,
+    revocation_notify: Arc<Notify>,
 }
 
 impl ControllerSchedulerNotifier {
     pub fn new(
         notification_service: uptrakit_web_api::notification_service::NotificationService,
         ca_rotation_trigger: Arc<Notify>,
+        revocation_notify: Arc<Notify>,
     ) -> Self {
         Self {
             notification_service,
             ca_rotation_trigger,
+            revocation_notify,
         }
     }
 }
@@ -117,6 +123,16 @@ impl SchedulerNotifier for ControllerSchedulerNotifier {
     async fn push_software_states_for_tenant(&self, payload: MqttSoftwareStatesPayload) {
         self.notification_service
             .deliver_software_states(payload)
+            .await;
+    }
+
+    async fn signal_crl_renewal(&self) {
+        tracing::info!("embedded scheduler triggering CRL rebuild");
+        self.revocation_notify.notify_one();
+        self.notification_service
+            .publish_controller_event(ControllerMessage::RequestCrlRenewal(
+                RequestCrlRenewalPayload {},
+            ))
             .await;
     }
 }

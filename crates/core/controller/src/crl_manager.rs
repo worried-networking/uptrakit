@@ -1,14 +1,16 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rcgen::{
     CertificateRevocationListParams, Issuer, KeyIdMethod, KeyPair, RevokedCertParams, SerialNumber,
 };
 use rustls::pki_types::CertificateRevocationListDer;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+};
 use time::OffsetDateTime;
 use tokio::sync::{Notify, RwLock};
-use uptrakit_shared_db::entity::{prelude::*, service_certificate};
+use uptrakit_shared_db::entity::{crl_cache, prelude::*, service_certificate};
 
 use crate::pki::{self, CaSnapshot};
 
@@ -20,8 +22,6 @@ pub struct CrlManagerConfig {
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     pub revocation_notify: Arc<Notify>,
     pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
-    pub default_tenant_id: uuid::Uuid,
-    pub initial_revocation_version: i64,
 }
 
 /// Mutable CA material that can be updated at runtime when the CA rotates.
@@ -35,6 +35,13 @@ struct CaIssuers {
     bundle_pem: String,
 }
 
+/// A CRL loaded from the database cache.
+pub struct LoadedCrl {
+    pub pem: String,
+    pub der: Vec<u8>,
+    pub crl_number: i64,
+}
+
 /// CRL lifecycle manager.
 ///
 /// Builds CRLs from the database and hot-reloads the TLS configuration
@@ -42,17 +49,110 @@ struct CaIssuers {
 pub struct CrlManager {
     config: CrlManagerConfig,
     crl_number: AtomicU64,
-    cached_revocation_version: AtomicI64,
     issuers: RwLock<CaIssuers>,
     server_cert: RwLock<(String, String)>,
 }
 
+/// Try to load a CRL for the given CA fingerprint from the database cache.
+///
+/// Returns `None` if:
+/// - No cache entry exists for the fingerprint, or
+/// - The cached CRL's `next_update` is within 1 hour of expiry (to ensure
+///   we always have a fresh CRL available at startup).
+pub async fn try_load_crl_from_db(
+    db: &DatabaseConnection,
+    ca_fingerprint: &str,
+) -> pki::Result<Option<LoadedCrl>> {
+    let cached = CrlCache::find_by_id(ca_fingerprint)
+        .one(db)
+        .await
+        .context_to::<pki::PkiError>()?;
+
+    let Some(entry) = cached else {
+        return Ok(None);
+    };
+
+    // Consider the cached CRL stale if it expires within 1 hour.
+    let fresh_buffer = time::Duration::hours(1);
+    if entry.next_update <= OffsetDateTime::now_utc() + fresh_buffer {
+        tracing::debug!(
+            ca_fingerprint,
+            next_update = %entry.next_update,
+            "cached CRL is near expiry, will regenerate"
+        );
+        return Ok(None);
+    }
+
+    // Re-derive DER from PEM so we don't store duplicate bytes.
+    let der = {
+        let (_, pem_block) = x509_parser::pem::parse_x509_pem(entry.crl_pem.as_bytes())
+            .map_err(|e| {
+                report!(pki::PkiError::CaValidation(format!(
+                    "failed to parse cached CRL PEM for CA {ca_fingerprint}: {e}"
+                )))
+            })?;
+        pem_block.contents
+    };
+
+    Ok(Some(LoadedCrl {
+        pem: entry.crl_pem,
+        der,
+        crl_number: entry.crl_number,
+    }))
+}
+
+/// Persist (upsert) a newly signed CRL into the database cache.
+pub async fn persist_crl_to_db(
+    db: &DatabaseConnection,
+    ca_fingerprint: &str,
+    crl_pem: &str,
+    crl_number: i64,
+    this_update: OffsetDateTime,
+    next_update: OffsetDateTime,
+) -> pki::Result<()> {
+    let now = OffsetDateTime::now_utc();
+
+    // Try insert first; if it fails (e.g. PK conflict), fall back to update.
+    let insert_result = crl_cache::ActiveModel {
+        ca_fingerprint: Set(ca_fingerprint.to_string()),
+        crl_pem: Set(crl_pem.to_string()),
+        crl_number: Set(crl_number),
+        this_update: Set(this_update),
+        next_update: Set(next_update),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await;
+
+    if insert_result.is_err() {
+        // Row already exists (PK conflict); update all non-PK fields.
+        crl_cache::ActiveModel {
+            ca_fingerprint: Set(ca_fingerprint.to_string()),
+            crl_pem: Set(crl_pem.to_string()),
+            crl_number: Set(crl_number),
+            this_update: Set(this_update),
+            next_update: Set(next_update),
+            updated_at: Set(now),
+        }
+        .update(db)
+        .await
+        .context_to::<pki::PkiError>()?;
+    }
+
+    Ok(())
+}
+
 /// Build DER-encoded CRLs and combined PEM from the database (standalone, for initial startup).
+///
+/// Tries to load each CA's CRL from the `crl_cache` table first. If the
+/// cached entry is missing or near expiry, a fresh CRL is signed and
+/// persisted. Returns the CRL number for the first generated CRL (all others
+/// use the same starting number within a startup cycle).
 pub async fn build_initial_crls(
     db: &DatabaseConnection,
     snapshot: &CaSnapshot,
     key_store: &pki::CaKeyStore,
-) -> pki::Result<(Vec<CertificateRevocationListDer<'static>>, String)> {
+) -> pki::Result<(Vec<CertificateRevocationListDer<'static>>, String, u64)> {
     if snapshot.trusted_cas.is_empty() {
         bail!(pki::PkiError::CaValidation(
             "no trusted CA material available".into()
@@ -61,8 +161,28 @@ pub async fn build_initial_crls(
 
     let mut crls = Vec::new();
     let mut combined_pem = String::new();
+    // Starting CRL number: highest cached number + 1, or 1 if nothing cached.
+    let mut starting_crl_number: u64 = 1;
 
     for ca in &snapshot.trusted_cas {
+        // Try cache first
+        if let Some(loaded) = try_load_crl_from_db(db, &ca.fingerprint).await? {
+            tracing::debug!(
+                ca_fingerprint = ca.fingerprint,
+                crl_number = loaded.crl_number,
+                "loaded CRL from database cache"
+            );
+            let loaded_next = loaded.crl_number as u64 + 1;
+            if loaded_next > starting_crl_number {
+                starting_crl_number = loaded_next;
+            }
+            let der = CertificateRevocationListDer::from(loaded.der);
+            crls.push(der);
+            combined_pem.push_str(&loaded.pem);
+            continue;
+        }
+
+        // Cache miss: generate fresh CRL
         let ca_key = key_store
             .trusted_ca_keys
             .iter()
@@ -76,12 +196,32 @@ pub async fn build_initial_crls(
         let key = KeyPair::from_pem(&ca_key.key_pem).context_to::<pki::PkiError>()?;
         let issuer = Issuer::from_ca_cert_pem(&ca.cert_pem, key).context_to::<pki::PkiError>()?;
         let revoked = query_revoked_certs_for_ca(db, &ca.fingerprint).await?;
-        let (crl, pem) = sign_crl(&issuer, revoked, 0)?;
+        let crl_num = starting_crl_number;
+        let (crl, pem, this_update, next_update) = sign_crl_with_times(&issuer, revoked, crl_num)?;
+
+        if let Err(e) = persist_crl_to_db(
+            db,
+            &ca.fingerprint,
+            &pem,
+            crl_num as i64,
+            this_update,
+            next_update,
+        )
+        .await
+        {
+            // Non-fatal: we still serve the in-memory CRL.
+            tracing::warn!(
+                ca_fingerprint = ca.fingerprint,
+                error = ?e,
+                "failed to persist initial CRL to database"
+            );
+        }
+
         crls.push(crl);
         combined_pem.push_str(&pem);
     }
 
-    Ok((crls, combined_pem))
+    Ok((crls, combined_pem, starting_crl_number))
 }
 
 impl CrlManager {
@@ -89,6 +229,7 @@ impl CrlManager {
         config: CrlManagerConfig,
         snapshot: &CaSnapshot,
         key_store: &pki::CaKeyStore,
+        starting_crl_number: u64,
     ) -> pki::Result<Self> {
         if snapshot.trusted_cas.is_empty() {
             bail!(pki::PkiError::CaValidation(
@@ -119,12 +260,10 @@ impl CrlManager {
 
         let server_cert_pem = config.server_cert_pem.clone();
         let server_key_pem = config.server_key_pem.clone();
-        let initial_revocation_version = config.initial_revocation_version;
 
         Ok(Self {
             config,
-            crl_number: AtomicU64::new(1),
-            cached_revocation_version: AtomicI64::new(initial_revocation_version),
+            crl_number: AtomicU64::new(starting_crl_number),
             issuers: RwLock::new(CaIssuers {
                 trusted,
                 bundle_pem: snapshot.bundle_pem.clone(),
@@ -182,20 +321,29 @@ impl CrlManager {
     /// Build DER-encoded CRLs and combined PEM from revoked certificates in the database.
     async fn build_crls(
         &self,
-    ) -> pki::Result<(Vec<CertificateRevocationListDer<'static>>, String)> {
+    ) -> pki::Result<(Vec<CertificateRevocationListDer<'static>>, String, Vec<(String, String, i64, OffsetDateTime, OffsetDateTime)>)> {
         let issuers = self.issuers.read().await;
         let crl_number = self.crl_number.fetch_add(1, Ordering::Relaxed);
 
         let mut crls = Vec::new();
         let mut combined_pem = String::new();
+        let mut persist_entries = Vec::new();
         for issuer in &issuers.trusted {
             let revoked = query_revoked_certs_for_ca(&self.config.db, &issuer.fingerprint).await?;
-            let (crl, pem) = sign_crl(&issuer.issuer, revoked, crl_number)?;
+            let (crl, pem, this_update, next_update) =
+                sign_crl_with_times(&issuer.issuer, revoked, crl_number)?;
+            persist_entries.push((
+                issuer.fingerprint.clone(),
+                pem.clone(),
+                crl_number as i64,
+                this_update,
+                next_update,
+            ));
             crls.push(crl);
             combined_pem.push_str(&pem);
         }
 
-        Ok((crls, combined_pem))
+        Ok((crls, combined_pem, persist_entries))
     }
 
     /// Rebuild the CRLs and hot-reload the TLS configuration.
@@ -205,8 +353,11 @@ impl CrlManager {
     /// they are dropped before the CPU-heavy `build_rustls_config_*` call to
     /// avoid blocking writers (CA rotation, server cert renewal) for longer
     /// than necessary.
+    ///
+    /// After hot-reload, the new CRLs are persisted to the `crl_cache` table
+    /// so that restarting controllers can load them without regeneration.
     pub async fn reload_tls_config(&self) -> pki::Result<()> {
-        let (crls, crl_pem) = self.build_crls().await?;
+        let (crls, crl_pem, persist_entries) = self.build_crls().await?;
 
         // Snapshot under each lock in order, then release before crypto work.
         let bundle_pem = {
@@ -232,50 +383,48 @@ impl CrlManager {
         // Update the CRL PEM cache for the HTTP endpoint
         *self.config.crl_pem_cache.write().await = crl_pem;
 
+        // Persist each CA's CRL to the database cache (best-effort).
+        for (ca_fingerprint, pem, crl_number, this_update, next_update) in persist_entries {
+            if let Err(e) = persist_crl_to_db(
+                &self.config.db,
+                &ca_fingerprint,
+                &pem,
+                crl_number,
+                this_update,
+                next_update,
+            )
+            .await
+            {
+                tracing::warn!(
+                    %ca_fingerprint,
+                    error = ?e,
+                    "failed to persist CRL to database after reload"
+                );
+            }
+        }
+
         tracing::info!("TLS configuration reloaded with updated CRL");
         Ok(())
     }
 
-    /// Background task: rebuilds CRL on revocation events or version-gated periodic poll.
+    /// Background task: rebuilds CRL on revocation events or explicit CRL renewal signals.
     ///
-    /// Uses a 60-second poll to check the `revocation_version` counter in the database.
-    /// If the version is unchanged, the CRL rebuild is skipped. This enables cross-instance
-    /// revocation propagation in multi-instance deployments while keeping the local `Notify`
-    /// for instant same-instance rebuilds.
+    /// Listens for `revocation_notify` which is fired by:
+    /// - Same-controller revocations (service deactivate / merge / cert renewal)
+    /// - `ControllerMessage::RequestCrlRenewal` from remote controllers via NATS
+    /// - The `CrlRenewal` scheduled task executor
+    ///
+    /// Periodic CRL renewal is delegated to the scheduler (`CrlRenewal` task,
+    /// default cron `0 */4 * * *`). The interval is configurable via the
+    /// scheduler task management API.
     ///
     /// Accepts an optional `CancellationToken` for graceful shutdown. When the
     /// token is cancelled, the task exits cleanly.
     pub async fn run(self: Arc<Self>, shutdown_token: Option<tokio_util::sync::CancellationToken>) {
-        let mut interval = tokio::time::interval(crate::durations::CRL_POLL_INTERVAL);
-        // The first tick completes immediately — skip it since we already
-        // built the initial CRL synchronously before starting.
-        interval.tick().await;
-
         loop {
             tokio::select! {
-                _ = interval.tick() => {
-                    // Check DB version — only rebuild if changed
-                    match uptrakit_web_api::settings_store::get_revocation_version(
-                        &self.config.db, self.config.default_tenant_id,
-                    ).await {
-                        Ok(db_ver) => {
-                            let cached = self.cached_revocation_version.load(Ordering::Relaxed);
-                            if db_ver == cached {
-                                tracing::debug!("revocation version unchanged, skipping CRL rebuild");
-                                continue;
-                            }
-                            tracing::info!(cached, db_ver, "revocation version changed, rebuilding CRL");
-                            self.cached_revocation_version.store(db_ver, Ordering::Release);
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = ?e, "failed to check revocation version, forcing CRL rebuild");
-                        }
-                    }
-                }
                 _ = self.config.revocation_notify.notified() => {
-                    tracing::debug!("CRL rebuild triggered by local revocation event");
-                    // Optimistic version bump to avoid redundant rebuild on next poll
-                    self.cached_revocation_version.fetch_add(1, Ordering::Release);
+                    tracing::debug!("CRL rebuild triggered by revocation or renewal signal");
                 }
                 _ = async {
                     if let Some(ref token) = shutdown_token {
@@ -336,16 +485,17 @@ async fn query_revoked_certs_for_ca(
     Ok(revoked)
 }
 
-/// Sign a CRL with the given issuer and return both DER bytes and PEM string.
-fn sign_crl(
+/// Sign a CRL with the given issuer and return DER, PEM, and timestamp fields.
+fn sign_crl_with_times(
     ca_issuer: &Issuer<'_, KeyPair>,
     revoked_certs: Vec<RevokedCertParams>,
     crl_number: u64,
-) -> pki::Result<(CertificateRevocationListDer<'static>, String)> {
+) -> pki::Result<(CertificateRevocationListDer<'static>, String, OffsetDateTime, OffsetDateTime)> {
     let now = OffsetDateTime::now_utc();
+    let next_update = now + time::Duration::hours(24);
     let params = CertificateRevocationListParams {
         this_update: now,
-        next_update: now + time::Duration::hours(24),
+        next_update,
         crl_number: SerialNumber::from(crl_number),
         issuing_distribution_point: None,
         revoked_certs,
@@ -356,7 +506,20 @@ fn sign_crl(
     let pem = crl.pem().context_to::<pki::PkiError>()?;
     let der = CertificateRevocationListDer::from(crl.der().to_vec());
 
-    Ok((der, pem))
+    Ok((der, pem, now, next_update))
+}
+
+/// Sign a CRL with the given issuer and return both DER bytes and PEM string.
+///
+/// Only used in tests; production code uses [`sign_crl_with_times`].
+#[cfg(test)]
+fn sign_crl(
+    ca_issuer: &Issuer<'_, KeyPair>,
+    revoked_certs: Vec<RevokedCertParams>,
+    crl_number: u64,
+) -> pki::Result<(CertificateRevocationListDer<'static>, String)> {
+    let (crl, pem, _, _) = sign_crl_with_times(ca_issuer, revoked_certs, crl_number)?;
+    Ok((crl, pem))
 }
 
 /// Parse a colon-hex serial string (e.g. `"00:ab:cd"`) into raw bytes.

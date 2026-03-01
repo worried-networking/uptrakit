@@ -664,7 +664,6 @@ pub(crate) fn validate_configuration(
 pub(crate) async fn init_pki_runtime(
     args: &crate::cli::Args,
     db: &sea_orm::DatabaseConnection,
-    default_tenant_id: uuid::Uuid,
     config_dir: &std::path::Path,
     reconciled: &ReconciledSettings,
 ) -> crate::Result<PkiRuntime> {
@@ -768,15 +767,9 @@ pub(crate) async fn init_pki_runtime(
     let revocation_notify = Arc::new(tokio::sync::Notify::const_new());
     let ca_rotation_trigger = Arc::new(tokio::sync::Notify::const_new());
 
-    // Read initial revocation version for CRL version-gated polling
-    let initial_revocation_version =
-        uptrakit_web_api::settings_store::get_revocation_version(db, default_tenant_id)
-            .await
-            .context(AppError::Settings)?;
-
-    // Build initial CRLs from DB before server starts
+    // Build initial CRLs — tries DB cache first, generates fresh if missing/stale.
     let crl_pem_cache = Arc::new(tokio::sync::RwLock::new(String::new()));
-    let (initial_crls, initial_crl_pem) = {
+    let (initial_crls, initial_crl_pem, starting_crl_number) = {
         let ks = ca_key_store.read().await;
         crate::crl_manager::build_initial_crls(db, &ca_snapshot, &ks)
             .await
@@ -807,11 +800,10 @@ pub(crate) async fn init_pki_runtime(
                 rustls_config: rustls_config.clone(),
                 revocation_notify: Arc::clone(&revocation_notify),
                 crl_pem_cache: Arc::clone(&crl_pem_cache),
-                default_tenant_id,
-                initial_revocation_version,
             },
             &ca_snapshot,
             &ks,
+            starting_crl_number,
         )
         .context(AppError::Pki)?
     });

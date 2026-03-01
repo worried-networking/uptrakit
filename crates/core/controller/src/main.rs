@@ -174,7 +174,6 @@ async fn run(args: cli::Args) -> Result<()> {
     let pki = startup::init_pki_runtime(
         &args,
         &db_conn,
-        default_tenant_id,
         app_dirs.config_dir(),
         &reconciled,
     )
@@ -347,6 +346,7 @@ async fn run(args: cli::Args) -> Result<()> {
             std::sync::Arc::new(ControllerSchedulerNotifier::new(
                 app_state.notification_service.clone(),
                 Arc::clone(&app_state.ca_rotation_trigger),
+                Arc::clone(&app_state.revocation_notify),
             ));
 
         let mut sched = uptrakit_scheduler_engine::Scheduler::new(
@@ -389,6 +389,10 @@ async fn run(args: cli::Args) -> Result<()> {
                 Arc::clone(&notifier),
             )),
         );
+        sched.register(
+            ScheduledTaskType::CrlRenewal,
+            Box::new(crl_renewal::CrlRenewalExecutor::new(Arc::clone(&notifier))),
+        );
 
         let h = tokio::spawn(sched.run(bg.child_token()));
         bg.track_with_timeout("scheduler", h, durations::SCHEDULER_SHUTDOWN_TIMEOUT);
@@ -422,6 +426,7 @@ async fn run(args: cli::Args) -> Result<()> {
             service_connections.clone(),
             app_state.db().clone(),
             Some(Arc::clone(&app_state.ca_rotation_trigger)),
+            Some(Arc::clone(&app_state.revocation_notify)),
         );
         bg.track("nats-consumer", h);
     }

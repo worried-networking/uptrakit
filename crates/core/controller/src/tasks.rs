@@ -533,8 +533,9 @@ pub fn spawn_nats_consumer(
     registry: uptrakit_web_api::service_connections::ServiceConnectionRegistry,
     db: sea_orm::DatabaseConnection,
     ca_rotation_trigger: Option<Arc<tokio::sync::Notify>>,
+    revocation_notify: Option<Arc<tokio::sync::Notify>>,
 ) -> JoinHandle<()> {
-    tokio::spawn(nats.run_consumer(registry, db, ca_rotation_trigger, token))
+    tokio::spawn(nats.run_consumer(registry, db, ca_rotation_trigger, revocation_notify, token))
 }
 
 // ---------------------------------------------------------------------------

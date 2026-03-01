@@ -13,9 +13,6 @@ pub const SERVER_CERT_RENEWAL_WINDOW_DAYS: i64 = 30;
 /// Server certificate validity period in days.
 pub const SERVER_CERT_VALIDITY_DAYS: i64 = 90;
 
-/// Interval for CRL version-gated polling (60 seconds).
-pub const CRL_POLL_INTERVAL: Duration = Duration::from_secs(60);
-
 /// Interval for checking settings/CA version changes across instances (30 seconds).
 pub const SETTINGS_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
