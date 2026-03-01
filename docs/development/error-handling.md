@@ -24,6 +24,12 @@ importing `ReportConversion` manually.
 
 Use `report!()` to create `Report` values; do **not** call `Report::new()` directly.
 
+**`#[from]` vs `impl_report_conversion!`:** `#[from]` on an error variant provides `impl From<SourceError> for
+MyError`, which the standard `?` operator uses. When the function return type is `Result<T, Report<MyError>>`,
+bare `?` can no longer call that `From` impl — use `.context_to()?` instead. Prefer `impl_report_conversion!`
+over `#[from]` and **omit** `#[from]` on variants whose only callers use `.context_to()?`. Having both
+`#[from]` and `impl_report_conversion!` on the same variant is dead code: the `From` impl is never called.
+
 ## Error Chain Structure
 
 `rootcause::Report` builds a tree of context nodes. Two methods modify the chain differently:
@@ -82,7 +88,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 #[derive(Debug, Error)]
 pub enum WidgetError {
     #[error("database error: {0}")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
 
     #[error("widget not found: {0}")]
     NotFound(uuid::Uuid),
@@ -141,7 +147,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum MyError {
     #[error("database error: {0}")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
 
     #[error("not found: {0}")]
     NotFound(String),
