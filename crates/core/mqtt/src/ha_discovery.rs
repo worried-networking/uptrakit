@@ -138,7 +138,7 @@ pub fn build_discovery_config(
     let uid = unique_id(tenant_id, item_id, host_id);
     let tenant_simple = tenant_id.simple().to_string();
     let item_simple = item_id.simple().to_string();
-    let default_entity_id = format!("{}_on_{}", slugify(item_name), slugify(hostname));
+    let default_entity_id = format!("uptrakit_{}_on_{}", slugify(item_name), slugify(hostname));
 
     serde_json::json!({
         "platform": "mqtt",
