@@ -17,6 +17,15 @@ use uuid::Uuid;
 use crate::mqtt_lease_coordinator::{LeaseCoordinatorError, MqttLeaseCoordinator};
 use crate::service_connections::ServiceConnectionRegistry;
 
+/// Optional controller-local resources needed when processing controller-targeted events.
+///
+/// All fields may be `None` when the corresponding subsystem is not running on this instance.
+pub struct ControllerResources<'a> {
+    pub ca_rotation_trigger: Option<&'a Arc<Notify>>,
+    pub revocation_notify: Option<&'a Arc<Notify>>,
+    pub token_denylist: Option<&'a Arc<crate::auth::token_denylist::TokenDenylist>>,
+}
+
 /// Parse a capability string back to a typed [`Capability`] variant.
 ///
 /// Returns `None` for unrecognised strings so the caller can fall back to
@@ -44,17 +53,14 @@ pub fn parse_capability_str(s: &str) -> Option<Capability> {
 pub async fn deliver_event(
     registry: &ServiceConnectionRegistry,
     db: &DatabaseConnection,
-    ca_rotation_trigger: Option<&Arc<Notify>>,
-    revocation_notify: Option<&Arc<Notify>>,
-    token_denylist: Option<&Arc<crate::auth::token_denylist::TokenDenylist>>,
+    resources: &ControllerResources<'_>,
     target_service_id: Option<Uuid>,
     target_capability: Option<&str>,
     msg: ControllerMessage,
 ) -> bool {
     // Controller-targeted events are handled locally (not forwarded to services)
     if target_service_id.is_none() && target_capability == Some("controller") {
-        return deliver_controller_event(db, registry, ca_rotation_trigger, revocation_notify, token_denylist, msg)
-            .await;
+        return deliver_controller_event(db, registry, resources, msg).await;
     }
 
     match (target_service_id, target_capability) {
@@ -137,9 +143,7 @@ pub async fn deliver_mqtt_event(
 pub async fn deliver_controller_event(
     db: &DatabaseConnection,
     registry: &ServiceConnectionRegistry,
-    ca_rotation_trigger: Option<&Arc<Notify>>,
-    revocation_notify: Option<&Arc<Notify>>,
-    token_denylist: Option<&Arc<crate::auth::token_denylist::TokenDenylist>>,
+    resources: &ControllerResources<'_>,
     msg: ControllerMessage,
 ) -> bool {
     match msg {
@@ -164,7 +168,7 @@ pub async fn deliver_controller_event(
             }
         }
         ControllerMessage::RequestCaRotation(payload) => {
-            if let Some(trigger) = ca_rotation_trigger {
+            if let Some(trigger) = resources.ca_rotation_trigger {
                 tracing::info!(reason = %payload.reason, "CA rotation requested via cross-controller event");
                 trigger.notify_one();
             } else {
@@ -173,7 +177,7 @@ pub async fn deliver_controller_event(
             true
         }
         ControllerMessage::RequestCrlRenewal(_) => {
-            if let Some(notify) = revocation_notify {
+            if let Some(notify) = resources.revocation_notify {
                 tracing::debug!("CRL rebuild requested via cross-controller event");
                 notify.notify_one();
             } else {
@@ -190,7 +194,7 @@ pub async fn deliver_controller_event(
             iat_cutoff,
             purge_after,
         }) => {
-            if let Some(denylist) = token_denylist {
+            if let Some(denylist) = resources.token_denylist {
                 // JTI-level revocation from another controller instance.
                 if let (Some(jti), Some(exp)) = (jti, exp) {
                     denylist.deny_token_remote(&jti, exp).await;
@@ -279,7 +283,12 @@ mod tests {
                 ca_bundle_pem: "pem".to_string(),
             });
         // With no connected services, broadcast succeeds.
-        let result = deliver_event(&registry, &db, None, None, None, None, None, msg).await;
+        let resources = ControllerResources {
+            ca_rotation_trigger: None,
+            revocation_notify: None,
+            token_denylist: None,
+        };
+        let result = deliver_event(&registry, &db, &resources, None, None, msg).await;
         assert!(result);
     }
 
@@ -294,8 +303,12 @@ mod tests {
                 ca_bundle_pem: "pem".to_string(),
             });
         // Service not on this controller — returns true (not our responsibility).
-        let result =
-            deliver_event(&registry, &db, None, None, None, Some(service_id), None, msg).await;
+        let resources = ControllerResources {
+            ca_rotation_trigger: None,
+            revocation_notify: None,
+            token_denylist: None,
+        };
+        let result = deliver_event(&registry, &db, &resources, Some(service_id), None, msg).await;
         assert!(result);
     }
 
@@ -308,9 +321,12 @@ mod tests {
             ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
                 ca_bundle_pem: "pem".to_string(),
             });
-        let result =
-            deliver_event(&registry, &db, None, None, None, None, Some("software_discovery"), msg)
-                .await;
+        let resources = ControllerResources {
+            ca_rotation_trigger: None,
+            revocation_notify: None,
+            token_denylist: None,
+        };
+        let result = deliver_event(&registry, &db, &resources, None, Some("software_discovery"), msg).await;
         assert!(result);
     }
 }

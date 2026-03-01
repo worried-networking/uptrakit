@@ -194,12 +194,15 @@ impl NatsTransport {
                     continue;
                 }
 
+                let resources = crate::event_delivery::ControllerResources {
+                    ca_rotation_trigger: ca_rotation_trigger.as_ref(),
+                    revocation_notify: revocation_notify.as_ref(),
+                    token_denylist: token_denylist.as_ref(),
+                };
                 let delivered = crate::event_delivery::deliver_event(
                     &registry,
                     &db,
-                    ca_rotation_trigger.as_ref(),
-                    revocation_notify.as_ref(),
-                    token_denylist.as_ref(),
+                    &resources,
                     envelope.target_service_id,
                     envelope.target_capability.as_deref(),
                     envelope.message,
