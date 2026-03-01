@@ -95,14 +95,12 @@ pub(crate) fn validate_hooks_internal(
 pub(crate) async fn find_raw_active_config(
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Option<plugin_config::Model> {
+) -> Result<Option<plugin_config::Model>, sea_orm::DbErr> {
     tenant_db
         .find_by_id::<plugin_config::Entity, _>(id)
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
-        .ok()
-        .flatten()
 }
 
 /// Same as [`find_raw_active_config`] but accepts an arbitrary `ConnectionTrait`
@@ -111,15 +109,13 @@ pub(crate) async fn find_raw_active_config_txn(
     db: &impl ConnectionTrait,
     tenant_id: Uuid,
     id: Uuid,
-) -> Option<plugin_config::Model> {
+) -> Result<Option<plugin_config::Model>, sea_orm::DbErr> {
     use sea_orm::EntityTrait;
     plugin_config::Entity::find_by_id(id)
         .filter(plugin_config::Column::TenantId.eq(tenant_id))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(db)
         .await
-        .ok()
-        .flatten()
 }
 
 // --- Public query functions ---
@@ -199,7 +195,7 @@ pub async fn get_plugin_config(
     tenant_db: &TenantDb,
     id: Uuid,
 ) -> Result<Option<PluginConfigResponse>, sea_orm::DbErr> {
-    let config = match find_raw_active_config(tenant_db, id).await {
+    let config = match find_raw_active_config(tenant_db, id).await? {
         Some(c) => c,
         None => return Ok(None),
     };
@@ -215,8 +211,9 @@ pub async fn update_plugin_config(
     req: UpdatePluginConfigRequest,
 ) -> Result<PluginConfigResponse, UpdatePluginConfigError> {
     let existing = match find_raw_active_config(tenant_db, id).await {
-        Some(c) => c,
-        None => return Err(UpdatePluginConfigError::NotFound),
+        Ok(Some(c)) => c,
+        Ok(None) => return Err(UpdatePluginConfigError::NotFound),
+        Err(e) => return Err(UpdatePluginConfigError::Db(e)),
     };
 
     let plugin_type = existing.plugin_type.clone();
@@ -272,7 +269,7 @@ pub async fn update_plugin_config(
 /// Soft-delete a plugin configuration.
 /// Returns `true` if deleted, `false` if not found.
 pub async fn delete_plugin_config(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm::DbErr> {
-    let config = match find_raw_active_config(tenant_db, id).await {
+    let config = match find_raw_active_config(tenant_db, id).await? {
         Some(c) => c,
         None => return Ok(false),
     };

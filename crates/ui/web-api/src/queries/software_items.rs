@@ -413,6 +413,7 @@ async fn resolve_plugin_config_txn(
             let pcid = *pcid;
             let c = find_raw_active_config_txn(txn, tenant_id, pcid)
                 .await
+                .map_err(SoftwareItemQueryError::Db)?
                 .ok_or(SoftwareItemQueryError::PluginConfigNotFound)?;
             Ok((pcid, c))
         }

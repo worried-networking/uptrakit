@@ -1164,8 +1164,17 @@ pub async fn check_versions_host(
     let mut controller_fetch_jobs: Vec<ControllerFetchJob> = Vec::new();
 
     for plugin in &role_plugins {
-        let Some(config) = find_raw_active_config(&tenant_db, plugin.plugin_config_id).await else {
-            continue;
+        let config = match find_raw_active_config(&tenant_db, plugin.plugin_config_id).await {
+            Ok(Some(c)) => c,
+            Ok(None) => continue,
+            Err(e) => {
+                tracing::error!(
+                    plugin_config_id = %plugin.plugin_config_id,
+                    error = %e,
+                    "DB error loading plugin config, skipping role assignment"
+                );
+                continue;
+            }
         };
         let Ok(plugin_type) = serde_json::from_value::<PluginType>(serde_json::Value::String(
             config.plugin_type.clone(),
