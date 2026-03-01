@@ -231,7 +231,7 @@ mod tests {
         params
             .distinguished_name
             .push(rcgen::DnType::CommonName, "Test CA");
-        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
         let cert = params.self_signed(&key_pair).expect("self-sign");
         (cert.pem(), key_pair)
     }

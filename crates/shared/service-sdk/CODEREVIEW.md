@@ -14,7 +14,9 @@ to this library, meaning any lifecycle fix propagates automatically to all consu
 
 The design is sound and the code quality is high. The main concerns are that `ServiceHandler` is
 not object-safe (undocumented), the `run_service_lifecycle` core function has zero test coverage,
-and the `poll_service_event` cancellation-safety requirement is undocumented.
+and the `poll_service_event` cancellation-safety requirement is undocumented. The
+`BasicConstraints::Unconstrained` divergence in the test CA helper has been fixed
+(`Constrained(0)` now matches production).
 
 ## Architecture
 
@@ -56,12 +58,6 @@ No architectural issues found.
 - Zero `unsafe` in production code.
 
 ### Issues
-
-**[MEDIUM]** `src/tls.rs:234` -- `BasicConstraints::Unconstrained` used in the test CA helper.
-`Unconstrained` permits any holder to issue further intermediate CA certificates. The correct
-value for a leaf-signing CA is `BasicConstraints::Constrained(0)` (path length 0). This pattern
-is mirrored in production `pki.rs:497` and `cert_signer.rs:174`. Aligning the test helper with
-`Constrained(0)` removes the divergence.
 
 ## Code Quality
 
