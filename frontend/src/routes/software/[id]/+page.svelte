@@ -29,6 +29,19 @@
 	let updateModal: { host: SoftwareItemHostSummary; toVersion: string } | null = $state(null);
 	let updateTriggering: boolean = $state(false);
 
+	// Release notes modal state
+	interface ReleaseMeta {
+		release_url?: string;
+		release_notes?: string;
+		tag?: string;
+		published_at?: string;
+	}
+	let releaseNotesModal: {
+		softwareName: string;
+		hostName: string;
+		meta: ReleaseMeta;
+	} | null = $state(null);
+
 	// Live terminal modal state
 	let liveModal: { updateHistoryId: string; hostName: string } | null = $state(null);
 	let liveStreamState: SseConnectionState = $state('disconnected');
@@ -164,6 +177,23 @@
 		liveStreamState = 'disconnected';
 	}
 
+	function getReleaseMeta(host: SoftwareItemHostSummary): ReleaseMeta | null {
+		const meta = host.latest_release_metadata;
+		if (!meta) return null;
+		return {
+			release_url: typeof meta.release_url === 'string' ? meta.release_url : undefined,
+			release_notes: typeof meta.release_notes === 'string' ? meta.release_notes : undefined,
+			tag: typeof meta.tag === 'string' ? meta.tag : undefined,
+			published_at: typeof meta.published_at === 'string' ? meta.published_at : undefined
+		};
+	}
+
+	function openReleaseNotesModal(host: SoftwareItemHostSummary) {
+		const meta = getReleaseMeta(host);
+		if (!meta) return;
+		releaseNotesModal = { softwareName: item?.name ?? '', hostName: host.hostname, meta };
+	}
+
 	function versionStatusLabel(host: SoftwareItemHostSummary): string {
 		if (!host.installed_version) return 'Unknown';
 		if (!host.latest_version) return 'Unknown latest';
@@ -183,6 +213,8 @@
 		if (e.key === 'Escape') {
 			if (liveModal) {
 				closeLiveModal();
+			} else if (releaseNotesModal) {
+				releaseNotesModal = null;
 			} else if (updateModal) {
 				updateModal = null;
 			}
@@ -276,7 +308,16 @@
 									{/if}
 								</td>
 								<td>{host.installed_version ?? '—'}</td>
-								<td>{host.latest_version ?? item.latest_version ?? '—'}</td>
+								<td>
+									{host.latest_version ?? item.latest_version ?? '—'}
+									{#if getReleaseMeta(host)}
+										<button
+											class="btn btn-sm preset-tonal ml-1"
+											title="View release notes"
+											onclick={() => openReleaseNotesModal(host)}>Notes</button
+										>
+									{/if}
+								</td>
 								<td>
 									<span class="badge {versionStatusClass(host)}">{versionStatusLabel(host)}</span>
 								</td>
@@ -329,11 +370,73 @@
 				</div>
 			</div>
 
+			{#if updateModal}
+				{@const meta = getReleaseMeta(updateModal.host)}
+				{#if meta?.release_url}
+					<p class="text-sm">
+						<a
+							href={meta.release_url}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="text-primary-500 hover:underline">View release page ↗</a
+						>
+					</p>
+				{/if}
+				{#if meta?.release_notes}
+					<details class="text-sm">
+						<summary class="cursor-pointer text-surface-500 hover:text-surface-700">Release notes</summary>
+						<pre class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs">{meta.release_notes}</pre>
+					</details>
+				{/if}
+			{/if}
+
 			<div class="flex justify-end gap-2">
 				<button class="btn preset-tonal-surface" onclick={() => (updateModal = null)}>Cancel</button>
 				<button class="btn preset-filled-warning-500" onclick={executeUpdate} disabled={updateTriggering}>
 					{updateTriggering ? 'Triggering…' : 'Trigger Update'}
 				</button>
+			</div>
+		</div>
+	</ModalBackdrop>
+{/if}
+
+{#if releaseNotesModal}
+	<ModalBackdrop onclose={() => (releaseNotesModal = null)}>
+		<div
+			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl space-y-4 p-6 shadow-xl"
+			role="dialog"
+			aria-modal="true"
+		>
+			<div class="flex items-start justify-between gap-4">
+				<div>
+					<h3 class="h3">{releaseNotesModal.softwareName}</h3>
+					<p class="text-sm text-surface-500">
+						{releaseNotesModal.meta.tag ?? ''} on {releaseNotesModal.hostName}
+						{#if releaseNotesModal.meta.published_at}
+							· {formatDate(releaseNotesModal.meta.published_at)}
+						{/if}
+					</p>
+				</div>
+				{#if releaseNotesModal.meta.release_url}
+					<a
+						href={releaseNotesModal.meta.release_url}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="btn btn-sm preset-tonal-surface shrink-0">View on GitHub ↗</a
+					>
+				{/if}
+			</div>
+
+			{#if releaseNotesModal.meta.release_notes}
+				<div class="overflow-y-auto max-h-96">
+					<pre class="whitespace-pre-wrap text-sm leading-relaxed">{releaseNotesModal.meta.release_notes}</pre>
+				</div>
+			{:else}
+				<p class="text-surface-500 text-sm">No release notes available.</p>
+			{/if}
+
+			<div class="flex justify-end">
+				<button class="btn preset-tonal-surface" onclick={() => (releaseNotesModal = null)}>Close</button>
 			</div>
 		</div>
 	</ModalBackdrop>
