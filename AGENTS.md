@@ -95,7 +95,7 @@ uptrakit/
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, cron utils, TaskExecutor trait, SchedulerNotifier trait, 4 built-in executors
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers; default_resolve_shutdown(), init_tracing()
-│   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry; webhook (default) + telegram (feature-gated) channel impls
+│   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry; webhook (default) + telegram + email (feature-gated) channel impls
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
@@ -870,7 +870,7 @@ tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate
 
 | Crate/module | Purpose |
 | --- | --- |
-| `crates/shared/notification-channels/` | `NotificationChannel` trait, `DeliveryMessage`, `ChannelRegistry`, webhook + telegram impls |
+| `crates/shared/notification-channels/` | `NotificationChannel` trait, `DeliveryMessage`, `ChannelRegistry`, webhook + telegram + email impls |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus` enums |
 | `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher`, `message_builder` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers (channels, rules, log, telegram callback) |
@@ -884,7 +884,9 @@ tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate
 | --- | --- | --- | --- |
 | `webhook` | notification-channels | yes | Always compiled |
 | `telegram` | notification-channels | no | Requires `teloxide-core` |
+| `email` | notification-channels | no | SMTP via lettre 0.11 (tokio1-rustls-tls) |
 | `notifications-telegram` | web-api, controller | no | Propagated to notification-channels |
+| `notifications-email` | web-api, controller | no | Propagated to notification-channels; requires global SMTP settings configured via `PUT /api/v1/settings/smtp` |
 
 ### Event types
 
@@ -903,6 +905,8 @@ and `settings_ca.rs`.
 3. Register in `ChannelRegistry::new()` behind `#[cfg(feature = "...")]`
 4. Add variant to `NotificationChannelType` enum
 5. Propagate feature: `web-api/Cargo.toml` → `controller/Cargo.toml`
+6. If the channel requires global shared settings (like email + SMTP), add a merge step in
+   `NotificationDispatcher::dispatch_loop` and in the `test_channel` route handler before calling `deliver()`
 
 See [Notifications Development](docs/development/notifications.md) for full details.
 

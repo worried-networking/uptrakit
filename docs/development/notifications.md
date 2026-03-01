@@ -35,7 +35,7 @@ This separation means adding a new channel never requires changes to event-produ
 | --- | --- | --- | --- |
 | `webhook` | `notification-channels` | yes | Webhook channel (always available) |
 | `telegram` | `notification-channels` | no | Telegram channel with inline keyboard |
-| `email` | `notification-channels` | no | Email channel (placeholder for future implementation) |
+| `email` | `notification-channels` | no | Email channel (SMTP via lettre, async TLS) |
 | `notifications-telegram` | `web-api`, `controller` | no | Propagated feature flag enabling Telegram |
 | `notifications-email` | `web-api`, `controller` | no | Propagated feature flag enabling email |
 | `notifications-all` | `web-api`, `controller` | no | Enables all optional notification channels |
@@ -401,6 +401,88 @@ header against the channel's `webhook_secret` config field.
 - `validate_config` requires `url` to start with `http://` or `https://` and `headers` to be an object if present.
 - `mask_config_secrets` replaces the `secret` field with `"***"`.
 
+## Email channel details
+
+`crates/shared/notification-channels/src/email.rs`
+
+The email channel sends notifications via SMTP using the [lettre](https://lettre.rs/) 0.11 library with
+async Tokio support. It is gated on the `email` feature flag.
+
+### Config split
+
+The email channel uses a **two-layer config** model:
+
+- **Per-channel config** (stored encrypted in `notification_channels.config`): contains only `to_addresses`.
+- **Global SMTP settings** (stored in the `settings` key-value table, per-tenant): SMTP server host, port,
+  credentials, sender identity, and TLS mode.
+
+The dispatcher merges these two sources before calling `deliver()`. Per-channel config contains no SMTP
+credentials, which means multiple email channels can share the same SMTP server without duplicating secrets.
+
+### Per-channel config fields
+
+```json
+{
+  "to_addresses": ["alice@example.com", "bob@example.com"]
+}
+```
+
+- `to_addresses`: non-empty list of recipient email addresses (validated at channel create/update time).
+
+### Global SMTP settings
+
+Configured via `PUT /api/v1/settings/smtp` (see [Settings Runtime Architecture](../api/settings-runtime.md)):
+
+| Setting key | DB key | Description |
+| --- | --- | --- |
+| SMTP host | `smtp.host` | SMTP server hostname (required for email delivery) |
+| SMTP port | `smtp.port` | SMTP server port (default: 587) |
+| SMTP username | `smtp.username` | Auth username (optional) |
+| SMTP password | `smtp.password` | Auth password (stored encrypted, optional) |
+| From address | `smtp.from_address` | Sender email address (required for email delivery) |
+| From name | `smtp.from_name` | Sender display name (optional) |
+| TLS mode | `smtp.tls_mode` | `"starttls"` (default), `"tls"`, or `"none"` |
+
+### TLS modes
+
+| Mode | Description | Default Port |
+| --- | --- | --- |
+| `starttls` | Opportunistic STARTTLS (upgrades plaintext connection to TLS) | 587 |
+| `tls` | Implicit TLS/SMTPS (TLS from the first byte) | 465 |
+| `none` | No TLS (plaintext -- development only) | 25 |
+
+`"starttls"` is the default and is appropriate for most modern SMTP providers.
+
+### Message format
+
+The channel sends **multipart/alternative** emails:
+
+- **text/plain** part: `message.body`
+- **text/html** part: `message.body_html` when provided, otherwise the plain body wrapped in a minimal
+  HTML5 document with basic styling.
+
+The email subject is set to `message.title`.
+
+### Dispatcher merge step
+
+The dispatcher (`crates/ui/web-api/src/notifications/dispatcher.rs`) performs the merge before each delivery:
+
+1. Load the per-channel config (decrypted `to_addresses`).
+2. Read the live `SmtpSettingsSnapshot` from `settings.smtp()`.
+3. If `smtp.is_configured()` returns false (host or from_address missing), the notification is skipped
+   with a `tracing::warn!` log and the log entry is marked `"failed"`.
+4. Otherwise, call `merge_smtp_into_config()` to add SMTP fields to the config object, then call
+   `email_channel.deliver(&merged_config, &message)`.
+
+The same merge logic is applied in the `test_channel` route handler
+(`crates/ui/web-api/src/routes/notifications.rs`) and returns HTTP 400 when SMTP is not configured.
+
+### `validate_config` and `mask_config_secrets`
+
+- `validate_config`: parses as `EmailChannelConfig`, rejects empty `to_addresses` and invalid email
+  formats (must contain `@`).
+- `mask_config_secrets`: no-op; per-channel config contains no secrets.
+
 ## Telegram channel details
 
 `crates/shared/notification-channels/src/telegram.rs`
@@ -416,9 +498,10 @@ header against the channel's `webhook_secret` config field.
 ## Testing
 
 - **Unit tests** exist in every module: `events.rs`, `message_builder.rs`, `webhook.rs`, `telegram.rs`,
-  `registry.rs`, `notifications.rs` (web-api-types).
+  `email.rs`, `registry.rs`, `notifications.rs` (web-api-types).
 - **Channel tests** use standard `#[test]` for sync methods (`validate_config`, `mask_config_secrets`).
-  Use `httpmock` for delivery assertions in async tests.
+  Use `httpmock` for delivery assertions in async tests. Email delivery tests verify error conversion
+  against non-routable SMTP hosts (the test waits up to 60 s for connection timeout).
 - **Serde round-trip tests** cover all enum variants and request/response types.
 - **Dispatcher testing**: the dispatcher uses fire-and-forget semantics. Test by verifying `notification_log`
   entries in the database after dispatching events.
@@ -434,6 +517,7 @@ header against the channel's `webhook_secret` config field.
 | `crates/shared/notification-channels/src/registry.rs` | `ChannelRegistry` -- compiled-in channel lookup |
 | `crates/shared/notification-channels/src/webhook.rs` | Webhook channel (HMAC-SHA256 signing) |
 | `crates/shared/notification-channels/src/telegram.rs` | Telegram channel (inline keyboard) |
+| `crates/shared/notification-channels/src/email.rs` | Email channel (SMTP via lettre, multipart/alternative) |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared enums, request/response types, `Validate` impls |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget background dispatcher loop |
 | `crates/ui/web-api/src/notifications/events.rs` | `NotificationEvent`, `NotificationEventDetails`, `ActionParams` |

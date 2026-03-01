@@ -28,8 +28,70 @@ Masked fields per channel type:
 | --- | --- |
 | `webhook` | `secret` |
 | `telegram` | `bot_token`, `webhook_secret` |
+| `email` | none (per-channel config stores only `to_addresses`) |
 
 All other config fields (e.g. `url`, `chat_id`) are returned unmasked.
+
+## Email Channel Security
+
+The email channel uses a two-layer config model that keeps SMTP credentials separate from per-channel
+recipient lists. This section covers the security properties of that design.
+
+### SMTP credentials storage
+
+Global SMTP settings (host, port, credentials, sender address, TLS mode) are stored in the `settings`
+key-value table. The password field (`smtp.password`) is encrypted at rest using
+`uptrakit_crypto::encrypt_str` (AES-256-GCM with the master key) before being written to the database.
+Decryption occurs at settings-load time (`settings::load_smtp_settings`) and the plaintext is held in
+memory only within the `SmtpSettingsSnapshot` struct.
+
+The SMTP password is **never returned in API responses**. The `SmtpSettingsResponse` type exposes only
+`has_password: bool` to indicate whether a password is configured.
+
+See [Secrets and Encryption](secrets-and-encryption.md) for encryption semantics and master key
+management.
+
+### TLS mode recommendations
+
+| Mode | Security level | Recommended use |
+| --- | --- | --- |
+| `tls` | Highest — full SMTPS, no downgrade possible | Production (port 465) |
+| `starttls` | Good — opportunistic TLS upgrade | Production (port 587), widely supported |
+| `none` | Plaintext — credentials and email transmitted in the clear | Development/testing only, never production |
+
+The default TLS mode is `"starttls"`. Administrators are advised to use `"tls"` whenever possible.
+
+### Per-channel config contains no credentials
+
+Each email notification channel stores only `to_addresses` in the encrypted `notification_channels.config`
+column. SMTP credentials are never written to per-channel config. This means:
+
+- Compromising a per-channel config row reveals only the recipient list, not SMTP credentials.
+- Multiple email channels share the same SMTP server without duplicating the password.
+- The dispatcher merges global SMTP settings into the config at delivery time, in memory only.
+
+### `has_password` masking
+
+`GET /api/v1/settings/smtp` returns `has_password: bool` rather than the actual password. This follows the
+same convention used by MQTT (`has_password`) and OIDC (`has_client_secret`).
+
+### Permission requirements
+
+| Endpoint | Required permission |
+| --- | --- |
+| `GET /api/v1/settings/smtp` | `view_settings` |
+| `PUT /api/v1/settings/smtp` | `manage_settings` |
+
+See [Auth and Authorization](auth-and-authorization.md) for the full permission model.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/notification-channels/src/email.rs` | `EmailChannel` — SMTP delivery, config validation |
+| `crates/ui/web-api/src/routes/settings_smtp.rs` | SMTP settings GET/PUT handlers with password encryption |
+| `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot` with masked `Debug` impl |
+| `crates/ui/web-api/src/notifications/dispatcher.rs` | `merge_smtp_into_config` — in-memory merge before delivery |
 
 ## Webhook HMAC Signing
 
@@ -150,6 +212,9 @@ provide defense-in-depth against abuse.
 | `crates/shared/notification-channels/src/channel.rs` | `NotificationChannel` trait with `#[must_use]` on `mask_config_secrets` |
 | `crates/shared/notification-channels/src/webhook.rs` | Webhook channel: HMAC-SHA256 signing, secret masking |
 | `crates/shared/notification-channels/src/telegram.rs` | Telegram channel: bot token masking, webhook secret masking |
+| `crates/shared/notification-channels/src/email.rs` | Email channel: SMTP delivery, no per-channel secrets |
+| `crates/ui/web-api/src/routes/settings_smtp.rs` | Global SMTP settings API: password encrypted at rest, `has_password` masking |
+| `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot`: masked `Debug`, decrypted password in memory only |
 | `crates/shared/notification-channels/src/registry.rs` | `ChannelRegistry` for channel type dispatch |
 | `crates/ui/web-api/src/routes/notifications.rs` | API route handlers including `telegram_callback` |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Background dispatcher: rule matching, action token generation, delivery |

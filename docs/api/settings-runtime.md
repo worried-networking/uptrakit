@@ -19,6 +19,7 @@ Settings are stored in the database and reconciled with CLI flags during startup
 | Registration | `registration.*` | `/settings/registration` | Runtime-changeable. |
 | Authentication | `authentication.*` | `/settings/authentication` | Runtime-changeable. |
 | Service Certificates | `service_certificates.*` | `/settings/service-certificates` | Runtime-changeable. |
+| SMTP | `smtp.*` | `/settings/smtp` | Runtime-changeable; read by dispatcher on each delivery. |
 
 Not DB-managed: `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--oidc-*` bootstrap flags.
 
@@ -215,6 +216,8 @@ other controller instances. Each revocation site bumps `revocation_version` in t
 | `GET /api/v1/settings/mqtt/{id}` | ViewSettings | Get a specific MQTT client configuration |
 | `PUT /api/v1/settings/mqtt/{id}` | ManageSettings | Update MQTT client configuration |
 | `DELETE /api/v1/settings/mqtt/{id}` | ManageSettings | Delete MQTT client configuration |
+| `GET /api/v1/settings/smtp` | ViewSettings | Read global SMTP settings |
+| `PUT /api/v1/settings/smtp` | ManageSettings | Update global SMTP settings |
 | `POST /api/v1/settings/rotate-ca` | ManageGlobalSettings | Trigger immediate CA rotation |
 | `POST /api/v1/settings/renew-server-certificate` | ManageGlobalSettings | Renew server TLS certificate |
 | `GET /api/v1/system/alerts` | ManageGlobalSettings | Get system alerts (CA/cert status) |
@@ -279,6 +282,81 @@ presentation field.
 
 The API accepts either a `url` field (parsed into components) or individual `transport`/`host`/`port` fields. The
 response always includes the computed `url`.
+
+### SMTP settings
+
+Global SMTP settings control how the email notification channel connects to an outgoing mail server. These
+settings are shared across all email notification channels for the tenant. Per-channel config stores only
+recipient addresses (see [Notifications Development](../development/notifications.md)).
+
+**Settings stored in the `settings` key-value table:**
+
+| DB key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `smtp.host` | string? | `null` | SMTP server hostname |
+| `smtp.port` | u16? | `null` (effective default: 587) | SMTP server port |
+| `smtp.username` | string? | `null` | SMTP auth username |
+| `smtp.password` | string? | `null` (encrypted) | SMTP auth password (AES-256-GCM) |
+| `smtp.from_address` | string? | `null` | Sender email address |
+| `smtp.from_name` | string? | `null` | Sender display name |
+| `smtp.tls_mode` | string | `"starttls"` | TLS mode: `starttls`, `tls`, or `none` |
+
+Email delivery is disabled (notifications skipped with a warning) until both `smtp.host` and
+`smtp.from_address` are configured (`SmtpSettingsSnapshot::is_configured()`).
+
+**`GET /api/v1/settings/smtp` — Response (`SmtpSettingsResponse`):**
+
+```json
+{
+  "host": "smtp.example.com",
+  "port": 587,
+  "username": "sender@example.com",
+  "has_password": true,
+  "from_address": "noreply@example.com",
+  "from_name": "Uptrakit",
+  "tls_mode": "starttls"
+}
+```
+
+`has_password: true` indicates a password is stored. The actual password is never returned.
+
+**`PUT /api/v1/settings/smtp` — Request (`UpdateSmtpSettingsRequest`):**
+
+All fields are optional. Omitting a field leaves the current value unchanged. Explicitly setting a nullable
+field to `null` clears the stored value.
+
+```json
+{
+  "host": "smtp.example.com",
+  "port": 587,
+  "username": "sender@example.com",
+  "password": "secret",
+  "from_address": "noreply@example.com",
+  "from_name": "Uptrakit",
+  "tls_mode": "starttls"
+}
+```
+
+To clear the password: `"password": null`. To clear the username: `"username": null`.
+
+**Validation rules:**
+
+- `host`: non-empty string if provided
+- `port`: 1–65535 if provided
+- `from_address`: must contain `@` if provided
+- `tls_mode`: must be `"starttls"`, `"tls"`, or `"none"` if provided
+
+**Security:** The password is encrypted with `uptrakit_crypto::encrypt_str` (AES-256-GCM) before storage.
+See [Notifications Security — Email Channel Security](../security/notifications-security.md#email-channel-security).
+
+**CLI:**
+
+```bash
+uptrakit settings smtp show
+uptrakit settings smtp set --host smtp.example.com --port 587 --from-address noreply@example.com --tls-mode starttls
+uptrakit settings smtp set --password mysecret
+uptrakit settings smtp set --clear-password
+```
 
 ## MQTT Service (Standalone Binary)
 
