@@ -215,6 +215,11 @@ async fn run_controller_fetch_jobs(
             "controller-side fetch: succeeded"
         );
 
+        let category_str = latest
+            .category
+            .unwrap_or_default()
+            .to_string();
+
         for (host_id, software_item_id) in &job.targets {
             let active = host_software_item::ActiveModel {
                 host_id: Set(*host_id),
@@ -222,6 +227,7 @@ async fn run_controller_fetch_jobs(
                 latest_version: Set(Some(latest_version_str.clone())),
                 latest_version_fetched_at: Set(Some(now)),
                 latest_release_metadata: Set(Some(release_metadata.clone())),
+                update_category: Set(category_str.clone()),
                 ..Default::default()
             };
             if let Err(e) = active.update(db).await {

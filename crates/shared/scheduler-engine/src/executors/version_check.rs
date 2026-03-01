@@ -299,6 +299,11 @@ impl VersionCheckExecutor {
                 "controller-side fetch_releases succeeded"
             );
 
+            let category_str = latest
+                .category
+                .unwrap_or_default()
+                .to_string();
+
             // Update all host_software_items rows sharing this plugin_config + package_identifier.
             for (host_id, software_item_id) in targets {
                 let active = host_software_item::ActiveModel {
@@ -307,6 +312,7 @@ impl VersionCheckExecutor {
                     latest_version: Set(Some(latest_version_str.clone())),
                     latest_version_fetched_at: Set(Some(now)),
                     latest_release_metadata: Set(Some(release_metadata.clone())),
+                    update_category: Set(category_str.clone()),
                     ..Default::default()
                 };
                 if let Err(e) = active.update(&self.db).await {

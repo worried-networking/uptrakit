@@ -744,6 +744,7 @@ async fn find_or_create_software_item(
         latest_release_metadata: Set(None),
         last_updated_at: Set(None),
         linked_at: Set(now),
+        update_category: Set("unknown".to_string()),
     };
     if let Err(e) = HostSoftwareItem::insert(link).exec(db).await
         && !is_unique_constraint_violation(&e)
@@ -941,6 +942,7 @@ mod tests {
             latest_release_metadata: Set(None),
             last_updated_at: Set(None),
             linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
         };
         HostSoftwareItem::insert(link)
             .exec(db)

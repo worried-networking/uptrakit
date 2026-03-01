@@ -32,6 +32,9 @@ pub struct Model {
     pub started_at: OffsetDateTime,
     pub completed_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
+    /// Classification of the update (security, bugfix, feature, unknown).
+    #[sea_orm(default_value = "unknown")]
+    pub update_category: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

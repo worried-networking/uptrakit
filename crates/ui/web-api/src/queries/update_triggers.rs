@@ -166,7 +166,7 @@ pub async fn trigger_update_for_host(
         .ok_or_else(|| report!(TriggerUpdateError::HostNotFound))?;
 
     // 3. Verify host is assigned to the software item.
-    let _link = HostSoftwareItem::find_by_id((host_id, item_id))
+    let hsi_link = HostSoftwareItem::find_by_id((host_id, item_id))
         .one(db)
         .await
         .context_to()?
@@ -246,6 +246,7 @@ pub async fn trigger_update_for_host(
         started_at: Set(now),
         completed_at: Set(None),
         created_at: Set(now),
+        update_category: Set(hsi_link.update_category.clone()),
     };
 
     update_record.insert(db).await.context_to()?;

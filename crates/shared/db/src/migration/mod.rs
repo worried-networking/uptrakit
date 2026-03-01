@@ -10,6 +10,7 @@ mod m20260302_000001_add_missing_indexes;
 mod m20260303_000001_global_settings;
 mod m20260303_000002_revoked_tokens;
 mod m20260305_000001_crl_cache;
+mod m20260306_000001_update_category;
 
 pub struct Migrator;
 
@@ -26,6 +27,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260303_000001_global_settings::Migration),
             Box::new(m20260303_000002_revoked_tokens::Migration),
             Box::new(m20260305_000001_crl_cache::Migration),
+            Box::new(m20260306_000001_update_category::Migration),
         ]
     }
 }
@@ -76,6 +78,13 @@ mod tests {
             .await
             .unwrap();
         db.execute_unprepared("SELECT count(*) FROM crl_cache")
+            .await
+            .unwrap();
+        // Verify update_category columns exist.
+        db.execute_unprepared("SELECT update_category FROM host_software_items LIMIT 0")
+            .await
+            .unwrap();
+        db.execute_unprepared("SELECT update_category FROM update_history LIMIT 0")
             .await
             .unwrap();
     }

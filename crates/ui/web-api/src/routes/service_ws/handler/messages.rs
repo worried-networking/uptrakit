@@ -334,6 +334,7 @@ pub(super) async fn handle_version_check_results(
                         active.latest_version = Set(Some(latest_version.clone()));
                         active.latest_version_fetched_at = Set(Some(now));
                     }
+                    active.update_category = Set(result.update_category.to_string());
                     if let Err(e) = active.update(state.db()).await {
                         tracing::warn!(
                             error = %e,

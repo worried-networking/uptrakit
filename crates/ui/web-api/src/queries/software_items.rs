@@ -831,6 +831,7 @@ pub async fn assign_hosts(
                 latest_release_metadata: Set(None),
                 last_updated_at: Set(None),
                 linked_at: Set(now),
+                update_category: Set("unknown".to_string()),
             };
             link.insert(&txn).await.context_to()?;
         }

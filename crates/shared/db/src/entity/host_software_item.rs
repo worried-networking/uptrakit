@@ -16,6 +16,9 @@ pub struct Model {
     pub latest_release_metadata: Option<serde_json::Value>,
     pub last_updated_at: Option<OffsetDateTime>,
     pub linked_at: OffsetDateTime,
+    /// Classification of the available update (security, bugfix, feature, unknown).
+    #[sea_orm(default_value = "unknown")]
+    pub update_category: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
