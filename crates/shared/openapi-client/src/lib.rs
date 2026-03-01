@@ -11,6 +11,7 @@ pub mod enrollment_tokens;
 pub mod error;
 pub mod health;
 pub mod hosts;
+pub mod notifications;
 pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod pki;

@@ -165,6 +165,28 @@ pub(crate) mod scheduler {
     }
 }
 
+pub(crate) mod notifications {
+    use uuid::Uuid;
+    /// `POST /api/v1/notifications/channels` · `GET …`
+    pub(crate) const CHANNELS: &str = "/api/v1/notifications/channels";
+    /// `GET /api/v1/notifications/channels/{id}` · `PUT …` · `DELETE …`
+    pub(crate) fn channel_by_id(id: &Uuid) -> String {
+        format!("/api/v1/notifications/channels/{id}")
+    }
+    /// `POST /api/v1/notifications/channels/{id}/test`
+    pub(crate) fn test_channel(id: &Uuid) -> String {
+        format!("/api/v1/notifications/channels/{id}/test")
+    }
+    /// `POST /api/v1/notifications/rules` · `GET …`
+    pub(crate) const RULES: &str = "/api/v1/notifications/rules";
+    /// `GET /api/v1/notifications/rules/{id}` · `PUT …` · `DELETE …`
+    pub(crate) fn rule_by_id(id: &Uuid) -> String {
+        format!("/api/v1/notifications/rules/{id}")
+    }
+    /// `GET /api/v1/notifications/log`
+    pub(crate) const LOG: &str = "/api/v1/notifications/log";
+}
+
 pub(crate) mod enrollment_tokens {
     use uuid::Uuid;
     /// `GET /api/v1/enrollment-tokens` · `POST /api/v1/enrollment-tokens`
