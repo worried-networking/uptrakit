@@ -27,7 +27,7 @@ use thiserror::Error;
 pub enum PluginType {
     ReleasesGithub,
     ReleasesGitlab,
-    ReleasesCodeberg,
+    ReleasesForgejo,
     DiscoveryProxmoxHelperScripts,
     ReleasesDocker,
     PackageManagerHomebrew,
@@ -50,7 +50,7 @@ impl PluginType {
         match self {
             Self::ReleasesGithub => "releases_github",
             Self::ReleasesGitlab => "releases_gitlab",
-            Self::ReleasesCodeberg => "releases_codeberg",
+            Self::ReleasesForgejo => "releases_forgejo",
             Self::DiscoveryProxmoxHelperScripts => "discovery_proxmox_helper_scripts",
             Self::ReleasesDocker => "releases_docker",
             Self::PackageManagerHomebrew => "package_manager_homebrew",
@@ -68,7 +68,7 @@ impl PluginType {
         match self {
             Self::ReleasesGithub => "GitHub Releases",
             Self::ReleasesGitlab => "GitLab Releases",
-            Self::ReleasesCodeberg => "Codeberg Releases",
+            Self::ReleasesForgejo => "Forgejo Releases",
             Self::ReleasesDocker => "Docker",
             Self::DiscoveryProxmoxHelperScripts => "Proxmox Helper Scripts",
             Self::PackageManagerHomebrew => "Homebrew",
@@ -103,7 +103,7 @@ impl FromStr for PluginType {
         match s {
             "releases_github" => Ok(Self::ReleasesGithub),
             "releases_gitlab" => Ok(Self::ReleasesGitlab),
-            "releases_codeberg" => Ok(Self::ReleasesCodeberg),
+            "releases_forgejo" => Ok(Self::ReleasesForgejo),
             "discovery_proxmox_helper_scripts" => Ok(Self::DiscoveryProxmoxHelperScripts),
             "releases_docker" => Ok(Self::ReleasesDocker),
             "package_manager_homebrew" => Ok(Self::PackageManagerHomebrew),
@@ -137,7 +137,7 @@ impl From<String> for PluginType {
         match s.as_str() {
             "releases_github" => Self::ReleasesGithub,
             "releases_gitlab" => Self::ReleasesGitlab,
-            "releases_codeberg" => Self::ReleasesCodeberg,
+            "releases_forgejo" => Self::ReleasesForgejo,
             "discovery_proxmox_helper_scripts" => Self::DiscoveryProxmoxHelperScripts,
             "releases_docker" => Self::ReleasesDocker,
             "package_manager_homebrew" => Self::PackageManagerHomebrew,
@@ -154,7 +154,7 @@ impl From<PluginType> for String {
         match pt {
             PluginType::ReleasesGithub => "releases_github".to_string(),
             PluginType::ReleasesGitlab => "releases_gitlab".to_string(),
-            PluginType::ReleasesCodeberg => "releases_codeberg".to_string(),
+            PluginType::ReleasesForgejo => "releases_forgejo".to_string(),
             PluginType::DiscoveryProxmoxHelperScripts => {
                 "discovery_proxmox_helper_scripts".to_string()
             }
@@ -232,10 +232,10 @@ mod tests {
     }
 
     #[test]
-    fn plugin_type_codeberg_serialization_roundtrip() {
-        let cb = PluginType::ReleasesCodeberg;
+    fn plugin_type_forgejo_serialization_roundtrip() {
+        let cb = PluginType::ReleasesForgejo;
         let json = serde_json::to_string(&cb).expect("serialize");
-        assert_eq!(json, r#""releases_codeberg""#);
+        assert_eq!(json, r#""releases_forgejo""#);
         let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, cb);
     }
@@ -344,8 +344,8 @@ mod tests {
             PluginType::ReleasesGitlab
         );
         assert_eq!(
-            PluginType::from("releases_codeberg".to_string()),
-            PluginType::ReleasesCodeberg
+            PluginType::from("releases_forgejo".to_string()),
+            PluginType::ReleasesForgejo
         );
         assert_eq!(
             PluginType::from("releases_docker".to_string()),
@@ -383,8 +383,8 @@ mod tests {
         assert_eq!(PluginType::ReleasesGithub.to_string(), "releases_github");
         assert_eq!(PluginType::ReleasesGitlab.to_string(), "releases_gitlab");
         assert_eq!(
-            PluginType::ReleasesCodeberg.to_string(),
-            "releases_codeberg"
+            PluginType::ReleasesForgejo.to_string(),
+            "releases_forgejo"
         );
         assert_eq!(
             PluginType::DiscoveryProxmoxHelperScripts.to_string(),
@@ -443,8 +443,8 @@ mod tests {
             Some(PluginType::ReleasesGitlab)
         );
         assert_eq!(
-            "releases_codeberg".parse::<PluginType>().ok(),
-            Some(PluginType::ReleasesCodeberg)
+            "releases_forgejo".parse::<PluginType>().ok(),
+            Some(PluginType::ReleasesForgejo)
         );
         assert_eq!(
             "generic_shell".parse::<PluginType>().ok(),
@@ -478,8 +478,8 @@ mod tests {
         assert_eq!(PluginType::ReleasesGithub.display_name(), "GitHub Releases");
         assert_eq!(PluginType::ReleasesGitlab.display_name(), "GitLab Releases");
         assert_eq!(
-            PluginType::ReleasesCodeberg.display_name(),
-            "Codeberg Releases"
+            PluginType::ReleasesForgejo.display_name(),
+            "Forgejo Releases"
         );
         assert_eq!(PluginType::ReleasesDocker.display_name(), "Docker");
         assert_eq!(
@@ -503,7 +503,7 @@ mod tests {
         let variants = [
             PluginType::ReleasesGithub,
             PluginType::ReleasesGitlab,
-            PluginType::ReleasesCodeberg,
+            PluginType::ReleasesForgejo,
             PluginType::DiscoveryProxmoxHelperScripts,
             PluginType::ReleasesDocker,
             PluginType::PackageManagerHomebrew,
@@ -525,7 +525,7 @@ mod tests {
         let variants = [
             PluginType::ReleasesGithub,
             PluginType::ReleasesGitlab,
-            PluginType::ReleasesCodeberg,
+            PluginType::ReleasesForgejo,
             PluginType::DiscoveryProxmoxHelperScripts,
             PluginType::ReleasesDocker,
             PluginType::PackageManagerHomebrew,
