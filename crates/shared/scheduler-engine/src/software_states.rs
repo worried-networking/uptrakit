@@ -16,6 +16,7 @@ struct HostSoftwareItemRow {
     software_item_id: Uuid,
     installed_version: Option<String>,
     latest_version: Option<String>,
+    latest_release_metadata: Option<serde_json::Value>,
 }
 
 /// Load all software state data for a tenant and assemble a [`MqttSoftwareStatesPayload`].
@@ -61,6 +62,7 @@ pub async fn load_software_states_for_tenant(
         .column(host_software_item::Column::SoftwareItemId)
         .column(host_software_item::Column::InstalledVersion)
         .column(host_software_item::Column::LatestVersion)
+        .column(host_software_item::Column::LatestReleaseMetadata)
         .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
         .into_model::<HostSoftwareItemRow>()
         .all(db)
@@ -117,12 +119,16 @@ pub async fn load_software_states_for_tenant(
                             (Some(installed), Some(latest)) => installed != latest,
                             _ => false,
                         };
+                        let (release_url, release_notes) =
+                            extract_release_info(link.latest_release_metadata.as_ref());
                         Some(MqttSoftwareStateHostEntry {
                             host_id: host.id,
                             hostname: host.hostname.clone(),
                             installed_version: link.installed_version.clone(),
                             latest_version: link.latest_version.clone(),
                             update_available,
+                            release_url,
+                            release_notes,
                         })
                     })
                     .collect()
@@ -145,4 +151,68 @@ pub async fn load_software_states_for_tenant(
         tenant_id,
         items: result_items,
     })
+}
+
+/// Extract `release_url` and `release_notes` from a `latest_release_metadata` JSON blob.
+///
+/// Returns `(None, None)` when `metadata` is `None` or the expected keys are absent.
+fn extract_release_info(
+    metadata: Option<&serde_json::Value>,
+) -> (Option<String>, Option<String>) {
+    let Some(meta) = metadata else {
+        return (None, None);
+    };
+    let url = meta
+        .get("release_url")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let notes = meta
+        .get("release_notes")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    (url, notes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_release_info_none_input() {
+        assert_eq!(extract_release_info(None), (None, None));
+    }
+
+    #[test]
+    fn extract_release_info_both_fields_present() {
+        let meta = serde_json::json!({
+            "release_url": "https://github.com/owner/repo/releases/tag/v1.3.0",
+            "release_notes": "## What's new\n- Feature A"
+        });
+        let (url, notes) = extract_release_info(Some(&meta));
+        assert_eq!(
+            url.as_deref(),
+            Some("https://github.com/owner/repo/releases/tag/v1.3.0")
+        );
+        assert_eq!(notes.as_deref(), Some("## What's new\n- Feature A"));
+    }
+
+    #[test]
+    fn extract_release_info_missing_fields() {
+        let meta = serde_json::json!({ "tag": "v1.3.0" });
+        assert_eq!(extract_release_info(Some(&meta)), (None, None));
+    }
+
+    #[test]
+    fn extract_release_info_only_url() {
+        let meta = serde_json::json!({ "release_url": "https://example.com" });
+        let (url, notes) = extract_release_info(Some(&meta));
+        assert_eq!(url.as_deref(), Some("https://example.com"));
+        assert!(notes.is_none());
+    }
+
+    #[test]
+    fn extract_release_info_non_string_values_ignored() {
+        let meta = serde_json::json!({ "release_url": 42, "release_notes": true });
+        assert_eq!(extract_release_info(Some(&meta)), (None, None));
+    }
 }
