@@ -297,9 +297,12 @@ pub async fn run_service_lifecycle<H: ServiceHandler>(
         match do_enrollment(args, &host, port, &mut identity, &tls_connector, handler).await {
             Ok(()) => break,
             Err(e) => {
-                if is_receive_closed_report(&e) {
+                if is_receive_closed_report(&e) || is_transient_network_report(&e) {
                     let delay = enrollment_backoff.next_delay();
-                    tracing::info!("disconnected during enrollment, reconnecting in {delay:?}");
+                    tracing::info!(
+                        error = %e,
+                        "transient enrollment error, reconnecting in {delay:?}"
+                    );
                     tokio::time::sleep(delay).await;
                     // Reload identity in case enrollment partially completed.
                     identity.load().await?;
@@ -442,6 +445,12 @@ fn is_cert_expired_report(report: &Report<EnrollmentError>) -> bool {
 /// Check if a `Report<EnrollmentError>` represents a receive-closed condition.
 fn is_receive_closed_report(report: &Report<EnrollmentError>) -> bool {
     report.current_context().is_receive_closed()
+}
+
+/// Check if a `Report<EnrollmentError>` represents a transient network error
+/// that should be retried with backoff (DNS failure, TCP refused, etc.).
+fn is_transient_network_report(report: &Report<EnrollmentError>) -> bool {
+    report.current_context().is_transient_network()
 }
 
 #[cfg(test)]

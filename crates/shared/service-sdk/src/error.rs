@@ -117,6 +117,33 @@ impl EnrollmentError {
         matches!(self, Self::Protocol(ProtocolError::ReceiveClosed))
     }
 
+    /// `true` for transient transport-level failures that should be retried.
+    ///
+    /// The following are considered transient:
+    /// - [`EnrollmentError::WebSocket`] — network-level connection error (TCP
+    ///   refused, DNS failure, TLS handshake, etc.)
+    /// - [`EnrollmentError::Io`] — TCP reset, connection refused, etc.,
+    ///   **unless** the underlying error is a rustls `CertificateExpired` alert
+    ///   (which is permanent: the agent's client certificate needs renewal).
+    /// - [`ProtocolError::ConnectionTimeout`] — explicit TCP connect timeout.
+    ///
+    /// The following are **not** retried:
+    /// - `Protocol::EnrollmentRejected` — server explicitly refused the token.
+    /// - `Protocol::VersionMismatch` — incompatible protocol version.
+    /// - `Protocol::UnexpectedMessage` — protocol violation.
+    /// - `Identity::*` — key / CSR generation failures (local misconfiguration).
+    /// - `Json::*` — protocol-level serialization error.
+    /// - `Directory::*` — filesystem access failure.
+    /// - `Tls::InvalidDnsName` — hostname is malformed (permanent).
+    pub fn is_transient_network(&self) -> bool {
+        match self {
+            Self::WebSocket(_) => true,
+            Self::Io(e) if !is_rustls_cert_expired(e) => true,
+            Self::Protocol(ProtocolError::ConnectionTimeout) => true,
+            _ => false,
+        }
+    }
+
     /// `true` when the TLS handshake failed because the server considers our
     /// client certificate expired.
     pub fn is_cert_expired(&self) -> bool {
@@ -217,5 +244,43 @@ mod tests {
     fn is_rustls_cert_expired_helper_different_error() {
         let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset");
         assert!(!is_rustls_cert_expired(&io_err));
+    }
+
+    // ── is_transient_network tests ────────────────────────────────────────
+
+    #[test]
+    fn is_transient_network_websocket_error() {
+        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
+        assert!(err.is_transient_network());
+    }
+
+    #[test]
+    fn is_transient_network_io_not_cert_expired() {
+        let err = EnrollmentError::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            "connection refused",
+        ));
+        assert!(err.is_transient_network());
+    }
+
+    #[test]
+    fn is_transient_network_connection_timeout() {
+        let err = EnrollmentError::Protocol(ProtocolError::ConnectionTimeout);
+        assert!(err.is_transient_network());
+    }
+
+    #[test]
+    fn is_transient_network_enrollment_rejected() {
+        let err = EnrollmentError::Protocol(ProtocolError::EnrollmentRejected);
+        assert!(!err.is_transient_network());
+    }
+
+    #[test]
+    fn is_transient_network_cert_expired_io() {
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
+        let io_err = std::io::Error::other(rustls_err);
+        let err = EnrollmentError::Io(io_err);
+        // Cert-expired IO errors must NOT be retried.
+        assert!(!err.is_transient_network());
     }
 }
