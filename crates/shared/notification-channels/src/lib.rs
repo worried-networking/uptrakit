@@ -6,6 +6,8 @@
 //! [`ChannelRegistry`] and looked up by type name at dispatch time.
 
 mod channel;
+#[cfg(feature = "email")]
+mod email;
 mod error;
 mod registry;
 #[cfg(feature = "telegram")]
@@ -17,6 +19,8 @@ pub use channel::{DeliveryMessage, MessageAction, NotificationChannel};
 pub use error::ChannelError;
 pub use registry::ChannelRegistry;
 
+#[cfg(feature = "email")]
+pub use email::EmailChannel;
 #[cfg(feature = "telegram")]
 pub use telegram::TelegramChannel;
 #[cfg(feature = "webhook")]

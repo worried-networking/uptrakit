@@ -12,10 +12,13 @@ description = "Pluggable notification channel implementations for Uptrakit"
 default = ["webhook"]
 webhook = []
 telegram = []
-email = []
+email = ["dep:lettre"]
 all = ["webhook", "telegram", "email"]
 
 [dependencies]
+lettre = { version = "0.11", default-features = false, features = [
+    "smtp-transport", "tokio1", "tokio1-rustls-tls", "builder", "hostname"
+], optional = true }
 async-trait = { workspace = true }
 hmac = "0.12"
 reqwest = { workspace = true }

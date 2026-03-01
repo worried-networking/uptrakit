@@ -46,7 +46,10 @@ impl ChannelRegistry {
             );
         }
 
-        // email: placeholder for future implementation
+        #[cfg(feature = "email")]
+        {
+            channels.insert("email".to_string(), Arc::new(crate::email::EmailChannel));
+        }
 
         Ok(Self { channels })
     }
@@ -104,5 +107,12 @@ mod tests {
     fn registry_get_returns_telegram_channel() {
         let registry = ChannelRegistry::new().expect("registry should build");
         assert!(registry.get("telegram").is_some());
+    }
+
+    #[cfg(feature = "email")]
+    #[test]
+    fn registry_get_returns_email_channel() {
+        let registry = ChannelRegistry::new().expect("registry should build");
+        assert!(registry.get("email").is_some());
     }
 }
