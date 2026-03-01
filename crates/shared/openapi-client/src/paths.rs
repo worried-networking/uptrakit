@@ -241,6 +241,11 @@ pub(crate) mod settings_smtp {
     pub(crate) const BASE: &str = "/api/v1/settings/smtp";
 }
 
+pub(crate) mod settings_nats {
+    /// `GET /api/v1/settings/nats` · `PUT /api/v1/settings/nats`
+    pub(crate) const BASE: &str = "/api/v1/settings/nats";
+}
+
 pub(crate) mod settings_mqtt {
     use uuid::Uuid;
     /// `GET /api/v1/settings/mqtt` · `POST …`

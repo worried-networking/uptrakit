@@ -20,6 +20,7 @@ pub mod scheduler;
 pub mod services;
 pub mod settings;
 pub mod settings_mqtt;
+pub mod settings_nats;
 pub mod settings_smtp;
 pub mod software_items;
 pub mod sse;
