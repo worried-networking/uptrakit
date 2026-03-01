@@ -95,6 +95,7 @@ uptrakit/
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, cron utils, TaskExecutor trait, SchedulerNotifier trait, 4 built-in executors
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers; default_resolve_shutdown(), init_tracing()
+│   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry; webhook (default) + telegram (feature-gated) channel impls
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
@@ -851,6 +852,52 @@ All crates writing sensitive files (private keys, certificates, CA bundles) **mu
 | --- | --- |
 | `crates/shared/directories/src/lib.rs` | Cross-platform directory resolution and secure file/directory operations |
 
+## Notification subsystem
+
+The controller includes a channel-agnostic notification subsystem. Event producers emit `NotificationEvent` values
+(internal, never exposed to channels). A fire-and-forget `NotificationDispatcher` matches events against
+tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate channel for delivery.
+
+### Key crates and modules
+
+| Crate/module | Purpose |
+| --- | --- |
+| `crates/shared/notification-channels/` | `NotificationChannel` trait, `DeliveryMessage`, `ChannelRegistry`, webhook + telegram impls |
+| `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus` enums |
+| `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher`, `message_builder` |
+| `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers (channels, rules, log, telegram callback) |
+| `crates/ui/web-api/src/queries/notifications.rs` | CRUD query helpers using `TenantDb` |
+| `crates/shared/openapi-client/src/notifications.rs` | Typed HTTP client methods |
+| `crates/ui/cli/src/commands/notifications.rs` | CLI `notifications` command group |
+
+### Feature flags
+
+| Feature | Crate | Default | Notes |
+| --- | --- | --- | --- |
+| `webhook` | notification-channels | yes | Always compiled |
+| `telegram` | notification-channels | no | Requires `teloxide-core` |
+| `notifications-telegram` | web-api, controller | no | Propagated to notification-channels |
+
+### Event types
+
+`update_available`, `update_completed`, `update_failed`, `new_software_discovered`, `new_service_enrolled`,
+`ca_rotated`. Events are wired into existing WebSocket handlers (`messages.rs`, `updates.rs`), `services.rs`,
+and `settings_ca.rs`.
+
+### Permissions
+
+`ViewNotifications` (view channels, rules, log) and `ManageNotifications` (create/edit/delete channels and rules).
+
+### Adding a new channel
+
+1. Add feature in `crates/shared/notification-channels/Cargo.toml`
+2. Implement `NotificationChannel` trait in a new module
+3. Register in `ChannelRegistry::new()` behind `#[cfg(feature = "...")]`
+4. Add variant to `NotificationChannelType` enum
+5. Propagate feature: `web-api/Cargo.toml` → `controller/Cargo.toml`
+
+See [Notifications Development](docs/development/notifications.md) for full details.
+
 ## Detailed Documentation References
 
 For more in-depth information on specific topics, refer to the following documents:
@@ -867,6 +914,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Reverse Proxy Security](docs/security/reverse-proxy-security.md)
 - [SSH Agent Secrets](docs/security/ssh-agent-secrets.md)
 - [Sudoers Management](docs/security/sudoers-management.md)
+- [Notifications Security](docs/security/notifications-security.md)
 
 ### End-user Guides
 
@@ -897,6 +945,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [OpenAPI Client](docs/development/openapi-client.md)
 - [Embedded Frontend](docs/development/embedded-frontend.md)
 - [Logging](docs/development/logging.md)
+- [Notifications](docs/development/notifications.md)
 
 ### Architecture
 

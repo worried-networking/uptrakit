@@ -171,6 +171,30 @@ Filtering uses `?capability=software_discovery` on the list endpoint. There is n
 All services connect to `/api/v1/ws/service` over mTLS and exchange shared `ServiceMessage`/`ControllerMessage` enums. The
 AsyncAPI definition lives at `crates/shared/wire/asyncapi.yaml` and is described in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 
+## Notification subsystem
+
+The controller includes a channel-agnostic notification subsystem that delivers event-driven alerts through
+pluggable channels. Event producers emit `NotificationEvent` values (internal, channel-agnostic); a
+fire-and-forget `NotificationDispatcher` matches them against tenant-scoped rules, builds a
+`DeliveryMessage`, and hands it to the appropriate channel implementation for delivery.
+
+The `uptrakit-notification-channels` crate (`crates/shared/notification-channels/`) houses the
+`NotificationChannel` trait, the `DeliveryMessage` struct, a `ChannelRegistry`, and all concrete channel
+implementations. Each channel is behind its own Cargo feature flag (`webhook` — default on, `telegram`).
+Future channels (Email, Slack, Discord, Pushover, etc.) are added as feature-gated modules in the same crate.
+
+Supported event types: `update_available`, `update_completed`, `update_failed`, `new_software_discovered`,
+`new_service_enrolled`, `ca_rotated`. Rules can be scoped to a specific host, software item, and/or plugin type.
+`UpdateAvailable` events produce actionable notifications — on Telegram, an inline keyboard button triggers
+the update via a callback endpoint.
+
+Channel configuration is stored encrypted (`EncryptedString`) in the `notification_channels` table. Secrets
+are masked in API responses. Delivery history is recorded in the `notification_log` table with status tracking
+(`pending` → `delivered` | `failed`).
+
+See [Notifications Development](docs/development/notifications.md), [Notifications API](docs/api/notifications.md),
+and [Notifications Security](docs/security/notifications-security.md).
+
 ## Update output streaming (SSE)
 
 The controller provides a browser-facing SSE endpoint (`GET /api/v1/update-history/{id}/output/stream`) for real-time

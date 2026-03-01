@@ -600,19 +600,31 @@ Polish and additional capabilities for production use.
 
 ### Notification System
 
-- [ ] Design notification architecture
-  - [ ] Notification types (email, webhook, MQTT, push)
-  - [ ] Notification triggers (updates available, completed, failed)
-  - [ ] Notification templates
-- [ ] Implement notification providers
-  - [ ] Email notifications
-  - [ ] Webhook notifications
-  - [ ] Slack integration
-  - [ ] Discord integration
+- [x] Design notification architecture
+  - [x] Channel-agnostic dispatcher with pluggable channels
+  - [x] Event types: update_available, update_completed, update_failed, new_software_discovered,
+    new_service_enrolled, ca_rotated
+  - [x] Scope-based rule matching (tenant, host, software item, plugin type)
+- [x] Implement notification channels
+  - [x] Generic Webhook (HMAC-SHA256 signed, always compiled)
+  - [x] Telegram (feature-gated, inline keyboard buttons for actionable notifications)
+  - [ ] Email notifications (via `lettre`)
+  - [ ] Slack integration (via `slack-morphism`)
+  - [ ] Discord integration (via `twilight-http`)
+  - [ ] Pushover integration
+  - [ ] Gotify integration
+  - [ ] ntfy integration
+  - [ ] Matrix integration
+  - [ ] Microsoft Teams integration
+  - [ ] PagerDuty integration
 - [ ] Add notification configuration UI
-- [ ] Implement notification filtering/preferences
-- [ ] Add notification history
-- [ ] Support actionable notifications
+- [x] Implement notification filtering/preferences (rule-based scope filters)
+- [x] Add notification history (delivery log with status tracking)
+- [x] Support actionable notifications (Telegram inline keyboard → update trigger)
+- [x] REST API for channels, rules, and delivery log
+- [x] CLI commands for notification management
+- [x] OpenAPI client methods
+- [ ] Add Telegram callback rate limiting
 
 ### Update Windows
 

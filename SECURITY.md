@@ -28,6 +28,7 @@ a week.
 - TOFU & TLS hardening: [docs/security/tofu-tls.md](docs/security/tofu-tls.md)
 - Filesystem/dependency hardening: [docs/security/filesystem-dependency-security.md](docs/security/filesystem-dependency-security.md)
 - Secure development practices: [docs/security/secure-development.md](docs/security/secure-development.md)
+- Notification security (secret storage, callback verification, action tokens): [docs/security/notifications-security.md](docs/security/notifications-security.md)
 
 ## Disclosure policy
 
