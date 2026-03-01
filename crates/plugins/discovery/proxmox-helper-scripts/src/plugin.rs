@@ -210,6 +210,29 @@ impl ProxmoxHelperScriptsPlugin {
         }
     }
 
+    /// Build a `DiscoveryTarget` for the Forgejo releases role.
+    ///
+    /// The plugin config carries only Forgejo-level settings (no `owner`/`repo`).
+    /// The `owner/repo` pair is expressed as the `package_identifier` override
+    /// so the controller routes release queries to the right repo while sharing
+    /// a single plugin config instance across all tracked Forgejo repositories.
+    fn forgejo_fetch_target(owner: &str, repo: &str) -> DiscoveryTarget {
+        DiscoveryTarget {
+            plugin_type: PluginType::ReleasesForgejo,
+            plugin_config: serde_json::json!({
+                "api_base_url": "https://codeberg.org",
+                "tag_strip_prefix": "v",
+                "include_prereleases": false,
+                "asset_patterns": [],
+            }),
+            plugin_config_name: "Forgejo Releases".to_string(),
+            roles: vec![PluginRole::FetchReleases],
+            package_identifier: Some(format!("{owner}/{repo}")),
+            config_override: None,
+            execution_site: None,
+        }
+    }
+
     /// Build a `DiscoveryTarget` for the Shell plugin covering both
     /// `DetectVersion` and `ExecuteUpdate` using PHS conventions.
     ///
@@ -450,6 +473,39 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     ],
                     extra: None,
                 });
+            } else if let (Some(owner), Some(repo)) =
+                (&analysis.forgejo_owner, &analysis.forgejo_repo)
+            {
+                // Forgejo-managed: read version via the same PHS helper script.
+                let vfb = analysis
+                    .version_file_basename
+                    .as_deref()
+                    .unwrap_or(&script.slug);
+                let Some(installed_version) = self.phs_version(vfb).await else {
+                    tracing::debug!(slug = %script.slug,
+                        "PHS version helper absent or version file absent; skipping Forgejo item");
+                    continue;
+                };
+
+                tracing::debug!(
+                    slug = %script.slug,
+                    version_file_basename = %vfb,
+                    version = %installed_version,
+                    owner = %owner,
+                    repo = %repo,
+                    "discovered Forgejo-managed PHS software"
+                );
+
+                discovered.push(DiscoveredSoftware {
+                    package_identifier: script.slug.clone(),
+                    name: display_name,
+                    installed_version,
+                    targets: vec![
+                        Self::forgejo_fetch_target(owner, repo),
+                        Self::phs_shell_target(analysis.version_file_basename.as_deref()),
+                    ],
+                    extra: None,
+                });
             } else if let Some(ref npm_pkg) = analysis.npm_package {
                 // npm-managed: verify installed via `npm list -g`.
                 let Some(installed_version) = self.npm_global_version(npm_pkg).await else {
@@ -670,6 +726,30 @@ mod tests {
         assert_eq!(
             target.package_identifier.as_deref(),
             Some("BookLore/BookLore")
+        );
+    }
+
+    #[test]
+    fn forgejo_fetch_target_structure() {
+        let target =
+            ProxmoxHelperScriptsPlugin::forgejo_fetch_target("readeck", "readeck");
+        assert_eq!(target.plugin_type, PluginType::ReleasesForgejo);
+        assert_eq!(target.plugin_config_name, "Forgejo Releases");
+        // FetchReleases only — no agent-side roles.
+        assert_eq!(target.roles.len(), 1);
+        assert_eq!(target.roles[0], PluginRole::FetchReleases);
+        // api_base_url points to Codeberg (PHS scripts use check_for_codeberg_release).
+        assert_eq!(
+            target.plugin_config.get("api_base_url").and_then(|v| v.as_str()),
+            Some("https://codeberg.org")
+        );
+        // No owner/repo in config.
+        assert!(target.plugin_config.get("owner").is_none());
+        assert!(target.plugin_config.get("repo").is_none());
+        // package_identifier carries the "owner/repo" override.
+        assert_eq!(
+            target.package_identifier.as_deref(),
+            Some("readeck/readeck")
         );
     }
 
