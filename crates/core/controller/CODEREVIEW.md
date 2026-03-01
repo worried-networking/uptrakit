@@ -90,6 +90,8 @@ scheduler-engine crate via a `register_all_executors` function.
 - Server certificate auto-renewal is watch-channel-driven. `spawn_ca_reload` detects
   cross-instance CA updates by comparing a version counter in the `settings` table and
   rebuilds the TLS config without a restart.
+- `src/startup.rs:60-76` -- `init_master_key` returns `Option<SecretString>` so the hex string
+  is zeroed on drop. The parsed key bytes use `Zeroizing<[u8; 32]>` throughout.
 - `src/startup.rs:77-83` -- Master key initialization requires explicit
   `--allow-plaintext-secrets` with clear warning.
 - `src/startup.rs:897-910` -- Master key rejected if not exactly 64 hex characters (32 bytes).
@@ -103,9 +105,7 @@ scheduler-engine crate via a `register_all_executors` function.
 
 ### Issues
 
-**[MEDIUM]** `src/startup.rs:61-75` -- Master key hex returned as `String`, not wrapped in
-`Zeroizing<String>`. The hex form may persist in memory after use. The parsed key bytes
-correctly use `Zeroizing<[u8; 32]>`, but the intermediate hex string could linger.
+No security issues found.
 
 ## Code Quality
 
@@ -201,10 +201,6 @@ and the bind.
   multi-instance safety.
 
 ### Issues
-
-**[HIGH]** `crates/ui/web-api/src/service_connections.rs:264` -- Untracked `tokio::spawn` tasks
-in `broadcast_server_restarting_scattered`. If the process exits before all scatter tasks fire
-(up to 5s window), some services will not receive the notification.
 
 **[MEDIUM]** `src/db/mod.rs:20-25` -- Database connection pool hardcoded at
 `max_connections=10` with no runtime configurability. All timeouts (8 seconds) and pool sizes

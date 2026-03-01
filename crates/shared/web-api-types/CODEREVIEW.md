@@ -9,8 +9,8 @@
 `uptrakit-web-api-types` (~6,323 LoC) defines all HTTP API request/response types shared between
 `uptrakit-web-api` (the server) and `uptrakit-openapi-client` (the generated client). It provides a
 comprehensive set of typed pagination types, domain models, and a well-structured `Validate` trait
-for input validation. The crate is a strong shared vocabulary layer. The primary concern is
-missing `Validate` implementations on the remaining MQTT client request types.
+for input validation. The crate is a strong shared vocabulary layer. `Validate` implementations now cover all HTTP
+request types including the MQTT client request types.
 
 ## Architecture
 
@@ -75,11 +75,6 @@ No high availability issues found.
 - `SecretString` used consistently for all credential fields.
 
 ### Issues
-
-**[MEDIUM]** `src/mqtt_clients.rs` -- `CreateMqttClientRequest` and `UpdateMqttClientRequest`
-accept user-controlled input but have no `Validate` implementation. Fields like MQTT client
-identifiers and broker hostnames can be submitted with arbitrary lengths or characters. Add
-`Validate` implementations.
 
 **[LOW]** `ServiceStatus` mapping from wire protocol status codes is duplicated in at least
 three locations across `mqtt`, `agent`, and `web-api`. Centralize the conversion as a

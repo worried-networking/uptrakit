@@ -21,7 +21,10 @@ and several query modules without test coverage. The OIDC registration DB error 
 invalid UUID query parameter handling, HTTP status code violations on soft-delete and
 idempotent-create endpoints, the `require_auth.rs` permission-fetch fallback, the TOCTOU race
 in `create_or_ignore_ignore_rule`, the empty output returned by `list_update_history` for
-records using the `update_output_lines` storage path, and the rate-limit test DB backdating
+records using the `update_output_lines` storage path, the rate-limit test DB backdating,
+the `find_raw_active_config` `.ok().flatten()` DB error swallowing, the
+`notification_service.rs` 50 ms timeout tests missing `start_paused`, and the
+`broadcast_server_restarting_scattered` untracked `tokio::spawn` tasks
 have all been fixed.
 
 ## Architecture
@@ -85,9 +88,6 @@ router function, and OpenAPI annotation.
 
 **[LOW]** `api_tokens` table has no `expires_at` column. API tokens valid indefinitely once
 issued. A compromised token that was never explicitly revoked remains valid forever.
-
-**[LOW]** `src/queries/plugin_configs.rs:87-94` -- `find_raw_active_config` swallows DB errors
-via `.ok().flatten()`. Transient DB issues indistinguishable from "config does not exist".
 
 ## Security and Safety
 
@@ -197,9 +197,6 @@ reduce duplication.
 **[MEDIUM]** `oidc_callback` has no unit tests despite 413 lines and 7 code paths. All seven
 `OidcUserResolution` branches are untested at the unit level.
 
-**[MEDIUM]** `src/notification_service.rs:396,437` -- `tokio::time::timeout(50ms)` in tests
-without `start_paused = true`. Should use `start_paused = true` with `tokio::time::advance`.
-
 **[LOW]** `src/notification_service.rs:46-63` -- `msg.clone()` on every `send()` and
 `broadcast()` call. Could compute serialized JSON first.
 
@@ -251,9 +248,6 @@ regardless of activity.
 **[MEDIUM]** `src/update_output_broadcaster.rs:80-96` -- `send_line` holds write lock for the
 entire operation. A read lock with per-entry interior mutability would allow concurrent sends to
 different updates.
-
-**[LOW]** `src/service_connections.rs:312-319` -- `broadcast_server_restarting_scattered` spawns
-unbounded untracked tasks. Consider bounded semaphore.
 
 **[LOW]** `src/routes/service_ws/handler/mod.rs` -- First approval-poll tick consumed with
 `.await`, blocking the enrolled loop for 5 seconds before entering the main `select!`.
