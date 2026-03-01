@@ -35,6 +35,9 @@ This is the default and is sufficient for single-controller deployments.
   credentials are delivered exclusively via WebSocket to services with credential capabilities.
 - `RequestCaRotation` flows in the opposite direction: published by the external scheduler to
   `uptrakit.events.controller`, consumed by controllers to trigger `ca_rotation_trigger.notify_one()`.
+- `RequestCrlRenewal` is published by controllers (after revocation) and by the `CrlRenewal` scheduler task
+  to `uptrakit.events.controller`; each consuming controller fires `revocation_notify.notify_one()` to rebuild
+  its CRL. See [PKI — CRLs](../security/pki-certificates.md#crls) for the full rebuild model.
 - NATS publishes are fire-and-forget (errors are logged, not propagated to the caller).
 - Without NATS, there is zero cross-controller overhead — `NotificationService` delivers locally only.
 

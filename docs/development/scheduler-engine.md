@@ -14,8 +14,8 @@ The engine provides:
 - **`TaskExecutor` trait** — implemented by each scheduled task type.
 - **`SchedulerNotifier` trait** — abstracts push notification delivery (local vs NATS).
 - **Shared query helpers** — `load_software_states_for_tenant()`, `should_rotate_ca()`.
-- **Four built-in executors** — `AuthCleanupExecutor`, `StaleLeaseCleanupExecutor`,
-  `VersionCheckExecutor`, `ServiceCertCheckExecutor`.
+- **Five built-in executors** — `AuthCleanupExecutor`, `StaleLeaseCleanupExecutor`,
+  `VersionCheckExecutor`, `ServiceCertCheckExecutor`, `CrlRenewalExecutor`.
 
 The CA rotation check executor is **not** in the engine — it is mode-specific:
 
@@ -43,6 +43,7 @@ crates/shared/scheduler-engine/src/
         stale_lease_cleanup.rs
         version_check.rs
         service_cert_check.rs
+        crl_renewal.rs
 ```
 
 ## Key traits
@@ -67,8 +68,10 @@ pub trait SchedulerNotifier: Send + Sync {
     async fn send_to_service(&self, service_id: &Uuid, msg: ControllerMessage);
     async fn broadcast(&self, msg: ControllerMessage);
     async fn send_by_capability(&self, capability: &str, msg: ControllerMessage);
-    async fn signal_ca_rotation(&self);
-    async fn push_software_states_for_tenant(&self, db: &DatabaseConnection, tenant_id: Uuid);
+    async fn signal_ca_rotation(&self, reason: &str);
+    async fn push_software_states_for_tenant(&self, payload: MqttSoftwareStatesPayload);
+    /// Trigger an immediate CRL rebuild on all controller instances.
+    async fn signal_crl_renewal(&self);
 }
 ```
 
@@ -126,6 +129,20 @@ controller-side fetch for items with `ControllerSideFetchReleases` plugins and p
 
 Queries `service_certificates` for non-revoked certificates within 30 days of expiry and sends
 `RequestCertRenewal` messages to the owning services via `SchedulerNotifier::send_to_service()`.
+
+### CrlRenewalExecutor
+
+Triggers a CRL rebuild on all controller instances by calling `SchedulerNotifier::signal_crl_renewal()`.
+
+- **Embedded mode** (`ControllerSchedulerNotifier`): fires `revocation_notify.notify_one()` and publishes
+  `ControllerMessage::RequestCrlRenewal` to NATS for remote controllers.
+- **External mode** (`NatsSchedulerNotifier`): publishes `ControllerMessage::RequestCrlRenewal` to the
+  NATS `controller` capability subject; each receiving controller fires its own `revocation_notify`.
+
+Default cron: `0 */4 * * *` (every 4 hours). The interval is configurable at runtime via the scheduler task
+management API (`PUT /api/v1/scheduler/tasks/{id}`) without a restart.
+
+The `CrlRenewal` task row is seeded for all tenants by migration `m20260305_000001_crl_cache`.
 
 ## Shared utilities
 

@@ -108,8 +108,68 @@ HAProxy, Envoy, Traefik, and Caddy do not.
 
 ## CRLs
 
-CRLs are rebuilt hourly and immediately on revocation. Proxies should refresh the file every 30-60 minutes when relying
-on CRLs. The CRL endpoint is `/api/v1/pki/ca.crl`.
+### Overview
+
+CRLs (Certificate Revocation Lists) are signed by each active CA and served at `/api/v1/pki/ca.crl`. Reverse proxies
+that rely on CRL validation should refresh the file every 30–60 minutes.
+
+### Three-Path Rebuild Model
+
+CRL rebuilds are triggered by three separate mechanisms:
+
+| Trigger | Mechanism |
+| --- | --- |
+| Certificate revoked — same controller | `revocation_notify.notify_one()` fires immediately in `CrlManager::run()`; the CRL is rebuilt and the NATS `RequestCrlRenewal` message is published to notify remote instances |
+| Certificate revoked — remote controllers | `ControllerMessage::RequestCrlRenewal` NATS event received; `event_delivery` calls `revocation_notify.notify_one()` on each receiving controller instance |
+| Periodic refresh | `CrlRenewal` scheduled task (default cron `0 */4 * * *`) executes `CrlRenewalExecutor`, which calls `SchedulerNotifier::signal_crl_renewal()` — fires `revocation_notify` on the embedded scheduler and publishes NATS for all instances |
+
+The default renewal interval (every 4 hours) is configurable via the existing scheduler task management API
+(`PUT /api/v1/scheduler/tasks/{id}`). No separate global setting is needed.
+
+### DB Persistence (`crl_cache` Table)
+
+Signed CRLs are persisted in the `crl_cache` table after every rebuild:
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `ca_fingerprint` | `TEXT` (PK) | CA certificate fingerprint |
+| `crl_pem` | `TEXT` | PEM-encoded CRL |
+| `crl_number` | `BIGINT` | Monotonically increasing CRL number |
+| `this_update` | `TIMESTAMPTZ` | CRL issuance time |
+| `next_update` | `TIMESTAMPTZ` | CRL validity expiry (24 h after issuance) |
+| `updated_at` | `TIMESTAMPTZ` | Last row update time |
+
+No `tenant_id` column — CRLs are global PKI state (not per-tenant).
+
+At startup, `CrlManager` tries to load each CA's CRL from `crl_cache`. A cached entry is used if:
+
+- The row exists for the CA's fingerprint, **and**
+- `next_update` is more than 1 hour in the future (fresh buffer).
+
+If the cache is missing or stale, a fresh CRL is generated and persisted immediately. This eliminates the
+startup window where `GET /api/v1/pki/ca.crl` would return a 404 before the first rebuild.
+
+The CRL number is initialized from `crl_cache.crl_number + 1` on startup so the counter is monotonically
+increasing across controller restarts.
+
+### CRL Validity
+
+Each CRL is valid for 24 hours (`this_update` to `next_update`). CRLs are signed by the corresponding CA's
+private key using ECDSA P-256 SHA-256.
+
+### Implementation Details
+
+- `CrlManager::run()` listens exclusively on `revocation_notify` — no periodic polling timer.
+- `revocation_notify` is fired by all three triggers above (local revocation, NATS event, scheduler).
+- Periodic renewal is delegated entirely to the `CrlRenewal` scheduler task; removing the 60-second poll
+  loop from the CRL manager makes the polling interval observable and configurable from the UI.
+- OCSP is unaffected — the responder reads `service_certificates.revoked_at` directly from the database.
+
+See also:
+
+- [Scheduler Engine](../development/scheduler-engine.md) — `CrlRenewalExecutor` details
+- [Cross-Controller Communication](../development/cross-controller-comm.md) — `RequestCrlRenewal` NATS message
+- [Wire Protocol](../api/wire-protocol.md) — `request_crl_renewal` message definition
 
 ## External CA
 

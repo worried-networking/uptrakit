@@ -5,8 +5,8 @@ the `scheduled_tasks` table for HA-safe exactly-once execution.
 
 ## Overview
 
-The scheduler ensures that periodic work (version checks, cleanup, CA rotation, certificate renewal)
-runs exactly once, regardless of how many controller instances are deployed.
+The scheduler ensures that periodic work (version checks, cleanup, CA rotation, certificate renewal,
+CRL renewal) runs exactly once, regardless of how many controller instances are deployed.
 
 Key properties:
 
@@ -67,8 +67,9 @@ One task per type per tenant |
 | `ca_rotation_check` | `0 3 * * *` | Check if managed CA needs rotation |
 | `version_check` | `0 */6 * * *` | Trigger version detection on agents |
 | `service_cert_check` | `0 */12 * * *` | Proactive certificate renewal for services |
+| `crl_renewal` | `0 */4 * * *` | Trigger CRL rebuild on all controller instances |
 
-All five rows are seeded during the migration with `next_run_at = now`.
+All six rows are seeded during the migration with `next_run_at = now`.
 
 ## HA Claim Mechanism
 
@@ -204,17 +205,27 @@ messages to the owning services via `NotificationService`.
 
 ### Moved to the scheduler (runs on exactly one controller at a time)
 
-| Task | Previously | Now | | --- | --- | --- | | Auth state cleanup | Inline 5-min interval in `main.rs` | `AuthCleanupExecutor` | | MQTT stale lease
-cleanup | No dedicated loop | `StaleLeaseCleanupExecutor` | | CA
-rotation check | Inline 24h interval in `main.rs` | `CaRotationCheckExecutor` | | Version checking | Not implemented | `VersionCheckExecutor` | |
-Service cert renewal check | Not implemented | `ServiceCertCheckExecutor` |
+| Task | Previously | Now |
+| --- | --- | --- |
+| Auth state cleanup | Inline 5-min interval in `main.rs` | `AuthCleanupExecutor` |
+| MQTT stale lease cleanup | No dedicated loop | `StaleLeaseCleanupExecutor` |
+| CA rotation check | Inline 24h interval in `main.rs` | `CaRotationCheckExecutor` |
+| Version checking | Not implemented | `VersionCheckExecutor` |
+| Service cert renewal check | Not implemented | `ServiceCertCheckExecutor` |
+| CRL periodic renewal | 60-second poll loop in `CrlManager::run()` | `CrlRenewalExecutor` (default every 4 h) |
 
 ### Stays as per-controller intervals (must run on every controller)
 
-| Task | Reason | | --- | --- | | Settings version check (30s) | In-memory cache sync | | CA state reload (30s) | CA cache sync | | CRL manager (60s +
-event-driven) | Security-critical TLS config | | NATS consumer (when configured) | Cross-controller messaging backbone | | Server cert renewal (24h) |
-Per-controller disk cert | | Token denylist purge (5min) | In-memory, per-instance | | Ping/pong (agent/MQTT) | Connection keepalive | | CA rotation
-execution | Listens on `ca_rotation_trigger`, needs local key store |
+| Task | Reason |
+| --- | --- |
+| Settings version check (30s) | In-memory cache sync |
+| CA state reload (30s) | CA cache sync |
+| CRL rebuild (event-driven) | Fires on `revocation_notify` — triggered by local revocation, NATS `RequestCrlRenewal`, or `CrlRenewalExecutor` |
+| NATS consumer (when configured) | Cross-controller messaging backbone |
+| Server cert renewal (24h) | Per-controller disk cert |
+| Token denylist purge (5min) | In-memory, per-instance |
+| Ping/pong (agent/MQTT) | Connection keepalive |
+| CA rotation execution | Listens on `ca_rotation_trigger`, needs local key store |
 
 ## REST API
 

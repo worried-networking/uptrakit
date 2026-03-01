@@ -665,6 +665,52 @@ The controller rejects the request with an `error` message (no WS close) in the 
 - The host has no approved agent linked.
 - An update with status `pending` or `in_progress` already exists for the same `(host_id, software_item_id)` pair.
 
+## Controller–Controller Messages (NATS only)
+
+Some `ControllerMessage` variants are exchanged between controller instances via NATS JetStream rather than
+directly over a WebSocket. These messages are published to the `uptrakit.events.controller` subject.
+
+### `request_crl_renewal`
+
+Published by:
+
+- A controller that just revoked a certificate (immediately after `revocation_notify.notify_one()`).
+- The `CrlRenewal` scheduler task via `SchedulerNotifier::signal_crl_renewal()` (embedded and external
+  scheduler modes).
+
+Consumed by:
+
+- All controller instances that receive the NATS event; each fires `revocation_notify.notify_one()` to
+  trigger a local CRL rebuild.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "type": "request_crl_renewal"
+}
+```
+
+The payload is empty — no additional fields are required. The consuming controller rebuilds its CRL from
+the database (all revoked certificates for each active CA).
+
+See [PKI and Certificate Lifecycle — CRLs](../security/pki-certificates.md#crls) for the full three-path
+rebuild model.
+
+### `request_ca_rotation`
+
+Published by the external scheduler when the active CA certificate enters the 6-month rotation window.
+Consumed by controllers to trigger `ca_rotation_trigger.notify_one()`.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "type": "request_ca_rotation",
+  "reason": "CA certificate approaching expiry (detected by external scheduler)"
+}
+```
+
 ## AsyncAPI Specification
 
 The full message schema and payload definitions are published in `crates/shared/wire/asyncapi.yaml`. Use this document
