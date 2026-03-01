@@ -36,7 +36,7 @@ The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenan
 
 ## Tables NOT changed (remain global)
 
-`users`, `roles`, `permissions`, `role_permissions`, `sessions`, `api_tokens`, `pending_*` tables,
+`users`, `roles`, `permissions`, `role_permissions`, `sessions`, `api_tokens`, `global_settings`, `pending_*` tables,
 `host_software_items`, `available_versions`. Note: `service_certificates` and `service_hosts` are tenant-scoped through
 the `services` table FK.
 
@@ -57,21 +57,27 @@ In single-tenant mode, the header is optional — all requests default to the de
 DB. It is used:
 
 - As the fallback in `TenantContext` when no header is provided.
-- For global settings (via `resolve_tenant_for_key()`).
+- For per-tenant settings and data scoping.
 - In middleware and auth flows that don't have a per-request tenant context.
 
 ## Global vs tenant-scoped settings
 
-`SettingKey::is_global()` returns `true` for settings that apply system-wide (not per-tenant). Global settings are
-always stored under `default_tenant_id`:
+Global settings are stored in a dedicated `global_settings` table (PK: `key`, no `tenant_id` column). Per-tenant
+settings remain in the `settings` table (PK: `(tenant_id, key)`).
 
-- `TrustedProxies`, `RealIpHeader`, `ExtraSans`, `HttpsAddr`
-- `ForwardedClientCertInfoHeader`, `ForwardedClientCertPemHeader`
-- `MultiTenancyEnabled`
-- `MqttMaxClientsPerTenant`
+`SettingKey::is_global()` returns `true` for the 13 system-wide settings:
 
-The helper `resolve_tenant_for_key(key, tenant_id, default_tenant_id)` in `settings_store.rs` returns the correct tenant
-ID based on whether the key is global.
+- **Network:** `TrustedProxies`, `RealIpHeader`, `ExtraSans`, `HttpsAddr`,
+  `ForwardedClientCertInfoHeader`, `ForwardedClientCertPemHeader`, `PkiAddr`
+- **PKI:** `PkiActiveCaFingerprint`, `PkiCaVersion`
+- **System:** `MultiTenancyEnabled`
+- **MQTT:** `MqttMaxClientsPerTenant`
+- **Auth:** `JwtSigningKey` (encrypted)
+- **Crypto:** `MasterKeyVerification` (encrypted)
+
+Global settings are read/written via dedicated functions (`load_global_setting`, `upsert_global_setting`,
+etc.) that operate directly on the `global_settings` table without a `tenant_id`. At startup,
+`Settings::load()` queries both tables and merges the results.
 
 ## Future multi-tenancy work
 

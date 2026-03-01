@@ -124,27 +124,45 @@ consume), `cleanup_expired()`.
 deferred OIDC registration claims (registration_code PK, provider_id, oidc_subject, email, names, mapped_roles JSON,
 expires_at).
 
+### Two-table design: global_settings and settings
+
+Settings are stored in two separate tables:
+
+| Table | PK | Purpose |
+| --- | --- | --- |
+| `global_settings` | `key` | System-wide settings (no `tenant_id`). 13 keys: network, PKI, MQTT limit, multi-tenancy, JWT signing key, master key verification. |
+| `settings` | `(tenant_id, key)` | Per-tenant settings (registration, authentication, service certificates, SMTP, etc.). |
+
+The `global_settings` table was introduced to cleanly separate system-wide configuration from
+per-tenant data, avoiding the previous design where global settings were stored under the default
+tenant's ID in the `settings` table.
+
 ### Bulk loading and known-keys registry
 
-At startup, `Settings::load(db, tenant_id)` issues a single `SELECT * FROM settings WHERE tenant_id = ?` via
-`load_all_settings(db, tenant_id)` and distributes the resulting `RawSettings` (`HashMap<String, serde_json::Value>`) to
-all sub-loaders. This replaces the previous pattern of one query per key.
+At startup, `Settings::load(db, tenant_id)` issues two bulk queries:
 
-After the bulk load, `warn_unrecognised_keys()` logs a warning for any DB key not recognised by
-`SettingKey::from_db_key()`. The `SettingKey` enum (defined in `crates/ui/web-api/src/setting_key.rs`) is the single
-source of truth for all known setting keys. In tests, `SettingKey::iter()` (via `strum::EnumIter`) provides iteration
-over every variant.
+1. `load_all_global_settings(db)` — all rows from `global_settings`
+2. `load_all_settings(db, tenant_id)` — all rows from `settings` for the given tenant
 
-`Settings::load()` returns `(Self, RawSettings, Option<String>)` so the controller passes the same map to reconciliation
-without re-reading.
+The two `RawSettings` maps (`HashMap<String, serde_json::Value>`) are merged (global first, then
+tenant) and distributed to all sub-loaders. After the bulk load, `warn_unrecognised_keys()` logs a
+warning for any DB key not recognised by `SettingKey::from_db_key()`. The `SettingKey` enum
+(defined in `crates/ui/web-api/src/setting_key.rs`) is the single source of truth for all known
+setting keys. In tests, `SettingKey::iter()` (via `strum::EnumIter`) provides iteration over every
+variant.
+
+`Settings::load()` returns `(Self, RawSettings, RawSettings, Option<String>)` — the global raw
+map, tenant raw map, and optional registration token — so the controller passes the global map to
+reconciliation without re-reading.
 
 The `RawSettingsExt` trait (defined in `settings_store.rs`) provides a `get_setting(SettingKey) -> Option<&Value>`
 method for typed lookups on `RawSettings`, replacing raw `raw.get("string.key")` calls throughout the codebase.
 
 ### Reconciliation logic
 
-`reconcile_setting()` (`crates/core/controller/src/reconcile.rs`) accepts a `SettingKey` and a `&RawSettings` map,
-looking up the key via `key.as_str()` — no per-key DB reads. It still needs the `DatabaseConnection` for upserts.
+`reconcile_setting()` (`crates/core/controller/src/reconcile.rs`) accepts a `SettingKey` and a `&RawSettings` map
+(global settings), looking up the key via `key.as_str()` — no per-key DB reads. It writes to the
+`global_settings` table via `upsert_global_setting()`. All reconciled settings are global (no `tenant_id`).
 
 For each DB-managed setting at startup:
 
@@ -174,9 +192,11 @@ rows with two version counters:
 | `revocation_version` | BIGINT | Revocation version (bumped on every certificate revocation for cross-instance CRL propagation) |
 | `updated_at` | TIMESTAMP | Last update timestamp |
 
-**Write semantics:** `upsert_setting()` and `delete_setting()` call `bump_settings_version()` after each write.
-`SettingKey::is_global()` determines which counter to bump. Certificate revocation sites call
-`bump_revocation_version()` before the local `Notify`.
+**Write semantics:** Per-tenant writes (`upsert_setting()`, `delete_setting()`) call
+`bump_settings_version(db, tenant_id)` — incrementing only the tenant's `version` counter. Global
+writes (`upsert_global_setting()`, `delete_global_setting()`) call
+`bump_global_settings_version(db)` — incrementing `global_version` on ALL tenant rows. Certificate
+revocation sites call `bump_revocation_version()` before the local `Notify`.
 
 **Read semantics:** A background task (every 30s) calls `Settings::check_version_and_reload()`, which reads a single row
 and compares both counters with cached `AtomicI64` values. A full reload (`reload_from_db()`) only happens when either
@@ -197,9 +217,11 @@ other controller instances. Each revocation site bumps `revocation_version` in t
 
 | File | Purpose |
 | --- | --- |
+| `crates/shared/db/src/entity/global_setting.rs` | SeaORM entity for `global_settings` table |
+| `crates/shared/db/src/entity/settings_version.rs` | SeaORM entity for version tracking |
 | `crates/shared/db/src/migration/m20260209_000001_initial.rs` | Single consolidated migration (includes settings_version + revocation_version) |
-| `crates/shared/db/src/entity/settings_version.rs` | SeaORM entity |
-| `crates/ui/web-api/src/settings_store.rs` | `bump_settings_version()`, `get_settings_versions()`, `bump_revocation_version()`, `get_revocation_version()` |
+| `crates/shared/db/src/migration/m20260303_000001_global_settings.rs` | Migration: create `global_settings` table, move 13 keys from `settings` |
+| `crates/ui/web-api/src/settings_store.rs` | `upsert_global_setting()`, `load_global_setting()`, `bump_settings_version()`, `bump_global_settings_version()`, `get_settings_versions()`, `bump_revocation_version()`, `get_revocation_version()` |
 | `crates/ui/web-api/src/settings.rs` | `reload_from_db()`, `check_version_and_reload()` |
 | `crates/core/controller/src/crl_manager.rs` | Version-gated CRL rebuild loop |
 
