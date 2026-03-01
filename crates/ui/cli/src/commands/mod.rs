@@ -6,6 +6,7 @@ pub mod check;
 pub mod enrollment_tokens;
 pub mod history;
 pub mod hosts;
+pub mod notifications;
 pub mod plugin_configs;
 pub mod scheduler;
 pub mod services;

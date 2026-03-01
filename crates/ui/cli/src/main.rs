@@ -125,6 +125,11 @@ enum Commands {
         #[command(subcommand)]
         command: DiscoveryAllowlistCommands,
     },
+    /// Manage notification channels, rules, and log
+    Notifications {
+        #[command(subcommand)]
+        command: NotificationsCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -931,6 +936,135 @@ enum HostDiscoveryAllowlistCommands {
     Remove {
         /// Entry UUID
         entry_id: Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum NotificationsCommands {
+    /// Manage notification channels
+    Channels {
+        #[command(subcommand)]
+        command: ChannelsCommands,
+    },
+    /// Manage notification rules
+    Rules {
+        #[command(subcommand)]
+        command: RulesCommands,
+    },
+    /// View notification delivery log
+    Log {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ChannelsCommands {
+    /// List notification channels
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show notification channel details
+    Get {
+        /// Channel UUID
+        id: Uuid,
+    },
+    /// Create a new notification channel
+    Create {
+        /// Channel name
+        #[arg(long)]
+        name: String,
+        /// Channel type (webhook, telegram)
+        #[arg(long = "type")]
+        channel_type: String,
+        /// Channel-specific configuration as JSON string
+        #[arg(long)]
+        config: String,
+    },
+    /// Update a notification channel
+    Update {
+        /// Channel UUID
+        id: Uuid,
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+        /// Updated configuration as JSON string
+        #[arg(long)]
+        config: Option<String>,
+        /// Enable or disable
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+    /// Delete a notification channel
+    Delete {
+        /// Channel UUID
+        id: Uuid,
+    },
+    /// Send a test notification through a channel
+    Test {
+        /// Channel UUID
+        id: Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RulesCommands {
+    /// List notification rules
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show notification rule details
+    Get {
+        /// Rule UUID
+        id: Uuid,
+    },
+    /// Create a new notification rule
+    Create {
+        /// Channel UUID to deliver notifications through
+        #[arg(long)]
+        channel_id: Uuid,
+        /// Event type (update_available, update_completed, update_failed, new_software_discovered, new_service_enrolled, ca_rotated)
+        #[arg(long)]
+        event_type: String,
+        /// Optionally scope to a specific host
+        #[arg(long)]
+        host_id: Option<Uuid>,
+        /// Optionally scope to a specific software item
+        #[arg(long)]
+        software_item_id: Option<Uuid>,
+        /// Optionally scope to a specific plugin type
+        #[arg(long)]
+        plugin_type: Option<String>,
+    },
+    /// Update a notification rule
+    Update {
+        /// Rule UUID
+        id: Uuid,
+        /// New event type
+        #[arg(long)]
+        event_type: Option<String>,
+        /// Enable or disable
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+    /// Delete a notification rule
+    Delete {
+        /// Rule UUID
+        id: Uuid,
     },
 }
 
@@ -2256,6 +2390,236 @@ async fn run(cli: Cli) -> error::Result<()> {
                         token: cli.token.as_deref(),
                         insecure,
                         request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+        },
+        Commands::Notifications { command } => match command {
+            NotificationsCommands::Channels { command } => match command {
+                ChannelsCommands::List { page, per_page } => {
+                    let resp = commands::notifications::channel_list(
+                        commands::notifications::ChannelListParams {
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                            page,
+                            per_page,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                ChannelsCommands::Get { id } => {
+                    let resp = commands::notifications::channel_get(
+                        commands::notifications::ChannelGetParams {
+                            id: &id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                ChannelsCommands::Create {
+                    name,
+                    channel_type,
+                    config,
+                } => {
+                    let channel_type: uptrakit_openapi_client::types::notifications::NotificationChannelType =
+                        channel_type.parse().map_err(|_| {
+                            report!(error::CliError::Other(format!(
+                                "unknown channel type: {channel_type} (expected webhook or telegram)"
+                            )))
+                        })?;
+                    let config_value: serde_json::Value =
+                        serde_json::from_str(&config).map_err(|e| {
+                            report!(error::CliError::Other(format!(
+                                "invalid JSON for --config: {e}"
+                            )))
+                        })?;
+                    let resp = commands::notifications::channel_create(
+                        commands::notifications::ChannelCreateParams {
+                            name,
+                            channel_type,
+                            config: config_value,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                ChannelsCommands::Update {
+                    id,
+                    name,
+                    config,
+                    enabled,
+                } => {
+                    let config_value: Option<serde_json::Value> = match config {
+                        Some(s) => Some(serde_json::from_str(&s).map_err(|e| {
+                            report!(error::CliError::Other(format!(
+                                "invalid JSON for --config: {e}"
+                            )))
+                        })?),
+                        None => None,
+                    };
+                    let resp = commands::notifications::channel_update(
+                        commands::notifications::ChannelUpdateParams {
+                            id: &id,
+                            name,
+                            config: config_value,
+                            enabled,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                ChannelsCommands::Delete { id } => {
+                    let resp = commands::notifications::channel_delete(
+                        commands::notifications::ChannelDeleteParams {
+                            id: &id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                ChannelsCommands::Test { id } => {
+                    let resp = commands::notifications::channel_test(
+                        commands::notifications::ChannelTestParams {
+                            id: &id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+            },
+            NotificationsCommands::Rules { command } => match command {
+                RulesCommands::List { page, per_page } => {
+                    let resp = commands::notifications::rule_list(
+                        commands::notifications::RuleListParams {
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                            page,
+                            per_page,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                RulesCommands::Get { id } => {
+                    let resp = commands::notifications::rule_get(
+                        commands::notifications::RuleGetParams {
+                            id: &id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                RulesCommands::Create {
+                    channel_id,
+                    event_type,
+                    host_id,
+                    software_item_id,
+                    plugin_type,
+                } => {
+                    let event_type: uptrakit_openapi_client::types::notifications::NotificationEventType =
+                        event_type.parse().map_err(|_| {
+                            report!(error::CliError::Other(format!(
+                                "unknown event type: {event_type} (expected update_available, update_completed, update_failed, new_software_discovered, new_service_enrolled, or ca_rotated)"
+                            )))
+                        })?;
+                    let resp = commands::notifications::rule_create(
+                        commands::notifications::RuleCreateParams {
+                            channel_id,
+                            event_type,
+                            host_id,
+                            software_item_id,
+                            plugin_type,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                RulesCommands::Update {
+                    id,
+                    event_type,
+                    enabled,
+                } => {
+                    let event_type: Option<uptrakit_openapi_client::types::notifications::NotificationEventType> =
+                        match event_type {
+                            Some(s) => Some(s.parse().map_err(|_| {
+                                report!(error::CliError::Other(format!(
+                                    "unknown event type: {s} (expected update_available, update_completed, update_failed, new_software_discovered, new_service_enrolled, or ca_rotated)"
+                                )))
+                            })?),
+                            None => None,
+                        };
+                    let resp = commands::notifications::rule_update(
+                        commands::notifications::RuleUpdateParams {
+                            id: &id,
+                            event_type,
+                            enabled,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                RulesCommands::Delete { id } => {
+                    let resp = commands::notifications::rule_delete(
+                        commands::notifications::RuleDeleteParams {
+                            id: &id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+            },
+            NotificationsCommands::Log { page, per_page } => {
+                let resp = commands::notifications::log_list(
+                    commands::notifications::LogListParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                        page,
+                        per_page,
                     },
                 )
                 .await?;
