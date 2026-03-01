@@ -58,6 +58,16 @@ impl Default for ForgejoConfig {
 }
 
 impl ForgejoConfig {
+    /// Validate a Forgejo/Gitea package identifier string.
+    ///
+    /// A valid identifier has exactly one `/`, with non-empty `owner` and `repo`
+    /// parts, and neither part may contain `..`.
+    ///
+    /// Called by the plugin registry's `validate_package_identifier` dispatch.
+    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     /// Validate the configuration, returning an error if any fields are invalid.
     ///
     /// `api_base_url` is required; all other fields are optional.

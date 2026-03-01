@@ -56,6 +56,16 @@ impl Default for GitHubConfig {
 }
 
 impl GitHubConfig {
+    /// Validate a GitHub package identifier string.
+    ///
+    /// A valid identifier has exactly one `/`, with non-empty `owner` and `repo`
+    /// parts, and neither part may contain `..`.
+    ///
+    /// Called by the plugin registry's `validate_package_identifier` dispatch.
+    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     /// Validate the configuration, returning an error if any fields are invalid.
     ///
     /// An entirely empty `{}` config is valid — all fields are optional.

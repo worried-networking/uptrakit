@@ -19,6 +19,17 @@ pub struct NpmConfig {
 impl SecretMasking for NpmConfig {}
 
 impl NpmConfig {
+    /// Validate an npm package identifier string.
+    ///
+    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
+    /// function. A valid identifier is a non-empty, valid npm package name
+    /// (plain or scoped: `lodash`, `@angular/cli`).
+    ///
+    /// Called by the plugin registry's `validate_package_identifier` dispatch.
+    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     /// Validate the configuration.
     ///
     /// Currently accepts all valid deserialized configs.

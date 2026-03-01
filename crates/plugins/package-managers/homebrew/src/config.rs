@@ -34,6 +34,16 @@ pub struct HomebrewConfig {
 impl SecretMasking for HomebrewConfig {}
 
 impl HomebrewConfig {
+    /// Validate a Homebrew package identifier string.
+    ///
+    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
+    /// function. A valid identifier is a non-empty formula or cask name.
+    ///
+    /// Called by the plugin registry's `validate_package_identifier` dispatch.
+    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     /// Validate the configuration.
     ///
     /// Currently accepts all valid deserialized configs since there are no

@@ -89,6 +89,16 @@ pub struct DockerConfig {
 }
 
 impl DockerConfig {
+    /// Validate a Docker image reference (package identifier) string.
+    ///
+    /// Delegates to [`crate::image_ref::validate_identifier`]. A valid reference
+    /// must be non-empty and must not contain whitespace or control characters.
+    ///
+    /// Called by the plugin registry's `validate_package_identifier` dispatch.
+    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     /// Validate the configuration.
     ///
     /// An empty (all-defaults) config is valid — discovery can proceed

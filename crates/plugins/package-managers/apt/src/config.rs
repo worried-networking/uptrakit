@@ -31,6 +31,16 @@ pub struct AptConfig {
 impl SecretMasking for AptConfig {}
 
 impl AptConfig {
+    /// Validate an APT package identifier string.
+    ///
+    /// Delegates to the crate-level [`validate_identifier`](crate::validate_identifier)
+    /// function. A valid identifier is a non-empty, lowercase Debian package name.
+    ///
+    /// Called by the plugin registry's `validate_package_identifier` dispatch.
+    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     /// Validate the configuration.
     ///
     /// Currently accepts all valid deserialized configs.

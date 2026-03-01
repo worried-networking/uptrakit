@@ -59,6 +59,17 @@ impl Default for GitLabConfig {
 }
 
 impl GitLabConfig {
+    /// Validate a GitLab package identifier string.
+    ///
+    /// A valid identifier has at least one `/`, all path components are non-empty,
+    /// and no component may contain `..`. GitLab supports nested namespaces such
+    /// as `group/subgroup/project`.
+    ///
+    /// Called by the plugin registry's `validate_package_identifier` dispatch.
+    pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+        crate::validate_identifier(value)
+    }
+
     /// Validate the configuration, returning an error if any fields are invalid.
     ///
     /// An entirely empty `{}` config is valid — all fields are optional.

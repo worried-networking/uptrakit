@@ -24,6 +24,16 @@ impl SecretMasking for ProxmoxHelperScriptsConfig {
 }
 
 impl ProxmoxHelperScriptsConfig {
+    /// Validate a Proxmox Helper Scripts package identifier string.
+    ///
+    /// Always succeeds — the PHS plugin does not impose constraints on the
+    /// identifier value; validation is handled at the autodiscovery layer.
+    ///
+    /// Called by the plugin registry's `validate_package_identifier` dispatch.
+    pub fn validate_identifier(_value: &str) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
     /// Validate the configuration.
     ///
     /// Always succeeds — the PHS plugin has no required configuration fields.

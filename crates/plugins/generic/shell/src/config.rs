@@ -40,6 +40,17 @@ pub struct ShellConfig {
 }
 
 impl ShellConfig {
+    /// Validate a Shell plugin package identifier string.
+    ///
+    /// Always succeeds — the Shell plugin does not impose constraints on the
+    /// identifier value; the value is shell-escaped before substitution into
+    /// `version_command` and `update_command` at runtime.
+    ///
+    /// Called by the plugin registry's `validate_package_identifier` dispatch.
+    pub fn validate_identifier(_value: &str) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
     /// Validate the configuration.
     ///
     /// Fails when **both** `version_command` and `update_command` are `None`
