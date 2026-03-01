@@ -550,7 +550,9 @@ configured) for cross-controller delivery (contains no credentials). MQTT servic
           "hostname": "my-host",
           "installed_version": "1.2.3",
           "latest_version": "1.3.0",
-          "update_available": true
+          "update_available": true,
+          "release_url": "https://github.com/owner/repo/releases/tag/v1.3.0",
+          "release_notes": "## What's New\n- Feature A\n- Bug fix B"
         }
       ]
     }
@@ -561,6 +563,21 @@ configured) for cross-controller delivery (contains no credentials). MQTT servic
 Each item in `items` corresponds to one enabled, non-deactivated software item whose `discovery_state` is
 `null` or `"approved"`. Each `hosts` entry contains the version data for one host that tracks the software
 item. An empty string in `installed_version` or `latest_version` means the version is not yet known.
+
+The `hosts` entries use the following fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `host_id` | UUID | Host UUID |
+| `hostname` | String | Human-readable hostname |
+| `installed_version` | `Option<String>` | Currently installed version (omitted if unknown) |
+| `latest_version` | `Option<String>` | Latest available version (omitted if unknown) |
+| `update_available` | bool | `true` when `latest_version` differs from `installed_version` |
+| `release_url` | `Option<String>` | URL to the upstream release page (omitted when unavailable) |
+| `release_notes` | `Option<String>` | Full release notes or changelog text (omitted when unavailable) |
+
+`release_url` and `release_notes` are populated only when the plugin fetches release metadata (e.g. GitHub
+Releases). They are absent (`null` / omitted) for plugins that track only version numbers.
 
 When `ha_discovery = true` for an MQTT client, the MQTT service publishes HA discovery configs and retained
 state topics from this payload. See [Home Assistant Integration](../end-user/home-assistant-mqtt.md).

@@ -76,6 +76,16 @@ Each entity displays:
 | Installed version | The currently installed version on the host (blank if unknown) |
 | Latest version | The newest available version (blank if unknown) |
 | Update available | `true` when latest > installed |
+| Release URL | Link to the upstream release page (GitHub releases only; absent otherwise) |
+| Release summary | First 500 characters of the release notes (GitHub releases only; absent otherwise) |
+
+When the plugin for a software item fetches releases from GitHub, Uptrakit includes `release_url` and
+`release_summary` in the HA MQTT discovery config for each entity. Home Assistant surfaces these as
+entity attributes, giving users a direct link to the GitHub release page and a preview of the changelog
+without leaving Home Assistant.
+
+For plugins that only track version numbers (e.g. apt, Homebrew, Docker Hub) the `release_url` and
+`release_summary` attributes are omitted from the discovery config.
 
 Each software item is represented as a distinct HA device named after that software item (e.g. "nginx").
 All hosts assigned to the same software item appear as separate entities within that device, each named
