@@ -1,0 +1,28 @@
+[package]
+name = "uptrakit-plugin-releases-gitlab"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true, features = ["parsing"] }
+thiserror = { workspace = true }
+rootcause = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }
+async-trait = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
