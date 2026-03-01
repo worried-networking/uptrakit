@@ -194,6 +194,12 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                             )
                             .await;
                     }
+                    Some(ControllerMessage::Unknown) => {
+                        tracing::warn!(
+                            "received unknown controller message type; \
+                             ignoring for forward compatibility"
+                        );
+                    }
                     Some(msg) => {
                         match handler.on_message(msg, &mut conn).await? {
                             Some(outcome) => break outcome,

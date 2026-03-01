@@ -468,6 +468,17 @@ pub(crate) async fn handle_authenticated_loop(
                             }
 
                             // -------------------------------------------------
+                            // Unknown: forward-compatibility catch-all
+                            // -------------------------------------------------
+                            ServiceMessage::Unknown => {
+                                tracing::warn!(
+                                    %service_id,
+                                    "received unknown service message type; \
+                                     ignoring for forward compatibility"
+                                );
+                            }
+
+                            // -------------------------------------------------
                             // Wildcard: message not supported for this capability
                             // -------------------------------------------------
                             _ => {

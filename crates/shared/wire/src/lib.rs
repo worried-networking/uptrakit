@@ -252,6 +252,14 @@ pub fn now_millis() -> Timestamp {
 }
 
 /// Messages sent from a service (agent or MQTT) to the controller.
+///
+/// ## Forward compatibility
+///
+/// The `Unknown` variant is a catch-all for message types introduced in newer
+/// service builds that an older controller does not yet recognise. When
+/// encountered, the controller logs a warning and continues without closing the
+/// connection, allowing rolling upgrades where services and controllers are not
+/// updated simultaneously.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -274,9 +282,24 @@ pub enum ServiceMessage {
     ReleaseTenants(MqttReleaseTenantsPayload),
     MqttClientStatus(MqttClientStatusPayload),
     MqttTriggerUpdate(MqttUpdateTriggerPayload),
+    /// Unknown message type from a newer service build.
+    ///
+    /// Deserialized when the `type` tag does not match any known variant.
+    /// The payload is discarded. The receiver should log a warning and
+    /// continue processing other messages.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Messages sent from the controller to a service (agent or MQTT).
+///
+/// ## Forward compatibility
+///
+/// The `Unknown` variant is a catch-all for message types introduced in newer
+/// controller builds that an older service does not yet recognise. When
+/// encountered, the service logs a warning and continues without closing the
+/// connection, allowing rolling upgrades where services and controllers are not
+/// updated simultaneously.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -317,6 +340,16 @@ pub enum ControllerMessage {
     /// perform CA certificate rotation. Published via NATS to the controller subject;
     /// handled by triggering `ca_rotation_trigger.notify_one()`.
     RequestCaRotation(RequestCaRotationPayload),
+    /// Unknown message type from a newer controller build.
+    ///
+    /// Deserialized when the `type` tag does not match any known variant.
+    /// The payload is discarded. The receiver should log a warning and
+    /// continue processing other messages.
+    ///
+    /// **Security**: Never published to NATS — we cannot re-publish a message
+    /// whose payload has been discarded.
+    #[serde(other)]
+    Unknown,
 }
 
 impl ControllerMessage {
@@ -335,6 +368,7 @@ impl ControllerMessage {
                 | ControllerMessage::TenantAssignments(_)
                 | ControllerMessage::TenantConfigUpdated(_)
                 | ControllerMessage::TenantRevoked(_)
+                | ControllerMessage::Unknown
         )
     }
 }
@@ -2534,6 +2568,41 @@ mod tests {
         );
         let deserialized: ControllerEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, envelope);
+    }
+
+    #[test]
+    fn service_message_unknown_type_deserializes_to_unknown_variant() {
+        // Forward-compatibility: an unknown message type from a newer service
+        // build must deserialize to `ServiceMessage::Unknown`, not fail.
+        let json = r#"{"protocol_version":1,"seq":1,"type":"future_message","payload":{"foo":"bar"}}"#;
+        let envelope: ServiceEnvelope = serde_json::from_str(json).expect("should deserialize");
+        assert_eq!(
+            envelope.message,
+            ServiceMessage::Unknown,
+            "unknown type tag must produce ServiceMessage::Unknown"
+        );
+    }
+
+    #[test]
+    fn controller_message_unknown_type_deserializes_to_unknown_variant() {
+        // Forward-compatibility: an unknown message type from a newer controller
+        // build must deserialize to `ControllerMessage::Unknown`, not fail.
+        let json = r#"{"protocol_version":1,"seq":1,"type":"future_command","data":{}}"#;
+        let envelope: ControllerEnvelope =
+            serde_json::from_str(json).expect("should deserialize");
+        assert_eq!(
+            envelope.message,
+            ControllerMessage::Unknown,
+            "unknown type tag must produce ControllerMessage::Unknown"
+        );
+    }
+
+    #[test]
+    fn unknown_controller_message_is_not_nats_publishable() {
+        assert!(
+            !ControllerMessage::Unknown.is_nats_publishable(),
+            "Unknown must not be published to NATS"
+        );
     }
 
     #[test]

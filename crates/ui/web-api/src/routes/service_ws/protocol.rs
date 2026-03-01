@@ -139,8 +139,11 @@ struct EnvelopeHeader {
 /// Returns:
 /// - `Err(_)` on malformed JSON, protocol version mismatch, or sequence mismatch
 ///   (hard errors — connection should be closed).
-/// - `Ok(None)` on an unrecognized message type from a newer service build
-///   (soft, log and skip — sequence was already advanced).
+/// - `Ok(Some(ServiceMessage::Unknown))` when the `type` tag is not recognised
+///   (unknown message type from a newer service build — sequence was already
+///   advanced; the caller should log a warning and continue).
+/// - `Ok(None)` when the full envelope parse fails for other reasons (soft
+///   failure — sequence was already advanced).
 /// - `Ok(Some(msg))` on successful parse.
 pub(crate) fn deserialize_service_msg(
     in_seq: &mut IncomingSeq,
