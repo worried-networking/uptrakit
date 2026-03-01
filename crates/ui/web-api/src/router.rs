@@ -118,6 +118,7 @@ use crate::AppState;
         crate::routes::update_batches::trigger_item_batch_update,
         crate::routes::update_batches::list_batches,
         crate::routes::update_batches::get_batch,
+        crate::routes::update_batches::stream_batch_progress,
         crate::routes::notifications::create_channel,
         crate::routes::notifications::list_channels,
         crate::routes::notifications::get_channel,
@@ -464,6 +465,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(crate::routes::update_batches::list_batches))
         .routes(routes!(crate::routes::update_batches::get_batch))
+        .routes(routes!(
+            crate::routes::update_batches::stream_batch_progress
+        ))
         // Autodiscovery
         .routes(routes!(
             crate::routes::software_items::approve_software_item

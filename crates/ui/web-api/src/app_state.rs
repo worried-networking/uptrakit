@@ -97,6 +97,9 @@ pub struct AppState {
     pub credential_sources: ServiceCredentialSources,
     /// Per-update broadcast channels for real-time output streaming via SSE.
     pub update_output_broadcaster: crate::update_output_broadcaster::UpdateOutputBroadcaster,
+    /// Per-batch broadcast channels for real-time batch progress streaming via SSE.
+    pub batch_progress_broadcaster:
+        crate::batch_progress_broadcaster::BatchProgressBroadcaster,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -147,6 +150,8 @@ pub struct AppStateBuilder {
     plugin_ops: Option<Arc<dyn PluginOps>>,
     credential_sources: Option<ServiceCredentialSources>,
     update_output_broadcaster: Option<crate::update_output_broadcaster::UpdateOutputBroadcaster>,
+    batch_progress_broadcaster:
+        Option<crate::batch_progress_broadcaster::BatchProgressBroadcaster>,
 }
 
 impl AppStateBuilder {
@@ -183,6 +188,7 @@ impl AppStateBuilder {
             plugin_ops: None,
             credential_sources: None,
             update_output_broadcaster: None,
+            batch_progress_broadcaster: None,
         }
     }
 
@@ -406,6 +412,7 @@ impl AppStateBuilder {
             }),
             credential_sources: self.credential_sources.unwrap_or_default(),
             update_output_broadcaster: self.update_output_broadcaster.unwrap_or_default(),
+            batch_progress_broadcaster: self.batch_progress_broadcaster.unwrap_or_default(),
         })
     }
 }

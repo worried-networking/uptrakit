@@ -265,6 +265,8 @@ mod tests {
             credential_sources: ServiceCredentialSources::default(),
             update_output_broadcaster:
                 crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
+            batch_progress_broadcaster:
+                crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
         })
     }
 

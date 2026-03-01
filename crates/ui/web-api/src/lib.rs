@@ -22,6 +22,7 @@ pub mod setting_key;
 pub mod settings;
 pub mod settings_store;
 pub mod tenant_db;
+pub mod batch_progress_broadcaster;
 pub mod update_output_broadcaster;
 
 pub use app_state::{AppState, AppStateBuildError, AppStateBuilder, ServiceCredentialSources};
@@ -192,6 +193,8 @@ mod tests {
             credential_sources: ServiceCredentialSources::default(),
             update_output_broadcaster:
                 crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
+            batch_progress_broadcaster:
+                crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
         })
     }
 

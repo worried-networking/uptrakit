@@ -313,6 +313,10 @@ pub(crate) mod update_batches {
     pub(crate) fn item_batch_update(id: &Uuid) -> String {
         format!("/api/v1/software-items/{id}/batch-update")
     }
+    /// `GET /api/v1/update-batches/{id}/stream`
+    pub(crate) fn stream(id: &Uuid) -> String {
+        format!("/api/v1/update-batches/{id}/stream")
+    }
 }
 
 pub(crate) mod update_history {

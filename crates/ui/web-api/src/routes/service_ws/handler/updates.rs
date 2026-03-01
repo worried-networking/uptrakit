@@ -346,6 +346,9 @@ pub(super) async fn handle_update_started(
         Ok(r) => r,
         Err(_) => return LoopAction::Continue,
     };
+    let record_batch_id = record.batch_id;
+    let record_host_id = record.host_id;
+    let record_software_item_id = record.software_item_id;
     let mut active: update_history::ActiveModel = record.into();
     active.status = Set(update_history::UpdateStatus::InProgress);
     active.started_at = Set(time::OffsetDateTime::now_utc());
@@ -387,6 +390,21 @@ pub(super) async fn handle_update_started(
             .notification_service
             .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
+    }
+
+    // Emit batch progress event if this update is part of a batch.
+    if let Some(batch_id) = record_batch_id {
+        emit_batch_progress_event(
+            state,
+            batch_id,
+            crate::batch_progress_broadcaster::BatchProgressEvent::UpdateStarted {
+                update_history_id: payload.update_history_id,
+                software_item_name: resolve_software_item_name(state, record_software_item_id)
+                    .await,
+                host_name: resolve_host_name(state, record_host_id).await,
+            },
+        )
+        .await;
     }
 
     LoopAction::Continue
@@ -626,9 +644,31 @@ pub(super) async fn handle_update_result(
             .await;
     }
 
-    // If this update is part of a batch, dispatch the next pending update
-    // for this host and check if the batch is complete.
+    // If this update is part of a batch, emit batch progress events and
+    // dispatch the next pending update for this host.
     if let Some(batch_id) = record.batch_id {
+        let event = match payload.status {
+            UpdateFinalStatus::Completed => {
+                crate::batch_progress_broadcaster::BatchProgressEvent::UpdateCompleted {
+                    update_history_id: payload.update_history_id,
+                    software_item_name: resolve_software_item_name(
+                        state,
+                        record.software_item_id,
+                    )
+                    .await,
+                    host_name: resolve_host_name(state, record.host_id).await,
+                }
+            }
+            _ => crate::batch_progress_broadcaster::BatchProgressEvent::UpdateFailed {
+                update_history_id: payload.update_history_id,
+                software_item_name: resolve_software_item_name(state, record.software_item_id)
+                    .await,
+                host_name: resolve_host_name(state, record.host_id).await,
+                error: payload.error.clone(),
+            },
+        };
+        emit_batch_progress_event(state, batch_id, event).await;
+
         dispatch_next_batch_update(state, service_id, batch_id, record.host_id).await;
     }
 
@@ -723,6 +763,25 @@ async fn dispatch_next_batch_update(
             use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
             use uptrakit_shared_types::BatchStatus;
 
+            // Emit final progress summary via broadcaster.
+            emit_batch_progress_event(
+                state,
+                batch_id,
+                crate::batch_progress_broadcaster::BatchProgressEvent::Progress {
+                    completed: completion.completed_count,
+                    failed: completion.failed_count,
+                    pending: 0,
+                    total: completion.total_count,
+                },
+            )
+            .await;
+
+            // Send batch completed event via broadcaster (removes the channel).
+            state
+                .batch_progress_broadcaster
+                .send_batch_completed(batch_id, completion.status.as_str().to_string())
+                .await;
+
             let details = match completion.status {
                 BatchStatus::Completed => NotificationEventDetails::BatchUpdateCompleted {
                     batch_id: completion.batch_id,
@@ -750,7 +809,10 @@ async fn dispatch_next_batch_update(
                 details,
             });
         }
-        Ok(None) => {}
+        Ok(None) => {
+            // Batch still in progress — emit updated progress summary.
+            emit_batch_progress_from_db(state, batch_id).await;
+        }
         Err(e) => {
             tracing::warn!(
                 %batch_id,
@@ -760,6 +822,82 @@ async fn dispatch_next_batch_update(
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Batch progress helpers
+// ---------------------------------------------------------------------------
+
+/// Send a batch progress event to all SSE subscribers.
+async fn emit_batch_progress_event(
+    state: &Arc<AppState>,
+    batch_id: uuid::Uuid,
+    event: crate::batch_progress_broadcaster::BatchProgressEvent,
+) {
+    state.batch_progress_broadcaster.send(batch_id, event).await;
+}
+
+/// Compute and emit a progress summary from the DB for an in-progress batch.
+async fn emit_batch_progress_from_db(state: &Arc<AppState>, batch_id: uuid::Uuid) {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let batch = match update_history::Entity::find()
+        .filter(update_history::Column::BatchId.eq(batch_id))
+        .all(state.db())
+        .await
+    {
+        Ok(records) => records,
+        Err(_) => return,
+    };
+
+    let total = batch.len() as i32;
+    let mut completed: i64 = 0;
+    let mut failed: i64 = 0;
+    let mut pending: i64 = 0;
+
+    for r in &batch {
+        match r.status {
+            update_history::UpdateStatus::Completed => completed += 1,
+            update_history::UpdateStatus::Failed => failed += 1,
+            update_history::UpdateStatus::Pending | update_history::UpdateStatus::InProgress => {
+                pending += 1;
+            }
+        }
+    }
+
+    emit_batch_progress_event(
+        state,
+        batch_id,
+        crate::batch_progress_broadcaster::BatchProgressEvent::Progress {
+            completed,
+            failed,
+            pending,
+            total,
+        },
+    )
+    .await;
+}
+
+/// Resolve a software item name by ID (for batch progress events).
+async fn resolve_software_item_name(state: &Arc<AppState>, item_id: uuid::Uuid) -> String {
+    software_item::Entity::find_by_id(item_id)
+        .one(state.db())
+        .await
+        .ok()
+        .flatten()
+        .map(|sw| sw.name)
+        .unwrap_or_else(|| "Unknown Software".to_string())
+}
+
+/// Resolve a host name by ID (for batch progress events).
+async fn resolve_host_name(state: &Arc<AppState>, host_id: uuid::Uuid) -> String {
+    host::Entity::find_by_id(host_id)
+        .one(state.db())
+        .await
+        .ok()
+        .flatten()
+        .map(|h| h.friendly_name)
+        .unwrap_or_else(|| "Unknown Host".to_string())
 }
 
 // ---------------------------------------------------------------------------

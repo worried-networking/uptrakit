@@ -50,4 +50,12 @@ impl UptrakitClient {
     pub async fn get_update_batch(&self, id: &Uuid) -> Result<UpdateBatchDetailResponse> {
         self.get(&crate::paths::update_batches::by_id(id)).await
     }
+
+    /// Returns the relative path for the batch progress SSE stream.
+    ///
+    /// The caller should combine this with the base URL and use an
+    /// SSE/EventSource client to consume it.
+    pub fn batch_progress_stream_path(id: &Uuid) -> String {
+        crate::paths::update_batches::stream(id)
+    }
 }
