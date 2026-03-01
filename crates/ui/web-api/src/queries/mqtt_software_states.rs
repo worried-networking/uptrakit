@@ -1,11 +1,13 @@
 //! Query helper that loads software state data for MQTT `SoftwareStates` push messages.
 
 use sea_orm::{ColumnTrait, Condition, EntityTrait, FromQueryResult, QueryFilter, QuerySelect};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uptrakit_internal_wire::{
     MqttSoftwareStateHostEntry, MqttSoftwareStateItem, MqttSoftwareStatesPayload,
 };
-use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, software_item};
+use uptrakit_shared_db::entity::{
+    host, host_software_item, prelude::*, software_item, update_history,
+};
 use uptrakit_shared_types::SoftwareDiscoveryState;
 use uuid::Uuid;
 
@@ -19,10 +21,17 @@ struct HostSoftwareItemRow {
     latest_release_metadata: Option<serde_json::Value>,
 }
 
+/// Lightweight projection used to bulk-load active update records.
+#[derive(Debug, FromQueryResult)]
+struct ActiveUpdateRow {
+    host_id: Uuid,
+    software_item_id: Uuid,
+}
+
 /// Load all software state data for a tenant and assemble a [`MqttSoftwareStatesPayload`].
 ///
-/// This function executes three bulk queries (no N+1) and is safe to call on
-/// every version-check result or update completion event.
+/// This function executes four bulk queries (no N+1) and is safe to call on
+/// every version-check result, update-trigger, or update completion event.
 ///
 /// # Errors
 ///
@@ -70,7 +79,7 @@ pub async fn load_software_states_for_tenant(
 
     // Collect distinct host_ids referenced in hsi_rows.
     let host_ids: Vec<Uuid> = {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         hsi_rows
             .iter()
             .filter(|r| seen.insert(r.host_id))
@@ -92,6 +101,31 @@ pub async fn load_software_states_for_tenant(
             .collect()
     };
 
+    // 5. Bulk-load active update records (Pending or InProgress) for all items.
+    //    Builds a HashSet<(host_id, software_item_id)> for O(1) lookup.
+    let active_updates: HashSet<(Uuid, Uuid)> = UpdateHistory::find()
+        .select_only()
+        .column(update_history::Column::HostId)
+        .column(update_history::Column::SoftwareItemId)
+        .filter(update_history::Column::SoftwareItemId.is_in(item_ids.clone()))
+        .filter(
+            Condition::any()
+                .add(
+                    update_history::Column::Status
+                        .eq(update_history::UpdateStatus::Pending),
+                )
+                .add(
+                    update_history::Column::Status
+                        .eq(update_history::UpdateStatus::InProgress),
+                ),
+        )
+        .into_model::<ActiveUpdateRow>()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|r| (r.host_id, r.software_item_id))
+        .collect();
+
     // Index hsi rows by software_item_id for O(1) lookup during assembly.
     let mut hsi_by_item: HashMap<Uuid, Vec<&HostSoftwareItemRow>> = HashMap::new();
     for row in &hsi_rows {
@@ -101,7 +135,7 @@ pub async fn load_software_states_for_tenant(
             .push(row);
     }
 
-    // 5. Assemble the payload.
+    // 6. Assemble the payload.
     let mut result_items: Vec<MqttSoftwareStateItem> = Vec::with_capacity(items.len());
 
     for item in &items {
@@ -119,6 +153,8 @@ pub async fn load_software_states_for_tenant(
                             (Some(installed), Some(latest)) => installed != latest,
                             _ => false,
                         };
+                        let update_in_progress =
+                            active_updates.contains(&(link.host_id, link.software_item_id));
                         let (release_url, release_notes) =
                             extract_release_info(link.latest_release_metadata.as_ref());
                         Some(MqttSoftwareStateHostEntry {
@@ -127,6 +163,7 @@ pub async fn load_software_states_for_tenant(
                             installed_version: link.installed_version.clone(),
                             latest_version: link.latest_version.clone(),
                             update_available,
+                            update_in_progress,
                             release_url,
                             release_notes,
                         })
