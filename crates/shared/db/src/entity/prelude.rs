@@ -58,6 +58,7 @@ pub use super::setting::{Entity as Setting, Model as SettingModel};
 pub use super::settings_version::{Entity as SettingsVersion, Model as SettingsVersionModel};
 pub use super::software_item::{Entity as SoftwareItem, Model as SoftwareItemModel};
 pub use super::tenant::{Entity as Tenant, Model as TenantModel};
+pub use super::update_batch::{Entity as UpdateBatch, Model as UpdateBatchModel};
 pub use super::update_history::{
     Entity as UpdateHistory, Model as UpdateHistoryModel, UpdateStatus,
 };

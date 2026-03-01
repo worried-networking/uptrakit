@@ -293,7 +293,7 @@ pub async fn create_update_history_record(
 ) -> Result<Uuid> {
     let now = OffsetDateTime::now_utc();
     let update_history_id = generate_uuid();
-    let mut record = update_history::ActiveModel {
+    let record = update_history::ActiveModel {
         id: Set(update_history_id),
         host_id: Set(params.host_id),
         software_item_id: Set(params.item_id),
@@ -308,11 +308,8 @@ pub async fn create_update_history_record(
         completed_at: Set(None),
         created_at: Set(now),
         update_category: Set(params.update_category.to_string()),
+        batch_id: Set(params.batch_id),
     };
-
-    // batch_id will be set once the column exists (Phase 2.2 migration).
-    let _ = params.batch_id;
-    let _ = &mut record;
 
     record.insert(db).await.context_to()?;
 

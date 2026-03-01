@@ -35,6 +35,8 @@ pub struct Model {
     /// Classification of the update (security, bugfix, feature, unknown).
     #[sea_orm(default_value = "unknown")]
     pub update_category: String,
+    /// Optional batch this update belongs to.
+    pub batch_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -51,6 +53,12 @@ pub enum Relation {
         to = "super::software_item::Column::Id"
     )]
     SoftwareItem,
+    #[sea_orm(
+        belongs_to = "super::update_batch::Entity",
+        from = "Column::BatchId",
+        to = "super::update_batch::Column::Id"
+    )]
+    UpdateBatch,
 }
 
 impl Related<super::host::Entity> for Entity {
@@ -62,6 +70,12 @@ impl Related<super::host::Entity> for Entity {
 impl Related<super::software_item::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::SoftwareItem.def()
+    }
+}
+
+impl Related<super::update_batch::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::UpdateBatch.def()
     }
 }
 

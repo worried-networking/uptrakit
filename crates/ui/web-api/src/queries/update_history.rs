@@ -278,6 +278,7 @@ mod tests {
             completed_at: Some(now),
             created_at: now,
             update_category: "unknown".to_string(),
+            batch_id: None,
         };
 
         let resp = build_response(
@@ -316,6 +317,7 @@ mod tests {
             completed_at: Some(now),
             created_at: now,
             update_category: "security".to_string(),
+            batch_id: None,
         };
 
         let resp = build_response(
@@ -352,6 +354,7 @@ mod tests {
             completed_at: None,
             created_at: now,
             update_category: "unknown".to_string(),
+            batch_id: None,
         };
 
         let resp = build_response(

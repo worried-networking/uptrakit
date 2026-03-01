@@ -36,6 +36,7 @@ pub mod setting;
 pub mod settings_version;
 pub mod software_item;
 pub mod tenant;
+pub mod update_batch;
 pub mod update_history;
 pub mod update_output_line;
 pub mod user;

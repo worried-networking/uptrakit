@@ -1,3 +1,4 @@
+mod batch_status;
 mod device_auth_status;
 mod discovered_software;
 mod discovery_target;
@@ -16,6 +17,7 @@ mod session_token_type;
 mod software_discovery_state;
 mod update_category;
 
+pub use batch_status::{BatchStatus, ParseBatchStatusError};
 pub use device_auth_status::{DeviceAuthStatus, ParseDeviceAuthStatusError};
 pub use discovered_software::DiscoveredSoftware;
 pub use discovery_target::DiscoveryTarget;
