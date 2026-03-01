@@ -236,6 +236,11 @@ pub(crate) mod settings {
     pub(crate) const RENEW_SERVER_CERT: &str = "/api/v1/settings/renew-server-certificate";
 }
 
+pub(crate) mod settings_smtp {
+    /// `GET /api/v1/settings/smtp` · `PUT /api/v1/settings/smtp`
+    pub(crate) const BASE: &str = "/api/v1/settings/smtp";
+}
+
 pub(crate) mod settings_mqtt {
     use uuid::Uuid;
     /// `GET /api/v1/settings/mqtt` · `POST …`

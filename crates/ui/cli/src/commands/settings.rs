@@ -27,6 +27,7 @@ use uptrakit_openapi_client::types::settings_mqtt::{
     CreateMqttClientRequest, MqttClientResponse, MqttLimitResponse, UpdateMqttClientRequest,
     UpdateMqttLimitRequest,
 };
+use uptrakit_openapi_client::types::settings_smtp::{SmtpSettingsResponse, UpdateSmtpSettingsRequest};
 use uptrakit_openapi_client::types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
 };
@@ -201,6 +202,35 @@ impl HumanOutput for MqttClientResponse {
 impl HumanOutput for MqttLimitResponse {
     fn to_human_string(&self) -> String {
         format!("Max Clients Per Tenant:  {}\n", self.max_clients_per_tenant)
+    }
+}
+
+impl HumanOutput for SmtpSettingsResponse {
+    fn to_human_string(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!(
+            "Host:          {}\n",
+            self.host.as_deref().unwrap_or("-")
+        ));
+        out.push_str(&format!(
+            "Port:          {}\n",
+            self.port.map_or("-".to_string(), |p| p.to_string())
+        ));
+        out.push_str(&format!(
+            "Username:      {}\n",
+            self.username.as_deref().unwrap_or("-")
+        ));
+        out.push_str(&format!("Has Password:  {}\n", self.has_password));
+        out.push_str(&format!(
+            "From Address:  {}\n",
+            self.from_address.as_deref().unwrap_or("-")
+        ));
+        out.push_str(&format!(
+            "From Name:     {}\n",
+            self.from_name.as_deref().unwrap_or("-")
+        ));
+        out.push_str(&format!("TLS Mode:      {}\n", self.tls_mode));
+        out
     }
 }
 
@@ -768,6 +798,70 @@ pub async fn oidc_deactivate(
 ) -> Result<OidcProviderResponse> {
     let client = authenticated_client(server, token, insecure, request_timeout)?;
     client.deactivate_oidc_provider(id).await.context_to()
+}
+
+/// Parameters for setting SMTP configuration.
+pub struct SmtpSetParams<'a> {
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub username: Option<String>,
+    pub clear_username: bool,
+    pub password: Option<String>,
+    pub clear_password: bool,
+    pub from_address: Option<String>,
+    pub from_name: Option<String>,
+    pub clear_from_name: bool,
+    pub tls_mode: Option<String>,
+}
+
+/// Show current SMTP settings.
+pub async fn smtp_show(
+    server: Option<&str>,
+    token: Option<&str>,
+    insecure: bool,
+    request_timeout: Option<std::time::Duration>,
+) -> Result<SmtpSettingsResponse> {
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
+    client.get_smtp_settings().await.context_to()
+}
+
+/// Update SMTP settings.
+pub async fn smtp_set(params: SmtpSetParams<'_>) -> Result<SmtpSettingsResponse> {
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    let username = if params.clear_username {
+        Some(serde_json::Value::Null)
+    } else {
+        params.username.map(serde_json::Value::String)
+    };
+    let password = if params.clear_password {
+        Some(serde_json::Value::Null)
+    } else {
+        params.password.map(serde_json::Value::String)
+    };
+    let from_name = if params.clear_from_name {
+        Some(serde_json::Value::Null)
+    } else {
+        params.from_name.map(serde_json::Value::String)
+    };
+    let req = UpdateSmtpSettingsRequest {
+        host: params.host,
+        port: params.port,
+        username,
+        password,
+        from_address: params.from_address,
+        from_name,
+        tls_mode: params.tls_mode,
+    };
+    client.update_smtp_settings(&req).await.context_to()
 }
 
 /// Show system alerts.

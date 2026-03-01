@@ -473,6 +473,50 @@ enum SettingsCommands {
     },
     /// Show system alerts
     Alerts,
+    /// SMTP settings for email notifications
+    Smtp {
+        #[command(subcommand)]
+        command: SmtpCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SmtpCommands {
+    /// Show current SMTP settings
+    Show,
+    /// Update SMTP settings
+    Set {
+        /// SMTP server hostname
+        #[arg(long)]
+        host: Option<String>,
+        /// SMTP server port (default: 587)
+        #[arg(long)]
+        port: Option<u16>,
+        /// SMTP username
+        #[arg(long)]
+        username: Option<String>,
+        /// Clear the saved username
+        #[arg(long, conflicts_with = "username")]
+        clear_username: bool,
+        /// SMTP password
+        #[arg(long)]
+        password: Option<String>,
+        /// Clear the saved password
+        #[arg(long, conflicts_with = "password")]
+        clear_password: bool,
+        /// Sender email address
+        #[arg(long)]
+        from_address: Option<String>,
+        /// Sender display name
+        #[arg(long)]
+        from_name: Option<String>,
+        /// Clear the saved sender display name
+        #[arg(long, conflicts_with = "from_name")]
+        clear_from_name: bool,
+        /// TLS mode: starttls, tls, or none (default: starttls)
+        #[arg(long)]
+        tls_mode: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2099,6 +2143,50 @@ async fn run(cli: Cli) -> error::Result<()> {
                         request_timeout,
                     )
                     .await?;
+                    output::print_output(format, &resp)?;
+                }
+            },
+            SettingsCommands::Smtp { command } => match command {
+                SmtpCommands::Show => {
+                    let resp = commands::settings::smtp_show(
+                        cli.server.as_deref(),
+                        cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                SmtpCommands::Set {
+                    host,
+                    port,
+                    username,
+                    clear_username,
+                    password,
+                    clear_password,
+                    from_address,
+                    from_name,
+                    clear_from_name,
+                    tls_mode,
+                } => {
+                    let resp =
+                        commands::settings::smtp_set(commands::settings::SmtpSetParams {
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                            host,
+                            port,
+                            username,
+                            clear_username,
+                            password,
+                            clear_password,
+                            from_address,
+                            from_name,
+                            clear_from_name,
+                            tls_mode,
+                        })
+                        .await?;
                     output::print_output(format, &resp)?;
                 }
             },
