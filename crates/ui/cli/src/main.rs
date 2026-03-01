@@ -478,6 +478,11 @@ enum SettingsCommands {
         #[command(subcommand)]
         command: SmtpCommands,
     },
+    /// NATS server URL configuration
+    Nats {
+        #[command(subcommand)]
+        command: NatsCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -517,6 +522,20 @@ enum SmtpCommands {
         #[arg(long)]
         tls_mode: Option<String>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum NatsCommands {
+    /// Show current NATS server URL configuration
+    Get,
+    /// Set the NATS server URL
+    Set {
+        /// NATS server URL (e.g. nats://host:4222 or nats://user:password@host:4222)
+        #[arg(long)]
+        url: String,
+    },
+    /// Clear the stored NATS server URL
+    Clear,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2200,6 +2219,45 @@ async fn run(cli: Cli) -> error::Result<()> {
                 .await?;
                 output::print_output(format, &resp)?;
             }
+            SettingsCommands::Nats { command } => match command {
+                NatsCommands::Get => {
+                    let resp = commands::settings::nats_show(
+                        cli.server.as_deref(),
+                        cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                NatsCommands::Set { url } => {
+                    let resp = commands::settings::nats_set(
+                        url,
+                        cli.server.as_deref(),
+                        cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                    eprintln!(
+                        "NATS URL updated. The change will take effect after the controller is restarted."
+                    );
+                }
+                NatsCommands::Clear => {
+                    let resp = commands::settings::nats_clear(
+                        cli.server.as_deref(),
+                        cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                    eprintln!(
+                        "NATS URL cleared. The change will take effect after the controller is restarted."
+                    );
+                }
+            },
         },
         Commands::PluginConfigs { command } => match command {
             PluginConfigsCommands::List { page, per_page } => {
@@ -3769,6 +3827,57 @@ mod tests {
             args.command,
             Some(Commands::Settings {
                 command: SettingsCommands::Alerts
+            })
+        ));
+    }
+
+    #[test]
+    fn settings_nats_get_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "settings", "nats", "get"]).expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::Settings {
+                command: SettingsCommands::Nats {
+                    command: NatsCommands::Get
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn settings_nats_set_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "settings",
+            "nats",
+            "set",
+            "--url",
+            "nats://host:4222",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Settings {
+                command: SettingsCommands::Nats {
+                    command: NatsCommands::Set { url },
+                },
+            }) => {
+                assert_eq!(url, "nats://host:4222");
+            }
+            _ => panic!("expected Settings Nats Set"),
+        }
+    }
+
+    #[test]
+    fn settings_nats_clear_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "settings", "nats", "clear"]).expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::Settings {
+                command: SettingsCommands::Nats {
+                    command: NatsCommands::Clear
+                }
             })
         ));
     }
