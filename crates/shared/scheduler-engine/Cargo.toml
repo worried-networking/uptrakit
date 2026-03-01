@@ -25,10 +25,10 @@ tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uptrakit-command = { workspace = true }
-uptrakit-internal-wire = { path = "../wire" }
+uptrakit-internal-wire = { workspace = true }
 uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
-uptrakit-shared-db = { path = "../db" }
+uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
@@ -36,7 +36,7 @@ x509-parser = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
-uptrakit-shared-db = { path = "../db", features = ["db-sqlite"] }
+uptrakit-shared-db = { workspace = true, features = ["db-sqlite"] }
 
 [lints]
 workspace = true

@@ -21,11 +21,11 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
 uptrakit-command = { workspace = true }
-uptrakit-internal-wire = { path = "../wire" }
+uptrakit-internal-wire = { workspace = true }
 uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon"] }
-uptrakit-service-sdk = { path = "../service-sdk" }
-uptrakit-directories = { path = "../directories" }
+uptrakit-service-sdk = { workspace = true }
+uptrakit-directories = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

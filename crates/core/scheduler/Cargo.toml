@@ -25,12 +25,12 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "
 tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-uptrakit-crypto = { path = "../../shared/crypto" }
-uptrakit-internal-wire = { path = "../../shared/wire" }
-uptrakit-nats = { path = "../../shared/nats" }
-uptrakit-scheduler-engine = { path = "../../shared/scheduler-engine" }
-uptrakit-service-sdk = { path = "../../shared/service-sdk" }
-uptrakit-shared-db = { path = "../../shared/db" }
+uptrakit-crypto = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
+uptrakit-nats = { workspace = true }
+uptrakit-scheduler-engine = { workspace = true }
+uptrakit-service-sdk = { workspace = true }
+uptrakit-shared-db = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 zeroize = { workspace = true }
@@ -38,10 +38,10 @@ zeroize = { workspace = true }
 [dev-dependencies]
 rcgen = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
-uptrakit-shared-db = { path = "../../shared/db", features = ["db-sqlite"] }
+uptrakit-shared-db = { workspace = true, features = ["db-sqlite"] }
 
 [build-dependencies]
-uptrakit-build-info = { path = "../../shared/build-info" }
+uptrakit-build-info = { workspace = true }
 
 [lints]
 workspace = true

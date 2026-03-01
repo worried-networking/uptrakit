@@ -14,11 +14,11 @@ rustls = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "fs", "sync", "time", "net"] }
 tokio-rustls = { workspace = true }
 tracing = { workspace = true }
-uptrakit-agent-core = { path = "../../shared/agent-core" }
+uptrakit-agent-core = { workspace = true }
 uptrakit-command = { workspace = true }
-uptrakit-directories = { path = "../../shared/directories" }
-uptrakit-internal-wire = { path = "../../shared/wire" }
-uptrakit-service-sdk = { path = "../../shared/service-sdk" }
+uptrakit-directories = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
+uptrakit-service-sdk = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 
 [dev-dependencies]
@@ -26,7 +26,7 @@ tempfile = { workspace = true }
 tokio-tungstenite = { workspace = true }
 
 [build-dependencies]
-uptrakit-build-info = { path = "../../shared/build-info" }
+uptrakit-build-info = { workspace = true }
 
 [lints]
 workspace = true

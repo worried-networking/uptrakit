@@ -17,7 +17,7 @@ time = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }
 uptrakit-backoff = { workspace = true }
-uptrakit-internal-wire = { path = "../wire" }
+uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 
