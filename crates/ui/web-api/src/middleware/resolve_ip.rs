@@ -223,6 +223,7 @@ mod tests {
             db.clone(),
             Arc::clone(&channel_registry),
             "https://localhost".to_string(),
+            settings.clone(),
         );
 
         Arc::new(AppState {

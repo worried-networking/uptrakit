@@ -200,6 +200,7 @@ async fn build_state(
             db.clone(),
             Arc::clone(&channel_registry),
             "https://localhost".to_string(),
+            settings.clone(),
         );
 
     let builder = AppState::builder()

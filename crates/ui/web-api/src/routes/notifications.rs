@@ -293,6 +293,20 @@ pub async fn test_channel(
         }
     };
 
+    // For email channels, merge global SMTP settings into the per-channel config before delivery.
+    let config_json = if channel_model.channel_type == "email" {
+        let smtp = state.settings.smtp();
+        if !smtp.is_configured() {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "SMTP is not configured. Set SMTP settings before testing an email channel.",
+            );
+        }
+        crate::notifications::dispatcher::merge_smtp_into_config_pub(&smtp, config_json)
+    } else {
+        config_json
+    };
+
     // Build test message
     let test_msg = DeliveryMessage {
         title: "Test Notification".to_string(),

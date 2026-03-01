@@ -512,10 +512,20 @@ mod tests {
                 .expect("channel registry for test"),
         );
 
+        let settings = Settings::new(
+            RegistrationSettings {
+                mode: RegistrationMode::Open,
+                token_hash: None,
+                require_token_for_oidc: false,
+            },
+            7,
+        );
+
         let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
             db.clone(),
             Arc::clone(&channel_registry),
             "https://localhost".to_string(),
+            settings.clone(),
         );
 
         Arc::new(AppState {
@@ -537,14 +547,7 @@ mod tests {
             rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
             db,
             default_tenant_id: tenant_id,
-            settings: Settings::new(
-                RegistrationSettings {
-                    mode: RegistrationMode::Open,
-                    token_hash: None,
-                    require_token_for_oidc: false,
-                },
-                7,
-            ),
+            settings,
             cert_signer: Arc::new(NoopCertSigner),
             service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
