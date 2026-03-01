@@ -321,6 +321,8 @@ impl TenantManager {
                         host.host_id,
                         &item.name,
                         &host.hostname,
+                        host.release_url.as_deref(),
+                        host.release_notes.as_deref(),
                     );
                     let config_bytes = config_json.to_string().into_bytes();
                     if let Err(e) = state
@@ -375,6 +377,8 @@ impl TenantManager {
                     host.host_id,
                     &item.name,
                     &host.hostname,
+                    host.release_url.as_deref(),
+                    host.release_notes.as_deref(),
                 );
                 let config_bytes = config_json.to_string().into_bytes();
                 if let Err(e) = state

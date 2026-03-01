@@ -109,6 +109,11 @@ pub fn unique_id(tenant_id: Uuid, item_id: Uuid, host_id: Uuid) -> String {
 /// Returns a [`serde_json::Value`] that should be serialized with `to_string()`
 /// and published (retained) on `discovery_config_topic(...)`.
 ///
+/// When `release_url` is provided it is included in the config verbatim.
+/// When `release_notes` is provided, the first 500 characters are included
+/// as `release_summary` (truncated at a character boundary to keep the MQTT
+/// payload small).
+///
 /// # Examples
 ///
 /// ```
@@ -122,6 +127,8 @@ pub fn unique_id(tenant_id: Uuid, item_id: Uuid, host_id: Uuid) -> String {
 ///     Uuid::nil(),
 ///     "My App",
 ///     "myhost",
+///     None,
+///     None,
 /// );
 /// assert_eq!(v["platform"], "mqtt");
 /// assert_eq!(v["payload_install"], "install");
@@ -134,13 +141,15 @@ pub fn build_discovery_config(
     host_id: Uuid,
     item_name: &str,
     hostname: &str,
+    release_url: Option<&str>,
+    release_notes: Option<&str>,
 ) -> serde_json::Value {
     let uid = unique_id(tenant_id, item_id, host_id);
     let tenant_simple = tenant_id.simple().to_string();
     let item_simple = item_id.simple().to_string();
     let default_entity_id = format!("uptrakit_{}_on_{}", slugify(item_name), slugify(hostname));
 
-    serde_json::json!({
+    let mut config = serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
         "name": hostname,
@@ -157,7 +166,25 @@ pub fn build_discovery_config(
             "name": item_name,
             "manufacturer": "Uptrakit"
         }
-    })
+    });
+
+    if let Some(url) = release_url {
+        config["release_url"] = serde_json::Value::String(url.to_string());
+    }
+    if let Some(notes) = release_notes {
+        config["release_summary"] =
+            serde_json::Value::String(truncate_str(notes, 500).to_string());
+    }
+
+    config
+}
+
+/// Truncate `s` to at most `max_chars` Unicode scalar values at a character boundary.
+fn truncate_str(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => &s[..byte_idx],
+        None => s,
+    }
 }
 
 /// Convert a string to a slug suitable for use in HA entity IDs.
@@ -382,6 +409,8 @@ mod tests {
             host(),
             "App",
             "myhost",
+            None,
+            None,
         );
         assert_eq!(v["platform"], "mqtt");
     }
@@ -396,6 +425,8 @@ mod tests {
             host(),
             "App",
             "myhost",
+            None,
+            None,
         );
         let expected_uid = unique_id(tenant(), item(), host());
         assert_eq!(v["unique_id"], expected_uid.as_str());
@@ -411,6 +442,8 @@ mod tests {
             host(),
             "MyApp",
             "server1",
+            None,
+            None,
         );
         assert_eq!(v["name"], "server1");
     }
@@ -425,6 +458,8 @@ mod tests {
             host(),
             "App",
             "h",
+            None,
+            None,
         );
         let expected = state_topic("uptrakit", item(), host());
         assert_eq!(v["state_topic"], expected.as_str());
@@ -440,6 +475,8 @@ mod tests {
             host(),
             "App",
             "h",
+            None,
+            None,
         );
         let expected = latest_version_topic("uptrakit", item(), host());
         assert_eq!(v["latest_version_topic"], expected.as_str());
@@ -455,6 +492,8 @@ mod tests {
             host(),
             "App",
             "h",
+            None,
+            None,
         );
         let expected = command_topic("uptrakit", item(), host());
         assert_eq!(v["command_topic"], expected.as_str());
@@ -470,6 +509,8 @@ mod tests {
             host(),
             "App",
             "h",
+            None,
+            None,
         );
         assert_eq!(v["payload_install"], "install");
     }
@@ -484,6 +525,8 @@ mod tests {
             host(),
             "App",
             "h",
+            None,
+            None,
         );
         assert_eq!(v["availability_topic"], "uptrakit/status");
     }
@@ -498,6 +541,8 @@ mod tests {
             host(),
             "App",
             "h",
+            None,
+            None,
         );
         assert_eq!(v["payload_available"], "online");
         assert_eq!(v["payload_not_available"], "offline");
@@ -513,6 +558,8 @@ mod tests {
             host(),
             "App",
             "h",
+            None,
+            None,
         );
         let tenant_simple = tenant().simple().to_string();
         let item_simple = item().simple().to_string();
@@ -530,6 +577,8 @@ mod tests {
             host(),
             "My App",
             "h",
+            None,
+            None,
         );
         assert_eq!(v["device"]["name"], "My App");
         assert_eq!(v["device"]["manufacturer"], "Uptrakit");
@@ -576,10 +625,89 @@ mod tests {
             host(),
             "App",
             "h",
+            None,
+            None,
         );
         let s = v.to_string();
         let reparsed: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(reparsed["platform"], "mqtt");
+    }
+
+    // -------------------------------------------------------------------------
+    // build_discovery_config — release metadata
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_discovery_config_with_release_url() {
+        let url = "https://github.com/owner/repo/releases/tag/v1.3.0";
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+            Some(url),
+            None,
+        );
+        assert_eq!(v["release_url"], url);
+        assert!(v.get("release_summary").is_none());
+    }
+
+    #[test]
+    fn build_discovery_config_with_release_summary() {
+        let notes = "## What's New\n- Feature A\n- Bug fix B";
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+            None,
+            Some(notes),
+        );
+        assert_eq!(v["release_summary"], notes);
+        assert!(v.get("release_url").is_none());
+    }
+
+    #[test]
+    fn build_discovery_config_release_summary_truncated_at_500_chars() {
+        // Build a string of 600 ASCII characters.
+        let notes: String = "a".repeat(600);
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+            None,
+            Some(&notes),
+        );
+        let summary = v["release_summary"].as_str().unwrap();
+        assert_eq!(summary.len(), 500);
+        assert_eq!(summary, &notes[..500]);
+    }
+
+    #[test]
+    fn build_discovery_config_no_release_metadata_omits_fields() {
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+            None,
+            None,
+        );
+        assert!(v.get("release_url").is_none());
+        assert!(v.get("release_summary").is_none());
     }
 
     // -------------------------------------------------------------------------
