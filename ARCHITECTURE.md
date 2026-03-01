@@ -184,7 +184,8 @@ implementations. Each channel is behind its own Cargo feature flag (`webhook` �
 Future channels (Email, Slack, Discord, Pushover, etc.) are added as feature-gated modules in the same crate.
 
 Supported event types: `update_available`, `update_completed`, `update_failed`, `new_software_discovered`,
-`new_service_enrolled`, `ca_rotated`. Rules can be scoped to a specific host, software item, and/or plugin type.
+`new_service_enrolled`, `ca_rotated`, `batch_update_completed`, `batch_update_partially_completed`.
+Rules can be scoped to a specific host, software item, and/or plugin type.
 `UpdateAvailable` events produce actionable notifications — on Telegram, an inline keyboard button triggers
 the update via a callback endpoint.
 
@@ -194,6 +195,24 @@ are masked in API responses. Delivery history is recorded in the `notification_l
 
 See [Notifications Development](docs/development/notifications.md), [Notifications API](docs/api/notifications.md),
 and [Notifications Security](docs/security/notifications-security.md).
+
+## Batch updates
+
+The controller supports batch updates — triggering multiple updates in a single request with sequential per-host
+dispatch. Two modes: host-wide (update all outdated items on a host, optionally filtered by update category) and
+item-wide (roll out a software item version to multiple hosts). The `update_batches` table tracks batch metadata;
+individual updates link back via `update_history.batch_id`. After each update completes on a host, the controller
+dispatches the next pending update for that host within the same batch.
+
+An `UpdateCategory` enum (`security`, `bugfix`, `feature`, `unknown`) classifies available updates based on upstream
+source metadata. The APT plugin detects security updates from `*-security` repositories. Categories are stored on
+`host_software_items` and `update_history` and exposed in API responses.
+
+A `BatchProgressBroadcaster` (`crates/ui/web-api/src/batch_progress_broadcaster.rs`) provides per-batch
+`tokio::sync::broadcast` channels for real-time SSE streaming of batch progress events.
+
+See [Update History Entity](docs/architecture/update-history-entity.md) and
+[Batch Update Endpoints](docs/api/http-web-api.md#batch-update-endpoints).
 
 ## Update output streaming (SSE)
 

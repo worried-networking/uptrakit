@@ -227,6 +227,165 @@ Types are defined in `crates/shared/web-api-types/src/update_history.rs`:
 | `crates/ui/web-api/src/update_output_broadcaster.rs` | In-process broadcast registry (`UpdateOutputBroadcaster`) |
 | `crates/shared/web-api-types/src/update_history.rs` | SSE event types (`OutputLineSSE`, `UpdateCompletedSSE`) |
 
+## Batch Update Endpoints
+
+Batch updates allow triggering multiple updates in a single request with controller-managed
+sequential per-host dispatch. Updates within a batch are dispatched one at a time per host;
+after one completes (or fails), the next is dispatched.
+
+### `POST /api/v1/hosts/{host_id}/batch-update`
+
+Trigger a host-wide batch update for all outdated software items on a host. Requires `ManageSoftware`.
+
+**Request body** (`HostBatchUpdateRequest`):
+
+```json
+{
+  "category_filter": "security",
+  "exclude_item_ids": ["<uuid>"]
+}
+```
+
+- `category_filter`: optional. Only include items with this update category (e.g. `security`). Omit for all outdated.
+- `exclude_item_ids`: optional. Exclude these software item UUIDs from the batch.
+
+**Response** (`200`): `BatchUpdateResponse`
+
+```json
+{
+  "batch_id": "019...",
+  "total_created": 5,
+  "updates": [
+    {
+      "update_history_id": "019...",
+      "software_item_id": "019...",
+      "software_item_name": "nginx",
+      "host_id": "019...",
+      "host_name": "web-01",
+      "to_version": "1.27.0",
+      "trigger_status": "pending"
+    }
+  ],
+  "skipped": [
+    {
+      "software_item_id": "019...",
+      "software_item_name": "redis",
+      "host_id": "019...",
+      "host_name": "web-01",
+      "reason": "update already in progress"
+    }
+  ]
+}
+```
+
+If no eligible items are found, returns `200` with `batch_id: null` and `total_created: 0`.
+
+### `POST /api/v1/software-items/{id}/batch-update`
+
+Trigger an item-wide batch update to roll out a software item version to hosts. Requires `ManageSoftware`.
+
+**Request body** (`ItemBatchUpdateRequest`):
+
+```json
+{
+  "to_version": "3.0.0",
+  "host_ids": ["<uuid>", "<uuid>"]
+}
+```
+
+- `to_version`: required. Target version to update to.
+- `host_ids`: optional. Limit to these host UUIDs. Omit to include all assigned hosts with outdated versions.
+
+**Response** (`200`): `BatchUpdateResponse` (same format as above).
+
+### `GET /api/v1/update-batches`
+
+List update batches with optional filters and pagination. Requires `ViewSoftware`.
+
+**Query parameters**: `status` (optional), `page`, `per_page`.
+
+**Response** (`200`): `PaginatedResponse<UpdateBatchSummaryResponse>`
+
+```json
+{
+  "items": [
+    {
+      "id": "019...",
+      "batch_type": "host_update",
+      "status": "completed",
+      "total_count": 5,
+      "completed_count": 5,
+      "failed_count": 0,
+      "pending_count": 0,
+      "actor_type": "user",
+      "actor_id": "019...",
+      "created_at": "2026-03-01T12:00:00Z",
+      "completed_at": "2026-03-01T12:05:00Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "per_page": 20,
+  "total_pages": 1
+}
+```
+
+### `GET /api/v1/update-batches/{id}`
+
+Get a single update batch with per-item update details. Requires `ViewSoftware`.
+
+**Response** (`200`): `UpdateBatchDetailResponse` (extends summary with `updates` array).
+
+### Batch Progress Streaming (SSE)
+
+`GET /api/v1/update-batches/{id}/stream` — Server-Sent Events endpoint for real-time batch
+progress. Requires `ViewSoftware`. Same authentication as the update output SSE endpoint.
+
+Three event types are emitted:
+
+**`update`** — an individual update within the batch changed status:
+
+```text
+event: update
+data: {"event":"update_completed","update_history_id":"<uuid>","software_item_name":"nginx","host_name":"web-01"}
+```
+
+**`progress`** — overall batch progress summary:
+
+```text
+event: progress
+data: {"completed":3,"failed":0,"pending":2,"total":5}
+```
+
+**`batch_completed`** — the batch reached a terminal status (stream ends after this):
+
+```text
+event: batch_completed
+data: {"status":"completed"}
+```
+
+### Response types
+
+Types are defined in `crates/shared/web-api-types/src/update_batches.rs`:
+
+| Type | Fields |
+| --- | --- |
+| `HostBatchUpdateRequest` | `category_filter?`, `exclude_item_ids?` |
+| `ItemBatchUpdateRequest` | `to_version`, `host_ids?` |
+| `BatchUpdateResponse` | `batch_id?`, `total_created`, `updates`, `skipped` |
+| `UpdateBatchSummaryResponse` | `id`, `batch_type`, `status`, counts, `actor_type`, `actor_id`, timestamps |
+| `UpdateBatchDetailResponse` | Extends summary with `updates: Vec<UpdateBatchItemDetail>` |
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/update_batches.rs` | Route handlers and SSE endpoint |
+| `crates/ui/web-api/src/queries/update_batches.rs` | Batch query logic |
+| `crates/ui/web-api/src/batch_progress_broadcaster.rs` | In-process broadcast registry |
+| `crates/shared/web-api-types/src/update_batches.rs` | Request/response types |
+| `crates/shared/db/src/entity/update_batch.rs` | SeaORM entity |
+
 ## Service Operations
 
 - `/api/v1/agents/{id}/version-check`: trigger a version check (requires `ManageSoftware`).
@@ -580,6 +739,7 @@ All paginated endpoints return a `PaginatedResponse<T>`:
 | `GET /api/v1/notifications/channels` | `PaginationParams` | |
 | `GET /api/v1/notifications/rules` | `ListRulesQuery` (includes `page`/`per_page`) | Filterable by `channel_id`, `event_type` |
 | `GET /api/v1/notifications/log` | `PaginationParams` | |
+| `GET /api/v1/update-batches` | `UpdateBatchListQuery` (includes `page`/`per_page`) | Filterable by `status` |
 
 ### Endpoints NOT paginated (already bounded)
 

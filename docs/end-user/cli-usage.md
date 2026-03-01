@@ -341,6 +341,55 @@ That command errors with a clear message if no latest version is known yet, prom
 
 See also: [Update Workflow](update-workflow.md), [Update History Entity](../architecture/update-history-entity.md).
 
+## Batch Updates
+
+Trigger multiple updates in a single request. Two modes are available: host-wide (update
+everything on a host) and item-wide (roll out a version to multiple hosts).
+
+```sh
+# Update all outdated software on a host
+uptrakit update batch-host <HOST_ID>
+
+# Only apply security patches
+uptrakit update batch-host <HOST_ID> --category security
+
+# Exclude specific items
+uptrakit update batch-host <HOST_ID> --exclude <ITEM_ID_1>,<ITEM_ID_2>
+
+# Follow batch progress in real time
+uptrakit update batch-host <HOST_ID> --follow
+
+# Roll out a software item to all assigned hosts
+uptrakit update batch-item <ITEM_ID> --to-version "3.0.0"
+
+# Limit to specific hosts
+uptrakit update batch-item <ITEM_ID> --to-version "3.0.0" --host <HOST_ID_1>,<HOST_ID_2>
+
+# Follow batch progress
+uptrakit update batch-item <ITEM_ID> --to-version "3.0.0" --follow
+```
+
+The `--follow` / `-f` flag connects to the batch progress SSE stream after triggering.
+Per-item status updates print to stderr. Press Ctrl+C to detach — the batch continues
+in the background. Exit codes: 0 = completed, 1 = partially completed, 2 = other.
+
+### Managing Batches
+
+```sh
+# List all update batches (paginated)
+uptrakit update-batches list
+uptrakit update-batches list --status in_progress --page 1 --per-page 10
+
+# Show batch details with per-item status
+uptrakit update-batches show <BATCH_ID>
+
+# Follow batch progress via SSE
+uptrakit update-batches follow <BATCH_ID>
+```
+
+See also: [Update Workflow](update-workflow.md#batch-updates),
+[Update History Entity](../architecture/update-history-entity.md).
+
 ## Update History
 
 View the history of updates across hosts and software items.

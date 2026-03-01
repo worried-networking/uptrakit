@@ -99,7 +99,7 @@ uptrakit/
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, services, software-items, plugin-configs, autodiscovery, checks, updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; lib target exposes modules for integration tests
+│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, services, software-items, plugin-configs, autodiscovery, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API; split into app_state.rs, ca_snapshot.rs, router.rs modules; auth/auth_method.rs hosts AuthMethod
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
@@ -478,6 +478,7 @@ for user review. Key invariants:
 | File | Purpose |
 | --- | --- |
 | `crates/shared/types/src/plugin_role.rs` | `PluginRole` enum (`DetectVersion`, `FetchReleases`, `ExecuteUpdate`, `Other`) |
+| `crates/shared/types/src/update_category.rs` | `UpdateCategory` enum (`Security`, `Bugfix`, `Feature`, `Unknown`) — classifies available updates |
 | `crates/shared/types/src/software_discovery_state.rs` | `SoftwareDiscoveryState` enum |
 | `crates/shared/types/src/discovered_software.rs` | `DiscoveredSoftware` type (with `targets: Vec<DiscoveryTarget>`) |
 | `crates/shared/types/src/discovery_target.rs` | `DiscoveryTarget` struct (plugin type, config, name, roles, overrides) |
@@ -567,7 +568,15 @@ non-alphanumeric characters replaced by underscores (consecutive separators coll
 | `crates/ui/web-api/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items with per-host version data |
 | `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish) |
 | `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` handler; states push after `TenantAssignments`, `VersionCheckResults`, and `UpdateResult` |
-| `crates/ui/web-api/src/queries/update_triggers.rs` | `trigger_update_for_host` shared by REST and MQTT WS handlers |
+| `crates/ui/web-api/src/queries/update_triggers.rs` | `trigger_update_for_host` (refactored into `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent` layers); shared by REST, MQTT, and batch handlers |
+| `crates/ui/web-api/src/queries/update_batches.rs` | Batch update query logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch` |
+| `crates/ui/web-api/src/routes/update_batches.rs` | Batch update route handlers + SSE batch progress endpoint |
+| `crates/ui/web-api/src/batch_progress_broadcaster.rs` | `BatchProgressBroadcaster`: per-batch `broadcast` channels for SSE streaming |
+| `crates/shared/web-api-types/src/update_batches.rs` | Batch API types (`HostBatchUpdateRequest`, `ItemBatchUpdateRequest`, `BatchUpdateResponse`, etc.) |
+| `crates/shared/db/src/entity/update_batch.rs` | `UpdateBatch` SeaORM entity with `BatchStatus` enum |
+| `crates/shared/openapi-client/src/update_batches.rs` | Typed HTTP client methods for batch endpoints |
+| `crates/shared/openapi-client/src/batch_progress_stream.rs` | SSE streaming client for batch progress events |
+| `crates/ui/cli/src/commands/batch_update.rs` | CLI batch update commands |
 | `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide |
 | `docs/api/wire-protocol.md` | `software_states` and `mqtt_trigger_update` payload docs |
 | `crates/shared/wire/asyncapi.yaml` | AsyncAPI schemas for both new messages |

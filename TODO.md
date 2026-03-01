@@ -577,16 +577,30 @@ Polish and additional capabilities for production use.
 
 ### Update Batching & Orchestration
 
-- [ ] Design batch update system
-  - [ ] Batch definition (groups of updates)
-  - [ ] Batch execution strategies (sequential, parallel)
-  - [ ] Batch failure handling
+- [x] Design batch update system
+  - [x] Batch definition (groups of updates) — `update_batches` table with `host_update` and
+    `item_rollout` types
+  - [x] Batch execution strategies (sequential) — per-host sequential dispatch managed by
+    the controller; parallel strategies deferred
+  - [x] Batch failure handling — soft-skip items with active updates; `partially_completed`
+    status when some items fail
+- [x] **Update category classification** — `UpdateCategory` enum (`security`, `bugfix`,
+  `feature`, `unknown`) stored on `host_software_items` and `update_history`. APT plugin
+  detects security updates from `*-security` repositories. Batch updates can filter by category.
+- [x] **Host-wide batch update** — `POST /api/v1/hosts/{host_id}/batch-update` with optional
+  category filter and exclude list. CLI: `uptrakit update batch-host`.
+- [x] **Item-wide batch update** — `POST /api/v1/software-items/{id}/batch-update` to roll out
+  a version to all/selected hosts. CLI: `uptrakit update batch-item`.
+- [x] **Batch progress tracking** — SSE endpoint (`GET /api/v1/update-batches/{id}/stream`),
+  in-process `BatchProgressBroadcaster`, CLI `update-batches follow` and `--follow` flag.
+- [x] **Batch notification events** — `batch_update_completed` and
+  `batch_update_partially_completed` notification event types.
 - [ ] Implement update dependencies
   - [ ] Update A must complete before update B
   - [ ] Cross-host dependencies
-- [ ] Add batch progress tracking
 - [ ] Create batch update UI
 - [ ] Implement canary deployment patterns
+- [ ] Rolling strategies (N-at-a-time, failure thresholds)
 
 ### Real-Time Frontend Updates
 
