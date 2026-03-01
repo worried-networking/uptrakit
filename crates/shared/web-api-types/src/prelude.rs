@@ -54,6 +54,14 @@ pub use crate::autodiscovery::{
     TriggerDiscoveryResponse,
 };
 
+// ── Notifications ───────────────────────────────────────────────────
+pub use crate::notifications::{
+    CreateNotificationChannelRequest, CreateNotificationRuleRequest, NotificationChannelResponse,
+    NotificationChannelType, NotificationDeliveryStatus, NotificationEventType,
+    NotificationLogResponse, NotificationRuleResponse, TestNotificationResponse,
+    UpdateNotificationChannelRequest, UpdateNotificationRuleRequest,
+};
+
 // ── Common ───────────────────────────────────────────────────────────
 pub use crate::error::ErrorResponse;
 pub use crate::pagination::{PaginatedResponse, PaginationParams};

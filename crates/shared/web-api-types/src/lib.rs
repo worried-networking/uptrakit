@@ -18,6 +18,7 @@ pub mod hosts;
 pub mod mqtt_services;
 pub mod mqtt_transport;
 pub mod mqtt_url;
+pub mod notifications;
 pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod pagination;
@@ -128,7 +129,7 @@ mod tests {
 
     #[test]
     fn permission_iter_covers_all_variants() {
-        assert_eq!(Permission::iter().count(), 9);
+        assert_eq!(Permission::iter().count(), 11);
     }
 
     #[test]
@@ -790,6 +791,15 @@ mod tests {
         let _ = MqttClientConnectionStatus::Online;
         let _ = MqttTransport::Tcp;
 
+        // Notifications
+        let _ = NotificationEventType::UpdateAvailable;
+        let _ = NotificationChannelType::Webhook;
+        let _ = NotificationDeliveryStatus::Pending;
+        let _: NotificationChannelResponse;
+        let _: NotificationRuleResponse;
+        let _: NotificationLogResponse;
+        let _: TestNotificationResponse;
+
         // Common
         let _: ErrorResponse;
         let _: PaginatedResponse<String>;
@@ -1042,5 +1052,176 @@ mod tests {
         };
         let err = req.validate().unwrap_err();
         assert_eq!(err.field, "trusted_proxies");
+    }
+
+    // ── 12. Notification enums round-trip ────────────────────────────────
+
+    #[test]
+    fn notification_event_type_serde_round_trip() {
+        use crate::notifications::NotificationEventType;
+        let variants = [
+            NotificationEventType::UpdateAvailable,
+            NotificationEventType::UpdateCompleted,
+            NotificationEventType::UpdateFailed,
+            NotificationEventType::NewSoftwareDiscovered,
+            NotificationEventType::NewServiceEnrolled,
+            NotificationEventType::CaRotated,
+        ];
+        for event in &variants {
+            let json = serde_json::to_string(event).unwrap();
+            let deserialized: NotificationEventType = serde_json::from_str(&json).unwrap();
+            assert_eq!(&deserialized, event);
+        }
+    }
+
+    #[test]
+    fn notification_channel_type_serde_round_trip() {
+        use crate::notifications::NotificationChannelType;
+        let variants = [
+            NotificationChannelType::Webhook,
+            NotificationChannelType::Telegram,
+        ];
+        for ct in &variants {
+            let json = serde_json::to_string(ct).unwrap();
+            let deserialized: NotificationChannelType = serde_json::from_str(&json).unwrap();
+            assert_eq!(&deserialized, ct);
+        }
+    }
+
+    #[test]
+    fn notification_delivery_status_serde_round_trip() {
+        use crate::notifications::NotificationDeliveryStatus;
+        let variants = [
+            NotificationDeliveryStatus::Pending,
+            NotificationDeliveryStatus::Delivered,
+            NotificationDeliveryStatus::Failed,
+        ];
+        for status in &variants {
+            let json = serde_json::to_string(status).unwrap();
+            let deserialized: NotificationDeliveryStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(&deserialized, status);
+        }
+    }
+
+    #[test]
+    fn notification_event_type_as_str_values() {
+        use crate::notifications::NotificationEventType;
+        assert_eq!(
+            NotificationEventType::UpdateAvailable.as_str(),
+            "update_available"
+        );
+        assert_eq!(
+            NotificationEventType::UpdateCompleted.as_str(),
+            "update_completed"
+        );
+        assert_eq!(
+            NotificationEventType::UpdateFailed.as_str(),
+            "update_failed"
+        );
+        assert_eq!(
+            NotificationEventType::NewSoftwareDiscovered.as_str(),
+            "new_software_discovered"
+        );
+        assert_eq!(
+            NotificationEventType::NewServiceEnrolled.as_str(),
+            "new_service_enrolled"
+        );
+        assert_eq!(NotificationEventType::CaRotated.as_str(), "ca_rotated");
+    }
+
+    #[test]
+    fn notification_event_type_from_str_valid() {
+        use crate::notifications::NotificationEventType;
+        assert_eq!(
+            "update_available".parse::<NotificationEventType>().ok(),
+            Some(NotificationEventType::UpdateAvailable)
+        );
+        assert_eq!(
+            "ca_rotated".parse::<NotificationEventType>().ok(),
+            Some(NotificationEventType::CaRotated)
+        );
+    }
+
+    #[test]
+    fn notification_event_type_from_str_invalid() {
+        use crate::notifications::NotificationEventType;
+        assert!("nonexistent".parse::<NotificationEventType>().is_err());
+        assert!("".parse::<NotificationEventType>().is_err());
+        assert!("UPDATE_AVAILABLE".parse::<NotificationEventType>().is_err());
+    }
+
+    #[test]
+    fn notification_event_type_display_matches_as_str() {
+        use crate::notifications::NotificationEventType;
+        let variants = [
+            NotificationEventType::UpdateAvailable,
+            NotificationEventType::UpdateCompleted,
+            NotificationEventType::UpdateFailed,
+            NotificationEventType::NewSoftwareDiscovered,
+            NotificationEventType::NewServiceEnrolled,
+            NotificationEventType::CaRotated,
+        ];
+        for event in &variants {
+            assert_eq!(format!("{event}"), event.as_str());
+        }
+    }
+
+    // ── 13. Notification validation ─────────────────────────────────────
+
+    #[test]
+    fn create_notification_channel_valid() {
+        use crate::notifications::{CreateNotificationChannelRequest, NotificationChannelType};
+        use crate::validation::Validate;
+        let req = CreateNotificationChannelRequest {
+            name: "My Webhook".to_string(),
+            channel_type: NotificationChannelType::Webhook,
+            config: serde_json::json!({"url": "https://example.com/hook"}),
+            enabled: true,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn create_notification_channel_empty_name() {
+        use crate::notifications::{CreateNotificationChannelRequest, NotificationChannelType};
+        use crate::validation::Validate;
+        let req = CreateNotificationChannelRequest {
+            name: "".to_string(),
+            channel_type: NotificationChannelType::Webhook,
+            config: serde_json::json!({}),
+            enabled: true,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "name");
+    }
+
+    #[test]
+    fn create_notification_channel_non_object_config() {
+        use crate::notifications::{CreateNotificationChannelRequest, NotificationChannelType};
+        use crate::validation::Validate;
+        let req = CreateNotificationChannelRequest {
+            name: "Test".to_string(),
+            channel_type: NotificationChannelType::Webhook,
+            config: serde_json::json!("not an object"),
+            enabled: true,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "config");
+    }
+
+    #[test]
+    fn create_notification_rule_valid() {
+        use crate::notifications::{CreateNotificationRuleRequest, NotificationEventType};
+        use crate::validation::Validate;
+        let req = CreateNotificationRuleRequest {
+            channel_id: Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6")
+                .expect("valid uuid"),
+            event_type: NotificationEventType::UpdateAvailable,
+            host_id: None,
+            software_item_id: None,
+            plugin_type: None,
+            enabled: true,
+        };
+        assert!(req.validate().is_ok());
     }
 }
