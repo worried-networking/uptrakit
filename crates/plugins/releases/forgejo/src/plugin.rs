@@ -206,6 +206,7 @@ impl ForgejoPlugin {
             release_notes: release.body.clone(),
             published_at,
             assets,
+            category: None,
         })
     }
 

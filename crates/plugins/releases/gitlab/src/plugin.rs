@@ -207,6 +207,7 @@ impl GitLabPlugin {
             release_notes: gl_release.description.clone(),
             published_at,
             assets,
+            category: None,
         })
     }
 

@@ -208,6 +208,7 @@ impl Plugin for DockerPlugin {
             release_notes: None,
             published_at: None,
             assets: vec![],
+            category: None,
         };
 
         tracing::debug!(

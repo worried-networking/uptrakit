@@ -1849,6 +1849,7 @@ components:
       type: object
       required:
         - software_item_id
+        - update_category
       properties:
         software_item_id:
           type: string
@@ -1874,6 +1875,20 @@ components:
           description: Error message if detection failed
           examples:
             - "unsupported plugin type"
+        update_category:
+          type: string
+          enum:
+            - security
+            - bugfix
+            - feature
+            - unknown
+          description: >
+            Classification of the available update. Set by plugins that can
+            determine the update type (e.g. APT detects security updates from
+            the repository URL). Omitted when the plugin cannot classify the
+            update or when no update is available.
+          examples:
+            - "security"
 
     outputStreamType:
       type: string

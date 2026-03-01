@@ -9,7 +9,8 @@ use uptrakit_command::{CommandExecutor, CommandSpec, SudoAwareCommandExecutor};
 use uptrakit_internal_wire::{
     Capability, CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryPluginResult,
     DiscoveryResultsPayload, ExecuteUpdatePayload, HostInfo, ReportHostsPayload, ServiceMessage,
-    UpdateFinalStatus, UpdateResultPayload, VersionCheckResult, VersionCheckResultsPayload,
+    UpdateCategory, UpdateFinalStatus, UpdateResultPayload, VersionCheckResult,
+    VersionCheckResultsPayload,
 };
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
 
@@ -714,6 +715,7 @@ fn error_results_for_check(payload: &CheckVersionsPayload, error: &str) -> Vec<V
             installed_version: None,
             latest_version: None,
             error: Some(error.to_string()),
+            update_category: UpdateCategory::Unknown,
         })
         .collect()
 }

@@ -14,6 +14,7 @@ mod secret_string;
 mod service_status;
 mod session_token_type;
 mod software_discovery_state;
+mod update_category;
 
 pub use device_auth_status::{DeviceAuthStatus, ParseDeviceAuthStatusError};
 pub use discovered_software::DiscoveredSoftware;
@@ -32,3 +33,4 @@ pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};
 pub use software_discovery_state::{ParseSoftwareDiscoveryStateError, SoftwareDiscoveryState};
+pub use update_category::{ParseUpdateCategoryError, UpdateCategory};

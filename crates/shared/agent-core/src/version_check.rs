@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
-use uptrakit_internal_wire::PluginAssignment;
+use uptrakit_internal_wire::{PluginAssignment, UpdateCategory};
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
 use crate::connection_context::ConnectionContext;
@@ -15,6 +15,8 @@ pub struct VersionCheckOutcome {
     pub latest_version: Option<String>,
     /// Error message if detection failed.
     pub error: Option<String>,
+    /// Classification of the available update (e.g. security, bugfix).
+    pub update_category: UpdateCategory,
 }
 
 /// Check the installed version (and optionally the latest version) for a
@@ -45,15 +47,16 @@ pub async fn check_version(
         Err(e) => (None, Some(e)),
     };
 
-    let latest_version = if let Some(assignment) = fetch {
+    let latest_result = if let Some(assignment) = fetch {
         fetch_latest(assignment, Arc::clone(&executor), ctx).await
     } else {
         Ok(None)
     };
 
-    let (latest_version, fetch_error) = match latest_version {
-        Ok(v) => (v, None),
-        Err(e) => (None, Some(e)),
+    let (latest_version, update_category, fetch_error) = match latest_result {
+        Ok(Some((version, category))) => (Some(version), category, None),
+        Ok(None) => (None, UpdateCategory::Unknown, None),
+        Err(e) => (None, UpdateCategory::Unknown, Some(e)),
     };
 
     // Combine errors if both roles failed.
@@ -68,6 +71,7 @@ pub async fn check_version(
         installed_version,
         latest_version,
         error,
+        update_category,
     }
 }
 
@@ -108,11 +112,13 @@ async fn detect_installed(
 }
 
 /// Fetch the latest available version using a specific plugin assignment.
+///
+/// Returns `Ok(Some((version_string, category)))` when a release is found.
 async fn fetch_latest(
     assignment: &PluginAssignment,
     executor: Arc<dyn CommandExecutor>,
     ctx: &ConnectionContext,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, UpdateCategory)>, String> {
     tracing::debug!(
         plugin_type = ?assignment.plugin_type,
         package = %assignment.package_identifier,
@@ -130,7 +136,10 @@ async fn fetch_latest(
     match plugin.fetch_releases(&assignment.package_identifier).await {
         Ok(releases) => {
             tracing::debug!(count = releases.len(), "releases fetched");
-            Ok(releases.first().map(|r| r.version.to_string()))
+            Ok(releases.first().map(|r| {
+                let category = r.category.unwrap_or_default();
+                (r.version.to_string(), category)
+            }))
         }
         Err(e) => {
             tracing::debug!(error = %e, "failed to fetch latest version from plugin");

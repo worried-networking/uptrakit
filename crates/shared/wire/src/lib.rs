@@ -15,7 +15,7 @@ use uuid::Uuid;
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{
     DiscoveredSoftware, DiscoveryTarget, HookShell, MqttClientConnectionStatus, MqttTransport,
-    OutputStreamType, PluginRole, PluginType, ReleaseAsset, ReleaseInfo,
+    OutputStreamType, PluginRole, PluginType, ReleaseAsset, ReleaseInfo, UpdateCategory,
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
@@ -694,6 +694,10 @@ pub struct VersionCheckResult {
     /// Error message if detection failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Classification of the available update (e.g. security, bugfix).
+    /// Defaults to `Unknown` when the plugin cannot classify the update.
+    #[serde(default)]
+    pub update_category: UpdateCategory,
 }
 
 // --- Update execution messages ---
@@ -1475,12 +1479,14 @@ mod tests {
                     installed_version: Some("1.2.3".to_string()),
                     latest_version: None,
                     error: None,
+                    update_category: UpdateCategory::Unknown,
                 },
                 VersionCheckResult {
                     software_item_id: TEST_UUID_2,
                     installed_version: None,
                     latest_version: None,
                     error: Some("detection failed".to_string()),
+                    update_category: UpdateCategory::Unknown,
                 },
             ],
         });
@@ -1503,6 +1509,7 @@ mod tests {
                 installed_version: Some("1.24.4".to_string()),
                 latest_version: Some("1.24.5".to_string()),
                 error: None,
+                update_category: UpdateCategory::Unknown,
             }],
         });
         let json = serde_json::to_string(&msg).unwrap();
@@ -3046,6 +3053,7 @@ mod tests {
                     installed_version: Some("1.2.3".to_string()),
                     latest_version: Some("1.3.0".to_string()),
                     error: None,
+                    update_category: UpdateCategory::Unknown,
                 }],
             },
         ));

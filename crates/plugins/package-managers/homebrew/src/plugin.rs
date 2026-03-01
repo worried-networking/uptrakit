@@ -462,6 +462,7 @@ impl Plugin for HomebrewPlugin {
             release_notes: None,
             published_at: None,
             assets: vec![],
+            category: None,
         }];
         tracing::debug!(count = releases.len(), "Homebrew releases fetched");
         Ok(releases)

@@ -3,7 +3,7 @@ use time::OffsetDateTime;
 
 pub use uptrakit_shared_types::{
     DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole, PluginType, ReleaseAsset,
-    ReleaseInfo,
+    ReleaseInfo, UpdateCategory,
 };
 
 use crate::version::Version;
@@ -28,6 +28,12 @@ pub struct UpstreamRelease {
     /// Downloadable assets.
     #[serde(default)]
     pub assets: Vec<ReleaseAsset>,
+    /// Classification of the update (security, bugfix, feature, unknown).
+    ///
+    /// Plugins that can determine the update type set this field.
+    /// `None` is treated as `Unknown` at storage time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<UpdateCategory>,
 }
 
 #[cfg(test)]
@@ -85,6 +91,7 @@ mod tests {
                 size: Some(1024),
                 content_type: None,
             }],
+            category: None,
         };
         let json = serde_json::to_string(&release).expect("serialize");
         let deserialized: UpstreamRelease = serde_json::from_str(&json).expect("deserialize");
@@ -104,6 +111,7 @@ mod tests {
             release_notes: None,
             published_at: None,
             assets: vec![],
+            category: None,
         };
         let json = serde_json::to_string(&release).expect("serialize");
         assert!(!json.contains("release_notes"));

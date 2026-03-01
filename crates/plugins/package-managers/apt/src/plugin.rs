@@ -417,6 +417,7 @@ impl Plugin for AptPlugin {
             release_notes: None,
             published_at: None,
             assets: vec![],
+            category: None,
         }])
     }
 

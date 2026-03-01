@@ -289,6 +289,7 @@ impl NpmPlugin {
                 release_notes: None,
                 published_at,
                 assets: vec![],
+                category: None,
             });
         }
 
@@ -328,6 +329,7 @@ impl NpmPlugin {
                     release_notes: None,
                     published_at,
                     assets: vec![],
+                    category: None,
                 });
             }
         }

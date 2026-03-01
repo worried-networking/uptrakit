@@ -202,6 +202,7 @@ impl GitHubPlugin {
             release_notes: gh_release.body.clone(),
             published_at,
             assets,
+            category: None,
         })
     }
 

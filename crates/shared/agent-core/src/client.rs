@@ -223,6 +223,7 @@ pub async fn handle_check_versions(
                     installed_version: outcome.installed_version,
                     latest_version: outcome.latest_version,
                     error: outcome.error,
+                    update_category: outcome.update_category,
                 }
             }
         })
