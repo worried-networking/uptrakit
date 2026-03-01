@@ -166,39 +166,46 @@ impl Settings {
         }
     }
 
-    /// Load all settings from DB in a single bulk query. Generates initial
-    /// registration token if no users exist.
+    /// Load all settings from DB (both global and per-tenant tables).
+    /// Generates initial registration token if no users exist.
     ///
-    /// Returns `(Settings, RawSettings, Option<plaintext_token>)` — the caller
-    /// can pass the raw map to reconciliation without re-reading from DB.
+    /// Returns `(Settings, global_raw, tenant_raw, Option<plaintext_token>)` —
+    /// the caller can pass the global raw map to reconciliation without
+    /// re-reading from DB.
     pub async fn load(
         db: &DatabaseConnection,
         tenant_id: Uuid,
-    ) -> auth::Result<(Self, RawSettings, Option<String>)> {
-        let raw = crate::settings_store::load_all_settings(db, tenant_id).await?;
-        warn_unrecognised_keys(&raw);
+    ) -> auth::Result<(Self, RawSettings, RawSettings, Option<String>)> {
+        let global_raw = crate::settings_store::load_all_global_settings(db).await?;
+        let tenant_raw = crate::settings_store::load_all_settings(db, tenant_id).await?;
 
-        let (registration, token) = RegistrationSettings::initialize(db, tenant_id, &raw).await?;
-        let authentication = AuthenticationSettings::from_raw(&raw);
+        // Merge: global settings first, then per-tenant overrides
+        let mut combined = global_raw.clone();
+        combined.extend(tenant_raw.clone());
+        warn_unrecognised_keys(&combined);
 
-        let agent_cert_lifetime_days = raw
+        let (registration, token) =
+            RegistrationSettings::initialize(db, tenant_id, &combined).await?;
+        let authentication = AuthenticationSettings::from_raw(&combined);
+
+        let agent_cert_lifetime_days = combined
             .get_setting(SettingKey::AgentCertLifetimeDays)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS);
 
-        let renewal_window_hours = raw
+        let renewal_window_hours = combined
             .get_setting(SettingKey::AgentCertRenewalWindowHours)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS);
 
-        let network = Self::load_network_settings(&raw);
+        let network = Self::load_network_settings(&combined);
 
-        let mqtt_max_clients_per_tenant = raw
+        let mqtt_max_clients_per_tenant = combined
             .get_setting(SettingKey::MqttMaxClientsPerTenant)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
-        let smtp = Self::load_smtp_settings(&raw);
+        let smtp = Self::load_smtp_settings(&combined);
 
         // Read initial version counters
         let (version, global_version) =
@@ -224,7 +231,7 @@ impl Settings {
             }),
         };
 
-        Ok((settings, raw, token))
+        Ok((settings, global_raw, tenant_raw, token))
     }
 
     fn load_network_settings(raw: &RawSettings) -> NetworkSettings {
@@ -295,34 +302,38 @@ impl Settings {
     /// Reload all settings from the database and publish atomically.
     ///
     /// Used by the periodic settings check when a version mismatch is detected.
+    /// Loads from both `global_settings` and per-tenant `settings` tables.
     pub async fn reload_from_db(
         &self,
         db: &DatabaseConnection,
         tenant_id: Uuid,
     ) -> auth::Result<()> {
-        let raw = crate::settings_store::load_all_settings(db, tenant_id).await?;
+        let global_raw = crate::settings_store::load_all_global_settings(db).await?;
+        let tenant_raw = crate::settings_store::load_all_settings(db, tenant_id).await?;
+        let mut combined = global_raw;
+        combined.extend(tenant_raw);
 
-        let registration = RegistrationSettings::from_raw(&raw);
-        let authentication = AuthenticationSettings::from_raw(&raw);
+        let registration = RegistrationSettings::from_raw(&combined);
+        let authentication = AuthenticationSettings::from_raw(&combined);
 
-        let agent_cert_lifetime_days = raw
+        let agent_cert_lifetime_days = combined
             .get_setting(SettingKey::AgentCertLifetimeDays)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS);
 
-        let renewal_window_hours = raw
+        let renewal_window_hours = combined
             .get_setting(SettingKey::AgentCertRenewalWindowHours)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS);
 
-        let network = Self::load_network_settings(&raw);
+        let network = Self::load_network_settings(&combined);
 
-        let mqtt_max_clients_per_tenant = raw
+        let mqtt_max_clients_per_tenant = combined
             .get_setting(SettingKey::MqttMaxClientsPerTenant)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
-        let smtp = Self::load_smtp_settings(&raw);
+        let smtp = Self::load_smtp_settings(&combined);
 
         // Publish complete snapshot atomically
         let _guard = self.inner.write_mutex.lock().await;
