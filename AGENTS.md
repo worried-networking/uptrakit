@@ -516,6 +516,14 @@ All topics use the MQTT client's `topic_prefix` field.
 `{t}`, `{i}`, `{h}` are UUID hex strings with dashes removed. The `unique_id` format is
 `uptrakit_{t}_{i}_{h}`.
 
+Each software item is modelled as a separate HA device identified by `uptrakit_{t}_{i}` and named
+after the software item. Entities within that device are named after the hostname. A
+`default_entity_id` of the form `{item_slug}_on_{host_slug}` is included in every discovery config
+so HA assigns a stable, human-readable entity ID on first registration. Slugs are lowercase with
+non-alphanumeric characters replaced by underscores (consecutive separators collapsed). The
+`default_entity_id` is only applied by HA when the entity is first created; existing registrations
+(matched by `unique_id`) are unaffected.
+
 #### Key files
 
 | File | Purpose |

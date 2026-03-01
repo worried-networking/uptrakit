@@ -77,9 +77,16 @@ Each entity displays:
 | Latest version | The newest available version (blank if unknown) |
 | Update available | `true` when latest > installed |
 
-Entity IDs follow the pattern: `update.uptrakit_<tenant_id>_<software_item_id>_<host_id>`.
+Each software item is represented as a distinct HA device named after that software item (e.g. "nginx").
+All hosts assigned to the same software item appear as separate entities within that device, each named
+after the hostname. The device identifier follows the pattern `uptrakit_<tenant_id>_<software_item_id>`,
+so items on multiple hosts are grouped together under one device.
 
-All entities share a single HA device named **Uptrakit** (identified by `uptrakit_<tenant_id>`).
+Entity IDs are assigned on first registration using a stable `default_entity_id` in the form
+`{item_slug}_on_{host_slug}`, where slugs are lowercase with non-alphanumeric characters replaced by
+underscores. For example, software item "uptrakit pangolin" on host
+"pangolin.uk.home.yantsen.su" gets the entity ID
+`update.uptrakit_pangolin_on_pangolin_uk_home_yantsen_su`.
 
 ## Triggering Updates from Home Assistant
 

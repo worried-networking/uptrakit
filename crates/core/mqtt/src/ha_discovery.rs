@@ -99,6 +99,13 @@ pub fn unique_id(tenant_id: Uuid, item_id: Uuid, host_id: Uuid) -> String {
 
 /// Build the HA MQTT discovery JSON for an `update` entity.
 ///
+/// Each software item is represented as a distinct HA device (identified by
+/// `uptrakit_{tenant_id}_{item_id}`), named after the software item. Entities
+/// within that device are named after the hostname. An explicit
+/// `default_entity_id` in the form `{item_slug}_on_{host_slug}` is included
+/// so that HA uses a stable, human-readable entity ID on first registration,
+/// independent of the entity name.
+///
 /// Returns a [`serde_json::Value`] that should be serialized with `to_string()`
 /// and published (retained) on `discovery_config_topic(...)`.
 ///
@@ -130,11 +137,14 @@ pub fn build_discovery_config(
 ) -> serde_json::Value {
     let uid = unique_id(tenant_id, item_id, host_id);
     let tenant_simple = tenant_id.simple().to_string();
+    let item_simple = item_id.simple().to_string();
+    let default_entity_id = format!("{}_on_{}", slugify(item_name), slugify(hostname));
 
     serde_json::json!({
         "platform": "mqtt",
         "unique_id": uid,
-        "name": format!("{item_name} on {hostname}"),
+        "name": hostname,
+        "default_entity_id": default_entity_id,
         "state_topic": state_topic(topic_prefix, item_id, host_id),
         "latest_version_topic": latest_version_topic(topic_prefix, item_id, host_id),
         "command_topic": command_topic(topic_prefix, item_id, host_id),
@@ -143,11 +153,51 @@ pub fn build_discovery_config(
         "payload_available": "online",
         "payload_not_available": "offline",
         "device": {
-            "identifiers": [format!("uptrakit_{tenant_simple}")],
-            "name": "Uptrakit",
+            "identifiers": [format!("uptrakit_{tenant_simple}_{item_simple}")],
+            "name": item_name,
             "manufacturer": "Uptrakit"
         }
     })
+}
+
+/// Convert a string to a slug suitable for use in HA entity IDs.
+///
+/// Rules:
+/// - ASCII alphanumeric characters are lowercased and kept as-is.
+/// - All other characters (spaces, dots, hyphens, etc.) are replaced with `_`.
+/// - Consecutive underscores are collapsed into one.
+/// - Leading and trailing underscores are stripped.
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::slugify;
+/// assert_eq!(slugify("My App"), "my_app");
+/// assert_eq!(slugify("pangolin.uk.home.yantsen.su"), "pangolin_uk_home_yantsen_su");
+/// assert_eq!(slugify("foo--bar"), "foo_bar");
+/// assert_eq!(slugify("  leading"), "leading");
+/// ```
+pub fn slugify(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut prev_underscore = false;
+
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            result.push(c.to_ascii_lowercase());
+            prev_underscore = false;
+        } else if !result.is_empty() && !prev_underscore {
+            result.push('_');
+            prev_underscore = true;
+        }
+    }
+
+    // Strip trailing underscore (produced when the input ends with a
+    // non-alphanumeric character).
+    if result.ends_with('_') {
+        result.pop();
+    }
+
+    result
 }
 
 /// Try to parse a command topic back to `(item_id, host_id)`.
@@ -352,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn build_discovery_config_name_format() {
+    fn build_discovery_config_name_is_hostname() {
         let v = build_discovery_config(
             "homeassistant",
             "uptrakit",
@@ -362,7 +412,7 @@ mod tests {
             "MyApp",
             "server1",
         );
-        assert_eq!(v["name"], "MyApp on server1");
+        assert_eq!(v["name"], "server1");
     }
 
     #[test]
@@ -465,23 +515,55 @@ mod tests {
             "h",
         );
         let tenant_simple = tenant().simple().to_string();
-        let expected_id = format!("uptrakit_{tenant_simple}");
+        let item_simple = item().simple().to_string();
+        let expected_id = format!("uptrakit_{tenant_simple}_{item_simple}");
         assert_eq!(v["device"]["identifiers"][0], expected_id.as_str());
     }
 
     #[test]
-    fn build_discovery_config_device_name_and_manufacturer() {
+    fn build_discovery_config_device_name_is_item_name() {
         let v = build_discovery_config(
             "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
-            "App",
+            "My App",
             "h",
         );
-        assert_eq!(v["device"]["name"], "Uptrakit");
+        assert_eq!(v["device"]["name"], "My App");
         assert_eq!(v["device"]["manufacturer"], "Uptrakit");
+    }
+
+    #[test]
+    fn build_discovery_config_default_entity_id() {
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "uptrakit pangolin",
+            "pangolin.uk.home.yantsen.su",
+        );
+        assert_eq!(
+            v["default_entity_id"],
+            "uptrakit_pangolin_on_pangolin_uk_home_yantsen_su"
+        );
+    }
+
+    #[test]
+    fn build_discovery_config_default_entity_id_simple_names() {
+        let v = build_discovery_config(
+            "homeassistant",
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "MyApp",
+            "server1",
+        );
+        assert_eq!(v["default_entity_id"], "myapp_on_server1");
     }
 
     #[test]
@@ -552,5 +634,81 @@ mod tests {
     #[test]
     fn parse_command_topic_empty_string() {
         assert!(parse_command_topic("uptrakit", "").is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // slugify
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn slugify_plain_lowercase() {
+        assert_eq!(slugify("nginx"), "nginx");
+    }
+
+    #[test]
+    fn slugify_uppercase_lowercased() {
+        assert_eq!(slugify("MyApp"), "myapp");
+    }
+
+    #[test]
+    fn slugify_spaces_become_underscores() {
+        assert_eq!(slugify("My App"), "my_app");
+    }
+
+    #[test]
+    fn slugify_dots_become_underscores() {
+        assert_eq!(slugify("pangolin.uk.home.yantsen.su"), "pangolin_uk_home_yantsen_su");
+    }
+
+    #[test]
+    fn slugify_hyphens_become_underscores() {
+        assert_eq!(slugify("my-service"), "my_service");
+    }
+
+    #[test]
+    fn slugify_consecutive_separators_collapsed() {
+        assert_eq!(slugify("foo--bar"), "foo_bar");
+        assert_eq!(slugify("foo  bar"), "foo_bar");
+        assert_eq!(slugify("foo.-bar"), "foo_bar");
+    }
+
+    #[test]
+    fn slugify_leading_separators_stripped() {
+        assert_eq!(slugify("  leading"), "leading");
+        assert_eq!(slugify(".leading"), "leading");
+    }
+
+    #[test]
+    fn slugify_trailing_separators_stripped() {
+        assert_eq!(slugify("trailing "), "trailing");
+        assert_eq!(slugify("trailing."), "trailing");
+    }
+
+    #[test]
+    fn slugify_digits_kept() {
+        assert_eq!(slugify("app2"), "app2");
+        assert_eq!(slugify("v1.2.3"), "v1_2_3");
+    }
+
+    #[test]
+    fn slugify_empty_string() {
+        assert_eq!(slugify(""), "");
+    }
+
+    #[test]
+    fn slugify_all_separators() {
+        assert_eq!(slugify("..."), "");
+    }
+
+    #[test]
+    fn slugify_real_world_example() {
+        assert_eq!(
+            slugify("uptrakit pangolin"),
+            "uptrakit_pangolin"
+        );
+        assert_eq!(
+            slugify("pangolin.uk.home.yantsen.su"),
+            "pangolin_uk_home_yantsen_su"
+        );
     }
 }
