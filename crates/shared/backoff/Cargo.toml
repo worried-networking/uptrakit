@@ -1,0 +1,13 @@
+[package]
+name = "uptrakit-backoff"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+rand = { workspace = true }
+
+[lints]
+workspace = true
