@@ -220,6 +220,25 @@ pub trait CommandExecutor: Send + Sync {
     }
 }
 
+/// Apply an optional timeout to a command execution future.
+///
+/// If `timeout` is `Some(dur)`, the future is wrapped with
+/// [`tokio::time::timeout`]. On expiry a [`CommandError::TimedOut`] is
+/// returned. If `timeout` is `None` the future is awaited directly.
+async fn apply_timeout(
+    fut: impl std::future::Future<Output = crate::Result<(String, i32)>>,
+    timeout: Option<std::time::Duration>,
+) -> crate::Result<(String, i32)> {
+    if let Some(dur) = timeout {
+        tokio::time::timeout(dur, fut).await.map_err(|_| {
+            tracing::warn!(timeout = ?dur, "command timed out");
+            report!(CommandError::TimedOut)
+        })?
+    } else {
+        fut.await
+    }
+}
+
 /// Executes commands on the local machine via `tokio::process::Command`.
 pub struct LocalCommandExecutor;
 
@@ -238,14 +257,7 @@ impl CommandExecutor for LocalCommandExecutor {
             spec.working_dir.as_deref(),
             Some(output_tx),
         );
-        let (output, exit_code) = if let Some(dur) = spec.timeout {
-            tokio::time::timeout(dur, fut).await.map_err(|_| {
-                tracing::warn!(timeout = ?dur, "command timed out");
-                report!(CommandError::TimedOut)
-            })??
-        } else {
-            fut.await?
-        };
+        let (output, exit_code) = apply_timeout(fut, spec.timeout).await?;
         tracing::debug!(exit_code, "command completed");
         Ok(CommandOutput { output, exit_code })
     }
@@ -254,14 +266,7 @@ impl CommandExecutor for LocalCommandExecutor {
         tracing::debug!("executing command (quiet)");
         let (program, args) = spec.resolve()?;
         let fut = run_command_exec_impl(&program, &args, spec.working_dir.as_deref(), None);
-        let (output, exit_code) = if let Some(dur) = spec.timeout {
-            tokio::time::timeout(dur, fut).await.map_err(|_| {
-                tracing::warn!(timeout = ?dur, "command timed out");
-                report!(CommandError::TimedOut)
-            })??
-        } else {
-            fut.await?
-        };
+        let (output, exit_code) = apply_timeout(fut, spec.timeout).await?;
         tracing::debug!(exit_code, "command completed");
         Ok(CommandOutput { output, exit_code })
     }
