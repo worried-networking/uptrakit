@@ -236,13 +236,6 @@ does NOT write to the outbox.
 
 ### Issues
 
-**[MEDIUM]** `src/event_poller.rs:59` -- `retry_counts: HashMap<i64, u8>` grows unboundedly
-when cursor is stuck. Add a hard cap or TTL-based eviction.
-
-**[MEDIUM]** `src/event_poller.rs:59` -- Fixed 1-second poll interval with no configurability
-or adaptive behavior. Every controller instance polls `controller_events` once per second
-regardless of activity.
-
 **[MEDIUM]** `src/update_output_broadcaster.rs:80-96` -- `send_line` holds write lock for the
 entire operation. A read lock with per-entry interior mutability would allow concurrent sends to
 different updates.

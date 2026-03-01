@@ -149,14 +149,6 @@ test would still pass. Adding an assertion on the deserialized message variant
 
 ### Issues
 
-**[MEDIUM]** `src/connection.rs:24-29` -- `connect()` performs a single
-connection attempt with no retry logic, backoff, or reconnection
-configuration. If the NATS server is momentarily unavailable during controller
-startup, the connection fails permanently. The `async-nats` client does support
-automatic reconnection for established connections, but the initial connection
-attempt has no resilience. Consider either retrying with exponential backoff in
-`connect()` or documenting that the caller is responsible for retry.
-
 **[LOW]** `src/connection.rs:67-69` -- When `js.publish()` fails, the error is
 logged at `warn` level but the message is silently dropped with no retry and no
 dead-letter mechanism. For most use cases this is acceptable (the wire protocol

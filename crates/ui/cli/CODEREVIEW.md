@@ -120,9 +120,6 @@ coverage against `MockApiServer`: `auth`, `scheduler`, `settings`, `plugin_confi
 assert JSON output. Asserts only `result.is_ok()`. The test is a duplicate of
 `hosts_list_success` under a misleading name.
 
-**[MEDIUM]** `src/commands/check.rs:53` -- Task type matched by raw string literal
-`"version_check"`. Should use a typed constant.
-
 **[MEDIUM]** `src/commands/update.rs:50` -- `unwrap_or("")` on `release_url` sends empty string
 to server when only `--release-tag` provided. Server must distinguish "provided and empty" from
 "not provided".

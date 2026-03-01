@@ -202,19 +202,6 @@ and the bind.
 
 ### Issues
 
-**[MEDIUM]** `src/db/mod.rs:20-25` -- Database connection pool hardcoded at
-`max_connections=10` with no runtime configurability. All timeouts (8 seconds) and pool sizes
-are hardcoded literals. Under connection exhaustion, cascading failures affect all subsystems
-simultaneously.
-
-**[MEDIUM]** `src/crl_manager.rs:202-222` -- CRL rebuild holds two `RwLock` read guards
-simultaneously (`issuers.read()` and `server_cert.read()`). Lock ordering is not documented.
-Creates a consistency window during concurrent CA rotation + server cert renewal.
-
-**[MEDIUM]** `src/main.rs:437` -- Fixed 100ms sleep before SIGUSR1 takeover signal. If the
-server takes longer than 100ms to bind, the old process is signaled before the new one is
-ready.
-
 **[LOW]** `src/main.rs:451-457` -- PKI HTTP server registered with `track_abort`, meaning
 in-flight OCSP/CRL requests are terminated mid-response on shutdown.
 

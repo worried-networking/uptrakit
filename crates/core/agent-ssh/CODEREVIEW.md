@@ -195,15 +195,6 @@ cover the full `run_bootstrap` orchestration path. Adding a trait seam for
 
 ### Issues
 
-**[MEDIUM]** `src/main.rs:72` / `src/client.rs:26-143` -- `report_enrolled_hosts` has no upper
-bound on total blocking time during `on_connected`. Iterates over every enrolled host
-sequentially with a 10-second timeout (`client.rs:47: Duration::from_secs(10)`). For N hosts,
-worst-case is N x 10 seconds. During this time `on_connected` has not returned, so the
-service-sdk ping keepalive timer has not started. If the report phase exceeds the controller's
-inactivity timeout, the controller will close the WebSocket, triggering a reconnect loop.
-Mitigation: spawn as a background task, apply a total-scan timeout, or move to a recurring
-service event.
-
 **[MEDIUM]** `src/ssh_pool.rs:36` -- SSH connect timeout is 30 seconds but there is no overall
 acquire timeout. If multiple hosts are unreachable simultaneously, many tokio tasks could be
 blocked for 30 seconds each.
