@@ -14,8 +14,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }
+uptrakit-backoff = { workspace = true }
 uptrakit-internal-wire = { path = "../wire" }
 uptrakit-shared-macros = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }

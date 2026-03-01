@@ -1,7 +1,10 @@
+use std::time::Duration;
+
 use async_nats::jetstream;
 use async_nats::jetstream::stream::RetentionPolicy;
 use rootcause::prelude::*;
 use time::OffsetDateTime;
+use uptrakit_backoff::Backoff;
 use uptrakit_internal_wire::ControllerMessage;
 use uuid::Uuid;
 
@@ -44,7 +47,35 @@ impl NatsConnection {
         }
 
         tracing::info!(url, "connecting to NATS");
-        let client = async_nats::connect(url).await.context_to::<NatsError>()?;
+        // Retry up to 10 times with exponential backoff (1s base, 30s cap).
+        // Transient NATS unavailability at startup should not cause permanent failure.
+        const MAX_ATTEMPTS: u32 = 10;
+        let client = 'connect: {
+            let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(30));
+            let mut last_err = None;
+            for attempt in 1..=MAX_ATTEMPTS {
+                match async_nats::connect(url).await {
+                    Ok(c) => break 'connect c,
+                    Err(e) => {
+                        let delay = backoff.next_delay();
+                        tracing::warn!(
+                            url,
+                            attempt,
+                            max_attempts = MAX_ATTEMPTS,
+                            delay_ms = delay.as_millis(),
+                            error = %e,
+                            "NATS connection attempt failed; retrying"
+                        );
+                        if attempt < MAX_ATTEMPTS {
+                            tokio::time::sleep(delay).await;
+                        }
+                        last_err = Some(e);
+                    }
+                }
+            }
+            // All attempts exhausted — propagate the last error.
+            return Err(last_err.expect("loop ran at least once")).context_to::<NatsError>();
+        };
 
         let js = jetstream::new(client.clone());
         Ok(Self { js, client })
