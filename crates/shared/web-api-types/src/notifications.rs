@@ -20,6 +20,8 @@ pub enum NotificationEventType {
     NewSoftwareDiscovered,
     NewServiceEnrolled,
     CaRotated,
+    BatchUpdateCompleted,
+    BatchUpdatePartiallyCompleted,
 }
 
 impl NotificationEventType {
@@ -31,6 +33,8 @@ impl NotificationEventType {
             Self::NewSoftwareDiscovered => "new_software_discovered",
             Self::NewServiceEnrolled => "new_service_enrolled",
             Self::CaRotated => "ca_rotated",
+            Self::BatchUpdateCompleted => "batch_update_completed",
+            Self::BatchUpdatePartiallyCompleted => "batch_update_partially_completed",
         }
     }
 }
@@ -57,6 +61,8 @@ impl FromStr for NotificationEventType {
             "new_software_discovered" => Ok(Self::NewSoftwareDiscovered),
             "new_service_enrolled" => Ok(Self::NewServiceEnrolled),
             "ca_rotated" => Ok(Self::CaRotated),
+            "batch_update_completed" => Ok(Self::BatchUpdateCompleted),
+            "batch_update_partially_completed" => Ok(Self::BatchUpdatePartiallyCompleted),
             _ => Err(ParseNotificationEventTypeError),
         }
     }

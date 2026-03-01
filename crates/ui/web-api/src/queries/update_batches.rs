@@ -384,15 +384,28 @@ pub async fn create_batch(
 // Batch progress: dispatch next and update batch status
 // ---------------------------------------------------------------------------
 
+/// Information about a batch that just transitioned to a terminal status.
+pub struct BatchCompletionInfo {
+    pub batch_id: Uuid,
+    pub tenant_id: Uuid,
+    pub status: BatchStatus,
+    pub total_count: i32,
+    pub completed_count: i64,
+    pub failed_count: i64,
+}
+
 /// Called after an update completes in a batch. Dispatches the next pending
 /// update for the same host within the batch, and checks if the batch is done.
+///
+/// Returns `Some(BatchCompletionInfo)` if the batch just transitioned to a
+/// terminal status, so the caller can dispatch a notification event.
 pub async fn dispatch_next_in_batch(
     db: &DatabaseConnection,
     notifier: &NotificationService,
     batch_id: Uuid,
     host_id: Uuid,
     tenant_id: Uuid,
-) -> std::result::Result<(), rootcause::Report<TriggerUpdateError>> {
+) -> std::result::Result<Option<BatchCompletionInfo>, rootcause::Report<TriggerUpdateError>> {
     // Find the next Pending update in this batch for this host (ordered by id)
     let next = UpdateHistory::find()
         .filter(update_history::Column::BatchId.eq(batch_id))
@@ -443,16 +456,18 @@ pub async fn dispatch_next_in_batch(
     }
 
     // Check if all items in the batch are terminal
-    maybe_complete_batch(db, batch_id).await?;
-
-    Ok(())
+    maybe_complete_batch(db, batch_id, tenant_id).await
 }
 
 /// Check if all items in a batch are terminal and update batch status if so.
+///
+/// Returns `Some(BatchCompletionInfo)` when the batch just transitioned to
+/// a terminal status, `None` if still in progress.
 async fn maybe_complete_batch(
     db: &DatabaseConnection,
     batch_id: Uuid,
-) -> std::result::Result<(), rootcause::Report<TriggerUpdateError>> {
+    tenant_id: Uuid,
+) -> std::result::Result<Option<BatchCompletionInfo>, rootcause::Report<TriggerUpdateError>> {
     let pending_count = UpdateHistory::find()
         .filter(update_history::Column::BatchId.eq(batch_id))
         .filter(update_history::Column::Status.is_in([
@@ -464,7 +479,7 @@ async fn maybe_complete_batch(
         .context_to()?;
 
     if pending_count > 0 {
-        return Ok(());
+        return Ok(None);
     }
 
     // All items are terminal. Check if any failed.
@@ -473,7 +488,14 @@ async fn maybe_complete_batch(
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Failed))
         .count(db)
         .await
-        .context_to()?;
+        .context_to()? as i64;
+
+    let completed_count = UpdateHistory::find()
+        .filter(update_history::Column::BatchId.eq(batch_id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Completed))
+        .count(db)
+        .await
+        .context_to()? as i64;
 
     let new_status = if failed_count > 0 {
         BatchStatus::PartiallyCompleted
@@ -486,15 +508,23 @@ async fn maybe_complete_batch(
         .await
         .context_to()?
     else {
-        return Ok(());
+        return Ok(None);
     };
 
+    let total_count = batch.total_count;
     let mut active: update_batch::ActiveModel = batch.into();
     active.status = Set(new_status);
     active.completed_at = Set(Some(OffsetDateTime::now_utc()));
     active.update(db).await.context_to()?;
 
-    Ok(())
+    Ok(Some(BatchCompletionInfo {
+        batch_id,
+        tenant_id,
+        status: new_status,
+        total_count,
+        completed_count,
+        failed_count,
+    }))
 }
 
 // ---------------------------------------------------------------------------

@@ -297,6 +297,24 @@ pub(crate) mod system_alerts {
     pub(crate) const ALERTS: &str = "/api/v1/system/alerts";
 }
 
+pub(crate) mod update_batches {
+    use uuid::Uuid;
+    /// `GET /api/v1/update-batches`
+    pub(crate) const BASE: &str = "/api/v1/update-batches";
+    /// `GET /api/v1/update-batches/{id}`
+    pub(crate) fn by_id(id: &Uuid) -> String {
+        format!("/api/v1/update-batches/{id}")
+    }
+    /// `POST /api/v1/hosts/{host_id}/batch-update`
+    pub(crate) fn host_batch_update(host_id: &Uuid) -> String {
+        format!("/api/v1/hosts/{host_id}/batch-update")
+    }
+    /// `POST /api/v1/software-items/{id}/batch-update`
+    pub(crate) fn item_batch_update(id: &Uuid) -> String {
+        format!("/api/v1/software-items/{id}/batch-update")
+    }
+}
+
 pub(crate) mod update_history {
     use uuid::Uuid;
     /// `GET /api/v1/update-history`

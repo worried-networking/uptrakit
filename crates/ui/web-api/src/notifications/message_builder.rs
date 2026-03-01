@@ -133,6 +133,35 @@ fn build_content(event: &NotificationEvent) -> (String, String, String) {
                 format!("The CA certificate has been rotated. Reason: <code>{reason}</code>");
             (title, body, body_html)
         }
+        NotificationEventDetails::BatchUpdateCompleted {
+            total_count,
+            completed_count,
+            ..
+        } => {
+            let title = "Batch Update Completed".to_string();
+            let body = format!(
+                "Batch update completed successfully. {completed_count}/{total_count} updates completed."
+            );
+            let body_html = format!(
+                "Batch update completed successfully. <b>{completed_count}/{total_count}</b> updates completed."
+            );
+            (title, body, body_html)
+        }
+        NotificationEventDetails::BatchUpdatePartiallyCompleted {
+            total_count,
+            completed_count,
+            failed_count,
+            ..
+        } => {
+            let title = "Batch Update Partially Completed".to_string();
+            let body = format!(
+                "Batch update partially completed. {completed_count}/{total_count} succeeded, {failed_count} failed."
+            );
+            let body_html = format!(
+                "Batch update partially completed. <b>{completed_count}/{total_count}</b> succeeded, <b>{failed_count}</b> failed."
+            );
+            (title, body, body_html)
+        }
     }
 }
 

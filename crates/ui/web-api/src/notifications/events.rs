@@ -48,6 +48,17 @@ pub enum NotificationEventDetails {
     CaRotated {
         reason: String,
     },
+    BatchUpdateCompleted {
+        batch_id: Uuid,
+        total_count: i32,
+        completed_count: i64,
+    },
+    BatchUpdatePartiallyCompleted {
+        batch_id: Uuid,
+        total_count: i32,
+        completed_count: i64,
+        failed_count: i64,
+    },
 }
 
 /// Parameters for actionable notifications (only `UpdateAvailable`).
@@ -76,6 +87,12 @@ impl NotificationEvent {
                 NotificationEventType::NewServiceEnrolled
             }
             NotificationEventDetails::CaRotated { .. } => NotificationEventType::CaRotated,
+            NotificationEventDetails::BatchUpdateCompleted { .. } => {
+                NotificationEventType::BatchUpdateCompleted
+            }
+            NotificationEventDetails::BatchUpdatePartiallyCompleted { .. } => {
+                NotificationEventType::BatchUpdatePartiallyCompleted
+            }
         }
     }
 

@@ -694,7 +694,8 @@ pub(super) async fn handle_update_result(
 /// Dispatch the next pending update within a batch for the given host.
 ///
 /// Resolves the service's tenant_id, calls `dispatch_next_in_batch`, and logs
-/// any errors without failing the calling handler.
+/// any errors without failing the calling handler. If the batch just completed,
+/// dispatches a notification event.
 async fn dispatch_next_batch_update(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -709,7 +710,7 @@ async fn dispatch_next_batch_update(
         _ => return,
     };
 
-    if let Err(e) = crate::queries::update_batches::dispatch_next_in_batch(
+    match crate::queries::update_batches::dispatch_next_in_batch(
         state.db(),
         &state.notification_service,
         batch_id,
@@ -718,12 +719,46 @@ async fn dispatch_next_batch_update(
     )
     .await
     {
-        tracing::warn!(
-            %batch_id,
-            %host_id,
-            error = %e,
-            "failed to dispatch next batch update or update batch status"
-        );
+        Ok(Some(completion)) => {
+            use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
+            use uptrakit_shared_types::BatchStatus;
+
+            let details = match completion.status {
+                BatchStatus::Completed => NotificationEventDetails::BatchUpdateCompleted {
+                    batch_id: completion.batch_id,
+                    total_count: completion.total_count,
+                    completed_count: completion.completed_count,
+                },
+                BatchStatus::PartiallyCompleted => {
+                    NotificationEventDetails::BatchUpdatePartiallyCompleted {
+                        batch_id: completion.batch_id,
+                        total_count: completion.total_count,
+                        completed_count: completion.completed_count,
+                        failed_count: completion.failed_count,
+                    }
+                }
+                _ => return,
+            };
+
+            state.notification_dispatcher.dispatch(NotificationEvent {
+                tenant_id: completion.tenant_id,
+                host_id: None,
+                host_name: None,
+                software_item_id: None,
+                software_item_name: None,
+                plugin_type: None,
+                details,
+            });
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!(
+                %batch_id,
+                %host_id,
+                error = %e,
+                "failed to dispatch next batch update or update batch status"
+            );
+        }
     }
 }
 

@@ -25,6 +25,7 @@ pub mod settings_smtp;
 pub mod software_items;
 pub mod sse;
 pub mod system_alerts;
+pub mod update_batches;
 pub mod update_history;
 pub mod update_output_stream;
 
