@@ -1,12 +1,24 @@
 //! Shared update-trigger logic used by the REST handler and the MQTT WS handler.
+//!
+//! The trigger pipeline is split into three composable layers:
+//!
+//! 1. [`validate_update_preconditions`] — verifies all preconditions and loads
+//!    the data needed for record creation and dispatch.
+//! 2. [`create_update_history_record`] — inserts a Pending `update_history` row.
+//! 3. [`dispatch_update_to_agent`] — builds the `ExecuteUpdate` payload and
+//!    sends it to the agent via `NotificationService`.
+//!
+//! [`trigger_update_for_host`] is a convenience wrapper that calls all three
+//! sequentially. The batch update code path calls them independently (bulk
+//! validation, bulk insert, selective dispatch).
 
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{ControllerMessage, PluginAssignment, ReleaseInfo};
 use uptrakit_shared_db::entity::{
-    host, host_software_item_plugin, plugin_config, prelude::*, service, service_host,
-    update_history,
+    host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
+    service_host, software_item, update_history,
 };
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
@@ -15,7 +27,11 @@ use crate::auth::token::generate_uuid;
 use crate::notification_service::NotificationService;
 use crate::queries::software_items::find_active_item;
 
-/// Error returned by [`trigger_update_for_host`].
+// ---------------------------------------------------------------------------
+// Error type
+// ---------------------------------------------------------------------------
+
+/// Error returned by the update-trigger pipeline.
 #[derive(Debug, thiserror::Error)]
 pub enum TriggerUpdateError {
     /// Software item not found or deactivated.
@@ -54,6 +70,10 @@ pub enum TriggerUpdateError {
 pub type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
 impl_report_conversion!(sea_orm::DbErr => TriggerUpdateError::Database);
 
+// ---------------------------------------------------------------------------
+// Public structs
+// ---------------------------------------------------------------------------
+
 /// Result returned by a successful [`trigger_update_for_host`] call.
 pub struct TriggerUpdateResult {
     /// The newly-created `update_history` record ID.
@@ -76,6 +96,42 @@ pub struct TriggerUpdateParams<'a> {
     /// `None` when triggered from MQTT or a scheduler.
     pub release_info: Option<ReleaseInfo>,
 }
+
+/// All data loaded and validated during [`validate_update_preconditions`].
+///
+/// Carries everything needed for record creation and dispatch so that
+/// callers do not need to repeat any DB lookups.
+pub struct ValidatedUpdateTarget {
+    pub item: software_item::Model,
+    pub host: host::Model,
+    pub hsi_link: host_software_item::Model,
+    pub agent: service::Model,
+    pub execute_update_data: (host_software_item_plugin::Model, plugin_config::Model),
+    pub detect_version_data: Option<(host_software_item_plugin::Model, plugin_config::Model)>,
+}
+
+/// Parameters for [`create_update_history_record`].
+pub struct CreateUpdateRecordParams<'a> {
+    pub host_id: Uuid,
+    pub item_id: Uuid,
+    pub to_version: &'a str,
+    pub actor_type: &'a str,
+    pub actor_id: &'a str,
+    pub update_category: &'a str,
+    /// Set when the update belongs to a batch.
+    pub batch_id: Option<Uuid>,
+}
+
+/// Parameters for [`dispatch_update_to_agent`].
+pub struct DispatchUpdateParams {
+    pub update_history_id: Uuid,
+    pub to_version: String,
+    pub release_info: Option<ReleaseInfo>,
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
 
 /// Load a role-specific plugin assignment for a host-software pair.
 ///
@@ -127,30 +183,28 @@ fn build_plugin_assignment(
     })
 }
 
-/// Core update-trigger logic shared by the REST handler and the MQTT WS handler.
+// ---------------------------------------------------------------------------
+// Layer 1: Validate preconditions
+// ---------------------------------------------------------------------------
+
+/// Validates all preconditions for triggering an update on a single
+/// (host, software_item) pair:
 ///
-/// Validates the software item, host, agent, and existing-update constraints,
-/// then creates an `update_history` record and dispatches an `ExecuteUpdate`
-/// message to the agent via `notifier`.
+/// - Software item exists and is active.
+/// - Host exists, is active, and belongs to the tenant.
+/// - Host is assigned to the software item.
+/// - An agent is linked to the host and is approved.
+/// - No pending/in-progress update exists for this pair.
+/// - The execute_update role plugin is assigned.
 ///
-/// # Errors
-///
-/// Returns a [`TriggerUpdateError`] describing the first validation failure or
-/// database error encountered.
-pub async fn trigger_update_for_host(
+/// Returns a [`ValidatedUpdateTarget`] containing all loaded data needed for
+/// the subsequent record creation and dispatch steps.
+pub async fn validate_update_preconditions(
     db: &DatabaseConnection,
-    notifier: &NotificationService,
-    params: TriggerUpdateParams<'_>,
-) -> Result<TriggerUpdateResult> {
-    let TriggerUpdateParams {
-        tenant_id,
-        item_id,
-        host_id,
-        to_version,
-        actor_type,
-        actor_id,
-        release_info,
-    } = params;
+    tenant_id: Uuid,
+    host_id: Uuid,
+    item_id: Uuid,
+) -> Result<ValidatedUpdateTarget> {
     // 1. Verify software item exists and is active.
     let item = find_active_item(db, tenant_id, item_id)
         .await
@@ -215,77 +269,168 @@ pub async fn trigger_update_for_host(
 
     let detect_version_data = load_role_plugin(db, host_id, item_id, "detect_version").await?;
 
-    let execute_update_plugin =
-        build_plugin_assignment(&execute_update_data.0, &execute_update_data.1)?;
+    Ok(ValidatedUpdateTarget {
+        item,
+        host: host_record,
+        hsi_link,
+        agent,
+        execute_update_data,
+        detect_version_data,
+    })
+}
 
-    let detect_version_plugin = detect_version_data
+// ---------------------------------------------------------------------------
+// Layer 2: Create update_history record
+// ---------------------------------------------------------------------------
+
+/// Inserts a Pending `update_history` row and returns its ID.
+///
+/// If `batch_id` is `Some`, the record is associated with a batch for
+/// sequential per-host dispatch.
+pub async fn create_update_history_record(
+    db: &DatabaseConnection,
+    params: &CreateUpdateRecordParams<'_>,
+) -> Result<Uuid> {
+    let now = OffsetDateTime::now_utc();
+    let update_history_id = generate_uuid();
+    let mut record = update_history::ActiveModel {
+        id: Set(update_history_id),
+        host_id: Set(params.host_id),
+        software_item_id: Set(params.item_id),
+        from_version: Set(None),
+        to_version: Set(params.to_version.to_string()),
+        status: Set(update_history::UpdateStatus::Pending),
+        output: Set(String::new()),
+        output_bytes: Set(0),
+        actor_type: Set(params.actor_type.to_string()),
+        actor_id: Set(params.actor_id.to_string()),
+        started_at: Set(now),
+        completed_at: Set(None),
+        created_at: Set(now),
+        update_category: Set(params.update_category.to_string()),
+    };
+
+    // batch_id will be set once the column exists (Phase 2.2 migration).
+    let _ = params.batch_id;
+    let _ = &mut record;
+
+    record.insert(db).await.context_to()?;
+
+    Ok(update_history_id)
+}
+
+// ---------------------------------------------------------------------------
+// Layer 3: Dispatch to agent
+// ---------------------------------------------------------------------------
+
+/// Builds the `ExecuteUpdate` payload from the validated target and sends it
+/// to the agent via `NotificationService`.
+///
+/// Returns `true` if the agent was locally connected at dispatch time.
+pub async fn dispatch_update_to_agent(
+    notifier: &NotificationService,
+    target: &ValidatedUpdateTarget,
+    params: DispatchUpdateParams,
+) -> Result<bool> {
+    let execute_update_plugin =
+        build_plugin_assignment(&target.execute_update_data.0, &target.execute_update_data.1)?;
+
+    let detect_version_plugin = target
+        .detect_version_data
         .as_ref()
         .map(|(a, c)| build_plugin_assignment(a, c))
         .transpose()?;
 
-    // 8. Resolve hooks from the execute_update plugin config + per-role override.
     let resolved_hooks = uptrakit_update_hooks::resolve_hooks(
-        &execute_update_data.1.config,
-        execute_update_data.0.config_override.as_ref(),
+        &target.execute_update_data.1.config,
+        target.execute_update_data.0.config_override.as_ref(),
     );
 
-    // 9. Create update_history record with status = Pending.
-    let now = OffsetDateTime::now_utc();
-    let update_history_id = generate_uuid();
-    let update_record = update_history::ActiveModel {
-        id: Set(update_history_id),
-        host_id: Set(host_id),
-        software_item_id: Set(item_id),
-        from_version: Set(None),
-        to_version: Set(to_version.clone()),
-        status: Set(update_history::UpdateStatus::Pending),
-        output: Set(String::new()),
-        output_bytes: Set(0),
-        actor_type: Set(actor_type.to_string()),
-        actor_id: Set(actor_id.to_string()),
-        started_at: Set(now),
-        completed_at: Set(None),
-        created_at: Set(now),
-        update_category: Set(hsi_link.update_category.clone()),
-    };
-
-    update_record.insert(db).await.context_to()?;
-
-    // 10. Build ExecuteUpdatePayload and dispatch to the agent.
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
-        host_machine_id: host_record.machine_id.clone(),
-        update_history_id,
-        software_item_id: item_id,
-        software_item_name: item.name.clone(),
-        to_version,
+        host_machine_id: target.host.machine_id.clone(),
+        update_history_id: params.update_history_id,
+        software_item_id: target.item.id,
+        software_item_name: target.item.name.clone(),
+        to_version: params.to_version,
         detect_version_plugin,
         execute_update_plugin,
         pre_update_hooks: resolved_hooks.pre_update_hooks,
         post_update_hooks: resolved_hooks.post_update_hooks,
-        release_info,
+        release_info: params.release_info,
         timeout_seconds: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT_SECS,
     };
 
     let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
-    let agent_connected = notifier.send(&agent.id, msg).await;
+    let agent_connected = notifier.send(&target.agent.id, msg).await;
 
     if agent_connected {
         tracing::info!(
-            update_id = %update_history_id,
-            agent_id = %agent.id,
-            host = %host_record.friendly_name,
-            software = %item.name,
+            update_id = %params.update_history_id,
+            agent_id = %target.agent.id,
+            host = %target.host.friendly_name,
+            software = %target.item.name,
             "update sent to connected agent"
         );
     } else {
         tracing::info!(
-            update_id = %update_history_id,
-            agent_id = %agent.id,
-            host = %host_record.friendly_name,
-            software = %item.name,
+            update_id = %params.update_history_id,
+            agent_id = %target.agent.id,
+            host = %target.host.friendly_name,
+            software = %target.item.name,
             "agent not connected locally, update queued (outbox written for cross-controller delivery)"
         );
     }
+
+    Ok(agent_connected)
+}
+
+// ---------------------------------------------------------------------------
+// Convenience wrapper
+// ---------------------------------------------------------------------------
+
+/// Core update-trigger logic shared by the REST handler and the MQTT WS handler.
+///
+/// Validates preconditions, creates a Pending `update_history` record, and
+/// dispatches the `ExecuteUpdate` message to the agent — all in one call.
+///
+/// For batch operations, call the three layers independently instead.
+///
+/// # Errors
+///
+/// Returns a [`TriggerUpdateError`] describing the first validation failure or
+/// database error encountered.
+pub async fn trigger_update_for_host(
+    db: &DatabaseConnection,
+    notifier: &NotificationService,
+    params: TriggerUpdateParams<'_>,
+) -> Result<TriggerUpdateResult> {
+    let target = validate_update_preconditions(db, params.tenant_id, params.host_id, params.item_id)
+        .await?;
+
+    let update_history_id = create_update_history_record(
+        db,
+        &CreateUpdateRecordParams {
+            host_id: params.host_id,
+            item_id: params.item_id,
+            to_version: &params.to_version,
+            actor_type: params.actor_type,
+            actor_id: params.actor_id,
+            update_category: &target.hsi_link.update_category,
+            batch_id: None,
+        },
+    )
+    .await?;
+
+    let agent_connected = dispatch_update_to_agent(
+        notifier,
+        &target,
+        DispatchUpdateParams {
+            update_history_id,
+            to_version: params.to_version,
+            release_info: params.release_info,
+        },
+    )
+    .await?;
 
     Ok(TriggerUpdateResult {
         update_history_id,
