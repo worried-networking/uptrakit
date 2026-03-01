@@ -93,10 +93,10 @@ after the hostname. The device identifier follows the pattern `uptrakit_<tenant_
 so items on multiple hosts are grouped together under one device.
 
 Entity IDs are assigned on first registration using a stable `default_entity_id` in the form
-`{item_slug}_on_{host_slug}`, where slugs are lowercase with non-alphanumeric characters replaced by
-underscores. For example, software item "uptrakit pangolin" on host
+`uptrakit_{item_slug}_on_{host_slug}`, where slugs are lowercase with non-alphanumeric characters replaced
+by underscores. For example, software item "uptrakit pangolin" on host
 "pangolin.uk.home.yantsen.su" gets the entity ID
-`update.uptrakit_pangolin_on_pangolin_uk_home_yantsen_su`.
+`update.uptrakit_uptrakit_pangolin_on_pangolin_uk_home_yantsen_su`.
 
 ## Triggering Updates from Home Assistant
 

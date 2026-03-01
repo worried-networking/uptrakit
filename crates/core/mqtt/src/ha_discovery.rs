@@ -579,32 +579,32 @@ mod tests {
     #[test]
     fn build_discovery_config_default_entity_id() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "uptrakit pangolin",
             "pangolin.uk.home.yantsen.su",
+            ReleaseInfo::default(),
         );
         assert_eq!(
             v["default_entity_id"],
-            "uptrakit_pangolin_on_pangolin_uk_home_yantsen_su"
+            "uptrakit_uptrakit_pangolin_on_pangolin_uk_home_yantsen_su"
         );
     }
 
     #[test]
     fn build_discovery_config_default_entity_id_simple_names() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "MyApp",
             "server1",
+            ReleaseInfo::default(),
         );
-        assert_eq!(v["default_entity_id"], "myapp_on_server1");
+        assert_eq!(v["default_entity_id"], "uptrakit_myapp_on_server1");
     }
 
     #[test]
