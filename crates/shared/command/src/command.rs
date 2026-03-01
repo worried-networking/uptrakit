@@ -64,6 +64,7 @@ pub(crate) async fn run_command_exec_impl(
     // dropped (e.g. on timeout), preventing orphaned processes from holding package
     // manager locks or consuming resources after the executor returns.
     cmd.args(args)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
@@ -559,6 +560,30 @@ mod tests {
             result.unwrap_err().current_context(),
             CommandError::CommandSpawn(_)
         ));
+    }
+
+    // -- Stdin null tests --
+
+    /// Verify that spawned commands have stdin closed (null) so interactive
+    /// prompts like `read` receive EOF immediately and do not block.
+    #[tokio::test]
+    async fn run_command_exec_quiet_null_stdin_completes() {
+        // `read var` gets EOF from /dev/null and returns non-zero, but `|| true`
+        // prevents the shell from failing. The printf should always execute.
+        let result = run_command_exec_quiet(
+            "bash",
+            &[
+                "-c".to_string(),
+                "read var || true; printf 'eof\n'".to_string(),
+            ],
+            None,
+        )
+        .await;
+        let (output, _exit_code) = result.expect("command should complete without blocking");
+        assert!(
+            output.contains("eof"),
+            "expected 'eof' in output, got: {output:?}"
+        );
     }
 
     // -- Stderr output tests --
