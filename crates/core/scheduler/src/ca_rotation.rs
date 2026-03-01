@@ -107,8 +107,7 @@ mod tests {
         }
         async fn push_software_states_for_tenant(
             &self,
-            _db: &sea_orm::DatabaseConnection,
-            _tenant_id: Uuid,
+            _payload: uptrakit_internal_wire::MqttSoftwareStatesPayload,
         ) {
         }
     }
@@ -150,7 +149,7 @@ mod tests {
         params
             .distinguished_name
             .push(rcgen::DnType::CommonName, "Test CA");
-        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
         let not_before = OffsetDateTime::now_utc();
         let not_after = not_before + time::Duration::days(days_valid);
         params.not_before = not_before;
