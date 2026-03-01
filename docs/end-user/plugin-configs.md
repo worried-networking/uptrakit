@@ -11,11 +11,13 @@ same plugin config.
 
 ## Plugin Types
 
-Uptrakit ships with seven built-in plugin types:
+Uptrakit ships with nine built-in plugin types:
 
 | Plugin type | Description | Autodiscovery |
 | --- | --- | --- |
 | `releases_github` | Fetches releases published on GitHub. Controller-side only — does not detect installed versions or execute updates directly. | No |
+| `releases_gitlab` | Fetches releases published on GitLab (or a self-hosted GitLab instance). Controller-side only. Supports nested namespaces (`group/subgroup/project`). | No |
+| `releases_forgejo` | Fetches releases from any Forgejo or Gitea instance (Codeberg, self-hosted, etc.). Controller-side only. Auto-detected by the PHS discovery plugin for Codeberg-hosted apps. | No |
 | `generic_shell` | Generic agent-side plugin: detects the installed version via a configurable shell command and/or executes updates via a configurable shell command. | No |
 | `releases_docker` | Tracks image tags or SHA digests in a Docker/OCI registry. Can pull images via the local or remote Docker daemon, and discovers running/stopped containers. | Yes |
 | `package_manager_homebrew` | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host. | Yes |
@@ -41,6 +43,52 @@ as the `package_identifier` of the software item (format: `"owner/repo"`). A sin
 **Package identifier:** The software item's `package_identifier` for a GitHub-tracked package
 must be set to `"owner/repo"` (e.g. `"octocat/hello-world"`). This value is validated when
 a software item is saved.
+
+### `releases_gitlab` configuration fields
+
+The GitLab Releases plugin is **controller-side only**. It fetches upstream release metadata via
+the GitLab Projects API. The project path is **not** a configuration field — it is expressed as
+the `package_identifier` of the software item. A single `releases_gitlab` config can therefore
+serve any number of tracked GitLab projects, including projects in nested namespaces.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `auth_token` | No | Personal access token (PAT) for authentication. Must have at least `read_api` scope. Stored encrypted at rest. |
+| `api_base_url` | No | Custom API base URL for self-hosted GitLab instances (must use HTTPS). Defaults to `https://gitlab.com`. |
+| `include_prereleases` | No | Include upcoming (unreleased/embargoed) releases when resolving latest (default: `false`). GitLab marks these with `upcoming_release: true`. |
+| `tag_strip_prefix` | No | Prefix to strip from tag names when extracting version strings (default: `"v"`). |
+| `asset_patterns` | No | List of regex patterns to filter release asset links. Only manually-uploaded links whose names match at least one pattern are included. Auto-generated source archives are always excluded. An empty list includes all manually-uploaded links. |
+
+**Package identifier:** Must be the GitLab project path in the form `"namespace/project"` or
+`"group/subgroup/project"` for nested namespaces (e.g. `"myorg/myapp"` or
+`"platform/backend/api-gateway"`). All path components must be non-empty and may not contain
+`..`. The identifier is validated when a software item is saved.
+
+**Self-hosted GitLab:** Set `api_base_url` to your instance root (e.g.
+`https://gitlab.corp.com`). The plugin appends `/api/v4/projects/...` automatically.
+
+### `releases_forgejo` configuration fields
+
+The Forgejo Releases plugin is **controller-side only**. It fetches upstream release metadata via
+the Forgejo/Gitea API. The `owner` and `repo` are **not** configuration fields — they are expressed
+as the `package_identifier` of the software item (format: `"owner/repo"`). A single
+`releases_forgejo` config can therefore serve any number of tracked repositories on the same instance.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `api_base_url` | **Yes** | Root URL of the Forgejo/Gitea instance (e.g. `https://codeberg.org`). Must use HTTPS and must not point to a private/loopback host. |
+| `auth_token` | No | Personal access token for authentication. Stored encrypted at rest. |
+| `include_prereleases` | No | Include pre-release tags when resolving latest (default: `false`). |
+| `tag_strip_prefix` | No | Prefix to strip from tag names when extracting version strings (default: `"v"`). |
+| `asset_patterns` | No | List of regex patterns to filter release assets. Only assets whose names match at least one pattern are included. An empty list includes all assets. |
+
+**Package identifier:** Must be set to `"owner/repo"` (e.g. `"readeck/readeck"`). This value is
+validated when a software item is saved.
+
+**PHS auto-discovery:** Proxmox Helper Scripts containers managed via `check_for_codeberg_release`
+or `CODEBERG_REPO=` are automatically detected by the `discovery_proxmox_helper_scripts` plugin,
+which synthesizes a `releases_forgejo` target (with `api_base_url` set to `https://codeberg.org`)
+and the corresponding Shell target automatically.
 
 ### `generic_shell` configuration fields
 

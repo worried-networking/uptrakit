@@ -328,6 +328,13 @@ skip = [
     # openssl-probe: 0.1.6 via git2 (ssh2-config build dep), 0.2.1 via rustls-native-certs
     { crate = "openssl-probe@0.1.6", reason = "pulled by git2 (ssh2-config build dep); newer 0.2.1 used by rustls-native-certs" },
 
+    # TLS stack split: async-nats 0.46 pins older rustls-native-certs/security-framework/core-foundation/rustls-webpki;
+    # bollard, reqwest, rustls-platform-verifier use the newer versions. Will resolve when async-nats updates its TLS deps.
+    { crate = "rustls-native-certs@0.7.3", reason = "pulled by async-nats 0.46 TLS stack; newer 0.8.x used by bollard, reqwest, rumqttc" },
+    { crate = "security-framework@2.11.1", reason = "pulled by rustls-native-certs 0.7.3 (async-nats); newer 3.x used by rustls-native-certs 0.8.x" },
+    { crate = "core-foundation@0.9.4", reason = "pulled by security-framework 2.x (async-nats TLS chain); newer 0.10.x used by security-framework 3.x" },
+    { crate = "rustls-webpki@0.102.8", reason = "pulled by async-nats 0.46 TLS stack (tokio-websockets/async-nats); newer 0.103.x used by rustls 0.23" },
+
     # rand_core: 0.9 via rand 0.9, 0.10-rc via russh crypto stack
     { crate = "rand_core@0.9.5", reason = "pulled by rand 0.9 (uptrakit); russh crypto uses 0.10-rc" },
 

@@ -1734,6 +1734,8 @@ components:
           description: Plugin type identifier
           examples:
             - releases_github
+            - releases_gitlab
+            - releases_forgejo
             - releases_docker
             - package_manager_homebrew
             - package_manager_apt
@@ -2851,6 +2853,8 @@ components:
           description: Target plugin type (may differ from the discovering plugin)
           examples:
             - releases_github
+            - releases_gitlab
+            - releases_forgejo
             - package_manager_apt
             - package_manager_npm
         plugin_config:
@@ -2905,6 +2909,9 @@ components:
           type: string
           description: Plugin type identifier
           examples:
+            - releases_github
+            - releases_gitlab
+            - releases_forgejo
             - package_manager_homebrew
             - package_manager_apt
             - package_manager_npm
@@ -2965,6 +2972,9 @@ components:
           type: string
           description: Plugin type that produced these results
           examples:
+            - releases_github
+            - releases_gitlab
+            - releases_forgejo
             - package_manager_homebrew
             - package_manager_apt
             - package_manager_npm
