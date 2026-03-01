@@ -55,9 +55,12 @@ pub(crate) struct PkiRuntime {
 
 /// Initialize the global master encryption key from env var or file.
 ///
-/// Returns the raw hex string if a master key was loaded, `None` otherwise.
-/// This hex string can be passed to services via `ServiceCredentials`.
-pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<Option<String>> {
+/// Returns the raw hex string wrapped in [`SecretString`] if a master key was
+/// loaded, `None` otherwise. The [`SecretString`] zeroes the hex on drop so
+/// the key material is not retained in memory beyond its needed lifetime.
+pub(crate) fn init_master_key(
+    args: &crate::cli::Args,
+) -> crate::Result<Option<uptrakit_internal_wire::SecretString>> {
     let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
     let key_hex = read_master_key_hex(args.master_key_file.as_deref(), env_val.as_deref())?;
 
@@ -72,7 +75,7 @@ pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<Option<S
             let key_bytes = parse_master_key_hex(&key_hex)?;
             uptrakit_crypto::init_master_key(zeroize::Zeroizing::new(key_bytes)).context_to()?;
             tracing::info!("master encryption key initialized");
-            Ok(Some(key_hex))
+            Ok(Some(uptrakit_internal_wire::SecretString::new(key_hex)))
         }
         None => {
             if args.allow_plaintext_secrets {
