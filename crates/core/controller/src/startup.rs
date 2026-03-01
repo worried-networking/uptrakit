@@ -161,15 +161,13 @@ pub(crate) async fn init_database(
 /// verification token if this is the first run.
 pub(crate) async fn verify_master_key(
     db: &sea_orm::DatabaseConnection,
-    tenant_id: uuid::Uuid,
 ) -> crate::Result<()> {
     if !uptrakit_crypto::master_key_available() {
         return Ok(());
     }
 
-    let stored_token = uptrakit_web_api::settings_store::load_setting(
+    let stored_token = uptrakit_web_api::settings_store::load_global_setting(
         db,
-        tenant_id,
         SettingKey::MasterKeyVerification,
     )
     .await
@@ -193,9 +191,8 @@ pub(crate) async fn verify_master_key(
         }
         None => {
             let token = uptrakit_crypto::create_key_verification_token().context_to()?;
-            let inserted = uptrakit_web_api::settings_store::insert_setting_if_absent(
+            let inserted = uptrakit_web_api::settings_store::insert_global_setting_if_absent(
                 db,
-                tenant_id,
                 SettingKey::MasterKeyVerification,
                 serde_json::json!(token),
             )
@@ -206,9 +203,8 @@ pub(crate) async fn verify_master_key(
                 tracing::info!("master key verification token stored");
             } else {
                 // Another instance raced and stored a token first — verify against it.
-                let raced_value = uptrakit_web_api::settings_store::load_setting(
+                let raced_value = uptrakit_web_api::settings_store::load_global_setting(
                     db,
-                    tenant_id,
                     SettingKey::MasterKeyVerification,
                 )
                 .await
@@ -240,23 +236,21 @@ pub(crate) async fn verify_master_key(
 // Phase 6: Settings reconciliation
 // ---------------------------------------------------------------------------
 
-/// Reconcile all DB-managed settings with CLI values and update the in-memory
-/// [`Settings`] object.
+/// Reconcile all DB-managed global settings with CLI values and update the
+/// in-memory [`Settings`] object.
 pub(crate) async fn reconcile_all_settings(
     db: &sea_orm::DatabaseConnection,
-    tenant_id: uuid::Uuid,
     args: &crate::cli::Args,
     settings: &Settings,
-    raw: &uptrakit_web_api::settings_store::RawSettings,
+    global_raw: &uptrakit_web_api::settings_store::RawSettings,
 ) -> crate::Result<ReconciledSettings> {
     let force = args.force_settings_override;
 
     // Network settings
     let trusted_proxies = reconcile_setting_vec::<IpNet>(crate::reconcile::ReconcileParams {
         db,
-        tenant_id,
         key: SettingKey::TrustedProxies,
-        raw,
+        raw: global_raw,
         cli_value: if args.trusted_proxies.is_empty() {
             None
         } else {
@@ -281,9 +275,8 @@ pub(crate) async fn reconcile_all_settings(
 
     let real_ip_header = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
         db,
-        tenant_id,
         key: SettingKey::RealIpHeader,
-        raw,
+        raw: global_raw,
         cli_value: args.real_ip_header.clone(),
         default_value: uptrakit_web_api::settings::DEFAULT_REAL_IP_HEADER.to_string(),
         force,
@@ -299,9 +292,8 @@ pub(crate) async fn reconcile_all_settings(
     let forwarded_cert_info_header =
         crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
             db,
-            tenant_id,
             key: SettingKey::ForwardedClientCertInfoHeader,
-            raw,
+            raw: global_raw,
             cli_value: args.forwarded_client_cert_info_header.clone(),
             default_value: String::new(),
             force,
@@ -336,9 +328,8 @@ pub(crate) async fn reconcile_all_settings(
     let forwarded_cert_pem_header =
         crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
             db,
-            tenant_id,
             key: SettingKey::ForwardedClientCertPemHeader,
-            raw,
+            raw: global_raw,
             cli_value: args.forwarded_client_cert_pem_header.clone(),
             default_value: String::new(),
             force,
@@ -372,9 +363,8 @@ pub(crate) async fn reconcile_all_settings(
 
     let pki_addr = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
         db,
-        tenant_id,
         key: SettingKey::PkiAddr,
-        raw,
+        raw: global_raw,
         cli_value: args.pki_addr.clone(),
         default_value: String::new(),
         force,
@@ -416,9 +406,8 @@ pub(crate) async fn reconcile_all_settings(
 
     let extra_sans = reconcile_setting_vec::<String>(crate::reconcile::ReconcileParams {
         db,
-        tenant_id,
         key: SettingKey::ExtraSans,
-        raw,
+        raw: global_raw,
         cli_value: if args.sans.is_empty() {
             None
         } else {
@@ -443,9 +432,8 @@ pub(crate) async fn reconcile_all_settings(
 
     let https_addr = reconcile_socket_addr(
         db,
-        tenant_id,
         SettingKey::HttpsAddr,
-        raw,
+        global_raw,
         args.https_addr,
         uptrakit_web_api::settings::DEFAULT_HTTPS_ADDR
             .parse()
@@ -676,7 +664,7 @@ pub(crate) fn validate_configuration(
 pub(crate) async fn init_pki_runtime(
     args: &crate::cli::Args,
     db: &sea_orm::DatabaseConnection,
-    tenant_id: uuid::Uuid,
+    default_tenant_id: uuid::Uuid,
     config_dir: &std::path::Path,
     reconciled: &ReconciledSettings,
 ) -> crate::Result<PkiRuntime> {
@@ -698,7 +686,7 @@ pub(crate) async fn init_pki_runtime(
             managed: false,
         }
     } else {
-        let mut state = pki::load_or_init_managed_ca(db, tenant_id, reconciled.pki_addr.as_deref())
+        let mut state = pki::load_or_init_managed_ca(db, reconciled.pki_addr.as_deref())
             .await
             .context(AppError::Pki)?;
 
@@ -706,7 +694,7 @@ pub(crate) async fn init_pki_runtime(
             tracing::info!("CA certificate is within rotation window, rotating now");
             let active_fp = pki::ca_fingerprint(&state.active.cert_pem).context(AppError::Pki)?;
             let rotation =
-                pki::rotate_managed_ca(db, tenant_id, reconciled.pki_addr.as_deref(), &active_fp)
+                pki::rotate_managed_ca(db, reconciled.pki_addr.as_deref(), &active_fp)
                     .await
                     .context(AppError::Pki)?;
             state = rotation.state;
@@ -782,7 +770,7 @@ pub(crate) async fn init_pki_runtime(
 
     // Read initial revocation version for CRL version-gated polling
     let initial_revocation_version =
-        uptrakit_web_api::settings_store::get_revocation_version(db, tenant_id)
+        uptrakit_web_api::settings_store::get_revocation_version(db, default_tenant_id)
             .await
             .context(AppError::Settings)?;
 
@@ -819,7 +807,7 @@ pub(crate) async fn init_pki_runtime(
                 rustls_config: rustls_config.clone(),
                 revocation_notify: Arc::clone(&revocation_notify),
                 crl_pem_cache: Arc::clone(&crl_pem_cache),
-                default_tenant_id: tenant_id,
+                default_tenant_id,
                 initial_revocation_version,
             },
             &ca_snapshot,
@@ -829,7 +817,7 @@ pub(crate) async fn init_pki_runtime(
     });
 
     let initial_ca_version = if ca_state.managed {
-        pki::load_ca_version(db, tenant_id)
+        pki::load_ca_version(db)
             .await
             .context(AppError::Pki)?
     } else {
@@ -858,14 +846,13 @@ pub(crate) async fn init_pki_runtime(
 /// Migrate file-based JWT key (if present) and load or generate the DB-stored JWT signing key.
 pub(crate) async fn init_jwt(
     db: &sea_orm::DatabaseConnection,
-    tenant_id: uuid::Uuid,
     state_dir: &std::path::Path,
 ) -> crate::Result<uptrakit_web_api::auth::jwt::JwtManager> {
-    uptrakit_web_api::settings_store::migrate_file_jwt_key(db, tenant_id, state_dir)
+    uptrakit_web_api::settings_store::migrate_file_jwt_key(db, state_dir)
         .await
         .context(AppError::Config("JWT key migration failed".into()))?;
 
-    let jwt_secret = uptrakit_web_api::settings_store::load_or_generate_jwt_key(db, tenant_id)
+    let jwt_secret = uptrakit_web_api::settings_store::load_or_generate_jwt_key(db)
         .await
         .context(AppError::Config("JWT key initialization failed".into()))?;
 
@@ -960,7 +947,7 @@ impl<T: fmt::Display> fmt::Display for DisplayVec<'_, T> {
     }
 }
 
-/// Reconcile a `Vec<T>` setting.  Empty CLI vec is treated as "not provided".
+/// Reconcile a `Vec<T>` global setting.  Empty CLI vec is treated as "not provided".
 async fn reconcile_setting_vec<T>(
     params: crate::reconcile::ReconcileParams<'_, Vec<T>>,
 ) -> crate::reconcile::Result<Vec<T>>
@@ -969,7 +956,6 @@ where
 {
     let crate::reconcile::ReconcileParams {
         db,
-        tenant_id,
         key,
         raw,
         cli_value,
@@ -984,9 +970,8 @@ where
         (Some(db_val), Some(cli_val)) if db_val != cli_val => {
             if force {
                 tracing::info!(key = db_key, cli = %DisplayVec(&cli_val), db = %DisplayVec(&db_val), "force-overriding DB setting with CLI value");
-                uptrakit_web_api::settings_store::upsert_setting(
+                uptrakit_web_api::settings_store::upsert_global_setting(
                     db,
-                    tenant_id,
                     key,
                     (convert.to_json)(&cli_val),
                 )
@@ -1012,9 +997,8 @@ where
         }
         (None, Some(cli_val)) => {
             tracing::info!(key = db_key, value = %DisplayVec(&cli_val), "seeding DB setting from CLI");
-            uptrakit_web_api::settings_store::upsert_setting(
+            uptrakit_web_api::settings_store::upsert_global_setting(
                 db,
-                tenant_id,
                 key,
                 (convert.to_json)(&cli_val),
             )
@@ -1027,9 +1011,8 @@ where
         }
         (None, None) => {
             tracing::info!(key = db_key, value = %DisplayVec(&default_value), "seeding DB setting from default");
-            uptrakit_web_api::settings_store::upsert_setting(
+            uptrakit_web_api::settings_store::upsert_global_setting(
                 db,
-                tenant_id,
                 key,
                 (convert.to_json)(&default_value),
             )
@@ -1043,10 +1026,9 @@ where
     }
 }
 
-/// Reconcile a `SocketAddr` setting.
+/// Reconcile a `SocketAddr` global setting.
 async fn reconcile_socket_addr(
     db: &sea_orm::DatabaseConnection,
-    tenant_id: uuid::Uuid,
     key: SettingKey,
     raw: &uptrakit_web_api::settings_store::RawSettings,
     cli_value: Option<SocketAddr>,
@@ -1055,7 +1037,6 @@ async fn reconcile_socket_addr(
 ) -> crate::Result<SocketAddr> {
     crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
         db,
-        tenant_id,
         key,
         raw,
         cli_value,

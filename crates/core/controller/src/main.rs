@@ -138,15 +138,16 @@ async fn run(args: cli::Args) -> Result<()> {
     tracing::info!(%default_tenant_id, "loaded default tenant");
 
     // Phase 4: Master key verification (HA safety)
-    startup::verify_master_key(&db_conn, default_tenant_id).await?;
+    startup::verify_master_key(&db_conn).await?;
 
     // Phase 4b: Re-encrypt legacy plaintext secrets
     reencrypt::reencrypt_legacy_plaintext(&db_conn).await;
 
     // Phase 5: Load settings
-    let (settings, raw_settings, reg_token) = Settings::load(&db_conn, default_tenant_id)
-        .await
-        .context(AppError::Settings)?;
+    let (settings, global_raw, _tenant_raw, reg_token) =
+        Settings::load(&db_conn, default_tenant_id)
+            .await
+            .context(AppError::Settings)?;
     if let Some(token) = reg_token {
         eprintln!("==========================================================");
         eprintln!("  No users found. Use this one-time registration token:");
@@ -157,10 +158,9 @@ async fn run(args: cli::Args) -> Result<()> {
     // Phase 6: Reconcile settings
     let reconciled = startup::reconcile_all_settings(
         &db_conn,
-        default_tenant_id,
         &args,
         &settings,
-        &raw_settings,
+        &global_raw,
     )
     .await?;
 
@@ -181,7 +181,7 @@ async fn run(args: cli::Args) -> Result<()> {
     .await?;
 
     // Phase 10: JWT
-    let jwt_manager = startup::init_jwt(&db_conn, default_tenant_id, app_dirs.state_dir()).await?;
+    let jwt_manager = startup::init_jwt(&db_conn, app_dirs.state_dir()).await?;
 
     // Destructure PKI runtime for distribution across AppState and tasks
     let startup::PkiRuntime {

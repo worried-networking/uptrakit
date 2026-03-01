@@ -13,7 +13,7 @@ use sea_orm::{
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{ca_certificate, setting};
+use uptrakit_shared_db::entity::{ca_certificate, global_setting};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api::SettingKey;
 use uptrakit_web_api::pki_utils::{self, SanCollection};
@@ -267,19 +267,18 @@ pub fn pki_dir(data_dir: &Path) -> Result<PathBuf> {
 /// Load or initialize the managed CA from the database.
 pub async fn load_or_init_managed_ca(
     db: &DatabaseConnection,
-    tenant_id: uuid::Uuid,
     pki_addr: Option<&str>,
 ) -> Result<CaState> {
-    let existing = load_active_ca_fingerprint(db, tenant_id).await?;
+    let existing = load_active_ca_fingerprint(db).await?;
     if existing.is_some() {
-        return load_managed_ca_state(db, tenant_id).await;
+        return load_managed_ca_state(db).await;
     }
 
     let tx = db.begin().await.context_to::<PkiError>()?;
-    let current = load_active_ca_fingerprint(&tx, tenant_id).await?;
+    let current = load_active_ca_fingerprint(&tx).await?;
     if current.is_some() {
         tx.rollback().await.context_to::<PkiError>()?;
-        return load_managed_ca_state(db, tenant_id).await;
+        return load_managed_ca_state(db).await;
     }
 
     let now = OffsetDateTime::now_utc();
@@ -288,16 +287,15 @@ pub async fn load_or_init_managed_ca(
     let not_before = cert_not_before(&bundle.cert_pem)?;
     let not_after = cert_not_after(&bundle.cert_pem)?;
 
-    let inserted = insert_setting_string_if_absent(
+    let inserted = insert_global_setting_string_if_absent(
         &tx,
-        tenant_id,
         SettingKey::PkiActiveCaFingerprint,
         &fingerprint,
     )
     .await?;
     if !inserted {
         tx.rollback().await.context_to::<PkiError>()?;
-        return load_managed_ca_state(db, tenant_id).await;
+        return load_managed_ca_state(db).await;
     }
 
     let encrypted_key =
@@ -317,20 +315,17 @@ pub async fn load_or_init_managed_ca(
         .await
         .context_to::<PkiError>()?;
 
-    set_setting_i64(&tx, tenant_id, SettingKey::PkiCaVersion, 1).await?;
+    set_global_setting_i64(&tx, SettingKey::PkiCaVersion, 1).await?;
 
     tx.commit().await.context_to::<PkiError>()?;
     tracing::info!("generated new internal CA and stored in database");
 
-    load_managed_ca_state(db, tenant_id).await
+    load_managed_ca_state(db).await
 }
 
 /// Load the full managed CA state from the database.
-pub async fn load_managed_ca_state(
-    db: &DatabaseConnection,
-    tenant_id: uuid::Uuid,
-) -> Result<CaState> {
-    let active_fp = load_active_ca_fingerprint(db, tenant_id)
+pub async fn load_managed_ca_state(db: &DatabaseConnection) -> Result<CaState> {
+    let active_fp = load_active_ca_fingerprint(db)
         .await?
         .ok_or_else(|| {
             report!(PkiError::CaValidation(
@@ -403,15 +398,14 @@ pub struct RotationOutcome {
 /// Rotate the managed CA using a compare-and-swap guard in the database.
 pub async fn rotate_managed_ca(
     db: &DatabaseConnection,
-    tenant_id: uuid::Uuid,
     pki_addr: Option<&str>,
     expected_active_fp: &str,
 ) -> Result<RotationOutcome> {
     let tx = db.begin().await.context_to::<PkiError>()?;
-    let current_active = load_active_ca_fingerprint(&tx, tenant_id).await?;
+    let current_active = load_active_ca_fingerprint(&tx).await?;
     let Some(current_active) = current_active else {
         tx.rollback().await.context_to::<PkiError>()?;
-        let state = load_managed_ca_state(db, tenant_id).await?;
+        let state = load_managed_ca_state(db).await?;
         return Ok(RotationOutcome {
             rotated: false,
             state,
@@ -420,7 +414,7 @@ pub async fn rotate_managed_ca(
 
     if current_active != expected_active_fp {
         tx.rollback().await.context_to::<PkiError>()?;
-        let state = load_managed_ca_state(db, tenant_id).await?;
+        let state = load_managed_ca_state(db).await?;
         return Ok(RotationOutcome {
             rotated: false,
             state,
@@ -459,16 +453,15 @@ pub async fn rotate_managed_ca(
 
     if update_old.rows_affected == 0 {
         tx.rollback().await.context_to::<PkiError>()?;
-        let state = load_managed_ca_state(db, tenant_id).await?;
+        let state = load_managed_ca_state(db).await?;
         return Ok(RotationOutcome {
             rotated: false,
             state,
         });
     }
 
-    let updated = update_setting_string_cas(
+    let updated = update_global_setting_string_cas(
         &tx,
-        tenant_id,
         SettingKey::PkiActiveCaFingerprint,
         &current_active,
         &new_fp,
@@ -477,18 +470,18 @@ pub async fn rotate_managed_ca(
 
     if !updated {
         tx.rollback().await.context_to::<PkiError>()?;
-        let state = load_managed_ca_state(db, tenant_id).await?;
+        let state = load_managed_ca_state(db).await?;
         return Ok(RotationOutcome {
             rotated: false,
             state,
         });
     }
 
-    bump_setting_i64(&tx, tenant_id, SettingKey::PkiCaVersion).await?;
+    bump_global_setting_i64(&tx, SettingKey::PkiCaVersion).await?;
 
     tx.commit().await.context_to::<PkiError>()?;
 
-    let state = load_managed_ca_state(db, tenant_id).await?;
+    let state = load_managed_ca_state(db).await?;
     Ok(RotationOutcome {
         rotated: true,
         state,
@@ -577,14 +570,10 @@ fn most_recent_deactivated(models: &[ca_certificate::Model]) -> Option<ca_certif
     candidates.into_iter().next()
 }
 
-async fn load_active_ca_fingerprint(
-    db: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
-) -> Result<Option<String>> {
-    let row = setting::Entity::find_by_id((
-        tenant_id,
+async fn load_active_ca_fingerprint(db: &impl ConnectionTrait) -> Result<Option<String>> {
+    let row = global_setting::Entity::find_by_id(
         SettingKey::PkiActiveCaFingerprint.as_str().to_string(),
-    ))
+    )
     .one(db)
     .await
     .context_to::<PkiError>()?;
@@ -593,23 +582,21 @@ async fn load_active_ca_fingerprint(
     Ok(value)
 }
 
-async fn insert_setting_string_if_absent(
+async fn insert_global_setting_string_if_absent(
     db: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
     key: SettingKey,
     value: &str,
 ) -> Result<bool> {
     let now = OffsetDateTime::now_utc();
-    let model = setting::ActiveModel {
-        tenant_id: Set(tenant_id),
+    let model = global_setting::ActiveModel {
         key: Set(key.as_str().to_string()),
         value: Set(serde_json::Value::String(value.to_string())),
         updated_at: Set(now),
     };
 
-    let _ = setting::Entity::insert(model)
+    let _ = global_setting::Entity::insert(model)
         .on_conflict(
-            OnConflict::columns([setting::Column::TenantId, setting::Column::Key])
+            OnConflict::column(global_setting::Column::Key)
                 .do_nothing()
                 .to_owned(),
         )
@@ -617,30 +604,28 @@ async fn insert_setting_string_if_absent(
         .await
         .context_to::<PkiError>()?;
 
-    let current = load_active_ca_fingerprint(db, tenant_id).await?;
+    let current = load_active_ca_fingerprint(db).await?;
     Ok(current.as_deref() == Some(value))
 }
 
-async fn set_setting_i64(
+async fn set_global_setting_i64(
     db: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
     key: SettingKey,
     value: i64,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
-    let existing = setting::Entity::find_by_id((tenant_id, key.as_str().to_string()))
+    let existing = global_setting::Entity::find_by_id(key.as_str().to_string())
         .one(db)
         .await
         .context_to::<PkiError>()?;
 
     if let Some(existing) = existing {
-        let mut model: setting::ActiveModel = existing.into();
+        let mut model: global_setting::ActiveModel = existing.into();
         model.value = Set(serde_json::Value::from(value));
         model.updated_at = Set(now);
         model.update(db).await.context_to::<PkiError>()?;
     } else {
-        let model = setting::ActiveModel {
-            tenant_id: Set(tenant_id),
+        let model = global_setting::ActiveModel {
             key: Set(key.as_str().to_string()),
             value: Set(serde_json::Value::from(value)),
             updated_at: Set(now),
@@ -650,23 +635,21 @@ async fn set_setting_i64(
     Ok(())
 }
 
-async fn update_setting_string_cas(
+async fn update_global_setting_string_cas(
     db: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
     key: SettingKey,
     expected: &str,
     new_value: &str,
 ) -> Result<bool> {
     let now = OffsetDateTime::now_utc();
-    let result = setting::Entity::update_many()
+    let result = global_setting::Entity::update_many()
         .col_expr(
-            setting::Column::Value,
+            global_setting::Column::Value,
             Expr::value(serde_json::Value::String(new_value.to_string())),
         )
-        .col_expr(setting::Column::UpdatedAt, Expr::value(now))
-        .filter(setting::Column::TenantId.eq(tenant_id))
-        .filter(setting::Column::Key.eq(key.as_str()))
-        .filter(setting::Column::Value.eq(serde_json::Value::String(expected.to_string())))
+        .col_expr(global_setting::Column::UpdatedAt, Expr::value(now))
+        .filter(global_setting::Column::Key.eq(key.as_str()))
+        .filter(global_setting::Column::Value.eq(serde_json::Value::String(expected.to_string())))
         .exec(db)
         .await
         .context_to::<PkiError>()?;
@@ -674,12 +657,8 @@ async fn update_setting_string_cas(
     Ok(result.rows_affected > 0)
 }
 
-async fn bump_setting_i64(
-    db: &impl ConnectionTrait,
-    tenant_id: uuid::Uuid,
-    key: SettingKey,
-) -> Result<i64> {
-    let current = setting::Entity::find_by_id((tenant_id, key.as_str().to_string()))
+async fn bump_global_setting_i64(db: &impl ConnectionTrait, key: SettingKey) -> Result<i64> {
+    let current = global_setting::Entity::find_by_id(key.as_str().to_string())
         .one(db)
         .await
         .context_to::<PkiError>()?
@@ -687,13 +666,13 @@ async fn bump_setting_i64(
         .unwrap_or(0);
 
     let next = current.saturating_add(1);
-    set_setting_i64(db, tenant_id, key, next).await?;
+    set_global_setting_i64(db, key, next).await?;
     Ok(next)
 }
 
-pub async fn load_ca_version(db: &DatabaseConnection, tenant_id: uuid::Uuid) -> Result<i64> {
+pub async fn load_ca_version(db: &DatabaseConnection) -> Result<i64> {
     let row =
-        setting::Entity::find_by_id((tenant_id, SettingKey::PkiCaVersion.as_str().to_string()))
+        global_setting::Entity::find_by_id(SettingKey::PkiCaVersion.as_str().to_string())
             .one(db)
             .await
             .context_to::<PkiError>()?;
@@ -1459,8 +1438,7 @@ mod tests {
 
     #[tokio::test]
     async fn managed_ca_init_and_rotation() -> std::result::Result<(), String> {
-        use sea_orm::{ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter};
-        use uptrakit_shared_db::entity::tenant;
+        use sea_orm::{ConnectOptions, Database};
 
         // EncryptedString requires a master key for DB writes
         let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
@@ -1471,26 +1449,19 @@ mod tests {
             .await
             .map_err(|e| format!("{e:?}"))?;
 
-        let tenant = tenant::Entity::find()
-            .filter(tenant::Column::IsDefault.eq(true))
-            .one(&db)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "default tenant not found".to_string())?;
-
-        let state = load_or_init_managed_ca(&db, tenant.id, None)
+        let state = load_or_init_managed_ca(&db, None)
             .await
             .map_err(|e| format!("{e:?}"))?;
         let active_fp = ca_fingerprint(&state.active.cert_pem).map_err(|e| format!("{e:?}"))?;
 
-        let version = load_ca_version(&db, tenant.id)
+        let version = load_ca_version(&db)
             .await
             .map_err(|e| format!("{e:?}"))?;
         if version != 1 {
             return Err(format!("expected CA version 1, got {version}"));
         }
 
-        let rotation = rotate_managed_ca(&db, tenant.id, None, &active_fp)
+        let rotation = rotate_managed_ca(&db, None, &active_fp)
             .await
             .map_err(|e| format!("{e:?}"))?;
         if !rotation.rotated {
@@ -1503,7 +1474,7 @@ mod tests {
             return Err("rotation did not update active CA".to_string());
         }
 
-        let version = load_ca_version(&db, tenant.id)
+        let version = load_ca_version(&db)
             .await
             .map_err(|e| format!("{e:?}"))?;
         if version != 2 {

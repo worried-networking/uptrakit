@@ -260,7 +260,6 @@ pub fn spawn_ca_reload(
     let db = app_state.db().clone();
     let settings = app_state.settings.clone();
     let ca_key_store = Arc::clone(&app_state.ca_key_store);
-    let tenant_id = app_state.default_tenant_id;
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(durations::SETTINGS_POLL_INTERVAL);
@@ -276,14 +275,14 @@ pub fn spawn_ca_reload(
                 }
             }
 
-            let Ok(db_version) = crate::pki::load_ca_version(&db, tenant_id).await else {
+            let Ok(db_version) = crate::pki::load_ca_version(&db).await else {
                 continue;
             };
             if db_version == cached_version {
                 continue;
             }
 
-            let state = match crate::pki::load_managed_ca_state(&db, tenant_id).await {
+            let state = match crate::pki::load_managed_ca_state(&db).await {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::error!(error = ?e, "failed to reload CA state from database");
@@ -334,7 +333,6 @@ pub fn spawn_ca_rotation(
     let ca_key_store = Arc::clone(&app_state.ca_key_store);
     let notification_service = app_state.notification_service.clone();
     let trigger = Arc::clone(&app_state.ca_rotation_trigger);
-    let tenant_id = app_state.default_tenant_id;
 
     tokio::spawn(async move {
         loop {
@@ -355,7 +353,6 @@ pub fn spawn_ca_rotation(
 
             match crate::pki::rotate_managed_ca(
                 &db,
-                tenant_id,
                 current_pki_addr.as_deref(),
                 &expected_fp,
             )
