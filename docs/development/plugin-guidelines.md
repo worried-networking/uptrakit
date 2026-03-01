@@ -21,7 +21,9 @@ can continue to validate configs and mask secrets correctly.
 
 `PluginType` implements `FromStr`, `Display`, and `as_str()` for string conversion. Use
 `s.parse::<PluginType>()` to convert strings (returns `ParsePluginTypeError` on failure). The string
-representations are: `releases_github`, `releases_docker`, `discovery_proxmox_helper_scripts`, `package_manager_homebrew`, `package_manager_apt`, `generic_shell`.
+representations are: `releases_github`, `releases_gitlab`, `releases_forgejo`, `releases_docker`,
+`discovery_proxmox_helper_scripts`, `package_manager_homebrew`, `package_manager_apt`,
+`package_manager_npm`, `generic_shell`.
 
 ## Plugin Capabilities
 
@@ -177,7 +179,8 @@ to all hosts sharing that combination. This avoids redundant API calls when many
 same upstream release. The controller uses a `NoopCommandExecutor` — if your plugin accidentally
 calls it, the process will panic.
 
-**Current plugins with this capability:** `GitHubPlugin`, `DockerPlugin`.
+**Current plugins with this capability:** `GitHubPlugin`, `GitLabPlugin`, `ForgejoPlugin`,
+`DockerPlugin`, `NpmPlugin`.
 
 ## The Role Model for New Plugins
 
@@ -365,10 +368,14 @@ Plugin crates:
 | `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | Plugin trait/abstractions; re-exports shared types and executor types. |
 | `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | Centralized plugin dispatch and validation; re-exports `PluginType`. |
 | `uptrakit-plugin-releases-docker` | `crates/plugins/releases/docker/` | Docker/OCI image tracking and container discovery. Implements `DetectHostCompatibility` (daemon build only, pings the Docker daemon via bollard `GET /_ping`). |
-| `uptrakit-plugin-releases-github` | `crates/plugins/releases/github/` | GitHub Releases: fetches metadata; agent installs. |
+| `uptrakit-plugin-releases-github` | `crates/plugins/releases/github/` | GitHub Releases: controller-side fetch; agent-side install. |
+| `uptrakit-plugin-releases-gitlab` | `crates/plugins/releases/gitlab/` | GitLab Releases: controller-side fetch; supports nested namespaces; PRIVATE-TOKEN auth. |
+| `uptrakit-plugin-releases-forgejo` | `crates/plugins/releases/forgejo/` | Forgejo / Codeberg Releases: controller-side fetch; requires `api_base_url`; auto-detected by PHS discovery. |
 | `uptrakit-plugin-package-manager-homebrew` | `crates/plugins/package-managers/homebrew/` | Homebrew: agent-side version tracking and updates. Implements `DetectHostCompatibility` (checks `which brew`). |
 | `uptrakit-plugin-discovery-proxmox-helper-scripts` | `crates/plugins/discovery/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. Implements `DetectHostCompatibility` (tests for `/usr/bin/update`, Proxmox VE only). |
 | `uptrakit-plugin-package-manager-apt` | `crates/plugins/package-managers/apt/` | APT: Debian/Ubuntu package management. Implements `DetectHostCompatibility` (checks `which apt-get`) and `PostUpdateHook` (checks `/var/run/reboot-required`). |
+| `uptrakit-plugin-package-manager-npm` | `crates/plugins/package-managers/npm/` | npm: global-package tracking via `registry.npmjs.org`. Implements `ControllerSideFetchReleases` and `DetectHostCompatibility` (checks `which npm`). |
+| `uptrakit-plugin-generic-shell` | `crates/plugins/generic/shell/` | Generic shell plugin: custom `version_command` and `update_command`; agent-side only. |
 
 ## Adding a New Plugin
 
@@ -391,15 +398,20 @@ that generates all dispatch methods from a single declaration:
 
 ```rust
 register_plugins! {
-    ReleasesGithub => { config: GitHubConfig, plugin: GitHubPlugin },
-    ReleasesDocker => { config: DockerConfig, plugin: DockerPlugin },
-    DiscoveryProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, plugin: ProxmoxHelperScriptsPlugin },
-    PackageManagerHomebrew => { config: HomebrewConfig, plugin: HomebrewPlugin },
-    PackageManagerApt => { config: AptConfig, plugin: AptPlugin },
+    ReleasesGithub   => { config: GitHubConfig,                plugin: GitHubPlugin },
+    ReleasesGitlab   => { config: GitLabConfig,                plugin: GitLabPlugin },
+    ReleasesForgejo  => { config: ForgejoConfig,               plugin: ForgejoPlugin },
+    ReleasesDocker   => { config: DockerConfig,                plugin: DockerPlugin },
+    DiscoveryProxmoxHelperScripts =>
+                        { config: ProxmoxHelperScriptsConfig,  plugin: ProxmoxHelperScriptsPlugin },
+    PackageManagerHomebrew => { config: HomebrewConfig,        plugin: HomebrewPlugin },
+    PackageManagerApt =>     { config: AptConfig,              plugin: AptPlugin },
+    PackageManagerNpm =>     { config: NpmConfig,              plugin: NpmPlugin },
+    GenericShell =>          { config: ShellConfig,            plugin: ShellPlugin },
 }
 ```
 
-The macro generates six methods:
+The macro generates seven methods:
 
 - `PluginRegistry::create_plugin()` — deserializes config, validates it, and instantiates the plugin.
 - `PluginRegistry::validate_config()` — deserializes and validates plugin configuration JSON.
@@ -410,6 +422,9 @@ The macro generates six methods:
 - `PluginRegistry::discovery_plugins()` — returns the list of `PluginType` variants whose plugin
   reports `PluginCapability::DiscoverLocalSoftware` in `capabilities()`. Fully auto-derived from the
   macro — no manual list needed.
+- `PluginRegistry::validate_package_identifier()` — dispatches to
+  `<Config>::validate_identifier(value)` for each registered plugin type. Requires every config
+  struct to implement the associated function (see [Package identifier validation](#package-identifier-validation)).
 
 **Discovery capability is registry-derived.** Use `state.plugin_ops.discovery_plugins()` in
 route handlers (or `PluginRegistry::discovery_plugins()` statically) to get the current list
@@ -440,29 +455,44 @@ human-readable message when the identifier is invalid.
 
 **When adding a new plugin with identifier constraints:**
 
-1. Add a `pub fn validate_identifier(value: &str) -> Result<(), String>` to your plugin crate
-   (e.g., `crates/plugins/my-plugin/src/plugin.rs`) and re-export it from `lib.rs`.
-2. Add a match arm to `PluginRegistry::validate_package_identifier` in
-   `crates/plugins/infrastructure/registry/src/registry.rs`:
+1. Add a crate-level `pub fn validate_identifier(value: &str) -> std::result::Result<(), String>`
+   in your plugin crate (e.g. `crates/plugins/my-plugin/src/lib.rs`).
+2. Add an associated function on your config struct that delegates to the crate-level function:
 
    ```rust
-   pub fn validate_package_identifier(
-       plugin_type: PluginType,
-       value: &str,
-   ) -> std::result::Result<(), String> {
-       match plugin_type {
-           PluginType::PackageManagerHomebrew => uptrakit_plugin_package_manager_homebrew::validate_identifier(value),
-           PluginType::MyPlugin => uptrakit_plugin_my_plugin::validate_identifier(value),
-           _ => Ok(()),
+   impl MyPluginConfig {
+       pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+           crate::validate_identifier(value)
        }
    }
    ```
 
-3. Add unit tests in your plugin crate covering valid identifiers, empty identifiers, and all
+   If your plugin imposes **no** constraints on `package_identifier`, add a no-op associated
+   function that always returns `Ok(())`:
+
+   ```rust
+   impl MyPluginConfig {
+       pub fn validate_identifier(_value: &str) -> std::result::Result<(), String> {
+           Ok(())
+       }
+   }
+   ```
+
+3. Add your plugin to the `register_plugins!` macro invocation in
+   `crates/plugins/infrastructure/registry/src/registry.rs`. The macro automatically generates
+   `PluginRegistry::validate_package_identifier()` by calling
+   `<YourConfig>::validate_identifier(value)` for each registered plugin type — no manual match
+   arm is required.
+
+4. Add unit tests in your plugin crate covering valid identifiers, empty identifiers, and all
    constraint violations.
 
 Do **not** add plugin-specific identifier validation logic to the web API layer or query helpers. All
 identifier validation must go through `PluginRegistry::validate_package_identifier`.
+
+> **Implementation note:** `validate_package_identifier` is generated by the `register_plugins!`
+> macro. Adding a plugin to the macro and implementing `Config::validate_identifier` is sufficient;
+> the registry dispatch is updated automatically.
 
 ### Version string validation
 

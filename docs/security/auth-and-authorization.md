@@ -231,6 +231,52 @@ See also: [`docs/development/coding-standards.md`](../development/coding-standar
    and add `extensions(("x-required-permission" = json!("xxx")))` to the corresponding `#[utoipa::path]` annotation.
 1. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.
 
+## WebSocket Enrollment Secret Lookup
+
+Services connect to the controller WebSocket endpoint at `/api/v1/ws/service`. Three authentication
+paths exist:
+
+| Path | When | How |
+| --- | --- | --- |
+| mTLS | Post-enrollment | Client certificate issued after CSR approval; identity is cryptographically tied to the certificate serial number and service ID. |
+| Bearer token | Enrollment window | `Authorization: Bearer <enrollment_secret>` header; secret is SHA-256 hashed and compared against the database. |
+| Anonymous | Pre-enrollment | No credentials; only `enroll` messages are accepted. |
+
+### Bearer token lookup and the `service_id` query parameter
+
+During the enrollment window (between `save_enrollment()` completing and the CA issuing and
+delivering the certificate), services authenticate via their enrollment secret. The controller
+resolves the service by querying:
+
+```sql
+SELECT * FROM services
+WHERE enrollment_secret_hash = $1
+  AND deactivated_at IS NULL
+  -- optionally:
+  AND id = $2
+```
+
+As a defence-in-depth measure, the service appends its known `service_id` as a URL query parameter:
+
+```text
+wss://controller:3000/api/v1/ws/service?service_id=<uuid>
+```
+
+When `service_id` is present, the DB query is narrowed to that specific service. If the secret hash
+matches a different service's row (a practically impossible collision for 256-bit random secrets, but
+architecturally undesirable), the controller returns `InvalidSecret` — the same error as no match —
+so the caller cannot tell whether a collision occurred.
+
+**The `service_id` filter is enforced by the service-sdk.** `connect_ws()` in
+`crates/shared/service-sdk/src/ws.rs` appends `?service_id=<uuid>` to the WebSocket URL whenever
+the local identity file contains a service ID. During the first enrollment (no identity yet) the
+parameter is omitted and the lookup falls back to hash-only matching.
+
+**mTLS connections do not use the `service_id` parameter.** Their identity is embedded in the client
+certificate; no bearer secret lookup is performed.
+
+See also: [Wire Protocol](../api/wire-protocol.md) for connection sequencing.
+
 ## Content Security Policy
 
 The admin UI's Content Security Policy (set in `frontend/src/app.html`) includes

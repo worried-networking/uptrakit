@@ -243,6 +243,65 @@ See also: [External Scheduler Deployment](../end-user/deployment/external-schedu
 - Agent/MQTT private keys are generated locally and never leave their hosts.
 - CA private keys live in `CaKeyStore` with `zeroize` guard, accessed only by signing components.
 
+## NATS Transport Security
+
+NATS carries cross-controller `ControllerMessage` payloads — software state updates, CA rotation
+requests, and (in multi-controller HA deployments) messages that previously traversed the
+authenticated WebSocket. Because NATS sits on the internal network, not the public internet, it is
+sometimes misconfigured with plaintext transport.
+
+### Requirements
+
+| Environment | Requirement |
+| --- | --- |
+| Production | `nats-tls://` scheme, or `nats://` with `tls_required: true` on the NATS server |
+| Development / CI | `nats://` is accepted; a warning is emitted |
+
+### Operator warning
+
+`NatsConnection::connect()` (`crates/shared/nats/src/connection.rs`) inspects the URL scheme at
+startup. When the scheme is `nats` (plaintext), it emits a `tracing::warn!` with a pointer to this
+document:
+
+```text
+WARN uptrakit_nats::connection: connecting to NATS over plaintext (nats://);
+     use nats-tls:// or enable TLS on the server side in production
+```
+
+This warning fires on every startup, not just the first connection attempt, so it is visible in
+monitoring and log aggregators.
+
+### Why plaintext NATS is risky
+
+NATS messages are **not** end-to-end encrypted at the application layer. All encryption relies on
+the transport. A plaintext `nats://` connection exposes:
+
+- Software state payloads (`software_states`) — reveals which packages are installed and which are
+  outdated on managed hosts.
+- CA rotation triggers — allows an observer to detect infrastructure events.
+- Cross-controller routing metadata — exposes controller identifiers and tenant structures.
+
+`ServiceCredentials` and MQTT tenant credentials are **never published to NATS** (filtered by
+`NotificationService`), so credential exposure over plaintext NATS is not a risk for those message
+types.
+
+### Configuration guidance
+
+For the NATS server, add to `nats-server.conf`:
+
+```text
+tls {
+  cert_file: "/etc/nats/server-cert.pem"
+  key_file:  "/etc/nats/server-key.pem"
+  ca_file:   "/etc/nats/ca.pem"
+  verify:    false   # set to true to require client certs
+}
+```
+
+For the controller, set `UPTRAKIT_NATS_URL=nats-tls://nats-host:4222` (or the corresponding CLI
+flag). See [NATS Deployment](../end-user/deployment/nats.md) and
+[NATS Integration](../development/nats-integration.md#connection-url-and-tls) for details.
+
 ## Key Files
 
 | File | Purpose |

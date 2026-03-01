@@ -383,12 +383,16 @@ for user review. Key invariants:
    no static list is maintained separately.
 
 6. **Package identifier validation goes through `PluginRegistry`.** Plugin-specific constraints on the
-   `package_identifier` field (e.g. Homebrew's allowed character set) must be implemented in the plugin crate as
-   `pub fn validate_identifier(value: &str) -> Result<(), String>` and wired through
-   `PluginRegistry::validate_package_identifier(plugin_type, value)`. Never add plugin-specific validation logic
-   directly to web API query helpers or route handlers. The `PluginOps` trait exposes this as
-   `validate_package_identifier_str(plugin_type: &str, value: &str)` for trait-object dispatch. See
-   [Plugin Guidelines](docs/development/plugin-guidelines.md) for the full extension pattern.
+   `package_identifier` field (e.g. Homebrew's allowed character set) must be implemented as:
+   (a) a crate-level `pub fn validate_identifier(value: &str) -> std::result::Result<(), String>` in the plugin crate,
+   (b) an associated function on the config struct that delegates to it:
+   `impl MyConfig { pub fn validate_identifier(value: &str) -> std::result::Result<(), String> { crate::validate_identifier(value) } }`.
+   Plugins with no identifier constraints must still implement the associated function as a no-op returning `Ok(())`.
+   The `register_plugins!` macro auto-generates `PluginRegistry::validate_package_identifier()` by dispatching through
+   each config struct's associated function — no manual match arm is required in the registry.
+   The `PluginOps` trait exposes this as `validate_package_identifier_str(plugin_type: &str, value: &str)` for
+   trait-object dispatch. Never add plugin-specific validation logic directly to web API query helpers or route
+   handlers. See [Plugin Guidelines](docs/development/plugin-guidelines.md) for the full extension pattern.
 
 7. **Plugins declare required sudo commands via `required_sudo_commands()`.** Any plugin that needs root-level
    command execution must override `required_sudo_commands() -> Vec<SudoCommandEntry>` on its `Plugin` impl.

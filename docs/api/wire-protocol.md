@@ -491,6 +491,11 @@ the `ServiceProfile` at read time.
 
 ## Forward Compatibility
 
+The wire protocol is designed for safe rolling upgrades where controllers and services may temporarily run
+different software versions.
+
+### Compile-time forward compatibility (`#[non_exhaustive]`)
+
 Several wire protocol enums are marked `#[non_exhaustive]` to allow adding new variants without breaking downstream
 consumers:
 
@@ -500,6 +505,34 @@ consumers:
 - `DisconnectReason` — new disconnect reasons may be added.
 
 Consumers matching on these enums must include a wildcard (`_`) arm to handle unknown variants gracefully.
+
+### Runtime forward compatibility (`#[serde(other)]` on message enums)
+
+Both `ServiceMessage` and `ControllerMessage` carry a terminal `Unknown` unit variant tagged with
+`#[serde(other)]`. When serde encounters an unrecognised `"type"` field value, it deserialises the
+message to `Unknown` instead of returning a hard error. This keeps the WebSocket connection alive
+across rolling upgrades where one peer is newer than the other.
+
+```json
+{ "protocol_version": 1, "seq": 5, "type": "future_message_type", "data": {} }
+```
+
+The above JSON payload from a newer peer is silently decoded as `ServiceMessage::Unknown` (or
+`ControllerMessage::Unknown`). Neither the controller nor the service closes the connection on receipt.
+
+**Behaviour when an `Unknown` message is received:**
+
+| Recipient | Action |
+| --- | --- |
+| Controller (from service) | Emits `tracing::warn!` and continues the event loop. |
+| Service / SDK (from controller) | Emits `tracing::warn!` and continues the event loop. |
+
+**NATS publication:** `ControllerMessage::Unknown` is excluded from NATS publication
+(`is_nats_publishable()` returns `false`). Its payload cannot be forwarded because the data has
+already been discarded by serde.
+
+**Sequence counter:** The sequence number on an `Unknown` message is still validated and consumed.
+Both sides keep their counters in sync even when individual messages cannot be interpreted.
 
 ## `MqttTenantConfig` Fields
 

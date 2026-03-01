@@ -4,6 +4,32 @@ This document covers the NATS JetStream integration from a development perspecti
 guidance, see [NATS Deployment](../end-user/deployment/nats.md). For the high-level design, see
 [Cross-Controller Communication](cross-controller-comm.md).
 
+## Connection URL and TLS
+
+`NatsConnection::connect(url)` accepts any NATS connection URL. The URL scheme determines whether the
+connection is encrypted:
+
+| Scheme | Transport | Notes |
+| --- | --- | --- |
+| `nats://` | Plaintext TCP | **Not recommended for production.** Emits a `tracing::warn!` at startup. |
+| `nats-tls://` | TLS | Recommended for production deployments. |
+| `nats://` + `tls_required: true` server config | TLS (server-side enforcement) | Accepted, but `nats-tls://` is preferred so the client also validates the requirement. |
+
+When a `nats://` URL is detected, `NatsConnection::connect` emits:
+
+```text
+WARN uptrakit_nats::connection: connecting to NATS over plaintext (nats://); use nats-tls:// or
+     enable TLS on the server side in production — see docs/security/secrets-and-encryption.md
+```
+
+**In production environments always use `nats-tls://`.** NATS carries cross-controller
+`ControllerMessage` payloads including software state updates and CA rotation requests. Plaintext
+transport exposes these messages to any observer on the network segment between the controller and
+the NATS server.
+
+See [Secrets and Encryption — NATS Transport Security](../security/secrets-and-encryption.md#nats-transport-security)
+for the full security rationale.
+
 ## Crate structure
 
 NATS primitives are split across two crates:
