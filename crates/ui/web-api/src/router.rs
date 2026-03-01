@@ -26,7 +26,8 @@ use crate::AppState;
         (name = "Plugin Configs", description = "Plugin configuration management"),
         (name = "Software Items", description = "Software item tracking and host assignment"),
         (name = "Update History", description = "Software update history tracking"),
-        (name = "Autodiscovery", description = "Automatic software discovery management")
+        (name = "Autodiscovery", description = "Automatic software discovery management"),
+        (name = "Notifications", description = "Notification channel, rule, and log management")
     ),
     paths(
         crate::routes::auth::register,
@@ -112,6 +113,18 @@ use crate::AppState;
         crate::routes::update_history::list_update_history,
         crate::routes::update_history::get_update_history,
         crate::routes::update_history::stream_update_output,
+        crate::routes::notifications::create_channel,
+        crate::routes::notifications::list_channels,
+        crate::routes::notifications::get_channel,
+        crate::routes::notifications::update_channel,
+        crate::routes::notifications::delete_channel,
+        crate::routes::notifications::test_channel,
+        crate::routes::notifications::create_rule,
+        crate::routes::notifications::list_rules,
+        crate::routes::notifications::get_rule,
+        crate::routes::notifications::update_rule,
+        crate::routes::notifications::delete_rule,
+        crate::routes::notifications::list_log,
     ),
     components(
         schemas(
@@ -199,6 +212,20 @@ use crate::AppState;
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::update_history::UpdateHistoryResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::plugin_configs::PluginConfigResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::autodiscovery::AutodiscoveryIgnoreResponse>,
+            crate::routes::notifications::CreateNotificationChannelRequest,
+            crate::routes::notifications::UpdateNotificationChannelRequest,
+            crate::routes::notifications::NotificationChannelResponse,
+            crate::routes::notifications::NotificationChannelType,
+            crate::routes::notifications::CreateNotificationRuleRequest,
+            crate::routes::notifications::UpdateNotificationRuleRequest,
+            crate::routes::notifications::NotificationRuleResponse,
+            crate::routes::notifications::NotificationEventType,
+            crate::routes::notifications::NotificationLogResponse,
+            crate::routes::notifications::NotificationDeliveryStatus,
+            crate::routes::notifications::TestNotificationResponse,
+            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationChannelResponse>,
+            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationRuleResponse>,
+            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationLogResponse>,
         )
     ),
     info(
@@ -413,6 +440,27 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(
             crate::routes::autodiscovery::delete_autodiscovery_ignore
         ))
+        // Notifications
+        .routes(routes!(
+            crate::routes::notifications::create_channel,
+            crate::routes::notifications::list_channels
+        ))
+        .routes(routes!(
+            crate::routes::notifications::get_channel,
+            crate::routes::notifications::update_channel,
+            crate::routes::notifications::delete_channel
+        ))
+        .routes(routes!(crate::routes::notifications::test_channel))
+        .routes(routes!(
+            crate::routes::notifications::create_rule,
+            crate::routes::notifications::list_rules
+        ))
+        .routes(routes!(
+            crate::routes::notifications::get_rule,
+            crate::routes::notifications::update_rule,
+            crate::routes::notifications::delete_rule
+        ))
+        .routes(routes!(crate::routes::notifications::list_log))
         // Discovery allowlist
         .routes(routes!(
             crate::routes::discovery_allowlist::list_tenant_discovery_allowlist,
@@ -479,6 +527,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let (api_router, api) = base_router.split_for_parts();
 
     let mut router = api_router
+        .route(
+            "/api/v1/notifications/callback/telegram/{channel_id}",
+            axum::routing::post(crate::routes::notifications::telegram_callback),
+        )
         .route(
             "/api/v1/ws/service",
             get(crate::routes::service_ws::service_ws),

@@ -43,6 +43,21 @@ pub async fn rotate_ca(
     // Signal the CA rotation background task to run immediately
     state.ca_rotation_trigger.notify_one();
 
+    // Dispatch notification event for CA rotation.
+    state.notification_dispatcher.dispatch(
+        crate::notifications::events::NotificationEvent {
+            tenant_id: state.default_tenant_id,
+            host_id: None,
+            host_name: None,
+            software_item_id: None,
+            software_item_name: None,
+            plugin_type: None,
+            details: crate::notifications::events::NotificationEventDetails::CaRotated {
+                reason: "manual rotation via API".to_string(),
+            },
+        },
+    );
+
     (
         StatusCode::OK,
         axum::Json(RotateCaResponse {

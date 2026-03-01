@@ -8,6 +8,7 @@ pub mod device_auth;
 pub mod enrollment_tokens;
 pub mod health;
 pub mod hosts;
+pub mod notifications;
 pub mod ocsp;
 #[cfg(feature = "oidc")]
 pub mod oidc_auth;

@@ -214,6 +214,17 @@ mod tests {
             uuid::Uuid::nil(),
         );
 
+        let channel_registry = Arc::new(
+            uptrakit_notification_channels::ChannelRegistry::new()
+                .expect("channel registry for test"),
+        );
+
+        let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
+            db.clone(),
+            Arc::clone(&channel_registry),
+            "https://localhost".to_string(),
+        );
+
         Arc::new(AppState {
             ca_snapshot: ca_rx,
             ca_key_store,
@@ -244,8 +255,10 @@ mod tests {
             rustls_config: rustls_cfg,
             crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
             ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
+            channel_registry,
             controller_id: uuid::Uuid::nil(),
             notification_service,
+            notification_dispatcher,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
             credential_sources: ServiceCredentialSources::default(),

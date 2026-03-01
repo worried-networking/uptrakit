@@ -24,6 +24,7 @@ use uptrakit_shared_db::entity::{
 
 use super::{HandlerError, HandlerResult, LoopAction, MAX_UPDATE_OUTPUT_BYTES};
 use crate::AppState;
+use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use crate::routes::service_ws::protocol::serialize_controller_msg;
 
 // ---------------------------------------------------------------------------
@@ -606,6 +607,58 @@ pub(super) async fn handle_update_result(
             .notification_service
             .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
+    }
+
+    // Dispatch notification event for update result.
+    {
+        // Look up names for the notification message.
+        let sw_name = software_item::Entity::find_by_id(record.software_item_id)
+            .one(state.db())
+            .await
+            .ok()
+            .flatten()
+            .map(|sw| sw.name.clone());
+        let host_name = host::Entity::find_by_id(record.host_id)
+            .one(state.db())
+            .await
+            .ok()
+            .flatten()
+            .map(|h| h.hostname.clone());
+
+        if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            let details = match payload.status {
+                UpdateFinalStatus::Completed => NotificationEventDetails::UpdateCompleted {
+                    from_version: record.from_version.clone(),
+                    to_version: payload
+                        .to_version
+                        .clone()
+                        .unwrap_or_else(|| record.to_version.clone()),
+                    update_history_id: payload.update_history_id,
+                },
+                _ => NotificationEventDetails::UpdateFailed {
+                    from_version: record.from_version.clone(),
+                    to_version: payload
+                        .to_version
+                        .clone()
+                        .unwrap_or_else(|| record.to_version.clone()),
+                    error: payload.error.clone(),
+                    update_history_id: payload.update_history_id,
+                },
+            };
+
+            state.notification_dispatcher.dispatch(NotificationEvent {
+                tenant_id: svc.tenant_id,
+                host_id: Some(record.host_id),
+                host_name,
+                software_item_id: Some(record.software_item_id),
+                software_item_name: sw_name,
+                plugin_type: None,
+                details,
+            });
+        }
     }
 
     LoopAction::Continue

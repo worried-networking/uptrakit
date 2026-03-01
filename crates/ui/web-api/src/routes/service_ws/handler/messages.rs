@@ -23,6 +23,7 @@ use super::renewal::sign_renewal_csr;
 use super::updates::load_linked_host_ids;
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
+use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use crate::routes::agents::{find_or_create_host_and_link, revoke_certificate};
 use crate::routes::service_ws::protocol::{
     CertIdentity, close_with_reason, record_service_activity, send_pong, serialize_controller_msg,
@@ -334,6 +335,44 @@ pub(super) async fn handle_version_check_results(
                             "failed to update host_software_item"
                         );
                     }
+
+                    // Dispatch notification event when a new version is detected.
+                    if let Some(ref latest_version) = result.latest_version {
+                        // Look up software item name for the notification message.
+                        let sw_name = software_item::Entity::find_by_id(software_item_id)
+                            .one(state.db())
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|sw| sw.name.clone());
+
+                        // Look up host name for the notification message.
+                        let host_name = host::Entity::find_by_id(host_id)
+                            .one(state.db())
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|h| h.hostname.clone());
+
+                        // Look up tenant_id from the service.
+                        if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+                            .one(state.db())
+                            .await
+                        {
+                            state.notification_dispatcher.dispatch(NotificationEvent {
+                                tenant_id: svc.tenant_id,
+                                host_id: Some(host_id),
+                                host_name,
+                                software_item_id: Some(software_item_id),
+                                software_item_name: sw_name,
+                                plugin_type: None,
+                                details: NotificationEventDetails::UpdateAvailable {
+                                    installed_version: result.installed_version.clone(),
+                                    latest_version: latest_version.clone(),
+                                },
+                            });
+                        }
+                    }
                 }
                 Ok(None) => {
                     tracing::debug!(
@@ -431,7 +470,15 @@ pub(super) async fn handle_discovery_results(
         if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
             .one(state.db())
             .await
-            && let Err(e) = crate::queries::autodiscovery::process_discovery_results(
+        {
+            let discovered_count: u32 = payload
+                .results
+                .iter()
+                .filter(|r| r.error.is_none())
+                .map(|r| r.discoveries.len() as u32)
+                .sum();
+
+            if let Err(e) = crate::queries::autodiscovery::process_discovery_results(
                 state.db(),
                 service_id,
                 svc.tenant_id,
@@ -439,12 +486,32 @@ pub(super) async fn handle_discovery_results(
                 payload,
             )
             .await
-        {
-            tracing::warn!(
-                error = %e,
-                %service_id,
-                "failed to process discovery results"
-            );
+            {
+                tracing::warn!(
+                    error = %e,
+                    %service_id,
+                    "failed to process discovery results"
+                );
+            } else if discovered_count > 0 {
+                let host_name = host::Entity::find_by_id(host_id)
+                    .one(state.db())
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|h| h.hostname.clone());
+
+                state.notification_dispatcher.dispatch(NotificationEvent {
+                    tenant_id: svc.tenant_id,
+                    host_id: Some(host_id),
+                    host_name,
+                    software_item_id: None,
+                    software_item_name: None,
+                    plugin_type: None,
+                    details: NotificationEventDetails::NewSoftwareDiscovered {
+                        discovered_count,
+                    },
+                });
+            }
         }
     } else {
         tracing::warn!(
