@@ -7,10 +7,6 @@ pub enum NatsError {
     Connection,
     #[error("JetStream setup failed")]
     JetStream,
-    #[error("publish failed")]
-    Publish,
-    #[error("serialization failed")]
-    Serialization,
 }
 
 impl_report_conversion!(async_nats::ConnectError => NatsError,

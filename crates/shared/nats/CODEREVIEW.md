@@ -25,8 +25,7 @@ idempotent startup across concurrent controller instances.
 The primary concerns are: the `connect()` function accepts only a bare URL
 string with no support for TLS authentication configuration or credentials, which limits
 production deployment hardening; and the `NatsEventEnvelope` lacks `Debug` to
-aid troubleshooting. The `NatsError` enum defines `Publish` and `Serialization`
-variants that are never constructed anywhere in the codebase. Test coverage is
+aid troubleshooting. Test coverage is
 adequate for the subject routing logic but the envelope roundtrip test does not
 assert on the `message` field content. The previously-reported absence of a
 compile-time or runtime guard preventing `ServiceCredentials` from being
@@ -117,15 +116,6 @@ capability namespace is ever opened to user input.
   `ConnectError` demonstrates the project's standard error propagation pattern.
 
 ### Issues
-
-**[MEDIUM]** `src/error.rs:10-13` -- `NatsError::Publish` and
-`NatsError::Serialization` variants are defined but never constructed anywhere
-in the crate. In `publish_envelope` (connection.rs:59-69), serialization
-errors are logged and returned from, and publish errors are logged as warnings,
-but neither path constructs these typed error variants. The variants are either
-dead code or were intended for a future API change. They should be removed or
-used, to avoid misleading consumers who might expect these variants to appear
-in `Report<NatsError>`.
 
 **[LOW]** `src/envelope.rs:9-17` -- `NatsEventEnvelope` derives only
 `Serialize` and `Deserialize` but not `Debug`. This makes it difficult to log
