@@ -13,5 +13,6 @@ pub mod plugin_configs;
 pub mod scheduled_tasks;
 pub mod services;
 pub mod software_items;
+pub mod update_batches;
 pub mod update_history;
 pub mod update_triggers;
