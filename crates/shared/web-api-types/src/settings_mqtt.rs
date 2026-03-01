@@ -106,13 +106,13 @@ pub struct UpdateMqttClientRequest {
 
 impl Validate for CreateMqttClientRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if let Some(ref url) = self.url {
-            if url.len() > 2048 {
-                return Err(ValidationError {
-                    field: "url",
-                    message: "must not exceed 2048 characters".to_string(),
-                });
-            }
+        if let Some(ref url) = self.url
+            && url.len() > 2048
+        {
+            return Err(ValidationError {
+                field: "url",
+                message: "must not exceed 2048 characters".to_string(),
+            });
         }
         if let Some(ref host) = self.host {
             if host.is_empty() {
@@ -142,21 +142,21 @@ impl Validate for CreateMqttClientRequest {
                 });
             }
         }
-        if let Some(ref username) = self.username {
-            if username.len() > 256 {
-                return Err(ValidationError {
-                    field: "username",
-                    message: "must not exceed 256 characters".to_string(),
-                });
-            }
+        if let Some(ref username) = self.username
+            && username.len() > 256
+        {
+            return Err(ValidationError {
+                field: "username",
+                message: "must not exceed 256 characters".to_string(),
+            });
         }
-        if let Some(ref password) = self.password {
-            if password.expose_secret().len() > 256 {
-                return Err(ValidationError {
-                    field: "password",
-                    message: "must not exceed 256 characters".to_string(),
-                });
-            }
+        if let Some(ref password) = self.password
+            && password.expose_secret().len() > 256
+        {
+            return Err(ValidationError {
+                field: "password",
+                message: "must not exceed 256 characters".to_string(),
+            });
         }
         if let Some(ref topic_prefix) = self.topic_prefix {
             if topic_prefix.is_empty() {
@@ -192,13 +192,13 @@ impl Validate for CreateMqttClientRequest {
 
 impl Validate for UpdateMqttClientRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if let Some(ref url) = self.url {
-            if url.len() > 2048 {
-                return Err(ValidationError {
-                    field: "url",
-                    message: "must not exceed 2048 characters".to_string(),
-                });
-            }
+        if let Some(ref url) = self.url
+            && url.len() > 2048
+        {
+            return Err(ValidationError {
+                field: "url",
+                message: "must not exceed 2048 characters".to_string(),
+            });
         }
         if let Some(ref host) = self.host {
             if host.is_empty() {
