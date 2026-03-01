@@ -25,4 +25,11 @@ pub trait SchedulerNotifier: Send + Sync {
     /// before invoking this method, keeping the notification interface
     /// decoupled from the ORM layer.
     async fn push_software_states_for_tenant(&self, payload: MqttSoftwareStatesPayload);
+
+    /// Signal all controller instances to rebuild the CRL immediately.
+    ///
+    /// The embedded-controller implementation fires `revocation_notify` locally
+    /// and publishes `RequestCrlRenewal` to NATS for remote instances.
+    /// The NATS-only implementation (external scheduler) publishes to NATS only.
+    async fn signal_crl_renewal(&self);
 }
