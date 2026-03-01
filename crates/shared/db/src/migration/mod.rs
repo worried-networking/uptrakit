@@ -8,6 +8,7 @@ mod m20260227_000003_discovery_allowlist;
 mod m20260301_000001_notifications;
 mod m20260302_000001_add_missing_indexes;
 mod m20260303_000001_global_settings;
+mod m20260305_000001_crl_cache;
 
 pub struct Migrator;
 
@@ -22,6 +23,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260301_000001_notifications::Migration),
             Box::new(m20260302_000001_add_missing_indexes::Migration),
             Box::new(m20260303_000001_global_settings::Migration),
+            Box::new(m20260305_000001_crl_cache::Migration),
         ]
     }
 }
@@ -63,6 +65,9 @@ mod tests {
             .await
             .unwrap();
         db.execute_unprepared("SELECT count(*) FROM global_settings")
+            .await
+            .unwrap();
+        db.execute_unprepared("SELECT count(*) FROM crl_cache")
             .await
             .unwrap();
     }

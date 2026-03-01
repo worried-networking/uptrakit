@@ -1,4 +1,5 @@
 pub mod api_rate_limit;
+pub mod crl_cache;
 pub mod api_token;
 pub mod autodiscovery_ignore;
 pub mod host_discovery_allowlist;

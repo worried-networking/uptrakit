@@ -19,6 +19,8 @@ pub enum ScheduledTaskType {
     VersionCheck,
     #[sea_orm(string_value = "service_cert_check")]
     ServiceCertCheck,
+    #[sea_orm(string_value = "crl_renewal")]
+    CrlRenewal,
 }
 
 impl ScheduledTaskType {
@@ -30,6 +32,7 @@ impl ScheduledTaskType {
             Self::CaRotationCheck => "CA Rotation Check",
             Self::VersionCheck => "Version Check",
             Self::ServiceCertCheck => "Service Cert Check",
+            Self::CrlRenewal => "CRL Renewal",
         }
     }
 }
