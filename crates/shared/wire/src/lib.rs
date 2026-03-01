@@ -959,6 +959,13 @@ pub struct MqttSoftwareStateHostEntry {
     pub latest_version: Option<String>,
     /// Whether an update is available (`latest_version > installed_version`).
     pub update_available: bool,
+    /// Whether an update is currently pending or in progress for this host-item pair.
+    ///
+    /// Set to `true` when an `update_history` record exists with status
+    /// `Pending` or `InProgress`. Cleared to `false` once the update
+    /// completes or fails. Defaults to `false` when absent (older controller).
+    #[serde(default)]
+    pub update_in_progress: bool,
     /// URL to the upstream release page (e.g. GitHub release), if available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_url: Option<String>,

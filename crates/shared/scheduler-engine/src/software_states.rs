@@ -127,6 +127,10 @@ pub async fn load_software_states_for_tenant(
                             installed_version: link.installed_version.clone(),
                             latest_version: link.latest_version.clone(),
                             update_available,
+                            // The scheduler-engine does not have access to
+                            // update_history; updates are never triggered from
+                            // this path, so this is always false.
+                            update_in_progress: false,
                             release_url,
                             release_notes,
                         })
