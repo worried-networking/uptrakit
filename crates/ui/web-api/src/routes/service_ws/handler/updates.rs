@@ -359,6 +359,18 @@ pub(super) async fn handle_update_started(
         .create_channel(payload.update_history_id)
         .await;
 
+    // Push updated software states to MQTT services so that the
+    // in_progress flag transitions to true immediately.
+    if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        state
+            .notification_service
+            .push_software_states_for_tenant(state.db(), svc.tenant_id)
+            .await;
+    }
+
     LoopAction::Continue
 }
 

@@ -314,6 +314,13 @@ pub(super) async fn handle_mqtt_trigger_update(
                 agent_connected = result.agent_connected,
                 "MQTT-triggered update dispatched"
             );
+            // Push updated software states immediately so that the MQTT/HA
+            // entity reflects `in_progress: true` without waiting for the
+            // agent's UpdateStarted message.
+            state
+                .notification_service
+                .push_software_states_for_tenant(state.db(), payload.tenant_id)
+                .await;
         }
         Err(err) => {
             tracing::warn!(

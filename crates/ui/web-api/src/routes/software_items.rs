@@ -708,6 +708,12 @@ pub async fn trigger_update(
             } else {
                 TriggerUpdateStatus::Queued
             };
+            // Push updated software states immediately so that any connected
+            // MQTT/HA entity transitions to `in_progress: true`.
+            state
+                .notification_service
+                .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
+                .await;
             let resp = TriggerUpdateResponse {
                 update_history_id: result.update_history_id,
                 status,
