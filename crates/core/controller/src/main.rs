@@ -447,9 +447,24 @@ async fn run(args: cli::Args) -> Result<()> {
     };
     let server_task = tokio::spawn(server::run(server_options));
 
-    // If taking over, signal old process after server is ready
+    // If taking over, wait until the new server is actually listening before
+    // signaling the old process.  `Handle::listening()` resolves the moment
+    // axum-server calls `notify_listening()` internally — i.e. when the socket
+    // is bound and ready to accept.  A 10-second timeout guards against a port
+    // conflict or slow TLS init keeping us blocked indefinitely.
     if let Some(old_pid) = args.takeover_from {
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        match tokio::time::timeout(
+            Duration::from_secs(10),
+            server_handle.listening(),
+        )
+        .await
+        {
+            Ok(_) => tracing::info!("server is listening; signaling old process"),
+            Err(_) => tracing::warn!(
+                "timed out waiting for server to become ready (10s); \
+                 signaling old process anyway"
+            ),
+        }
         match nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(old_pid as i32),
             nix::sys::signal::Signal::SIGUSR1,
