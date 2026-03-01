@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 use uuid::Uuid;
@@ -51,10 +53,13 @@ impl SchedulerConfig {
 /// Polls the `scheduled_tasks` table for due tasks, claims them via optimistic
 /// locking (HA-safe), executes the matching [`TaskExecutor`], and releases the
 /// claim with updated metadata.
+///
+/// Within each poll cycle, all claimed tasks are spawned concurrently into a
+/// [`JoinSet`] so that a slow executor cannot block other due tasks.
 pub struct Scheduler {
     db: DatabaseConnection,
     config: SchedulerConfig,
-    executors: HashMap<ScheduledTaskType, Box<dyn TaskExecutor>>,
+    executors: HashMap<ScheduledTaskType, Arc<dyn TaskExecutor>>,
 }
 
 impl Scheduler {
@@ -68,7 +73,7 @@ impl Scheduler {
 
     /// Register an executor for a task type.
     pub fn register(&mut self, task_type: ScheduledTaskType, executor: Box<dyn TaskExecutor>) {
-        self.executors.insert(task_type, executor);
+        self.executors.insert(task_type, Arc::from(executor));
     }
 
     /// Run the scheduler loop until the cancellation token is triggered.
@@ -104,11 +109,16 @@ impl Scheduler {
         }
     }
 
-    /// Single poll cycle: recover stale claims, find due tasks, execute them.
+    /// Single poll cycle: recover stale claims, find due tasks, execute them in parallel.
     ///
-    /// `token` is checked before and during each task execution. If the token
-    /// is cancelled mid-cycle the loop exits early — the per-task timeout
-    /// ensures no single executor can block the cancellation check indefinitely.
+    /// Tasks are claimed sequentially (fast, avoids double-claim races), then each
+    /// claimed task is spawned into a [`JoinSet`] for concurrent execution. The
+    /// JoinSet is drained before returning so that all in-flight tasks complete
+    /// (or release their claims) before the next poll tick.
+    ///
+    /// `token` is checked before each claim attempt. If cancelled, the claiming
+    /// loop stops immediately; already-running tasks observe the same token inside
+    /// their own `biased` select and release their claims before terminating.
     async fn poll_cycle(&self, token: &CancellationToken) {
         // Recover stale claims from crashed controllers
         match claim::recover_stale_claims(&self.db).await {
@@ -130,8 +140,10 @@ impl Scheduler {
             }
         };
 
+        let mut join_set: JoinSet<()> = JoinSet::new();
+
         for task in due_tasks {
-            // Exit early if a shutdown was requested while iterating
+            // Stop claiming new tasks if shutdown was requested
             if token.is_cancelled() {
                 break;
             }
@@ -166,81 +178,92 @@ impl Scheduler {
             tracing::debug!(
                 task_id = %task.id,
                 task_type = ?task.task_type,
-                "executing scheduled task"
+                "spawning scheduled task"
             );
 
-            // Execute with per-task timeout and cancellation awareness.
-            // `biased` gives the cancellation branch higher priority so that a
-            // pending shutdown is honoured before the timeout branch fires.
-            let result: crate::error::Result<()> = tokio::select! {
-                biased;
-                _ = token.cancelled() => {
-                    tracing::debug!(
-                        task_id = %task.id,
-                        task_type = ?task.task_type,
-                        "scheduler shutdown requested during task execution; releasing claim"
-                    );
-                    // Release the claim so other scheduler instances can pick up the
-                    // task immediately rather than waiting for the stale-claim
-                    // recovery window (up to 10 minutes).
-                    let now = time::OffsetDateTime::now_utc();
-                    let next_run_at = cron_utils::next_run_after(&task.cron_expression, now)
-                        .unwrap_or_else(|| now + time::Duration::hours(1));
-                    if let Err(e) = claim::release_claim(
-                        &self.db,
-                        task.id,
-                        next_run_at,
-                        &Err("scheduler shutdown during execution".to_string()),
-                    )
-                    .await
-                    {
-                        tracing::warn!(
-                            task_id = %task.id,
-                            error = %e,
-                            "failed to release task claim on scheduler shutdown"
-                        );
-                    }
-                    break;
-                }
-                res = tokio::time::timeout(
-                    self.config.task_execution_timeout,
-                    executor.execute(&task),
-                ) => {
-                    res.unwrap_or_else(|_| {
-                        tracing::warn!(
+            let db = self.db.clone();
+            let executor = executor.clone();
+            let token = token.clone();
+            let timeout = self.config.task_execution_timeout;
+
+            join_set.spawn(async move {
+                // Execute with per-task timeout and cancellation awareness.
+                // `biased` gives the cancellation branch higher priority so that
+                // a pending shutdown is honoured before the timeout branch fires.
+                let result: crate::error::Result<()> = tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        tracing::debug!(
                             task_id = %task.id,
                             task_type = ?task.task_type,
-                            timeout_secs = self.config.task_execution_timeout.as_secs(),
-                            "scheduled task timed out"
+                            "scheduler shutdown requested during task execution; releasing claim"
                         );
-                        bail!(SchedulerError::TaskTimedOut(task.task_type))
-                    })
+                        // Release the claim so other scheduler instances can pick
+                        // up the task immediately rather than waiting for the
+                        // stale-claim recovery window (up to 10 minutes).
+                        let now = time::OffsetDateTime::now_utc();
+                        let next_run_at = cron_utils::next_run_after(&task.cron_expression, now)
+                            .unwrap_or_else(|| now + time::Duration::hours(1));
+                        if let Err(e) = claim::release_claim(
+                            &db,
+                            task.id,
+                            next_run_at,
+                            &Err("scheduler shutdown during execution".to_string()),
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                task_id = %task.id,
+                                error = %e,
+                                "failed to release task claim on scheduler shutdown"
+                            );
+                        }
+                        return;
+                    }
+                    res = tokio::time::timeout(timeout, executor.execute(&task)) => {
+                        res.unwrap_or_else(|_| {
+                            tracing::warn!(
+                                task_id = %task.id,
+                                task_type = ?task.task_type,
+                                timeout_secs = timeout.as_secs(),
+                                "scheduled task timed out"
+                            );
+                            bail!(SchedulerError::TaskTimedOut(task.task_type))
+                        })
+                    }
+                };
+
+                if let Err(ref e) = result {
+                    tracing::warn!(
+                        task_id = %task.id,
+                        task_type = ?task.task_type,
+                        error = %e,
+                        "scheduled task failed"
+                    );
                 }
-            };
 
-            if let Err(ref e) = result {
-                tracing::warn!(
-                    task_id = %task.id,
-                    task_type = ?task.task_type,
-                    error = %e,
-                    "scheduled task failed"
-                );
-            }
+                // Compute the next run time from the cron expression
+                let now = time::OffsetDateTime::now_utc();
+                let next_run_at = cron_utils::next_run_after(&task.cron_expression, now)
+                    .unwrap_or_else(|| now + time::Duration::hours(1));
 
-            // Compute the next run time from the cron expression
-            let now = time::OffsetDateTime::now_utc();
-            let next_run_at = cron_utils::next_run_after(&task.cron_expression, now)
-                .unwrap_or_else(|| now + time::Duration::hours(1));
+                // Convert typed error to string for DB storage.
+                let db_result = result.as_ref().map(|_| ()).map_err(|e| e.to_string());
 
-            // Convert typed error to string for DB storage (last_error column is Option<String>).
-            let db_result = result.as_ref().map(|_| ()).map_err(|e| e.to_string());
+                if let Err(e) = claim::release_claim(&db, task.id, next_run_at, &db_result).await {
+                    tracing::warn!(
+                        task_id = %task.id,
+                        error = %e,
+                        "failed to release task claim"
+                    );
+                }
+            });
+        }
 
-            if let Err(e) = claim::release_claim(&self.db, task.id, next_run_at, &db_result).await {
-                tracing::warn!(
-                    task_id = %task.id,
-                    error = %e,
-                    "failed to release task claim"
-                );
+        // Drain all in-flight tasks before returning to the poll loop.
+        while let Some(res) = join_set.join_next().await {
+            if let Err(e) = res {
+                tracing::warn!(error = ?e, "scheduled task execution panicked");
             }
         }
     }

@@ -71,11 +71,6 @@ doc comment. Promote to a typed `Duration` constant with documentation, matching
 
 ### Issues
 
-**[MEDIUM]** `src/scheduler.rs` -- Tasks are executed sequentially within each poll cycle. If a
-registered executor takes 10 seconds, all other due tasks are blocked for the full 10 seconds.
-Introduce a `tokio::task::JoinSet` with a configurable concurrency limit so independent tasks
-can run in parallel.
-
 **[LOW]** `src/scheduler.rs` -- The shutdown sequence sends the shutdown signal before awaiting
 the in-progress task's `JoinHandle`. This creates a window where the task's `release_claim`
 DB write may be abandoned mid-execution. Await the handle before propagating shutdown.
