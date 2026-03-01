@@ -19,6 +19,7 @@ time = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 utoipa = { workspace = true, optional = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
