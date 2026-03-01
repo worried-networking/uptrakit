@@ -336,9 +336,8 @@ pub async fn update_mqtt_limit(
     }
 
     // Persist to DB
-    if let Err(e) = crate::settings_store::upsert_setting(
+    if let Err(e) = crate::settings_store::upsert_global_setting(
         state.db(),
-        state.default_tenant_id,
         crate::SettingKey::MqttMaxClientsPerTenant,
         serde_json::Value::Number(serde_json::Number::from(req.max_clients_per_tenant)),
     )

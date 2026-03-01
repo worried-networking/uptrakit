@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageGlobalSettings;
-use crate::settings_store::upsert_setting;
+use crate::settings_store::upsert_global_setting;
 use axum::{
     Json,
     extract::State,
@@ -98,9 +98,8 @@ pub async fn update_network_settings(
             }
         }
         let json_val = serde_json::json!(parsed.iter().map(|n| n.to_string()).collect::<Vec<_>>());
-        if let Err(e) = upsert_setting(
+        if let Err(e) = upsert_global_setting(
             state.db(),
-            state.default_tenant_id,
             SettingKey::TrustedProxies,
             json_val,
         )
@@ -114,9 +113,8 @@ pub async fn update_network_settings(
 
     // Validate and apply real_ip_header (runtime-changeable)
     if let Some(ref header) = req.real_ip_header {
-        if let Err(e) = upsert_setting(
+        if let Err(e) = upsert_global_setting(
             state.db(),
-            state.default_tenant_id,
             SettingKey::RealIpHeader,
             serde_json::json!(header),
         )
@@ -130,9 +128,8 @@ pub async fn update_network_settings(
 
     // Validate and apply extra_sans (runtime-changeable)
     if let Some(ref sans) = req.extra_sans {
-        if let Err(e) = upsert_setting(
+        if let Err(e) = upsert_global_setting(
             state.db(),
-            state.default_tenant_id,
             SettingKey::ExtraSans,
             serde_json::json!(sans),
         )
@@ -155,9 +152,8 @@ pub async fn update_network_settings(
             Some(v) => serde_json::json!(v),
             None => serde_json::Value::Null,
         };
-        if let Err(e) = upsert_setting(
+        if let Err(e) = upsert_global_setting(
             state.db(),
-            state.default_tenant_id,
             SettingKey::ForwardedClientCertInfoHeader,
             json_val,
         )
@@ -183,9 +179,8 @@ pub async fn update_network_settings(
             Some(v) => serde_json::json!(v),
             None => serde_json::Value::Null,
         };
-        if let Err(e) = upsert_setting(
+        if let Err(e) = upsert_global_setting(
             state.db(),
-            state.default_tenant_id,
             SettingKey::ForwardedClientCertPemHeader,
             json_val,
         )
@@ -239,9 +234,8 @@ pub async fn update_network_settings(
             Some(v) => serde_json::json!(v),
             None => serde_json::Value::Null,
         };
-        if let Err(e) = upsert_setting(
+        if let Err(e) = upsert_global_setting(
             state.db(),
-            state.default_tenant_id,
             SettingKey::PkiAddr,
             json_val,
         )
@@ -264,9 +258,8 @@ pub async fn update_network_settings(
                 );
             }
         };
-        if let Err(e) = upsert_setting(
+        if let Err(e) = upsert_global_setting(
             state.db(),
-            state.default_tenant_id,
             SettingKey::HttpsAddr,
             serde_json::json!(addr.to_string()),
         )
