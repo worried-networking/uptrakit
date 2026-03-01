@@ -340,6 +340,13 @@ pub enum ControllerMessage {
     /// perform CA certificate rotation. Published via NATS to the controller subject;
     /// handled by triggering `ca_rotation_trigger.notify_one()`.
     RequestCaRotation(RequestCaRotationPayload),
+    /// Request all controller instances to rebuild the CRL immediately.
+    ///
+    /// Published via NATS to the controller subject by any controller that
+    /// revokes a certificate or by the `CrlRenewal` scheduled task.
+    /// Receiving controllers fire `revocation_notify.notify_one()` so that
+    /// `CrlManager::run()` rebuilds and hot-reloads the TLS configuration.
+    RequestCrlRenewal(RequestCrlRenewalPayload),
     /// Unknown message type from a newer controller build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
@@ -950,6 +957,14 @@ pub struct RequestCaRotationPayload {
     /// Human-readable reason for the rotation request.
     pub reason: String,
 }
+
+/// Request all controller instances to rebuild the CRL immediately.
+///
+/// Published via NATS to the `uptrakit.events.controller` subject by any
+/// controller that revokes a certificate or by the `CrlRenewal` scheduled
+/// task.  Receiving controllers fire `revocation_notify.notify_one()`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequestCrlRenewalPayload {}
 
 fn default_ha_discovery_prefix() -> String {
     "homeassistant".to_string()
