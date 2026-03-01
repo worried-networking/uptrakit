@@ -14,6 +14,8 @@ use ipnet::IpNet;
 use rootcause::prelude::*;
 use uptrakit_web_api::SettingKey;
 use uptrakit_web_api::settings::Settings;
+#[cfg(feature = "nats")]
+use uptrakit_web_api::MaskedUrl;
 
 use crate::AppError;
 
@@ -26,6 +28,10 @@ pub(crate) struct ReconciledSettings {
     pub extra_sans: Vec<String>,
     pub pki_addr: Option<String>,
     pub https_addr: SocketAddr,
+    /// Raw (decrypted) NATS URL, or `None` when not configured.
+    /// Populated only when the `nats` feature is enabled.
+    #[cfg(feature = "nats")]
+    pub nats_url: Option<String>,
 }
 
 /// Configuration values validated after reconciliation.
@@ -447,10 +453,56 @@ pub(crate) async fn reconcile_all_settings(
     .await?;
     settings.set_https_addr(https_addr).await;
 
+    // NATS URL reconciliation (only when nats feature is enabled)
+    #[cfg(feature = "nats")]
+    let nats_url = {
+        let nats_url_raw = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
+            db,
+            key: SettingKey::NatsUrl,
+            raw: global_raw,
+            cli_value: args.nats_url.clone(),
+            default_value: String::new(),
+            force,
+            convert: crate::reconcile::JsonConvert {
+                to_json: |v| {
+                    if v.is_empty() {
+                        return serde_json::Value::Null;
+                    }
+                    uptrakit_crypto::encrypt_str(v)
+                        .map(|e| serde_json::json!(e))
+                        .unwrap_or_else(|_| serde_json::json!(v))
+                },
+                from_json: |v| {
+                    let s = v.as_str().filter(|s| !s.is_empty())?;
+                    if uptrakit_crypto::is_encrypted(s) {
+                        uptrakit_crypto::decrypt_str(s)
+                            .map_err(|e| {
+                                tracing::warn!("failed to decrypt nats.url: {e}");
+                            })
+                            .ok()
+                    } else {
+                        Some(s.to_string())
+                    }
+                },
+            },
+        })
+        .await
+        .context(AppError::Settings)?;
+
+        let nats_url_opt: Option<String> =
+            if nats_url_raw.is_empty() { None } else { Some(nats_url_raw) };
+        settings
+            .set_nats_url(nats_url_opt.as_deref().map(MaskedUrl::new))
+            .await;
+        nats_url_opt
+    };
+
     Ok(ReconciledSettings {
         extra_sans,
         pki_addr: pki_addr_opt,
         https_addr,
+        #[cfg(feature = "nats")]
+        nats_url,
     })
 }
 

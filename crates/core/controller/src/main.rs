@@ -228,8 +228,9 @@ async fn run(args: cli::Args) -> Result<()> {
     );
 
     // NATS transport (optional, feature-gated)
+    // Uses the reconciled NATS URL (DB value wins over CLI; CLI seeds DB on first run).
     #[cfg(feature = "nats")]
-    let nats_transport = if let Some(ref url) = args.nats_url {
+    let nats_transport = if let Some(ref url) = reconciled.nats_url {
         let nats = uptrakit_web_api::nats_transport::NatsTransport::connect(url, controller_id)
             .await
             .context_transform(|_| AppError::Config("NATS connection failed".to_string()))?;
@@ -265,7 +266,7 @@ async fn run(args: cli::Args) -> Result<()> {
             master_key_hex,
         };
         #[cfg(feature = "nats")]
-        if let Some(ref url) = args.nats_url {
+        if let Some(ref url) = reconciled.nats_url {
             sources.nats_url = Some(url.clone());
         }
         sources
