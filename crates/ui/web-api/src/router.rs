@@ -27,6 +27,7 @@ use crate::AppState;
         (name = "Software Items", description = "Software item tracking and host assignment"),
         (name = "Update History", description = "Software update history tracking"),
         (name = "Autodiscovery", description = "Automatic software discovery management"),
+        (name = "Update Batches", description = "Batch update operations"),
         (name = "Notifications", description = "Notification channel, rule, and log management")
     ),
     paths(
@@ -113,6 +114,10 @@ use crate::AppState;
         crate::routes::update_history::list_update_history,
         crate::routes::update_history::get_update_history,
         crate::routes::update_history::stream_update_output,
+        crate::routes::update_batches::trigger_host_batch_update,
+        crate::routes::update_batches::trigger_item_batch_update,
+        crate::routes::update_batches::list_batches,
+        crate::routes::update_batches::get_batch,
         crate::routes::notifications::create_channel,
         crate::routes::notifications::list_channels,
         crate::routes::notifications::get_channel,
@@ -230,6 +235,16 @@ use crate::AppState;
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationChannelResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationRuleResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationLogResponse>,
+            // Update batches
+            crate::routes::update_batches::BatchUpdateResponse,
+            crate::routes::update_batches::BatchUpdateItem,
+            crate::routes::update_batches::BatchSkippedItem,
+            uptrakit_web_api_types::update_batches::HostBatchUpdateRequest,
+            uptrakit_web_api_types::update_batches::ItemBatchUpdateRequest,
+            uptrakit_web_api_types::update_batches::UpdateBatchSummaryResponse,
+            uptrakit_web_api_types::update_batches::UpdateBatchDetailResponse,
+            uptrakit_web_api_types::update_batches::UpdateBatchItemSummary,
+            uptrakit_web_api_types::pagination::PaginatedResponse<uptrakit_web_api_types::update_batches::UpdateBatchSummaryResponse>,
         )
     ),
     info(
@@ -440,6 +455,15 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::update_history::list_update_history))
         .routes(routes!(crate::routes::update_history::get_update_history))
         .routes(routes!(crate::routes::update_history::stream_update_output))
+        // Update batches
+        .routes(routes!(
+            crate::routes::update_batches::trigger_host_batch_update
+        ))
+        .routes(routes!(
+            crate::routes::update_batches::trigger_item_batch_update
+        ))
+        .routes(routes!(crate::routes::update_batches::list_batches))
+        .routes(routes!(crate::routes::update_batches::get_batch))
         // Autodiscovery
         .routes(routes!(
             crate::routes::software_items::approve_software_item

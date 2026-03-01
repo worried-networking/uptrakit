@@ -115,9 +115,12 @@ pub(super) async fn deliver_pending_updates(
     let host_ids: Vec<uuid::Uuid> = host_links.iter().map(|l| l.host_id).collect();
 
     // 2. Query pending update_history records for those hosts.
+    //    Ordered by ID (UUIDv7 = chronological) so batch-aware filtering
+    //    below picks the oldest pending update per (batch_id, host_id).
     let pending_updates = update_history::Entity::find()
         .filter(update_history::Column::HostId.is_in(host_ids.clone()))
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+        .order_by_asc(update_history::Column::Id)
         .all(state.db())
         .await
         .context_to::<HandlerError>()?;
@@ -204,7 +207,21 @@ pub(super) async fn deliver_pending_updates(
         .collect();
 
     // 3. Build ExecuteUpdatePayload for each pending update using HashMap lookups.
+    //
+    // Batch-aware filtering: for updates within a batch, only dispatch the
+    // first pending update per (batch_id, host_id) — the rest are dispatched
+    // sequentially as each completes via dispatch_next_in_batch.
+    let mut dispatched_batch_hosts: HashSet<(uuid::Uuid, uuid::Uuid)> = HashSet::new();
+
     for update_record in pending_updates {
+        if let Some(batch_id) = update_record.batch_id {
+            let key = (batch_id, update_record.host_id);
+            if !dispatched_batch_hosts.insert(key) {
+                // Already dispatching the first update for this (batch, host);
+                // skip subsequent ones — they will be dispatched on completion.
+                continue;
+            }
+        }
         let Some(item) = sw_items_map.get(&update_record.software_item_id) else {
             tracing::warn!(
                 update_id = %update_record.id,
@@ -609,6 +626,12 @@ pub(super) async fn handle_update_result(
             .await;
     }
 
+    // If this update is part of a batch, dispatch the next pending update
+    // for this host and check if the batch is complete.
+    if let Some(batch_id) = record.batch_id {
+        dispatch_next_batch_update(state, service_id, batch_id, record.host_id).await;
+    }
+
     // Dispatch notification event for update result.
     {
         // Look up names for the notification message.
@@ -662,6 +685,46 @@ pub(super) async fn handle_update_result(
     }
 
     LoopAction::Continue
+}
+
+// ---------------------------------------------------------------------------
+// Batch dispatch helper
+// ---------------------------------------------------------------------------
+
+/// Dispatch the next pending update within a batch for the given host.
+///
+/// Resolves the service's tenant_id, calls `dispatch_next_in_batch`, and logs
+/// any errors without failing the calling handler.
+async fn dispatch_next_batch_update(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    batch_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+) {
+    let tenant_id = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => svc.tenant_id,
+        _ => return,
+    };
+
+    if let Err(e) = crate::queries::update_batches::dispatch_next_in_batch(
+        state.db(),
+        &state.notification_service,
+        batch_id,
+        host_id,
+        tenant_id,
+    )
+    .await
+    {
+        tracing::warn!(
+            %batch_id,
+            %host_id,
+            error = %e,
+            "failed to dispatch next batch update or update batch status"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
