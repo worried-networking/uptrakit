@@ -1,7 +1,7 @@
 # Code Review: Workspace (Root)
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-01
+- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility | tests | consistency | maintainability | database | crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -11,6 +11,15 @@ agent-based update tracking toolkit. The codebase demonstrates mature Rust engin
 workspace-level `clippy::all = "deny"` and `warnings = "deny"` lints, consistent error handling
 via `rootcause` + `thiserror` + `impl_report_conversion!`, and strong type-system enforcement of
 security invariants (`EncryptedString`, `SecretString`, `TenantScoped`).
+
+This root review was updated on 2026-03-01 to incorporate five additional dimensions across all
+per-crate reviews: **tests** (functionality coverage + testing philosophy conformity), **consistency**
+(cross-cutting API and protocol inconsistencies), **maintainability** (long-term structural debt),
+**database** (query safety, transaction correctness, migration patterns), and **crate structure**
+(splitting/merging opportunities, dependency graph analysis). Per-crate files were also updated with
+findings from new code committed after 2026-02-28: `ZeroizeOnDrop` on `MaskedEmail`
+(`5da34db`), NATS CLI subcommand (`33266c1`), and NATS openapi-client methods (`987f110`). Full
+reviews for the `forgejo` and `gitlab` release plugins were created on this date.
 
 The dependency graph is a clean DAG with no circular dependencies. Feature flags are used
 judiciously for database backends, OIDC, NATS, and embedded components. The plugin system is
@@ -87,6 +96,8 @@ NATS startup retry being absent (already implemented with exponential backoff in
 | `crates/plugins/infrastructure/registry` | [CODEREVIEW.md](crates/plugins/infrastructure/registry/CODEREVIEW.md) |
 | `crates/plugins/releases/docker` | [CODEREVIEW.md](crates/plugins/releases/docker/CODEREVIEW.md) |
 | `crates/plugins/releases/github` | [CODEREVIEW.md](crates/plugins/releases/github/CODEREVIEW.md) |
+| `crates/plugins/releases/forgejo` | [CODEREVIEW.md](crates/plugins/releases/forgejo/CODEREVIEW.md) |
+| `crates/plugins/releases/gitlab` | [CODEREVIEW.md](crates/plugins/releases/gitlab/CODEREVIEW.md) |
 | `crates/plugins/package-managers/apt` | [CODEREVIEW.md](crates/plugins/package-managers/apt/CODEREVIEW.md) |
 | `crates/plugins/package-managers/npm` | [CODEREVIEW.md](crates/plugins/package-managers/npm/CODEREVIEW.md) |
 | `crates/plugins/package-managers/homebrew` | [CODEREVIEW.md](crates/plugins/package-managers/homebrew/CODEREVIEW.md) |
@@ -326,3 +337,210 @@ No coding standards issues found.
 
 **[MEDIUM]** `crates/shared/service-sdk/src/lifecycle.rs:79,89` -- `ServiceHandler` is not
 object-safe due to associated constants. No documentation or `where Self: Sized` guards.
+
+## Crate Structure
+
+### Splitting Candidates
+
+#### `uptrakit-web-api` (~32K LoC, ~98 files)
+
+**Current concerns:** The crate contains 8 distinct domains: authentication (JWT, OIDC, sessions,
+device flow, token denylist), authorization (permissions, rate limiting), routes (30+ handler
+files), queries (10+ DB query modules), settings (settings store, reconciliation), MQTT
+coordination (lease coordinator, MQTT client store), PKI/OCSP (CA snapshot, CRL, OCSP, cert
+signer), and cross-controller transport (NATS transport, notification service, event delivery).
+
+**Proposed split:**
+
+| New crate | Contents | Current files |
+| --- | --- | --- |
+| `uptrakit-web-api-auth` | JWT, sessions, token denylist, password hashing, device flow, OIDC state stores, rate limiting | `src/auth/` (16 files) |
+| `uptrakit-web-api-core` | `AppState`, `Settings`, `TenantDb`, `SettingKey`, settings store, CA snapshot, cert signer, error helpers | `app_state.rs`, `settings.rs`, `settings_store.rs`, `tenant_db.rs`, `ca_snapshot.rs`, `cert_signer.rs`, `setting_key.rs` |
+| `uptrakit-web-api-routes` | All HTTP route handlers and the router | `src/routes/` (30 files), `router.rs` |
+| `uptrakit-web-api` (rump) | NATS transport, notification service, MQTT coordination, OCSP, update broadcaster, event delivery | remaining files |
+
+**Priority:** MEDIUM — the crate is functional and its internal structure is clean; the split
+has high migration cost (all import paths change, controller must be re-wired) with moderate
+benefit (faster incremental compilation, clearer ownership boundaries).
+
+**Estimated benefit:** Faster compilation of route-only changes (routes depend on auth and core
+but not on each other). Cleaner separation allows `uptrakit-web-api-auth` to be tested without
+instantiating `AppState`. Independent versioning of the auth layer is possible.
+
+**Risk:** `AppState` is referenced in every route handler; a split requires either passing
+sub-state structs through Axum extractors (significant refactor) or keeping `AppState` in a
+shared crate that all others depend on (which reduces the compile-time benefit). This is a
+high-churn change that should be deferred until the `AppState.pub` field problem is resolved
+first.
+
+---
+
+#### `uptrakit-shared-wire` (3,790 lines, single file)
+
+**Current concerns:** The entire wire protocol lives in `src/lib.rs`. Production code (~1,266
+lines) and test code (~2,524 lines) are in the same file. Finding a type definition requires
+knowing roughly what line it is on; there is no module hierarchy to navigate.
+
+**Recommendation (module extraction, no crate split):** Split into sub-modules within the same
+crate. No new crate is needed.
+
+| Proposed module | Contents |
+| --- | --- |
+| `src/capability.rs` | `Capability`, `ParseCapabilityError`, `is_known()` |
+| `src/messages.rs` | `ServiceMessage`, `ControllerMessage`, all payload structs |
+| `src/envelopes.rs` | `ServiceEnvelope`, `ControllerEnvelope`, `IncomingSeq`, `OutgoingSeq`, `SeqError` |
+| `src/serde_helpers.rs` | `utc_datetime_millis`, `duration_seconds`, `now_millis`, `Timestamp` |
+| `src/lib.rs` | Re-exports only |
+
+Tests move to `src/messages/tests.rs` etc., matching the sub-module they exercise.
+
+**Priority:** HIGH — pure refactor (no behavioral change, no dependency changes). Reduces the
+cognitive overhead of navigating the protocol definition and makes it easier to review changes
+to a specific message type without scrolling through 3,700 lines.
+
+**Risk:** Low. All types remain in the same crate; consumers see no change to import paths
+(re-exports from `lib.rs`). The `asyncapi.yaml` spec-conformance tests continue to work.
+
+---
+
+#### `uptrakit-controller` (startup complexity)
+
+**Current concerns:** The controller binary directly instantiates and owns three distinct
+infrastructure subsystems that have no logical relationship to each other at the binary level:
+the PKI lifecycle (`pki.rs`, `crl_manager.rs`), the scheduler (`scheduler/mod.rs`), and the
+re-encryption pass (`reencrypt.rs`). The scheduler block is already partially abstracted via
+`uptrakit-scheduler-engine`; PKI is not.
+
+**Recommendation:** Extract PKI utilities to `uptrakit-shared-pki` (absorbing
+`controller/src/pki.rs` DER encoding helpers and `web-api/src/pki_utils.rs`). The controller
+and web-api both import PKI utilities, so this would eliminate the current layering inversion
+where the controller must depend on `uptrakit-web-api` partly to access `pki_utils`.
+
+**Priority:** LOW — requires resolving the `AppState`/web-api layering issue first. The PKI
+extraction is blocked by the fact that `web-api` owns `CaKeyStore` and `CaPublicSnapshot`, which
+are used by both the controller and web-api routes.
+
+**Risk:** Medium. PKI is security-critical; any refactor of the key store types requires careful
+audit of all call sites.
+
+---
+
+### Merging Candidates
+
+#### `uptrakit-backoff` → into `uptrakit-service-sdk`
+
+**Rationale:** `uptrakit-backoff` is 105 lines with a single public struct (`Backoff`). Its only
+two consumers are `uptrakit-service-sdk` and `uptrakit-nats`. The crate exists as a separate
+entity to avoid a dependency loop (service-sdk → backoff, nats → backoff), but the same
+isolation is achievable by moving the `Backoff` struct into a `backoff` sub-module of
+`uptrakit-service-sdk` and having `uptrakit-nats` depend on `uptrakit-service-sdk` instead.
+
+**Priority:** LOW — the current arrangement is correct (no circular deps) and the overhead of an
+extra crate is minimal in a 35-crate workspace. Merging is cosmetic.
+
+**Risk:** Low. `uptrakit-nats` would gain a dependency on `uptrakit-service-sdk` (adding TLS,
+WebSocket, and Clap as transitive deps), which may be undesirable. Keep as-is until `nats`
+needs more SDK functionality.
+
+---
+
+#### `uptrakit-shared-macros` (142 lines) — keep as-is
+
+**Assessment:** Although `uptrakit-shared-macros` is a single 142-line file containing one
+macro, it is used by 23 crates across the workspace. Its tiny size is not a maintenance burden;
+the macro is proc-macro-adjacent in concept (but implemented as a declarative macro in a normal
+crate, which is correct). Merging it into `uptrakit-shared-types` would create a dependency
+cycle (`types` → `macros` is fine, but many crates that use `macros` do not need `types`).
+Keep as a separate leaf crate.
+
+---
+
+#### `uptrakit-update-hooks` (768 lines) → into `uptrakit-web-api-types` or `uptrakit-agent-core`
+
+**Rationale:** `uptrakit-update-hooks` has exactly one consumer: `uptrakit-web-api`. Its only
+dependency is `uptrakit-internal-wire` and `uptrakit-web-api-types`. The module is logically
+"hook configuration processing for update execution" — which belongs in `uptrakit-agent-core`
+or `uptrakit-web-api-types`. Moving it to `uptrakit-agent-core` is the better fit because
+hook resolution is consumed by agents during update execution.
+
+**Priority:** MEDIUM — reduces the crate count by one and moves hook logic closer to its
+consumers. The current arrangement has `web-api` depending on `update-hooks` for what is
+conceptually agent-level logic.
+
+**Risk:** Low. No public API change; only import paths change.
+
+---
+
+#### `uptrakit-build-info` (216 lines) — keep as-is
+
+**Assessment:** `uptrakit-build-info` is consumed by 7 crates (all binaries and `service-sdk`)
+as both a regular dependency and a build dependency. It provides compile-time build metadata
+embedded via `build.rs`. Merging into any other crate would require those crates to also carry
+a `build.rs`, unnecessarily complicating them. Keep as a separate leaf crate.
+
+---
+
+### Module Extraction (without crate split)
+
+#### `uptrakit-shared-wire` — split `src/lib.rs` into sub-modules
+
+Covered above under Splitting Candidates. This is the highest-priority structural improvement
+that can be made to the wire crate without any breaking changes to consumers.
+
+#### `uptrakit-scheduler-engine` — extract `version_check.rs` query helpers
+
+`src/executors/version_check.rs` at 653 lines is the largest file in the scheduler-engine
+crate and contains both the executor logic and inline query row types
+(`ControllerFetchRow`, `AgentAssignmentRow`, `FetchGroupKey`). Extracting the query row
+definitions and query functions to `src/queries/version_check.rs` would follow the same
+pattern used in `web-api` (routes vs queries) and make the executor logic easier to read.
+
+#### `uptrakit-web-api/src/queries/autodiscovery.rs` — split at concern boundary
+
+At 1,846 lines, `autodiscovery.rs` contains two unrelated concerns: ignore-rule management
+(~170 lines) and discovery-result processing (~1,676 lines). These should be
+`queries/autodiscovery_ignore_rules.rs` and `queries/autodiscovery_processing.rs` within the
+same module.
+
+---
+
+### Dependency Graph Analysis
+
+The dependency graph is a valid DAG with no circular dependencies. Key observations:
+
+1. **Controller → web-api (upward dependency):** The most significant structural issue. The
+   controller binary (`core/`) depends on a UI-layer crate (`ui/web-api`). This means any
+   change to web-api triggers controller recompilation. The resolution is to extract `AppState`
+   construction and settings into a shared crate, making web-api depend on it rather than the
+   reverse.
+
+2. **Graph depth is shallow:** The longest dependency chain is approximately:
+   `types` → `wire` → `service-sdk` → `agent-core` → `agent`. This 5-hop depth is healthy
+   and means most leaf changes compile quickly.
+
+3. **`uptrakit-plugin-infrastructure-registry` is broadly imported:** 6+ crates depend on it
+   directly. The registry is a legitimate hub crate, but any change to it (e.g., adding a
+   new dispatch method) triggers recompilation of all consumers. Feature flags
+   (`daemon`, `ssh`) help limit this.
+
+4. **`uptrakit-directories` is not in `[workspace.dependencies]`:** It is referenced via
+   `path = ...` in 7 crates. Moving it to `[workspace.dependencies]` would standardize the
+   reference pattern and make it eligible for workspace-level feature management. (The same
+   applies to several other path-only crates: `uptrakit-nats`, `uptrakit-scheduler-engine`,
+   `uptrakit-notification-channels`.)
+
+---
+
+### Overall Assessment
+
+The workspace crate organization is generally healthy. The four-domain layout (`core/`,
+`shared/`, `ui/`, `plugins/`) enforces a clean dependency gradient for most crates. The main
+structural debt is the `controller → web-api` upward dependency, which is a known issue and the
+root cause of several other concerns (settings logic in the UI layer, `AppState` with 22 public
+fields). Resolving this one dependency inversion would enable the most impactful follow-on
+improvements: a web-api split, PKI extraction, and a cleaner `AppState` API surface.
+
+The highest-value, lowest-risk improvement is the `uptrakit-shared-wire` module extraction:
+splitting `src/lib.rs` into domain-specific sub-modules with `lib.rs` as a re-export façade.
+This is a pure file reorganization with no dependency changes and no impact on consumers, and
+it directly addresses the single largest navigation pain point in the codebase.
