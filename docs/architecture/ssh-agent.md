@@ -174,7 +174,10 @@ command. It accepts a positional target in standard SSH format
 5. DETECT PRIVILEGES (root check via id -u; sudo -n true)
 6. REMOTE SETUP
    - Create user with /bin/sh shell (if different from auth user)
-   - Deploy authorized_keys with no-pty/no-agent-forwarding/no-X11-forwarding
+   - Read existing authorized_keys
+   - Auto-remove keys matching uptrakit-svc:<this-service-uuid>-host:* (always)
+   - Remove all Uptrakit-managed keys (only with --remove-stale-keys)
+   - Deploy new key with no-pty/no-agent-forwarding/no-X11-forwarding
    - Resolve plugin commands (command -v per SudoCommandEntry)
    - Write minimal /etc/sudoers.d/uptrakit-<username> (or NOPASSWD: ALL with --allow-all)
    - Validate with visudo -cf

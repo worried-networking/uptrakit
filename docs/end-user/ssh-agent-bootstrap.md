@@ -136,7 +136,7 @@ This resolves to `deploy@10.0.0.5:2222` with host name `myserver`.
 | `--target-private-key-file` | No | (generated) | Path to PEM private key for the target user |
 | `--host-key-fingerprint` | No | (TOFU) | Expected host key fingerprint (SHA-256) |
 | `--allow-all` | No | `false` | Write `NOPASSWD: ALL` instead of specific command entries (less secure) |
-| `--remove-stale-keys` | No | `false` | Remove existing Uptrakit-managed keys before writing the new key (see [Stale key detection](#stale-key-detection)) |
+| `--remove-stale-keys` | No | `false` | Extend stale-key removal to all Uptrakit-managed keys (same-service keys are always removed automatically; see [Stale key detection](#stale-key-detection)) |
 
 ## SSH config resolution
 
@@ -188,24 +188,28 @@ The bootstrap command performs these steps in order:
 
 4. **Deploy SSH key** — If `--target-private-key-file` is omitted, generates a
    new Ed25519 keypair in memory. Reads the existing `authorized_keys` (if any),
-   classifies Uptrakit-managed entries (see [Stale key detection](#stale-key-detection)
-   below), and prints a notice when any are found. Then appends the public key to
-   `~target/.ssh/authorized_keys` with SSH restrictions
-   (`no-pty,no-agent-forwarding,no-X11-forwarding`) and proper permissions
-   (`700` for `.ssh`, `600` for `authorized_keys`). The restrictions prevent
-   interactive terminal allocation, SSH agent forwarding, and X11 forwarding
-   through the managed account while allowing the non-interactive command
-   execution that the agent requires.
+   then applies two-tier stale-key handling (see
+   [Stale key detection](#stale-key-detection) below):
+
+   - **Automatic removal** — any existing entry written by this service on a
+     previous bootstrap run (comment matching
+     `uptrakit-svc:<service-uuid>-host:*`) is removed without any flag.
+   - **Explicit removal** — pass `--remove-stale-keys` to additionally remove
+     all other Uptrakit-managed entries.
+
+   The new public key is then written to `~target/.ssh/authorized_keys` with SSH
+   restrictions (`no-pty,no-agent-forwarding,no-X11-forwarding`) and proper
+   permissions (`700` for `.ssh`, `600` for `authorized_keys`). The restrictions
+   prevent interactive terminal allocation, SSH agent forwarding, and X11
+   forwarding through the managed account while allowing the non-interactive
+   command execution that the agent requires.
 
    The key entry is written with a comment that identifies its origin:
 
-   - `uptrakit-<service-uuid>` — when the service has already been enrolled with
-     the controller (the UUID is the service identifier assigned at enrollment).
-   - `uptrakit` — when bootstrap runs before first enrollment (fallback; still
-     marks the key as Uptrakit-managed).
-
-   If `--remove-stale-keys` is passed, existing stale keys are removed before
-   the new key is appended (see [Stale key detection](#stale-key-detection)).
+   - `uptrakit-svc:<service-uuid>-host:<host-uuid>` — when the service has
+     already been enrolled with the controller.
+   - `uptrakit-host:<host-uuid>` — when bootstrap runs before first enrollment
+     (fallback; still marks the key as Uptrakit-managed).
 
 5. **Configure sudoers** — Queries all registered plugins for their required
    sudo commands, resolves each to its absolute path on the remote host via
@@ -242,29 +246,60 @@ via `--target-private-key-file`.
 Each key entry written to `authorized_keys` by bootstrap includes a comment
 that identifies it as Uptrakit-managed:
 
-- `uptrakit-<service-uuid>` when the service has been enrolled.
-- `uptrakit` as a fallback before first enrollment.
+- `uptrakit-svc:<service-uuid>-host:<host-uuid>` — when the service has been
+  enrolled with the controller.
+- `uptrakit-host:<host-uuid>` — when bootstrap runs before first enrollment
+  (the service UUID is not yet known).
 
-Before writing the new key, bootstrap reads `authorized_keys` and classifies
-existing entries:
+Before writing the new key, bootstrap reads `authorized_keys` and applies
+**two-tier stale-key handling**:
 
-- **For the `uptrakit` target user**: all existing entries are considered
-  Uptrakit-managed, because the `uptrakit` account is exclusively managed by
-  the agent and no external keys should be present.
-- **For all other target users**: only entries whose last whitespace-separated
-  token starts with `uptrakit` are considered Uptrakit-managed.
+### Tier 1 — automatic same-service removal (always)
 
-If any managed entries are found, bootstrap prints a notice:
+Any existing entry whose comment matches
+`uptrakit-svc:<this-service-uuid>-host:*` is removed **without any flag**.
+This keeps `authorized_keys` clean when the same service re-bootstraps a
+machine — for example, after key rotation or when a host was previously
+bootstrapped under a different name. Keys placed by *other* Uptrakit services
+and non-Uptrakit keys are left untouched.
+
+Example output when one same-service key is found and removed:
+
+```text
+Removing 1 key(s) written by this service on a previous bootstrap...
+  no-pty,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... uptrakit-svc:550e8400-...-host:018d7f12-...
+```
+
+This automatic removal only occurs when the service has been enrolled (so its
+UUID is known). If bootstrap runs before first enrollment, no automatic removal
+takes place.
+
+### Tier 2 — explicit broad removal (`--remove-stale-keys`)
+
+Pass `--remove-stale-keys` to also remove all other Uptrakit-managed entries:
+
+- **For the `uptrakit` target user**: all existing entries (the `uptrakit`
+  account is exclusively managed by the agent; no external keys should be
+  present).
+- **For all other target users**: only entries whose last
+  whitespace-separated token starts with `uptrakit`.
+
+Entries already covered by the automatic same-service removal are not counted
+twice.
+
+If remaining stale keys are found but the flag is not set, bootstrap prints a
+notice:
 
 ```text
 NOTE: Found 1 existing key(s) in authorized_keys:
-  no-pty,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... uptrakit-550e8400-e29b-41d4-a716-446655440000
+  no-pty,no-agent-forwarding,no-X11-forwarding ssh-ed25519 BBBB... uptrakit-svc:aaaaaaaa-...-host:bbbbbbbb-...
       Pass --remove-stale-keys to remove them before writing the new key.
 ```
 
-By default the new key is **appended** (non-destructive). Pass
-`--remove-stale-keys` to remove the stale entries atomically before the new key
-is written. This is the safe way to re-bootstrap a host after key rotation.
+By default those entries are left in place (non-destructive append). Pass
+`--remove-stale-keys` when you want to remove all Uptrakit-managed keys on the
+machine before deploying the new one — for example, when transferring a host to
+a different service instance:
 
 ```bash
 uptrakit-agent-ssh host bootstrap root@192.168.1.100 \
