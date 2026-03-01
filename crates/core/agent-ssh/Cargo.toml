@@ -9,30 +9,30 @@ version.workspace = true
 [dependencies]
 base64 = { workspace = true }
 clap = { workspace = true }
-dirs = "6"
+dirs = { workspace = true }
 futures-util = { workspace = true }
 rootcause = { workspace = true }
-rpassword = "7"
-russh = { version = "0.57", default-features = false, features = ["aws-lc-rs"] }
-ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "rand_core", "std"] }
+rpassword = { workspace = true }
+russh = { workspace = true, features = ["aws-lc-rs"] }
+ssh-key = { workspace = true, features = ["ed25519", "rand_core", "std"] }
 strum = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 rustls = { workspace = true }
-ssh2-config = "0.7"
+ssh2-config = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "fs", "sync", "time"] }
 tokio-rustls = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
-uptrakit-agent-core = { path = "../../shared/agent-core" }
+uptrakit-agent-core = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon"] }
-uptrakit-directories = { path = "../../shared/directories" }
-uptrakit-service-sdk = { path = "../../shared/service-sdk" }
+uptrakit-directories = { workspace = true }
+uptrakit-service-sdk = { workspace = true }
 uptrakit-shared-types = { workspace = true }
-uptrakit-crypto = { path = "../../shared/crypto", features = ["sea-orm"] }
-uptrakit-internal-wire = { path = "../../shared/wire" }
+uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
+uptrakit-internal-wire = { workspace = true }
 sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
 sea-orm-migration = { workspace = true, features = ["sqlx-sqlite"] }
 uuid = { workspace = true, features = ["v7", "serde"] }
@@ -46,7 +46,7 @@ tokio-tungstenite = { workspace = true }
 rcgen = { workspace = true }
 
 [build-dependencies]
-uptrakit-build-info = { path = "../../shared/build-info" }
+uptrakit-build-info = { workspace = true }
 
 [lints]
 workspace = true

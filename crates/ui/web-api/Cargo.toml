@@ -41,51 +41,51 @@ rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
-uptrakit-directories = { path = "../../shared/directories" }
-uptrakit-crypto = { path = "../../shared/crypto", features = ["sea-orm"] }
-uptrakit-shared-db = { path = "../../shared/db" }
-uptrakit-update-hooks = { path = "../../shared/update-hooks" }
+uptrakit-directories = { workspace = true }
+uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
+uptrakit-shared-db = { workspace = true }
+uptrakit-update-hooks = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["openapi"] }
-uptrakit-internal-wire = { path = "../../shared/wire" }
+uptrakit-internal-wire = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-command = { workspace = true }
-argon2 = { version = "0.5", features = ["std"] }
+argon2 = { workspace = true, features = ["std"] }
 rand = { workspace = true }
-client-ip = { version = "0.2", features = ["forwarded-header"] }
+client-ip = { workspace = true, features = ["forwarded-header"] }
 x509-parser = { workspace = true }
 base64 = { workspace = true }
 sha2 = { workspace = true }
-uptrakit-web-api-types = { path = "../../shared/web-api-types", features = ["openapi"] }
+uptrakit-web-api-types = { workspace = true, features = ["openapi"] }
 utoipa = { workspace = true, features = ["axum_extras"] }
-utoipa-axum = "0.2"
-openidconnect = { version = "4", optional = true }
+utoipa-axum = { workspace = true }
+openidconnect = { workspace = true, optional = true }
 url = { workspace = true }
-percent-encoding = "2"
-jsonwebtoken = { version = "10", default-features = false, features = ["aws_lc_rs"] }
+percent-encoding = { workspace = true }
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 axum-server = { workspace = true }
 hostname = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
-utoipa-swagger-ui = { version = "9.0", features = ["axum"], optional = true }
+utoipa-swagger-ui = { workspace = true, features = ["axum"], optional = true }
 x509-ocsp = { workspace = true }
 der = { workspace = true }
 spki = { workspace = true }
 x509-cert = { workspace = true }
 const-oid = { workspace = true }
 aws-lc-rs = { workspace = true }
-parking_lot = "0.12"
+parking_lot = { workspace = true }
 tokio-util = { workspace = true }
 zeroize = { workspace = true }
 async-nats = { workspace = true, optional = true }
-uptrakit-nats = { path = "../../shared/nats", optional = true }
-uptrakit-notification-channels = { path = "../../shared/notification-channels", default-features = false, features = ["webhook"] }
+uptrakit-nats = { workspace = true, optional = true }
+uptrakit-notification-channels = { workspace = true, features = ["webhook"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 tower = { workspace = true }
-http-body-util = "0.1"
+http-body-util = { workspace = true }
 strum = { workspace = true }
-uptrakit-shared-db = { path = "../../shared/db", features = ["migration", "db-sqlite"] }
+uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 
 [lints]
 workspace = true

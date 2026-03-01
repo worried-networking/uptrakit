@@ -8,7 +8,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-directories = "6"
+directories = { workspace = true }
 rootcause.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "rt"] }

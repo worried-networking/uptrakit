@@ -16,11 +16,11 @@ email = ["dep:lettre"]
 all = ["webhook", "telegram", "email"]
 
 [dependencies]
-lettre = { version = "0.11", default-features = false, features = [
+lettre = { workspace = true, features = [
     "smtp-transport", "tokio1", "tokio1-rustls-tls", "builder", "hostname"
 ], optional = true }
 async-trait = { workspace = true }
-hmac = "0.12"
+hmac = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }
 serde = { workspace = true }

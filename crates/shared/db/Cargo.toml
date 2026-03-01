@@ -18,13 +18,13 @@ db-mysql    = ["sea-orm/sqlx-mysql",    "sea-orm-migration?/sqlx-mysql"]
 rootcause = { workspace = true }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true, optional = true }
-sqlx = { version = "0.8", default-features = false }
+sqlx = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tracing = { workspace = true }
-uptrakit-crypto = { path = "../crypto", features = ["sea-orm"] }
+uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["sea-orm"] }
 uuid = { workspace = true, features = ["v7", "serde"] }
