@@ -115,13 +115,15 @@ pub(crate) async fn init_database(
     args: &crate::cli::Args,
     state_dir: &std::path::Path,
 ) -> crate::Result<DatabaseInit> {
-    let db_config = crate::db::DbConfig::from_args(args.db_url.clone(), state_dir)
-        .context(AppError::Database)?;
+    let db_config =
+        crate::db::DbConfig::from_args(args.db_url.clone(), state_dir, args.db_max_connections)
+            .context(AppError::Database)?;
     tracing::info!(
+        max_connections = db_config.max_connections,
         "connecting to database: {}",
         crate::db::sanitize_url(&db_config.url)
     );
-    let db_conn = crate::db::connect(&db_config.url)
+    let db_conn = crate::db::connect(&db_config)
         .await
         .context(AppError::Database)?;
 

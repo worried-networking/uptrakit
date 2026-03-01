@@ -4,20 +4,20 @@ compile_error!(
     "At least one database backend feature must be enabled: db-sqlite, db-postgres, or db-mysql"
 );
 
-mod config;
+pub(crate) mod config;
 mod error;
 
-pub use config::DbConfig;
+pub use config::{DEFAULT_MAX_CONNECTIONS, DbConfig};
 pub use error::{DbError, Result};
 
 use rootcause::prelude::*;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use std::time::Duration;
 
-/// Initialize database connection with the given URL
-pub async fn connect(db_url: &str) -> Result<DatabaseConnection> {
-    let mut opt = ConnectOptions::new(db_url.to_owned());
-    opt.max_connections(10)
+/// Initialize a database connection pool using the provided configuration.
+pub async fn connect(config: &DbConfig) -> Result<DatabaseConnection> {
+    let mut opt = ConnectOptions::new(config.url.clone());
+    opt.max_connections(config.max_connections)
         .min_connections(1)
         .connect_timeout(Duration::from_secs(8))
         .acquire_timeout(Duration::from_secs(8))
@@ -48,7 +48,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_memory_connection() {
-        let db = connect("sqlite::memory:").await.unwrap();
+        let config = DbConfig {
+            url: "sqlite::memory:".to_string(),
+            max_connections: DEFAULT_MAX_CONNECTIONS,
+        };
+        let db = connect(&config).await.unwrap();
         assert!(db.ping().await.is_ok());
     }
 }

@@ -2,15 +2,25 @@ use super::error::{DbError, Result};
 use rootcause::prelude::*;
 use std::path::Path;
 
+/// Default maximum number of database connections in the pool.
+pub const DEFAULT_MAX_CONNECTIONS: u32 = 10;
+
 /// Database configuration
 #[derive(Debug, Clone)]
 pub struct DbConfig {
     pub url: String,
+    /// Maximum number of connections in the connection pool.
+    /// Default: [`DEFAULT_MAX_CONNECTIONS`].
+    pub max_connections: u32,
 }
 
 impl DbConfig {
-    /// Create config from CLI args, defaulting to SQLite in data_dir
-    pub fn from_args(db_url: Option<String>, data_dir: &Path) -> Result<Self> {
+    /// Create config from CLI args, defaulting to SQLite in data_dir.
+    pub fn from_args(
+        db_url: Option<String>,
+        data_dir: &Path,
+        max_connections: u32,
+    ) -> Result<Self> {
         let url = match db_url {
             Some(url) => {
                 // Validate URL scheme matches enabled features
@@ -29,7 +39,7 @@ impl DbConfig {
             }
         };
 
-        Ok(Self { url })
+        Ok(Self { url, max_connections })
     }
 
     /// Validate that the database URL scheme is supported by enabled features

@@ -54,17 +54,23 @@ pub async fn run(args: &Args, migrate_args: &DbMigrateArgs) -> Result<()> {
         "Connecting to source:  {}",
         crate::db::sanitize_url(src_url)
     );
-    let src = crate::db::connect(src_url)
-        .await
-        .map_err(|e| report!(DbMigrateError::Connection(format!("source: {e}"))))?;
+    let src = crate::db::connect(&crate::db::DbConfig {
+        url: src_url.to_string(),
+        max_connections: crate::db::DEFAULT_MAX_CONNECTIONS,
+    })
+    .await
+    .map_err(|e| report!(DbMigrateError::Connection(format!("source: {e}"))))?;
 
     eprintln!(
         "Connecting to target:  {}",
         crate::db::sanitize_url(dst_url)
     );
-    let dst = crate::db::connect(dst_url)
-        .await
-        .map_err(|e| report!(DbMigrateError::Connection(format!("target: {e}"))))?;
+    let dst = crate::db::connect(&crate::db::DbConfig {
+        url: dst_url.to_string(),
+        max_connections: crate::db::DEFAULT_MAX_CONNECTIONS,
+    })
+    .await
+    .map_err(|e| report!(DbMigrateError::Connection(format!("target: {e}"))))?;
 
     // ── 3. Schema migrations on target ───────────────────────────────────────
     eprintln!("Running schema migrations on target…");
@@ -140,9 +146,13 @@ pub async fn run(args: &Args, migrate_args: &DbMigrateArgs) -> Result<()> {
 
 /// Validate that the URL scheme is supported by enabled features.
 fn validate_url(url: &str) -> std::result::Result<(), String> {
-    crate::db::DbConfig::from_args(Some(url.to_owned()), Path::new("/"))
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    crate::db::DbConfig::from_args(
+        Some(url.to_owned()),
+        Path::new("/"),
+        crate::db::DEFAULT_MAX_CONNECTIONS,
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

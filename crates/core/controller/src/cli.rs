@@ -87,6 +87,12 @@ pub struct Args {
     #[arg(long)]
     pub db_url: Option<String>,
 
+    /// Maximum number of connections in the database connection pool.
+    /// Increase this value under high REST/WebSocket load to prevent pool
+    /// exhaustion. The default of 10 is suitable for small to medium deployments.
+    #[arg(long, default_value = "10")]
+    pub db_max_connections: u32,
+
     /// HTTPS listen address (dual-stack by default).
     /// Stored in DB as `network.https_addr`. CLI value used only on first run
     /// or with `--force-settings-override`.
