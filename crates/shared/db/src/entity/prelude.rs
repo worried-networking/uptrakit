@@ -11,6 +11,7 @@ pub use super::tenant_discovery_allowlist::{
 };
 pub use super::ca_certificate::{Entity as CaCertificate, Model as CaCertificateModel};
 pub use super::enrollment_token::{Entity as EnrollmentToken, Model as EnrollmentTokenModel};
+pub use super::global_setting::{Entity as GlobalSetting, Model as GlobalSettingModel};
 pub use super::host::{Entity as Host, Model as HostModel};
 pub use super::host_software_item::{Entity as HostSoftwareItem, Model as HostSoftwareItemModel};
 pub use super::host_software_item_plugin::{

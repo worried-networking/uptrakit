@@ -5,6 +5,7 @@ pub mod host_discovery_allowlist;
 pub mod tenant_discovery_allowlist;
 pub mod ca_certificate;
 pub mod enrollment_token;
+pub mod global_setting;
 pub mod host;
 pub mod host_software_item;
 pub mod host_software_item_plugin;

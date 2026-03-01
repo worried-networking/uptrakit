@@ -7,7 +7,7 @@ use uptrakit_shared_db::entity::prelude::*;
 
 use super::error::{DbMigrateError, Result};
 
-/// Names of all 37 application tables in FK-safe copy order
+/// Names of all 38 application tables in FK-safe copy order
 /// (parent tables first, leaf tables last).
 ///
 /// This is the reverse of the `drop_tables!` list in the initial migration's
@@ -22,6 +22,7 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "ca_certificates",
     "roles",
     "permissions",
+    "global_settings",
     "role_permissions",
     "oidc_providers",
     "user_roles",
@@ -77,6 +78,7 @@ pub async fn copy_all(
     copy!(CaCertificate, "ca_certificates");
     copy!(Role, "roles");
     copy!(Permission, "permissions");
+    copy!(GlobalSetting, "global_settings");
     copy!(RolePermission, "role_permissions");
     copy!(OidcProvider, "oidc_providers");
     copy!(UserRole, "user_roles");
@@ -157,6 +159,7 @@ pub async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(OidcProvider, "oidc_providers");
     clean!(UserRole, "user_roles");
     clean!(RolePermission, "role_permissions");
+    clean!(GlobalSetting, "global_settings");
     clean!(Permission, "permissions");
     clean!(Role, "roles");
     clean!(CaCertificate, "ca_certificates");
@@ -184,6 +187,7 @@ pub async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnection) -> R
     verify!(CaCertificate, "ca_certificates");
     verify!(Role, "roles");
     verify!(Permission, "permissions");
+    verify!(GlobalSetting, "global_settings");
     verify!(RolePermission, "role_permissions");
     verify!(OidcProvider, "oidc_providers");
     verify!(UserRole, "user_roles");
@@ -345,11 +349,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copy_order_has_all_37_tables() {
+    fn copy_order_has_all_38_tables() {
         assert_eq!(
             COPY_ORDER.len(),
-            37,
-            "COPY_ORDER must list all 37 app tables"
+            38,
+            "COPY_ORDER must list all 38 app tables"
         );
     }
 }
