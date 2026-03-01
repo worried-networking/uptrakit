@@ -6670,7 +6670,9 @@ dependencies = [
  "uptrakit-plugin-package-manager-homebrew",
  "uptrakit-plugin-package-manager-npm",
  "uptrakit-plugin-releases-docker",
+ "uptrakit-plugin-releases-forgejo",
  "uptrakit-plugin-releases-github",
+ "uptrakit-plugin-releases-gitlab",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
 ]
@@ -6745,7 +6747,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-plugin-releases-forgejo"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "regex",
+ "reqwest 0.13.2",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
+ "url",
+]
+
+[[package]]
 name = "uptrakit-plugin-releases-github"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "regex",
+ "reqwest 0.13.2",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
+ "url",
+]
+
+[[package]]
+name = "uptrakit-plugin-releases-gitlab"
 version = "0.0.1"
 dependencies = [
  "async-trait",
