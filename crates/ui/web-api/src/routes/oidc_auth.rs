@@ -367,8 +367,11 @@ pub async fn oidc_callback(
                         return Redirect::to("/login?error=oidc_internal_error").into_response();
                     }
 
+                    // Use a hash fragment so the registration code never
+                    // appears in server-side access logs (HTTP clients strip
+                    // fragments before sending the request).
                     return Redirect::to(&format!(
-                        "/login?registration_token_required=true&registration_code={code}"
+                        "/login#registration_token_required=true&registration_code={code}"
                     ))
                     .into_response();
                 }

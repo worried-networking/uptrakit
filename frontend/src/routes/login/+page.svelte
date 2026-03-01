@@ -68,10 +68,14 @@
 			return;
 		}
 
-		// Handle OIDC registration token requirement
-		if (params.get('registration_token_required') === 'true') {
+		// Handle OIDC registration token requirement.
+		// The registration_code is passed via hash fragment (not query string)
+		// to prevent it from appearing in server-side access logs.
+		const hash = $page.url.hash.slice(1); // drop leading '#'
+		const hashParams = new URLSearchParams(hash);
+		if (hashParams.get('registration_token_required') === 'true') {
 			registrationTokenRequired = true;
-			registrationCode = params.get('registration_code') || '';
+			registrationCode = hashParams.get('registration_code') || '';
 			return;
 		}
 
