@@ -314,15 +314,16 @@ impl TenantManager {
                     let config_topic =
                         crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
                     let config_json = crate::ha_discovery::build_discovery_config(
-                        ha_prefix,
                         topic_prefix,
                         tenant_id,
                         item.software_item_id,
                         host.host_id,
                         &item.name,
                         &host.hostname,
-                        host.release_url.as_deref(),
-                        host.release_notes.as_deref(),
+                        crate::ha_discovery::ReleaseInfo {
+                            url: host.release_url.as_deref(),
+                            notes: host.release_notes.as_deref(),
+                        },
                     );
                     let config_bytes = config_json.to_string().into_bytes();
                     if let Err(e) = state
@@ -370,15 +371,16 @@ impl TenantManager {
                     crate::ha_discovery::unique_id(tenant_id, item.software_item_id, host.host_id);
                 let config_topic = crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
                 let config_json = crate::ha_discovery::build_discovery_config(
-                    ha_prefix,
                     topic_prefix,
                     tenant_id,
                     item.software_item_id,
                     host.host_id,
                     &item.name,
                     &host.hostname,
-                    host.release_url.as_deref(),
-                    host.release_notes.as_deref(),
+                    crate::ha_discovery::ReleaseInfo {
+                        url: host.release_url.as_deref(),
+                        notes: host.release_notes.as_deref(),
+                    },
                 );
                 let config_bytes = config_json.to_string().into_bytes();
                 if let Err(e) = state

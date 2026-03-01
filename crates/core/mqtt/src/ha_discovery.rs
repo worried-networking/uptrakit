@@ -97,6 +97,21 @@ pub fn unique_id(tenant_id: Uuid, item_id: Uuid, host_id: Uuid) -> String {
     format!("uptrakit_{t}_{i}_{h}")
 }
 
+/// Optional upstream release metadata included in a discovery config.
+///
+/// Passed to [`build_discovery_config`] to include release page links and
+/// changelog snippets in the HA MQTT discovery payload.
+#[derive(Debug, Default, Clone)]
+pub struct ReleaseInfo<'a> {
+    /// URL to the upstream release page (e.g. a GitHub release).
+    pub url: Option<&'a str>,
+    /// Full release notes or changelog text.
+    ///
+    /// Truncated to 500 Unicode characters when written to the discovery
+    /// config (`release_summary`).
+    pub notes: Option<&'a str>,
+}
+
 /// Build the HA MQTT discovery JSON for an `update` entity.
 ///
 /// Each software item is represented as a distinct HA device (identified by
@@ -109,40 +124,39 @@ pub fn unique_id(tenant_id: Uuid, item_id: Uuid, host_id: Uuid) -> String {
 /// Returns a [`serde_json::Value`] that should be serialized with `to_string()`
 /// and published (retained) on `discovery_config_topic(...)`.
 ///
-/// When `release_url` is provided it is included in the config verbatim.
-/// When `release_notes` is provided, the first 500 characters are included
+/// When `release.url` is provided it is included verbatim as `release_url`.
+/// When `release.notes` is provided, the first 500 characters are included
 /// as `release_summary` (truncated at a character boundary to keep the MQTT
 /// payload small).
+///
+/// Pass `ReleaseInfo::default()` (or `ReleaseInfo { url: None, notes: None }`)
+/// when no release metadata is available.
 ///
 /// # Examples
 ///
 /// ```
 /// # use uuid::Uuid;
-/// # use uptrakit_mqtt::ha_discovery::build_discovery_config;
+/// # use uptrakit_mqtt::ha_discovery::{build_discovery_config, ReleaseInfo};
 /// let v = build_discovery_config(
-///     "homeassistant",
 ///     "uptrakit",
 ///     Uuid::nil(),
 ///     Uuid::nil(),
 ///     Uuid::nil(),
 ///     "My App",
 ///     "myhost",
-///     None,
-///     None,
+///     ReleaseInfo::default(),
 /// );
 /// assert_eq!(v["platform"], "mqtt");
 /// assert_eq!(v["payload_install"], "install");
 /// ```
 pub fn build_discovery_config(
-    _ha_prefix: &str,
     topic_prefix: &str,
     tenant_id: Uuid,
     item_id: Uuid,
     host_id: Uuid,
     item_name: &str,
     hostname: &str,
-    release_url: Option<&str>,
-    release_notes: Option<&str>,
+    release: ReleaseInfo<'_>,
 ) -> serde_json::Value {
     let uid = unique_id(tenant_id, item_id, host_id);
     let tenant_simple = tenant_id.simple().to_string();
@@ -168,10 +182,10 @@ pub fn build_discovery_config(
         }
     });
 
-    if let Some(url) = release_url {
+    if let Some(url) = release.url {
         config["release_url"] = serde_json::Value::String(url.to_string());
     }
-    if let Some(notes) = release_notes {
+    if let Some(notes) = release.notes {
         config["release_summary"] =
             serde_json::Value::String(truncate_str(notes, 500).to_string());
     }
@@ -402,15 +416,13 @@ mod tests {
     #[test]
     fn build_discovery_config_platform_mqtt() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "myhost",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         assert_eq!(v["platform"], "mqtt");
     }
@@ -418,15 +430,13 @@ mod tests {
     #[test]
     fn build_discovery_config_unique_id_matches() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "myhost",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         let expected_uid = unique_id(tenant(), item(), host());
         assert_eq!(v["unique_id"], expected_uid.as_str());
@@ -435,15 +445,13 @@ mod tests {
     #[test]
     fn build_discovery_config_name_is_hostname() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "MyApp",
             "server1",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         assert_eq!(v["name"], "server1");
     }
@@ -451,15 +459,13 @@ mod tests {
     #[test]
     fn build_discovery_config_state_topic_correct() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         let expected = state_topic("uptrakit", item(), host());
         assert_eq!(v["state_topic"], expected.as_str());
@@ -468,15 +474,13 @@ mod tests {
     #[test]
     fn build_discovery_config_latest_version_topic_correct() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         let expected = latest_version_topic("uptrakit", item(), host());
         assert_eq!(v["latest_version_topic"], expected.as_str());
@@ -485,15 +489,13 @@ mod tests {
     #[test]
     fn build_discovery_config_command_topic_correct() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         let expected = command_topic("uptrakit", item(), host());
         assert_eq!(v["command_topic"], expected.as_str());
@@ -502,15 +504,13 @@ mod tests {
     #[test]
     fn build_discovery_config_payload_install() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         assert_eq!(v["payload_install"], "install");
     }
@@ -518,15 +518,13 @@ mod tests {
     #[test]
     fn build_discovery_config_availability_topic() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         assert_eq!(v["availability_topic"], "uptrakit/status");
     }
@@ -534,15 +532,13 @@ mod tests {
     #[test]
     fn build_discovery_config_availability_payloads() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         assert_eq!(v["payload_available"], "online");
         assert_eq!(v["payload_not_available"], "offline");
@@ -551,15 +547,13 @@ mod tests {
     #[test]
     fn build_discovery_config_device_identifiers() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         let tenant_simple = tenant().simple().to_string();
         let item_simple = item().simple().to_string();
@@ -570,15 +564,13 @@ mod tests {
     #[test]
     fn build_discovery_config_device_name_is_item_name() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "My App",
             "h",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         assert_eq!(v["device"]["name"], "My App");
         assert_eq!(v["device"]["manufacturer"], "Uptrakit");
@@ -618,15 +610,13 @@ mod tests {
     #[test]
     fn build_discovery_config_serializes_to_valid_json() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         let s = v.to_string();
         let reparsed: serde_json::Value = serde_json::from_str(&s).unwrap();
@@ -641,15 +631,13 @@ mod tests {
     fn build_discovery_config_with_release_url() {
         let url = "https://github.com/owner/repo/releases/tag/v1.3.0";
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            Some(url),
-            None,
+            ReleaseInfo { url: Some(url), notes: None },
         );
         assert_eq!(v["release_url"], url);
         assert!(v.get("release_summary").is_none());
@@ -659,15 +647,13 @@ mod tests {
     fn build_discovery_config_with_release_summary() {
         let notes = "## What's New\n- Feature A\n- Bug fix B";
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            Some(notes),
+            ReleaseInfo { url: None, notes: Some(notes) },
         );
         assert_eq!(v["release_summary"], notes);
         assert!(v.get("release_url").is_none());
@@ -678,15 +664,13 @@ mod tests {
         // Build a string of 600 ASCII characters.
         let notes: String = "a".repeat(600);
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            Some(&notes),
+            ReleaseInfo { url: None, notes: Some(&notes) },
         );
         let summary = v["release_summary"].as_str().unwrap();
         assert_eq!(summary.len(), 500);
@@ -696,15 +680,13 @@ mod tests {
     #[test]
     fn build_discovery_config_no_release_metadata_omits_fields() {
         let v = build_discovery_config(
-            "homeassistant",
             "uptrakit",
             tenant(),
             item(),
             host(),
             "App",
             "h",
-            None,
-            None,
+            ReleaseInfo::default(),
         );
         assert!(v.get("release_url").is_none());
         assert!(v.get("release_summary").is_none());
