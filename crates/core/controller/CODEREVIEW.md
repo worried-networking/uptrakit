@@ -251,12 +251,6 @@ all other timing constants. Move to `durations.rs` as
 
 ### Issues
 
-**[MEDIUM]** `src/scheduler/mod.rs:48` -- `executors` field is
-`HashMap<ScheduledTaskType, Box<dyn TaskExecutor>>`; `Scheduler::register` uses
-`HashMap::insert`, which silently replaces any previously registered executor for a given task
-type with no warning. The method should either `debug_assert!` that the key is not already
-present, or return `Option<Box<dyn TaskExecutor>>` to expose the displacement.
-
 **[MEDIUM]** `src/scheduler/executor.rs:9` -- `TaskExecutor` trait has no registration or
 discovery mechanism for new task types. Adding a new scheduled task requires creating a new
 executor, adding a match arm, and registering manually. Unlike the `register_plugins!` macro,

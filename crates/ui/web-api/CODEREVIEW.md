@@ -13,8 +13,7 @@ delivery, and database query helpers. It is a library crate consumed by `uptraki
 
 The crate demonstrates strong security primitives (Argon2id, JWT denylist, typed permission
 extractors, PKCE for OIDC), a well-designed `TenantDb` abstraction for tenant isolation, and
-clean `AppState` builder pattern. Key concerns: the in-memory-only token denylist without
-cross-instance replication, the crate's overall size approaching "god crate" territory, route
+clean `AppState` builder pattern. Key concerns: the crate's overall size approaching "god crate" territory, route
 handlers in `src/routes/` lacking inline unit tests for the majority of business-logic paths,
 and several query modules without test coverage. The OIDC registration DB error masking
 (`unwrap_or(1)`), `count_linked_hosts` DB error swallowing, `Report::new()` macro violations,
@@ -28,7 +27,11 @@ the `find_raw_active_config` `.ok().flatten()` DB error swallowing, the
 have all been fixed. The `generate_secure_token()` UUID fallback (OIDC auth now returns
 HTTP 500 on RNG failure instead of silently downgrading entropy), and the `lookup_by_secret`
 bearer-secret query without a `service_id` filter (now narrowed via optional URL query
-parameter for defence-in-depth during the enrollment window) have been fixed.
+parameter for defence-in-depth during the enrollment window) have been fixed. The
+in-memory-only token denylist (revocations now persisted to `revoked_token_jtis`/
+`revoked_token_users` DB tables and propagated to peer instances via
+`ControllerMessage::TokenRevoked` over NATS), and the OIDC registration code exposed in
+redirect URL query parameters (now transmitted via URL hash fragment) have been fixed.
 
 ## Architecture
 
@@ -119,13 +122,6 @@ issued. A compromised token that was never explicitly revoked remains valid fore
 - `SecretString` at all API input boundaries.
 
 ### Issues
-
-**[HIGH]** `src/auth/token_denylist.rs:14-16` -- In-memory denylist not replicated across
-instances. Revoked tokens remain valid on other instances for up to 15 minutes (JWT TTL).
-A DB-backed `revoked_tokens` table or Redis pub/sub invalidation would close this gap.
-
-**[MEDIUM]** `src/routes/oidc_auth.rs:349-352` -- Registration code exposed in redirect URL
-query parameter. Appears in browser history and server logs.
 
 **[LOW]** `src/auth/token.rs:17-22` -- API tokens hashed with unsalted SHA-256. Per-token salt
 would strengthen defense-in-depth.

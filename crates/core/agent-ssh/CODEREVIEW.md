@@ -199,10 +199,6 @@ cover the full `run_bootstrap` orchestration path. Adding a trait seam for
 acquire timeout. If multiple hosts are unreachable simultaneously, many tokio tasks could be
 blocked for 30 seconds each.
 
-**[LOW]** `service-sdk/src/lifecycle.rs:263-275` (shared) -- Enrollment retry only catches
-`ReceiveClosed`, not transient network errors. DNS timeout, TCP connection failure, or TLS
-handshake error during enrollment causes process exit rather than retry with backoff.
-
 ## Coding Standards
 
 ### Strengths

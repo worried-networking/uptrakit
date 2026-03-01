@@ -16,7 +16,9 @@ The design is sound and the code quality is high. The main concerns are that `Se
 not object-safe (undocumented), the `run_service_lifecycle` core function has zero test coverage,
 and the `poll_service_event` cancellation-safety requirement is undocumented. The
 `BasicConstraints::Unconstrained` divergence in the test CA helper has been fixed
-(`Constrained(0)` now matches production).
+(`Constrained(0)` now matches production). The enrollment retry loop previously only retried on
+`ReceiveClosed`; it now retries all transient network errors (`WebSocket`, `Io` non-cert-expired,
+`ConnectionTimeout`) via `EnrollmentError::is_transient_network()`.
 
 ## Architecture
 
@@ -99,11 +101,7 @@ exercising signal delivery. Does not test signal dispatch path.
 
 ### Issues
 
-**[LOW]** `src/lifecycle.rs:263-275` -- Enrollment retry only catches `ReceiveClosed`, not
-transient network errors. DNS resolution failure, TCP connect timeout, and TLS handshake errors
-all propagate immediately via `return Err(e)`, causing the process to exit. The backoff
-infrastructure is already in place; extending the retry condition to cover transient network
-errors would improve resilience.
+No high availability issues found.
 
 ## Coding Standards
 

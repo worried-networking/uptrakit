@@ -51,10 +51,6 @@ No security issues found.
 
 ### Issues
 
-**[LOW]** `src/scheduler.rs` -- `Scheduler::register` uses `HashMap::insert` which silently
-overwrites a previously registered executor with no warning. Add a `debug_assert!` that the
-key is absent to surface accidental double-registration during development.
-
 **[LOW]** `src/scheduler.rs` -- `DEFAULT_POLL_INTERVAL_SECS` is a bare `const u64` without a
 doc comment. Promote to a typed `Duration` constant with documentation, matching the
 `durations.rs` pattern used in the controller.

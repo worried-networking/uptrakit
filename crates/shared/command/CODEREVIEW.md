@@ -12,8 +12,9 @@ injection), `CommandSpec` (a builder for command configuration), and `LocalComma
 concrete implementation). The crate also includes sudo-aware execution via `SudoContext` and shell
 escaping utilities.
 
-The design enables unit testing of all plugin and agent code without spawning real processes. The
-main concern is duplicated timeout logic between `execute` and `execute_quiet` methods.
+The design enables unit testing of all plugin and agent code without spawning real processes.
+The previously-reported duplicated timeout logic between `execute` and `execute_quiet` has been
+extracted into a shared `apply_timeout` helper.
 
 ## Architecture
 
@@ -58,12 +59,6 @@ No security issues found.
   policy variants and conflict detection.
 
 ### Issues
-
-**[MEDIUM]** `src/executor.rs:176-199` -- `execute` and `execute_quiet` share identical
-`tokio::time::timeout` / `report!(CommandError::TimedOut)` logic. The only difference is
-whether `output_tx` is passed to `run_command_exec_impl`. Future timeout behavior changes
-(e.g., exposing a `cancelled` token, killing the child process) must be applied in two
-places. Extract a private `run_with_optional_timeout(fut, timeout)` helper.
 
 **[LOW]** `src/executor.rs:126` -- Unnecessary `clone()` in `CommandSpec::resolve()` for
 Exec mode. Could take ownership or return references.
