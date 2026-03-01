@@ -7,7 +7,7 @@ use uptrakit_shared_db::entity::prelude::*;
 
 use super::error::{DbMigrateError, Result};
 
-/// Names of all 34 application tables in FK-safe copy order
+/// Names of all 37 application tables in FK-safe copy order
 /// (parent tables first, leaf tables last).
 ///
 /// This is the reverse of the `drop_tables!` list in the initial migration's
@@ -51,6 +51,9 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "pending_oidc_registrations",
     "api_rate_limits",
     "scheduled_tasks",
+    "notification_channels",
+    "notification_rules",
+    "notification_log",
 ];
 
 /// Batch-copy all rows from `src` to `dst` in FK-safe order.
@@ -103,6 +106,9 @@ pub async fn copy_all(
     copy!(PendingOidcRegistration, "pending_oidc_registrations");
     copy!(ApiRateLimit, "api_rate_limits");
     copy!(ScheduledTask, "scheduled_tasks");
+    copy!(NotificationChannel, "notification_channels");
+    copy!(NotificationRule, "notification_rules");
+    copy!(NotificationLog, "notification_log");
 
     Ok(total)
 }
@@ -119,6 +125,9 @@ pub async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
         };
     }
 
+    clean!(NotificationLog, "notification_log");
+    clean!(NotificationRule, "notification_rules");
+    clean!(NotificationChannel, "notification_channels");
     clean!(ScheduledTask, "scheduled_tasks");
     clean!(ApiRateLimit, "api_rate_limits");
     clean!(PendingOidcRegistration, "pending_oidc_registrations");
@@ -204,6 +213,9 @@ pub async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnection) -> R
     verify!(PendingOidcRegistration, "pending_oidc_registrations");
     verify!(ApiRateLimit, "api_rate_limits");
     verify!(ScheduledTask, "scheduled_tasks");
+    verify!(NotificationChannel, "notification_channels");
+    verify!(NotificationRule, "notification_rules");
+    verify!(NotificationLog, "notification_log");
 
     Ok(total)
 }
@@ -333,11 +345,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copy_order_has_all_34_tables() {
+    fn copy_order_has_all_37_tables() {
         assert_eq!(
             COPY_ORDER.len(),
-            34,
-            "COPY_ORDER must list all 34 app tables"
+            37,
+            "COPY_ORDER must list all 37 app tables"
         );
     }
 }

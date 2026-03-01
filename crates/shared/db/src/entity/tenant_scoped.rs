@@ -1,9 +1,9 @@
 use sea_orm::EntityTrait;
 
 use super::{
-    enrollment_token, host, host_discovery_allowlist, mqtt_client, oidc_provider, plugin_config,
-    scheduled_task, service, setting, settings_version, software_item, tenant_discovery_allowlist,
-    user_role,
+    enrollment_token, host, host_discovery_allowlist, mqtt_client, notification_channel,
+    notification_log, notification_rule, oidc_provider, plugin_config, scheduled_task, service,
+    setting, settings_version, software_item, tenant_discovery_allowlist, user_role,
 };
 
 /// Marker trait for SeaORM entities that are scoped to a tenant via a `tenant_id` column.
@@ -90,5 +90,23 @@ impl TenantScoped for tenant_discovery_allowlist::Entity {
 impl TenantScoped for host_discovery_allowlist::Entity {
     fn tenant_id_column() -> Self::Column {
         host_discovery_allowlist::Column::TenantId
+    }
+}
+
+impl TenantScoped for notification_channel::Entity {
+    fn tenant_id_column() -> Self::Column {
+        notification_channel::Column::TenantId
+    }
+}
+
+impl TenantScoped for notification_rule::Entity {
+    fn tenant_id_column() -> Self::Column {
+        notification_rule::Column::TenantId
+    }
+}
+
+impl TenantScoped for notification_log::Entity {
+    fn tenant_id_column() -> Self::Column {
+        notification_log::Column::TenantId
     }
 }

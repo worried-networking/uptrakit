@@ -18,6 +18,11 @@ pub use super::host_software_item_plugin::{
 };
 pub use super::mqtt_client::{Entity as MqttClient, Model as MqttClientModel};
 pub use super::mqtt_lease::{Entity as MqttLease, Model as MqttLeaseModel};
+pub use super::notification_channel::{
+    Entity as NotificationChannel, Model as NotificationChannelModel,
+};
+pub use super::notification_log::{Entity as NotificationLog, Model as NotificationLogModel};
+pub use super::notification_rule::{Entity as NotificationRule, Model as NotificationRuleModel};
 pub use super::oidc_provider::{Entity as OidcProvider, Model as OidcProviderModel, RoleMapping};
 pub use super::pending_account_link::{
     Entity as PendingAccountLink, Model as PendingAccountLinkModel,
