@@ -199,15 +199,29 @@ impl CrlManager {
     }
 
     /// Rebuild the CRLs and hot-reload the TLS configuration.
+    ///
+    /// Lock ordering: always acquire `issuers` before `server_cert`.
+    /// Both locks are held only long enough to snapshot the required fields;
+    /// they are dropped before the CPU-heavy `build_rustls_config_*` call to
+    /// avoid blocking writers (CA rotation, server cert renewal) for longer
+    /// than necessary.
     pub async fn reload_tls_config(&self) -> pki::Result<()> {
         let (crls, crl_pem) = self.build_crls().await?;
-        let issuers = self.issuers.read().await;
-        let server_cert = self.server_cert.read().await;
+
+        // Snapshot under each lock in order, then release before crypto work.
+        let bundle_pem = {
+            let issuers = self.issuers.read().await;
+            issuers.bundle_pem.clone()
+        };
+        let (cert_pem, key_pem) = {
+            let server_cert = self.server_cert.read().await;
+            (server_cert.0.clone(), server_cert.1.clone())
+        };
 
         let server_config = pki::build_rustls_config_with_client_auth_and_crls(
-            &server_cert.0,
-            &server_cert.1,
-            &issuers.bundle_pem,
+            &cert_pem,
+            &key_pem,
+            &bundle_pem,
             crls,
         )?;
 
