@@ -21,7 +21,28 @@ pub struct NatsConnection {
 
 impl NatsConnection {
     /// Connect to NATS and create the JetStream context.
+    ///
+    /// # Security note
+    ///
+    /// If the URL scheme is `nats://` (plaintext), a warning is emitted.
+    /// In production environments use `nats-tls://` or configure the NATS
+    /// server with `tls_required: true`. See
+    /// [docs/security/secrets-and-encryption.md](../../../docs/security/secrets-and-encryption.md)
+    /// for details.
     pub async fn connect(url: &str) -> Result<Self, Report<NatsError>> {
+        // Warn when the operator configured a plaintext (non-TLS) NATS URL.
+        // Strip any user-info (user:password@) before parsing the scheme so we
+        // match both `nats://host:4222` and `nats://user:pass@host:4222`.
+        let scheme = url.split("://").next().unwrap_or("");
+        if scheme == "nats" {
+            tracing::warn!(
+                url,
+                "connecting to NATS over plaintext (nats://); \
+                 use nats-tls:// or enable TLS on the server side in production — \
+                 see docs/security/secrets-and-encryption.md for guidance"
+            );
+        }
+
         tracing::info!(url, "connecting to NATS");
         let client = async_nats::connect(url).await.context_to::<NatsError>()?;
 
