@@ -53,7 +53,8 @@ impl ControllerConnection {
         auth_header: Option<&str>,
     ) -> Result<Self> {
         tracing::debug!(host, port, "connecting to controller");
-        let ws = connect_ws(host, port, tls_connector, auth_header).await?;
+        // Authenticated connections use mTLS identity — no service_id query param needed.
+        let ws = connect_ws(host, port, tls_connector, auth_header, None).await?;
         tracing::debug!("WebSocket connection established");
         Ok(Self {
             ws,

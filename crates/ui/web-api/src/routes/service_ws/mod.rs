@@ -5,16 +5,18 @@ mod protocol;
 pub(crate) use handler::trigger_discovery_for_agent_host;
 use protocol::{ConnectionType, ServiceWsError, ServiceWsResult};
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 
 use axum::Extension;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::extract::WebSocketUpgrade;
 use axum::extract::ws::WebSocket;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use uuid::Uuid;
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{IncomingSeq, OutgoingSeq};
@@ -35,10 +37,17 @@ use crate::extract::{ClientIp, ServiceIdentity};
 ///
 /// Per-IP rate limiting is applied before the WebSocket upgrade to prevent
 /// connection floods and brute-force bearer secret guessing.
+///
+/// An optional `service_id` query parameter can be supplied by enrolled
+/// services (those in the `Bearer`-token path). When present, the
+/// enrollment-secret lookup is narrowed to that specific service — a
+/// defence-in-depth measure against cross-service secret collisions during the
+/// narrow pre-certificate window.
 pub async fn service_ws(
     State(state): State<Arc<AppState>>,
     identity: Option<Extension<ServiceIdentity>>,
     client_ip: Option<Extension<ClientIp>>,
+    Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
@@ -76,8 +85,13 @@ pub async fn service_ws(
             cert_serial: id.cert_serial.clone(),
         }
     } else if let Some(secret) = connection::extract_bearer(&headers) {
+        // Extract optional service_id query param for narrowing the secret lookup.
+        let query_service_id = query
+            .get("service_id")
+            .and_then(|v| v.parse::<Uuid>().ok());
+
         // Try unified lookup: find any non-deactivated service by secret hash.
-        match lookup_by_secret(state.db(), &secret).await {
+        match lookup_by_secret(state.db(), &secret, query_service_id).await {
             Ok(service) => {
                 tracing::info!(
                     service_id = %service.id,
@@ -142,14 +156,26 @@ pub async fn service_ws(
 ///
 /// All services (agent and MQTT) use deterministic SHA-256 hashing for enrollment
 /// secrets. This allows a single indexed DB query instead of iterating rows.
+///
+/// When `service_id` is `Some`, the query is further filtered to that specific
+/// service. If the secret hash matches a different service, `InvalidSecret` is
+/// returned (same error as no match) to avoid revealing that a secret collision
+/// occurred across services.
 async fn lookup_by_secret(
     db: &sea_orm::DatabaseConnection,
     secret: &str,
+    service_id: Option<Uuid>,
 ) -> ServiceWsResult<service_entity::Model> {
     let secret_hash = crate::auth::token::hash_token(secret);
-    uptrakit_shared_db::entity::prelude::Service::find()
+    let mut query = uptrakit_shared_db::entity::prelude::Service::find()
         .filter(service_entity::Column::EnrollmentSecretHash.eq(&secret_hash))
-        .filter(service_entity::Column::DeactivatedAt.is_null())
+        .filter(service_entity::Column::DeactivatedAt.is_null());
+
+    if let Some(id) = service_id {
+        query = query.filter(service_entity::Column::Id.eq(id));
+    }
+
+    query
         .one(db)
         .await
         .context_to::<ServiceWsError>()?
@@ -216,14 +242,14 @@ mod tests {
     use uptrakit_shared_db::entity::service as service_entity;
 
     #[test]
-    fn deserialize_unknown_type_returns_none() {
+    fn deserialize_unknown_type_returns_unknown_variant() {
         let mut in_seq = IncomingSeq::new();
         let json =
             r#"{"protocol_version":1,"seq":1,"type":"future_message","data":{"foo":"bar"}}"#;
         let result = deserialize_service_msg(&mut in_seq, json);
         assert!(
-            matches!(result, Ok(None)),
-            "unknown type should return Ok(None)"
+            matches!(result, Ok(Some(uptrakit_internal_wire::ServiceMessage::Unknown))),
+            "unknown type should deserialize to Ok(Some(ServiceMessage::Unknown))"
         );
     }
 

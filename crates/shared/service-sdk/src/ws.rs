@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use uuid::Uuid;
 
 use uptrakit_internal_wire::{
     Capability, CertificatePayload, CURRENT_PROTOCOL_VERSION, ControllerEnvelope, ControllerMessage,
@@ -40,13 +41,22 @@ pub type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>;
 
 /// Connect TCP → TLS → WebSocket upgrade, with optional Authorization header.
+///
+/// When `service_id` is `Some`, it is appended as a `service_id` query
+/// parameter to the WebSocket URL. The controller uses this to narrow the
+/// enrollment-secret lookup to the specific service, preventing cross-tenant
+/// secret collisions during the narrow pre-certificate window.
 pub async fn connect_ws(
     host: &str,
     port: u16,
     tls_connector: &TlsConnector,
     auth_header: Option<&str>,
+    service_id: Option<Uuid>,
 ) -> Result<WsStream> {
-    let ws_url = format!("wss://{host}:{port}/api/v1/ws/service");
+    let ws_url = match service_id {
+        Some(id) => format!("wss://{host}:{port}/api/v1/ws/service?service_id={id}"),
+        None => format!("wss://{host}:{port}/api/v1/ws/service"),
+    };
     tracing::info!(url = %ws_url, "connecting to controller");
     tracing::debug!(host, port, "opening TCP connection");
 
@@ -371,7 +381,8 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
         enrollment_token,
         capabilities,
     } = params;
-    let mut ws = connect_ws(host, port, tls_connector, None).await?;
+    // Fresh enrollment: no service_id yet, so no query parameter.
+    let mut ws = connect_ws(host, port, tls_connector, None, None).await?;
     let mut out_seq = OutgoingSeq::new();
     let mut in_seq = IncomingSeq::new();
 
@@ -436,8 +447,11 @@ pub async fn resume_enrollment(
         .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotEnrolled)))?
         .to_string();
 
+    // Include service_id as a query parameter so the controller can narrow
+    // the bearer-secret lookup to this specific service (defence-in-depth).
+    let service_id = identity.service_id();
     let auth_header = format!("Bearer {enrollment_secret}");
-    let mut ws = connect_ws(host, port, tls_connector, Some(&auth_header)).await?;
+    let mut ws = connect_ws(host, port, tls_connector, Some(&auth_header), service_id).await?;
     let mut out_seq = OutgoingSeq::new();
     let mut in_seq = IncomingSeq::new();
 
