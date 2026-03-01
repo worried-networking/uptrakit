@@ -3,10 +3,13 @@ use std::hash::Hash;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A newtype wrapper for email addresses that masks the local part in
 /// `Debug` and `Display` output while preserving the full value for
 /// serialization and database storage.
+///
+/// The inner `String` is zeroed when the value is dropped.
 ///
 /// # Masking algorithm
 ///
@@ -20,7 +23,7 @@ use serde::{Deserialize, Serialize};
 /// - `andrey@example.com` → `an***@example.com`
 /// - `andrey.johnson@example.org` → `an***.joh***@example.org`
 /// - `john_doe@example.com` → `jo***_d***@example.com`
-#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(transparent)]
 pub struct MaskedEmail(String);
 
