@@ -1,4 +1,4 @@
-use uptrakit_internal_wire::ControllerMessage;
+use uptrakit_internal_wire::{ControllerMessage, MqttSoftwareStatesPayload};
 use uuid::Uuid;
 
 /// Abstraction over message delivery for scheduled task executors.
@@ -19,10 +19,10 @@ pub trait SchedulerNotifier: Send + Sync {
     /// Signal the controller(s) to perform CA certificate rotation.
     async fn signal_ca_rotation(&self, reason: &str);
 
-    /// Load software states for a tenant and push to all MQTT services.
-    async fn push_software_states_for_tenant(
-        &self,
-        db: &sea_orm::DatabaseConnection,
-        tenant_id: Uuid,
-    );
+    /// Deliver pre-loaded software states to all MQTT services.
+    ///
+    /// The caller is responsible for loading the payload from the database
+    /// before invoking this method, keeping the notification interface
+    /// decoupled from the ORM layer.
+    async fn push_software_states_for_tenant(&self, payload: MqttSoftwareStatesPayload);
 }

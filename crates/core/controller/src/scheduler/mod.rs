@@ -7,9 +7,8 @@
 
 use std::sync::Arc;
 
-use sea_orm::DatabaseConnection;
 use tokio::sync::Notify;
-use uptrakit_internal_wire::{ControllerMessage, RequestCaRotationPayload};
+use uptrakit_internal_wire::{ControllerMessage, MqttSoftwareStatesPayload, RequestCaRotationPayload};
 use uptrakit_scheduler_engine::{SchedulerNotifier, TaskExecutor};
 use uptrakit_shared_db::entity::scheduled_task;
 use uuid::Uuid;
@@ -115,9 +114,9 @@ impl SchedulerNotifier for ControllerSchedulerNotifier {
             .await;
     }
 
-    async fn push_software_states_for_tenant(&self, db: &DatabaseConnection, tenant_id: Uuid) {
+    async fn push_software_states_for_tenant(&self, payload: MqttSoftwareStatesPayload) {
         self.notification_service
-            .push_software_states_for_tenant(db, tenant_id)
+            .deliver_software_states(payload)
             .await;
     }
 }

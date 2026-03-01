@@ -9,9 +9,9 @@
 `uptrakit-shared-scheduler-engine` (~2,172 LoC) implements the database-backed distributed task
 scheduler used by both `uptrakit-controller` (embedded) and `uptrakit-scheduler` (standalone
 binary). The core claim/release cycle uses TOCTOU-free optimistic locking and stale-claim recovery,
-which are strong correctness properties. The primary concerns are the `SchedulerNotifier` trait
-leaking `sea_orm::DatabaseConnection` into a clean notification boundary, and a sequential
-execution model that can starve tasks under concurrent load.
+which are strong correctness properties. The `SchedulerNotifier` ORM coupling has been fixed
+(callers now load and pass a `MqttSoftwareStatesPayload`), and the sequential execution model
+now uses a `JoinSet` for parallel task execution within each poll cycle.
 
 ## Architecture
 
@@ -25,11 +25,7 @@ execution model that can starve tasks under concurrent load.
 
 ### Issues
 
-**[MEDIUM]** `src/notifier.rs` -- `SchedulerNotifier` trait accepts
-`sea_orm::DatabaseConnection` as a parameter. This leaks the ORM into what should be a pure
-notification interface, and forces every implementor to take on a `sea-orm` dependency even if
-they only want to send a channel message. Replace with a boxed async closure or a simpler
-trait that does not reference `sea_orm` types.
+No architectural issues found.
 
 ## Security and Safety
 

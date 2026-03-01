@@ -4,7 +4,7 @@
 //! (`UPTRAKIT_EVENTS`), where controllers consume them and deliver to the
 //! appropriate connected services via their WebSocket connections.
 
-use uptrakit_internal_wire::{ControllerMessage, RequestCaRotationPayload};
+use uptrakit_internal_wire::{ControllerMessage, MqttSoftwareStatesPayload, RequestCaRotationPayload};
 use uptrakit_nats::NatsConnection;
 use uptrakit_scheduler_engine::SchedulerNotifier;
 use uuid::Uuid;
@@ -53,27 +53,7 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
             .await;
     }
 
-    async fn push_software_states_for_tenant(
-        &self,
-        db: &sea_orm::DatabaseConnection,
-        tenant_id: Uuid,
-    ) {
-        let payload =
-            match uptrakit_scheduler_engine::software_states::load_software_states_for_tenant(
-                db, tenant_id,
-            )
-            .await
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        %tenant_id,
-                        "failed to load software states for NATS push"
-                    );
-                    return;
-                }
-            };
+    async fn push_software_states_for_tenant(&self, payload: MqttSoftwareStatesPayload) {
         let msg = ControllerMessage::SoftwareStates(payload);
         self.nats
             .publish(self.scheduler_id, None, Some("mqtt_bridge"), msg)

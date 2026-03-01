@@ -1,4 +1,4 @@
-use uptrakit_internal_wire::{Capability, ControllerMessage};
+use uptrakit_internal_wire::{Capability, ControllerMessage, MqttSoftwareStatesPayload};
 use uuid::Uuid;
 
 use crate::service_connections::ServiceConnectionRegistry;
@@ -122,6 +122,15 @@ impl NotificationService {
                 return;
             }
         };
+        self.deliver_software_states(payload).await;
+    }
+
+    /// Deliver a pre-loaded `MqttSoftwareStatesPayload` to all locally connected
+    /// MQTT services and publish to NATS for cross-controller delivery.
+    ///
+    /// Used by `ControllerSchedulerNotifier` to avoid re-loading an already-loaded
+    /// payload through the ORM layer.
+    pub async fn deliver_software_states(&self, payload: MqttSoftwareStatesPayload) {
         let msg = ControllerMessage::SoftwareStates(payload);
         // Deliver to locally connected MQTT services immediately.
         self.registry
