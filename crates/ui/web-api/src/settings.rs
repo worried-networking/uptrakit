@@ -1,3 +1,4 @@
+use std::fmt;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -58,6 +59,47 @@ impl Default for NetworkSettings {
     }
 }
 
+/// SMTP settings snapshot for sending email notifications.
+///
+/// Per-tenant: each tenant configures their own SMTP server. The password is
+/// stored encrypted at rest in the `settings` table and decrypted into memory
+/// here at load time. It is never returned over the API; callers receive
+/// `has_password: bool` instead.
+#[derive(Clone, Default)]
+pub struct SmtpSettingsSnapshot {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub username: Option<String>,
+    /// Decrypted SMTP password — never logged or sent over the API.
+    pub password: Option<String>,
+    pub from_address: Option<String>,
+    pub from_name: Option<String>,
+    /// TLS mode: `"starttls"` (default), `"tls"`, or `"none"`.
+    pub tls_mode: String,
+}
+
+impl SmtpSettingsSnapshot {
+    /// Returns `true` when the minimum required fields (host + from_address) are present.
+    pub fn is_configured(&self) -> bool {
+        self.host.as_ref().is_some_and(|h| !h.is_empty())
+            && self.from_address.as_ref().is_some_and(|f| !f.is_empty())
+    }
+}
+
+impl fmt::Debug for SmtpSettingsSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SmtpSettingsSnapshot")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("from_address", &self.from_address)
+            .field("from_name", &self.from_name)
+            .field("tls_mode", &self.tls_mode)
+            .finish()
+    }
+}
+
 /// Immutable snapshot of all settings. Published atomically via a watch channel
 /// so readers never see a mix of old and new values.
 #[derive(Clone, Debug)]
@@ -68,6 +110,7 @@ pub struct SettingsSnapshot {
     pub renewal_window_hours: u16,
     pub network: NetworkSettings,
     pub mqtt_max_clients_per_tenant: u16,
+    pub smtp: SmtpSettingsSnapshot,
 }
 
 #[derive(Clone)]
@@ -109,6 +152,7 @@ impl Settings {
             renewal_window_hours,
             network: NetworkSettings::default(),
             mqtt_max_clients_per_tenant: DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT,
+            smtp: SmtpSettingsSnapshot::default(),
         };
         let (tx, rx) = tokio::sync::watch::channel(snapshot);
         Self {
@@ -154,6 +198,8 @@ impl Settings {
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
+        let smtp = Self::load_smtp_settings(&raw);
+
         // Read initial version counters
         let (version, global_version) =
             crate::settings_store::get_settings_versions(db, tenant_id).await?;
@@ -165,6 +211,7 @@ impl Settings {
             renewal_window_hours,
             network,
             mqtt_max_clients_per_tenant,
+            smtp,
         };
         let (tx, rx) = tokio::sync::watch::channel(snapshot);
         let settings = Self {
@@ -275,6 +322,8 @@ impl Settings {
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
+        let smtp = Self::load_smtp_settings(&raw);
+
         // Publish complete snapshot atomically
         let _guard = self.inner.write_mutex.lock().await;
         let _ = self.inner.snapshot_tx.send(SettingsSnapshot {
@@ -284,6 +333,7 @@ impl Settings {
             renewal_window_hours,
             network,
             mqtt_max_clients_per_tenant,
+            smtp,
         });
 
         // Update cached version counters
@@ -523,5 +573,90 @@ impl Settings {
         self.inner
             .snapshot_tx
             .send_modify(|snap| snap.mqtt_max_clients_per_tenant = max);
+    }
+
+    // --- SMTP settings ---
+
+    /// Read the SMTP settings snapshot (synchronous).
+    pub fn smtp(&self) -> SmtpSettingsSnapshot {
+        self.inner.snapshot_rx.borrow().smtp.clone()
+    }
+
+    /// Replace SMTP settings (acquires write mutex for atomic publish).
+    pub async fn set_smtp(&self, smtp: SmtpSettingsSnapshot) {
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.smtp = smtp);
+    }
+
+    /// Load SMTP settings from a [`RawSettings`] map.
+    ///
+    /// The `smtp.password` key is expected to be stored encrypted; it is
+    /// transparently decrypted here. Unrecognised or unparseable values are
+    /// silently ignored so that a bad DB row never prevents the server from
+    /// starting.
+    pub fn load_smtp_settings(raw: &RawSettings) -> SmtpSettingsSnapshot {
+        let host = raw
+            .get_setting(SettingKey::SmtpHost)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let port = raw
+            .get_setting(SettingKey::SmtpPort)
+            .and_then(|v| v.as_u64()?.try_into().ok());
+
+        let username = raw
+            .get_setting(SettingKey::SmtpUsername)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let password = raw
+            .get_setting(SettingKey::SmtpPassword)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .and_then(|stored| {
+                if uptrakit_crypto::is_encrypted(stored) {
+                    uptrakit_crypto::decrypt_str(stored)
+                        .map_err(|e| {
+                            tracing::warn!("failed to decrypt SMTP password: {e}");
+                        })
+                        .ok()
+                } else {
+                    // Legacy plaintext — use as-is (migration happens on next write)
+                    Some(stored.to_string())
+                }
+            });
+
+        let from_address = raw
+            .get_setting(SettingKey::SmtpFromAddress)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let from_name = raw
+            .get_setting(SettingKey::SmtpFromName)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let tls_mode = raw
+            .get_setting(SettingKey::SmtpTlsMode)
+            .and_then(|v| v.as_str())
+            .filter(|s| matches!(*s, "starttls" | "tls" | "none"))
+            .unwrap_or("starttls")
+            .to_string();
+
+        SmtpSettingsSnapshot {
+            host,
+            port,
+            username,
+            password,
+            from_address,
+            from_name,
+            tls_mode,
+        }
     }
 }

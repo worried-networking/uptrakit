@@ -54,6 +54,9 @@ pub use crate::autodiscovery::{
     TriggerDiscoveryResponse,
 };
 
+// ── SMTP Settings ────────────────────────────────────────────────────
+pub use crate::settings_smtp::{SmtpSettingsResponse, UpdateSmtpSettingsRequest};
+
 // ── Notifications ───────────────────────────────────────────────────
 pub use crate::notifications::{
     CreateNotificationChannelRequest, CreateNotificationRuleRequest, NotificationChannelResponse,

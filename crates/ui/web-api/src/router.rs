@@ -125,6 +125,8 @@ use crate::AppState;
         crate::routes::notifications::update_rule,
         crate::routes::notifications::delete_rule,
         crate::routes::notifications::list_log,
+        crate::routes::settings_smtp::get_smtp_settings,
+        crate::routes::settings_smtp::update_smtp_settings,
     ),
     components(
         schemas(
@@ -223,6 +225,8 @@ use crate::AppState;
             crate::routes::notifications::NotificationLogResponse,
             crate::routes::notifications::NotificationDeliveryStatus,
             crate::routes::notifications::TestNotificationResponse,
+            crate::routes::settings_smtp::SmtpSettingsResponse,
+            crate::routes::settings_smtp::UpdateSmtpSettingsRequest,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationChannelResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationRuleResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationLogResponse>,
@@ -461,6 +465,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::notifications::delete_rule
         ))
         .routes(routes!(crate::routes::notifications::list_log))
+        // SMTP settings
+        .routes(routes!(
+            crate::routes::settings_smtp::get_smtp_settings,
+            crate::routes::settings_smtp::update_smtp_settings
+        ))
         // Discovery allowlist
         .routes(routes!(
             crate::routes::discovery_allowlist::list_tenant_discovery_allowlist,

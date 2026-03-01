@@ -70,6 +70,7 @@ impl FromStr for NotificationEventType {
 pub enum NotificationChannelType {
     Webhook,
     Telegram,
+    Email,
 }
 
 impl NotificationChannelType {
@@ -77,6 +78,7 @@ impl NotificationChannelType {
         match self {
             Self::Webhook => "webhook",
             Self::Telegram => "telegram",
+            Self::Email => "email",
         }
     }
 }
@@ -99,6 +101,7 @@ impl FromStr for NotificationChannelType {
         match s {
             "webhook" => Ok(Self::Webhook),
             "telegram" => Ok(Self::Telegram),
+            "email" => Ok(Self::Email),
             _ => Err(ParseNotificationChannelTypeError),
         }
     }
@@ -333,9 +336,10 @@ mod tests {
         NotificationEventType::CaRotated,
     ];
 
-    const ALL_CHANNEL_TYPES: [NotificationChannelType; 2] = [
+    const ALL_CHANNEL_TYPES: [NotificationChannelType; 3] = [
         NotificationChannelType::Webhook,
         NotificationChannelType::Telegram,
+        NotificationChannelType::Email,
     ];
 
     const ALL_DELIVERY_STATUSES: [NotificationDeliveryStatus; 3] = [
@@ -465,6 +469,7 @@ mod tests {
     fn channel_type_as_str_values() {
         assert_eq!(NotificationChannelType::Webhook.as_str(), "webhook");
         assert_eq!(NotificationChannelType::Telegram.as_str(), "telegram");
+        assert_eq!(NotificationChannelType::Email.as_str(), "email");
     }
 
     #[test]
@@ -477,11 +482,15 @@ mod tests {
             "telegram".parse::<NotificationChannelType>().ok(),
             Some(NotificationChannelType::Telegram)
         );
+        assert_eq!(
+            "email".parse::<NotificationChannelType>().ok(),
+            Some(NotificationChannelType::Email)
+        );
     }
 
     #[test]
     fn channel_type_from_str_invalid_returns_err() {
-        assert!("email".parse::<NotificationChannelType>().is_err());
+        assert!("sms".parse::<NotificationChannelType>().is_err());
         assert!("".parse::<NotificationChannelType>().is_err());
         assert!("WEBHOOK".parse::<NotificationChannelType>().is_err());
     }

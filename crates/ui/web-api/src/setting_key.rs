@@ -27,6 +27,13 @@ pub enum SettingKey {
     MqttMaxClientsPerTenant,
     JwtSigningKey,
     MasterKeyVerification,
+    SmtpHost,
+    SmtpPort,
+    SmtpUsername,
+    SmtpPassword,
+    SmtpFromAddress,
+    SmtpFromName,
+    SmtpTlsMode,
 }
 
 impl SettingKey {
@@ -52,6 +59,13 @@ impl SettingKey {
             Self::MqttMaxClientsPerTenant => "mqtt.max_clients_per_tenant",
             Self::JwtSigningKey => "auth.jwt_signing_key",
             Self::MasterKeyVerification => "crypto.master_key_verification",
+            Self::SmtpHost => "smtp.host",
+            Self::SmtpPort => "smtp.port",
+            Self::SmtpUsername => "smtp.username",
+            Self::SmtpPassword => "smtp.password",
+            Self::SmtpFromAddress => "smtp.from_address",
+            Self::SmtpFromName => "smtp.from_name",
+            Self::SmtpTlsMode => "smtp.tls_mode",
         }
     }
 
@@ -79,6 +93,13 @@ impl SettingKey {
             "mqtt.max_clients_per_tenant" => Some(Self::MqttMaxClientsPerTenant),
             "auth.jwt_signing_key" => Some(Self::JwtSigningKey),
             "crypto.master_key_verification" => Some(Self::MasterKeyVerification),
+            "smtp.host" => Some(Self::SmtpHost),
+            "smtp.port" => Some(Self::SmtpPort),
+            "smtp.username" => Some(Self::SmtpUsername),
+            "smtp.password" => Some(Self::SmtpPassword),
+            "smtp.from_address" => Some(Self::SmtpFromAddress),
+            "smtp.from_name" => Some(Self::SmtpFromName),
+            "smtp.tls_mode" => Some(Self::SmtpTlsMode),
             _ => None,
         }
     }
