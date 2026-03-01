@@ -6485,6 +6485,7 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
+ "uptrakit-notification-channels",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
@@ -6583,6 +6584,24 @@ dependencies = [
  "uptrakit-internal-wire",
  "uptrakit-shared-macros",
  "uuid",
+]
+
+[[package]]
+name = "uptrakit-notification-channels"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "hmac",
+ "reqwest 0.13.2",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-shared-macros",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -6993,6 +7012,7 @@ dependencies = [
  "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-nats",
+ "uptrakit-notification-channels",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",

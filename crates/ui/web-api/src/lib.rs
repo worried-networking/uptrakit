@@ -11,6 +11,7 @@ pub mod mqtt_lease_coordinator;
 #[cfg(feature = "nats")]
 pub mod nats_transport;
 pub mod notification_service;
+pub mod notifications;
 pub mod ocsp;
 pub mod pki_utils;
 pub mod queries;
@@ -139,9 +140,22 @@ mod tests {
             controller_id,
         );
 
+        let channel_registry = Arc::new(
+            uptrakit_notification_channels::ChannelRegistry::new()
+                .expect("channel registry for test"),
+        );
+
+        let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
+            db.clone(),
+            Arc::clone(&channel_registry),
+            "https://localhost".to_string(),
+        );
+
         Arc::new(AppState {
             ca_snapshot: ca_rx,
             ca_key_store,
+            ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
+            channel_registry,
             settings,
             cert_signer: Arc::new(NoopCertSigner),
             service_connections,
@@ -166,10 +180,10 @@ mod tests {
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
-            ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             default_tenant_id: uuid::Uuid::nil(),
             controller_id,
             notification_service,
+            notification_dispatcher,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
             db,

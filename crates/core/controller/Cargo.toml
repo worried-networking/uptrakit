@@ -16,6 +16,9 @@ db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite", "uptrakit-we
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptrakit-web-api/db-postgres"]
 db-mysql = ["sea-orm/sqlx-mysql", "uptrakit-shared-db/db-mysql", "uptrakit-web-api/db-mysql"]
 nats = ["uptrakit-web-api/nats"]
+notifications-telegram = ["uptrakit-web-api/notifications-telegram"]
+notifications-email = ["uptrakit-web-api/notifications-email"]
+notifications-all = ["uptrakit-web-api/notifications-all"]
 embed-frontend = ["dep:rust-embed"]
 
 [dependencies]
@@ -26,6 +29,7 @@ uptrakit-web-api = { path = "../../ui/web-api", default-features = false }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-shared-types = { workspace = true }
 uptrakit-command = { workspace = true }
+uptrakit-notification-channels = { path = "../../shared/notification-channels", default-features = false, features = ["webhook"] }
 uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
 async-trait = { workspace = true }

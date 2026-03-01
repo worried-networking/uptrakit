@@ -242,6 +242,18 @@ async fn run(args: cli::Args) -> Result<()> {
 
     let token_denylist = Arc::new(uptrakit_web_api::auth::token_denylist::TokenDenylist::new());
 
+    let channel_registry = Arc::new(
+        uptrakit_notification_channels::ChannelRegistry::new()
+            .context_transform(|_| AppError::Config("failed to build channel registry".to_string()))?,
+    );
+
+    let callback_base_url = format!("https://{}", reconciled.https_addr);
+    let notification_dispatcher = uptrakit_web_api::notifications::dispatcher::NotificationDispatcher::new(
+        db_conn.clone(),
+        Arc::clone(&channel_registry),
+        callback_base_url,
+    );
+
     // Build credential sources for external services that need direct infrastructure access.
     let credential_sources = {
         #[cfg_attr(not(feature = "nats"), allow(unused_mut))]
@@ -275,6 +287,8 @@ async fn run(args: cli::Args) -> Result<()> {
         .default_tenant_id(default_tenant_id)
         .controller_id(controller_id)
         .notification_service(notification_service)
+        .notification_dispatcher(notification_dispatcher)
+        .channel_registry(channel_registry)
         .token_denylist(token_denylist)
         .credential_sources(credential_sources);
 

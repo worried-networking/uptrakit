@@ -75,12 +75,16 @@ pub struct AppState {
     pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
     /// Trigger for immediate CA rotation (fired by the rotate-ca API endpoint).
     pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
+    /// Channel registry for notification channel lookups.
+    pub channel_registry: std::sync::Arc<uptrakit_notification_channels::ChannelRegistry>,
     /// UUID of the default (seeded) tenant. Used as fallback when no tenant header is present.
     pub default_tenant_id: uuid::Uuid,
     /// Unique identifier for this controller instance (used for cross-controller notification delivery).
     pub controller_id: uuid::Uuid,
     /// Cross-controller notification service for push message delivery via outbox pattern.
     pub notification_service: NotificationService,
+    /// Notification dispatcher for fire-and-forget event delivery.
+    pub notification_dispatcher: crate::notifications::dispatcher::NotificationDispatcher,
     /// In-memory denylist for immediate JWT access token revocation.
     pub token_denylist: Arc<crate::auth::token_denylist::TokenDenylist>,
     /// Plugin operations abstraction used by plugin-config route handlers.
@@ -134,9 +138,11 @@ pub struct AppStateBuilder {
     rustls_config: Option<axum_server::tls_rustls::RustlsConfig>,
     crl_pem_cache: Option<Arc<tokio::sync::RwLock<String>>>,
     ca_rotation_trigger: Option<Arc<tokio::sync::Notify>>,
+    channel_registry: Option<std::sync::Arc<uptrakit_notification_channels::ChannelRegistry>>,
     default_tenant_id: Option<uuid::Uuid>,
     controller_id: Option<uuid::Uuid>,
     notification_service: Option<NotificationService>,
+    notification_dispatcher: Option<crate::notifications::dispatcher::NotificationDispatcher>,
     token_denylist: Option<Arc<crate::auth::token_denylist::TokenDenylist>>,
     plugin_ops: Option<Arc<dyn PluginOps>>,
     credential_sources: Option<ServiceCredentialSources>,
@@ -168,9 +174,11 @@ impl AppStateBuilder {
             rustls_config: None,
             crl_pem_cache: None,
             ca_rotation_trigger: None,
+            channel_registry: None,
             default_tenant_id: None,
             controller_id: None,
             notification_service: None,
+            notification_dispatcher: None,
             token_denylist: None,
             plugin_ops: None,
             credential_sources: None,
@@ -273,6 +281,11 @@ impl AppStateBuilder {
         self
     }
 
+    pub fn channel_registry(mut self, v: std::sync::Arc<uptrakit_notification_channels::ChannelRegistry>) -> Self {
+        self.channel_registry = Some(v);
+        self
+    }
+
     pub fn default_tenant_id(mut self, v: uuid::Uuid) -> Self {
         self.default_tenant_id = Some(v);
         self
@@ -285,6 +298,11 @@ impl AppStateBuilder {
 
     pub fn notification_service(mut self, v: NotificationService) -> Self {
         self.notification_service = Some(v);
+        self
+    }
+
+    pub fn notification_dispatcher(mut self, v: crate::notifications::dispatcher::NotificationDispatcher) -> Self {
+        self.notification_dispatcher = Some(v);
         self
     }
 
@@ -365,6 +383,9 @@ impl AppStateBuilder {
             ca_rotation_trigger: self
                 .ca_rotation_trigger
                 .ok_or(AppStateBuildError("ca_rotation_trigger"))?,
+            channel_registry: self
+                .channel_registry
+                .ok_or(AppStateBuildError("channel_registry"))?,
             default_tenant_id: self
                 .default_tenant_id
                 .ok_or(AppStateBuildError("default_tenant_id"))?,
@@ -374,6 +395,9 @@ impl AppStateBuilder {
             notification_service: self
                 .notification_service
                 .ok_or(AppStateBuildError("notification_service"))?,
+            notification_dispatcher: self
+                .notification_dispatcher
+                .ok_or(AppStateBuildError("notification_dispatcher"))?,
             token_denylist: self
                 .token_denylist
                 .ok_or(AppStateBuildError("token_denylist"))?,

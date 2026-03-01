@@ -12,6 +12,9 @@ default = ["oidc"]
 oidc = ["dep:openidconnect"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
 nats = ["dep:async-nats", "dep:uptrakit-nats"]
+notifications-telegram = ["uptrakit-notification-channels/telegram"]
+notifications-email = ["uptrakit-notification-channels/email"]
+notifications-all = ["notifications-telegram", "notifications-email"]
 db-all = ["db-sqlite", "db-postgres", "db-mysql"]
 db-sqlite = ["sea-orm/sqlx-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres"]
@@ -75,6 +78,7 @@ tokio-util = { workspace = true }
 zeroize = { workspace = true }
 async-nats = { workspace = true, optional = true }
 uptrakit-nats = { path = "../../shared/nats", optional = true }
+uptrakit-notification-channels = { path = "../../shared/notification-channels", default-features = false, features = ["webhook"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
