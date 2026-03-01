@@ -72,7 +72,17 @@ impl Scheduler {
     }
 
     /// Register an executor for a task type.
+    ///
+    /// # Panics (debug builds only)
+    ///
+    /// Panics if an executor for `task_type` is already registered. This
+    /// catches accidental double-registration during development without any
+    /// runtime cost in release builds.
     pub fn register(&mut self, task_type: ScheduledTaskType, executor: Box<dyn TaskExecutor>) {
+        debug_assert!(
+            !self.executors.contains_key(&task_type),
+            "BUG: executor for {task_type:?} is already registered; double-registration detected"
+        );
         self.executors.insert(task_type, Arc::from(executor));
     }
 
@@ -591,6 +601,39 @@ mod tests {
             "claim must be released on cancellation; got locked_by = {:?}",
             after.locked_by
         );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "double-registration detected")]
+    fn register_debug_panics_on_double_registration() {
+        // Use a throw-away in-memory connection handle (no real DB needed for
+        // the register path, which only modifies the HashMap).
+        let db = {
+            // Safety: we only test the synchronous HashMap guard, the DB is
+            // never actually used before the panic.
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                sea_orm::Database::connect("sqlite::memory:").await.unwrap()
+            })
+        };
+        let config = SchedulerConfig::new(Uuid::now_v7(), Uuid::now_v7());
+        let mut scheduler = Scheduler::new(db, config);
+
+        struct NoopExecutor;
+        #[async_trait::async_trait]
+        impl TaskExecutor for NoopExecutor {
+            async fn execute(
+                &self,
+                _task: &uptrakit_shared_db::entity::scheduled_task::Model,
+            ) -> crate::error::Result<()> {
+                Ok(())
+            }
+        }
+
+        scheduler.register(ScheduledTaskType::AuthCleanup, Box::new(NoopExecutor));
+        // Second registration for the same type must panic in debug builds.
+        scheduler.register(ScheduledTaskType::AuthCleanup, Box::new(NoopExecutor));
     }
 
     #[tokio::test]
