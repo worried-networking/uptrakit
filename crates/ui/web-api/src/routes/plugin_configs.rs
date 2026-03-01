@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
 use crate::queries::autodiscovery as autodiscovery_queries;
-use crate::queries::plugin_configs::{self as pc_queries, UpdatePluginConfigError};
+use crate::queries::plugin_configs::{self as pc_queries, PluginConfigError};
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -87,14 +87,20 @@ pub async fn create_plugin_config(
 
     match pc_queries::create_plugin_config(state.plugin_ops.as_ref(), &tenant_db, req).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-        Err(pc_queries::CreatePluginConfigError::DuplicateName) => error_response(
-            StatusCode::CONFLICT,
-            "A plugin config with this name already exists",
-        ),
-        Err(pc_queries::CreatePluginConfigError::Db(e)) => {
-            tracing::error!("Failed to create plugin config: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        Err(report) => match report.current_context() {
+            PluginConfigError::DuplicateName => error_response(
+                StatusCode::CONFLICT,
+                "A plugin config with this name already exists",
+            ),
+            PluginConfigError::Db(_) => {
+                tracing::error!("Failed to create plugin config: {report}");
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+            _ => {
+                tracing::error!("Unexpected error creating plugin config: {report}");
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
     }
 }
 
@@ -182,22 +188,28 @@ pub async fn update_plugin_config(
         .await
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(UpdatePluginConfigError::NotFound) => {
-            error_response(StatusCode::NOT_FOUND, "Plugin config not found")
-        }
-        Err(UpdatePluginConfigError::EmptyName) => {
-            error_response(StatusCode::BAD_REQUEST, "name must not be empty")
-        }
-        Err(UpdatePluginConfigError::ConfigValidation(msg)) => {
-            error_response(StatusCode::BAD_REQUEST, msg)
-        }
-        Err(UpdatePluginConfigError::HookValidation(msg)) => {
-            error_response(StatusCode::BAD_REQUEST, msg)
-        }
-        Err(UpdatePluginConfigError::Db(e)) => {
-            tracing::error!("Failed to update plugin config: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        Err(report) => match report.current_context() {
+            PluginConfigError::NotFound => {
+                error_response(StatusCode::NOT_FOUND, "Plugin config not found")
+            }
+            PluginConfigError::EmptyName => {
+                error_response(StatusCode::BAD_REQUEST, "name must not be empty")
+            }
+            PluginConfigError::ConfigValidation(msg) => {
+                error_response(StatusCode::BAD_REQUEST, msg.clone())
+            }
+            PluginConfigError::HookValidation(msg) => {
+                error_response(StatusCode::BAD_REQUEST, msg.clone())
+            }
+            PluginConfigError::Db(_) => {
+                tracing::error!("Failed to update plugin config: {report}");
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+            _ => {
+                tracing::error!("Unexpected error updating plugin config: {report}");
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
     }
 }
 

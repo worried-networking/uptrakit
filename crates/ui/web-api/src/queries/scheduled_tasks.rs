@@ -1,25 +1,34 @@
+use rootcause::prelude::*;
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter,
     sea_query::Expr,
 };
 use std::str::FromStr;
+use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::scheduled_task;
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::scheduler::{ScheduledTaskResponse, UpdateScheduledTaskRequest};
 use uuid::Uuid;
 
 use crate::tenant_db::TenantDb;
 
-/// Error returned by [`update_scheduled_task`].
-#[derive(Debug)]
-pub enum UpdateScheduledTaskError {
+/// Error returned by scheduled task query helpers.
+#[derive(Debug, Error)]
+pub enum ScheduledTaskError {
     /// The requested task does not exist for this tenant.
-    TaskNotFound,
+    #[error("scheduled task not found")]
+    NotFound,
     /// The provided cron expression could not be parsed.
+    #[error("invalid cron expression")]
     InvalidCronExpression,
     /// A database error occurred.
+    #[error("database error: {0}")]
     Db(sea_orm::DbErr),
 }
+
+pub type Result<T> = std::result::Result<T, rootcause::Report<ScheduledTaskError>>;
+impl_report_conversion!(sea_orm::DbErr => ScheduledTaskError::Db);
 
 // --- Private helpers ---
 
@@ -60,13 +69,12 @@ fn compute_next_run(cron_expr: &str, after: OffsetDateTime) -> Option<OffsetDate
 
 // --- Public query functions ---
 
-pub async fn list_scheduled_tasks(
-    tenant_db: &TenantDb,
-) -> Result<Vec<ScheduledTaskResponse>, sea_orm::DbErr> {
+pub async fn list_scheduled_tasks(tenant_db: &TenantDb) -> Result<Vec<ScheduledTaskResponse>> {
     let tasks = tenant_db
         .find::<scheduled_task::Entity>()
         .all(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
     Ok(tasks.iter().map(model_to_response).collect())
 }
 
@@ -74,30 +82,28 @@ pub async fn list_scheduled_tasks(
 pub async fn get_scheduled_task(
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Result<Option<ScheduledTaskResponse>, sea_orm::DbErr> {
-    let task = tenant_db
-        .find_by_id::<scheduled_task::Entity, _>(id)
-        .one(tenant_db.db())
-        .await?;
-    Ok(task.as_ref().map(model_to_response))
-}
-
-/// Update a scheduled task. Returns `None` if not found.
-pub async fn update_scheduled_task(
-    tenant_db: &TenantDb,
-    id: Uuid,
-    req: UpdateScheduledTaskRequest,
-) -> Result<ScheduledTaskResponse, UpdateScheduledTaskError> {
+) -> Result<Option<ScheduledTaskResponse>> {
     let task = tenant_db
         .find_by_id::<scheduled_task::Entity, _>(id)
         .one(tenant_db.db())
         .await
-        .map_err(UpdateScheduledTaskError::Db)?;
+        .context_to()?;
+    Ok(task.as_ref().map(model_to_response))
+}
 
-    let task = match task {
-        Some(t) => t,
-        None => return Err(UpdateScheduledTaskError::TaskNotFound),
-    };
+/// Update a scheduled task.
+pub async fn update_scheduled_task(
+    tenant_db: &TenantDb,
+    id: Uuid,
+    req: UpdateScheduledTaskRequest,
+) -> Result<ScheduledTaskResponse> {
+    let task = tenant_db
+        .find_by_id::<scheduled_task::Entity, _>(id)
+        .one(tenant_db.db())
+        .await
+        .context_to()?;
+
+    let task = task.ok_or_else(|| report!(ScheduledTaskError::NotFound))?;
 
     let mut active: scheduled_task::ActiveModel = task.into();
     let now = OffsetDateTime::now_utc();
@@ -105,7 +111,7 @@ pub async fn update_scheduled_task(
     if let Some(ref cron_expr) = req.cron_expression {
         let normalized = normalize_cron(cron_expr);
         if cron::Schedule::from_str(&normalized).is_err() {
-            return Err(UpdateScheduledTaskError::InvalidCronExpression);
+            bail!(ScheduledTaskError::InvalidCronExpression);
         }
         active.cron_expression = ActiveValue::Set(cron_expr.clone());
         if let Some(next) = compute_next_run(cron_expr, now) {
@@ -127,25 +133,20 @@ pub async fn update_scheduled_task(
 
     active.updated_at = ActiveValue::Set(now);
 
-    let updated = active
-        .update(tenant_db.db())
-        .await
-        .map_err(UpdateScheduledTaskError::Db)?;
+    let updated = active.update(tenant_db.db()).await.context_to()?;
 
     Ok(model_to_response(&updated))
 }
 
 /// Force immediate execution by setting `next_run_at` to now.
 /// Returns `true` if the task was found and updated, `false` if not found.
-pub async fn trigger_scheduled_task(
-    tenant_db: &TenantDb,
-    id: Uuid,
-) -> Result<bool, sea_orm::DbErr> {
+pub async fn trigger_scheduled_task(tenant_db: &TenantDb, id: Uuid) -> Result<bool> {
     // Verify task exists for this tenant before issuing the bulk update.
     if tenant_db
         .find_by_id::<scheduled_task::Entity, _>(id)
         .one(tenant_db.db())
-        .await?
+        .await
+        .context_to()?
         .is_none()
     {
         return Ok(false);
@@ -157,7 +158,8 @@ pub async fn trigger_scheduled_task(
         .col_expr(scheduled_task::Column::UpdatedAt, Expr::value(now))
         .filter(scheduled_task::Column::Id.eq(id))
         .exec(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(result.rows_affected == 1)
 }

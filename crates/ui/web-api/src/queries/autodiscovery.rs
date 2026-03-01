@@ -12,6 +12,7 @@
 //! specify exactly which plugin configs and roles to create — no plugin-specific
 //! synthesis logic lives here.
 
+use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
@@ -25,6 +26,7 @@ use uptrakit_shared_db::entity::{
     software_item,
 };
 use uptrakit_shared_db::is_unique_constraint_violation;
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::SoftwareDiscoveryState;
 use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, DiscardDiscoveredResponse,
@@ -36,8 +38,11 @@ use uuid::Uuid;
 #[derive(Debug, thiserror::Error)]
 pub enum AutodiscoveryError {
     #[error("database error: {0}")]
-    Db(#[from] sea_orm::DbErr),
+    Db(sea_orm::DbErr),
 }
+
+pub type Result<T> = std::result::Result<T, rootcause::Report<AutodiscoveryError>>;
+impl_report_conversion!(sea_orm::DbErr => AutodiscoveryError::Db);
 
 // ── Ignore rules ─────────────────────────────────────────────────────────────
 
@@ -51,7 +56,7 @@ pub async fn create_or_ignore_ignore_rule(
     tenant_id: Uuid,
     plugin_config_id: Uuid,
     package_identifier: &str,
-) -> Result<bool, AutodiscoveryError> {
+) -> Result<bool> {
     let record = autodiscovery_ignore::ActiveModel {
         id: Set(Uuid::now_v7()),
         tenant_id: Set(tenant_id),
@@ -63,7 +68,7 @@ pub async fn create_or_ignore_ignore_rule(
     match AutodiscoveryIgnore::insert(record).exec(db).await {
         Ok(_) => Ok(true),
         Err(e) if is_unique_constraint_violation(&e) => Ok(false),
-        Err(e) => Err(AutodiscoveryError::Db(e)),
+        Err(e) => Err(report!(AutodiscoveryError::Db(e))),
     }
 }
 
@@ -73,7 +78,7 @@ pub async fn list_ignore_rules(
     tenant_id: Uuid,
     plugin_config_id_filter: Option<Uuid>,
     params: &PaginationParams,
-) -> Result<PaginatedResponse<AutodiscoveryIgnoreResponse>, AutodiscoveryError> {
+) -> Result<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
     use sea_orm::PaginatorTrait;
 
     let page = params.page.unwrap_or(1).max(1);
@@ -90,8 +95,8 @@ pub async fn list_ignore_rules(
         .order_by_desc(autodiscovery_ignore::Column::CreatedAt)
         .paginate(db, per_page);
 
-    let total = paginator.num_items().await?;
-    let items_raw = paginator.fetch_page(page - 1).await?;
+    let total = paginator.num_items().await.context_to()?;
+    let items_raw = paginator.fetch_page(page - 1).await.context_to()?;
 
     // Collect all plugin_config IDs we need to join.
     let pc_ids: Vec<Uuid> = items_raw
@@ -104,7 +109,8 @@ pub async fn list_ignore_rules(
     let configs = PluginConfig::find()
         .filter(plugin_config::Column::Id.is_in(pc_ids))
         .all(db)
-        .await?;
+        .await
+        .context_to()?;
 
     let config_map: std::collections::HashMap<Uuid, plugin_config::Model> =
         configs.into_iter().map(|c| (c.id, c)).collect();
@@ -143,12 +149,13 @@ pub async fn delete_ignore_rule(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     id: Uuid,
-) -> Result<bool, AutodiscoveryError> {
+) -> Result<bool> {
     let result = AutodiscoveryIgnore::delete_many()
         .filter(autodiscovery_ignore::Column::Id.eq(id))
         .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
         .exec(db)
-        .await?;
+        .await
+        .context_to()?;
     Ok(result.rows_affected > 0)
 }
 
@@ -166,7 +173,7 @@ pub async fn discard_pending_items(
     tenant_id: Uuid,
     host_id_filter: Option<Uuid>,
     plugin_config_id_filter: Option<Uuid>,
-) -> Result<DiscardDiscoveredResponse, AutodiscoveryError> {
+) -> Result<DiscardDiscoveredResponse> {
     let now = OffsetDateTime::now_utc();
 
     // Gather candidate pending software item IDs for this tenant.
@@ -183,7 +190,8 @@ pub async fn discard_pending_items(
         let linked: Vec<Uuid> = HostSoftwareItemPlugin::find()
             .filter(host_software_item_plugin::Column::PluginConfigId.eq(pc_id))
             .all(db)
-            .await?
+            .await
+            .context_to()?
             .into_iter()
             .map(|l| l.software_item_id)
             .collect();
@@ -205,7 +213,8 @@ pub async fn discard_pending_items(
         let linked_item_ids: Vec<Uuid> = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
             .all(db)
-            .await?
+            .await
+            .context_to()?
             .into_iter()
             .map(|l| l.software_item_id)
             .collect();
@@ -219,7 +228,8 @@ pub async fn discard_pending_items(
         id_query
             .into_model::<IdRow>()
             .all(db)
-            .await?
+            .await
+            .context_to()?
             .into_iter()
             .map(|r| r.id)
             .collect()
@@ -227,7 +237,8 @@ pub async fn discard_pending_items(
         id_query
             .into_model::<IdRow>()
             .all(db)
-            .await?
+            .await
+            .context_to()?
             .into_iter()
             .map(|r| r.id)
             .collect()
@@ -246,7 +257,8 @@ pub async fn discard_pending_items(
     HostSoftwareItem::delete_many()
         .filter(host_software_item::Column::SoftwareItemId.is_in(ids.clone()))
         .exec(db)
-        .await?;
+        .await
+        .context_to()?;
 
     // Soft-delete in bulk.
     SoftwareItem::update_many()
@@ -256,7 +268,8 @@ pub async fn discard_pending_items(
         )
         .filter(software_item::Column::Id.is_in(ids))
         .exec(db)
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(DiscardDiscoveredResponse {
         discarded_count: count,
@@ -289,7 +302,7 @@ pub async fn find_or_create_default_plugin_config(
     plugin_type: &str,
     config_json: &serde_json::Value,
     display_name: &str,
-) -> Result<Uuid, AutodiscoveryError> {
+) -> Result<Uuid> {
     // Search by the natural identity key: (tenant_id, plugin_type, name).
     // Matching on name — rather than JSON content — means that when a plugin
     // update rewrites a default command template, the existing row is updated
@@ -300,7 +313,8 @@ pub async fn find_or_create_default_plugin_config(
         .filter(plugin_config::Column::Name.eq(display_name))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(db)
-        .await?;
+        .await
+        .context_to()?;
 
     if let Some(cfg) = existing {
         let id = cfg.id;
@@ -314,7 +328,7 @@ pub async fn find_or_create_default_plugin_config(
         let mut active: plugin_config::ActiveModel = cfg.into();
         active.config = Set(config_json.clone());
         active.updated_at = Set(now);
-        active.update(db).await?;
+        active.update(db).await.context_to()?;
         tracing::debug!(
             %id,
             plugin_type = %plugin_type,
@@ -350,11 +364,12 @@ pub async fn find_or_create_default_plugin_config(
                 .filter(plugin_config::Column::Name.eq(display_name))
                 .filter(plugin_config::Column::DeactivatedAt.is_null())
                 .one(db)
-                .await?
+                .await
+                .context_to()?
                 .map(|c| c.id)
-                .ok_or(AutodiscoveryError::Db(e))
+                .ok_or_else(|| report!(AutodiscoveryError::Db(e)))
         }
-        Err(e) => Err(AutodiscoveryError::Db(e)),
+        Err(e) => Err(report!(AutodiscoveryError::Db(e))),
     }
 }
 
@@ -375,7 +390,7 @@ pub async fn process_discovery_results(
     tenant_id: Uuid,
     host_id: Uuid,
     payload: DiscoveryResultsPayload,
-) -> Result<(), AutodiscoveryError> {
+) -> Result<()> {
     let now = OffsetDateTime::now_utc();
 
     for result in payload.results {
@@ -415,7 +430,7 @@ async fn process_plugin_result(
     host_id: Uuid,
     now: OffsetDateTime,
     result: &DiscoveryPluginResult,
-) -> Result<(), AutodiscoveryError> {
+) -> Result<()> {
     for item in &result.discoveries {
         let item_info = DiscoveredItemInfo {
             package_identifier: &item.package_identifier,
@@ -472,7 +487,7 @@ async fn process_targets_discovery(
     item: &DiscoveredItemInfo<'_>,
     targets: &[DiscoveryTarget],
     now: OffsetDateTime,
-) -> Result<(), AutodiscoveryError> {
+) -> Result<()> {
     for target in targets {
         let target_plugin_type_str = target.plugin_type.to_string();
 
@@ -540,7 +555,7 @@ async fn process_targets_discovery(
             if let Err(e) = HostSoftwareItemPlugin::insert(plugin_link).exec(db).await
                 && !is_unique_constraint_violation(&e)
             {
-                return Err(e.into());
+                return Err(report!(AutodiscoveryError::Db(e)));
             }
         }
     }
@@ -556,12 +571,13 @@ async fn load_ignore_set(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     plugin_config_id: Uuid,
-) -> Result<HashSet<String>, AutodiscoveryError> {
+) -> Result<HashSet<String>> {
     let rules = AutodiscoveryIgnore::find()
         .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
         .filter(autodiscovery_ignore::Column::PluginConfigId.eq(plugin_config_id))
         .all(db)
-        .await?;
+        .await
+        .context_to()?;
     Ok(rules.into_iter().map(|r| r.package_identifier).collect())
 }
 
@@ -589,7 +605,7 @@ async fn find_or_create_software_item(
     plugin_config_id: Uuid,
     item: &DiscoveredItemInfo<'_>,
     now: OffsetDateTime,
-) -> Result<Option<Uuid>, AutodiscoveryError> {
+) -> Result<Option<Uuid>> {
     let package_identifier = item.package_identifier;
     let name = item.name;
     let installed_version = item.installed_version;
@@ -599,26 +615,29 @@ async fn find_or_create_software_item(
         .filter(host_software_item_plugin::Column::PluginConfigId.eq(plugin_config_id))
         .filter(host_software_item_plugin::Column::PackageIdentifier.eq(package_identifier))
         .one(db)
-        .await?;
+        .await
+        .context_to()?;
 
     if let Some(plugin_link) = existing_plugin_link {
         let linked_item_active = SoftwareItem::find()
             .filter(software_item::Column::Id.eq(plugin_link.software_item_id))
             .filter(software_item::Column::DeactivatedAt.is_null())
             .one(db)
-            .await?
+            .await
+            .context_to()?
             .is_some();
 
         if linked_item_active {
             // Just refresh the installed version on the parent host_software_item row.
             let hsi = HostSoftwareItem::find_by_id((host_id, plugin_link.software_item_id))
                 .one(db)
-                .await?;
+                .await
+                .context_to()?;
             if let Some(hsi) = hsi {
                 let mut active: host_software_item::ActiveModel = hsi.into();
                 active.installed_version = Set(Some(installed_version.to_string()));
                 active.installed_version_detected_at = Set(Some(now));
-                active.update(db).await?;
+                active.update(db).await.context_to()?;
             }
             return Ok(None);
         }
@@ -631,10 +650,11 @@ async fn find_or_create_software_item(
         );
         if let Some(hsi) = HostSoftwareItem::find_by_id((host_id, plugin_link.software_item_id))
             .one(db)
-            .await?
+            .await
+            .context_to()?
         {
             let hsi_active: host_software_item::ActiveModel = hsi.into();
-            hsi_active.delete(db).await?;
+            hsi_active.delete(db).await.context_to()?;
         }
         // Fall through to phases 2/3.
     }
@@ -645,7 +665,8 @@ async fn find_or_create_software_item(
         .filter(host_software_item_plugin::Column::PluginConfigId.eq(plugin_config_id))
         .filter(host_software_item_plugin::Column::PackageIdentifier.eq(package_identifier))
         .all(db)
-        .await?
+        .await
+        .context_to()?
         .into_iter()
         .map(|l| l.software_item_id)
         .collect();
@@ -658,7 +679,8 @@ async fn find_or_create_software_item(
             .filter(software_item::Column::TenantId.eq(tenant_id))
             .filter(software_item::Column::DeactivatedAt.is_null())
             .one(db)
-            .await?
+            .await
+            .context_to()?
     };
 
     let software_item_id = if let Some(item) = existing_item {
@@ -698,15 +720,16 @@ async fn find_or_create_software_item(
                     .filter(software_item::Column::Name.eq(name))
                     .filter(software_item::Column::DeactivatedAt.is_null())
                     .one(db)
-                    .await?
+                    .await
+                    .context_to()?
                     .ok_or_else(|| {
-                        AutodiscoveryError::Db(sea_orm::DbErr::RecordNotFound(format!(
-                            "software_item with name '{name}' not found after collision"
+                        report!(AutodiscoveryError::Db(sea_orm::DbErr::RecordNotFound(
+                            format!("software_item with name '{name}' not found after collision")
                         )))
                     })?
                     .id
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(report!(AutodiscoveryError::Db(e))),
         }
     };
 
@@ -725,7 +748,7 @@ async fn find_or_create_software_item(
     if let Err(e) = HostSoftwareItem::insert(link).exec(db).await
         && !is_unique_constraint_violation(&e)
     {
-        return Err(e.into());
+        return Err(report!(AutodiscoveryError::Db(e)));
     }
 
     Ok(Some(software_item_id))
@@ -743,7 +766,7 @@ async fn process_one_discovery(
     args: DiscoveredItemInfo<'_>,
     ignore_set: &HashSet<String>,
     now: OffsetDateTime,
-) -> Result<(), AutodiscoveryError> {
+) -> Result<()> {
     // Check ignore list (O(1) lookup into pre-loaded set).
     if ignore_set.contains(args.package_identifier) {
         tracing::debug!(
@@ -780,7 +803,7 @@ async fn process_one_discovery(
         if let Err(e) = HostSoftwareItemPlugin::insert(plugin_link).exec(db).await
             && !is_unique_constraint_violation(&e)
         {
-            return Err(e.into());
+            return Err(report!(AutodiscoveryError::Db(e)));
         }
     }
 

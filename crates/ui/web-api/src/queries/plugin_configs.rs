@@ -1,11 +1,14 @@
+use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
 };
+use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uptrakit_shared_db::entity::plugin_config;
 use uptrakit_shared_db::is_unique_constraint_violation;
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, UpdatePluginConfigRequest,
@@ -15,20 +18,31 @@ use uuid::Uuid;
 use crate::auth::token::generate_uuid;
 use crate::tenant_db::TenantDb;
 
-/// Error returned by [`update_plugin_config`].
-#[derive(Debug)]
-pub enum UpdatePluginConfigError {
+/// Error returned by plugin config query helpers.
+#[derive(Debug, Error)]
+pub enum PluginConfigError {
     /// No active plugin config with this ID exists for the tenant.
+    #[error("plugin config not found")]
     NotFound,
     /// `name` was explicitly set to an empty string.
+    #[error("name must not be empty")]
     EmptyName,
+    /// An active plugin config with the same name already exists for the tenant.
+    #[error("a plugin config with this name already exists")]
+    DuplicateName,
     /// Plugin-specific config validation failed.
+    #[error("config validation error: {0}")]
     ConfigValidation(String),
     /// Hook parameter validation failed (command-injection prevention).
+    #[error("hook validation error: {0}")]
     HookValidation(String),
     /// A database error occurred.
+    #[error("database error: {0}")]
     Db(sea_orm::DbErr),
 }
+
+pub type Result<T> = std::result::Result<T, rootcause::Report<PluginConfigError>>;
+impl_report_conversion!(sea_orm::DbErr => PluginConfigError::Db);
 
 // --- Private helpers ---
 
@@ -77,7 +91,7 @@ fn plugin_config_to_response(
 /// modules (e.g. `software_items`) can reuse the check.
 pub(crate) fn validate_hooks_internal(
     config: &serde_json::Value,
-) -> Result<(), uptrakit_web_api_types::update_hooks::HookValidationError> {
+) -> std::result::Result<(), uptrakit_web_api_types::update_hooks::HookValidationError> {
     if let Some(hooks_val) = config.get("hooks")
         && let Ok(hooks_config) = serde_json::from_value::<
             uptrakit_web_api_types::update_hooks::HooksConfig,
@@ -95,12 +109,13 @@ pub(crate) fn validate_hooks_internal(
 pub(crate) async fn find_raw_active_config(
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Result<Option<plugin_config::Model>, sea_orm::DbErr> {
+) -> Result<Option<plugin_config::Model>> {
     tenant_db
         .find_by_id::<plugin_config::Entity, _>(id)
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
+        .context_to()
 }
 
 /// Same as [`find_raw_active_config`] but accepts an arbitrary `ConnectionTrait`
@@ -109,25 +124,17 @@ pub(crate) async fn find_raw_active_config_txn(
     db: &impl ConnectionTrait,
     tenant_id: Uuid,
     id: Uuid,
-) -> Result<Option<plugin_config::Model>, sea_orm::DbErr> {
+) -> Result<Option<plugin_config::Model>> {
     use sea_orm::EntityTrait;
     plugin_config::Entity::find_by_id(id)
         .filter(plugin_config::Column::TenantId.eq(tenant_id))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(db)
         .await
+        .context_to()
 }
 
 // --- Public query functions ---
-
-/// Errors returned by [`create_plugin_config`].
-#[derive(Debug)]
-pub enum CreatePluginConfigError {
-    /// An active plugin config with the same name already exists for the tenant.
-    DuplicateName,
-    /// A database error occurred.
-    Db(sea_orm::DbErr),
-}
 
 /// Create a new plugin configuration and return the masked response.
 /// Validation (name, plugin-specific config, hooks) is the caller's responsibility.
@@ -135,7 +142,7 @@ pub async fn create_plugin_config(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     req: CreatePluginConfigRequest,
-) -> Result<PluginConfigResponse, CreatePluginConfigError> {
+) -> Result<PluginConfigResponse> {
     let now = OffsetDateTime::now_utc();
     let model = plugin_config::ActiveModel {
         id: Set(generate_uuid()),
@@ -151,9 +158,9 @@ pub async fn create_plugin_config(
 
     let inserted = model.insert(tenant_db.db()).await.map_err(|e| {
         if is_unique_constraint_violation(&e) {
-            CreatePluginConfigError::DuplicateName
+            report!(PluginConfigError::DuplicateName)
         } else {
-            CreatePluginConfigError::Db(e)
+            report!(PluginConfigError::Db(e))
         }
     })?;
     Ok(plugin_config_to_response(ops, inserted)
@@ -165,7 +172,7 @@ pub async fn list_plugin_configs(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     params: &PaginationParams,
-) -> Result<PaginatedResponse<PluginConfigResponse>, sea_orm::DbErr> {
+) -> Result<PaginatedResponse<PluginConfigResponse>> {
     let pagination = params.resolve();
 
     let base_query = tenant_db
@@ -173,13 +180,14 @@ pub async fn list_plugin_configs(
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .order_by_asc(plugin_config::Column::Name);
 
-    let total = base_query.clone().count(tenant_db.db()).await?;
+    let total = base_query.clone().count(tenant_db.db()).await.context_to()?;
 
     let configs = base_query
         .offset(Some(pagination.offset()))
         .limit(Some(pagination.per_page))
         .all(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     let items: Vec<PluginConfigResponse> = configs
         .into_iter()
@@ -194,7 +202,7 @@ pub async fn get_plugin_config(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Result<Option<PluginConfigResponse>, sea_orm::DbErr> {
+) -> Result<Option<PluginConfigResponse>> {
     let config = match find_raw_active_config(tenant_db, id).await? {
         Some(c) => c,
         None => return Ok(None),
@@ -209,12 +217,10 @@ pub async fn update_plugin_config(
     tenant_db: &TenantDb,
     id: Uuid,
     req: UpdatePluginConfigRequest,
-) -> Result<PluginConfigResponse, UpdatePluginConfigError> {
-    let existing = match find_raw_active_config(tenant_db, id).await {
-        Ok(Some(c)) => c,
-        Ok(None) => return Err(UpdatePluginConfigError::NotFound),
-        Err(e) => return Err(UpdatePluginConfigError::Db(e)),
-    };
+) -> Result<PluginConfigResponse> {
+    let existing = find_raw_active_config(tenant_db, id)
+        .await?
+        .ok_or_else(|| report!(PluginConfigError::NotFound))?;
 
     let plugin_type = existing.plugin_type.clone();
 
@@ -222,7 +228,7 @@ pub async fn update_plugin_config(
     if let Some(ref name) = req.name
         && name.is_empty()
     {
-        return Err(UpdatePluginConfigError::EmptyName);
+        bail!(PluginConfigError::EmptyName);
     }
 
     // Validate new config if provided; restore masked secrets from the existing value.
@@ -230,11 +236,11 @@ pub async fn update_plugin_config(
         ops.restore_config_secrets_str(&plugin_type, new_config, &existing.config);
 
         if let Err(e) = ops.validate_config_str(&plugin_type, new_config) {
-            return Err(UpdatePluginConfigError::ConfigValidation(e.to_string()));
+            bail!(PluginConfigError::ConfigValidation(e.to_string()));
         }
 
         if let Err(e) = validate_hooks_internal(new_config) {
-            return Err(UpdatePluginConfigError::HookValidation(e.to_string()));
+            bail!(PluginConfigError::HookValidation(e.to_string()));
         }
     }
 
@@ -254,21 +260,17 @@ pub async fn update_plugin_config(
     }
     model.updated_at = Set(now);
 
-    let updated = model
-        .update(tenant_db.db())
-        .await
-        .map_err(UpdatePluginConfigError::Db)?;
+    let updated = model.update(tenant_db.db()).await.context_to()?;
 
-    plugin_config_to_response(ops, updated).ok_or_else(|| {
-        UpdatePluginConfigError::ConfigValidation(
+    plugin_config_to_response(ops, updated)
+        .ok_or_else(|| report!(PluginConfigError::ConfigValidation(
             "updated record has unrecognised plugin_type".to_string(),
-        )
-    })
+        )))
 }
 
 /// Soft-delete a plugin configuration.
 /// Returns `true` if deleted, `false` if not found.
-pub async fn delete_plugin_config(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm::DbErr> {
+pub async fn delete_plugin_config(tenant_db: &TenantDb, id: Uuid) -> Result<bool> {
     let config = match find_raw_active_config(tenant_db, id).await? {
         Some(c) => c,
         None => return Ok(false),
@@ -279,6 +281,6 @@ pub async fn delete_plugin_config(tenant_db: &TenantDb, id: Uuid) -> Result<bool
     model.deactivated_at = Set(Some(now));
     model.enabled = Set(false);
     model.updated_at = Set(now);
-    model.update(tenant_db.db()).await?;
+    model.update(tenant_db.db()).await.context_to()?;
     Ok(true)
 }

@@ -1,8 +1,10 @@
+use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, QuerySelect,
 };
 use time::OffsetDateTime;
+use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
 use uptrakit_shared_db::entity::{notification_channel, notification_log, notification_rule};
@@ -20,25 +22,25 @@ pub async fn create_channel(
     tenant_db: &TenantDb,
     req: &uptrakit_web_api_types::notifications::CreateNotificationChannelRequest,
     channel_registry: &uptrakit_notification_channels::ChannelRegistry,
-) -> Result<NotificationChannelResponse, ChannelQueryError> {
+) -> ChannelResult<NotificationChannelResponse> {
     // Validate config with channel implementation
     let channel_type_str = req.channel_type.as_str();
     let channel_impl = channel_registry
         .get(channel_type_str)
-        .ok_or_else(|| ChannelQueryError::UnsupportedType(channel_type_str.to_string()))?;
+        .ok_or_else(|| report!(ChannelQueryError::UnsupportedType(channel_type_str.to_string())))?;
 
     channel_impl
         .validate_config(&req.config)
-        .map_err(|e| ChannelQueryError::InvalidConfig(e.to_string()))?;
+        .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
 
     let config_str = serde_json::to_string(&req.config)
-        .map_err(|e| ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string())))?;
+        .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
 
     let now = OffsetDateTime::now_utc();
     let id = Uuid::now_v7();
 
     let encrypted_config = uptrakit_crypto::EncryptedString::new(config_str)
-        .map_err(|e| ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string())))?;
+        .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
 
     let model = notification_channel::ActiveModel {
         id: Set(id),
@@ -51,10 +53,7 @@ pub async fn create_channel(
         updated_at: Set(now),
     };
 
-    let result = model
-        .insert(tenant_db.db())
-        .await
-        .map_err(ChannelQueryError::Db)?;
+    let result = model.insert(tenant_db.db()).await.context_to()?;
 
     // Return with masked config
     let masked_config = channel_impl.mask_config_secrets(&req.config);
@@ -65,12 +64,13 @@ pub async fn list_channels(
     tenant_db: &TenantDb,
     params: &PaginationParams,
     channel_registry: &uptrakit_notification_channels::ChannelRegistry,
-) -> Result<PaginatedResponse<NotificationChannelResponse>, sea_orm::DbErr> {
+) -> ChannelResult<PaginatedResponse<NotificationChannelResponse>> {
     let resolved = params.resolve();
     let total = tenant_db
         .find::<notification_channel::Entity>()
         .count(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     let channels = tenant_db
         .find::<notification_channel::Entity>()
@@ -78,7 +78,8 @@ pub async fn list_channels(
         .offset(Some(resolved.offset()))
         .limit(Some(resolved.per_page))
         .all(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     let items = channels
         .into_iter()
@@ -95,11 +96,12 @@ pub async fn get_channel(
     tenant_db: &TenantDb,
     id: Uuid,
     channel_registry: &uptrakit_notification_channels::ChannelRegistry,
-) -> Result<Option<NotificationChannelResponse>, sea_orm::DbErr> {
+) -> ChannelResult<Option<NotificationChannelResponse>> {
     let channel = tenant_db
         .find_by_id::<notification_channel::Entity, _>(id)
         .one(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(channel.map(|ch| {
         let masked = mask_channel_config(&ch, channel_registry);
@@ -112,12 +114,12 @@ pub async fn update_channel(
     id: Uuid,
     req: &uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest,
     channel_registry: &uptrakit_notification_channels::ChannelRegistry,
-) -> Result<Option<NotificationChannelResponse>, ChannelQueryError> {
+) -> ChannelResult<Option<NotificationChannelResponse>> {
     let existing = tenant_db
         .find_by_id::<notification_channel::Entity, _>(id)
         .one(tenant_db.db())
         .await
-        .map_err(ChannelQueryError::Db)?;
+        .context_to()?;
 
     let Some(existing) = existing else {
         return Ok(None);
@@ -134,32 +136,30 @@ pub async fn update_channel(
         if let Some(channel_impl) = channel_registry.get(&existing.channel_type) {
             channel_impl
                 .validate_config(config)
-                .map_err(|e| ChannelQueryError::InvalidConfig(e.to_string()))?;
+                .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
         }
         let config_str = serde_json::to_string(config)
-            .map_err(|e| ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string())))?;
+            .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
         let encrypted_config = uptrakit_crypto::EncryptedString::new(config_str)
-            .map_err(|e| ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string())))?;
+            .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
         active.config = Set(encrypted_config);
     }
     if let Some(enabled) = req.enabled {
         active.enabled = Set(enabled);
     }
 
-    let result = active
-        .update(tenant_db.db())
-        .await
-        .map_err(ChannelQueryError::Db)?;
+    let result = active.update(tenant_db.db()).await.context_to()?;
     let masked = mask_channel_config(&result, channel_registry);
     Ok(Some(channel_to_response(result, masked)))
 }
 
-pub async fn delete_channel(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm::DbErr> {
+pub async fn delete_channel(tenant_db: &TenantDb, id: Uuid) -> ChannelResult<bool> {
     let result = tenant_db
         .delete_many::<notification_channel::Entity>()
         .filter(notification_channel::Column::Id.eq(id))
         .exec(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(result.rows_affected > 0)
 }
@@ -169,16 +169,16 @@ pub async fn delete_channel(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_
 pub async fn create_rule(
     tenant_db: &TenantDb,
     req: &uptrakit_web_api_types::notifications::CreateNotificationRuleRequest,
-) -> Result<NotificationRuleResponse, RuleQueryError> {
+) -> RuleResult<NotificationRuleResponse> {
     // Verify channel belongs to tenant
     let channel = tenant_db
         .find_by_id::<notification_channel::Entity, _>(req.channel_id)
         .one(tenant_db.db())
         .await
-        .map_err(RuleQueryError::Db)?;
+        .context_to()?;
 
     if channel.is_none() {
-        return Err(RuleQueryError::ChannelNotFound);
+        bail!(RuleQueryError::ChannelNotFound);
     }
 
     let id = Uuid::now_v7();
@@ -196,10 +196,7 @@ pub async fn create_rule(
         created_at: Set(now),
     };
 
-    let result = model
-        .insert(tenant_db.db())
-        .await
-        .map_err(RuleQueryError::Db)?;
+    let result = model.insert(tenant_db.db()).await.context_to()?;
     Ok(rule_to_response(result))
 }
 
@@ -208,7 +205,7 @@ pub async fn list_rules(
     params: &PaginationParams,
     channel_id_filter: Option<Uuid>,
     event_type_filter: Option<&str>,
-) -> Result<PaginatedResponse<NotificationRuleResponse>, sea_orm::DbErr> {
+) -> RuleResult<PaginatedResponse<NotificationRuleResponse>> {
     let resolved = params.resolve();
     let mut query = tenant_db.find::<notification_rule::Entity>();
 
@@ -220,14 +217,15 @@ pub async fn list_rules(
     }
 
     let count_query = query.clone();
-    let total = count_query.count(tenant_db.db()).await?;
+    let total = count_query.count(tenant_db.db()).await.context_to()?;
 
     let rules = query
         .order_by_desc(notification_rule::Column::CreatedAt)
         .offset(Some(resolved.offset()))
         .limit(Some(resolved.per_page))
         .all(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     let items = rules.into_iter().map(rule_to_response).collect();
     Ok(PaginatedResponse::new(items, total, resolved))
@@ -236,11 +234,12 @@ pub async fn list_rules(
 pub async fn get_rule(
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Result<Option<NotificationRuleResponse>, sea_orm::DbErr> {
+) -> RuleResult<Option<NotificationRuleResponse>> {
     let rule = tenant_db
         .find_by_id::<notification_rule::Entity, _>(id)
         .one(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(rule.map(rule_to_response))
 }
@@ -249,11 +248,12 @@ pub async fn update_rule(
     tenant_db: &TenantDb,
     id: Uuid,
     req: &uptrakit_web_api_types::notifications::UpdateNotificationRuleRequest,
-) -> Result<Option<NotificationRuleResponse>, sea_orm::DbErr> {
+) -> RuleResult<Option<NotificationRuleResponse>> {
     let existing = tenant_db
         .find_by_id::<notification_rule::Entity, _>(id)
         .one(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     let Some(existing) = existing else {
         return Ok(None);
@@ -278,16 +278,17 @@ pub async fn update_rule(
         active.plugin_type = Set(req.plugin_type.clone());
     }
 
-    let result = active.update(tenant_db.db()).await?;
+    let result = active.update(tenant_db.db()).await.context_to()?;
     Ok(Some(rule_to_response(result)))
 }
 
-pub async fn delete_rule(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm::DbErr> {
+pub async fn delete_rule(tenant_db: &TenantDb, id: Uuid) -> RuleResult<bool> {
     let result = tenant_db
         .delete_many::<notification_rule::Entity>()
         .filter(notification_rule::Column::Id.eq(id))
         .exec(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(result.rows_affected > 0)
 }
@@ -297,13 +298,14 @@ pub async fn delete_rule(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm
 pub async fn list_log(
     tenant_db: &TenantDb,
     params: &PaginationParams,
-) -> Result<PaginatedResponse<NotificationLogResponse>, sea_orm::DbErr> {
+) -> ChannelResult<PaginatedResponse<NotificationLogResponse>> {
     let resolved = params.resolve();
 
     let total = tenant_db
         .find::<notification_log::Entity>()
         .count(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     let logs = tenant_db
         .find::<notification_log::Entity>()
@@ -311,7 +313,8 @@ pub async fn list_log(
         .offset(Some(resolved.offset()))
         .limit(Some(resolved.per_page))
         .all(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     let items = logs.into_iter().map(log_to_response).collect();
     Ok(PaginatedResponse::new(items, total, resolved))
@@ -320,27 +323,39 @@ pub async fn list_log(
 pub async fn find_log_by_action_token(
     db: &sea_orm::DatabaseConnection,
     action_token: Uuid,
-) -> Result<Option<notification_log::Model>, sea_orm::DbErr> {
+) -> ChannelResult<Option<notification_log::Model>> {
     notification_log::Entity::find()
         .filter(notification_log::Column::ActionToken.eq(action_token))
         .one(db)
         .await
+        .context_to()
 }
 
 // -- Error types --------------------------------------------------------------
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ChannelQueryError {
+    #[error("database error: {0}")]
     Db(sea_orm::DbErr),
+    #[error("unsupported channel type: {0}")]
     UnsupportedType(String),
+    #[error("invalid channel config: {0}")]
     InvalidConfig(String),
 }
 
-#[derive(Debug)]
+pub type ChannelResult<T> = std::result::Result<T, rootcause::Report<ChannelQueryError>>;
+impl_report_conversion!(sea_orm::DbErr => ChannelQueryError::Db);
+
+#[derive(Debug, thiserror::Error)]
 pub enum RuleQueryError {
+    #[error("database error: {0}")]
     Db(sea_orm::DbErr),
+    #[error("channel not found")]
     ChannelNotFound,
 }
+
+pub type RuleResult<T> = std::result::Result<T, rootcause::Report<RuleQueryError>>;
+impl_report_conversion!(sea_orm::DbErr => RuleQueryError::Db);
 
 // -- Helpers ------------------------------------------------------------------
 

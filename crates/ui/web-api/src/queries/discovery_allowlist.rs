@@ -12,12 +12,14 @@
 
 use std::collections::HashSet;
 
+use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
 };
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{PluginCapability, PluginOps};
 use uptrakit_shared_db::entity::{host_discovery_allowlist, tenant_discovery_allowlist};
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::PluginType;
 use uptrakit_web_api_types::discovery_allowlist::{
     HostDiscoveryAllowlistEntry, TenantDiscoveryAllowlistEntry,
@@ -34,8 +36,11 @@ pub enum AllowlistError {
     #[error("plugin type does not support discovery")]
     InvalidPluginType,
     #[error("database error: {0}")]
-    Db(#[from] sea_orm::DbErr),
+    Db(sea_orm::DbErr),
 }
+
+pub type Result<T> = std::result::Result<T, rootcause::Report<AllowlistError>>;
+impl_report_conversion!(sea_orm::DbErr => AllowlistError::Db);
 
 // ── Internal validation ───────────────────────────────────────────────────────
 
@@ -55,11 +60,12 @@ fn is_valid_discovery_plugin(ops: &dyn PluginOps, plugin_type: &PluginType) -> b
 pub async fn list_tenant_allowlist(
     db: &DatabaseConnection,
     tenant_id: Uuid,
-) -> Result<Vec<TenantDiscoveryAllowlistEntry>, sea_orm::DbErr> {
+) -> Result<Vec<TenantDiscoveryAllowlistEntry>> {
     let rows = tenant_discovery_allowlist::Entity::find()
         .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_id))
         .all(db)
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(rows
         .into_iter()
@@ -80,9 +86,9 @@ pub async fn add_tenant_allowlist_entry(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     plugin_type: PluginType,
-) -> Result<TenantDiscoveryAllowlistEntry, AllowlistError> {
+) -> Result<TenantDiscoveryAllowlistEntry> {
     if !is_valid_discovery_plugin(ops, &plugin_type) {
-        return Err(AllowlistError::InvalidPluginType);
+        bail!(AllowlistError::InvalidPluginType);
     }
 
     let type_str = plugin_type.to_string();
@@ -92,7 +98,8 @@ pub async fn add_tenant_allowlist_entry(
         .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_id))
         .filter(tenant_discovery_allowlist::Column::PluginType.eq(&type_str))
         .one(db)
-        .await?
+        .await
+        .context_to()?
     {
         return Ok(TenantDiscoveryAllowlistEntry {
             id: existing.id,
@@ -110,7 +117,7 @@ pub async fn add_tenant_allowlist_entry(
         plugin_type: Set(type_str.clone()),
         created_at: Set(now),
     };
-    model.insert(db).await?;
+    model.insert(db).await.context_to()?;
 
     Ok(TenantDiscoveryAllowlistEntry {
         id,
@@ -126,12 +133,13 @@ pub async fn remove_tenant_allowlist_entry(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     id: Uuid,
-) -> Result<bool, sea_orm::DbErr> {
+) -> Result<bool> {
     let result = tenant_discovery_allowlist::Entity::delete_many()
         .filter(tenant_discovery_allowlist::Column::Id.eq(id))
         .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_id))
         .exec(db)
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(result.rows_affected > 0)
 }
@@ -139,18 +147,23 @@ pub async fn remove_tenant_allowlist_entry(
 /// Load the tenant-wide allowlist as a `HashSet<String>` for efficient lookup.
 ///
 /// Returns an empty set when no entries exist (unconfigured → all allowed).
+/// On database failure, logs a warning and falls back to an empty set so that
+/// discovery proceeds unfiltered rather than silently failing.
 pub(crate) async fn load_tenant_allowlist_set(
     db: &DatabaseConnection,
     tenant_id: Uuid,
 ) -> HashSet<String> {
-    tenant_discovery_allowlist::Entity::find()
+    match tenant_discovery_allowlist::Entity::find()
         .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_id))
         .all(db)
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| r.plugin_type)
-        .collect()
+    {
+        Ok(rows) => rows.into_iter().map(|r| r.plugin_type).collect(),
+        Err(e) => {
+            tracing::warn!(error = %e, %tenant_id, "failed to load tenant discovery allowlist; falling back to empty set (all plugins allowed)");
+            HashSet::new()
+        }
+    }
 }
 
 // ── Host-specific allowlist ───────────────────────────────────────────────────
@@ -163,12 +176,13 @@ pub async fn list_host_allowlist(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,
-) -> Result<Vec<HostDiscoveryAllowlistEntry>, sea_orm::DbErr> {
+) -> Result<Vec<HostDiscoveryAllowlistEntry>> {
     let rows = host_discovery_allowlist::Entity::find()
         .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_id))
         .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
         .all(db)
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(rows
         .into_iter()
@@ -191,9 +205,9 @@ pub async fn add_host_allowlist_entry(
     tenant_id: Uuid,
     host_id: Uuid,
     plugin_type: PluginType,
-) -> Result<HostDiscoveryAllowlistEntry, AllowlistError> {
+) -> Result<HostDiscoveryAllowlistEntry> {
     if !is_valid_discovery_plugin(ops, &plugin_type) {
-        return Err(AllowlistError::InvalidPluginType);
+        bail!(AllowlistError::InvalidPluginType);
     }
 
     let type_str = plugin_type.to_string();
@@ -204,7 +218,8 @@ pub async fn add_host_allowlist_entry(
         .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
         .filter(host_discovery_allowlist::Column::PluginType.eq(&type_str))
         .one(db)
-        .await?
+        .await
+        .context_to()?
     {
         return Ok(HostDiscoveryAllowlistEntry {
             id: existing.id,
@@ -224,7 +239,7 @@ pub async fn add_host_allowlist_entry(
         plugin_type: Set(type_str.clone()),
         created_at: Set(now),
     };
-    model.insert(db).await?;
+    model.insert(db).await.context_to()?;
 
     Ok(HostDiscoveryAllowlistEntry {
         id,
@@ -243,13 +258,14 @@ pub async fn remove_host_allowlist_entry(
     tenant_id: Uuid,
     host_id: Uuid,
     entry_id: Uuid,
-) -> Result<bool, sea_orm::DbErr> {
+) -> Result<bool> {
     let result = host_discovery_allowlist::Entity::delete_many()
         .filter(host_discovery_allowlist::Column::Id.eq(entry_id))
         .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_id))
         .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
         .exec(db)
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(result.rows_affected > 0)
 }
@@ -257,18 +273,23 @@ pub async fn remove_host_allowlist_entry(
 /// Load the host-specific allowlist as a `HashSet<String>` for efficient lookup.
 ///
 /// Returns an empty set when no entries exist.
+/// On database failure, logs a warning and falls back to an empty set so that
+/// discovery proceeds unfiltered rather than silently failing.
 pub(crate) async fn load_host_allowlist_set(
     db: &DatabaseConnection,
     host_id: Uuid,
 ) -> HashSet<String> {
-    host_discovery_allowlist::Entity::find()
+    match host_discovery_allowlist::Entity::find()
         .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
         .all(db)
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| r.plugin_type)
-        .collect()
+    {
+        Ok(rows) => rows.into_iter().map(|r| r.plugin_type).collect(),
+        Err(e) => {
+            tracing::warn!(error = %e, %host_id, "failed to load host discovery allowlist; falling back to empty set (tenant allowlist applies)");
+            HashSet::new()
+        }
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

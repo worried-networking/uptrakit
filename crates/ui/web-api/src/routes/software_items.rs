@@ -41,8 +41,8 @@ pub use uptrakit_web_api_types::software_items::{
 
 // --- Error mapping helper ---
 
-fn query_error_to_response(e: SoftwareItemQueryError) -> Response {
-    match e {
+fn query_error_to_response(report: rootcause::Report<SoftwareItemQueryError>) -> Response {
+    match report.current_context() {
         SoftwareItemQueryError::NotFound => {
             error_response(StatusCode::NOT_FOUND, "Software item not found")
         }
@@ -69,10 +69,10 @@ fn query_error_to_response(e: SoftwareItemQueryError) -> Response {
         | SoftwareItemQueryError::InvalidConfigOverride(msg)
         | SoftwareItemQueryError::InvalidInlinePluginConfig(msg)
         | SoftwareItemQueryError::InvalidExecutionSite(msg) => {
-            error_response(StatusCode::BAD_REQUEST, msg)
+            error_response(StatusCode::BAD_REQUEST, msg.clone())
         }
-        SoftwareItemQueryError::Db(e) => {
-            tracing::error!("Database error in software items: {e}");
+        SoftwareItemQueryError::Db(_) => {
+            tracing::error!("Database error in software items: {report}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -720,46 +720,51 @@ pub async fn trigger_update(
             };
             (StatusCode::OK, Json(resp)).into_response()
         }
-        Err(crate::queries::update_triggers::TriggerUpdateError::SoftwareItemNotFound) => {
-            error_response(StatusCode::NOT_FOUND, "Software item not found")
-        }
-        Err(crate::queries::update_triggers::TriggerUpdateError::HostNotFound) => {
-            error_response(StatusCode::NOT_FOUND, "Host not found")
-        }
-        Err(crate::queries::update_triggers::TriggerUpdateError::HostNotAssigned) => {
-            error_response(
-                StatusCode::BAD_REQUEST,
-                "Host is not assigned to this software item",
-            )
-        }
-        Err(crate::queries::update_triggers::TriggerUpdateError::NoAgent) => {
-            error_response(StatusCode::NOT_FOUND, "No agent linked to this host")
-        }
-        Err(crate::queries::update_triggers::TriggerUpdateError::AgentNotApproved) => {
-            error_response(StatusCode::BAD_REQUEST, "Agent is not approved")
-        }
-        Err(crate::queries::update_triggers::TriggerUpdateError::UpdateAlreadyActive) => {
-            error_response(
-                StatusCode::CONFLICT,
-                "An update is already pending or in progress",
-            )
-        }
-        Err(crate::queries::update_triggers::TriggerUpdateError::NoExecuteUpdatePlugin) => {
-            error_response(
-                StatusCode::BAD_REQUEST,
-                "No execute_update plugin assigned for this host",
-            )
-        }
-        Err(crate::queries::update_triggers::TriggerUpdateError::PluginConfigNotFound) => {
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Plugin config not found")
-        }
-        Err(crate::queries::update_triggers::TriggerUpdateError::UnknownPluginType(pt)) => {
-            tracing::error!("Unknown plugin type: {pt}");
-            error_response(StatusCode::BAD_REQUEST, "Unknown plugin type")
-        }
-        Err(crate::queries::update_triggers::TriggerUpdateError::Database(e)) => {
-            tracing::error!("Database error in trigger_update: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        Err(report) => {
+            use crate::queries::update_triggers::TriggerUpdateError;
+            match report.current_context() {
+                TriggerUpdateError::SoftwareItemNotFound => {
+                    error_response(StatusCode::NOT_FOUND, "Software item not found")
+                }
+                TriggerUpdateError::HostNotFound => {
+                    error_response(StatusCode::NOT_FOUND, "Host not found")
+                }
+                TriggerUpdateError::HostNotAssigned => {
+                    error_response(
+                        StatusCode::BAD_REQUEST,
+                        "Host is not assigned to this software item",
+                    )
+                }
+                TriggerUpdateError::NoAgent => {
+                    error_response(StatusCode::NOT_FOUND, "No agent linked to this host")
+                }
+                TriggerUpdateError::AgentNotApproved => {
+                    error_response(StatusCode::BAD_REQUEST, "Agent is not approved")
+                }
+                TriggerUpdateError::UpdateAlreadyActive => {
+                    error_response(
+                        StatusCode::CONFLICT,
+                        "An update is already pending or in progress",
+                    )
+                }
+                TriggerUpdateError::NoExecuteUpdatePlugin => {
+                    error_response(
+                        StatusCode::BAD_REQUEST,
+                        "No execute_update plugin assigned for this host",
+                    )
+                }
+                TriggerUpdateError::PluginConfigNotFound => {
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Plugin config not found")
+                }
+                TriggerUpdateError::UnknownPluginType(pt) => {
+                    tracing::error!("Unknown plugin type: {pt}");
+                    error_response(StatusCode::BAD_REQUEST, "Unknown plugin type")
+                }
+                TriggerUpdateError::Database(_) => {
+                    tracing::error!("Database error in trigger_update: {report}");
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                }
+            }
         }
     }
 }

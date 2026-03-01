@@ -1,5 +1,6 @@
 //! Shared update-trigger logic used by the REST handler and the MQTT WS handler.
 
+use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{ControllerMessage, PluginAssignment, ReleaseInfo};
@@ -7,6 +8,7 @@ use uptrakit_shared_db::entity::{
     host, host_software_item_plugin, plugin_config, prelude::*, service, service_host,
     update_history,
 };
+use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
 use crate::auth::token::generate_uuid;
@@ -46,8 +48,11 @@ pub enum TriggerUpdateError {
     UnknownPluginType(String),
     /// A database error occurred.
     #[error("database error: {0}")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
 }
+
+pub type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
+impl_report_conversion!(sea_orm::DbErr => TriggerUpdateError::Database);
 
 /// Result returned by a successful [`trigger_update_for_host`] call.
 pub struct TriggerUpdateResult {
@@ -80,13 +85,14 @@ async fn load_role_plugin(
     host_id: Uuid,
     software_item_id: Uuid,
     role: &str,
-) -> Result<Option<(host_software_item_plugin::Model, plugin_config::Model)>, TriggerUpdateError> {
+) -> Result<Option<(host_software_item_plugin::Model, plugin_config::Model)>> {
     let assignment = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
         .filter(host_software_item_plugin::Column::Role.eq(role))
         .one(db)
-        .await?;
+        .await
+        .context_to()?;
 
     let Some(assignment) = assignment else {
         return Ok(None);
@@ -95,8 +101,9 @@ async fn load_role_plugin(
     let config = PluginConfig::find_by_id(assignment.plugin_config_id)
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .one(db)
-        .await?
-        .ok_or(TriggerUpdateError::PluginConfigNotFound)?;
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(TriggerUpdateError::PluginConfigNotFound))?;
 
     Ok(Some((assignment, config)))
 }
@@ -105,7 +112,7 @@ async fn load_role_plugin(
 fn build_plugin_assignment(
     assignment: &host_software_item_plugin::Model,
     config: &plugin_config::Model,
-) -> Result<PluginAssignment, TriggerUpdateError> {
+) -> Result<PluginAssignment> {
     let plugin_type: uptrakit_internal_wire::PluginType =
         serde_json::from_value(serde_json::Value::String(config.plugin_type.clone()))
             .map_err(|_| TriggerUpdateError::UnknownPluginType(config.plugin_type.clone()))?;
@@ -134,7 +141,7 @@ pub async fn trigger_update_for_host(
     db: &DatabaseConnection,
     notifier: &NotificationService,
     params: TriggerUpdateParams<'_>,
-) -> Result<TriggerUpdateResult, TriggerUpdateError> {
+) -> Result<TriggerUpdateResult> {
     let TriggerUpdateParams {
         tenant_id,
         item_id,
@@ -147,38 +154,42 @@ pub async fn trigger_update_for_host(
     // 1. Verify software item exists and is active.
     let item = find_active_item(db, tenant_id, item_id)
         .await
-        .ok_or(TriggerUpdateError::SoftwareItemNotFound)?;
+        .ok_or_else(|| report!(TriggerUpdateError::SoftwareItemNotFound))?;
 
     // 2. Verify host exists, is active, and belongs to the tenant.
     let host_record = Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(db)
-        .await?
-        .ok_or(TriggerUpdateError::HostNotFound)?;
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(TriggerUpdateError::HostNotFound))?;
 
     // 3. Verify host is assigned to the software item.
     let _link = HostSoftwareItem::find_by_id((host_id, item_id))
         .one(db)
-        .await?
-        .ok_or(TriggerUpdateError::HostNotAssigned)?;
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(TriggerUpdateError::HostNotAssigned))?;
 
     // 4. Find the agent linked to this host.
     let agent_link = ServiceHost::find()
         .filter(service_host::Column::HostId.eq(host_id))
         .one(db)
-        .await?
-        .ok_or(TriggerUpdateError::NoAgent)?;
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(TriggerUpdateError::NoAgent))?;
 
     // 5. Verify agent exists and is approved.
     let agent = Service::find_by_id(agent_link.service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(db)
-        .await?
-        .ok_or(TriggerUpdateError::NoAgent)?;
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(TriggerUpdateError::NoAgent))?;
 
     if agent.status != service::ServiceStatus::Approved {
-        return Err(TriggerUpdateError::AgentNotApproved);
+        bail!(TriggerUpdateError::AgentNotApproved);
     }
 
     // 6. Check for pending/in_progress updates for this (host_id, software_item_id).
@@ -190,16 +201,17 @@ pub async fn trigger_update_for_host(
             update_history::UpdateStatus::InProgress,
         ]))
         .one(db)
-        .await?;
+        .await
+        .context_to()?;
 
     if existing_update.is_some() {
-        return Err(TriggerUpdateError::UpdateAlreadyActive);
+        bail!(TriggerUpdateError::UpdateAlreadyActive);
     }
 
     // 7. Load role-specific plugin assignments.
     let execute_update_data = load_role_plugin(db, host_id, item_id, "execute_update")
         .await?
-        .ok_or(TriggerUpdateError::NoExecuteUpdatePlugin)?;
+        .ok_or_else(|| report!(TriggerUpdateError::NoExecuteUpdatePlugin))?;
 
     let detect_version_data = load_role_plugin(db, host_id, item_id, "detect_version").await?;
 
@@ -236,7 +248,7 @@ pub async fn trigger_update_for_host(
         created_at: Set(now),
     };
 
-    update_record.insert(db).await?;
+    update_record.insert(db).await.context_to()?;
 
     // 10. Build ExecuteUpdatePayload and dispatch to the agent.
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {

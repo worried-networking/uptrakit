@@ -1,3 +1,4 @@
+use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, FromQueryResult, ModelTrait, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, TransactionTrait,
@@ -8,6 +9,7 @@ use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, software_item,
 };
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::PluginRole;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::software_items::{
@@ -21,32 +23,46 @@ use crate::auth::token::generate_uuid;
 use crate::queries::plugin_configs::{find_raw_active_config_txn, validate_hooks_internal};
 use crate::tenant_db::TenantDb;
 
-/// Errors returned by software item mutation queries.
-#[derive(Debug)]
+/// Errors returned by software item queries.
+#[derive(Debug, thiserror::Error)]
 pub enum SoftwareItemQueryError {
     /// Software item not found or deactivated.
+    #[error("software item not found")]
     NotFound,
     /// Name must not be empty (for update).
+    #[error("name must not be empty")]
     EmptyName,
     /// A software item with the same name already exists.
+    #[error("a software item with this name already exists")]
     DuplicateItem,
     /// A host in the request was not found or is deactivated.
+    #[error("host not found: {0}")]
     HostNotFound(Uuid),
     /// The referenced plugin config does not exist or is inactive.
+    #[error("plugin config not found")]
     PluginConfigNotFound,
     /// A `(host_id, software_item_id, role, ordinal)` combo already exists.
+    #[error("duplicate host assignment")]
     DuplicateHostAssignment,
     /// Package identifier failed validation (e.g. Homebrew naming rules).
+    #[error("invalid package identifier: {0}")]
     InvalidPackageIdentifier(String),
     /// `config_override` failed plugin-level or hook validation.
+    #[error("invalid config override: {0}")]
     InvalidConfigOverride(String),
     /// Inline plugin config failed name/config/hook validation.
+    #[error("invalid inline plugin config: {0}")]
     InvalidInlinePluginConfig(String),
     /// Invalid `execution_site` value.
+    #[error("invalid execution site: {0}")]
     InvalidExecutionSite(String),
     /// A database error occurred.
+    #[error("database error: {0}")]
     Db(sea_orm::DbErr),
 }
+
+pub type Result<T> = std::result::Result<T, rootcause::Report<SoftwareItemQueryError>>;
+impl_report_conversion!(sea_orm::DbErr => SoftwareItemQueryError::Db);
 
 #[derive(Debug, FromQueryResult)]
 struct ItemHostCount {
@@ -119,11 +135,12 @@ fn host_update_available(installed_version: Option<&str>, latest_version: Option
 async fn count_linked_hosts(
     db: &sea_orm::DatabaseConnection,
     item_id: Uuid,
-) -> Result<u64, sea_orm::DbErr> {
+) -> Result<u64> {
     HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
         .count(db)
         .await
+        .context_to()
 }
 
 /// Load the latest version for a single software item across all hosts.
@@ -379,25 +396,22 @@ fn validate_config_override(
 
 /// Validate that `execution_site` is one of the allowed values and that
 /// "controller" is only used with the "fetch_releases" role.
-fn validate_execution_site(
-    execution_site: &str,
-    role: &PluginRole,
-) -> Result<(), SoftwareItemQueryError> {
+fn validate_execution_site(execution_site: &str, role: &PluginRole) -> Result<()> {
     match execution_site {
         "auto" | "agent" => Ok(()),
         "controller" => {
             if *role == PluginRole::FetchReleases {
                 Ok(())
             } else {
-                Err(SoftwareItemQueryError::InvalidExecutionSite(format!(
+                Err(report!(SoftwareItemQueryError::InvalidExecutionSite(format!(
                     "execution_site \"controller\" is only valid for the \"fetch_releases\" role, got \"{}\"",
                     role,
-                )))
+                ))))
             }
         }
-        other => Err(SoftwareItemQueryError::InvalidExecutionSite(format!(
+        other => Err(report!(SoftwareItemQueryError::InvalidExecutionSite(format!(
             "invalid execution_site value \"{other}\"; must be \"auto\", \"agent\", or \"controller\""
-        ))),
+        )))),
     }
 }
 
@@ -407,33 +421,33 @@ async fn resolve_plugin_config_txn(
     txn: &sea_orm::DatabaseTransaction,
     tenant_id: Uuid,
     assignment: &HostPluginRoleAssignment,
-) -> Result<(Uuid, plugin_config::Model), SoftwareItemQueryError> {
+) -> Result<(Uuid, plugin_config::Model)> {
     match (&assignment.plugin_config_id, &assignment.plugin_config) {
         (Some(pcid), None) => {
             let pcid = *pcid;
             let c = find_raw_active_config_txn(txn, tenant_id, pcid)
                 .await
-                .map_err(SoftwareItemQueryError::Db)?
-                .ok_or(SoftwareItemQueryError::PluginConfigNotFound)?;
+                .map_err(|e| {
+                    report!(SoftwareItemQueryError::Db(sea_orm::DbErr::Custom(
+                        e.to_string()
+                    )))
+                })?
+                .ok_or_else(|| report!(SoftwareItemQueryError::PluginConfigNotFound))?;
             Ok((pcid, c))
         }
         (None, Some(inline)) => {
             if inline.name.is_empty() {
-                return Err(SoftwareItemQueryError::InvalidInlinePluginConfig(
+                bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(
                     "name must not be empty".to_string(),
                 ));
             }
             if let Err(e) =
                 PluginRegistry::validate_config_str(inline.plugin_type.as_str(), &inline.config)
             {
-                return Err(SoftwareItemQueryError::InvalidInlinePluginConfig(
-                    e.to_string(),
-                ));
+                bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(e.to_string()));
             }
             if let Err(e) = validate_hooks_internal(&inline.config) {
-                return Err(SoftwareItemQueryError::InvalidInlinePluginConfig(
-                    e.to_string(),
-                ));
+                bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(e.to_string()));
             }
             let now = OffsetDateTime::now_utc();
             let pcid = generate_uuid();
@@ -448,13 +462,10 @@ async fn resolve_plugin_config_txn(
                 updated_at: Set(now),
                 deactivated_at: Set(None),
             };
-            let inserted = model
-                .insert(txn)
-                .await
-                .map_err(SoftwareItemQueryError::Db)?;
+            let inserted = model.insert(txn).await.context_to()?;
             Ok((pcid, inserted))
         }
-        _ => Err(SoftwareItemQueryError::PluginConfigNotFound),
+        _ => Err(report!(SoftwareItemQueryError::PluginConfigNotFound)),
     }
 }
 
@@ -463,22 +474,22 @@ fn validate_assignment(
     config: &plugin_config::Model,
     package_identifier: &str,
     config_override: Option<&serde_json::Value>,
-) -> Result<(), SoftwareItemQueryError> {
+) -> Result<()> {
     if let Ok(pt) = config
         .plugin_type
         .parse::<uptrakit_plugin_infrastructure_registry::PluginType>()
         && let Err(e) = PluginRegistry::validate_package_identifier(pt, package_identifier)
     {
-        return Err(SoftwareItemQueryError::InvalidPackageIdentifier(e));
+        bail!(SoftwareItemQueryError::InvalidPackageIdentifier(e));
     }
 
     if let Some(override_val) = config_override {
         if let Err(e) = validate_config_override(&config.plugin_type, &config.config, override_val)
         {
-            return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
+            bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
         }
         if let Err(e) = validate_hooks_internal(override_val) {
-            return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
+            bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
         }
     }
 
@@ -491,12 +502,8 @@ fn validate_assignment(
 pub async fn create_software_item(
     tenant_db: &TenantDb,
     req: CreateSoftwareItemRequest,
-) -> Result<SoftwareItemResponse, SoftwareItemQueryError> {
-    let txn = tenant_db
-        .db()
-        .begin()
-        .await
-        .map_err(SoftwareItemQueryError::Db)?;
+) -> Result<SoftwareItemResponse> {
+    let txn = tenant_db.db().begin().await.context_to()?;
 
     // Check uniqueness: name must be unique among active items for this tenant.
     let duplicate = SoftwareItem::find()
@@ -505,10 +512,10 @@ pub async fn create_software_item(
         .filter(software_item::Column::DeactivatedAt.is_null())
         .one(&txn)
         .await
-        .map_err(SoftwareItemQueryError::Db)?;
+        .context_to()?;
 
     if duplicate.is_some() {
-        return Err(SoftwareItemQueryError::DuplicateItem);
+        bail!(SoftwareItemQueryError::DuplicateItem);
     }
 
     let now = OffsetDateTime::now_utc();
@@ -524,12 +531,9 @@ pub async fn create_software_item(
         deactivated_at: Set(None),
     };
 
-    let inserted = model
-        .insert(&txn)
-        .await
-        .map_err(SoftwareItemQueryError::Db)?;
+    let inserted = model.insert(&txn).await.context_to()?;
 
-    txn.commit().await.map_err(SoftwareItemQueryError::Db)?;
+    txn.commit().await.context_to()?;
 
     Ok(build_list_response(&inserted, vec![], 0, None, false))
 }
@@ -537,7 +541,7 @@ pub async fn create_software_item(
 pub async fn list_software_items(
     tenant_db: &TenantDb,
     params: &ListSoftwareItemsParams,
-) -> Result<PaginatedResponse<SoftwareItemResponse>, sea_orm::DbErr> {
+) -> Result<PaginatedResponse<SoftwareItemResponse>> {
     use sea_orm::sea_query::Expr;
 
     let pagination = params.pagination().resolve();
@@ -551,13 +555,14 @@ pub async fn list_software_items(
         base_query = base_query.filter(software_item::Column::DiscoveryState.eq(state.clone()));
     }
 
-    let total = base_query.clone().count(tenant_db.db()).await?;
+    let total = base_query.clone().count(tenant_db.db()).await.context_to()?;
 
     let items = base_query
         .offset(Some(pagination.offset()))
         .limit(Some(pagination.per_page))
         .all(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     if items.is_empty() {
         return Ok(PaginatedResponse::new(vec![], total, pagination));
@@ -580,7 +585,8 @@ pub async fn list_software_items(
         .group_by(host_software_item::Column::SoftwareItemId)
         .into_model::<ItemHostCount>()
         .all(tenant_db.db())
-        .await?
+        .await
+        .context_to()?
         .into_iter()
         .map(|row| (row.software_item_id, row.count as u64))
         .collect();
@@ -597,7 +603,8 @@ pub async fn list_software_items(
         .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(item_ids.clone()))
         .into_model::<ItemPluginType>()
         .all(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     // Group plugin types by software item id, deduplicated.
     let mut plugins_map: HashMap<Uuid, Vec<String>> = HashMap::new();
@@ -628,7 +635,8 @@ pub async fn list_software_items(
         .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
         .into_model::<InstalledVersionRow>()
         .all(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     type VersionPair = (Option<String>, Option<String>);
     let mut installed_map: HashMap<Uuid, Vec<VersionPair>> = HashMap::new();
@@ -664,7 +672,7 @@ pub async fn list_software_items(
 pub async fn get_software_item(
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Result<Option<SoftwareItemDetailResponse>, sea_orm::DbErr> {
+) -> Result<Option<SoftwareItemDetailResponse>> {
     let Some(item) = find_active_item(tenant_db.db(), tenant_db.tenant_id, id).await else {
         return Ok(None);
     };
@@ -693,15 +701,15 @@ pub async fn update_software_item(
     tenant_db: &TenantDb,
     id: Uuid,
     req: UpdateSoftwareItemRequest,
-) -> Result<SoftwareItemResponse, SoftwareItemQueryError> {
+) -> Result<SoftwareItemResponse> {
     let existing = find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
         .await
-        .ok_or(SoftwareItemQueryError::NotFound)?;
+        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
     if let Some(ref name) = req.name
         && name.is_empty()
     {
-        return Err(SoftwareItemQueryError::EmptyName);
+        bail!(SoftwareItemQueryError::EmptyName);
     }
 
     // Check for name collision when renaming.
@@ -715,10 +723,10 @@ pub async fn update_software_item(
             .filter(software_item::Column::Id.ne(id))
             .one(tenant_db.db())
             .await
-            .map_err(SoftwareItemQueryError::Db)?;
+            .context_to()?;
 
         if duplicate.is_some() {
-            return Err(SoftwareItemQueryError::DuplicateItem);
+            bail!(SoftwareItemQueryError::DuplicateItem);
         }
     }
 
@@ -733,14 +741,9 @@ pub async fn update_software_item(
     }
     model.updated_at = Set(now);
 
-    let updated = model
-        .update(tenant_db.db())
-        .await
-        .map_err(SoftwareItemQueryError::Db)?;
+    let updated = model.update(tenant_db.db()).await.context_to()?;
     let plugins = load_plugins(tenant_db.db(), id).await;
-    let host_count = count_linked_hosts(tenant_db.db(), id)
-        .await
-        .map_err(SoftwareItemQueryError::Db)?;
+    let host_count = count_linked_hosts(tenant_db.db(), id).await?;
     let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
 
     // For update_available we do a quick per-host check.
@@ -768,7 +771,7 @@ pub async fn update_software_item(
 }
 
 /// Soft-delete a software item. Returns `true` if deleted, `false` if not found.
-pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm::DbErr> {
+pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool> {
     let Some(item) = find_active_item(tenant_db.db(), tenant_db.tenant_id, id).await else {
         return Ok(false);
     };
@@ -778,7 +781,7 @@ pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool
     model.deactivated_at = Set(Some(now));
     model.enabled = Set(false);
     model.updated_at = Set(now);
-    model.update(tenant_db.db()).await?;
+    model.update(tenant_db.db()).await.context_to()?;
     Ok(true)
 }
 
@@ -789,16 +792,12 @@ pub async fn assign_hosts(
     tenant_db: &TenantDb,
     id: Uuid,
     req: AssignHostsRequest,
-) -> Result<SoftwareItemDetailResponse, SoftwareItemQueryError> {
+) -> Result<SoftwareItemDetailResponse> {
     find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
         .await
-        .ok_or(SoftwareItemQueryError::NotFound)?;
+        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
-    let txn = tenant_db
-        .db()
-        .begin()
-        .await
-        .map_err(SoftwareItemQueryError::Db)?;
+    let txn = tenant_db.db().begin().await.context_to()?;
 
     let now = OffsetDateTime::now_utc();
 
@@ -809,17 +808,17 @@ pub async fn assign_hosts(
             .filter(host::Column::DeactivatedAt.is_null())
             .one(&txn)
             .await
-            .map_err(SoftwareItemQueryError::Db)?;
+            .context_to()?;
 
         if host_exists.is_none() {
-            return Err(SoftwareItemQueryError::HostNotFound(host_id));
+            bail!(SoftwareItemQueryError::HostNotFound(host_id));
         }
 
         // Upsert the host_software_item link row (no plugin fields, just the link).
         let existing_link = HostSoftwareItem::find_by_id((host_id, id))
             .one(&txn)
             .await
-            .map_err(SoftwareItemQueryError::Db)?;
+            .context_to()?;
 
         if existing_link.is_none() {
             let link = host_software_item::ActiveModel {
@@ -833,9 +832,7 @@ pub async fn assign_hosts(
                 last_updated_at: Set(None),
                 linked_at: Set(now),
             };
-            link.insert(&txn)
-                .await
-                .map_err(SoftwareItemQueryError::Db)?;
+            link.insert(&txn).await.context_to()?;
         }
 
         // Process each role assignment for this host.
@@ -863,7 +860,7 @@ pub async fn assign_hosts(
                 .filter(host_software_item_plugin::Column::Ordinal.eq(0))
                 .one(&txn)
                 .await
-                .map_err(SoftwareItemQueryError::Db)?;
+                .context_to()?;
 
             match existing_plugin {
                 Some(existing) => {
@@ -874,10 +871,7 @@ pub async fn assign_hosts(
                     active.config_override = Set(role_assignment.config_override.clone());
                     active.execution_site = Set(execution_site.clone());
                     active.updated_at = Set(now);
-                    active
-                        .update(&txn)
-                        .await
-                        .map_err(SoftwareItemQueryError::Db)?;
+                    active.update(&txn).await.context_to()?;
                 }
                 None => {
                     let plugin_row = host_software_item_plugin::ActiveModel {
@@ -900,9 +894,9 @@ pub async fn assign_hosts(
                             || e.to_string().contains("UNIQUE")
                             || e.to_string().contains("duplicate")
                         {
-                            SoftwareItemQueryError::DuplicateHostAssignment
+                            report!(SoftwareItemQueryError::DuplicateHostAssignment)
                         } else {
-                            SoftwareItemQueryError::Db(e)
+                            report!(SoftwareItemQueryError::Db(e))
                         }
                     })?;
                 }
@@ -910,11 +904,11 @@ pub async fn assign_hosts(
         }
     }
 
-    txn.commit().await.map_err(SoftwareItemQueryError::Db)?;
+    txn.commit().await.context_to()?;
 
     let item = find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
         .await
-        .ok_or(SoftwareItemQueryError::NotFound)?;
+        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
     let hosts = load_item_hosts(tenant_db.db(), id).await;
     let host_count = hosts.len() as u64;
@@ -937,17 +931,17 @@ pub async fn update_host_assignment(
     id: Uuid,
     host_id: Uuid,
     req: UpdateHostAssignmentRequest,
-) -> Result<SoftwareItemDetailResponse, SoftwareItemQueryError> {
+) -> Result<SoftwareItemDetailResponse> {
     find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
         .await
-        .ok_or(SoftwareItemQueryError::NotFound)?;
+        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
     // Verify the host_software_item link exists.
     HostSoftwareItem::find_by_id((host_id, id))
         .one(tenant_db.db())
         .await
-        .map_err(SoftwareItemQueryError::Db)?
-        .ok_or(SoftwareItemQueryError::NotFound)?;
+        .context_to()?
+        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
     // Load the existing plugin assignment for this role.
     let existing_plugin = HostSoftwareItemPlugin::find()
@@ -957,7 +951,7 @@ pub async fn update_host_assignment(
         .filter(host_software_item_plugin::Column::Ordinal.eq(0))
         .one(tenant_db.db())
         .await
-        .map_err(SoftwareItemQueryError::Db)?;
+        .context_to()?;
 
     // Build a synthetic role assignment to reuse resolve_plugin_config_txn.
     let (existing_pcid, existing_pkg, existing_override, existing_exec_site) =
@@ -992,11 +986,7 @@ pub async fn update_host_assignment(
     // Validate execution_site.
     validate_execution_site(&synthetic.execution_site, &req.role)?;
 
-    let txn = tenant_db
-        .db()
-        .begin()
-        .await
-        .map_err(SoftwareItemQueryError::Db)?;
+    let txn = tenant_db.db().begin().await.context_to()?;
 
     let (plugin_config_id, config) =
         resolve_plugin_config_txn(&txn, tenant_db.tenant_id, &synthetic).await?;
@@ -1027,10 +1017,7 @@ pub async fn update_host_assignment(
             active.execution_site = Set(synthetic.execution_site);
             active.updated_at = Set(now);
 
-            active
-                .update(&txn)
-                .await
-                .map_err(SoftwareItemQueryError::Db)?;
+            active.update(&txn).await.context_to()?;
         }
         None => {
             // No existing plugin for this role -- create a new one.
@@ -1047,18 +1034,15 @@ pub async fn update_host_assignment(
                 created_at: Set(now),
                 updated_at: Set(now),
             };
-            plugin_row
-                .insert(&txn)
-                .await
-                .map_err(SoftwareItemQueryError::Db)?;
+            plugin_row.insert(&txn).await.context_to()?;
         }
     }
 
-    txn.commit().await.map_err(SoftwareItemQueryError::Db)?;
+    txn.commit().await.context_to()?;
 
     let item = find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
         .await
-        .ok_or(SoftwareItemQueryError::NotFound)?;
+        .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
     let hosts = load_item_hosts(tenant_db.db(), id).await;
     let host_count = hosts.len() as u64;
@@ -1082,7 +1066,7 @@ pub async fn unassign_host(
     tenant_db: &TenantDb,
     id: Uuid,
     host_id: Uuid,
-) -> Result<bool, sea_orm::DbErr> {
+) -> Result<bool> {
     if find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
         .await
         .is_none()
@@ -1092,11 +1076,12 @@ pub async fn unassign_host(
 
     let link = HostSoftwareItem::find_by_id((host_id, id))
         .one(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     match link {
         Some(l) => {
-            l.delete(tenant_db.db()).await?;
+            l.delete(tenant_db.db()).await.context_to()?;
             Ok(true)
         }
         None => Ok(false),

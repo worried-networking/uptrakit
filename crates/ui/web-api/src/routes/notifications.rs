@@ -67,16 +67,18 @@ pub async fn create_channel(
 
     match notif_queries::create_channel(&tenant_db, &body, &state.channel_registry).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-        Err(ChannelQueryError::UnsupportedType(t)) => {
-            error_response(StatusCode::BAD_REQUEST, format!("Unsupported channel type: {t}"))
-        }
-        Err(ChannelQueryError::InvalidConfig(msg)) => {
-            error_response(StatusCode::BAD_REQUEST, format!("Invalid config: {msg}"))
-        }
-        Err(ChannelQueryError::Db(e)) => {
-            tracing::error!("Failed to create notification channel: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        Err(report) => match report.current_context() {
+            ChannelQueryError::UnsupportedType(t) => {
+                error_response(StatusCode::BAD_REQUEST, format!("Unsupported channel type: {t}"))
+            }
+            ChannelQueryError::InvalidConfig(msg) => {
+                error_response(StatusCode::BAD_REQUEST, format!("Invalid config: {msg}"))
+            }
+            ChannelQueryError::Db(_) => {
+                tracing::error!("Failed to create notification channel: {}", report);
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
     }
 }
 
@@ -180,16 +182,18 @@ pub async fn update_channel(
     {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Channel not found"),
-        Err(ChannelQueryError::UnsupportedType(t)) => {
-            error_response(StatusCode::BAD_REQUEST, format!("Unsupported channel type: {t}"))
-        }
-        Err(ChannelQueryError::InvalidConfig(msg)) => {
-            error_response(StatusCode::BAD_REQUEST, format!("Invalid config: {msg}"))
-        }
-        Err(ChannelQueryError::Db(e)) => {
-            tracing::error!("Failed to update notification channel: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        Err(report) => match report.current_context() {
+            ChannelQueryError::UnsupportedType(t) => {
+                error_response(StatusCode::BAD_REQUEST, format!("Unsupported channel type: {t}"))
+            }
+            ChannelQueryError::InvalidConfig(msg) => {
+                error_response(StatusCode::BAD_REQUEST, format!("Invalid config: {msg}"))
+            }
+            ChannelQueryError::Db(_) => {
+                tracing::error!("Failed to update notification channel: {}", report);
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
     }
 }
 
@@ -348,13 +352,15 @@ pub async fn create_rule(
 
     match notif_queries::create_rule(&tenant_db, &body).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-        Err(RuleQueryError::ChannelNotFound) => {
-            error_response(StatusCode::NOT_FOUND, "Channel not found")
-        }
-        Err(RuleQueryError::Db(e)) => {
-            tracing::error!("Failed to create notification rule: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        Err(report) => match report.current_context() {
+            RuleQueryError::ChannelNotFound => {
+                error_response(StatusCode::NOT_FOUND, "Channel not found")
+            }
+            RuleQueryError::Db(_) => {
+                tracing::error!("Failed to create notification rule: {}", report);
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
     }
 }
 

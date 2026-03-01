@@ -1,12 +1,15 @@
+use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Set, TransactionTrait,
     sea_query::{Expr, OnConflict},
 };
+use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::Capability;
 use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
 use uptrakit_shared_db::entity::{service, service_certificate, service_host};
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::services::{ListServicesQuery, ServiceResponse};
 use uuid::Uuid;
@@ -16,23 +19,33 @@ use crate::tenant_db::TenantDb;
 use uptrakit_internal_wire::service_profile::{ServiceProfile, parse_capabilities};
 
 /// Errors returned by service mutation queries.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ServiceQueryError {
     /// No active service found with the given ID.
+    #[error("service not found")]
     NotFound,
     /// The service must be in `Pending` status for this operation.
+    #[error("service is not in pending status")]
     NotPending,
     /// The service must be in `Approved` status for this operation.
+    #[error("service is not in approved status")]
     NotApproved,
     /// The service does not support merge (requires SoftwareDiscovery capability).
+    #[error("service does not support merge")]
     NotMergeable,
     /// The target service is still connected (checked before calling the query).
+    #[error("target service is still connected")]
     TargetConnected,
     /// The source service ID was not found.
+    #[error("source service not found")]
     SourceNotFound,
     /// A database error occurred.
+    #[error("database error: {0}")]
     Db(sea_orm::DbErr),
 }
+
+pub type Result<T> = std::result::Result<T, rootcause::Report<ServiceQueryError>>;
+impl_report_conversion!(sea_orm::DbErr => ServiceQueryError::Db);
 
 // --- Private helpers ---
 
@@ -62,7 +75,7 @@ fn model_to_response(m: service::Model) -> ServiceResponse {
 pub async fn list_services(
     tenant_db: &TenantDb,
     query: &ListServicesQuery,
-) -> Result<PaginatedResponse<ServiceResponse>, sea_orm::DbErr> {
+) -> Result<PaginatedResponse<ServiceResponse>> {
     let pagination = query.pagination().resolve();
 
     let mut q = tenant_db
@@ -79,13 +92,14 @@ pub async fn list_services(
 
     let base_query = q.order_by_desc(service::Column::CreatedAt);
 
-    let total = base_query.clone().count(tenant_db.db()).await?;
+    let total = base_query.clone().count(tenant_db.db()).await.context_to()?;
 
     let services = base_query
         .offset(Some(pagination.offset()))
         .limit(Some(pagination.per_page))
         .all(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
 
     let items: Vec<ServiceResponse> = services.into_iter().map(model_to_response).collect();
     Ok(PaginatedResponse::new(items, total, pagination))
@@ -95,12 +109,13 @@ pub async fn list_services(
 pub async fn get_active_service(
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Result<Option<ServiceResponse>, sea_orm::DbErr> {
+) -> Result<Option<ServiceResponse>> {
     let svc = tenant_db
         .find_by_id::<service::Entity, _>(id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
-        .await?;
+        .await
+        .context_to()?;
     Ok(svc.map(model_to_response))
 }
 
@@ -110,12 +125,13 @@ pub async fn update_service_settings(
     tenant_db: &TenantDb,
     id: Uuid,
     ping_interval_seconds: Option<u32>,
-) -> Result<Option<ServiceResponse>, sea_orm::DbErr> {
+) -> Result<Option<ServiceResponse>> {
     let Some(svc) = tenant_db
         .find_by_id::<service::Entity, _>(id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
-        .await?
+        .await
+        .context_to()?
     else {
         return Ok(None);
     };
@@ -128,7 +144,7 @@ pub async fn update_service_settings(
     }
     active.updated_at = Set(OffsetDateTime::now_utc());
 
-    let updated = active.update(tenant_db.db()).await?;
+    let updated = active.update(tenant_db.db()).await.context_to()?;
     Ok(Some(model_to_response(updated)))
 }
 
@@ -136,18 +152,18 @@ pub async fn update_service_settings(
 pub async fn approve_service(
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Result<ServiceResponse, ServiceQueryError> {
+) -> Result<ServiceResponse> {
     let svc = tenant_db
         .find_by_id::<service::Entity, _>(id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
-        .map_err(ServiceQueryError::Db)?;
+        .context_to()?;
 
-    let svc = svc.ok_or(ServiceQueryError::NotFound)?;
+    let svc = svc.ok_or_else(|| report!(ServiceQueryError::NotFound))?;
 
     if svc.status != service::ServiceStatus::Pending {
-        return Err(ServiceQueryError::NotPending);
+        bail!(ServiceQueryError::NotPending);
     }
 
     let now = OffsetDateTime::now_utc();
@@ -155,10 +171,7 @@ pub async fn approve_service(
     active.status = Set(service::ServiceStatus::Approved);
     active.updated_at = Set(now);
 
-    let updated = active
-        .update(tenant_db.db())
-        .await
-        .map_err(ServiceQueryError::Db)?;
+    let updated = active.update(tenant_db.db()).await.context_to()?;
     Ok(model_to_response(updated))
 }
 
@@ -166,18 +179,18 @@ pub async fn approve_service(
 pub async fn reject_service(
     tenant_db: &TenantDb,
     id: Uuid,
-) -> Result<ServiceResponse, ServiceQueryError> {
+) -> Result<ServiceResponse> {
     let svc = tenant_db
         .find_by_id::<service::Entity, _>(id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
-        .map_err(ServiceQueryError::Db)?;
+        .context_to()?;
 
-    let svc = svc.ok_or(ServiceQueryError::NotFound)?;
+    let svc = svc.ok_or_else(|| report!(ServiceQueryError::NotFound))?;
 
     if svc.status != service::ServiceStatus::Pending {
-        return Err(ServiceQueryError::NotPending);
+        bail!(ServiceQueryError::NotPending);
     }
 
     let now = OffsetDateTime::now_utc();
@@ -186,10 +199,7 @@ pub async fn reject_service(
     active.deactivated_at = Set(Some(now));
     active.updated_at = Set(now);
 
-    let updated = active
-        .update(tenant_db.db())
-        .await
-        .map_err(ServiceQueryError::Db)?;
+    let updated = active.update(tenant_db.db()).await.context_to()?;
     Ok(model_to_response(updated))
 }
 
@@ -204,19 +214,15 @@ pub async fn deactivate_service(
     tenant_db: &TenantDb,
     id: Uuid,
     default_tenant_id: Uuid,
-) -> Result<bool, ServiceQueryError> {
-    let txn = tenant_db
-        .db()
-        .begin()
-        .await
-        .map_err(ServiceQueryError::Db)?;
+) -> Result<bool> {
+    let txn = tenant_db.db().begin().await.context_to()?;
 
     let Some(svc) = tenant_db
         .find_by_id::<service::Entity, _>(id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(&txn)
         .await
-        .map_err(ServiceQueryError::Db)?
+        .context_to()?
     else {
         return Ok(false);
     };
@@ -225,7 +231,7 @@ pub async fn deactivate_service(
     let mut active: service::ActiveModel = svc.into();
     active.deactivated_at = Set(Some(now));
     active.updated_at = Set(now);
-    active.update(&txn).await.map_err(ServiceQueryError::Db)?;
+    active.update(&txn).await.context_to()?;
 
     ServiceCertificate::update_many()
         .col_expr(
@@ -240,13 +246,13 @@ pub async fn deactivate_service(
         .filter(service_certificate::Column::RevokedAt.is_null())
         .exec(&txn)
         .await
-        .map_err(ServiceQueryError::Db)?;
+        .context_to()?;
 
     crate::settings_store::bump_revocation_version(&txn, default_tenant_id)
         .await
-        .map_err(|e| ServiceQueryError::Db(sea_orm::DbErr::Custom(e.to_string())))?;
+        .map_err(|e| report!(ServiceQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
 
-    txn.commit().await.map_err(ServiceQueryError::Db)?;
+    txn.commit().await.context_to()?;
 
     Ok(true)
 }
@@ -261,16 +267,12 @@ pub async fn merge_service(
     source_uuid: Uuid,
     target_connected: bool,
     default_tenant_id: Uuid,
-) -> Result<ServiceResponse, ServiceQueryError> {
+) -> Result<ServiceResponse> {
     if target_connected {
-        return Err(ServiceQueryError::TargetConnected);
+        bail!(ServiceQueryError::TargetConnected);
     }
 
-    let txn = tenant_db
-        .db()
-        .begin()
-        .await
-        .map_err(ServiceQueryError::Db)?;
+    let txn = tenant_db.db().begin().await.context_to()?;
 
     // Find target service (must be approved, not deactivated, mergeable).
     let target = tenant_db
@@ -279,15 +281,15 @@ pub async fn merge_service(
         .filter(service::Column::DeactivatedAt.is_null())
         .one(&txn)
         .await
-        .map_err(ServiceQueryError::Db)?
-        .ok_or(ServiceQueryError::NotFound)?;
+        .context_to()?
+        .ok_or_else(|| report!(ServiceQueryError::NotFound))?;
 
     let target_caps = parse_capabilities(&target.capabilities);
     if !target_caps.contains(&Capability::SoftwareDiscovery) {
-        return Err(ServiceQueryError::NotMergeable);
+        bail!(ServiceQueryError::NotMergeable);
     }
     if target.status != service::ServiceStatus::Approved {
-        return Err(ServiceQueryError::NotApproved);
+        bail!(ServiceQueryError::NotApproved);
     }
 
     // Find source service (must be pending, not deactivated, mergeable).
@@ -297,15 +299,15 @@ pub async fn merge_service(
         .filter(service::Column::DeactivatedAt.is_null())
         .one(&txn)
         .await
-        .map_err(ServiceQueryError::Db)?
-        .ok_or(ServiceQueryError::SourceNotFound)?;
+        .context_to()?
+        .ok_or_else(|| report!(ServiceQueryError::SourceNotFound))?;
 
     let source_caps = parse_capabilities(&source.capabilities);
     if !source_caps.contains(&Capability::SoftwareDiscovery) {
-        return Err(ServiceQueryError::NotMergeable);
+        bail!(ServiceQueryError::NotMergeable);
     }
     if source.status != service::ServiceStatus::Pending {
-        return Err(ServiceQueryError::NotPending);
+        bail!(ServiceQueryError::NotPending);
     }
 
     let now = OffsetDateTime::now_utc();
@@ -321,10 +323,7 @@ pub async fn merge_service(
     source_active.enrollment_secret_hash = Set(invalidated_hash);
     source_active.deactivated_at = Set(Some(now));
     source_active.updated_at = Set(now);
-    source_active
-        .update(&txn)
-        .await
-        .map_err(ServiceQueryError::Db)?;
+    source_active.update(&txn).await.context_to()?;
 
     // Revoke all non-revoked certificates for both services.
     for (svc_uuid, label) in [(source_uuid, "source"), (target_uuid, "target")] {
@@ -343,7 +342,7 @@ pub async fn merge_service(
             .await
         {
             tracing::error!("Failed to revoke {label} service certificates: {}", e);
-            return Err(ServiceQueryError::Db(e));
+            bail!(ServiceQueryError::Db(e));
         }
     }
 
@@ -359,17 +358,14 @@ pub async fn merge_service(
     target_active.ip_address = Set(source_ip_address);
     target_active.updated_at = Set(now);
 
-    let updated_target = target_active
-        .update(&txn)
-        .await
-        .map_err(ServiceQueryError::Db)?;
+    let updated_target = target_active.update(&txn).await.context_to()?;
 
     // Copy source service's host links to target (INSERT ON CONFLICT DO NOTHING).
     let source_links = ServiceHost::find()
         .filter(service_host::Column::ServiceId.eq(source_uuid))
         .all(&txn)
         .await
-        .map_err(ServiceQueryError::Db)?;
+        .context_to()?;
 
     for link in source_links {
         let new_link = service_host::ActiveModel {
@@ -390,11 +386,11 @@ pub async fn merge_service(
             .await
         {
             tracing::error!("Failed to copy host link during merge: {}", e);
-            return Err(ServiceQueryError::Db(e));
+            bail!(ServiceQueryError::Db(e));
         }
     }
 
-    txn.commit().await.map_err(ServiceQueryError::Db)?;
+    txn.commit().await.context_to()?;
 
     Ok(model_to_response(updated_target))
 }

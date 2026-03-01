@@ -96,14 +96,16 @@ pub async fn add_tenant_discovery_allowlist_entry(
     .await
     {
         Ok(entry) => (StatusCode::CREATED, Json(entry)).into_response(),
-        Err(allowlist_queries::AllowlistError::InvalidPluginType) => error_response(
-            StatusCode::BAD_REQUEST,
-            "plugin type does not support discovery or is unknown",
-        ),
-        Err(allowlist_queries::AllowlistError::Db(e)) => {
-            tracing::error!("DB error adding tenant discovery allowlist entry: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        Err(report) => match report.current_context() {
+            allowlist_queries::AllowlistError::InvalidPluginType => error_response(
+                StatusCode::BAD_REQUEST,
+                "plugin type does not support discovery or is unknown",
+            ),
+            allowlist_queries::AllowlistError::Db(_) => {
+                tracing::error!("DB error adding tenant discovery allowlist entry: {report}");
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
     }
 }
 
@@ -250,14 +252,16 @@ pub async fn add_host_discovery_allowlist_entry(
     .await
     {
         Ok(entry) => (StatusCode::CREATED, Json(entry)).into_response(),
-        Err(allowlist_queries::AllowlistError::InvalidPluginType) => error_response(
-            StatusCode::BAD_REQUEST,
-            "plugin type does not support discovery or is unknown",
-        ),
-        Err(allowlist_queries::AllowlistError::Db(e)) => {
-            tracing::error!("DB error adding host discovery allowlist entry: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
+        Err(report) => match report.current_context() {
+            allowlist_queries::AllowlistError::InvalidPluginType => error_response(
+                StatusCode::BAD_REQUEST,
+                "plugin type does not support discovery or is unknown",
+            ),
+            allowlist_queries::AllowlistError::Db(_) => {
+                tracing::error!("DB error adding host discovery allowlist entry: {report}");
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
     }
 }
 

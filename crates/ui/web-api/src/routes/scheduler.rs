@@ -8,7 +8,7 @@ use uptrakit_web_api_types::validation::Validate;
 
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageSoftware;
-use crate::queries::scheduled_tasks::{self as sched_queries, UpdateScheduledTaskError};
+use crate::queries::scheduled_tasks::{self as sched_queries, ScheduledTaskError};
 use crate::tenant_db::TenantDb;
 
 pub use uptrakit_web_api_types::scheduler::{
@@ -101,16 +101,18 @@ pub async fn update_scheduled_task(
 
     match sched_queries::update_scheduled_task(&tenant_db, task_id, req).await {
         Ok(task) => Json(task).into_response(),
-        Err(UpdateScheduledTaskError::TaskNotFound) => {
-            error_response(StatusCode::NOT_FOUND, "Task not found")
-        }
-        Err(UpdateScheduledTaskError::InvalidCronExpression) => {
-            error_response(StatusCode::BAD_REQUEST, "Invalid cron expression")
-        }
-        Err(UpdateScheduledTaskError::Db(e)) => {
-            tracing::error!(error = %e, "failed to update scheduled task");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update task")
-        }
+        Err(report) => match report.current_context() {
+            ScheduledTaskError::NotFound => {
+                error_response(StatusCode::NOT_FOUND, "Task not found")
+            }
+            ScheduledTaskError::InvalidCronExpression => {
+                error_response(StatusCode::BAD_REQUEST, "Invalid cron expression")
+            }
+            ScheduledTaskError::Db(_) => {
+                tracing::error!(error = %report, "failed to update scheduled task");
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update task")
+            }
+        },
     }
 }
 

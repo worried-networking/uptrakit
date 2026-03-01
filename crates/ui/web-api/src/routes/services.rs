@@ -155,19 +155,23 @@ pub async fn approve_service(
 ) -> Response {
     let resp = match svc_queries::approve_service(&tenant_db, service_id).await {
         Ok(r) => r,
-        Err(ServiceQueryError::NotFound) => {
-            return error_response(StatusCode::NOT_FOUND, "Service not found");
-        }
-        Err(ServiceQueryError::NotPending) => {
-            return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status");
-        }
-        Err(ServiceQueryError::Db(e)) => {
-            tracing::error!("Failed to approve service: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-        Err(e) => {
-            tracing::error!("Unexpected error approving service: {:?}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        Err(report) => {
+            return match report.current_context() {
+                ServiceQueryError::NotFound => {
+                    error_response(StatusCode::NOT_FOUND, "Service not found")
+                }
+                ServiceQueryError::NotPending => {
+                    error_response(StatusCode::BAD_REQUEST, "Service is not in pending status")
+                }
+                ServiceQueryError::Db(_) => {
+                    tracing::error!("Failed to approve service: {}", report);
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                }
+                _ => {
+                    tracing::error!("Unexpected error approving service: {}", report);
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                }
+            };
         }
     };
 
@@ -228,19 +232,23 @@ pub async fn reject_service(
 ) -> Response {
     let resp = match svc_queries::reject_service(&tenant_db, service_id).await {
         Ok(r) => r,
-        Err(ServiceQueryError::NotFound) => {
-            return error_response(StatusCode::NOT_FOUND, "Service not found");
-        }
-        Err(ServiceQueryError::NotPending) => {
-            return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status");
-        }
-        Err(ServiceQueryError::Db(e)) => {
-            tracing::error!("Failed to reject service: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-        Err(e) => {
-            tracing::error!("Unexpected error rejecting service: {:?}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        Err(report) => {
+            return match report.current_context() {
+                ServiceQueryError::NotFound => {
+                    error_response(StatusCode::NOT_FOUND, "Service not found")
+                }
+                ServiceQueryError::NotPending => {
+                    error_response(StatusCode::BAD_REQUEST, "Service is not in pending status")
+                }
+                ServiceQueryError::Db(_) => {
+                    tracing::error!("Failed to reject service: {}", report);
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                }
+                _ => {
+                    tracing::error!("Unexpected error rejecting service: {}", report);
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                }
+            };
         }
     };
 
@@ -289,12 +297,8 @@ pub async fn deactivate_service(
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Service not found"),
-        Err(ServiceQueryError::Db(e)) => {
-            tracing::error!("Failed to deactivate service: {}", e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        }
-        Err(e) => {
-            tracing::error!("Unexpected error deactivating service: {:?}", e);
+        Err(report) => {
+            tracing::error!("Failed to deactivate service: {}", report);
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -346,33 +350,34 @@ pub async fn merge_service(
     .await
     {
         Ok(r) => r,
-        Err(ServiceQueryError::NotFound) => {
-            return error_response(StatusCode::NOT_FOUND, "Target service not found");
-        }
-        Err(ServiceQueryError::SourceNotFound) => {
-            return error_response(StatusCode::NOT_FOUND, "Source service not found");
-        }
-        Err(ServiceQueryError::TargetConnected) => {
-            return error_response(
-                StatusCode::CONFLICT,
-                "Target service is currently connected",
-            );
-        }
-        Err(ServiceQueryError::NotMergeable) => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "Merge requires SoftwareDiscovery capability",
-            );
-        }
-        Err(ServiceQueryError::NotApproved) => {
-            return error_response(StatusCode::BAD_REQUEST, "Target service must be approved");
-        }
-        Err(ServiceQueryError::NotPending) => {
-            return error_response(StatusCode::BAD_REQUEST, "Source service must be pending");
-        }
-        Err(ServiceQueryError::Db(e)) => {
-            tracing::error!("Failed to merge services: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        Err(report) => {
+            return match report.current_context() {
+                ServiceQueryError::NotFound => {
+                    error_response(StatusCode::NOT_FOUND, "Target service not found")
+                }
+                ServiceQueryError::SourceNotFound => {
+                    error_response(StatusCode::NOT_FOUND, "Source service not found")
+                }
+                ServiceQueryError::TargetConnected => {
+                    error_response(StatusCode::CONFLICT, "Target service is currently connected")
+                }
+                ServiceQueryError::NotMergeable => {
+                    error_response(
+                        StatusCode::BAD_REQUEST,
+                        "Merge requires SoftwareDiscovery capability",
+                    )
+                }
+                ServiceQueryError::NotApproved => {
+                    error_response(StatusCode::BAD_REQUEST, "Target service must be approved")
+                }
+                ServiceQueryError::NotPending => {
+                    error_response(StatusCode::BAD_REQUEST, "Source service must be pending")
+                }
+                ServiceQueryError::Db(_) => {
+                    tracing::error!("Failed to merge services: {}", report);
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                }
+            };
         }
     };
 
