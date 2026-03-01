@@ -2636,6 +2636,15 @@ components:
         update_available:
           type: boolean
           description: Whether an update is available
+        release_url:
+          type: string
+          format: uri
+          description: URL to the release page (absent when unavailable)
+          examples:
+            - "https://github.com/owner/repo/releases/tag/v1.3.0"
+        release_notes:
+          type: string
+          description: Release notes or changelog text (absent when unavailable)
 
     mqttSoftwareStateItem:
       type: object

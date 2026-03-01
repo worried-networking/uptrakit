@@ -959,6 +959,12 @@ pub struct MqttSoftwareStateHostEntry {
     pub latest_version: Option<String>,
     /// Whether an update is available (`latest_version > installed_version`).
     pub update_available: bool,
+    /// URL to the upstream release page (e.g. GitHub release), if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_url: Option<String>,
+    /// Release notes or changelog text, if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_notes: Option<String>,
 }
 
 /// MQTT service -> Controller: request to trigger a software update.
