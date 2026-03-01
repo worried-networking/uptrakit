@@ -304,6 +304,25 @@ impl TenantManager {
                     );
                 }
 
+                // Always: publish JSON attributes (in_progress flag).
+                let at = crate::ha_discovery::json_attributes_topic(
+                    topic_prefix,
+                    item.software_item_id,
+                    host.host_id,
+                );
+                let attributes_bytes = crate::ha_discovery::build_attributes_payload(
+                    host.update_in_progress,
+                )
+                .to_string()
+                .into_bytes();
+                if let Err(e) = state.handle.publish_retained(&at, attributes_bytes).await {
+                    tracing::warn!(
+                        error = ?e,
+                        %mqtt_client_id,
+                        "failed to publish JSON attributes topic"
+                    );
+                }
+
                 // HA-only: publish HA discovery config so HA creates an update entity.
                 if state.ha_discovery {
                     let uid = crate::ha_discovery::unique_id(

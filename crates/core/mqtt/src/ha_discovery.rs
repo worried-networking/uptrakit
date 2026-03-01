@@ -74,6 +74,53 @@ pub fn command_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String
     format!("{topic_prefix}/update/{item_id}/{host_id}/set")
 }
 
+/// Returns the MQTT topic for HA JSON attributes of a `(software_item, host)` pair.
+///
+/// Published as a retained JSON payload. The recognized attribute is
+/// `"in_progress"` (bool): `true` while an update is pending or running,
+/// `false` when idle.
+///
+/// Format: `{topic_prefix}/update/{item_id}/{host_id}/attributes`
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::json_attributes_topic;
+/// let item_id = Uuid::nil();
+/// let host_id = Uuid::nil();
+/// let topic = json_attributes_topic("uptrakit", item_id, host_id);
+/// assert!(topic.ends_with("/attributes"));
+/// ```
+pub fn json_attributes_topic(topic_prefix: &str, item_id: Uuid, host_id: Uuid) -> String {
+    format!("{topic_prefix}/update/{item_id}/{host_id}/attributes")
+}
+
+/// Build the JSON attributes payload for a `(software_item, host)` entity.
+///
+/// Returns a [`serde_json::Value`] that should be serialized and published
+/// (retained) to [`json_attributes_topic`].
+///
+/// The `in_progress` attribute is recognized by Home Assistant's `update`
+/// entity:
+/// - `false` — no update running (idle).
+/// - `true` — an update is pending dispatch or executing on the agent
+///   (displays a spinner in the HA UI).
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::build_attributes_payload;
+/// let payload = build_attributes_payload(true);
+/// assert_eq!(payload["in_progress"], true);
+///
+/// let payload = build_attributes_payload(false);
+/// assert_eq!(payload["in_progress"], false);
+/// ```
+pub fn build_attributes_payload(in_progress: bool) -> serde_json::Value {
+    serde_json::json!({ "in_progress": in_progress })
+}
+
 /// Returns a unique ID string for this `(tenant, software_item, host)` triple.
 ///
 /// Format: `uptrakit_{tenant_id_no_dashes}_{item_id_no_dashes}_{host_id_no_dashes}`
@@ -172,6 +219,7 @@ pub fn build_discovery_config(
         "latest_version_topic": latest_version_topic(topic_prefix, item_id, host_id),
         "command_topic": command_topic(topic_prefix, item_id, host_id),
         "payload_install": "install",
+        "json_attributes_topic": json_attributes_topic(topic_prefix, item_id, host_id),
         "availability_topic": format!("{topic_prefix}/status"),
         "payload_available": "online",
         "payload_not_available": "offline",
@@ -368,6 +416,55 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
+    // json_attributes_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn json_attributes_topic_format() {
+        let t = json_attributes_topic("uptrakit", item(), host());
+        assert_eq!(
+            t,
+            "uptrakit/update/22222222-2222-2222-2222-222222222222/33333333-3333-3333-3333-333333333333/attributes"
+        );
+    }
+
+    #[test]
+    fn json_attributes_topic_ends_with_attributes() {
+        assert!(json_attributes_topic("pfx", item(), host()).ends_with("/attributes"));
+    }
+
+    #[test]
+    fn json_attributes_topic_custom_prefix() {
+        let t = json_attributes_topic("home/uptrakit", item(), host());
+        assert!(t.starts_with("home/uptrakit/update/"));
+        assert!(t.ends_with("/attributes"));
+    }
+
+    // -------------------------------------------------------------------------
+    // build_attributes_payload
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_attributes_payload_in_progress_true() {
+        let payload = build_attributes_payload(true);
+        assert_eq!(payload["in_progress"], true);
+    }
+
+    #[test]
+    fn build_attributes_payload_in_progress_false() {
+        let payload = build_attributes_payload(false);
+        assert_eq!(payload["in_progress"], false);
+    }
+
+    #[test]
+    fn build_attributes_payload_is_valid_json() {
+        let payload = build_attributes_payload(true);
+        let s = payload.to_string();
+        let reparsed: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(reparsed["in_progress"], true);
+    }
+
+    // -------------------------------------------------------------------------
     // unique_id
     // -------------------------------------------------------------------------
 
@@ -542,6 +639,21 @@ mod tests {
         );
         assert_eq!(v["payload_available"], "online");
         assert_eq!(v["payload_not_available"], "offline");
+    }
+
+    #[test]
+    fn build_discovery_config_json_attributes_topic_correct() {
+        let v = build_discovery_config(
+            "uptrakit",
+            tenant(),
+            item(),
+            host(),
+            "App",
+            "h",
+            ReleaseInfo::default(),
+        );
+        let expected = json_attributes_topic("uptrakit", item(), host());
+        assert_eq!(v["json_attributes_topic"], expected.as_str());
     }
 
     #[test]
