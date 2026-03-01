@@ -75,6 +75,55 @@ uptrakit-openapi-client = { path = "crates/shared/openapi-client" }
 uptrakit-command = { path = "crates/shared/command" }
 uptrakit-plugin-infrastructure-core = { path = "crates/plugins/infrastructure/core" }
 uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructure/registry", default-features = false }
+# Internal crates (all must be referenced via workspace = true in member Cargo.toml files)
+uptrakit-agent-core = { path = "crates/shared/agent-core" }
+uptrakit-crypto = { path = "crates/shared/crypto" }
+uptrakit-shared-db = { path = "crates/shared/db", default-features = false }
+uptrakit-directories = { path = "crates/shared/directories" }
+uptrakit-web-api-types = { path = "crates/shared/web-api-types" }
+uptrakit-nats = { path = "crates/shared/nats" }
+uptrakit-scheduler-engine = { path = "crates/shared/scheduler-engine" }
+uptrakit-service-sdk = { path = "crates/shared/service-sdk" }
+uptrakit-notification-channels = { path = "crates/shared/notification-channels", default-features = false }
+uptrakit-update-hooks = { path = "crates/shared/update-hooks" }
+uptrakit-internal-wire = { path = "crates/shared/wire" }
+uptrakit-web-api = { path = "crates/ui/web-api", default-features = false }
+uptrakit-build-info = { path = "crates/shared/build-info" }
+uptrakit-cli = { path = "crates/ui/cli" }
+uptrakit-plugin-releases-docker = { path = "crates/plugins/releases/docker", default-features = false }
+uptrakit-plugin-releases-github = { path = "crates/plugins/releases/github" }
+uptrakit-plugin-releases-gitlab = { path = "crates/plugins/releases/gitlab" }
+uptrakit-plugin-releases-forgejo = { path = "crates/plugins/releases/forgejo" }
+uptrakit-plugin-generic-shell = { path = "crates/plugins/generic/shell" }
+uptrakit-plugin-package-manager-homebrew = { path = "crates/plugins/package-managers/homebrew" }
+uptrakit-plugin-package-manager-apt = { path = "crates/plugins/package-managers/apt" }
+uptrakit-plugin-package-manager-npm = { path = "crates/plugins/package-managers/npm" }
+uptrakit-plugin-discovery-proxmox-helper-scripts = { path = "crates/plugins/discovery/proxmox-helper-scripts" }
+# External deps used by a single crate — declared here so all versions are pinned in one place
+dirs = "6"
+rpassword = "7"
+russh = { version = "0.57", default-features = false }
+ssh-key = { version = "0.6", default-features = false }
+ssh2-config = "0.7"
+tower-http = { version = "0.6", default-features = false }
+nix = { version = "0.31", default-features = false }
+rust-embed = { version = "8", default-features = false }
+lettre = { version = "0.11", default-features = false }
+hmac = "0.12"
+argon2 = { version = "0.5", default-features = false }
+jsonwebtoken = { version = "10", default-features = false }
+openidconnect = "4"
+client-ip = { version = "0.2", default-features = false }
+percent-encoding = "2"
+utoipa-axum = "0.2"
+utoipa-swagger-ui = { version = "9.0", default-features = false }
+http-body-util = "0.1"
+sqlx = { version = "0.8", default-features = false }
+directories = "6"
+testcontainers = "0.27"
+sha1 = "0.10"
+httpmock = "0.8"
+serde_urlencoded = "0.7"
 
 [workspace.lints.rust]
 warnings = "deny"
