@@ -30,7 +30,12 @@ permission-fetch fallback have since been fixed. The missing 5 capabilities in
 `controller_capabilities()`, the absent `protocol_version` field in wire envelopes, the
 insufficient 5-second scheduler shutdown timeout, the `ScheduledTaskType` rolling-upgrade
 safety (`#[non_exhaustive]` + `find_due_tasks` skip-unknown), and the `machine_id`
-empty-string sentinel in `ssh_host.rs` have also been fixed.
+empty-string sentinel in `ssh_host.rs` have also been fixed. The SSH pool TOCTOU race under
+concurrent connection acquisition, the NATS `ServiceCredentials` leakage (now guarded by
+`is_nats_publishable()`), the broken TOCTOU suppression in `create_or_ignore_ignore_rule`,
+the empty output returned by `list_update_history` for streamed records, the rate-limit test
+DB backdating, and all remaining `Report::new()` / `.expect()` violations in service-sdk,
+agent-ssh, controller, and cli have been fixed.
 
 ## Per-Crate Review Files
 
@@ -134,13 +139,6 @@ with `pub` visibility.
 `output` column and `update_output_lines` child table. No DB constraint enforcing which storage
 path is canonical.
 
-**[MEDIUM]** `crates/ui/web-api/src/queries/autodiscovery.rs:36-75` -- TOCTOU race in
-`create_or_ignore_ignore_rule`. Check-then-insert without transaction.
-
-**[MEDIUM]** `crates/ui/web-api/src/queries/update_history.rs:148-150` -- Output not loaded for
-`list_update_history`. Returns empty output for records using newer `update_output_lines`
-storage.
-
 **[MEDIUM]** `crates/core/controller/src/migration/m20260209_000001_initial.rs:615-621` -- Raw
 SQL in migration seed uses `CURRENT_TIMESTAMP` which behaves differently across backends.
 
@@ -237,9 +235,6 @@ inline unit tests. `hosts.rs`, `agents.rs`, `settings_ca.rs`, `settings_mqtt.rs`
 **[MEDIUM]** `crates/ui/web-api/src/routes/software_items.rs:98,102` and
 `crates/shared/scheduler-engine/src/executors/version_check.rs:44,51` -- `NoopCommandExecutor`
 duplicated with `unreachable!()` in two locations.
-
-**[MEDIUM]** `.expect()` on guarded values in `agent-ssh/src/commands/update_sudoers.rs:72,114`
-is logically safe but fragile to refactoring.
 
 **[MEDIUM]** `test_state(db)` / `test_db()` / `NoopCertSigner` construction duplicated across
 17+ test modules. Shared `test_helpers` module would eliminate duplication.

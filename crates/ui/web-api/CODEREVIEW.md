@@ -19,8 +19,10 @@ handlers in `src/routes/` lacking inline unit tests for the majority of business
 and several query modules without test coverage. The OIDC registration DB error masking
 (`unwrap_or(1)`), `count_linked_hosts` DB error swallowing, `Report::new()` macro violations,
 invalid UUID query parameter handling, HTTP status code violations on soft-delete and
-idempotent-create endpoints, and the `require_auth.rs` permission-fetch fallback have been
-fixed.
+idempotent-create endpoints, the `require_auth.rs` permission-fetch fallback, the TOCTOU race
+in `create_or_ignore_ignore_rule`, the empty output returned by `list_update_history` for
+records using the `update_output_lines` storage path, and the rate-limit test DB backdating
+have all been fixed.
 
 ## Architecture
 
@@ -80,13 +82,6 @@ accessor methods.
 **[MEDIUM]** `src/router.rs:17-209` -- OpenAPI `#[openapi(...)]` lists every path and schema
 explicitly (~200 lines). Adding a new endpoint requires modifying three places: route module,
 router function, and OpenAPI annotation.
-
-**[MEDIUM]** `src/queries/autodiscovery.rs:36-75` -- TOCTOU race in
-`create_or_ignore_ignore_rule`. Check-then-insert without transaction.
-
-**[MEDIUM]** `src/queries/update_history.rs:148-150` -- Output not loaded for
-`list_update_history`. Returns empty output for records using newer `update_output_lines`
-storage, unlike the detail endpoint which correctly falls back.
 
 **[LOW]** `api_tokens` table has no `expires_at` column. API tokens valid indefinitely once
 issued. A compromised token that was never explicitly revoked remains valid forever.
@@ -186,10 +181,6 @@ business-logic paths. The following route files have zero `#[cfg(test)]` coverag
 `settings_auth.rs`, `ocsp.rs`. Given the complexity of handlers like `oidc_callback`
 (413 lines), the absence of tests for individual sub-flows means regressions are only caught
 at integration level.
-
-**[HIGH]** `src/auth/rate_limit.rs:256` -- Rate-limit test manually backdates DB rows instead
-of time-mocking. Couples test to internal DB column name; a rename silently produces wrong SQL.
-Use `#[tokio::test(start_paused = true)]` + `tokio::time::advance` via injectable clock.
 
 **[MEDIUM]** `src/routes/auth.rs:458` and `src/middleware/require_auth.rs:202` --
 `test_state(db)` / `NoopCertSigner` construction duplicated across at minimum these two modules

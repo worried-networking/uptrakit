@@ -24,13 +24,13 @@ idempotent startup across concurrent controller instances.
 
 The primary concerns are: the `connect()` function accepts only a bare URL
 string with no support for TLS or authentication configuration, which limits
-production deployment hardening; there is no compile-time or runtime guard
-preventing sensitive `ControllerMessage` variants (e.g., `ServiceCredentials`)
-from being published to NATS; and the `NatsEventEnvelope` lacks `Debug` to aid
-troubleshooting. The `NatsError` enum defines `Publish` and `Serialization`
+production deployment hardening; and the `NatsEventEnvelope` lacks `Debug` to
+aid troubleshooting. The `NatsError` enum defines `Publish` and `Serialization`
 variants that are never constructed anywhere in the codebase. Test coverage is
 adequate for the subject routing logic but the envelope roundtrip test does not
-assert on the `message` field content.
+assert on the `message` field content. The previously-reported absence of a
+compile-time or runtime guard preventing `ServiceCredentials` from being
+published to NATS has been fixed via `is_nats_publishable()`.
 
 ## Architecture
 
@@ -87,17 +87,6 @@ future contributors from attempting to "optimize" it away.
   propagation. No `.unwrap()` calls exist in production code paths.
 
 ### Issues
-
-**[HIGH]** `src/connection.rs:73-88` -- The `publish()` method accepts any
-`ControllerMessage` variant without filtering. The wire protocol documents that
-`ServiceCredentials` must "NEVER be published to NATS" (see
-`uptrakit-internal-wire` `src/lib.rs:312`), but there is no compile-time type
-restriction or runtime guard in this crate to enforce that invariant. A
-programming error in a caller could publish database URLs, master keys, or NATS
-credentials to the JetStream stream. Consider either: (a) a newtype wrapper
-`NatsPublishableMessage` that excludes sensitive variants, or (b) a runtime
-check in `publish_envelope` that rejects known-sensitive message types with an
-error log.
 
 **[MEDIUM]** `src/connection.rs:24-29` -- The connection uses
 `async_nats::connect(url)` which defaults to plaintext `nats://` unless the URL

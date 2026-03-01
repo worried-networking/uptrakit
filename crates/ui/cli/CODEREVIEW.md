@@ -165,18 +165,8 @@ N/A.
 
 ### Issues
 
-**[MEDIUM]** `src/main.rs:988` -- `.expect("valid directive")` on hard-coded tracing directive.
-While functionally safe, violates AGENTS.md rule that `expect()` is approved only for
-`Mutex`/`RwLock` poison guards. Restructure to use `EnvFilter::new(level)`.
-
 **[LOW]** `Cargo.toml` -- No `publish = false` declaration. Should not be accidentally
 published to crates.io.
-
-**[LOW]** `src/commands/history.rs:116` and `src/commands/services.rs:146` -- Uses
-`Report::new()` instead of `report!()` macro.
-
-**[LOW]** `src/commands/software_items.rs:425` -- Uses `return Err(report!(...))` instead of
-`bail!()`.
 
 **[LOW]** `src/commands/settings.rs:701` -- `role_mapping: HashMap::new()` hardcoded in
 `oidc_create`. No `--role-mapping` CLI argument.

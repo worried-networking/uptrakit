@@ -14,10 +14,9 @@ discovery to the shared `uptrakit-agent-core` crate. The crate is structurally h
 the extra weight is justified: the credential management problem it solves genuinely requires
 it.
 
-The code is clean in the areas it controls directly. The main actionable concerns are the SSH
-pool's TOCTOU race under concurrent connection acquisition, the unbounded
-`report_enrolled_hosts` blocking during `on_connected`, and the absence of test coverage for
-the protocol-to-transport bridge in `client.rs`.
+The code is clean in the areas it controls directly. The main actionable concerns are the
+unbounded `report_enrolled_hosts` blocking during `on_connected` and the absence of test
+coverage for the protocol-to-transport bridge in `client.rs`.
 
 ## Architecture
 
@@ -159,13 +158,6 @@ tests using a mock `ControllerConnection` and an in-memory DB.
 tested, but the CLI-to-ops translation (key reading, encryption, field mapping, stdout
 formatting) is exercised only by manual invocation.
 
-**[MEDIUM]** `src/commands/update_sudoers.rs:72` -- `.expect("length checked above")` after a
-`match matches.len()` guard. Logically safe but fragile to refactoring. Replace with
-`.into_iter().next().ok_or_else(...)`.
-
-**[MEDIUM]** `src/commands/update_sudoers.rs:114` -- `.expect("checked above")` on
-`url_username.as_deref()`. Same fragile pattern.
-
 **[LOW]** `src/client.rs:158-179` -- `establish_ssh_session` returns
 `Result<Arc<SshSession>, String>`. All call sites immediately convert to tracing log + wire
 error payload. Returning `crate::error::Result<Arc<SshSession>>` would integrate with the
@@ -202,12 +194,6 @@ cover the full `run_bootstrap` orchestration path. Adding a trait seam for
 - `src/main.rs:471-499` -- Host snapshot diffing prevents unnecessary re-reporting.
 
 ### Issues
-
-**[HIGH]** `src/ssh_pool.rs:82-127` -- TOCTOU race in SSH connection pool `acquire`. Between
-releasing the lock (line 106) and re-acquiring it (line 119), another concurrent `acquire` for
-the same host could start a parallel connection. The second `insert` overwrites the first,
-leaving an orphaned SSH connection. Under concurrent version check requests, this could leak
-connections.
 
 **[MEDIUM]** `src/main.rs:72` / `src/client.rs:26-143` -- `report_enrolled_hosts` has no upper
 bound on total blocking time during `on_connected`. Iterates over every enrolled host

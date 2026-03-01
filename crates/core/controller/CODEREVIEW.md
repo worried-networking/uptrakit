@@ -148,10 +148,6 @@ correctly use `Zeroizing<[u8; 32]>`, but the intermediate hex string could linge
 
 ### Issues
 
-**[MEDIUM]** `src/main.rs:83` -- `.expect("valid directive")` on `directive.parse()`. While
-the string literal is hard-coded and always valid, this establishes a pattern that could be
-copied incorrectly.
-
 **[LOW]** `src/pki.rs:543` -- `bundle_from_pem` takes `String` parameters where `&str` would
 suffice for key parsing. Ownership is eventually needed for the struct, but the parameter
 naming could clarify this.
