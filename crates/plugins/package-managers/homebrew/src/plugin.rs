@@ -5,9 +5,10 @@ use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    BatchUpdateItem, BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
-    OutputStreamType, Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo,
-    Result, TrackingSystem, UpdateOutputLine, UpstreamRelease, Version,
+    BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
+    BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
+    Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result,
+    TrackingSystem, UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::{HomebrewConfig, HomebrewPackageType};
@@ -273,6 +274,34 @@ impl HomebrewPlugin {
             ));
         }
         Ok(())
+    }
+
+    /// Find the homepage URL of a formula by name in `brew info --json=v2` output.
+    fn find_formula_homepage(json: &serde_json::Value, pkg_id: &str) -> String {
+        json.get("formulae")
+            .and_then(|f| f.as_array())
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|f| f.get("name").and_then(|n| n.as_str()) == Some(pkg_id))
+            })
+            .and_then(|f| f.get("homepage"))
+            .and_then(|h| h.as_str())
+            .unwrap_or("")
+            .to_string()
+    }
+
+    /// Find the homepage URL of a cask by token in `brew info --json=v2` output.
+    fn find_cask_homepage(json: &serde_json::Value, pkg_id: &str) -> String {
+        json.get("casks")
+            .and_then(|c| c.as_array())
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|c| c.get("token").and_then(|t| t.as_str()) == Some(pkg_id))
+            })
+            .and_then(|c| c.get("homepage"))
+            .and_then(|h| h.as_str())
+            .unwrap_or("")
+            .to_string()
     }
 }
 
@@ -559,6 +588,186 @@ impl Plugin for HomebrewPlugin {
             })
             .collect();
 
+        Ok(results)
+    }
+
+    /// Detect installed versions for multiple packages using a single `brew info` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// brew info --json=v2 pkg1 pkg2 pkg3
+    /// ```
+    ///
+    /// Parses the returned JSON once and looks up each package individually using the
+    /// existing [`parse_installed_version`](Self::parse_installed_version) helper. If
+    /// the command fails, all items receive the same error.
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[BatchDetectItem],
+    ) -> Result<Vec<BatchDetectResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            validate_identifier(&item.package_identifier)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args = vec!["info".to_string(), "--json=v2".to_string()];
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        tracing::debug!(count = items.len(), "batch detecting Homebrew installed versions");
+
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("brew", args))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "brew info failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            // Fail all items with the same error.
+            let error_str =
+                format!("brew info exited with code {}", cmd_output.exit_code);
+            return Ok(items
+                .iter()
+                .map(|item| BatchDetectResult {
+                    package_identifier: item.package_identifier.clone(),
+                    installed_version: None,
+                    error: Some(error_str.clone()),
+                })
+                .collect());
+        }
+
+        let json: serde_json::Value = serde_json::from_str(&cmd_output.output).map_err(|e| {
+            report!(PluginError::PluginInternal(format!(
+                "failed to parse brew info JSON: {e}"
+            )))
+        })?;
+
+        let is_cask = self.is_cask();
+        let results = items
+            .iter()
+            .map(|item| {
+                let installed_version =
+                    Self::parse_installed_version(&json, &item.package_identifier, is_cask)
+                        .map(|v| Version::new(&v));
+                BatchDetectResult {
+                    package_identifier: item.package_identifier.clone(),
+                    installed_version,
+                    error: None,
+                }
+            })
+            .collect();
+
+        tracing::debug!(count = items.len(), "Homebrew batch version detection complete");
+        Ok(results)
+    }
+
+    /// Fetch available releases for multiple packages using a single `brew info` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// brew info --json=v2 pkg1 pkg2 pkg3
+    /// ```
+    ///
+    /// Parses the returned JSON once and resolves the latest version and homepage for
+    /// each package individually. If the command fails, all items receive the same error.
+    async fn batch_fetch_releases(
+        &self,
+        items: &[BatchFetchItem],
+    ) -> Result<Vec<BatchFetchResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            validate_identifier(&item.package_identifier)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args = vec!["info".to_string(), "--json=v2".to_string()];
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        tracing::debug!(count = items.len(), "batch fetching Homebrew releases");
+
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("brew", args))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "brew info failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            let error_str =
+                format!("brew info exited with code {}", cmd_output.exit_code);
+            return Ok(items
+                .iter()
+                .map(|item| BatchFetchResult {
+                    package_identifier: item.package_identifier.clone(),
+                    releases: vec![],
+                    error: Some(error_str.clone()),
+                })
+                .collect());
+        }
+
+        let json: serde_json::Value = serde_json::from_str(&cmd_output.output).map_err(|e| {
+            report!(PluginError::PluginInternal(format!(
+                "failed to parse brew info JSON: {e}"
+            )))
+        })?;
+
+        let is_cask = self.is_cask();
+        let results = items
+            .iter()
+            .map(|item| {
+                let Some(version_str) =
+                    Self::parse_latest_version(&json, &item.package_identifier, is_cask)
+                else {
+                    return BatchFetchResult {
+                        package_identifier: item.package_identifier.clone(),
+                        releases: vec![],
+                        error: None,
+                    };
+                };
+
+                let homepage = if is_cask {
+                    Self::find_cask_homepage(&json, &item.package_identifier)
+                } else {
+                    Self::find_formula_homepage(&json, &item.package_identifier)
+                };
+
+                BatchFetchResult {
+                    package_identifier: item.package_identifier.clone(),
+                    releases: vec![UpstreamRelease {
+                        version: Version::new(&version_str),
+                        tag: version_str,
+                        is_prerelease: false,
+                        release_url: homepage,
+                        release_notes: None,
+                        published_at: None,
+                        assets: vec![],
+                        category: None,
+                    }],
+                    error: None,
+                }
+            })
+            .collect();
+
+        tracing::debug!(count = items.len(), "Homebrew batch fetch complete");
         Ok(results)
     }
 }
@@ -962,5 +1171,260 @@ mod tests {
             HostCompatibility::Compatible => panic!("expected Incompatible"),
             _ => panic!("unexpected HostCompatibility variant"),
         }
+    }
+
+    // ── find_formula_homepage / find_cask_homepage ───────────────────────
+
+    #[test]
+    fn find_formula_homepage_returns_correct_url() {
+        let json = sample_formula_json();
+        let homepage = HomebrewPlugin::find_formula_homepage(&json, "wget");
+        assert_eq!(homepage, "https://www.gnu.org/software/wget/");
+    }
+
+    #[test]
+    fn find_formula_homepage_unknown_package_returns_empty() {
+        let json = sample_formula_json();
+        let homepage = HomebrewPlugin::find_formula_homepage(&json, "nonexistent");
+        assert!(homepage.is_empty());
+    }
+
+    #[test]
+    fn find_cask_homepage_returns_correct_url() {
+        let json = sample_cask_json();
+        let homepage = HomebrewPlugin::find_cask_homepage(&json, "firefox");
+        assert_eq!(homepage, "https://www.mozilla.org/firefox/");
+    }
+
+    #[test]
+    fn find_cask_homepage_unknown_package_returns_empty() {
+        let json = sample_cask_json();
+        let homepage = HomebrewPlugin::find_cask_homepage(&json, "nonexistent");
+        assert!(homepage.is_empty());
+    }
+
+    // ── batch_detect_installed_version ───────────────────────────────────
+
+    /// Mock executor that returns a specific JSON payload for brew info.
+    struct BrewInfoExecutor {
+        json: String,
+    }
+
+    impl BrewInfoExecutor {
+        fn with_json(json: serde_json::Value) -> Arc<dyn CommandExecutor> {
+            Arc::new(Self {
+                json: json.to_string(),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl CommandExecutor for BrewInfoExecutor {
+        async fn execute(
+            &self,
+            _spec: &CommandSpec,
+            _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput {
+                output: self.json.clone(),
+                exit_code: 0,
+            })
+        }
+
+        async fn execute_quiet(
+            &self,
+            _spec: &CommandSpec,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            Ok(CommandOutput {
+                output: self.json.clone(),
+                exit_code: 0,
+            })
+        }
+    }
+
+    fn multi_formula_json() -> serde_json::Value {
+        serde_json::json!({
+            "formulae": [
+                {
+                    "name": "wget",
+                    "full_name": "wget",
+                    "versions": { "stable": "1.24.5" },
+                    "installed": [{ "version": "1.24.4" }],
+                    "homepage": "https://www.gnu.org/software/wget/"
+                },
+                {
+                    "name": "jq",
+                    "full_name": "jq",
+                    "versions": { "stable": "1.7.1" },
+                    "installed": [{ "version": "1.7.1" }],
+                    "homepage": "https://jqlang.github.io/jq/"
+                },
+                {
+                    "name": "curl",
+                    "full_name": "curl",
+                    "versions": { "stable": "8.5.0" },
+                    "installed": [],
+                    "homepage": "https://curl.se/"
+                }
+            ],
+            "casks": []
+        })
+    }
+
+    fn multi_cask_json() -> serde_json::Value {
+        serde_json::json!({
+            "formulae": [],
+            "casks": [
+                {
+                    "token": "firefox",
+                    "name": ["Mozilla Firefox"],
+                    "version": "133.0",
+                    "installed": "132.0",
+                    "homepage": "https://www.mozilla.org/firefox/"
+                },
+                {
+                    "token": "google-chrome",
+                    "name": ["Google Chrome"],
+                    "version": "120.0",
+                    "installed": null,
+                    "homepage": "https://www.google.com/chrome/"
+                }
+            ]
+        })
+    }
+
+    #[tokio::test]
+    async fn batch_detect_installed_version_formulae() {
+        let plugin = HomebrewPlugin::new(
+            HomebrewConfig { package_type: Some(HomebrewPackageType::Formula) },
+            BrewInfoExecutor::with_json(multi_formula_json()),
+        )
+        .await
+        .expect("create");
+
+        let items = vec![
+            BatchDetectItem { package_identifier: "wget".to_string() },
+            BatchDetectItem { package_identifier: "jq".to_string() },
+            BatchDetectItem { package_identifier: "curl".to_string() },
+        ];
+        let results = plugin.batch_detect_installed_version(&items).await.expect("ok");
+
+        assert_eq!(results.len(), 3);
+
+        let wget = results.iter().find(|r| r.package_identifier == "wget").unwrap();
+        assert_eq!(wget.installed_version, Some(Version::new("1.24.4")));
+        assert!(wget.error.is_none());
+
+        let jq = results.iter().find(|r| r.package_identifier == "jq").unwrap();
+        assert_eq!(jq.installed_version, Some(Version::new("1.7.1")));
+
+        let curl = results.iter().find(|r| r.package_identifier == "curl").unwrap();
+        assert!(curl.installed_version.is_none(), "curl has empty installed array");
+        assert!(curl.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn batch_detect_installed_version_casks() {
+        let plugin = HomebrewPlugin::new(
+            HomebrewConfig { package_type: Some(HomebrewPackageType::Cask) },
+            BrewInfoExecutor::with_json(multi_cask_json()),
+        )
+        .await
+        .expect("create");
+
+        let items = vec![
+            BatchDetectItem { package_identifier: "firefox".to_string() },
+            BatchDetectItem { package_identifier: "google-chrome".to_string() },
+        ];
+        let results = plugin.batch_detect_installed_version(&items).await.expect("ok");
+
+        assert_eq!(results.len(), 2);
+
+        let firefox = results.iter().find(|r| r.package_identifier == "firefox").unwrap();
+        assert_eq!(firefox.installed_version, Some(Version::new("132.0")));
+
+        let chrome = results.iter().find(|r| r.package_identifier == "google-chrome").unwrap();
+        assert!(chrome.installed_version.is_none(), "chrome is not installed (installed: null)");
+        assert!(chrome.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn batch_detect_installed_version_empty_returns_empty() {
+        let plugin = HomebrewPlugin::new(HomebrewConfig::default(), test_executor())
+            .await
+            .expect("create");
+        let results = plugin.batch_detect_installed_version(&[]).await.expect("ok");
+        assert!(results.is_empty());
+    }
+
+    // ── batch_fetch_releases ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn batch_fetch_releases_formulae() {
+        let plugin = HomebrewPlugin::new(
+            HomebrewConfig { package_type: Some(HomebrewPackageType::Formula) },
+            BrewInfoExecutor::with_json(multi_formula_json()),
+        )
+        .await
+        .expect("create");
+
+        let items = vec![
+            BatchFetchItem { package_identifier: "wget".to_string() },
+            BatchFetchItem { package_identifier: "jq".to_string() },
+            BatchFetchItem { package_identifier: "curl".to_string() },
+        ];
+        let results = plugin.batch_fetch_releases(&items).await.expect("ok");
+
+        assert_eq!(results.len(), 3);
+
+        let wget = results.iter().find(|r| r.package_identifier == "wget").unwrap();
+        assert_eq!(wget.releases.len(), 1);
+        assert_eq!(wget.releases[0].tag, "1.24.5");
+        assert_eq!(wget.releases[0].release_url, "https://www.gnu.org/software/wget/");
+        assert!(wget.error.is_none());
+
+        let jq = results.iter().find(|r| r.package_identifier == "jq").unwrap();
+        assert_eq!(jq.releases.len(), 1);
+        assert_eq!(jq.releases[0].release_url, "https://jqlang.github.io/jq/");
+
+        let curl = results.iter().find(|r| r.package_identifier == "curl").unwrap();
+        assert_eq!(curl.releases.len(), 1, "curl has a latest stable version");
+        assert_eq!(curl.releases[0].tag, "8.5.0");
+    }
+
+    #[tokio::test]
+    async fn batch_fetch_releases_casks() {
+        let plugin = HomebrewPlugin::new(
+            HomebrewConfig { package_type: Some(HomebrewPackageType::Cask) },
+            BrewInfoExecutor::with_json(multi_cask_json()),
+        )
+        .await
+        .expect("create");
+
+        let items = vec![
+            BatchFetchItem { package_identifier: "firefox".to_string() },
+            BatchFetchItem { package_identifier: "google-chrome".to_string() },
+        ];
+        let results = plugin.batch_fetch_releases(&items).await.expect("ok");
+
+        assert_eq!(results.len(), 2);
+
+        let firefox = results.iter().find(|r| r.package_identifier == "firefox").unwrap();
+        assert_eq!(firefox.releases.len(), 1);
+        assert_eq!(firefox.releases[0].tag, "133.0");
+        assert_eq!(firefox.releases[0].release_url, "https://www.mozilla.org/firefox/");
+
+        let chrome = results.iter().find(|r| r.package_identifier == "google-chrome").unwrap();
+        assert_eq!(chrome.releases.len(), 1);
+        assert_eq!(chrome.releases[0].release_url, "https://www.google.com/chrome/");
+    }
+
+    #[tokio::test]
+    async fn batch_fetch_releases_empty_returns_empty() {
+        let plugin = HomebrewPlugin::new(HomebrewConfig::default(), test_executor())
+            .await
+            .expect("create");
+        let results = plugin.batch_fetch_releases(&[]).await.expect("ok");
+        assert!(results.is_empty());
     }
 }
