@@ -6,8 +6,8 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec,
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin,
-    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, UpdateOutputLine,
-    UpstreamRelease, Version,
+    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, TrackingSystem,
+    UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::{HomebrewConfig, HomebrewPackageType};
@@ -188,6 +188,7 @@ impl HomebrewPlugin {
                     installed_version,
                     targets,
                     extra: None,
+                    tracking_system: TrackingSystem::HostManaged,
                 });
             }
         }
@@ -249,6 +250,7 @@ impl HomebrewPlugin {
                     installed_version,
                     targets,
                     extra: None,
+                    tracking_system: TrackingSystem::HostManaged,
                 });
             }
         }

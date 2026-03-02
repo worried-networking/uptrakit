@@ -9,7 +9,8 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec,
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
-    PluginType, ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
+    PluginType, ReleaseInfo, Result, SudoCommandEntry, TrackingSystem, UpdateOutputLine,
+    UpstreamRelease, Version,
 };
 
 use crate::config::NpmConfig;
@@ -531,6 +532,7 @@ impl Plugin for NpmPlugin {
                 installed_version: version,
                 targets: vec![],
                 extra: None,
+                tracking_system: TrackingSystem::HostManaged,
             })
             .collect();
 

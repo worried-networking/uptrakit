@@ -8,7 +8,7 @@ use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin,
     PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, SudoCommandEntry,
-    UpdateCategory, UpdateHookContext, UpdateOutputLine, UpstreamRelease, Version,
+    TrackingSystem, UpdateCategory, UpdateHookContext, UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::{AptConfig, AptDiscoveryFilter};
@@ -349,6 +349,7 @@ impl Plugin for AptPlugin {
                     installed_version: version,
                     targets,
                     extra: None,
+                    tracking_system: TrackingSystem::HostManaged,
                 }
             })
             .collect();

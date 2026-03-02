@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::discovery_target::DiscoveryTarget;
+use crate::tracking_system::TrackingSystem;
 
 /// A piece of software discovered on the local system by a plugin.
 ///
@@ -39,6 +40,13 @@ pub struct DiscoveredSoftware {
     /// Example: Docker's `{"containers": ["web-server"]}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extra: Option<serde_json::Value>,
+    /// Which tracking system this item belongs to.
+    ///
+    /// Every discovery plugin must explicitly declare the target system.
+    /// Defaults to [`TrackingSystem::Targeted`] for backward compatibility
+    /// with existing discovery results.
+    #[serde(default)]
+    pub tracking_system: TrackingSystem,
 }
 
 #[cfg(test)]
@@ -54,6 +62,7 @@ mod tests {
             installed_version: "1.21.3".to_string(),
             targets: vec![],
             extra: Some(serde_json::json!({"package_type": "formula"})),
+            tracking_system: TrackingSystem::Targeted,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
@@ -68,6 +77,7 @@ mod tests {
             installed_version: "8.4.0".to_string(),
             targets: vec![],
             extra: None,
+            tracking_system: TrackingSystem::Targeted,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("extra"));
@@ -84,6 +94,7 @@ mod tests {
             installed_version: "2.43.0".to_string(),
             targets: vec![],
             extra: None,
+            tracking_system: TrackingSystem::Targeted,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("targets"));
@@ -105,6 +116,7 @@ mod tests {
                 execution_site: None,
             }],
             extra: None,
+            tracking_system: TrackingSystem::Targeted,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(json.contains("targets"));
@@ -122,5 +134,22 @@ mod tests {
         let sw: DiscoveredSoftware = serde_json::from_str(json).expect("deserialize");
         assert!(sw.targets.is_empty());
         assert!(sw.extra.is_none());
+        assert_eq!(sw.tracking_system, TrackingSystem::Targeted);
+    }
+
+    #[test]
+    fn tracking_system_host_managed_roundtrip() {
+        let sw = DiscoveredSoftware {
+            package_identifier: "nginx".to_string(),
+            name: "nginx".to_string(),
+            installed_version: "1.24.0".to_string(),
+            targets: vec![],
+            extra: None,
+            tracking_system: TrackingSystem::HostManaged,
+        };
+        let json = serde_json::to_string(&sw).expect("serialize");
+        assert!(json.contains("host_managed"));
+        let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized.tracking_system, TrackingSystem::HostManaged);
     }
 }

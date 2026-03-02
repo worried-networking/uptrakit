@@ -9,8 +9,8 @@ use uptrakit_plugin_infrastructure_core::command::{
     CommandExecutor, CommandSpec, send_output, shell_escape,
 };
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, OutputStreamType, Plugin, PluginCapability, PluginError,
-    PluginType, ReleaseInfo, UpdateOutputLine, UpstreamRelease, Version,
+    DiscoveredSoftware, OutputStreamType, Plugin, PluginCapability, PluginError, PluginType,
+    ReleaseInfo, TrackingSystem, UpdateOutputLine, UpstreamRelease, Version,
 };
 
 /// Type-erased RAII handle kept alive alongside the Docker client.
@@ -504,6 +504,7 @@ impl Plugin for DockerPlugin {
                 installed_version: digest,
                 targets,
                 extra: Some(json!({ "containers": container_names })),
+                tracking_system: TrackingSystem::Targeted,
             });
         }
 

@@ -1015,6 +1015,7 @@ mod tests {
                     execution_site: None,
                 }],
                 extra: None,
+                tracking_system: Default::default(),
             }],
         }
     }
@@ -1042,6 +1043,7 @@ mod tests {
                     execution_site: None,
                 }],
                 extra: None,
+                tracking_system: Default::default(),
             }],
         }
     }
@@ -1057,6 +1059,7 @@ mod tests {
                 installed_version: "1.0.0".to_string(),
                 targets: vec![],
                 extra: None,
+                tracking_system: Default::default(),
             }],
         }
     }
@@ -1109,6 +1112,7 @@ mod tests {
                     },
                 ],
                 extra: None,
+                tracking_system: Default::default(),
             }],
         }
     }
@@ -1479,6 +1483,7 @@ mod tests {
                 installed_version: "1.21.4".to_string(),
                 targets: vec![],
                 extra: None,
+                tracking_system: Default::default(),
             }],
         };
 
