@@ -78,6 +78,17 @@ pub(crate) fn init_master_key(
                     encryption remains enabled because a master key was provided."
                 );
             }
+            // Warn when the key is supplied via environment variable rather than a file.
+            // Environment variables are visible in /proc/pid/environ, container manifests,
+            // and orchestration tooling — use --master-key-file with mode 0o600 in production.
+            if args.master_key_file.is_none() && env_val.is_some() {
+                tracing::warn!(
+                    "master encryption key loaded from UPTRAKIT_MASTER_KEY environment variable. \
+                     For production deployments, prefer --master-key-file with a file readable \
+                     only by the service user (mode 0o600). Environment variables are visible in \
+                     /proc/pid/environ, container inspection output, and orchestration manifests."
+                );
+            }
             let key_bytes = parse_master_key_hex(&key_hex)?;
             uptrakit_crypto::init_master_key(zeroize::Zeroizing::new(key_bytes)).context_to()?;
             tracing::info!("master encryption key initialized");

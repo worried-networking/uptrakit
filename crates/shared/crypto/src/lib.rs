@@ -2,6 +2,23 @@
 //!
 //! Uses AES-256-GCM with a global master key to encrypt/decrypt values
 //! transparently via the [`EncryptedString`] SeaORM custom type.
+//!
+//! ## Ciphertext formats
+//!
+//! Two wire formats coexist for backward compatibility:
+//!
+//! | Format | Prefix | AAD | Used by |
+//! |---|---|---|---|
+//! | v1 | `ENC:v1:` | empty | [`EncryptedString`] DB columns (legacy) |
+//! | v2 | `ENC:v2:` | caller-supplied context string | [`encrypt_str_with_aad`], key verification, JWT key |
+//!
+//! `ENC:v2:` ciphertexts are **context-bound**: the AAD string is mixed into
+//! the GCM authentication tag, so a ciphertext encrypted for one purpose
+//! (e.g. `"uptrakit:settings:jwt_signing_key"`) cannot be used as a valid
+//! ciphertext for a different purpose.  This prevents ciphertext relocation
+//! attacks where an attacker moves a ciphertext from one column to another.
+//!
+//! See `docs/security/secrets-and-encryption.md` for operational details.
 
 use std::fmt;
 use std::sync::OnceLock;
@@ -103,27 +120,53 @@ pub fn master_key_available() -> bool {
     MASTER_KEY.get().is_some()
 }
 
+// ── Ciphertext format prefixes ───────────────────────────────────────
+
+/// Prefix for v1 ciphertexts (empty AAD, used by `EncryptedString` columns).
+const ENC_V1_PREFIX: &str = "ENC:v1:";
+
+/// Prefix for v2 ciphertexts (caller-supplied AAD, context-bound).
+const ENC_V2_PREFIX: &str = "ENC:v2:";
+
+/// Check whether a stored string is already encrypted (`ENC:v1:` or `ENC:v2:` prefix).
+pub fn is_encrypted(s: &str) -> bool {
+    s.starts_with(ENC_V1_PREFIX) || s.starts_with(ENC_V2_PREFIX)
+}
+
 // ── Master key verification ──────────────────────────────────────────
 
 /// Sentinel plaintext used to verify master key consistency across HA instances.
 const KEY_VERIFICATION_SENTINEL: &str = "uptrakit-master-key-ok-v1";
 
+/// AAD string bound to the key-verification ciphertext.
+///
+/// Using a dedicated AAD ensures this ciphertext cannot be reused as a valid
+/// ciphertext in any other context, even if an attacker obtains the master key
+/// and attempts a ciphertext relocation attack.
+const KEY_VERIFICATION_AAD: &str = "uptrakit:master-key-verification";
+
 /// Create an encrypted verification token from the sentinel value.
+///
+/// Uses `ENC:v2:` format with [`KEY_VERIFICATION_AAD`] so the token is
+/// context-bound and cannot be repurposed as a different encrypted value.
 ///
 /// The returned string should be stored in the settings table.
 /// On subsequent startups, call [`verify_key_verification_token`] with
 /// the stored value to ensure the same master key is in use.
 pub fn create_key_verification_token() -> Result<String> {
-    encrypt_value(KEY_VERIFICATION_SENTINEL)
+    encrypt_value_v2(KEY_VERIFICATION_SENTINEL, KEY_VERIFICATION_AAD)
 }
 
 /// Verify a stored key-verification token against the current master key.
+///
+/// Accepts both `ENC:v1:` (legacy installations, verified with empty AAD)
+/// and `ENC:v2:` (current format, verified with [`KEY_VERIFICATION_AAD`]).
 ///
 /// Decrypts the token and checks that the plaintext matches the expected
 /// sentinel. Returns `Err(MasterKeyMismatch)` if decryption succeeds but
 /// the plaintext differs, or if decryption itself fails (wrong key).
 pub fn verify_key_verification_token(stored: &str) -> Result<()> {
-    match decrypt_value(stored) {
+    match decrypt_str_with_aad(stored, KEY_VERIFICATION_AAD) {
         Ok(plaintext) if plaintext == KEY_VERIFICATION_SENTINEL => Ok(()),
         Ok(_) => bail!(CryptoError::MasterKeyMismatch),
         Err(e) => {
@@ -133,15 +176,9 @@ pub fn verify_key_verification_token(stored: &str) -> Result<()> {
     }
 }
 
-/// Prefix for encrypted values stored in the database.
-const ENC_PREFIX: &str = "ENC:v1:";
+// ── Public encryption API ────────────────────────────────────────────
 
-/// Check whether a stored string is already encrypted (has the `ENC:v1:` prefix).
-pub fn is_encrypted(s: &str) -> bool {
-    s.starts_with(ENC_PREFIX)
-}
-
-/// Encrypt a plaintext string.
+/// Encrypt a plaintext string without AAD (produces `ENC:v1:` ciphertext).
 ///
 /// Returns `"ENC:v1:<hex(nonce || ciphertext || tag)>"`.
 ///
@@ -161,7 +198,7 @@ pub fn encrypt_str(plaintext: &str) -> Result<String> {
     encrypt_value(plaintext)
 }
 
-/// Decrypt a stored encrypted string.
+/// Decrypt a stored `ENC:v1:` encrypted string.
 ///
 /// Strips the `"ENC:v1:"` prefix, hex-decodes, extracts the nonce, and
 /// decrypts the ciphertext. Requires the master key to be initialized via
@@ -169,6 +206,43 @@ pub fn encrypt_str(plaintext: &str) -> Result<String> {
 pub fn decrypt_str(stored: &str) -> Result<String> {
     decrypt_value(stored)
 }
+
+/// Encrypt a plaintext string with caller-supplied AAD (produces `ENC:v2:` ciphertext).
+///
+/// The `aad` string is mixed into the GCM authentication tag. A ciphertext
+/// encrypted with a given `aad` can only be decrypted with the same `aad`,
+/// preventing relocation of the ciphertext to a different context.
+///
+/// Use a unique, stable, descriptive string for `aad`; for example:
+/// `"uptrakit:settings:jwt_signing_key"`.
+///
+/// Returns `"ENC:v2:<hex(nonce || ciphertext || tag)>"`.
+///
+/// Requires the master key to be initialized via [`init_master_key`]; returns
+/// `Err(CryptoError::NotInitialized)` otherwise.
+pub fn encrypt_str_with_aad(plaintext: &str, aad: &str) -> Result<String> {
+    encrypt_value_v2(plaintext, aad)
+}
+
+/// Decrypt a stored encrypted string, accepting both `ENC:v1:` and `ENC:v2:`.
+///
+/// - For `ENC:v2:` ciphertexts: the provided `aad` must match the AAD used
+///   during encryption. Decryption fails if the AAD does not match.
+/// - For `ENC:v1:` ciphertexts: the `aad` argument is ignored and decryption
+///   proceeds with empty AAD (backward compatibility for existing data).
+///
+/// Requires the master key to be initialized via [`init_master_key`]; returns
+/// `Err(CryptoError::NotInitialized)` otherwise.
+pub fn decrypt_str_with_aad(stored: &str, aad: &str) -> Result<String> {
+    if stored.starts_with(ENC_V2_PREFIX) {
+        decrypt_value_v2(stored, aad)
+    } else {
+        // Backward compat: ENC:v1: ciphertexts were produced with empty AAD.
+        decrypt_value(stored)
+    }
+}
+
+// ── Internal v1 implementation (empty AAD) ──────────────────────────
 
 fn encrypt_value(plaintext: &str) -> Result<String> {
     if PLAINTEXT_MODE.load(Ordering::Acquire) {
@@ -201,7 +275,7 @@ fn encrypt_value(plaintext: &str) -> Result<String> {
     output.extend_from_slice(tag.as_ref());
 
     Ok(format!(
-        "{ENC_PREFIX}{}",
+        "{ENC_V1_PREFIX}{}",
         uptrakit_shared_types::hex::encode(&output)
     ))
 }
@@ -212,7 +286,7 @@ fn decrypt_value(stored: &str) -> Result<String> {
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
 
     let hex_part = stored
-        .strip_prefix(ENC_PREFIX)
+        .strip_prefix(ENC_V1_PREFIX)
         .ok_or_else(|| report!(CryptoError::Decryption("missing ENC:v1: prefix".into())))?;
 
     let raw = uptrakit_shared_types::hex::decode(hex_part).context_to()?;
@@ -239,6 +313,81 @@ fn decrypt_value(stored: &str) -> Result<String> {
     String::from_utf8(plaintext.to_vec()).context_to()
 }
 
+// ── Internal v2 implementation (caller-supplied AAD) ─────────────────
+
+fn encrypt_value_v2(plaintext: &str, aad: &str) -> Result<String> {
+    if PLAINTEXT_MODE.load(Ordering::Acquire) {
+        return Ok(plaintext.to_string());
+    }
+
+    let key_bytes = MASTER_KEY
+        .get()
+        .ok_or_else(|| report!(CryptoError::NotInitialized))?;
+
+    let unbound = UnboundKey::new(&AES_256_GCM, key_bytes.as_slice())
+        .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
+    let key = LessSafeKey::new(unbound);
+
+    // Generate random 12-byte nonce
+    let mut nonce_bytes = [0u8; 12];
+    rand::rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+
+    // Encrypt in-place with caller-supplied AAD
+    let mut in_out = plaintext.as_bytes().to_vec();
+    let tag = key
+        .seal_in_place_separate_tag(nonce, Aad::from(aad.as_bytes()), &mut in_out)
+        .map_err(|e| report!(CryptoError::Encryption(e.to_string())))?;
+
+    // Build output: nonce || ciphertext || tag
+    let mut output = Vec::with_capacity(12 + in_out.len() + tag.as_ref().len());
+    output.extend_from_slice(&nonce_bytes);
+    output.extend_from_slice(&in_out);
+    output.extend_from_slice(tag.as_ref());
+
+    Ok(format!(
+        "{ENC_V2_PREFIX}{}",
+        uptrakit_shared_types::hex::encode(&output)
+    ))
+}
+
+fn decrypt_value_v2(stored: &str, aad: &str) -> Result<String> {
+    let key_bytes = MASTER_KEY
+        .get()
+        .ok_or_else(|| report!(CryptoError::NotInitialized))?;
+
+    let hex_part = stored
+        .strip_prefix(ENC_V2_PREFIX)
+        .ok_or_else(|| report!(CryptoError::Decryption("missing ENC:v2: prefix".into())))?;
+
+    let raw = uptrakit_shared_types::hex::decode(hex_part).context_to()?;
+
+    // AES-256-GCM: 12-byte nonce + ciphertext + 16-byte tag
+    if raw.len() < 12 + 16 {
+        bail!(CryptoError::CiphertextTooShort);
+    }
+
+    let nonce_bytes: [u8; 12] = raw[..12]
+        .try_into()
+        .map_err(|_| report!(CryptoError::InvalidNonce))?;
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+
+    let unbound = UnboundKey::new(&AES_256_GCM, key_bytes.as_slice())
+        .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
+    let key = LessSafeKey::new(unbound);
+
+    let mut ciphertext_and_tag = raw[12..].to_vec();
+    let plaintext = key
+        .open_in_place(nonce, Aad::from(aad.as_bytes()), &mut ciphertext_and_tag)
+        .map_err(|_| {
+            report!(CryptoError::Decryption(
+                "wrong key, wrong AAD, or tampered data".into()
+            ))
+        })?;
+
+    String::from_utf8(plaintext.to_vec()).context_to()
+}
+
 /// A string that is transparently encrypted when written to the database
 /// and decrypted when read back.
 ///
@@ -251,6 +400,12 @@ fn decrypt_value(stored: &str) -> Result<String> {
 /// `Err(CryptoError::NotInitialized)`. There is no plaintext fallback — a
 /// missing key is always treated as a hard error to prevent silent secret
 /// exposure in misconfigured deployments.
+///
+/// ## Ciphertext format
+///
+/// `EncryptedString` uses the `ENC:v1:` format (empty AAD). Migration of
+/// existing columns to context-bound `ENC:v2:` ciphertexts is tracked in
+/// `TODO.md`.
 pub struct EncryptedString {
     /// Plaintext value (for `expose_secret`).
     plaintext: SecretString,
@@ -339,7 +494,7 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
     fn try_from(v: sea_orm::Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
         match v {
             sea_orm::Value::String(Some(s)) => {
-                if is_encrypted(&s) {
+                if s.starts_with(ENC_V1_PREFIX) {
                     let plaintext =
                         decrypt_value(&s).map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
                     Ok(EncryptedString::from_db(plaintext, s))
@@ -397,7 +552,7 @@ impl sea_orm::TryGetable for EncryptedString {
             }
         };
 
-        if is_encrypted(&s) {
+        if s.starts_with(ENC_V1_PREFIX) {
             let plaintext = decrypt_value(&s).map_err(|e| {
                 sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
                     "EncryptedString decryption failed: {e}"
@@ -441,7 +596,7 @@ mod tests {
             "a".repeat(10_000).as_str(),
         ] {
             let encrypted = encrypt_value(plaintext).expect("encryption should succeed");
-            assert!(is_encrypted(&encrypted));
+            assert!(encrypted.starts_with(ENC_V1_PREFIX));
             let decrypted = decrypt_value(&encrypted).expect("decryption should succeed");
             assert_eq!(decrypted, plaintext);
         }
@@ -473,8 +628,9 @@ mod tests {
     #[test]
     fn test_is_encrypted_detection() {
         assert!(is_encrypted("ENC:v1:aabbcc"));
+        assert!(is_encrypted("ENC:v2:aabbcc"));
         assert!(!is_encrypted("plaintext"));
-        assert!(!is_encrypted("ENC:v2:aabbcc"));
+        assert!(!is_encrypted("ENC:v3:aabbcc"));
         assert!(!is_encrypted(""));
     }
 
@@ -506,13 +662,13 @@ mod tests {
         let encrypted = encrypt_value("sensitive data").expect("encryption should succeed");
         // Tamper with one byte in the hex payload
         let hex_part = encrypted
-            .strip_prefix(ENC_PREFIX)
+            .strip_prefix(ENC_V1_PREFIX)
             .expect("should have prefix");
         let mut raw = uptrakit_shared_types::hex::decode(hex_part).expect("valid hex");
         if let Some(byte) = raw.last_mut() {
             *byte ^= 0xFF;
         }
-        let tampered = format!("{ENC_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
+        let tampered = format!("{ENC_V1_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
         assert!(decrypt_value(&tampered).is_err());
     }
 
@@ -591,8 +747,29 @@ mod tests {
         ensure_test_key();
 
         let token = create_key_verification_token().expect("should create token");
+        // Verification token must now be ENC:v2:
+        assert!(
+            token.starts_with(ENC_V2_PREFIX),
+            "key verification token should use ENC:v2: format"
+        );
         assert!(is_encrypted(&token));
         assert!(verify_key_verification_token(&token).is_ok());
+    }
+
+    #[test]
+    fn test_key_verification_accepts_legacy_v1() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        // Simulate a legacy ENC:v1: token (from an installation before this change).
+        // ENC:v1: tokens are decrypted with empty AAD — the sentinel must match.
+        let legacy_token = encrypt_value(KEY_VERIFICATION_SENTINEL)
+            .expect("should encrypt sentinel with v1");
+        assert!(legacy_token.starts_with(ENC_V1_PREFIX));
+        assert!(
+            verify_key_verification_token(&legacy_token).is_ok(),
+            "verify must accept legacy ENC:v1: tokens for backward compatibility"
+        );
     }
 
     #[test]
@@ -602,12 +779,12 @@ mod tests {
 
         let token = create_key_verification_token().expect("should create token");
         // Tamper with the ciphertext
-        let hex_part = token.strip_prefix(ENC_PREFIX).expect("has prefix");
+        let hex_part = token.strip_prefix(ENC_V2_PREFIX).expect("has v2 prefix");
         let mut raw = uptrakit_shared_types::hex::decode(hex_part).expect("valid hex");
         if let Some(byte) = raw.last_mut() {
             *byte ^= 0xFF;
         }
-        let tampered = format!("{ENC_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
+        let tampered = format!("{ENC_V2_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
         let result = verify_key_verification_token(&tampered);
         assert!(result.is_err());
         assert!(
@@ -642,7 +819,7 @@ mod tests {
         // Construct a value with valid prefix but ciphertext shorter than nonce + tag (28 bytes).
         let short_bytes = [0u8; 10];
         let short_hex = uptrakit_shared_types::hex::encode(short_bytes);
-        let stored = format!("{ENC_PREFIX}{short_hex}");
+        let stored = format!("{ENC_V1_PREFIX}{short_hex}");
         let result = decrypt_value(&stored);
         assert!(result.is_err());
         assert!(matches!(
@@ -670,7 +847,7 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let result = decrypt_value(&format!("{ENC_PREFIX}not-valid-hex!@#$"));
+        let result = decrypt_value(&format!("{ENC_V1_PREFIX}not-valid-hex!@#$"));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err().current_context(),
@@ -758,4 +935,102 @@ mod tests {
         );
     }
 
+    // ── ENC:v2: (AAD) tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_v2_round_trip() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let aad = "uptrakit:test:context";
+        for plaintext in ["hello", "", "multi\nline\nvalue", "a".repeat(1_000).as_str()] {
+            let encrypted =
+                encrypt_str_with_aad(plaintext, aad).expect("v2 encryption should succeed");
+            assert!(
+                encrypted.starts_with(ENC_V2_PREFIX),
+                "v2 ciphertext must carry ENC:v2: prefix"
+            );
+            assert!(is_encrypted(&encrypted));
+            let decrypted =
+                decrypt_str_with_aad(&encrypted, aad).expect("v2 decryption should succeed");
+            assert_eq!(decrypted, plaintext);
+        }
+    }
+
+    #[test]
+    fn test_v2_wrong_aad_fails() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let encrypted =
+            encrypt_str_with_aad("secret", "correct-aad").expect("v2 encryption should succeed");
+        let result = decrypt_str_with_aad(&encrypted, "wrong-aad");
+        assert!(
+            result.is_err(),
+            "decrypting with wrong AAD must fail"
+        );
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            CryptoError::Decryption(_)
+        ));
+    }
+
+    #[test]
+    fn test_v2_nonce_uniqueness() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let aad = "uptrakit:test:nonce";
+        let enc1 = encrypt_str_with_aad("same", aad).expect("should encrypt");
+        let enc2 = encrypt_str_with_aad("same", aad).expect("should encrypt");
+        assert_ne!(enc1, enc2, "v2 encryptions of the same value must differ (random nonces)");
+    }
+
+    #[test]
+    fn test_v2_tampered_ciphertext_fails() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let aad = "uptrakit:test:tamper";
+        let encrypted = encrypt_str_with_aad("data", aad).expect("v2 encryption should succeed");
+        let hex_part = encrypted.strip_prefix(ENC_V2_PREFIX).expect("has v2 prefix");
+        let mut raw = uptrakit_shared_types::hex::decode(hex_part).expect("valid hex");
+        if let Some(byte) = raw.last_mut() {
+            *byte ^= 0xFF;
+        }
+        let tampered = format!("{ENC_V2_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
+        assert!(decrypt_str_with_aad(&tampered, aad).is_err());
+    }
+
+    #[test]
+    fn test_decrypt_with_aad_accepts_v1_fallback() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        // An ENC:v1: ciphertext should be accepted by decrypt_str_with_aad
+        // regardless of the provided aad (backward compat).
+        let v1_encrypted = encrypt_str("legacy_value").expect("v1 encryption should succeed");
+        assert!(v1_encrypted.starts_with(ENC_V1_PREFIX));
+        let result = decrypt_str_with_aad(&v1_encrypted, "any-aad-is-ignored-for-v1");
+        assert!(
+            result.is_ok(),
+            "decrypt_str_with_aad must accept ENC:v1: tokens for backward compatibility"
+        );
+        assert_eq!(result.unwrap(), "legacy_value");
+    }
+
+    #[test]
+    fn test_v2_plaintext_mode_returns_plaintext() {
+        let _lock = TEST_LOCK.lock().unwrap();
+
+        let was_plaintext = PLAINTEXT_MODE.load(Ordering::Acquire);
+        PLAINTEXT_MODE.store(true, Ordering::Release);
+
+        let result = encrypt_str_with_aad("dev secret", "some-aad");
+        PLAINTEXT_MODE.store(was_plaintext, Ordering::Release);
+
+        let value = result.expect("plaintext mode should succeed");
+        assert_eq!(value, "dev secret");
+        assert!(!is_encrypted(&value));
+    }
 }
