@@ -39,6 +39,10 @@ the refactored update trigger pipeline (`queries/update_triggers.rs`), and SSE b
 streaming. The N+1 query patterns in `find_outdated_items_for_host` and
 `find_outdated_hosts_for_item` have been fixed via batch-loading. The Telegram webhook secret
 comparison now uses SHA-256 + constant-time `ct_eq` to eliminate the timing side-channel.
+The non-atomic batch completion race (`maybe_complete_batch` three separate COUNT queries + UPDATE
+outside a transaction) has been fixed by wrapping the entire function in a DB transaction with a
+terminal-state guard. The SSE batch progress and update output streams now integrate
+`CancellationToken` and exit cleanly during graceful server shutdown.
 
 ## Architecture
 
@@ -136,9 +140,6 @@ issued. A compromised token that was never explicitly revoked remains valid fore
 - `SecretString` at all API input boundaries.
 
 ### Issues
-
-**[MEDIUM]** `src/routes/oidc_auth.rs` -- `oidc_complete_registration` consumes registration
-code before token validation. DoS via code burning.
 
 **[LOW]** `src/auth/token.rs:17-22` -- API tokens hashed with unsalted SHA-256. Per-token salt
 would strengthen defense-in-depth.
@@ -260,12 +261,6 @@ does NOT write to the outbox.
 
 **[HIGH]** `src/batch_progress_broadcaster.rs:64-66` -- Instance-local only. SSE clients on
 instance A get no live events for batches processed on instance B.
-
-**[HIGH]** `src/routes/update_batches.rs:373-483` -- SSE stream has no CancellationToken
-integration. Hangs during graceful shutdown.
-
-**[HIGH]** `src/queries/update_batches.rs:466-528` -- Non-atomic batch completion. Three
-COUNT queries + UPDATE without CAS guard. Concurrent completions may duplicate notifications.
 
 **[MEDIUM]** `src/batch_progress_broadcaster.rs:77-79` -- Orphaned channel leak if batch
 never reaches terminal state.
@@ -651,12 +646,6 @@ issues three sequential round-trips to the DB.
 at line 50. While the comment is accurate (a `Vec<String>` is always JSON-serializable), this
 is a hidden panic in a production query path. Use `map_err` / `?` to propagate this as a
 `DbErr::Custom`, consistent with all other serialization error handling in the query layer.
-
-**[MEDIUM]** `src/queries/update_batches.rs:471-498` -- `maybe_complete_batch` executes three
-separate COUNT queries. Consolidate to one GROUP BY.
-
-**[MEDIUM]** `src/queries/update_batches.rs:402-460` -- `dispatch_next_in_batch` race:
-concurrent completions may double-update batch status.
 
 **[MEDIUM]** Missing index on `update_history(host_id, software_item_id, status)` for
 `validate_update_preconditions`.

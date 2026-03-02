@@ -17,7 +17,8 @@ testability, and comprehensive CLI argument tests.
 The main concerns are the plaintext API token storage, `main.rs` at 4,793 lines (including ~1,500
 lines of tests) needing splitting, a UTF-8 safety issue in `truncate()`, and incomplete integration
 test coverage (only 3 of 13 namespaces covered by `MockApiServer` tests). The batch update commands
-are well-structured with `*Params` structs and follow existing CLI patterns.
+are well-structured with `*Params` structs and follow existing CLI patterns. The `--status` filter
+now uses a `clap` `value_parser` to reject invalid status values at parse time.
 
 ## Architecture
 
@@ -160,11 +161,6 @@ to server when only `--release-tag` provided. Server must distinguish "provided 
 character. Host names and software item names from external systems may contain non-ASCII
 characters. Use `s.chars().take(max - 1).collect::<String>()` or `s.char_indices()` to find a
 safe boundary.
-
-**[LOW]** `src/commands/batch_update.rs:268` -- `.parse().unwrap_or_default()` on the `status`
-filter silently accepts invalid status values (e.g. `--status garbage` resolves to the
-default enum variant). The user receives no feedback that their filter was ignored. Should
-return an error or print a warning listing valid values.
 
 **[LOW]** `src/commands/auth.rs:155-156` -- `chrono_date()` function name does not match its
 implementation (uses `time::OffsetDateTime`, not `chrono`).

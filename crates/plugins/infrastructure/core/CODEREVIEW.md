@@ -9,7 +9,8 @@
 `uptrakit-plugin-infrastructure-core` (~1,101 LoC across 7 source files) defines the `Plugin` trait,
 `PluginCapability`, `SecretMasking`, `Version`, and the typed error/command infrastructure used by
 all plugin crates. The trait is object-safe with opt-in methods and correct default implementations.
-This is one of the best-designed trait APIs in the workspace.
+This is one of the best-designed trait APIs in the workspace. `HostCompatibility` and `PluginError`
+have been annotated with `#[non_exhaustive]` per the workspace coding standard.
 
 ## Architecture
 
@@ -85,14 +86,6 @@ No coding standards issues found.
   capability adoption.
 
 ### Issues
-
-**[LOW]** `src/traits.rs:16-22` -- `HostCompatibility` not `#[non_exhaustive]`. Inconsistent
-with project convention documented in `coding-standards.md`. Adding a variant to
-`HostCompatibility` is a semver-breaking change for downstream match sites.
-
-**[LOW]** `src/error.rs:6-48` -- `PluginError` not `#[non_exhaustive]`. Inconsistent with
-project convention. External consumers matching on `PluginError` variants will break if a new
-variant is added.
 
 **[LOW]** `src/types.rs:18-25` -- `PluginCapability` has `#[non_exhaustive]` but no
 `Other(String)` variant unlike its wire counterpart `Capability`. New capabilities require

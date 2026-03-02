@@ -20,9 +20,10 @@ registry response handling, and async plugin trait methods using a well-designed
 `FixedOutputExecutor` mock. Error handling is consistent, using the `rootcause` framework
 throughout. The registry integration correctly handles dist-tag deduplication for pre-release
 versions and gracefully degrades on parsing failures. The HTTP client correctly sets
-`connect_timeout(10s)` and `timeout(60s)`. Notable areas for improvement include the absence of
-retry logic for transient network failures and the hardcoded registry URL, which limits private
-registry support.
+`connect_timeout(10s)` and `timeout(60s)`. The `.unwrap()` in `validate_npm_name_part` has been
+replaced with a `let/else` pattern consistent with the project no-unwrap rule. Notable areas for
+improvement include the absence of retry logic for transient network failures and the hardcoded
+registry URL, which limits private registry support.
 
 ## Architecture
 
@@ -146,13 +147,6 @@ would be more portable and POSIX-compliant.
   doc comments explaining the validation rules and threat model (protocol prefix injection).
 
 ### Issues
-
-**[HIGH]** `src/plugin.rs:76` -- `.unwrap()` in production `validate_npm_name_part()` after
-emptiness guard. The guard at line 67 ensures the string is non-empty, so the
-`.chars().next().unwrap()` at line 76 cannot panic under the current code. However, this
-violates the project-wide no-unwrap-in-production rule. Using
-`let Some(first) = part.chars().next() else { ... }` or a pattern match would be
-consistent with the workspace convention.
 
 **[LOW]** `plugin.rs:17-21` -- The doc comment on `SYSTEM_NPM_PACKAGES` explains why
 packages are filtered but the constant itself lacks a note about maintenance -- when new
