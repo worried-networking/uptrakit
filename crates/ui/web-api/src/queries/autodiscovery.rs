@@ -436,22 +436,52 @@ async fn process_plugin_result(
         match item.tracking_system {
             TrackingSystem::HostManaged => {
                 // Route to host_packages table.
-                if let Some(existing_pc_id) = result.plugin_config_id {
+                //
+                // Determine the plugin config ID:
+                // - Config-ID mode (plugin already registered): use the pre-existing ID
+                //   directly from the result.
+                // - Discover-all mode (no pre-existing config, `plugin_config_id: None`):
+                //   use the first DiscoveryTarget to find-or-create the plugin config, then
+                //   use that ID. This handles the first-run case for Homebrew, APT, and npm
+                //   when no plugin config exists yet for the tenant.
+                let pc_id = if let Some(existing) = result.plugin_config_id {
+                    Some(existing)
+                } else if let Some(target) = item.targets.first() {
+                    let target_plugin_type = target.plugin_type.to_string();
+                    Some(
+                        find_or_create_default_plugin_config(
+                            db,
+                            tenant_id,
+                            &target_plugin_type,
+                            &target.plugin_config,
+                            &target.plugin_config_name,
+                        )
+                        .await?,
+                    )
+                } else {
+                    None
+                };
+
+                if let Some(plugin_config_id) = pc_id {
                     let ignore_set = super::host_packages::load_host_package_ignore_set(
                         db,
                         tenant_id,
                         host_id,
-                        existing_pc_id,
+                        plugin_config_id,
                     )
                     .await
-                    .map_err(|e| report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+                    .map_err(|e| {
+                        report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(
+                            e.to_string()
+                        )))
+                    })?;
 
                     super::host_packages::find_or_create_host_package(
                         super::host_packages::FindOrCreateHostPackageParams {
                             db,
                             tenant_id,
                             host_id,
-                            plugin_config_id: existing_pc_id,
+                            plugin_config_id,
                             package_identifier: &item.package_identifier,
                             name: &item.name,
                             installed_version: &item.installed_version,
@@ -459,12 +489,16 @@ async fn process_plugin_result(
                         },
                     )
                     .await
-                    .map_err(|e| report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+                    .map_err(|e| {
+                        report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(
+                            e.to_string()
+                        )))
+                    })?;
                 } else {
                     tracing::warn!(
                         plugin_type = %result.plugin_type,
                         package_identifier = %item.package_identifier,
-                        "host-managed item has no plugin_config_id; skipping"
+                        "host-managed item has no plugin_config_id and no targets; skipping"
                     );
                 }
             }
@@ -875,8 +909,9 @@ mod tests {
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
         PluginRole, PluginType,
     };
-    use uptrakit_shared_db::entity::{host, plugin_config, tenant};
-    use uptrakit_shared_types::SoftwareDiscoveryState;
+    use uptrakit_shared_db::entity::{host, host_package, plugin_config, tenant};
+    use uptrakit_shared_db::entity::prelude::HostPackage;
+    use uptrakit_shared_types::{SoftwareDiscoveryState, TrackingSystem};
 
     async fn setup_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");
@@ -1897,5 +1932,149 @@ mod tests {
             .await
             .expect("count");
         assert_eq!(count, 1, "duplicate insert must not create a second row");
+    }
+
+    // ── HostManaged + target: discover-all first-run path ─────────────────────
+
+    /// When a `HostManaged` item arrives with `plugin_config_id: None` but
+    /// carries a `DiscoveryTarget`, the server must auto-create the plugin
+    /// config and create a `host_packages` row.
+    ///
+    /// This covers the first-run Homebrew / APT discovery path where no plugin
+    /// config exists for the tenant yet.
+    #[tokio::test]
+    async fn host_managed_with_target_auto_creates_config_and_host_package() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let agent_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let payload = DiscoveryResultsPayload {
+            host_machine_id: "test-machine".to_string(),
+            results: vec![DiscoveryPluginResult {
+                plugin_type: PluginType::PackageManagerHomebrew,
+                plugin_config_id: None,
+                error: None,
+                discoveries: vec![WireDiscoveredSoftware {
+                    package_identifier: "wget".to_string(),
+                    name: "wget".to_string(),
+                    installed_version: "1.24.4".to_string(),
+                    targets: vec![DiscoveryTarget {
+                        plugin_type: PluginType::PackageManagerHomebrew,
+                        plugin_config: serde_json::json!({"package_type": "formula"}),
+                        plugin_config_name: "Homebrew (Formulae)".to_string(),
+                        roles: all_roles(),
+                        package_identifier: None,
+                        config_override: None,
+                        execution_site: None,
+                    }],
+                    extra: None,
+                    tracking_system: TrackingSystem::HostManaged,
+                }],
+            }],
+        };
+
+        process_discovery_results(&db, agent_id, tenant_id, host_id, payload)
+            .await
+            .expect("process must succeed");
+
+        // Plugin config must have been auto-created from the target.
+        let configs = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq("package_manager_homebrew"))
+            .all(&db)
+            .await
+            .expect("query plugin configs");
+        assert_eq!(configs.len(), 1, "exactly one Homebrew plugin config must exist");
+        assert_eq!(configs[0].name, "Homebrew (Formulae)");
+
+        // host_package row must have been created.
+        let packages = HostPackage::find()
+            .filter(host_package::Column::HostId.eq(host_id))
+            .filter(host_package::Column::PackageIdentifier.eq("wget"))
+            .all(&db)
+            .await
+            .expect("query host packages");
+        assert_eq!(packages.len(), 1, "exactly one host_package row must exist");
+        assert_eq!(
+            packages[0].installed_version.as_deref(),
+            Some("1.24.4"),
+            "installed version must be recorded"
+        );
+    }
+
+    /// Repeated `HostManaged` discoveries with the same target are idempotent:
+    /// the plugin config is reused and the host_package version is updated in place.
+    #[tokio::test]
+    async fn host_managed_with_target_idempotent_on_second_run() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let agent_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        insert_host(&db, host_id, tenant_id).await;
+
+        let make_payload = |version: &str| {
+            let version = version.to_string();
+            DiscoveryResultsPayload {
+                host_machine_id: "test-machine".to_string(),
+                results: vec![DiscoveryPluginResult {
+                    plugin_type: PluginType::PackageManagerHomebrew,
+                    plugin_config_id: None,
+                    error: None,
+                    discoveries: vec![WireDiscoveredSoftware {
+                        package_identifier: "wget".to_string(),
+                        name: "wget".to_string(),
+                        installed_version: version,
+                        targets: vec![DiscoveryTarget {
+                            plugin_type: PluginType::PackageManagerHomebrew,
+                            plugin_config: serde_json::json!({"package_type": "formula"}),
+                            plugin_config_name: "Homebrew (Formulae)".to_string(),
+                            roles: all_roles(),
+                            package_identifier: None,
+                            config_override: None,
+                            execution_site: None,
+                        }],
+                        extra: None,
+                        tracking_system: TrackingSystem::HostManaged,
+                    }],
+                }],
+            }
+        };
+
+        // First run.
+        process_discovery_results(&db, agent_id, tenant_id, host_id, make_payload("1.24.4"))
+            .await
+            .expect("first run");
+
+        // Second run with an updated version.
+        process_discovery_results(&db, agent_id, tenant_id, host_id, make_payload("1.24.5"))
+            .await
+            .expect("second run");
+
+        // Still exactly one plugin config.
+        let config_count = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq("package_manager_homebrew"))
+            .count(&db)
+            .await
+            .expect("count configs");
+        assert_eq!(config_count, 1, "must not create duplicate plugin configs");
+
+        // Still exactly one host_package, but with the updated version.
+        let packages = HostPackage::find()
+            .filter(host_package::Column::HostId.eq(host_id))
+            .filter(host_package::Column::PackageIdentifier.eq("wget"))
+            .all(&db)
+            .await
+            .expect("query host packages");
+        assert_eq!(packages.len(), 1, "must not create duplicate host_package rows");
+        assert_eq!(
+            packages[0].installed_version.as_deref(),
+            Some("1.24.5"),
+            "installed version must be updated on second run"
+        );
     }
 }
