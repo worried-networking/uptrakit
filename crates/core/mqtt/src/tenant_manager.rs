@@ -26,6 +26,8 @@ pub struct TenantManager {
     clients: HashMap<Uuid, ClientState>,
     event_tx: Option<mpsc::Sender<MqttServiceEvent>>,
     software_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttSoftwareStateItem>>,
+    /// Cached per-host package states, keyed by tenant_id.
+    host_package_states: HashMap<Uuid, Vec<uptrakit_internal_wire::MqttHostPackageHostState>>,
 }
 
 impl TenantManager {
@@ -34,6 +36,7 @@ impl TenantManager {
             clients: HashMap::new(),
             event_tx,
             software_states: HashMap::new(),
+            host_package_states: HashMap::new(),
         }
     }
 
@@ -105,6 +108,8 @@ impl TenantManager {
     ) {
         self.software_states
             .insert(payload.tenant_id, payload.items.clone());
+        self.host_package_states
+            .insert(payload.tenant_id, payload.host_package_hosts.clone());
 
         // Collect client IDs for this tenant (all of them, not just HA-enabled).
         let client_ids: Vec<uuid::Uuid> = self
@@ -116,6 +121,8 @@ impl TenantManager {
 
         for client_id in client_ids {
             self.publish_software_states(client_id, &payload.items).await;
+            self.publish_host_package_states(client_id, &payload.host_package_hosts)
+                .await;
         }
     }
 
@@ -131,14 +138,19 @@ impl TenantManager {
         if let Some(items) = self.software_states.get(&tenant_id).cloned() {
             self.publish_software_states(*mqtt_client_id, &items).await;
         }
+        if let Some(host_states) = self.host_package_states.get(&tenant_id).cloned() {
+            self.publish_host_package_states(*mqtt_client_id, &host_states)
+                .await;
+        }
     }
 
     /// Called when HA sends its birth message (restarted): republish only HA
     /// discovery config topics.
     ///
     /// State and version topics are retained on the broker and do not need
-    /// re-sending after an HA restart. Only the HA entity discovery configs
-    /// need to be republished so that HA re-registers the `update` entities.
+    /// re-sending after an HA restart. Only the `{ha_prefix}/update/.../config`
+    /// messages need to be republished so that HA re-registers its `update`
+    /// entities.
     pub async fn handle_ha_online(&mut self, mqtt_client_id: &uuid::Uuid) {
         let Some(state) = self.clients.get(mqtt_client_id) else {
             return;
@@ -149,6 +161,10 @@ impl TenantManager {
         let tenant_id = state.tenant_id;
         if let Some(items) = self.software_states.get(&tenant_id).cloned() {
             self.publish_ha_configs_only(*mqtt_client_id, &items).await;
+        }
+        if let Some(host_states) = self.host_package_states.get(&tenant_id).cloned() {
+            self.publish_host_package_ha_configs_only(*mqtt_client_id, &host_states)
+                .await;
         }
     }
 
@@ -175,6 +191,26 @@ impl TenantManager {
             software_item_id: item_id,
             host_id,
             to_version,
+            mqtt_client_id,
+        })
+    }
+
+    /// Given an inbound MQTT command topic, resolve it to an
+    /// [`MqttTriggerHostPackageUpdatePayload`](uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload).
+    ///
+    /// Returns `None` if the topic doesn't match the host-packages command
+    /// pattern `{prefix}/hosts/{host_id}/set`.
+    pub fn resolve_host_package_update_trigger(
+        &self,
+        mqtt_client_id: uuid::Uuid,
+        topic: &str,
+    ) -> Option<uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload> {
+        let state = self.clients.get(&mqtt_client_id)?;
+        let host_id =
+            crate::ha_discovery::parse_host_packages_command_topic(&state.topic_prefix, topic)?;
+        Some(uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload {
+            tenant_id: state.tenant_id,
+            host_id,
             mqtt_client_id,
         })
     }
@@ -413,6 +449,182 @@ impl TenantManager {
                         "failed to publish HA discovery config"
                     );
                 }
+            }
+        }
+    }
+
+    /// Publish per-host package state topics for all hosts in `host_states`.
+    ///
+    /// For each host:
+    /// - Publishes `{prefix}/hosts/{host_id}/state` (retained)
+    /// - Publishes `{prefix}/hosts/{host_id}/latest_version` (retained, always "up-to-date")
+    /// - Publishes `{prefix}/hosts/{host_id}/attributes` (retained)
+    /// - Subscribes to `{prefix}/hosts/{host_id}/set`
+    /// - If `ha_discovery`: publishes HA discovery config (retained)
+    async fn publish_host_package_states(
+        &self,
+        mqtt_client_id: uuid::Uuid,
+        host_states: &[uptrakit_internal_wire::MqttHostPackageHostState],
+    ) {
+        let Some(state) = self.clients.get(&mqtt_client_id) else {
+            return;
+        };
+
+        let tenant_id = state.tenant_id;
+        let topic_prefix = &state.topic_prefix;
+        let ha_prefix = &state.ha_discovery_prefix;
+
+        for hs in host_states {
+            // Compute state string: "N updates pending" or "up-to-date".
+            let installed_str = if hs.pending_count > 0 {
+                format!("{} updates pending", hs.pending_count)
+            } else {
+                "up-to-date".to_string()
+            };
+
+            // Publish state topic.
+            let st = crate::ha_discovery::host_packages_state_topic(topic_prefix, hs.host_id);
+            if let Err(e) = state
+                .handle
+                .publish_retained(&st, installed_str.into_bytes())
+                .await
+            {
+                tracing::warn!(
+                    error = ?e,
+                    %mqtt_client_id,
+                    host_id = %hs.host_id,
+                    "failed to publish host package state topic"
+                );
+            }
+
+            // Publish latest_version topic (always "up-to-date").
+            let lt = crate::ha_discovery::host_packages_latest_version_topic(
+                topic_prefix,
+                hs.host_id,
+            );
+            if let Err(e) = state
+                .handle
+                .publish_retained(&lt, b"up-to-date".to_vec())
+                .await
+            {
+                tracing::warn!(
+                    error = ?e,
+                    %mqtt_client_id,
+                    host_id = %hs.host_id,
+                    "failed to publish host package latest_version topic"
+                );
+            }
+
+            // Publish JSON attributes.
+            let at = crate::ha_discovery::host_packages_json_attributes_topic(
+                topic_prefix,
+                hs.host_id,
+            );
+            let attributes_bytes =
+                crate::ha_discovery::build_host_packages_attributes_payload(
+                    hs.update_in_progress,
+                    hs.pending_count,
+                )
+                .to_string()
+                .into_bytes();
+            if let Err(e) = state.handle.publish_retained(&at, attributes_bytes).await {
+                tracing::warn!(
+                    error = ?e,
+                    %mqtt_client_id,
+                    host_id = %hs.host_id,
+                    "failed to publish host package attributes topic"
+                );
+            }
+
+            // Subscribe to command topic.
+            let ct =
+                crate::ha_discovery::host_packages_command_topic(topic_prefix, hs.host_id);
+            if let Err(e) = state.handle.subscribe_topic(&ct).await {
+                tracing::warn!(
+                    error = ?e,
+                    %mqtt_client_id,
+                    host_id = %hs.host_id,
+                    "failed to subscribe to host package command topic"
+                );
+            }
+
+            // HA-only: publish HA discovery config.
+            if state.ha_discovery {
+                let config_topic = crate::ha_discovery::host_packages_discovery_config_topic(
+                    ha_prefix,
+                    tenant_id,
+                    hs.host_id,
+                );
+                let config_json = crate::ha_discovery::build_host_packages_discovery_config(
+                    topic_prefix,
+                    tenant_id,
+                    hs.host_id,
+                    &hs.hostname,
+                );
+                let config_bytes = config_json.to_string().into_bytes();
+                if let Err(e) = state
+                    .handle
+                    .publish_retained(&config_topic, config_bytes)
+                    .await
+                {
+                    tracing::warn!(
+                        error = ?e,
+                        %mqtt_client_id,
+                        host_id = %hs.host_id,
+                        "failed to publish host package HA discovery config"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Republish only the HA discovery config topics for host package entities
+    /// to an HA-enabled client.
+    ///
+    /// Used exclusively by [`handle_ha_online`](Self::handle_ha_online): when
+    /// HA restarts, retained state/attributes topics are already on the broker
+    /// and do not need re-sending. Only the discovery config topics need to be
+    /// republished so that HA re-registers the `update` entities.
+    async fn publish_host_package_ha_configs_only(
+        &self,
+        mqtt_client_id: uuid::Uuid,
+        host_states: &[uptrakit_internal_wire::MqttHostPackageHostState],
+    ) {
+        let Some(state) = self.clients.get(&mqtt_client_id) else {
+            return;
+        };
+        if !state.ha_discovery {
+            return;
+        }
+
+        let tenant_id = state.tenant_id;
+        let topic_prefix = &state.topic_prefix;
+        let ha_prefix = &state.ha_discovery_prefix;
+
+        for hs in host_states {
+            let config_topic = crate::ha_discovery::host_packages_discovery_config_topic(
+                ha_prefix,
+                tenant_id,
+                hs.host_id,
+            );
+            let config_json = crate::ha_discovery::build_host_packages_discovery_config(
+                topic_prefix,
+                tenant_id,
+                hs.host_id,
+                &hs.hostname,
+            );
+            let config_bytes = config_json.to_string().into_bytes();
+            if let Err(e) = state
+                .handle
+                .publish_retained(&config_topic, config_bytes)
+                .await
+            {
+                tracing::warn!(
+                    error = ?e,
+                    %mqtt_client_id,
+                    host_id = %hs.host_id,
+                    "failed to publish host package HA discovery config"
+                );
             }
         }
     }
@@ -755,6 +967,7 @@ mod tests {
                 name: "nginx".to_string(),
                 hosts: vec![],
             }],
+            host_package_hosts: vec![],
         };
 
         // No connected clients — but the cache must still be updated.
@@ -797,6 +1010,7 @@ mod tests {
                 name: "nginx".to_string(),
                 hosts: vec![],
             }],
+            host_package_hosts: vec![],
         };
         manager.update_software_states(first).await;
 
@@ -814,6 +1028,7 @@ mod tests {
                     hosts: vec![],
                 },
             ],
+            host_package_hosts: vec![],
         };
         manager.update_software_states(second).await;
 
