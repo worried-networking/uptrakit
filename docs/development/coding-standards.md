@@ -112,6 +112,8 @@ Enums currently annotated with `#[non_exhaustive]`:
 - `OutputStreamType`
 - `DeviceAuthStatus`
 - `ServiceStatus`
+- `BatchStatus`
+- `UpdateStatus`
 
 **`uptrakit-internal-wire`:**
 
@@ -135,6 +137,71 @@ Enums currently annotated with `#[non_exhaustive]`:
 
 When adding a new public enum, apply `#[non_exhaustive]` by default unless the enum is explicitly guaranteed to be closed (e.g., a two-variant
 boolean-like enum).
+
+## Exhaustive Enum Test Coverage
+
+Enum tests (serde round-trips, `Display`/`FromStr` checks, `as_str()` invariants) must automatically cover every
+variant. A manually maintained array like `const ALL_VARIANTS: [T; 4]` silently skips any new variant added later.
+
+### Required pattern — `strum::EnumIter`
+
+Use `#[cfg_attr(test, derive(strum::EnumIter))]` on the enum and call `T::iter()` inside the test:
+
+```rust
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(all(test, not(feature = "sea-orm")), derive(strum::EnumIter))]
+#[serde(rename_all = "snake_case")]
+pub enum MyStatus { Pending, Active, Completed }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn serde_round_trip() {
+        for variant in MyStatus::iter() {
+            let json = serde_json::to_string(&variant).unwrap();
+            let back: MyStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, variant);
+        }
+    }
+}
+```
+
+### cfg guards for sea-orm enums
+
+Enums with `#[cfg_attr(feature = "sea-orm", derive(strum::EnumIter, ...))]` already derive `EnumIter` when the
+`sea-orm` feature is active. Adding `#[cfg_attr(test, derive(strum::EnumIter))]` on top causes a duplicate
+implementation when both `cfg(test)` and `feature = "sea-orm"` are active simultaneously. Use the combined guard:
+
+```rust
+#[cfg_attr(all(test, not(feature = "sea-orm")), derive(strum::EnumIter))]
+```
+
+This ensures:
+
+- Tests run without `sea-orm` → the `cfg(test)` guard derives `EnumIter`.
+- Tests run with `sea-orm` → the sea-orm feature already derives `EnumIter`; the guard is a no-op.
+
+### cfg propagation caveat
+
+`#[cfg(test)]` is **not** propagated to dependency crates. If crate B depends on crate A, the
+`#[cfg_attr(test, derive(strum::EnumIter))]` on an enum in crate A will not make `EnumIter` available in crate
+B's test code. For enums in external crates, use inline arrays in tests (keeping them complete by always listing
+all known variants explicitly).
+
+### Anti-pattern — hardcoded const array
+
+```rust
+// ✗ Wrong — silently skips new variants; no compile-time enforcement
+const ALL_STATUSES: [MyStatus; 3] = [MyStatus::Pending, MyStatus::Active, MyStatus::Completed];
+for status in &ALL_STATUSES { ... }
+
+// ✓ Correct
+for status in MyStatus::iter() { ... }
+```
 
 ## Feature Flags
 
