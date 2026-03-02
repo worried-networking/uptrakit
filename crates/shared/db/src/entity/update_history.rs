@@ -1,18 +1,6 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
-pub enum UpdateStatus {
-    #[sea_orm(string_value = "pending")]
-    Pending,
-    #[sea_orm(string_value = "in_progress")]
-    InProgress,
-    #[sea_orm(string_value = "completed")]
-    Completed,
-    #[sea_orm(string_value = "failed")]
-    Failed,
-}
+pub use uptrakit_shared_types::UpdateStatus;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "update_history")]

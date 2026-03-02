@@ -697,7 +697,7 @@ pub async fn get_batch_with_items(
                     .cloned()
                     .unwrap_or_else(|| "Unknown Software Item".to_string()),
                 to_version: child.to_version,
-                status: format!("{:?}", child.status).to_lowercase(),
+                status: child.status.to_string(),
                 update_category: child.update_category,
             }
         })

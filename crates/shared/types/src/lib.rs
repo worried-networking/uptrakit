@@ -17,6 +17,7 @@ mod session_token_type;
 mod software_discovery_state;
 mod tracking_system;
 mod update_category;
+mod update_status;
 
 pub use batch_status::{BatchStatus, ParseBatchStatusError};
 pub use device_auth_status::{DeviceAuthStatus, ParseDeviceAuthStatusError};
@@ -38,3 +39,4 @@ pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};
 pub use software_discovery_state::{ParseSoftwareDiscoveryStateError, SoftwareDiscoveryState};
 pub use tracking_system::{ParseTrackingSystemError, TrackingSystem};
 pub use update_category::{ParseUpdateCategoryError, UpdateCategory};
+pub use update_status::{ParseUpdateStatusError, UpdateStatus};
