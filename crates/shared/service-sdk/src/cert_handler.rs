@@ -103,12 +103,17 @@ impl CertificateRenewalHandler {
     /// Handle a `CaBundleUpdated` message by persisting the new CA bundle.
     ///
     /// Failures are logged as warnings but are not fatal — the service loop
-    /// continues regardless.
+    /// continues regardless. An empty `ca_bundle_pem` is silently ignored to
+    /// prevent overwriting a valid local CA with an empty file.
     pub async fn handle_ca_bundle_updated(
         &self,
         identity: &mut ServiceIdentityState,
         payload: &CaBundleUpdatedPayload,
     ) {
+        if payload.ca_bundle_pem.is_empty() {
+            tracing::warn!("received CA bundle update with empty PEM, ignoring");
+            return;
+        }
         tracing::info!("received CA bundle update from controller");
         if let Err(e) = identity.save_ca_cert(&payload.ca_bundle_pem).await {
             tracing::warn!(error = %e, "failed to save updated CA bundle");
@@ -450,5 +455,32 @@ mod tests {
             .await;
 
         assert_eq!(identity.ca_cert_pem(), Some(payload.ca_bundle_pem.as_str()));
+    }
+
+    #[tokio::test]
+    async fn handle_ca_bundle_updated_empty_pem_does_not_save() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut identity = ServiceIdentityState::new_single_dir(dir.path());
+        identity.load().await.expect("load");
+
+        let handler = CertificateRenewalHandler::new();
+        let payload = CaBundleUpdatedPayload {
+            ca_bundle_pem: String::new(),
+        };
+
+        handler
+            .handle_ca_bundle_updated(&mut identity, &payload)
+            .await;
+
+        // No CA should have been written when the payload is empty.
+        assert!(
+            identity.ca_cert_pem().is_none(),
+            "ca_cert_pem should remain None after empty CaBundleUpdated"
+        );
+        // The file must not exist on disk either.
+        assert!(
+            !dir.path().join("ca.pem").exists(),
+            "ca.pem must not be created from empty CaBundleUpdated"
+        );
     }
 }

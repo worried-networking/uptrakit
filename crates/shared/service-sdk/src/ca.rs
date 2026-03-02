@@ -95,6 +95,12 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
         .await
         .map_err(|e| report!(EnrollmentError::Ca(CaError::Fetch(e.to_string()))))?;
 
+    if body.is_empty() {
+        bail!(EnrollmentError::Ca(CaError::Fetch(
+            "empty CA certificate response from server".to_string(),
+        )));
+    }
+
     tracing::info!(bytes = body.len(), "CA certificate fetched");
     Ok(body.to_vec())
 }
@@ -137,6 +143,12 @@ pub async fn bootstrap_ca(
                 ca_path.display()
             ))))
         })?;
+        if pem.is_empty() {
+            bail!(EnrollmentError::Ca(CaError::CertFile(format!(
+                "{}: CA cert file is empty",
+                ca_path.display()
+            ))));
+        }
         identity
             .save_ca_cert(&String::from_utf8_lossy(&pem))
             .await?;
@@ -263,6 +275,38 @@ pub async fn check_ca_staleness(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── bootstrap_ca ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn bootstrap_ca_empty_ca_cert_file_returns_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let empty_ca_path = dir.path().join("ca.pem");
+        tokio::fs::write(&empty_ca_path, b"")
+            .await
+            .expect("write empty ca file");
+
+        let mut identity =
+            crate::identity::ServiceIdentityState::new_single_dir(dir.path());
+        identity.load().await.expect("load identity");
+
+        let result = bootstrap_ca(
+            &mut identity,
+            "https://controller.example.com",
+            false,
+            None,
+            Some(&empty_ca_path),
+            None,
+        )
+        .await;
+
+        assert!(result.is_err(), "empty --ca-cert file must return an error");
+        let err_str = result.unwrap_err().to_string();
+        assert!(
+            err_str.contains("empty"),
+            "error message should mention 'empty', got: {err_str}"
+        );
+    }
 
     #[test]
     fn ca_pem_fingerprint_deterministic() {

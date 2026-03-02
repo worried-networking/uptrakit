@@ -173,7 +173,11 @@ impl ServiceIdentityState {
             let ca_pem = fs::read_to_string(&ca_path)
                 .await
                 .context_to::<EnrollmentError>()?;
-            self.ca_cert_pem = Some(ca_pem);
+            if ca_pem.is_empty() {
+                tracing::warn!(path = %ca_path.display(), "ca.pem exists but is empty, treating as missing");
+            } else {
+                self.ca_cert_pem = Some(ca_pem);
+            }
         }
 
         Ok(())
@@ -417,12 +421,20 @@ impl ServiceIdentityState {
     }
 
     /// Load the raw CA certificate bytes from disk.
+    ///
+    /// Returns `None` if the file does not exist or is empty. An empty file
+    /// is treated as missing so that a prior write failure that produced an
+    /// empty `ca.pem` does not propagate to the TLS layer as `NoCertificates`.
     pub async fn load_ca_cert(&self) -> Result<Option<Vec<u8>>> {
         let path = self.config_dir.join(CA_CERT_FILE);
         if !path.exists() {
             return Ok(None);
         }
         let bytes = fs::read(&path).await.context_to::<EnrollmentError>()?;
+        if bytes.is_empty() {
+            tracing::warn!(path = %path.display(), "ca.pem exists but is empty, treating as missing");
+            return Ok(None);
+        }
         Ok(Some(bytes))
     }
 
@@ -784,6 +796,41 @@ mod tests {
         // The DER bytes should parse as a valid X.509 certificate.
         let (_, parsed) = x509_parser::parse_x509_certificate(&der).expect("parse x509");
         assert!(parsed.validity().is_valid());
+    }
+
+    #[tokio::test]
+    async fn load_ca_cert_empty_file_returns_none() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut identity = ServiceIdentityState::new_single_dir(dir.path());
+        identity.load().await.expect("load");
+
+        // Write an empty ca.pem to disk (simulates a prior failed write).
+        tokio::fs::write(dir.path().join("ca.pem"), b"")
+            .await
+            .expect("write empty ca.pem");
+
+        // load_ca_cert must treat empty file as missing.
+        let result = identity.load_ca_cert().await.expect("load_ca_cert");
+        assert!(result.is_none(), "empty ca.pem should be treated as missing");
+    }
+
+    #[tokio::test]
+    async fn load_skips_empty_ca_pem() {
+        let dir = TempDir::new().expect("tempdir");
+
+        // Write an empty ca.pem before loading identity.
+        tokio::fs::write(dir.path().join("ca.pem"), b"")
+            .await
+            .expect("write empty ca.pem");
+
+        let mut identity = ServiceIdentityState::new_single_dir(dir.path());
+        identity.load().await.expect("load");
+
+        // In-memory field must be None when the file is empty.
+        assert!(
+            identity.ca_cert_pem().is_none(),
+            "in-memory ca_cert_pem should be None for empty file"
+        );
     }
 
     #[test]
