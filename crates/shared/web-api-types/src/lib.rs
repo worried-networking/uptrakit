@@ -14,6 +14,7 @@ pub mod discovery_allowlist;
 pub mod device_auth;
 pub mod enrollment_tokens;
 pub mod error;
+pub mod host_packages;
 pub mod hosts;
 pub mod mqtt_services;
 pub mod mqtt_transport;

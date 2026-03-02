@@ -28,6 +28,7 @@ fn host_to_response(h: host::Model, agents: Vec<HostAgentSummary>) -> HostRespon
         created_at: h.created_at,
         updated_at: h.updated_at,
         agents,
+        update_summary: Default::default(),
     }
 }
 
