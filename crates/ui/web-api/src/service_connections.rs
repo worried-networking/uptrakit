@@ -579,7 +579,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn broadcast_does_not_block_on_full_channel() {
         let registry = ServiceConnectionRegistry::new();
         let svc = Uuid::now_v7();

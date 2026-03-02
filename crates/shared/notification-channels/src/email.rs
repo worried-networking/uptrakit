@@ -4,6 +4,8 @@
 //! contains only the recipient addresses; SMTP server credentials and sender
 //! identity are supplied at delivery time from the merged global SMTP settings.
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use lettre::message::header::ContentType;
 use lettre::message::{MultiPart, SinglePart};
@@ -216,6 +218,12 @@ impl NotificationChannel for EmailChannel {
     }
 }
 
+/// Connection timeout applied to every SMTP transport variant.
+///
+/// Prevents the mailer from hanging indefinitely when the server is
+/// unreachable or a firewall silently drops SYN packets.
+const SMTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Build an async SMTP mailer from the merged [`EmailConfig`].
 ///
 /// Selects the transport variant based on `tls_mode`:
@@ -239,6 +247,7 @@ fn build_mailer(cfg: &EmailConfig) -> error::Result<AsyncSmtpTransport<Tokio1Exe
                     )))
                 })?;
             builder = builder.port(cfg.smtp_port);
+            builder = builder.timeout(Some(SMTP_CONNECT_TIMEOUT));
             if let Some(c) = creds {
                 builder = builder.credentials(c);
             }
@@ -248,6 +257,7 @@ fn build_mailer(cfg: &EmailConfig) -> error::Result<AsyncSmtpTransport<Tokio1Exe
             let mut builder =
                 AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.smtp_host);
             builder = builder.port(cfg.smtp_port);
+            builder = builder.timeout(Some(SMTP_CONNECT_TIMEOUT));
             if let Some(c) = creds {
                 builder = builder.credentials(c);
             }
@@ -263,6 +273,7 @@ fn build_mailer(cfg: &EmailConfig) -> error::Result<AsyncSmtpTransport<Tokio1Exe
                         )))
                     })?;
             builder = builder.port(cfg.smtp_port);
+            builder = builder.timeout(Some(SMTP_CONNECT_TIMEOUT));
             if let Some(c) = creds {
                 builder = builder.credentials(c);
             }
@@ -366,11 +377,17 @@ mod tests {
 
     #[tokio::test]
     async fn deliver_returns_error_on_unreachable_smtp_host() {
-        // Use a non-routable address to force a connection failure without
-        // actually reaching any SMTP server.
+        // Bind on a loopback port then immediately release it so that the
+        // connection attempt gets an instant ECONNREFUSED rather than waiting
+        // for an OS-level TCP timeout (which can exceed 75 seconds for
+        // non-routable addresses such as the TEST-NET-1 range 192.0.2.0/24).
+        let free_addr = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap()
+        };
         let config = serde_json::json!({
-            "smtp_host": "192.0.2.1",  // TEST-NET-1, never routable
-            "smtp_port": 25u16,
+            "smtp_host": free_addr.ip().to_string(),
+            "smtp_port": free_addr.port(),
             "from_address": "sender@example.com",
             "to_addresses": ["user@example.com"],
             "tls_mode": "none"
@@ -385,7 +402,7 @@ mod tests {
         let result = channel().deliver(&config, &msg).await;
         assert!(
             result.is_err(),
-            "delivery to non-routable host should fail"
+            "delivery to a refused connection should fail"
         );
         let err = result.unwrap_err();
         assert!(
