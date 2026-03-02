@@ -12,7 +12,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, QuerySelect, Set,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, prelude::*, software_item, update_batch,
@@ -80,7 +80,37 @@ pub async fn find_outdated_items_for_host(
 
     let links = query.all(db).await.context_to()?;
 
-    // Filter to only outdated items and those with an execute_update plugin
+    if links.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Batch-load active software items for all links
+    let link_ids: Vec<Uuid> = links.iter().map(|l| l.software_item_id).collect();
+    let items: HashMap<Uuid, software_item::Model> = SoftwareItem::find()
+        .filter(software_item::Column::TenantId.eq(tenant_id))
+        .filter(software_item::Column::Id.is_in(link_ids.clone()))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .filter(software_item::Column::Enabled.eq(true))
+        .all(db)
+        .await
+        .context_to()?
+        .into_iter()
+        .map(|i| (i.id, i))
+        .collect();
+
+    // Batch-load execute_update plugin assignments for this host
+    let execute_plugin_item_ids: HashSet<Uuid> = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+        .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(link_ids))
+        .filter(host_software_item_plugin::Column::Role.eq("execute_update"))
+        .all(db)
+        .await
+        .context_to()?
+        .into_iter()
+        .map(|p| p.software_item_id)
+        .collect();
+
+    // Filter to only outdated items with an execute_update plugin
     let mut candidates = Vec::new();
     for link in links {
         let installed = match link.installed_version.as_ref() {
@@ -102,35 +132,19 @@ pub async fn find_outdated_items_for_host(
             continue;
         }
 
-        // Verify software item is active
-        let Some(item) = SoftwareItem::find_by_id(link.software_item_id)
-            .filter(software_item::Column::TenantId.eq(tenant_id))
-            .filter(software_item::Column::DeactivatedAt.is_null())
-            .filter(software_item::Column::Enabled.eq(true))
-            .one(db)
-            .await
-            .context_to()?
-        else {
+        // Skip inactive or missing software items
+        let Some(item) = items.get(&link.software_item_id) else {
             continue;
         };
 
-        // Verify execute_update plugin exists for this pair
-        let has_execute_plugin = HostSoftwareItemPlugin::find()
-            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(link.software_item_id))
-            .filter(host_software_item_plugin::Column::Role.eq("execute_update"))
-            .one(db)
-            .await
-            .context_to()?
-            .is_some();
-
-        if !has_execute_plugin {
+        // Skip items without an execute_update plugin
+        if !execute_plugin_item_ids.contains(&link.software_item_id) {
             continue;
         }
 
         candidates.push(BatchUpdateCandidate {
             software_item_id: link.software_item_id,
-            software_item_name: item.name,
+            software_item_name: item.name.clone(),
             host_id,
             host_name: host_record.friendly_name.clone(),
             installed_version: installed.clone(),
@@ -171,10 +185,14 @@ pub async fn find_outdated_hosts_for_item(
 
     let links = query.all(db).await.context_to()?;
 
+    if links.is_empty() {
+        return Ok(vec![]);
+    }
+
     // Batch-load host records
     let host_record_ids: Vec<Uuid> = links.iter().map(|l| l.host_id).collect();
     let hosts: HashMap<Uuid, host::Model> = Host::find()
-        .filter(host::Column::Id.is_in(host_record_ids))
+        .filter(host::Column::Id.is_in(host_record_ids.clone()))
         .filter(host::Column::TenantId.eq(tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .all(db)
@@ -182,6 +200,18 @@ pub async fn find_outdated_hosts_for_item(
         .context_to()?
         .into_iter()
         .map(|h| (h.id, h))
+        .collect();
+
+    // Batch-load execute_update plugin assignments for this item across all hosts
+    let execute_plugin_host_ids: HashSet<Uuid> = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
+        .filter(host_software_item_plugin::Column::HostId.is_in(host_record_ids))
+        .filter(host_software_item_plugin::Column::Role.eq("execute_update"))
+        .all(db)
+        .await
+        .context_to()?
+        .into_iter()
+        .map(|p| p.host_id)
         .collect();
 
     let mut candidates = Vec::new();
@@ -202,17 +232,8 @@ pub async fn find_outdated_hosts_for_item(
             continue;
         };
 
-        // Verify execute_update plugin exists for this pair
-        let has_execute_plugin = HostSoftwareItemPlugin::find()
-            .filter(host_software_item_plugin::Column::HostId.eq(link.host_id))
-            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(item_id))
-            .filter(host_software_item_plugin::Column::Role.eq("execute_update"))
-            .one(db)
-            .await
-            .context_to()?
-            .is_some();
-
-        if !has_execute_plugin {
+        // Skip hosts without an execute_update plugin for this item
+        if !execute_plugin_host_ids.contains(&link.host_id) {
             continue;
         }
 
