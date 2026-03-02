@@ -7,6 +7,7 @@ mod hook_shell;
 mod masked_email;
 mod mqtt_connection_status;
 mod mqtt_transport;
+pub mod network;
 mod output_stream_type;
 mod plugin_capability;
 mod plugin_role;

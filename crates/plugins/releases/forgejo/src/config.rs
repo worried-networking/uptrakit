@@ -1,7 +1,7 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
 use uptrakit_plugin_infrastructure_core::{SecretMasking, SecretString};
+use uptrakit_shared_types::network::is_private_host;
 use url::Url;
 
 use crate::error::{ForgejoError, Result};
@@ -135,28 +135,6 @@ impl SecretMasking for ForgejoConfig {
         {
             self.auth_token = existing.auth_token.clone();
         }
-    }
-}
-
-fn is_private_host(host: &str) -> bool {
-    let lower = host.to_lowercase();
-    if lower == "localhost"
-        || lower.ends_with(".local")
-        || lower.ends_with(".internal")
-        || lower.ends_with(".localhost")
-    {
-        return true;
-    }
-
-    match host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(v4)) => {
-            v4.is_private()
-                || v4.is_loopback()
-                || v4.is_unspecified()
-                || (v4.octets()[0] == 169 && v4.octets()[1] == 254)
-        }
-        Ok(IpAddr::V6(v6)) => v6.is_loopback() || v6.is_unspecified(),
-        Err(_) => false,
     }
 }
 
