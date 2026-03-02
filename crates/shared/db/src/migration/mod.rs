@@ -13,6 +13,7 @@ mod m20260305_000001_crl_cache;
 mod m20260306_000001_update_category;
 mod m20260306_000002_update_batches;
 mod m20260302_000002_host_packages;
+mod m20260302_000003_host_packages_has_update;
 mod m20260307_000001_split_version_check;
 
 pub struct Migrator;
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260306_000001_update_category::Migration),
             Box::new(m20260306_000002_update_batches::Migration),
             Box::new(m20260302_000002_host_packages::Migration),
+            Box::new(m20260302_000003_host_packages_has_update::Migration),
             Box::new(m20260307_000001_split_version_check::Migration),
         ]
     }
@@ -108,6 +110,10 @@ mod tests {
             .await
             .unwrap();
         db.execute_unprepared("SELECT count(*) FROM host_package_update_history")
+            .await
+            .unwrap();
+        // Verify has_update generated column exists.
+        db.execute_unprepared("SELECT has_update FROM host_packages LIMIT 0")
             .await
             .unwrap();
         // Verify split_version_check migration: detect_version task row exists.
