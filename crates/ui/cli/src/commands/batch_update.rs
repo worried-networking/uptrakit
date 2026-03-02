@@ -365,10 +365,11 @@ pub async fn follow_batch(params: FollowBatchParams<'_>) -> Result<FollowResult>
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}…", &s[..max - 1])
+        let truncated: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{}…", truncated)
     }
 }
 
@@ -438,6 +439,20 @@ mod tests {
     fn truncate_long_string() {
         let result = truncate("abcdefghij", 5);
         assert_eq!(result, "abcd…");
+    }
+
+    #[test]
+    fn truncate_multibyte_latin() {
+        // "héllo" has 5 chars but 6 bytes; max=3 → "hé…"
+        let result = truncate("héllo", 3);
+        assert_eq!(result, "hé…");
+    }
+
+    #[test]
+    fn truncate_multibyte_cjk() {
+        // "こんにちは" has 5 chars; max=4 → "こんに…"
+        let result = truncate("こんにちは", 4);
+        assert_eq!(result, "こんに…");
     }
 
     #[test]
