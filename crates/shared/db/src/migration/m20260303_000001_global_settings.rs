@@ -31,6 +31,30 @@ const GLOBAL_KEYS: &[&str] = &[
     "crypto.master_key_verification",
 ];
 
+#[derive(DeriveIden)]
+enum GlobalSettings {
+    Table,
+    Key,
+    Value,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Settings {
+    Table,
+    TenantId,
+    Key,
+    Value,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum Tenants {
+    Table,
+    Id,
+    IsDefault,
+}
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -52,47 +76,71 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // 2. Copy global keys from the default tenant's settings rows
-        let keys_list = GLOBAL_KEYS
-            .iter()
-            .map(|k| format!("'{k}'"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        // 2. Copy global keys from the default tenant's settings rows.
+        //    SELECT key, value, updated_at FROM settings
+        //    WHERE tenant_id = (SELECT id FROM tenants WHERE is_default = 1)
+        //    AND key IN (...)
+        let tenant_subquery = Query::select()
+            .from(Tenants::Table)
+            .column(Tenants::Id)
+            .and_where(Expr::col(Tenants::IsDefault).eq(1))
+            .to_owned();
 
-        let db = manager.get_connection();
-        db.execute_unprepared(&format!(
-            "INSERT INTO global_settings (key, value, updated_at) \
-             SELECT key, value, updated_at FROM settings \
-             WHERE tenant_id = (SELECT id FROM tenants WHERE is_default = 1) \
-             AND key IN ({keys_list})"
-        ))
-        .await?;
+        let select = Query::select()
+            .from(Settings::Table)
+            .columns([Settings::Key, Settings::Value, Settings::UpdatedAt])
+            .and_where(
+                Expr::col(Settings::TenantId)
+                    .in_subquery(tenant_subquery),
+            )
+            .and_where(Expr::col(Settings::Key).is_in(GLOBAL_KEYS.iter().copied()))
+            .to_owned();
 
-        // 3. Delete global keys from settings for ALL tenants
-        db.execute_unprepared(&format!(
-            "DELETE FROM settings WHERE key IN ({keys_list})"
-        ))
-        .await?;
+        let insert = Query::insert()
+            .into_table(GlobalSettings::Table)
+            .columns([GlobalSettings::Key, GlobalSettings::Value, GlobalSettings::UpdatedAt])
+            .select_from(select)
+            .map_err(|e| DbErr::Migration(e.to_string()))?
+            .to_owned();
+
+        manager.get_connection().execute(&insert).await?;
+
+        // 3. Delete global keys from settings for ALL tenants.
+        let delete = Query::delete()
+            .from_table(Settings::Table)
+            .and_where(Expr::col(Settings::Key).is_in(GLOBAL_KEYS.iter().copied()))
+            .to_owned();
+
+        manager.get_connection().execute(&delete).await?;
 
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let db = manager.get_connection();
-        let keys_list = GLOBAL_KEYS
-            .iter()
-            .map(|k| format!("'{k}'"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        // Move global settings back to the default tenant's settings rows.
+        //    SELECT (SELECT id FROM tenants WHERE is_default = 1), key, value, updated_at
+        //    FROM global_settings WHERE key IN (...)
+        let tenant_subquery = Query::select()
+            .from(Tenants::Table)
+            .column(Tenants::Id)
+            .and_where(Expr::col(Tenants::IsDefault).eq(1))
+            .to_owned();
 
-        // Move global settings back to the default tenant's settings rows
-        db.execute_unprepared(&format!(
-            "INSERT INTO settings (tenant_id, key, value, updated_at) \
-             SELECT (SELECT id FROM tenants WHERE is_default = 1), key, value, updated_at \
-             FROM global_settings \
-             WHERE key IN ({keys_list})"
-        ))
-        .await?;
+        let select = Query::select()
+            .from(GlobalSettings::Table)
+            .expr(tenant_subquery.into_sub_query_statement())
+            .columns([GlobalSettings::Key, GlobalSettings::Value, GlobalSettings::UpdatedAt])
+            .and_where(Expr::col(GlobalSettings::Key).is_in(GLOBAL_KEYS.iter().copied()))
+            .to_owned();
+
+        let insert = Query::insert()
+            .into_table(Settings::Table)
+            .columns([Settings::TenantId, Settings::Key, Settings::Value, Settings::UpdatedAt])
+            .select_from(select)
+            .map_err(|e| DbErr::Migration(e.to_string()))?
+            .to_owned();
+
+        manager.get_connection().execute(&insert).await?;
 
         manager
             .drop_table(Table::drop().table(GlobalSettings::Table).to_owned())
@@ -100,12 +148,4 @@ impl MigrationTrait for Migration {
 
         Ok(())
     }
-}
-
-#[derive(DeriveIden)]
-enum GlobalSettings {
-    Table,
-    Key,
-    Value,
-    UpdatedAt,
 }

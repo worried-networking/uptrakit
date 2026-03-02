@@ -476,28 +476,15 @@ impl OidcRegistrationStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectOptions, ConnectionTrait, Database, Schema};
+    use sea_orm::{ConnectOptions, Database};
 
     async fn test_db() -> DatabaseConnection {
         let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.expect("test db");
-        let schema = Schema::new(db.get_database_backend());
-
-        // Create all 3 tables
-        let stmt = schema.create_table_from_entity(PendingOidcFlow);
-        db.execute(&stmt).await.expect("create oidc_flow table");
-        let stmt = schema.create_table_from_entity(PendingAccountLink);
-        db.execute(&stmt).await.expect("create account_link table");
-        let stmt = schema.create_table_from_entity(PendingOidcTokenExchange);
-        db.execute(&stmt)
+        uptrakit_shared_db::migration::run_migrations(&db)
             .await
-            .expect("create token_exchange table");
-        let stmt = schema.create_table_from_entity(PendingOidcRegistration);
-        db.execute(&stmt)
-            .await
-            .expect("create oidc_registration table");
-
+            .expect("migrations");
         db
     }
 
@@ -628,9 +615,18 @@ mod tests {
             .unwrap();
 
         // Backdate the flow to make it expired
-        db.execute_unprepared(
-            "UPDATE pending_oidc_flows SET expires_at = datetime('now', '-1 hour') WHERE csrf_state = 'state-to-expire'"
-        ).await.unwrap();
+        {
+            use sea_orm::{sea_query::Expr, EntityTrait as _, QueryFilter as _};
+            pending_oidc_flow::Entity::update_many()
+                .col_expr(
+                    pending_oidc_flow::Column::ExpiresAt,
+                    Expr::value(OffsetDateTime::now_utc() - time::Duration::hours(1)),
+                )
+                .filter(pending_oidc_flow::Column::CsrfState.eq("state-to-expire"))
+                .exec(&db)
+                .await
+                .expect("backdate oidc flow");
+        }
 
         store.cleanup_expired().await;
 
@@ -660,11 +656,17 @@ mod tests {
             .unwrap();
 
         // Backdate the link
-        db.execute_unprepared(
-            "UPDATE pending_account_links SET expires_at = datetime('now', '-1 hour')",
-        )
-        .await
-        .unwrap();
+        {
+            use sea_orm::{sea_query::Expr, EntityTrait as _};
+            pending_account_link::Entity::update_many()
+                .col_expr(
+                    pending_account_link::Column::ExpiresAt,
+                    Expr::value(OffsetDateTime::now_utc() - time::Duration::hours(1)),
+                )
+                .exec(&db)
+                .await
+                .expect("backdate account link");
+        }
 
         store.cleanup_expired().await;
 
@@ -687,11 +689,17 @@ mod tests {
             .unwrap();
 
         // Backdate the exchange
-        db.execute_unprepared(
-            "UPDATE pending_oidc_token_exchanges SET expires_at = datetime('now', '-1 hour')",
-        )
-        .await
-        .unwrap();
+        {
+            use sea_orm::{sea_query::Expr, EntityTrait as _};
+            pending_oidc_token_exchange::Entity::update_many()
+                .col_expr(
+                    pending_oidc_token_exchange::Column::ExpiresAt,
+                    Expr::value(OffsetDateTime::now_utc() - time::Duration::hours(1)),
+                )
+                .exec(&db)
+                .await
+                .expect("backdate token exchange");
+        }
 
         store.cleanup_expired().await;
 
@@ -811,11 +819,17 @@ mod tests {
             .unwrap();
 
         // Backdate to make it expired
-        db.execute_unprepared(
-            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour')",
-        )
-        .await
-        .unwrap();
+        {
+            use sea_orm::{sea_query::Expr, EntityTrait as _};
+            pending_oidc_registration::Entity::update_many()
+                .col_expr(
+                    pending_oidc_registration::Column::ExpiresAt,
+                    Expr::value(OffsetDateTime::now_utc() - time::Duration::hours(1)),
+                )
+                .exec(&db)
+                .await
+                .expect("backdate oidc registration");
+        }
 
         let reg = store.get("reg-get-expired").await.unwrap();
         assert!(reg.is_none());
@@ -883,11 +897,17 @@ mod tests {
             .unwrap();
 
         // Backdate the registration
-        db.execute_unprepared(
-            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour')",
-        )
-        .await
-        .unwrap();
+        {
+            use sea_orm::{sea_query::Expr, EntityTrait as _};
+            pending_oidc_registration::Entity::update_many()
+                .col_expr(
+                    pending_oidc_registration::Column::ExpiresAt,
+                    Expr::value(OffsetDateTime::now_utc() - time::Duration::hours(1)),
+                )
+                .exec(&db)
+                .await
+                .expect("backdate oidc registration");
+        }
 
         store.cleanup_expired().await;
 

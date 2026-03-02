@@ -30,15 +30,13 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = init_db(dir.path()).await.expect("init_db should succeed");
 
-        // Verify the ssh_hosts table exists by running a simple query.
-        use sea_orm::ConnectionTrait;
-        let result = db
-            .execute_unprepared("SELECT count(*) FROM ssh_hosts")
-            .await;
-        assert!(
-            result.is_ok(),
-            "ssh_hosts table should exist after migration"
-        );
+        // Verify the ssh_hosts table exists by running a typed entity count.
+        use crate::db::entity::ssh_host;
+        use sea_orm::{EntityTrait as _, PaginatorTrait as _};
+        let _count: u64 = ssh_host::Entity::find()
+            .count(&db)
+            .await
+            .expect("ssh_hosts table should exist after migration");
     }
 
     #[tokio::test]

@@ -200,39 +200,36 @@ pub async fn trigger_immediate(db: &DatabaseConnection, task_id: Uuid) -> error:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{
-        ActiveModelTrait, ActiveValue, ConnectOptions, ConnectionTrait, Database, Schema,
-    };
+    use sea_orm::{ActiveModelTrait, ActiveValue, ConnectOptions, Database};
     use uptrakit_shared_db::entity::{scheduled_task, tenant};
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.expect("test db");
-
-        let schema = Schema::new(db.get_database_backend());
-        let stmt = schema.create_table_from_entity(tenant::Entity);
-        db.execute(&stmt).await.expect("create tenants table");
-        let stmt = schema.create_table_from_entity(scheduled_task::Entity);
-        db.execute(&stmt)
+        uptrakit_shared_db::migration::run_migrations(&db)
             .await
-            .expect("create scheduled_tasks table");
+            .expect("run migrations");
         db
     }
 
     async fn seed_tenant(db: &DatabaseConnection) -> tenant::Model {
+        use sea_orm::ActiveModelTrait;
+        // Create a fresh non-default test tenant. Migrations seed scheduled tasks
+        // only for tenants that exist at migration time, so this tenant starts with
+        // no pre-seeded tasks — allowing seed_task() to insert freely.
         let now = OffsetDateTime::now_utc();
         tenant::ActiveModel {
             id: ActiveValue::Set(Uuid::now_v7()),
-            name: ActiveValue::Set("Default".to_string()),
-            slug: ActiveValue::Set("default".to_string()),
-            is_default: ActiveValue::Set(true),
+            name: ActiveValue::Set("Test Tenant".to_string()),
+            slug: ActiveValue::Set(format!("test-{}", Uuid::now_v7())),
+            is_default: ActiveValue::Set(false),
+            deactivated_at: ActiveValue::Set(None),
             created_at: ActiveValue::Set(now),
             updated_at: ActiveValue::Set(now),
-            deactivated_at: ActiveValue::Set(None),
         }
         .insert(db)
         .await
-        .expect("insert tenant")
+        .expect("insert test tenant")
     }
 
     async fn seed_task(db: &DatabaseConnection, tenant_id: Uuid) -> scheduled_task::Model {
@@ -428,30 +425,58 @@ mod tests {
         // Insert a known task that is due.
         seed_task(&db, tenant.id).await;
 
-        // Insert an unknown task type directly via raw SQL — simulates a row
-        // created by a newer controller version during a rolling upgrade.
-        // Temporarily disable FK checks so we can insert without needing a
-        // perfectly formatted timestamp string that matches the SeaORM storage format.
-        use sea_orm::ConnectionTrait;
-        db.execute_unprepared("PRAGMA foreign_keys = OFF")
-            .await
-            .expect("disable fk");
-        db.execute_unprepared(&format!(
-            "INSERT INTO scheduled_tasks \
-            (id, tenant_id, task_type, cron_expression, enabled, task_config, \
-             last_run_at, next_run_at, locked_by, locked_at, last_error, run_count, \
-             created_at, updated_at) VALUES \
-            ('{id}', '{tid}', 'future_unknown_task_type', '*/5 * * * *', 1, NULL, \
-             NULL, datetime('now', '-1 minute'), NULL, NULL, NULL, 0, \
-             datetime('now'), datetime('now'))",
-            id = Uuid::now_v7(),
-            tid = tenant.id,
-        ))
-        .await
-        .expect("insert unknown task type");
-        db.execute_unprepared("PRAGMA foreign_keys = ON")
-            .await
-            .expect("re-enable fk");
+        // Insert an unknown task type via a sea_query builder INSERT — simulates
+        // a row created by a newer controller version during a rolling upgrade.
+        // The tenant FK is satisfied because seed_tenant() already inserted the row.
+        {
+            use sea_orm::sea_query::Query;
+
+            let unknown_id = Uuid::now_v7();
+            let now = OffsetDateTime::now_utc();
+            let past = now - time::Duration::minutes(1);
+
+            use sea_orm::sea_query::Expr as SqExpr;
+            let insert = Query::insert()
+                .into_table(scheduled_task::Entity)
+                .columns([
+                    scheduled_task::Column::Id,
+                    scheduled_task::Column::TenantId,
+                    scheduled_task::Column::TaskType,
+                    scheduled_task::Column::CronExpression,
+                    scheduled_task::Column::Enabled,
+                    scheduled_task::Column::TaskConfig,
+                    scheduled_task::Column::LastRunAt,
+                    scheduled_task::Column::NextRunAt,
+                    scheduled_task::Column::LockedBy,
+                    scheduled_task::Column::LockedAt,
+                    scheduled_task::Column::LastError,
+                    scheduled_task::Column::RunCount,
+                    scheduled_task::Column::CreatedAt,
+                    scheduled_task::Column::UpdatedAt,
+                ])
+                .values_panic([
+                    SqExpr::value(unknown_id),
+                    SqExpr::value(tenant.id),
+                    SqExpr::value("future_unknown_task_type"),
+                    SqExpr::value("*/5 * * * *"),
+                    SqExpr::value(true),
+                    SqExpr::value(sea_orm::Value::Json(None)),
+                    SqExpr::value(sea_orm::Value::TimeDateTimeWithTimeZone(None)),
+                    SqExpr::value(past),
+                    SqExpr::value(sea_orm::Value::Uuid(None)),
+                    SqExpr::value(sea_orm::Value::TimeDateTimeWithTimeZone(None)),
+                    SqExpr::value(sea_orm::Value::String(None)),
+                    SqExpr::value(0i32),
+                    SqExpr::value(now),
+                    SqExpr::value(now),
+                ])
+                .to_owned();
+
+            use sea_orm::ConnectionTrait as _;
+            db.execute(&insert)
+                .await
+                .expect("insert unknown task type");
+        }
 
         // Only the known task should be returned; no deserialization error.
         let due = find_due_tasks(&db, tenant.id).await.unwrap();

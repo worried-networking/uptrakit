@@ -129,10 +129,12 @@ indistinguishable from a real timestamp and makes stale-detection logic incorrec
 ### Converting existing INTEGER timestamps
 
 If an existing table stores timestamps as `INTEGER` (unix seconds), write a data migration using
-SQLite's `strftime` function via `execute_unprepared()` (the typed API cannot express this):
+SQLite's `strftime` function. This is one of the approved `execute_unprepared()` exceptions
+because `strftime` is a SQLite-specific built-in that sea_query cannot express:
 
 ```rust
-// Recreate the table with TEXT timestamps; convert via strftime
+// `strftime` is a SQLite-specific function with no sea_query equivalent.
+// execute_unprepared is the approved exception for this pattern.
 manager
     .get_connection()
     .execute_unprepared(
@@ -239,28 +241,151 @@ For each new table, verify:
 
 ---
 
-## When to use `execute_unprepared()`
+## No raw SQL — use sea_query builders for DML
 
-Prefer the typed SeaORM `SchemaManager` API. Raw SQL via `execute_unprepared()` is accepted
-only when the typed API cannot express the operation:
+**Raw SQL strings are banned everywhere in this codebase**, including migrations and tests.
+All DML (`INSERT`, `UPDATE`, `DELETE`, `SELECT`) that cannot be expressed with the SeaORM entity
+API must use the **sea_query typed builder API** instead of `execute_unprepared()` or
+`format!()`-constructed strings.
 
-| Acceptable | Example |
-| --- | --- |
-| Multi-table conditional DML | `UPDATE a SET x = (SELECT y FROM b WHERE ...)` |
-| JSON field updates across rows | `UPDATE t SET config = json_patch(config, '...')` |
-| Complex `ALTER TABLE` patterns | Renaming a column on SQLite (requires recreate-table) |
-| Partial / expression indices | `CREATE INDEX ... WHERE deactivated_at IS NULL` |
+### Why
 
-Always add a comment that justifies the raw SQL:
+- Raw strings bypass the type system — a renamed column silently breaks a query at runtime.
+- `format!()` SQL is a SQL-injection vector.
+- sea_query builders adapt automatically to the active database dialect (SQLite / PostgreSQL /
+  MySQL).
+
+### INSERT via sea_query
+
+Use `DeriveIden` enums to reference tables and columns by name, then `Query::insert()`:
 
 ```rust
-// SQLite does not support ALTER TABLE ... RENAME COLUMN, so we
-// recreate the table. SeaORM's SchemaManager cannot express this.
-manager
-    .get_connection()
-    .execute_unprepared("...")
-    .await?;
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveIden)]
+enum MyTable {
+    Table,
+    Id,
+    Name,
+    CreatedAt,
+}
+
+let insert = Query::insert()
+    .into_table(MyTable::Table)
+    .columns([MyTable::Id, MyTable::Name, MyTable::CreatedAt])
+    .values_panic([
+        Uuid::now_v7().into(),
+        "example".into(),
+        now.into(),
+    ])
+    .to_owned();
+
+manager.get_connection().execute(&insert).await?;
 ```
+
+> **Note:** `execute()` accepts `&impl StatementBuilder` (i.e., pass `&insert`, not a
+> pre-built `Statement`). Do not call `.build(...)` yourself.
+
+### INSERT … SELECT
+
+To copy rows between tables (e.g. moving keys out of a per-tenant table into a global one):
+
+```rust
+let select = Query::select()
+    .from(SourceTable::Table)
+    .columns([SourceTable::Key, SourceTable::Value, SourceTable::UpdatedAt])
+    .and_where(Expr::col(SourceTable::TenantId).in_subquery(
+        Query::select()
+            .from(Tenants::Table)
+            .column(Tenants::Id)
+            .and_where(Expr::col(Tenants::IsDefault).eq(1))
+            .to_owned(),
+    ))
+    .to_owned();
+
+let insert = Query::insert()
+    .into_table(DestTable::Table)
+    .columns([DestTable::Key, DestTable::Value, DestTable::UpdatedAt])
+    .select_from(select)
+    .map_err(|e| DbErr::Migration(e.to_string()))?
+    .to_owned();
+
+manager.get_connection().execute(&insert).await?;
+```
+
+### DELETE via sea_query
+
+```rust
+let delete = Query::delete()
+    .from_table(ScheduledTasks::Table)
+    .and_where(Expr::col(ScheduledTasks::TaskType).eq("event_cleanup"))
+    .to_owned();
+
+manager.get_connection().execute(&delete).await?;
+```
+
+### Test-only INSERT with arbitrary column values
+
+Tests sometimes need to insert rows with values that don't fit the entity's type system (e.g.,
+an unknown enum variant to verify forward-compatibility filtering). Use sea_query with
+`Expr::value()` wrappers:
+
+```rust
+use sea_orm::sea_query::{Expr as SqExpr, Query};
+
+let insert = Query::insert()
+    .into_table(scheduled_task::Entity)
+    .columns([scheduled_task::Column::Id, scheduled_task::Column::TaskType, /* … */])
+    .values_panic([
+        SqExpr::value(Uuid::now_v7()),
+        SqExpr::value("future_unknown_task_type"),  // not a known enum variant
+        // …
+    ])
+    .to_owned();
+
+use sea_orm::ConnectionTrait as _;
+db.execute(&insert).await.expect("insert");
+```
+
+> `values_panic` expects `IntoIterator<Item = Expr>`, not raw `Value`s.  Always wrap
+> with `SqExpr::value(...)`.
+
+### DROP TABLE in tests
+
+Use the sea_query builder instead of `execute_unprepared("DROP TABLE …")`:
+
+```rust
+let drop = Table::drop()
+    .table(Alias::new("my_table"))
+    .to_owned();
+db.execute(&drop).await?;
+```
+
+### When `execute_unprepared()` is still allowed
+
+Raw SQL via `execute_unprepared()` is accepted **only** for operations that have no sea_query
+equivalent:
+
+| Acceptable | Why sea_query cannot express it |
+| --- | --- |
+| `CREATE TABLE new AS SELECT * FROM old` | SQLite-specific shorthand; no builder equivalent |
+| `CREATE UNIQUE INDEX … WHERE col IS NULL` | Partial/filtered index; builder lacks `WHERE` clause |
+| `INSERT INTO … SELECT strftime(…)` | `strftime` is a SQLite-specific function |
+
+Every `execute_unprepared()` call **must** include a comment that names the limitation:
+
+```rust
+// `CREATE TABLE … AS SELECT *` is a SQLite-specific shorthand that snapshots
+// the live schema at runtime. sea_query has no equivalent builder for this
+// construct; execute_unprepared is the only option here.
+db.execute_unprepared(
+    "CREATE TABLE host_packages_new AS SELECT * FROM host_packages",
+)
+.await?;
+```
+
+If you find yourself reaching for `execute_unprepared()` for a `DELETE`, `INSERT`, or
+plain `SELECT`, use a sea_query builder instead.
 
 ---
 
@@ -330,8 +455,86 @@ async fn setup_db() -> DatabaseConnection {
 ```
 
 This guarantees that tests run against the exact same schema as production.
-`sea-orm-migration` v2 enables `PRAGMA foreign_keys = ON` after migrating, so tests that
-insert FK-dependent rows must create the parent rows first.
+`sea-orm-migration` v2 enables `PRAGMA foreign_keys = ON` after migrating, so tests must
+create parent rows rather than disabling FK checks.
+
+### Never use `PRAGMA foreign_keys = OFF`
+
+Disabling FK enforcement with `execute_unprepared("PRAGMA foreign_keys = OFF")` is
+**forbidden**. Create the required parent rows instead:
+
+```rust
+// ✗ Wrong
+db.execute_unprepared("PRAGMA foreign_keys = OFF").await?;
+
+// ✓ Correct — insert the required parent row first
+tenant::ActiveModel {
+    id: ActiveValue::Set(Uuid::nil()),
+    name: ActiveValue::Set("Test Tenant".to_string()),
+    // …
+}
+.insert(&db)
+.await
+.expect("insert test tenant");
+```
+
+### Avoid the migration-seeded default tenant for tests with unique-per-tenant constraints
+
+The initial migration creates a **default tenant** and seeds one row per `task_type` in
+`scheduled_tasks` for it. Because the table has a `UNIQUE(tenant_id, task_type)` constraint,
+inserting a second `auth_cleanup` row for the same tenant will fail.
+
+**Do not fetch the default tenant** in tests that insert their own task rows. Create a fresh
+non-default tenant instead:
+
+```rust
+async fn seed_tenant(db: &DatabaseConnection) -> tenant::Model {
+    let now = OffsetDateTime::now_utc();
+    // A fresh non-default tenant has no pre-seeded scheduled_tasks rows.
+    tenant::ActiveModel {
+        id: ActiveValue::Set(Uuid::now_v7()),
+        name: ActiveValue::Set("Test Tenant".to_string()),
+        slug: ActiveValue::Set(format!("test-{}", Uuid::now_v7())),
+        is_default: ActiveValue::Set(false),
+        deactivated_at: ActiveValue::Set(None),
+        created_at: ActiveValue::Set(now),
+        updated_at: ActiveValue::Set(now),
+    }
+    .insert(db)
+    .await
+    .expect("insert test tenant")
+}
+```
+
+### Testing re-encryption without raw SQL `UPDATE`
+
+The `reencrypt` module tests need to insert rows that simulate legacy plaintext values
+(i.e., the `ENC:v1:…` prefix is absent). Do **not** use a raw `UPDATE` to backfill the column.
+Instead, use the `testing` feature of `uptrakit-crypto`:
+
+```toml
+# crates/my-crate/Cargo.toml
+[dev-dependencies]
+uptrakit-crypto = { workspace = true, features = ["testing"] }
+```
+
+```rust
+// Inserts a row using a plaintext (unencrypted) EncryptedString value —
+// simulates a legacy row written before encryption was added.
+let mut am: ca_certificate::ActiveModel = row.into();
+am.key_pem = Set(EncryptedString::plaintext_for_test("raw_key".to_string()));
+am.update(&db).await.expect("set plaintext key_pem");
+```
+
+`EncryptedString::plaintext_for_test` is gated on `#[cfg(any(test, feature = "testing"))]` in
+`uptrakit-crypto/src/lib.rs` and **must never be called in production code**.
+
+### Do not use `#[cfg(test)]` alone to share test helpers across crates
+
+`#[cfg(test)]` is only active when the crate that declares the function is itself under test.
+When another crate imports the function, `#[cfg(test)]` is not active for the dependency. Use a
+`testing` Cargo feature (as shown above) for any helper that must be visible to dependent
+crates' test builds.
 
 See [Testing](testing.md) for the full test DB pattern and FK-helper conventions.
 

@@ -52,7 +52,30 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), sea_orm::DbEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectOptions, Database};
+    use sea_orm::{ConnectOptions, Database, EntityTrait as _, PaginatorTrait as _};
+
+    use crate::entity::{
+        crl_cache, global_setting, host_discovery_allowlist, host_package, host_package_ignore,
+        host_package_update_history, host_software_item, notification_channel, notification_log,
+        notification_rule, plugin_config, revoked_token_jti, revoked_token_user, service,
+        software_item, tenant_discovery_allowlist, update_batch, update_history,
+    };
+
+    /// Verify that the `has_update` generated column exists in `host_packages`.
+    ///
+    /// `has_update` is a SQLite generated column and is not part of the
+    /// `host_package::Model` entity. It must be checked via a sea_query SELECT
+    /// rather than an entity query.
+    async fn assert_has_update_column_exists(db: &DatabaseConnection) {
+        let stmt = Query::select()
+            .from(Alias::new("host_packages"))
+            .column(Alias::new("has_update"))
+            .limit(0)
+            .to_owned();
+        db.query_all(&stmt)
+            .await
+            .expect("has_update generated column must exist in host_packages");
+    }
 
     /// Simulate the "existing database" upgrade scenario:
     /// the first twelve migrations are applied in a first run, then the
@@ -72,9 +95,7 @@ mod tests {
         Migrator::up(&db, None)
             .await
             .expect("remaining migrations should succeed on existing database");
-        db.execute_unprepared("SELECT has_update FROM host_packages LIMIT 0")
-            .await
-            .expect("has_update column must exist after incremental migration");
+        assert_has_update_column_exists(&db).await;
     }
 
     /// State B recovery: a previous run of m20260302_000003 created
@@ -90,6 +111,13 @@ mod tests {
 
         // Simulate: host_packages_new was created but host_packages was NOT yet
         // dropped (both tables exist).
+        //
+        // `CREATE TABLE … AS SELECT *` is a SQLite-specific shorthand that
+        // snapshots the live schema at runtime. sea_query has no equivalent
+        // builder for this construct, so execute_unprepared is the only option
+        // here. This is an approved exception: the sole purpose of this
+        // statement is to replicate the exact mid-migration crash state that
+        // m20260302_000003 is designed to recover from.
         db.execute_unprepared(
             "CREATE TABLE host_packages_new AS SELECT * FROM host_packages",
         )
@@ -100,9 +128,7 @@ mod tests {
         Migrator::up(&db, None).await.expect(
             "migration must succeed even when host_packages_new already exists alongside original",
         );
-        db.execute_unprepared("SELECT has_update FROM host_packages LIMIT 0")
-            .await
-            .expect("has_update column must exist after State B recovery");
+        assert_has_update_column_exists(&db).await;
     }
 
     /// State C recovery: a previous run of m20260302_000003 created
@@ -116,15 +142,18 @@ mod tests {
         Migrator::up(&db, Some(12)).await.unwrap();
 
         // Simulate: copy done, original dropped, rename not yet done.
-        // Use the real schema so the rename results in a valid host_packages.
+        // See the State B comment above for why execute_unprepared is used here.
         db.execute_unprepared(
             "CREATE TABLE host_packages_new AS SELECT * FROM host_packages",
         )
         .await
         .unwrap();
-        db.execute_unprepared("DROP TABLE host_packages")
-            .await
-            .unwrap();
+
+        // Drop the original table using the sea_query builder.
+        let drop_stmt = Table::drop()
+            .table(Alias::new("host_packages"))
+            .to_owned();
+        db.execute(&drop_stmt).await.unwrap();
 
         // The next Migrator::up call must not crash.
         Migrator::up(&db, None).await.expect(
@@ -137,81 +166,39 @@ mod tests {
         let opt = ConnectOptions::new("sqlite::memory:");
         let db = Database::connect(opt).await.unwrap();
         run_migrations(&db).await.unwrap();
-        db.execute_unprepared("SELECT count(*) FROM software_items")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM plugin_configs")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM tenant_discovery_allowlist")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM host_discovery_allowlist")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM notification_channels")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM notification_rules")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM notification_log")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM global_settings")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM revoked_token_jtis")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM revoked_token_users")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM crl_cache")
-            .await
-            .unwrap();
-        // Verify update_category columns exist.
-        db.execute_unprepared("SELECT update_category FROM host_software_items LIMIT 0")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT update_category FROM update_history LIMIT 0")
-            .await
-            .unwrap();
-        // Verify update_batches table and batch_id column exist.
-        db.execute_unprepared("SELECT count(*) FROM update_batches")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT batch_id FROM update_history LIMIT 0")
-            .await
-            .unwrap();
-        // Verify host_packages tables exist.
-        db.execute_unprepared("SELECT count(*) FROM host_packages")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM host_package_ignores")
-            .await
-            .unwrap();
-        db.execute_unprepared("SELECT count(*) FROM host_package_update_history")
-            .await
-            .unwrap();
-        // Verify has_update generated column exists.
-        db.execute_unprepared("SELECT has_update FROM host_packages LIMIT 0")
-            .await
-            .unwrap();
-        // Verify cert_lifetime_hours column exists on services.
-        db.execute_unprepared("SELECT cert_lifetime_hours FROM services LIMIT 0")
-            .await
-            .unwrap();
+
+        // Verify tables added by various migrations exist and are queryable.
+        software_item::Entity::find().count(&db).await.unwrap();
+        plugin_config::Entity::find().count(&db).await.unwrap();
+        tenant_discovery_allowlist::Entity::find().count(&db).await.unwrap();
+        host_discovery_allowlist::Entity::find().count(&db).await.unwrap();
+        notification_channel::Entity::find().count(&db).await.unwrap();
+        notification_rule::Entity::find().count(&db).await.unwrap();
+        notification_log::Entity::find().count(&db).await.unwrap();
+        global_setting::Entity::find().count(&db).await.unwrap();
+        revoked_token_jti::Entity::find().count(&db).await.unwrap();
+        revoked_token_user::Entity::find().count(&db).await.unwrap();
+        crl_cache::Entity::find().count(&db).await.unwrap();
+
+        // Entity count queries verify that each table exists and is queryable.
+        host_software_item::Entity::find().count(&db).await.unwrap();
+        update_history::Entity::find().count(&db).await.unwrap();
+        update_batch::Entity::find().count(&db).await.unwrap();
+        host_package::Entity::find().count(&db).await.unwrap();
+        host_package_ignore::Entity::find().count(&db).await.unwrap();
+        host_package_update_history::Entity::find().count(&db).await.unwrap();
+
+        // `has_update` is a SQLite generated column not part of the entity
+        // model; verify it exists via a targeted sea_query SELECT.
+        assert_has_update_column_exists(&db).await;
+
+        service::Entity::find().count(&db).await.unwrap();
+
         // Verify split_version_check migration: detect_version task row exists.
-        let count_stmt = sea_orm_migration::prelude::Query::select()
-            .expr(sea_orm_migration::prelude::Func::count(
-                sea_orm_migration::prelude::Expr::col(Alias::new("id")),
-            ))
+        let count_stmt = Query::select()
+            .expr(Func::count(Expr::col(Alias::new("id"))))
             .from(Alias::new("scheduled_tasks"))
-            .and_where(
-                sea_orm_migration::prelude::Expr::col(Alias::new("task_type"))
-                    .eq("detect_version"),
-            )
+            .and_where(Expr::col(Alias::new("task_type")).eq("detect_version"))
             .to_owned();
         let detect_version_count_rows = db.query_all(&count_stmt).await.unwrap();
         let detect_version_count: i64 = {

@@ -64,6 +64,7 @@ uptrakit-scheduler-engine = { workspace = true, optional = true }
 rust-embed = { workspace = true, optional = true, features = ["mime-guess"] }
 
 [dev-dependencies]
+uptrakit-crypto = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tempfile = { workspace = true }
 testcontainers = { workspace = true }

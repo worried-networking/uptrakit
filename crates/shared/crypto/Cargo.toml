@@ -9,6 +9,9 @@ publish = false
 
 [features]
 sea-orm = ["dep:sea-orm"]
+# Expose test-only helpers (e.g. `EncryptedString::plaintext_for_test`) to
+# dependent crates' test builds.  Never enable this in production.
+testing = []
 
 [dependencies]
 aws-lc-rs = { workspace = true }

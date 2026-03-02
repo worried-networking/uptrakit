@@ -3,12 +3,20 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
+#[derive(DeriveIden)]
+enum ScheduledTasks {
+    Table,
+    TaskType,
+}
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let db = manager.get_connection();
-        db.execute_unprepared("DELETE FROM scheduled_tasks WHERE task_type = 'event_cleanup'")
-            .await?;
+        let stmt = Query::delete()
+            .from_table(ScheduledTasks::Table)
+            .and_where(Expr::col(ScheduledTasks::TaskType).eq("event_cleanup"))
+            .to_owned();
+        manager.get_connection().execute(&stmt).await?;
         Ok(())
     }
 

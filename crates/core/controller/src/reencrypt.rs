@@ -320,11 +320,11 @@ async fn reencrypt_oidc_flow_pkce_verifiers(db: &DatabaseConnection) -> u64 {
 mod tests {
     use super::*;
     use sea_orm::{
-        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, EntityTrait, Set,
+        ActiveModelTrait, ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter, Set,
     };
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{
-        ca_certificate, mqtt_client, oidc_provider, pending_oidc_flow,
+        ca_certificate, mqtt_client, oidc_provider, pending_oidc_flow, tenant,
     };
     use uptrakit_shared_types::{MqttClientConnectionStatus, MqttTransport};
     use uuid::Uuid;
@@ -334,16 +334,8 @@ mod tests {
     /// The master key is initialised once (idempotent: subsequent calls are
     /// silently ignored if the key is already set to the same value).
     ///
-    /// FK enforcement is disabled so we can insert rows into tables that have
-    /// FK references (e.g. `oidc_providers.tenant_id`) without having to build
-    /// the full parent-record hierarchy.
-    ///
-    /// `max_connections(1)` / `min_connections(1)` pin all operations to a
-    /// single persistent connection.  sqlx 0.8 enables `PRAGMA foreign_keys =
-    /// ON` by default for each new SQLite connection; using a single
-    /// connection and disabling FKs after migrations ensures the PRAGMA
-    /// remains in effect for every subsequent query, and that the in-memory
-    /// database is never discarded when the pool recycles connections.
+    /// A tenant with the nil UUID is inserted so that FK constraints on
+    /// `oidc_providers.tenant_id` and `mqtt_clients.tenant_id` are satisfied.
     async fn test_db() -> DatabaseConnection {
         let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
         let mut opt = ConnectOptions::new("sqlite::memory:");
@@ -352,21 +344,22 @@ mod tests {
         crate::migration::run_migrations(&db)
             .await
             .expect("run migrations");
-        // sqlx 0.8 enables PRAGMA foreign_keys = ON for every new SQLite
-        // connection by default.  Override it after migrations so that test
-        // helpers can insert rows without constructing the full FK hierarchy.
-        db.execute_unprepared("PRAGMA foreign_keys = OFF")
-            .await
-            .expect("disable FK enforcement for test isolation");
+        // Insert a tenant with the nil UUID so FK constraints on
+        // oidc_providers.tenant_id and mqtt_clients.tenant_id are satisfied.
+        let now = OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(Uuid::nil()),
+            name: Set("Test Tenant".to_string()),
+            slug: Set("test-tenant".to_string()),
+            is_default: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert nil tenant for FK satisfaction");
         db
-    }
-
-    /// Overwrite an encrypted column with a raw plaintext value via raw SQL,
-    /// simulating legacy rows that were written before encryption was added.
-    async fn set_plaintext(db: &DatabaseConnection, sql: &str) {
-        db.execute_unprepared(sql)
-            .await
-            .expect("raw SQL update");
     }
 
     // ── ca_certificates.key_pem ───────────────────────────────────────────────
@@ -390,11 +383,18 @@ mod tests {
         am.insert(&db).await.expect("insert ca_certificate");
 
         // Simulate legacy: overwrite key_pem with plaintext (no ENC:v1: prefix).
-        set_plaintext(
-            &db,
-            "UPDATE ca_certificates SET key_pem = 'secret_key' WHERE fingerprint = 'fp1'",
-        )
-        .await;
+        {
+            let model = uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id(
+                "fp1".to_string(),
+            )
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+            let mut am: ca_certificate::ActiveModel = model.into();
+            am.key_pem = Set(EncryptedString::plaintext_for_test("secret_key".to_string()));
+            am.update(&db).await.expect("set plaintext key_pem");
+        }
 
         let count = reencrypt_ca_certificate_keys(&db).await;
         assert_eq!(count, 1, "exactly one row should be re-encrypted");
@@ -468,15 +468,20 @@ mod tests {
             .await
             .expect("insert oidc_provider");
 
-        // Use the string `slug` column rather than the UUID `id` column to
-        // avoid any UUID text-encoding ambiguity in raw SQLite statements.
-        set_plaintext(
-            &db,
-            &format!(
-                "UPDATE oidc_providers SET client_secret = 'client-secret-val' WHERE slug = 'test-{id}'"
-            ),
-        )
-        .await;
+        // Overwrite client_secret with a plaintext value (no ENC:v1: prefix)
+        // to simulate a legacy row written before encryption was added.
+        {
+            let model = oidc_provider::Entity::find()
+                .filter(oidc_provider::Column::Slug.eq(format!("test-{id}")))
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row exists");
+            let mut am: oidc_provider::ActiveModel = model.into();
+            am.client_secret =
+                Set(EncryptedString::plaintext_for_test("client-secret-val".to_string()));
+            am.update(&db).await.expect("set plaintext client_secret");
+        }
 
         let count = reencrypt_oidc_client_secrets(&db).await;
         assert_eq!(count, 1, "exactly one row should be re-encrypted");
@@ -542,12 +547,20 @@ mod tests {
             .await
             .expect("insert mqtt_client");
 
-        // Use the string `client_id` column to avoid UUID encoding ambiguity.
-        set_plaintext(
-            &db,
-            &format!("UPDATE mqtt_clients SET password = 'mqtt-pass' WHERE client_id = 'client-{id}'"),
-        )
-        .await;
+        // Overwrite password with a plaintext value (no ENC:v1: prefix)
+        // to simulate a legacy row written before encryption was added.
+        {
+            let model = mqtt_client::Entity::find()
+                .filter(mqtt_client::Column::ClientId.eq(format!("client-{id}")))
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row exists");
+            let mut am: mqtt_client::ActiveModel = model.into();
+            am.password =
+                Set(Some(EncryptedString::plaintext_for_test("mqtt-pass".to_string())));
+            am.update(&db).await.expect("set plaintext password");
+        }
 
         let count = reencrypt_mqtt_passwords(&db).await;
         assert_eq!(count, 1, "exactly one row should be re-encrypted");
@@ -607,14 +620,21 @@ mod tests {
         ));
         am.insert(&db).await.expect("insert mqtt_client");
 
-        // Use `client_id` to avoid UUID encoding ambiguity in raw SQL.
-        set_plaintext(
-            &db,
-            &format!(
-                "UPDATE mqtt_clients SET ca_cert_pem = '-----BEGIN CERTIFICATE-----' WHERE client_id = 'client-{id}'"
-            ),
-        )
-        .await;
+        // Overwrite ca_cert_pem with a plaintext value (no ENC:v1: prefix)
+        // to simulate a legacy row written before encryption was added.
+        {
+            let model = mqtt_client::Entity::find()
+                .filter(mqtt_client::Column::ClientId.eq(format!("client-{id}")))
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row exists");
+            let mut am: mqtt_client::ActiveModel = model.into();
+            am.ca_cert_pem = Set(Some(EncryptedString::plaintext_for_test(
+                "-----BEGIN CERTIFICATE-----".to_string(),
+            )));
+            am.update(&db).await.expect("set plaintext ca_cert_pem");
+        }
 
         let count = reencrypt_mqtt_ca_certs(&db).await;
         assert_eq!(count, 1, "exactly one row should be re-encrypted");
@@ -664,13 +684,20 @@ mod tests {
         };
         am.insert(&db).await.expect("insert pending_oidc_flow");
 
-        set_plaintext(
-            &db,
-            &format!(
-                "UPDATE pending_oidc_flows SET pkce_verifier = 'pkce_secret' WHERE csrf_state = '{csrf}'"
-            ),
-        )
-        .await;
+        // Overwrite pkce_verifier with a plaintext value (no ENC:v1: prefix)
+        // to simulate a legacy row written before encryption was added.
+        {
+            let model =
+                uptrakit_shared_db::entity::prelude::PendingOidcFlow::find_by_id(csrf.to_string())
+                    .one(&db)
+                    .await
+                    .expect("query")
+                    .expect("row exists");
+            let mut am: pending_oidc_flow::ActiveModel = model.into();
+            am.pkce_verifier =
+                Set(EncryptedString::plaintext_for_test("pkce_secret".to_string()));
+            am.update(&db).await.expect("set plaintext pkce_verifier");
+        }
 
         let count = reencrypt_oidc_flow_pkce_verifiers(&db).await;
         assert_eq!(count, 1, "exactly one row should be re-encrypted");
@@ -724,34 +751,56 @@ mod tests {
             created_at: Set(now),
         };
         ca_am.insert(&db).await.expect("insert ca_certificate");
-        set_plaintext(
-            &db,
-            "UPDATE ca_certificates SET key_pem = 'ca_key' WHERE fingerprint = 'fp_all'",
-        )
-        .await;
+        // Simulate legacy: overwrite key_pem with plaintext (no ENC:v1: prefix).
+        {
+            let model =
+                uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("fp_all".to_string())
+                    .one(&db)
+                    .await
+                    .expect("query")
+                    .expect("row exists");
+            let mut am: ca_certificate::ActiveModel = model.into();
+            am.key_pem = Set(EncryptedString::plaintext_for_test("ca_key".to_string()));
+            am.update(&db).await.expect("set plaintext key_pem");
+        }
 
         let oidc_id = Uuid::now_v7();
         oidc_provider_am(oidc_id, now)
             .insert(&db)
             .await
             .expect("insert oidc_provider");
-        // Use string columns to avoid UUID encoding ambiguity in raw SQL.
-        set_plaintext(
-            &db,
-            &format!("UPDATE oidc_providers SET client_secret = 'oidc_secret' WHERE slug = 'test-{oidc_id}'"),
-        )
-        .await;
+        // Simulate legacy: overwrite client_secret with plaintext (no ENC:v1: prefix).
+        {
+            let model = oidc_provider::Entity::find()
+                .filter(oidc_provider::Column::Slug.eq(format!("test-{oidc_id}")))
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row exists");
+            let mut am: oidc_provider::ActiveModel = model.into();
+            am.client_secret =
+                Set(EncryptedString::plaintext_for_test("oidc_secret".to_string()));
+            am.update(&db).await.expect("set plaintext client_secret");
+        }
 
         let mqtt_id = Uuid::now_v7();
         mqtt_client_am(mqtt_id, now)
             .insert(&db)
             .await
             .expect("insert mqtt_client");
-        set_plaintext(
-            &db,
-            &format!("UPDATE mqtt_clients SET password = 'mqtt_pass' WHERE client_id = 'client-{mqtt_id}'"),
-        )
-        .await;
+        // Simulate legacy: overwrite password with plaintext (no ENC:v1: prefix).
+        {
+            let model = mqtt_client::Entity::find()
+                .filter(mqtt_client::Column::ClientId.eq(format!("client-{mqtt_id}")))
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row exists");
+            let mut am: mqtt_client::ActiveModel = model.into();
+            am.password =
+                Set(Some(EncryptedString::plaintext_for_test("mqtt_pass".to_string())));
+            am.update(&db).await.expect("set plaintext password");
+        }
 
         let csrf = "csrf_all_tables";
         let flow_am = pending_oidc_flow::ActiveModel {
@@ -763,11 +812,19 @@ mod tests {
             expires_at: Set(now),
         };
         flow_am.insert(&db).await.expect("insert pending_oidc_flow");
-        set_plaintext(
-            &db,
-            &format!("UPDATE pending_oidc_flows SET pkce_verifier = 'pkce_val' WHERE csrf_state = '{csrf}'"),
-        )
-        .await;
+        // Simulate legacy: overwrite pkce_verifier with plaintext (no ENC:v1: prefix).
+        {
+            let model =
+                uptrakit_shared_db::entity::prelude::PendingOidcFlow::find_by_id(csrf.to_string())
+                    .one(&db)
+                    .await
+                    .expect("query")
+                    .expect("row exists");
+            let mut am: pending_oidc_flow::ActiveModel = model.into();
+            am.pkce_verifier =
+                Set(EncryptedString::plaintext_for_test("pkce_val".to_string()));
+            am.update(&db).await.expect("set plaintext pkce_verifier");
+        }
 
         // Run the top-level function — should process all tables.
         reencrypt_legacy_plaintext(&db).await;

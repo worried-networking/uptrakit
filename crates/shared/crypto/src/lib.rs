@@ -466,6 +466,22 @@ impl EncryptedString {
         self.plaintext.expose_secret()
     }
 
+    /// Construct an `EncryptedString` whose database representation is the
+    /// raw `value` string **without** the `ENC:v1:` prefix.
+    ///
+    /// This is used exclusively in tests to simulate legacy rows that were
+    /// written to the database before encryption was added, allowing the
+    /// re-encryption routine to be tested without raw SQL `UPDATE` statements.
+    ///
+    /// **Never call this in production code.**
+    #[cfg(any(test, feature = "testing"))]
+    pub fn plaintext_for_test(value: String) -> Self {
+        Self {
+            plaintext: SecretString::new(value.clone()),
+            db_value: value,
+        }
+    }
+
     /// Returns `true` if the stored DB representation is already encrypted.
     ///
     /// Used by the re-encryption routine to identify legacy plaintext values

@@ -419,50 +419,14 @@ mod tests {
     use crate::ServiceCredentialSources;
     use axum::body::Body;
     use axum::http::Request;
-    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
-
-    async fn test_db() -> DatabaseConnection {
-        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
-        Database::connect(opt).await.expect("test db")
-    }
+    use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 
     async fn setup_test_db() -> DatabaseConnection {
-        let db = test_db().await;
-
-        db.execute_unprepared(
-            "CREATE TABLE users (
-                id TEXT PRIMARY KEY,
-                email TEXT UNIQUE NOT NULL,
-                first_name TEXT NOT NULL,
-                last_name TEXT NOT NULL,
-                password_hash TEXT,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                deactivated_at INTEGER,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            )",
-        )
-        .await
-        .unwrap();
-
-        db.execute_unprepared(
-            "CREATE TABLE sessions (
-                id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                refresh_token_hash TEXT UNIQUE NOT NULL,
-                auth_method TEXT NOT NULL,
-                oidc_provider_id TEXT,
-                token_type TEXT NOT NULL DEFAULT 'refresh_token',
-                created_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL,
-                revoked_at INTEGER,
-                user_agent TEXT,
-                ip_address TEXT,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )",
-        )
-        .await
-        .unwrap();
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let db = Database::connect(opt).await.expect("test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
 
         let now = OffsetDateTime::now_utc();
         let user = user::ActiveModel {
