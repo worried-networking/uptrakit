@@ -766,6 +766,9 @@ pub async fn get_batch_with_items(
 /// [`ExecuteBatchHostPackageUpdate`](ControllerMessage::ExecuteBatchHostPackageUpdate)
 /// message per plugin config group to the host's linked agent.
 ///
+/// When `security_only` is `true`, only packages with `update_category = "security"`
+/// are included in the batch.
+///
 /// Returns `None` if no outdated packages exist (nothing to do), or
 /// `Some(batch_id)` when at least one dispatch was issued.
 ///
@@ -783,6 +786,7 @@ pub async fn trigger_all_host_package_updates_for_host(
     host_id: Uuid,
     actor_type: &str,
     actor_id: &str,
+    security_only: bool,
 ) -> Result<Option<Uuid>> {
     // 1. Verify host exists and belongs to tenant.
     let host_record = Host::find_by_id(host_id)
@@ -814,6 +818,15 @@ pub async fn trigger_all_host_package_updates_for_host(
             )
         })
         .collect();
+
+    let outdated = if security_only {
+        outdated
+            .into_iter()
+            .filter(|p| p.update_category == "security")
+            .collect()
+    } else {
+        outdated
+    };
 
     if outdated.is_empty() {
         return Ok(None);

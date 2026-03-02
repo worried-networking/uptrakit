@@ -2861,6 +2861,7 @@ components:
         - host_id
         - hostname
         - pending_count
+        - security_pending_count
         - total_count
         - update_in_progress
       description: |
@@ -2886,6 +2887,14 @@ components:
           description: |
             Number of packages where both `installed_version` and `latest_version`
             are known and the two differ (update is available).
+        security_pending_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: |
+            Number of packages where `update_category = "security"` and both
+            `installed_version` and `latest_version` are known and differ.
+            Used to drive the per-host security updates entity in Home Assistant.
         total_count:
           type: integer
           format: int32
@@ -2947,6 +2956,14 @@ components:
           description: MQTT client UUID that initiated the trigger (used as actor_id)
           examples:
             - 660e8400-e29b-41d4-a716-446655440001
+        security_only:
+          type: boolean
+          default: false
+          description: |
+            When `true`, the controller filters the batch to packages with
+            `update_category = "security"` only. Set automatically by the MQTT
+            service when the user presses "Install" on the security updates
+            entity. Defaults to `false` (all outdated packages included).
 
     softwareStatesPayload:
       type: object

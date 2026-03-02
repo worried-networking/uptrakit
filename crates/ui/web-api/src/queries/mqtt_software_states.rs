@@ -204,6 +204,7 @@ struct HostPackageRow {
     host_id: Uuid,
     installed_version: Option<String>,
     latest_version: Option<String>,
+    update_category: String,
 }
 
 /// Lightweight projection for bulk-loading just the host_id from history rows.
@@ -231,6 +232,7 @@ pub async fn load_host_package_host_states_for_tenant(
         .column(host_package::Column::HostId)
         .column(host_package::Column::InstalledVersion)
         .column(host_package::Column::LatestVersion)
+        .column(host_package::Column::UpdateCategory)
         .filter(host_package::Column::TenantId.eq(tenant_id))
         .filter(host_package::Column::Enabled.eq(true))
         .filter(host_package::Column::DeactivatedAt.is_null())
@@ -302,12 +304,22 @@ pub async fn load_host_package_host_states_for_tenant(
                 _ => false,
             })
             .count() as u32;
+        let security_pending_count = pkgs
+            .iter()
+            .filter(|p| {
+                matches!(
+                    (&p.installed_version, &p.latest_version),
+                    (Some(installed), Some(latest)) if installed != latest
+                ) && p.update_category == "security"
+            })
+            .count() as u32;
         let update_in_progress = in_progress_host_ids.contains(&host_id);
 
         results.push(MqttHostPackageHostState {
             host_id,
             hostname: host.hostname.clone(),
             pending_count,
+            security_pending_count,
             total_count,
             update_in_progress,
         });
@@ -377,5 +389,74 @@ mod tests {
     fn extract_release_info_non_string_values_ignored() {
         let meta = serde_json::json!({ "release_url": 42, "release_notes": true });
         assert_eq!(extract_release_info(Some(&meta)), (None, None));
+    }
+
+    // -------------------------------------------------------------------------
+    // security_pending_count computation
+    // -------------------------------------------------------------------------
+
+    fn make_pkg(installed: Option<&str>, latest: Option<&str>, category: &str) -> HostPackageRow {
+        HostPackageRow {
+            host_id: Uuid::nil(),
+            installed_version: installed.map(String::from),
+            latest_version: latest.map(String::from),
+            update_category: category.to_string(),
+        }
+    }
+
+    #[test]
+    fn security_pending_count_only_security_outdated() {
+        // 3 packages: one security-outdated, one regular-outdated, one up-to-date security
+        let pkgs = vec![
+            make_pkg(Some("1.0"), Some("2.0"), "security"),
+            make_pkg(Some("1.0"), Some("2.0"), "bugfix"),
+            make_pkg(Some("3.0"), Some("3.0"), "security"),
+        ];
+        let security_pending_count = pkgs
+            .iter()
+            .filter(|p| {
+                matches!(
+                    (&p.installed_version, &p.latest_version),
+                    (Some(installed), Some(latest)) if installed != latest
+                ) && p.update_category == "security"
+            })
+            .count() as u32;
+        assert_eq!(security_pending_count, 1);
+    }
+
+    #[test]
+    fn security_pending_count_zero_when_no_security_packages() {
+        let pkgs = vec![
+            make_pkg(Some("1.0"), Some("2.0"), "bugfix"),
+            make_pkg(Some("1.0"), Some("1.0"), "regular"),
+        ];
+        let security_pending_count = pkgs
+            .iter()
+            .filter(|p| {
+                matches!(
+                    (&p.installed_version, &p.latest_version),
+                    (Some(installed), Some(latest)) if installed != latest
+                ) && p.update_category == "security"
+            })
+            .count() as u32;
+        assert_eq!(security_pending_count, 0);
+    }
+
+    #[test]
+    fn security_pending_count_ignores_missing_versions() {
+        let pkgs = vec![
+            make_pkg(None, Some("2.0"), "security"),
+            make_pkg(Some("1.0"), None, "security"),
+        ];
+        let security_pending_count = pkgs
+            .iter()
+            .filter(|p| {
+                matches!(
+                    (&p.installed_version, &p.latest_version),
+                    (Some(installed), Some(latest)) if installed != latest
+                ) && p.update_category == "security"
+            })
+            .count() as u32;
+        assert_eq!(security_pending_count, 0);
     }
 }

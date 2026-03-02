@@ -382,6 +382,7 @@ pub(super) async fn handle_mqtt_trigger_host_package_update(
         payload.host_id,
         "mqtt",
         &payload.mqtt_client_id.to_string(),
+        payload.security_only,
     )
     .await
     {

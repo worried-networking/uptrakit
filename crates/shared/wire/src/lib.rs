@@ -1195,6 +1195,8 @@ pub struct MqttHostPackageHostState {
     pub hostname: String,
     /// Count of packages where `installed_version != latest_version` (both known).
     pub pending_count: u32,
+    /// Count of packages where `update_category = "security"` AND versions differ.
+    pub security_pending_count: u32,
     /// Total count of enabled, non-deactivated packages for this host.
     pub total_count: u32,
     /// Whether a batch update is currently pending or in progress for this host.
@@ -1214,6 +1216,9 @@ pub struct MqttTriggerHostPackageUpdatePayload {
     pub host_id: Uuid,
     /// MQTT client UUID that initiated the trigger (used as actor_id).
     pub mqtt_client_id: Uuid,
+    /// When `true`, only packages with `update_category = "security"` are updated.
+    #[serde(default)]
+    pub security_only: bool,
 }
 
 // =============================================================================
@@ -3755,6 +3760,7 @@ mod tests {
             host_id: TEST_UUID_1,
             hostname: "myserver.local".to_string(),
             pending_count: 3,
+            security_pending_count: 1,
             total_count: 42,
             update_in_progress: false,
         };
@@ -3780,6 +3786,7 @@ mod tests {
                 host_id: TEST_UUID_2,
                 hostname: "host1".to_string(),
                 pending_count: 5,
+                security_pending_count: 2,
                 total_count: 100,
                 update_in_progress: true,
             }],
@@ -3796,12 +3803,41 @@ mod tests {
                 tenant_id: TEST_UUID_1,
                 host_id: TEST_UUID_2,
                 mqtt_client_id: TEST_UUID_3,
+                security_only: false,
             },
         );
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"mqtt_trigger_host_package_update""#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_trigger_host_package_update_security_only_roundtrip() {
+        let msg = ServiceMessage::MqttTriggerHostPackageUpdate(
+            MqttTriggerHostPackageUpdatePayload {
+                tenant_id: TEST_UUID_1,
+                host_id: TEST_UUID_2,
+                mqtt_client_id: TEST_UUID_3,
+                security_only: true,
+            },
+        );
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""security_only":true"#));
+        let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_trigger_host_package_update_security_only_defaults_false() {
+        // When `security_only` is absent in old wire messages, it should deserialize as false.
+        let json = r#"{"protocol_version":1,"seq":1,"type":"mqtt_trigger_host_package_update","tenant_id":"11111111-1111-1111-1111-111111111111","host_id":"22222222-2222-2222-2222-222222222222","mqtt_client_id":"33333333-3333-3333-3333-333333333333"}"#;
+        let msg: ServiceMessage = serde_json::from_str(json).unwrap();
+        if let ServiceMessage::MqttTriggerHostPackageUpdate(p) = msg {
+            assert!(!p.security_only);
+        } else {
+            panic!("expected MqttTriggerHostPackageUpdate");
+        }
     }
 
     // =========================================================================
