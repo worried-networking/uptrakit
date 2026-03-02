@@ -173,15 +173,6 @@ protocol definition lives in one module. Should be decomposed into domain module
 **[HIGH]** `crates/ui/web-api/src/app_state.rs:37-96` -- `AppState` has 26 public fields, most
 with `pub` visibility.
 
-**[HIGH]** `crates/ui/web-api/src/queries/update_batches.rs:106-125,206-213` -- N+1 query
-pattern in `find_outdated_items_for_host` and `find_outdated_hosts_for_item`. Per-item DB
-queries for software items and plugin assignments inside loops. With 50 items per host,
-generates 100+ extra queries.
-
-**[HIGH]** `crates/ui/web-api/src/queries/update_batches.rs:252-381` -- `create_batch`
-performs no transaction around multi-step mutation. If any step fails mid-way, the batch
-record exists with `total_count` that does not match actual children.
-
 **[MEDIUM]** `crates/shared/db/src/entity/oidc_provider.rs:89` -- Soft-delete column named
 `deleted_at` instead of `deactivated_at`. All other 7 soft-deletable entities use
 `deactivated_at`. Inconsistency prevents generic soft-delete utility.
@@ -289,10 +280,6 @@ duplicated with `unreachable!()` in two locations.
 `src/queries/update_triggers.rs` (436 lines) -- Zero test coverage on the batch query layer
 and the refactored update trigger pipeline.
 
-**[HIGH]** `crates/shared/web-api-types/src/notifications.rs:336` -- `ALL_EVENT_TYPES` lists
-only 6 of 8 variants, missing `BatchUpdateCompleted` and `BatchUpdatePartiallyCompleted`.
-Three tests iterate this array.
-
 **[MEDIUM]** `crates/shared/openapi-client/src/lib.rs:687-885` -- Retry-backoff tests do not
 verify delay durations. Eight tests assert only eventual success, not backoff timing.
 
@@ -362,19 +349,7 @@ retry uses fixed 1-second delay with no exponential backoff or jitter.
 
 ### Issues
 
-**[CRITICAL]** `crates/plugins/releases/github/src/plugin.rs:107-118`,
-`crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs:115-127`,
-`crates/shared/service-sdk/src/ca.rs:49-76` -- Missing HTTP client timeouts
-(`connect_timeout`, `timeout`). An unresponsive upstream can hang the process indefinitely.
-
-**[CRITICAL]** `crates/plugins/releases/github/src/error.rs:13`,
-`crates/plugins/releases/forgejo/src/error.rs:13`,
-`crates/plugins/releases/gitlab/src/error.rs:13` -- `status: u16` in `ApiError` instead of
-`StatusCode`.
-
-**[HIGH]** `crates/plugins/releases/github/src/plugin.rs:29`,
-`crates/plugins/releases/forgejo/src/plugin.rs:29` -- `.unwrap()` in production
-`parse_owner_repo()` after guard. Violates no-unwrap rule.
+No coding standards issues found.
 
 ## Extensibility
 
@@ -399,11 +374,6 @@ retry uses fixed 1-second delay with no exponential backoff or jitter.
 
 **[MEDIUM]** `crates/shared/wire/src/lib.rs:214-234` -- `ServiceMessage` and
 `ControllerMessage` mix agent-specific and MQTT-specific variants.
-
-**[HIGH]** `crates/shared/web-api-types/src/update_batches.rs:30-43` --
-`HostBatchUpdateRequest::validate()` hardcodes valid category list as
-`["security", "bugfix", "feature", "unknown"]`. Duplicated source of truth from
-`UpdateCategory` enum.
 
 **[MEDIUM]** `crates/shared/types/src/batch_status.rs:8-29` and
 `src/update_category.rs:13-35` -- No `Other(String)` catch-all variant. New values in API

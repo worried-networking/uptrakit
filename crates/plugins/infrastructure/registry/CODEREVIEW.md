@@ -110,26 +110,13 @@ types. A new plugin type added to the `PluginType` enum but not yet registered i
   `HomebrewConfig`, `NpmConfig`, `ProxmoxHelperScriptsConfig`) implement the trait with a
   no-op `with_secrets_masked` using the default implementation from the trait. The distinction
   is enforced by the trait rather than convention.
-- All four plugins that perform HTTP requests (`DockerPlugin` at `registry.rs:34-35`,
+- All plugins that perform HTTP requests (`DockerPlugin` at `registry.rs:34-35`,
   `GitLabPlugin` at `plugin.rs:112-113`, `ForgejoPlugin` at `plugin.rs:113-114`,
-  `NpmPlugin` at `plugin.rs:181-182`) set `.connect_timeout(10s)` and `.timeout(60s)`.
-  The timeout values are consistent across all four. (See issue below for the two exceptions.)
+  `NpmPlugin` at `plugin.rs:181-182`, `GitHubPlugin`, and `ProxmoxHelperScriptsPlugin`)
+  set `.connect_timeout(10s)` and `.timeout(60s)`. The timeout values are consistent
+  across all plugins.
 
 ### Issues
-
-**[HIGH]** `crates/plugins/releases/github/src/plugin.rs:107-115` and
-`crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs:115-127`
-(vs `crates/plugins/releases/docker/src/registry.rs:34-35`,
-`crates/plugins/releases/gitlab/src/plugin.rs:112-113`,
-`crates/plugins/releases/forgejo/src/plugin.rs:113-114`,
-`crates/plugins/package-managers/npm/src/plugin.rs:181-182`) -- The GitHub and
-Proxmox-helper-scripts plugins construct `reqwest::Client` without `.connect_timeout()` or
-`.timeout()`. Both plugins make external network requests: GitHub fetches release tags from
-`api.github.com`; Proxmox fetches the community scripts JSON index from an external URL. In a
-network partition or slow-server scenario, these plugins can hang indefinitely, blocking the
-agent's update processing loop. Every other HTTP-using plugin in the workspace applies
-`connect_timeout(10s)` and `timeout(60s)`. Preferred fix: add the same two timeout calls to
-`GitHubPlugin::new` and `ProxmoxHelperScriptsPlugin::new`.
 
 **[MEDIUM]** `crates/plugins/package-managers/npm/src/plugin.rs` and
 `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`

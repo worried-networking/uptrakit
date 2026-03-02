@@ -515,18 +515,6 @@ if called — does NOT write to the NATS outbox; currently it only confirms the 
 
 ### Issues
 
-**[HIGH]** `src/queries/update_batches.rs:679` -- `format!("{:?}", child.status).to_lowercase()`
-produces `"inprogress"` for `InProgress`. DB stores `"in_progress"`. Batch list and detail
-endpoints return different status strings.
-
-**[HIGH]** `src/routes/enrollment_tokens.rs:183,199` (vs `src/routes/hosts.rs:149`,
-`src/routes/services.rs:305`, `src/routes/plugin_configs.rs:235`,
-`src/routes/notifications.rs:222,520`) -- `revoke_enrollment_token` returns HTTP 200 with a
-`MessageResponse` body on success, while every other soft-delete and hard-delete endpoint in
-the codebase returns HTTP 204 with no body. This forces API clients to treat enrollment token
-deletion as a special case. Preferred pattern: 204 No Content, matching all other delete
-endpoints.
-
 **[MEDIUM]** `src/routes/oidc_providers.rs:126` and `src/routes/settings_mqtt.rs:87`
 (vs all other list endpoints) -- `list_providers` returns `Vec<OidcProviderResponse>` (flat
 array, no pagination) and `list_mqtt_settings` returns `Vec<MqttClientResponse>` (flat array),
@@ -591,12 +579,6 @@ consistent with `update_history` SSE but both silently swallow DB errors.
   transaction.
 
 ### Issues
-
-**[HIGH]** `src/queries/update_batches.rs:85-140` -- N+1 in `find_outdated_items_for_host`:
-per-item software_item and plugin queries.
-
-**[HIGH]** `src/queries/update_batches.rs:252-381` -- No transaction around `create_batch`.
-Partial failure leaves inconsistent state.
 
 **[HIGH]** `src/queries/hosts.rs:35-45` -- `load_host_agents` queries `ServiceHost` with only
 a `host_id` filter, bypassing the `TenantDb` abstraction entirely:

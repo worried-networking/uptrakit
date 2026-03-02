@@ -257,14 +257,6 @@ value. If the column contains malformed JSON (e.g., from a direct DB edit), the 
 restriction is silently dropped instead of causing an error. Storing as `Json` column type
 would enable DB-level structural validation.
 
-**[MEDIUM]** `src/entity/user_oidc_link.rs` -- No unique constraint on
-`(user_id, provider_id)` or `(provider_id, oidc_subject)`. A user linked to the same OIDC
-provider twice (possible via a race in `oidc_callback`) would produce two rows.
-`(provider_id, oidc_subject)` in particular should be globally unique: a given external
-identity should map to exactly one Uptrakit user. Without this constraint, concurrent OIDC
-logins with the same subject can race and create duplicate links or even link the same
-external identity to two different users.
-
 **[MEDIUM]** `src/entity/host_discovery_allowlist.rs` and
 `src/entity/tenant_discovery_allowlist.rs` -- Both tables lack a unique constraint on
 `(tenant_id, host_id, plugin_type)` and `(tenant_id, plugin_type)` respectively. The
@@ -301,13 +293,6 @@ plan that relied on the dropped index.
 are all `String` columns with no CHECK constraint or enum backing. Any string value can be
 inserted, and invalid values are only caught at application-level parsing. Unlike
 `UpdateStatus` which uses `DeriveActiveEnum`, these columns have no DB-level validation.
-
-**[LOW]** `src/entity/update_batch.rs:13` -- `total_count: i32` is set at batch creation
-time. If candidates fail validation after the batch record is created but before all child
-update history records are inserted, the count will not match the actual number of children.
-The batch creation and child record insertion are not wrapped in a transaction, so a partial
-failure leaves `total_count` inconsistent with the actual `update_history` row count for
-that batch.
 
 **[LOW]** `src/entity/mqtt_client.rs` -- The `mqtt_clients` table has no unique constraint on
 `(tenant_id, client_id)`. MQTT `client_id` values must be unique within an MQTT broker

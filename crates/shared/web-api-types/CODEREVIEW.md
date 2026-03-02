@@ -89,13 +89,6 @@ three locations across `mqtt`, `agent`, and `web-api`. Centralize the conversion
 
 ### Issues
 
-**[HIGH]** `src/update_batches.rs:30-43` -- `HostBatchUpdateRequest::validate()` hardcodes the
-category list `["security", "bugfix", "feature", "unknown"]`. This duplicates the variant set
-from the `UpdateCategory` enum in `uptrakit-shared-types`. When a new category is added to the
-enum, the validation will reject it until the hardcoded list is manually updated. Use
-`UpdateCategory::iter()` (via `strum::IntoEnumIterator`) or validate by parsing through
-`UpdateCategory::from_str()` instead.
-
 **[LOW]** API version is embedded in route paths (`/api/v1/`) but not in response types or
 envelope headers. Future breaking changes to response shapes will require either a new route
 version or a migration period. Consider adding an `X-API-Version` header response field.
@@ -130,12 +123,6 @@ version or a migration period. Consider adding an `X-API-Version` header respons
 have no tests. Validation logic is the primary security boundary for all HTTP endpoints; a
 regression in any `validate()` implementation (e.g., accepting an empty field that should be
 rejected) would not be caught before deployment.
-
-**[HIGH]** `src/notifications.rs:336` -- `ALL_EVENT_TYPES` lists 6 of 8 variants, missing
-`BatchUpdateCompleted` and `BatchUpdatePartiallyCompleted`. Three tests iterate this array
-to verify exhaustive coverage of notification event types. Those tests now silently pass
-while leaving two event types untested. Any bug in the handling of the missing variants
-will not be caught by the test suite.
 
 **[LOW]** `src/masked_url.rs` -- `MaskedUrl` has no tests for its `Debug`/`Display`
 redaction behaviour. A regression that accidentally exposes embedded credentials in a URL
