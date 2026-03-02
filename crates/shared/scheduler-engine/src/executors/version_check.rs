@@ -16,8 +16,8 @@ use uptrakit_internal_wire::{
 use uptrakit_plugin_infrastructure_core::PluginCapability;
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 use uptrakit_shared_db::entity::{
-    host, host_software_item, host_software_item_plugin, plugin_config, scheduled_task, service,
-    service_host, software_item,
+    host, host_package, host_software_item, host_software_item_plugin, plugin_config,
+    scheduled_task, service, service_host, software_item,
 };
 use uptrakit_shared_types::PluginType;
 use uuid::Uuid;
@@ -102,6 +102,18 @@ struct FetchGroupKey {
 }
 
 // ── Phase B: agent-side assignments ──────────────────────────────────────────
+
+/// Row returned from the host-packages version check query.
+#[derive(Debug, sea_orm::FromQueryResult)]
+struct HostPackageAssignmentRow {
+    service_id: Uuid,
+    host_machine_id: String,
+    host_package_id: Uuid,
+    host_package_name: String,
+    plugin_type: String,
+    package_identifier: String,
+    config: serde_json::Value,
+}
 
 /// Row returned from the agent-side assignment query.
 #[derive(Debug, sea_orm::FromQueryResult)]
@@ -425,21 +437,29 @@ impl VersionCheckExecutor {
     // ── Phase B ──────────────────────────────────────────────────────────
 
     /// Build and send `CheckVersions` messages to agents.
+    ///
+    /// Includes both targeted software items (from `host_software_item_plugins`) and
+    /// host-managed packages (from `host_packages`). Host packages include `host_package_id`
+    /// so results can be routed back to the correct table.
     async fn send_agent_assignments(&self, tenant_id: Uuid) -> crate::error::Result<()> {
         let rows = self.query_agent_assignment_rows(tenant_id).await?;
-        if rows.is_empty() {
-            tracing::debug!("no software items assigned to agents for version check");
+        let hp_rows = self.query_host_package_assignment_rows(tenant_id).await?;
+
+        if rows.is_empty() && hp_rows.is_empty() {
+            tracing::debug!("no items assigned to agents for version check");
             return Ok(());
         }
 
-        // Build VersionCheckAssignment per (service_id, host_machine_id, software_item_id).
-        // Each software item may have up to two roles: detect_version and fetch_releases.
+        // Build VersionCheckAssignment per (service_id, host_machine_id).
+        // Use a unique key (Uuid) per assignment. For targeted items, the key is
+        // software_item_id. For host packages, the key is host_package_id.
         //
         // Key: (service_id, host_machine_id)
-        // Inner key: software_item_id -> partial VersionCheckAssignment
+        // Inner key: assignment key Uuid -> partial VersionCheckAssignment
         let mut by_agent_host: HashMap<(Uuid, String), HashMap<Uuid, VersionCheckAssignment>> =
             HashMap::new();
 
+        // Targeted software items.
         for row in rows {
             let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
                 report!(SchedulerError::Execution(format!(
@@ -495,6 +515,34 @@ impl VersionCheckExecutor {
                     tracing::warn!(role = other, "unexpected role in version check query");
                 }
             }
+        }
+
+        // Host packages — each gets a detect_version assignment from its plugin config.
+        for row in hp_rows {
+            let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
+                report!(SchedulerError::Execution(format!(
+                    "unknown plugin type: {}",
+                    row.plugin_type
+                )))
+            })?;
+
+            let agent_key = (row.service_id, row.host_machine_id.clone());
+            let items = by_agent_host.entry(agent_key).or_default();
+
+            // Use host_package_id as the map key (guaranteed unique per host package).
+            items.entry(row.host_package_id).or_insert_with(|| {
+                VersionCheckAssignment {
+                    software_item_id: row.host_package_id, // used for wire compat; handler routes via host_package_id
+                    name: row.host_package_name.clone(),
+                    detect_version: Some(PluginAssignment {
+                        plugin_type,
+                        package_identifier: row.package_identifier,
+                        config: row.config,
+                    }),
+                    fetch_releases: None,
+                    host_package_id: Some(row.host_package_id),
+                }
+            });
         }
 
         // Flatten and send messages.
@@ -588,6 +636,49 @@ impl VersionCheckExecutor {
                     .add(software_item::Column::DiscoveryState.ne("pending")),
             )
             .into_model::<AgentAssignmentRow>()
+            .all(&self.db)
+            .await
+            .context_to::<SchedulerError>()?;
+
+        Ok(rows)
+    }
+
+    /// Query host packages that need agent-side version checks.
+    ///
+    /// Joins `host_packages → host → service_host → service` and
+    /// `host_packages → plugin_config` to find enabled, non-deactivated
+    /// host packages with an active plugin config and a linked agent.
+    async fn query_host_package_assignment_rows(
+        &self,
+        tenant_id: Uuid,
+    ) -> crate::error::Result<Vec<HostPackageAssignmentRow>> {
+        let rows: Vec<HostPackageAssignmentRow> = host_package::Entity::find()
+            .select_only()
+            .column_as(service::Column::Id, "service_id")
+            .column_as(host::Column::MachineId, "host_machine_id")
+            .column_as(host_package::Column::Id, "host_package_id")
+            .column_as(host_package::Column::Name, "host_package_name")
+            .column_as(plugin_config::Column::PluginType, "plugin_type")
+            .column_as(host_package::Column::PackageIdentifier, "package_identifier")
+            .column_as(plugin_config::Column::Config, "config")
+            .join(JoinType::InnerJoin, host_package::Relation::Host.def())
+            .join(
+                JoinType::InnerJoin,
+                host_package::Relation::PluginConfig.def(),
+            )
+            .join(
+                JoinType::InnerJoin,
+                service_host::Relation::Host.def().rev(),
+            )
+            .join(JoinType::InnerJoin, service_host::Relation::Service.def())
+            .filter(host_package::Column::TenantId.eq(tenant_id))
+            .filter(host_package::Column::Enabled.eq(true))
+            .filter(host_package::Column::DeactivatedAt.is_null())
+            .filter(host::Column::DeactivatedAt.is_null())
+            .filter(plugin_config::Column::Enabled.eq(true))
+            .filter(plugin_config::Column::DeactivatedAt.is_null())
+            .filter(service::Column::DeactivatedAt.is_null())
+            .into_model::<HostPackageAssignmentRow>()
             .all(&self.db)
             .await
             .context_to::<SchedulerError>()?;

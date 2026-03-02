@@ -16,7 +16,9 @@ use uptrakit_internal_wire::{
     ErrorPayload, OutgoingSeq, ReportHostsPayload, RequestCrlRenewalPayload,
     VersionCheckResultsPayload,
 };
-use uptrakit_shared_db::entity::{host, host_software_item, service, service_host, software_item};
+use uptrakit_shared_db::entity::{
+    host, host_package, host_software_item, service, service_host, software_item,
+};
 
 use super::LoopAction;
 use super::discovery::trigger_discovery_for_agent_host;
@@ -310,12 +312,58 @@ pub(super) async fn handle_version_check_results(
         if result.error.is_some() {
             tracing::debug!(
                 software_item_id = %result.software_item_id,
+                host_package_id = ?result.host_package_id,
                 error = ?result.error,
                 "skipping version result with error"
             );
             continue;
         }
 
+        // Route to host_packages table when host_package_id is present.
+        if let Some(hp_id) = result.host_package_id {
+            match host_package::Entity::find_by_id(hp_id)
+                .one(state.db())
+                .await
+            {
+                Ok(Some(existing)) => {
+                    let mut active: host_package::ActiveModel = existing.into();
+                    if let Some(ref installed_version) = result.installed_version {
+                        active.installed_version = Set(Some(installed_version.clone()));
+                        active.installed_version_detected_at = Set(Some(now));
+                    }
+                    if let Some(ref latest_version) = result.latest_version {
+                        active.latest_version = Set(Some(latest_version.clone()));
+                        active.latest_version_fetched_at = Set(Some(now));
+                    }
+                    active.update_category = Set(result.update_category.to_string());
+                    active.last_checked_at = Set(Some(now));
+                    active.updated_at = Set(now);
+                    if let Err(e) = active.update(state.db()).await {
+                        tracing::warn!(
+                            error = %e,
+                            host_package_id = %hp_id,
+                            "failed to update host_package version check result"
+                        );
+                    }
+                }
+                Ok(None) => {
+                    tracing::debug!(
+                        host_package_id = %hp_id,
+                        "host_package not found for version check result"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        host_package_id = %hp_id,
+                        "failed to look up host_package"
+                    );
+                }
+            }
+            continue;
+        }
+
+        // Route to host_software_item (targeted tracking system).
         let software_item_id = result.software_item_id;
 
         // Update installed version and latest version on host_software_item records.
