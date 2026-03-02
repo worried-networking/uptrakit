@@ -151,12 +151,8 @@ impl NotificationChannel for TelegramChannel {
     }
 }
 
-/// Escape HTML special characters for Telegram HTML parse mode.
-fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
+/// Re-export the shared HTML escaping function for use within this module.
+use crate::escape_html;
 
 #[cfg(test)]
 mod tests {

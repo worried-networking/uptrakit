@@ -62,6 +62,7 @@ impl MessageRateLimiter {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)] // Used by tests in mod.rs
     pub(crate) fn set_window_start(&mut self, start: std::time::Instant) {
         self.window_start = start;
     }

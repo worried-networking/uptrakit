@@ -1,4 +1,4 @@
-use uptrakit_notification_channels::{DeliveryMessage, MessageAction};
+use uptrakit_notification_channels::{escape_html, DeliveryMessage, MessageAction};
 use uuid::Uuid;
 
 use super::events::{NotificationEvent, NotificationEventDetails};
@@ -47,6 +47,10 @@ fn build_content(event: &NotificationEvent) -> (String, String, String) {
         .as_deref()
         .unwrap_or("unknown software");
 
+    // HTML-escaped versions of user-controlled labels for safe body_html interpolation.
+    let host_html = escape_html(host_label);
+    let software_html = escape_html(software_label);
+
     match &event.details {
         NotificationEventDetails::UpdateAvailable {
             installed_version,
@@ -59,10 +63,12 @@ fn build_content(event: &NotificationEvent) -> (String, String, String) {
                  Installed: {installed}\n\
                  Available: {latest_version}"
             );
+            let installed_html = escape_html(installed);
+            let latest_html = escape_html(latest_version);
             let body_html = format!(
-                "A new version of <b>{software_label}</b> is available on <b>{host_label}</b>.\n\
-                 Installed: <code>{installed}</code>\n\
-                 Available: <code>{latest_version}</code>"
+                "A new version of <b>{software_html}</b> is available on <b>{host_html}</b>.\n\
+                 Installed: <code>{installed_html}</code>\n\
+                 Available: <code>{latest_html}</code>"
             );
             (title, body, body_html)
         }
@@ -78,10 +84,12 @@ fn build_content(event: &NotificationEvent) -> (String, String, String) {
                  From: {from}\n\
                  To: {to_version}"
             );
+            let from_html = escape_html(from);
+            let to_html = escape_html(to_version);
             let body_html = format!(
-                "<b>{software_label}</b> on <b>{host_label}</b> has been updated successfully.\n\
-                 From: <code>{from}</code>\n\
-                 To: <code>{to_version}</code>"
+                "<b>{software_html}</b> on <b>{host_html}</b> has been updated successfully.\n\
+                 From: <code>{from_html}</code>\n\
+                 To: <code>{to_html}</code>"
             );
             (title, body, body_html)
         }
@@ -100,11 +108,14 @@ fn build_content(event: &NotificationEvent) -> (String, String, String) {
                  To: {to_version}\n\
                  Error: {err}"
             );
+            let from_html = escape_html(from);
+            let to_html = escape_html(to_version);
+            let err_html = escape_html(err);
             let body_html = format!(
-                "<b>{software_label}</b> on <b>{host_label}</b> failed to update.\n\
-                 From: <code>{from}</code>\n\
-                 To: <code>{to_version}</code>\n\
-                 Error: <code>{err}</code>"
+                "<b>{software_html}</b> on <b>{host_html}</b> failed to update.\n\
+                 From: <code>{from_html}</code>\n\
+                 To: <code>{to_html}</code>\n\
+                 Error: <code>{err_html}</code>"
             );
             (title, body, body_html)
         }
@@ -113,7 +124,7 @@ fn build_content(event: &NotificationEvent) -> (String, String, String) {
             let body =
                 format!("{discovered_count} new software item(s) discovered on {host_label}.");
             let body_html = format!(
-                "<b>{discovered_count}</b> new software item(s) discovered on <b>{host_label}</b>."
+                "<b>{discovered_count}</b> new software item(s) discovered on <b>{host_html}</b>."
             );
             (title, body, body_html)
         }
@@ -122,15 +133,17 @@ fn build_content(event: &NotificationEvent) -> (String, String, String) {
         } => {
             let title = format!("New Service Enrolled: {service_label}");
             let body = format!("Service \"{service_label}\" has been enrolled and approved.");
+            let service_html = escape_html(service_label);
             let body_html =
-                format!("Service <b>{service_label}</b> has been enrolled and approved.");
+                format!("Service <b>{service_html}</b> has been enrolled and approved.");
             (title, body, body_html)
         }
         NotificationEventDetails::CaRotated { reason } => {
             let title = "CA Certificate Rotated".to_string();
             let body = format!("The CA certificate has been rotated. Reason: {reason}");
+            let reason_html = escape_html(reason);
             let body_html =
-                format!("The CA certificate has been rotated. Reason: <code>{reason}</code>");
+                format!("The CA certificate has been rotated. Reason: <code>{reason_html}</code>");
             (title, body, body_html)
         }
         NotificationEventDetails::BatchUpdateCompleted {
@@ -168,6 +181,47 @@ fn build_content(event: &NotificationEvent) -> (String, String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_update_available_escapes_html_in_body_html() {
+        let event = NotificationEvent {
+            tenant_id: Uuid::nil(),
+            host_id: Some(Uuid::nil()),
+            host_name: Some("<img src=x onerror=alert(1)>".to_string()),
+            software_item_id: Some(Uuid::nil()),
+            software_item_name: Some("<script>alert('xss')</script>".to_string()),
+            plugin_type: None,
+            details: NotificationEventDetails::UpdateAvailable {
+                installed_version: Some("1.0 & \"old\"".to_string()),
+                latest_version: "2.0 <beta>".to_string(),
+            },
+        };
+
+        let msg = build_delivery_message(&event, None, "https://example.com", Uuid::nil());
+
+        // body_html must not contain raw HTML tags from user input
+        let html = msg.body_html.as_deref().unwrap();
+        assert!(
+            !html.contains("<script>"),
+            "body_html must escape <script> tags, got: {html}"
+        );
+        assert!(
+            !html.contains("<img"),
+            "body_html must escape <img> tags, got: {html}"
+        );
+        assert!(
+            html.contains("&lt;script&gt;"),
+            "body_html must contain escaped script tag, got: {html}"
+        );
+        assert!(
+            html.contains("&amp;"),
+            "body_html must escape ampersands, got: {html}"
+        );
+
+        // Plain text body must preserve the original values unescaped
+        assert!(msg.body.contains("<script>alert('xss')</script>"));
+        assert!(msg.body.contains("<img src=x onerror=alert(1)>"));
+    }
 
     #[test]
     fn build_update_available_message() {
