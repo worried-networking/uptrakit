@@ -72,6 +72,8 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
     }
 
     let client = builder
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| report!(EnrollmentError::Ca(CaError::Fetch(e.to_string()))))?;
 
