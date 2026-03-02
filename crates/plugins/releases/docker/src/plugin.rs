@@ -638,6 +638,7 @@ mod tests {
                 );
             }
             HostCompatibility::Compatible => panic!("expected Incompatible"),
+            _ => panic!("unexpected HostCompatibility variant"),
         }
     }
 

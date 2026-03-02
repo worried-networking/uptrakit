@@ -2,6 +2,7 @@ use rootcause::prelude::*;
 use thiserror::Error;
 
 /// Errors that can occur within plugin operations.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum PluginError {
     #[error("configuration error: {0}")]

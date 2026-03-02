@@ -14,6 +14,7 @@ use uptrakit_command::UpdateOutputLine;
 const NO_CAPABILITIES: &[PluginCapability] = &[];
 
 /// Whether a plugin is applicable to the current host.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostCompatibility {
     /// Plugin is applicable.

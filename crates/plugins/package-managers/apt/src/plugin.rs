@@ -1000,6 +1000,7 @@ mod tests {
                 assert_eq!(msg, "apt-get not found");
             }
             HostCompatibility::Compatible => panic!("expected Incompatible"),
+            _ => panic!("unexpected HostCompatibility variant"),
         }
     }
 

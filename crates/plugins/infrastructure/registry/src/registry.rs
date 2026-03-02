@@ -338,6 +338,13 @@ macro_rules! register_plugins {
                                     );
                                     false
                                 }
+                                Ok(_) => {
+                                    tracing::warn!(
+                                        plugin = %PluginType::$variant,
+                                        "unknown HostCompatibility variant; assuming compatible"
+                                    );
+                                    true
+                                }
                                 Err(e) => {
                                     tracing::debug!(
                                         plugin = %PluginType::$variant,
