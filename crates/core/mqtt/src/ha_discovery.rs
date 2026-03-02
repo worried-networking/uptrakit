@@ -7,17 +7,25 @@ use uuid::Uuid;
 
 /// Returns the HA MQTT discovery config topic for an `update` entity.
 ///
-/// Format: `{ha_prefix}/update/{unique_id}/config`
+/// Format: `{ha_prefix}/update/uptrakit/{object_id}/config`
+///
+/// where `{object_id}` is `unique_id` with any leading `"uptrakit_"` prefix
+/// stripped.  The static `uptrakit` node_id level groups all Uptrakit discovery
+/// configs under a single MQTT namespace, allowing HA or a broker to subscribe
+/// to `{ha_prefix}/update/uptrakit/#` to receive all Uptrakit entities at once.
+/// Since the namespace already carries the `uptrakit` identity, the redundant
+/// prefix is dropped from the object_id to keep topics concise.
 ///
 /// # Examples
 ///
 /// ```
 /// # use uptrakit_mqtt::ha_discovery::discovery_config_topic;
 /// let topic = discovery_config_topic("homeassistant", "uptrakit_abc_def_ghi");
-/// assert_eq!(topic, "homeassistant/update/uptrakit_abc_def_ghi/config");
+/// assert_eq!(topic, "homeassistant/update/uptrakit/abc_def_ghi/config");
 /// ```
 pub fn discovery_config_topic(ha_prefix: &str, unique_id: &str) -> String {
-    format!("{ha_prefix}/update/{unique_id}/config")
+    let object_id = unique_id.strip_prefix("uptrakit_").unwrap_or(unique_id);
+    format!("{ha_prefix}/update/uptrakit/{object_id}/config")
 }
 
 /// Returns the topic carrying the installed version of a `(software_item, host)` pair.
@@ -410,7 +418,12 @@ pub fn host_packages_command_topic(prefix: &str, host_id: Uuid) -> String {
 /// Returns the HA MQTT discovery config topic for a host's package `update`
 /// entity.
 ///
-/// Format: `{ha_prefix}/update/uptrakit_pkgs_{t}_{h}/config`
+/// Format: `{ha_prefix}/update/uptrakit/pkgs_{t}_{h}/config`
+///
+/// The static `uptrakit` node_id groups all Uptrakit configs under a shared
+/// namespace (see [`discovery_config_topic`]). The `uptrakit_` prefix is
+/// stripped from the object_id because the node_id already provides that
+/// context.
 ///
 /// # Examples
 ///
@@ -418,7 +431,7 @@ pub fn host_packages_command_topic(prefix: &str, host_id: Uuid) -> String {
 /// # use uuid::Uuid;
 /// # use uptrakit_mqtt::ha_discovery::host_packages_discovery_config_topic;
 /// let topic = host_packages_discovery_config_topic("homeassistant", Uuid::nil(), Uuid::nil());
-/// assert!(topic.starts_with("homeassistant/update/"));
+/// assert!(topic.starts_with("homeassistant/update/uptrakit/pkgs_"));
 /// assert!(topic.ends_with("/config"));
 /// ```
 pub fn host_packages_discovery_config_topic(
@@ -427,7 +440,8 @@ pub fn host_packages_discovery_config_topic(
     host_id: Uuid,
 ) -> String {
     let uid = host_packages_unique_id(tenant_id, host_id);
-    format!("{ha_prefix}/update/{uid}/config")
+    let object_id = uid.strip_prefix("uptrakit_").unwrap_or(&uid);
+    format!("{ha_prefix}/update/uptrakit/{object_id}/config")
 }
 
 /// Returns a unique ID string for a host's package entity.
@@ -670,7 +684,12 @@ pub fn host_security_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
 /// Returns the HA MQTT discovery config topic for a host's security updates
 /// `update` entity.
 ///
-/// Format: `{ha_prefix}/update/uptrakit_sec_{t}_{h}/config`
+/// Format: `{ha_prefix}/update/uptrakit/sec_{t}_{h}/config`
+///
+/// The static `uptrakit` node_id groups all Uptrakit configs under a shared
+/// namespace (see [`discovery_config_topic`]). The `uptrakit_` prefix is
+/// stripped from the object_id because the node_id already provides that
+/// context.
 ///
 /// # Examples
 ///
@@ -678,7 +697,7 @@ pub fn host_security_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
 /// # use uuid::Uuid;
 /// # use uptrakit_mqtt::ha_discovery::host_security_discovery_config_topic;
 /// let topic = host_security_discovery_config_topic("homeassistant", Uuid::nil(), Uuid::nil());
-/// assert!(topic.starts_with("homeassistant/update/"));
+/// assert!(topic.starts_with("homeassistant/update/uptrakit/sec_"));
 /// assert!(topic.ends_with("/config"));
 /// ```
 pub fn host_security_discovery_config_topic(
@@ -687,7 +706,8 @@ pub fn host_security_discovery_config_topic(
     host_id: Uuid,
 ) -> String {
     let uid = host_security_unique_id(tenant_id, host_id);
-    format!("{ha_prefix}/update/{uid}/config")
+    let object_id = uid.strip_prefix("uptrakit_").unwrap_or(&uid);
+    format!("{ha_prefix}/update/uptrakit/{object_id}/config")
 }
 
 /// Build the HA MQTT discovery JSON for a host's security updates `update`
@@ -807,18 +827,31 @@ mod tests {
     #[test]
     fn discovery_config_topic_format() {
         let uid = "uptrakit_abc_def_ghi";
+        // The leading "uptrakit_" is stripped from the object_id; the "uptrakit"
+        // node_id level already provides the namespace.
         assert_eq!(
             discovery_config_topic("homeassistant", uid),
-            "homeassistant/update/uptrakit_abc_def_ghi/config"
+            "homeassistant/update/uptrakit/abc_def_ghi/config"
+        );
+    }
+
+    #[test]
+    fn discovery_config_topic_no_uptrakit_prefix_passthrough() {
+        // IDs without an "uptrakit_" prefix pass through unchanged.
+        assert_eq!(
+            discovery_config_topic("ha", "uid123"),
+            "ha/update/uptrakit/uid123/config"
         );
     }
 
     #[test]
     fn discovery_config_topic_custom_prefix() {
-        assert_eq!(
-            discovery_config_topic("ha", "uid123"),
-            "ha/update/uid123/config"
-        );
+        let uid = unique_id(tenant(), item(), host());
+        let topic = discovery_config_topic("ha", &uid);
+        // Should contain the node_id but NOT the repeated "uptrakit_" prefix.
+        assert!(topic.starts_with("ha/update/uptrakit/"));
+        assert!(!topic.contains("uptrakit_uptrakit_"));
+        assert!(topic.ends_with("/config"));
     }
 
     // -------------------------------------------------------------------------
@@ -1639,6 +1672,20 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
+    // host_packages_discovery_config_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_packages_discovery_config_topic_format() {
+        let topic = host_packages_discovery_config_topic("homeassistant", tenant(), host());
+        // The "uptrakit_" prefix is stripped; the node_id already carries the namespace.
+        assert!(topic.starts_with("homeassistant/update/uptrakit/pkgs_"));
+        assert!(topic.ends_with("/config"));
+        // The redundant "uptrakit_" prefix must not appear in the object_id segment.
+        assert!(!topic.contains("/uptrakit_pkgs_"));
+    }
+
+    // -------------------------------------------------------------------------
     // build_host_packages_discovery_config — enabled_by_default: false
     // -------------------------------------------------------------------------
 
@@ -1735,9 +1782,11 @@ mod tests {
     #[test]
     fn host_security_discovery_config_topic_format() {
         let topic = host_security_discovery_config_topic("homeassistant", tenant(), host());
-        assert!(topic.starts_with("homeassistant/update/"));
+        // The "uptrakit_" prefix is stripped; the node_id already carries the namespace.
+        assert!(topic.starts_with("homeassistant/update/uptrakit/sec_"));
         assert!(topic.ends_with("/config"));
-        assert!(topic.contains("uptrakit_sec_"));
+        // The redundant "uptrakit_" prefix must not appear in the object_id segment.
+        assert!(!topic.contains("/uptrakit_sec_"));
     }
 
     // -------------------------------------------------------------------------
