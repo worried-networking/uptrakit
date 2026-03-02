@@ -19,7 +19,8 @@ config `{}` is valid, and the plugin correctly uses the GitLab `PRIVATE-TOKEN` h
 (not the Bearer scheme used by most other APIs). The package identifier supports nested
 namespaces (`group/subgroup/project`), and `parse_project_path` percent-encodes slashes for
 the Projects API. Test coverage mirrors the Forgejo plugin: strong for configuration and
-`convert_release` logic, absent for HTTP interaction tests.
+`convert_release` logic, absent for HTTP interaction tests. Typed `StatusCode` in `ApiError`
+has been fixed.
 
 ## Architecture
 
@@ -145,11 +146,7 @@ transient failures.
 
 ### Issues
 
-**[CRITICAL]** `src/error.rs:13` -- `ApiError { status: u16 }` instead of `StatusCode`. Using
-a raw `u16` bypasses `reqwest::StatusCode` type safety and the workspace convention of using
-typed HTTP status codes throughout. The Docker plugin correctly uses `reqwest::StatusCode`
-in its `ApiError` variant (`src/error.rs:13-14`). The GitLab plugin should follow the same
-pattern: `ApiError { status: reqwest::StatusCode, message: String }`.
+No coding standards issues found.
 
 ## Extensibility
 
@@ -222,9 +219,7 @@ that `new()` propagates `validate()` errors correctly.
 
 ### Issues
 
-**[CRITICAL]** `src/error.rs:13` -- The `status: u16` field in `ApiError` is inconsistent
-with the Docker plugin which correctly uses `reqwest::StatusCode`. All release plugins
-should use the same typed status code to maintain workspace consistency.
+No consistency issues found.
 
 ## Maintainability
 

@@ -20,8 +20,8 @@ and the `poll_service_event` cancellation-safety requirement is undocumented. Th
 (`Constrained(0)` now matches production). The enrollment retry loop previously only retried on
 `ReceiveClosed`; it now retries all transient network errors (`WebSocket`, `Io` non-cert-expired,
 `ConnectionTimeout`) via `EnrollmentError::is_transient_network()`. The CA certificate fetch in
-`src/ca.rs` builds a `reqwest::Client` without timeouts, violating the project-wide HTTP client
-requirement; this is the only critical finding in the crate.
+`src/ca.rs` now applies `.connect_timeout(10s)` and `.timeout(60s)` to the `reqwest::Client`,
+satisfying the project-wide HTTP client requirement.
 
 ## Architecture
 
@@ -127,13 +127,7 @@ processing N consecutive service events.
 
 ### Issues
 
-**[CRITICAL]** `src/ca.rs:49-76` -- CA certificate fetch builds a `reqwest::Client` via
-`reqwest::Client::builder()` with no `.connect_timeout()` and no `.timeout()`. If the
-controller endpoint is unresponsive (e.g., stuck behind a load balancer that accepts TCP
-but never responds), the service hangs indefinitely waiting for the CA bundle. This violates
-the project-wide HTTP client requirement (`.connect_timeout(10s)` and `.timeout(60s)`) and
-can prevent service startup or certificate renewal from completing. All other HTTP clients
-in the workspace (plugins, openapi-client) comply with this requirement.
+No coding standards issues found.
 
 ## Extensibility
 

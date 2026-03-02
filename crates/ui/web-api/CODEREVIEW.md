@@ -36,7 +36,9 @@ redirect URL query parameters (now transmitted via URL hash fragment) have been 
 Updated on 2026-03-02 with findings for the batch updates feature
 (`routes/update_batches.rs`, `queries/update_batches.rs`, `batch_progress_broadcaster.rs`),
 the refactored update trigger pipeline (`queries/update_triggers.rs`), and SSE batch progress
-streaming.
+streaming. The N+1 query patterns in `find_outdated_items_for_host` and
+`find_outdated_hosts_for_item` have been fixed via batch-loading. The Telegram webhook secret
+comparison now uses SHA-256 + constant-time `ct_eq` to eliminate the timing side-channel.
 
 ## Architecture
 
@@ -97,13 +99,6 @@ accessor methods.
 explicitly (~200 lines). Adding a new endpoint requires modifying three places: route module,
 router function, and OpenAPI annotation.
 
-**[HIGH]** `src/queries/update_batches.rs:84-143` -- `find_outdated_items_for_host` N+1 query:
-per-item software_item and plugin_assignment queries inside loop. With 50 items, generates
-100+ extra queries.
-
-**[HIGH]** `src/queries/update_batches.rs:206-214` -- Same N+1 in `find_outdated_hosts_for_item`
-for plugin existence checks.
-
 **[MEDIUM]** `src/batch_progress_broadcaster.rs` -- Instance-local HashMap. Multi-instance
 deployments will not deliver SSE events cross-instance.
 
@@ -141,9 +136,6 @@ issued. A compromised token that was never explicitly revoked remains valid fore
 - `SecretString` at all API input boundaries.
 
 ### Issues
-
-**[MEDIUM]** `src/routes/notifications.rs:620` -- Telegram webhook secret comparison uses `!=`,
-not constant-time. Timing side-channel risk.
 
 **[MEDIUM]** `src/routes/oidc_auth.rs` -- `oidc_complete_registration` consumes registration
 code before token validation. DoS via code burning.
@@ -218,9 +210,6 @@ reduce duplication.
 
 **[LOW]** `src/notification_service.rs:46-63` -- `msg.clone()` on every `send()` and
 `broadcast()` call. Could compute serialized JSON first.
-
-**[MEDIUM]** `src/queries/update_batches.rs:106-125,206-213` -- N+1 query pattern violating
-batch query rule.
 
 **[MEDIUM]** `src/routes/update_batches.rs:355,365` -- `.unwrap_or_default()` silently
 swallows DB errors loading host/item names for SSE replay.

@@ -18,7 +18,8 @@ requires `api_base_url` (no implicit public default), which is correct since eve
 instance is self-hosted. The plugin enforces HTTPS-only and rejects private/loopback addresses,
 preventing SSRF to internal infrastructure. Test coverage is good for configuration and
 `convert_release` logic; the only significant gap is the absence of HTTP interaction tests for
-`fetch_releases`.
+`fetch_releases`. Typed `StatusCode` in `ApiError` and the `.unwrap()` in `parse_owner_repo`
+have been fixed.
 
 ## Architecture
 
@@ -143,18 +144,7 @@ GitHub plugin has the same gap. A simple exponential retry (max 3 attempts) on
 
 ### Issues
 
-**[CRITICAL]** `src/error.rs:13` -- `ApiError { status: u16 }` instead of `StatusCode`. Using
-a raw `u16` bypasses `reqwest::StatusCode` type safety and the workspace convention of using
-typed HTTP status codes throughout. The Docker plugin correctly uses `reqwest::StatusCode`
-in its `ApiError` variant. The Forgejo plugin should follow the same pattern:
-`ApiError { status: reqwest::StatusCode, message: String }`.
-
-**[HIGH]** `src/plugin.rs:29` -- `.unwrap()` in production `parse_owner_repo()` after guard.
-The guard at line 24 verifies `slash_count == 1`, so the `.find('/').unwrap()` at line 29
-cannot panic under the current code. However, this violates the project-wide
-no-unwrap-in-production rule. Using `.expect("guard ensures slash exists")` at minimum, or
-preferably refactoring to use `split_once('/')` with `bail!` on `None`, would be consistent
-with the workspace convention.
+No coding standards issues found.
 
 ## Extensibility
 
@@ -230,9 +220,7 @@ with no correctness impact.
 
 ### Issues
 
-**[CRITICAL]** `src/error.rs:13` -- The `status: u16` field in `ApiError` is inconsistent
-with the Docker plugin which correctly uses `reqwest::StatusCode`. All release plugins
-should use the same typed status code to maintain workspace consistency.
+No consistency issues found.
 
 ## Maintainability
 

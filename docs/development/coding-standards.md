@@ -847,6 +847,50 @@ Always use `reqwest::StatusCode` (re-exported as `uptrakit_openapi_client::Statu
 - **Serialization**: When a `StatusCode` must appear as a number in JSON, use `#[serde(serialize_with = "serialize_status_code")]`
 - **The only approved `.as_u16()` call** is inside serde serialization helpers for JSON wire compatibility
 
+## Constant-Time Secret Comparison
+
+Externally-provided secrets (webhook tokens, API keys, and similar short-lived credentials) must
+**never** be compared using `==` or `!=`. Rust's default `PartialEq` on `&str` short-circuits on
+the first differing byte, leaking timing information that an attacker can exploit to infer the
+secret one byte at a time.
+
+**Rule:** Whenever code validates a caller-supplied secret against an expected value, use
+`subtle::ConstantTimeEq` after normalising both sides to a fixed-length representation.
+
+### Required pattern
+
+Add `subtle = { workspace = true }` to the crate's `Cargo.toml` and use the SHA-256 + `ct_eq`
+idiom:
+
+```rust
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
+
+// Hash both values so the comparison is always over two fixed-size 32-byte arrays.
+// This prevents length information from leaking through ct_eq.
+let expected_hash: [u8; 32] = Sha256::digest(expected_secret.as_bytes()).into();
+let provided_hash: [u8; 32] = Sha256::digest(provided_secret.as_bytes()).into();
+let secrets_match: bool = expected_hash.ct_eq(&provided_hash).into();
+
+// Guard against the "no secret configured accepts all" case.
+if expected_secret.is_empty() || !secrets_match {
+    return Err(/* unauthorized error */);
+}
+```
+
+Hashing first ensures both inputs are exactly 32 bytes before calling `ct_eq`, making the
+comparison unconditionally constant-time regardless of input length differences.
+
+### Anti-pattern table
+
+| Wrong | Right | Reason |
+| --- | --- | --- |
+| `provided != expected` | `ct_eq` with SHA-256 pre-hashing (see above) | Short-circuit timing leak |
+| `provided == expected` | `ct_eq` with SHA-256 pre-hashing (see above) | Short-circuit timing leak |
+| `subtle::ConstantTimeEq` directly on `&str` | Hash first, then `ct_eq` | Length difference leaks through variable-time `ct_eq` implementations |
+
+See also: [Security — Secure Development](../security/secure-development.md).
+
 ## Database Enum Columns (`DeriveActiveEnum`)
 
 All entity columns that store a fixed set of string values must use a typed Rust enum with SeaORM's `DeriveActiveEnum` instead of `String`. This

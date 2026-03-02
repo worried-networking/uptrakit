@@ -16,8 +16,7 @@ type.
 The plugin emits structured `DiscoveryTarget` values that tell the controller exactly which
 downstream plugin configs to create, with no PHS-specific logic needed in the controller. The
 helper script pattern (`uptrakit-phs-version`, `uptrakit-phs-update`) with `SudoHelperScript`
-provides safe privilege escalation with argument validation. The main concern is the missing
-HTTP client timeouts on the `reqwest::Client` used for fetching CT scripts from GitHub.
+provides safe privilege escalation with argument validation. HTTP client timeouts and the `.unwrap()` in `is_valid_deb_package` have been fixed.
 
 ## Architecture
 
@@ -110,24 +109,7 @@ No high availability issues found.
 
 ### Issues
 
-**[CRITICAL]** `src/plugin.rs:115-127` -- Missing `.connect_timeout()` and `.timeout()` on
-`reqwest::Client::builder()`. Every other HTTP-using plugin in the workspace applies
-`connect_timeout(Duration::from_secs(10))` and `timeout(Duration::from_secs(60))`. Without
-these, a network partition or slow `raw.githubusercontent.com` response can hang indefinitely,
-blocking the agent's discovery processing. The fix is to add:
-
-```rust
-.connect_timeout(std::time::Duration::from_secs(10))
-.timeout(std::time::Duration::from_secs(60))
-```
-
-to the `reqwest::Client::builder()` chain at lines 115-127.
-
-**[LOW]** `src/discovery.rs:701` -- `.unwrap()` in `is_valid_deb_package()` after length guard.
-While the guard ensures the `unwrap()` cannot panic under current call patterns, this violates
-the project-wide no-unwrap-in-production rule. Using
-`let Some(first) = chars.next() else { return false; }` would be consistent with
-the workspace convention.
+No coding standards issues found.
 
 ## Extensibility
 
@@ -194,11 +176,7 @@ construction and output parsing without requiring a Proxmox host.
 
 ### Issues
 
-**[CRITICAL]** `src/plugin.rs:115-127` -- The missing HTTP client timeouts break the
-workspace-wide requirement that all plugins building `reqwest::Client` must set
-`connect_timeout(10s)` and `timeout(60s)`. Every other HTTP-using plugin (Docker, GitHub,
-GitLab, Forgejo, npm) sets these timeouts. This inconsistency is both a consistency issue
-and a reliability risk.
+No consistency issues found.
 
 ## Maintainability
 

@@ -12,7 +12,8 @@ awareness with `x-ratelimit-remaining` header parsing, and `SecretString` for th
 
 The main concerns are the hardcoded `per_page=100` without pagination follow-through (silently
 truncating repositories with 100+ releases) and the absence of HTTP interaction tests for
-`fetch_releases`.
+`fetch_releases`. HTTP client timeouts, typed `StatusCode` in `ApiError`, and the `.unwrap()`
+in `parse_owner_repo` have been fixed.
 
 ## Architecture
 
@@ -92,19 +93,7 @@ exist in the workspace; a simple exponential retry (max 3 attempts) on `is_conne
 
 ### Issues
 
-**[CRITICAL]** `src/plugin.rs:107-118` -- Missing `.connect_timeout()` and `.timeout()` on
-`reqwest::Client`. Every other HTTP-using plugin in the workspace applies
-`connect_timeout(10s)` and `timeout(60s)`. Without these, a network partition or slow GitHub
-API response can hang indefinitely, blocking the agent's update processing loop.
-
-**[CRITICAL]** `src/error.rs:13` -- `ApiError { status: u16 }` instead of `StatusCode`. Using
-a raw `u16` bypasses `reqwest::StatusCode` type safety and the workspace convention of using
-typed HTTP status codes throughout.
-
-**[HIGH]** `src/plugin.rs:29` -- `.unwrap()` in production `parse_owner_repo()` after guard.
-While the guard at the call site ensures the `unwrap()` cannot panic under current call
-patterns, this violates the project-wide no-unwrap-in-production rule. A `bail!` or
-`.ok_or_else(|| ...)` would be consistent with the workspace convention.
+No coding standards issues found.
 
 ## Extensibility
 
