@@ -494,6 +494,11 @@ pub async fn dispatch_next_in_batch(
 
 /// Check if all items in a batch are terminal and update batch status if so.
 ///
+/// All reads and the batch status UPDATE are performed inside a single
+/// database transaction so that concurrent completions cannot both observe
+/// `pending_count == 0` and produce a double-write with an incorrect
+/// `completed_at` timestamp.
+///
 /// Returns `Some(BatchCompletionInfo)` when the batch just transitioned to
 /// a terminal status, `None` if still in progress.
 async fn maybe_complete_batch(
@@ -501,17 +506,20 @@ async fn maybe_complete_batch(
     batch_id: Uuid,
     tenant_id: Uuid,
 ) -> std::result::Result<Option<BatchCompletionInfo>, rootcause::Report<TriggerUpdateError>> {
+    let txn = db.begin().await.context_to()?;
+
     let pending_count = UpdateHistory::find()
         .filter(update_history::Column::BatchId.eq(batch_id))
         .filter(update_history::Column::Status.is_in([
             update_history::UpdateStatus::Pending,
             update_history::UpdateStatus::InProgress,
         ]))
-        .count(db)
+        .count(&txn)
         .await
         .context_to()?;
 
     if pending_count > 0 {
+        // txn auto-rollbacks on drop; nothing to commit.
         return Ok(None);
     }
 
@@ -519,14 +527,14 @@ async fn maybe_complete_batch(
     let failed_count = UpdateHistory::find()
         .filter(update_history::Column::BatchId.eq(batch_id))
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Failed))
-        .count(db)
+        .count(&txn)
         .await
         .context_to()? as i64;
 
     let completed_count = UpdateHistory::find()
         .filter(update_history::Column::BatchId.eq(batch_id))
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Completed))
-        .count(db)
+        .count(&txn)
         .await
         .context_to()? as i64;
 
@@ -537,18 +545,26 @@ async fn maybe_complete_batch(
     };
 
     let Some(batch) = UpdateBatch::find_by_id(batch_id)
-        .one(db)
+        .one(&txn)
         .await
         .context_to()?
     else {
         return Ok(None);
     };
 
+    // Guard against double-write: if the batch is already in a terminal
+    // status another concurrent call already committed its update.
+    if matches!(batch.status, BatchStatus::Completed | BatchStatus::PartiallyCompleted) {
+        return Ok(None);
+    }
+
     let total_count = batch.total_count;
     let mut active: update_batch::ActiveModel = batch.into();
     active.status = Set(new_status);
     active.completed_at = Set(Some(OffsetDateTime::now_utc()));
-    active.update(db).await.context_to()?;
+    active.update(&txn).await.context_to()?;
+
+    txn.commit().await.context_to()?;
 
     Ok(Some(BatchCompletionInfo {
         batch_id,
