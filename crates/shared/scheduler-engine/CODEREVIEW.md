@@ -1,17 +1,20 @@
 # Code Review: uptrakit-shared-scheduler-engine
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
 
-`uptrakit-shared-scheduler-engine` (~2,172 LoC) implements the database-backed distributed task
+`uptrakit-shared-scheduler-engine` (~2,609 LoC) implements the database-backed distributed task
 scheduler used by both `uptrakit-controller` (embedded) and `uptrakit-scheduler` (standalone
 binary). The core claim/release cycle uses TOCTOU-free optimistic locking and stale-claim recovery,
 which are strong correctness properties. The `SchedulerNotifier` ORM coupling has been fixed
 (callers now load and pass a `MqttSoftwareStatesPayload`), and the sequential execution model
-now uses a `JoinSet` for parallel task execution within each poll cycle.
+now uses a `JoinSet` for parallel task execution within each poll cycle. Three of five executors
+(`AuthCleanupExecutor`, `ServiceCertCheckExecutor`, `StaleLeaseCleanupExecutor`) have no tests,
+and the `AuthCleanupExecutor` runs multiple independent `DELETE` statements without a wrapping
+transaction.
 
 ## Architecture
 
@@ -25,7 +28,12 @@ now uses a `JoinSet` for parallel task execution within each poll cycle.
 
 ### Issues
 
-No architectural issues found.
+**[MEDIUM]** Depends on `plugin-infrastructure-registry` which compiles all plugins. The
+scheduler only needs plugin capabilities (for version-check executor configuration), not
+full plugin execution code. This heavyweight dependency pulls the entire plugin tree --
+including all release and package-manager plugins -- into the scheduler binary. Extracting
+a `plugin-capabilities` trait crate or feature-gating the registry dependency would reduce
+compile time and binary size for the standalone scheduler deployment.
 
 ## Security and Safety
 
@@ -94,6 +102,49 @@ No coding standards issues found.
 variants have registered executors. Unlike `register_plugins!`, there is no mechanism to catch
 a missing executor at startup -- the scheduler will silently skip tasks of an unregistered type.
 
+## Tests
+
+### Strengths
+
+- `src/claim.rs:200-464` -- Nine `#[tokio::test]` tests (no `start_paused`, correct since no
+  Tokio time APIs are used) exercise the claim lifecycle against an in-memory SQLite database:
+  `try_claim` acquires a claim, double-claim returns false, `release_claim` on success and on
+  error, `find_due_tasks` filters correctly by `next_run_at`, `recover_stale_claims` releases
+  old locks, `release_all_claims` scoped to controller, `trigger_immediate` updates
+  `next_run_at`, and unknown task types are excluded from `find_due_tasks`. Inter-test
+  isolation is achieved via separate `setup_db()` calls.
+- `src/cron_utils.rs:40-120` -- Nine synchronous tests cover `next_cron_time` for valid
+  expressions, invalid cron strings, six-field expressions, `normalize_cron` prepend behavior,
+  and `validate_cron` for valid and invalid inputs.
+- `src/software_states.rs:180-222` -- Five tests cover `extract_release_info` including `None`
+  input, both fields present, missing fields, only URL, and non-string value handling.
+- `src/executors/version_check.rs:612-659` -- Five unit tests cover `merge_config` logic for
+  object merge, non-object override, non-object base, empty override, and nested object
+  (shallow, not deep merge). These are plain `#[test]` without a runtime, correct since
+  `merge_config` is a pure synchronous function.
+- `src/executors/crl_renewal.rs:32-91` -- One `#[tokio::test]` (no `start_paused`, correct)
+  exercises the `CrlRenewalExecutor::execute` success path with a mock `SchedulerNotifier`,
+  verifying `signal_crl_renewal` is called.
+- `src/scheduler.rs:282-698` -- Eight scheduler-level tests cover `SchedulerConfig` defaults,
+  empty-DB poll cycle, cancellation exit, no-due-tasks cycle, unregistered task type skipping,
+  debug-mode double-registration panic, registered task execution with claim release and
+  run_count increment, and mid-execution cancellation with claim release verification.
+- `src/ca_utils.rs:29-47` -- Three tests cover `should_rotate_ca` for invalid PEM, empty PEM,
+  and `cert_not_after` returning `None` for garbage input.
+
+### Issues
+
+**[HIGH]** Three of the five executor types (`AuthCleanupExecutor`, `ServiceCertCheckExecutor`,
+`StaleLeaseCleanupExecutor`) have no tests at all. The `AuthCleanupExecutor` deletes
+session rows from the database -- an incorrect predicate or missing filter would silently
+delete valid sessions. Each executor should have at minimum a success-path test and a
+no-rows-to-process test against an in-memory SQLite database.
+
+**[MEDIUM]** `src/executors/version_check.rs` -- `run_controller_side_fetch_releases` and
+`send_agent_assignments` (the two primary async methods) have no tests. These methods
+contain the core business logic for version checking and are the most likely source of
+regressions when new plugin types or assignment logic are added.
+
 ## Consistency
 
 ### Strengths
@@ -103,9 +154,10 @@ a missing executor at startup -- the scheduler will silently skip tasks of an un
   `.exec(db)` / `.context_to::<SchedulerError>()` pipeline. The DB update pattern is uniform
   across all claim lifecycle operations, making the locking model easy to audit.
 - `src/scheduler.rs:199-278` -- Within a single poll cycle, the cancellation-aware task
-  execution loop uses the same `tokio::select! { biased; _ = token.cancelled() => { release_claim("shutdown") }; res = timeout(executor.execute) => { ... } }` structure for every
-  spawned task. Error handling after execution (log on failure, then call `release_claim`)
-  is applied identically regardless of which executor ran.
+  execution loop uses the same
+  `tokio::select! { biased; _ = token.cancelled() => { release_claim("shutdown") }; res = timeout(executor.execute) => { ... } }`
+  structure for every spawned task. Error handling after execution (log on failure, then call
+  `release_claim`) is applied identically regardless of which executor ran.
 - `src/scheduler.rs:17` and `src/scheduler.rs:24` -- `DEFAULT_POLL_INTERVAL_SECS` and
   `TASK_EXECUTION_TIMEOUT` are the only two numeric constants in the file. Both are named
   module-level constants rather than inline literals, consistent with the `durations.rs`
@@ -124,13 +176,11 @@ typed `Duration` constants with doc-comments throughout.
 `src/scheduler.rs:217-231` (mid-task cancellation, `release_claim` with shutdown reason) --
 The shutdown path in the main loop (`token.cancelled()` outer arm) calls `release_all_claims`
 to bulk-release every claim owned by this controller. The shutdown path inside a running task
-calls `release_claim` for only the one in-flight task. This is correct, but the two arms use
-different error log levels: the outer arm uses `tracing::warn!`, and the inner arm also uses
-`tracing::warn!`. The difference is that the outer `release_all_claims` does not set
-`last_error` on released tasks, while the inner `release_claim` records `"scheduler shutdown
-during execution"` as the error string. A comment on the outer arm noting that it intentionally
-does not set `last_error` (to avoid falsely marking tasks as errored on clean shutdown) would
-make this asymmetry self-documenting.
+calls `release_claim` for only the one in-flight task. This is correct, but the outer
+`release_all_claims` does not set `last_error` on released tasks, while the inner
+`release_claim` records `"scheduler shutdown during execution"` as the error string. A comment
+on the outer arm noting that it intentionally does not set `last_error` (to avoid falsely
+marking tasks as errored on clean shutdown) would make this asymmetry self-documenting.
 
 **[LOW]** `src/notifier.rs` -- `SchedulerNotifier` has six async methods, but the
 `VersionCheckExecutor` uses `send_agent_assignments` (via `notifier.broadcast`) while
@@ -141,60 +191,25 @@ make this asymmetry self-documenting.
 across methods without a consistent naming convention, making the intent of each method harder
 to infer from the trait definition alone.
 
-## Tests
-
-### Strengths
-
-- `src/claim.rs` -- Nine `#[tokio::test]` tests (no `start_paused`, correct since no Tokio
-  time APIs are used) exercise the claim lifecycle against an in-memory SQLite database:
-  `try_claim` acquires a claim, double-claim returns false, `release_claim` on success and on
-  error, `find_due_tasks` filters correctly by `next_run_at`, `recover_stale_claims` releases
-  old locks, `release_all_claims` scoped to controller, and `trigger_immediate` updates
-  `next_run_at`. Inter-test isolation is achieved via separate `setup_db()` calls.
-- `src/cron_utils.rs` -- Nine synchronous tests cover `next_cron_time` for valid expressions,
-  invalid cron strings, leap-second edge cases, and far-future calculations.
-- `src/software_states.rs` -- Five tests cover `merge_software_states` including empty input,
-  single agent, multi-agent deduplication, and conflict resolution semantics.
-- `src/executors/version_check.rs` -- Five unit tests cover `merge_config` logic for
-  object merge, non-object override, non-object base, empty override, and nested object
-  (shallow, not deep merge). These are plain `#[test]` without a runtime, correct since
-  `merge_config` is a pure synchronous function.
-- `src/executors/crl_renewal.rs` -- One `#[tokio::test]` (no `start_paused`, correct)
-  exercises the `CrlRenewalExecutor::execute` success path against an in-memory SQLite DB.
-- `src/scheduler.rs` -- Scheduler-level tests cover the `next_cron_time` helper and
-  two `#[tokio::test]` scenarios for the full scheduler poll loop.
-
-### Issues
-
-**[HIGH]** Three of the five executor types (`AuthCleanupExecutor`, `ServiceCertCheckExecutor`,
-`StaleLeasCleanupExecutor`) have no tests at all. The `AuthCleanupExecutor` deletes
-session rows from the database — an incorrect predicate or missing filter would silently
-delete valid sessions. Each executor should have at minimum a success-path test and a
-no-rows-to-process test against an in-memory SQLite database.
-
-**[MEDIUM]** `src/executors/version_check.rs` -- `run_controller_side_fetch_releases` and
-`send_agent_assignments` (the two primary async methods) have no tests. These methods
-contain the core business logic for version checking and are the most likely source of
-regressions when new plugin types or assignment logic are added.
-
 ## Maintainability
 
 ### Strengths
 
 - `src/cron_utils.rs` -- The cron normalization and validation helpers are cleanly isolated with
-  doc comments explaining the 5-field vs 6-field distinction. The module has eight tests covering
+  doc comments explaining the 5-field vs 6-field distinction. The module has nine tests covering
   valid/invalid expressions, field normalization, and an invalid expression that returns `None`.
 - `src/notifier.rs` -- `SchedulerNotifier` trait methods all have doc comments. The comment on
   `push_software_states_for_tenant` explicitly documents the caller's responsibility to pre-load
   the payload, which is a non-obvious API design decision.
-- `src/claim.rs` -- Constants (`STALE_CLAIM_THRESHOLD_SECS`) are documented with rationale.
+- `src/claim.rs` -- Constants (`STALE_CLAIM_SECONDS`) are documented with rationale.
   The claim-and-release pattern is explained in the struct-level doc.
 
 ### Issues
 
 **[HIGH]** `src/executors/version_check.rs:159-165` -- An anonymous tuple type alias is used
 for the group accumulator:
-```
+
+```text
 type FetchGroupValue = (
     String,            // plugin_type
     serde_json::Value, // merged config
@@ -202,6 +217,7 @@ type FetchGroupValue = (
     Vec<(Uuid, Uuid)>, // (host_id, software_item_id) targets
 );
 ```
+
 The fields are accessed by numeric index (`entry.3.push(...)` at line 182), making the code
 fragile: swapping two `String` fields would compile without error but produce wrong results.
 Replacing the anonymous tuple with a named struct (`struct FetchGroup { plugin_type: String,
@@ -215,7 +231,7 @@ a hard constraint or a conservative default. Promote to a typed `Duration` const
 comment explaining the relationship (poll interval should be much shorter than the stale claim
 threshold of 600 s), and move to a `durations` module for discoverability.
 
-**[MEDIUM]** `src/executors/version_check.rs` -- The `NoopCommandExecutor` at lines 29–53 is a
+**[MEDIUM]** `src/executors/version_check.rs` -- The `NoopCommandExecutor` at lines 29-53 is a
 duplicate of the same struct in `crates/ui/web-api/src/routes/software_items.rs`. Both
 `unreachable!()` with identical error messages. The existing Code Quality review at the root
 level noted this; it is included here because the scheduler-engine is a library crate and the

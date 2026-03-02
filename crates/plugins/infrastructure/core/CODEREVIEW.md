@@ -1,7 +1,7 @@
 # Code Review: uptrakit-plugin-infrastructure-core
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -85,6 +85,14 @@ No coding standards issues found.
   capability adoption.
 
 ### Issues
+
+**[LOW]** `src/traits.rs:16-22` -- `HostCompatibility` not `#[non_exhaustive]`. Inconsistent
+with project convention documented in `coding-standards.md`. Adding a variant to
+`HostCompatibility` is a semver-breaking change for downstream match sites.
+
+**[LOW]** `src/error.rs:6-48` -- `PluginError` not `#[non_exhaustive]`. Inconsistent with
+project convention. External consumers matching on `PluginError` variants will break if a new
+variant is added.
 
 **[LOW]** `src/types.rs:18-25` -- `PluginCapability` has `#[non_exhaustive]` but no
 `Other(String)` variant unlike its wire counterpart `Capability`. New capabilities require

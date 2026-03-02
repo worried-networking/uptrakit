@@ -1,12 +1,12 @@
 # Code Review: uptrakit-plugin-releases-gitlab
 
-- **Review date**: 2026-03-01
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility | tests)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
 
-`uptrakit-plugin-releases-gitlab` (~1,100 LoC across 6 source files) provides GitLab Releases
+`uptrakit-plugin-releases-gitlab` (~1,037 LoC across 6 source files) provides GitLab Releases
 integration for version checking. It fetches release metadata from the GitLab Projects API v4
 and converts it to `UpstreamRelease` values for the controller. The plugin supports
 `gitlab.com` by default and any self-hosted GitLab instance via an optional `api_base_url`.
@@ -145,7 +145,11 @@ transient failures.
 
 ### Issues
 
-No coding standards issues found.
+**[CRITICAL]** `src/error.rs:13` -- `ApiError { status: u16 }` instead of `StatusCode`. Using
+a raw `u16` bypasses `reqwest::StatusCode` type safety and the workspace convention of using
+typed HTTP status codes throughout. The Docker plugin correctly uses `reqwest::StatusCode`
+in its `ApiError` variant (`src/error.rs:13-14`). The GitLab plugin should follow the same
+pattern: `ApiError { status: reqwest::StatusCode, message: String }`.
 
 ## Extensibility
 
@@ -203,3 +207,35 @@ gap without a live GitLab server.
 only plugin creation test. There is no corresponding failure test (e.g., `new()` with an
 invalid `api_base_url` or an invalid regex pattern). Adding a failure test would verify
 that `new()` propagates `validate()` errors correctly.
+
+## Consistency
+
+### Strengths
+
+- The error type pattern (`GitLabError` with `thiserror` derives + `impl_report_conversion!`)
+  matches the workspace convention used by all other plugins.
+- `SecretMasking` implementation follows the same sentinel-based pattern as the Forgejo and
+  Docker plugins.
+- Config structure mirrors the Forgejo plugin: same field names (`auth_token`, `api_base_url`,
+  `include_prereleases`, `tag_strip_prefix`, `asset_patterns`), same defaults, same serde
+  attributes.
+
+### Issues
+
+**[CRITICAL]** `src/error.rs:13` -- The `status: u16` field in `ApiError` is inconsistent
+with the Docker plugin which correctly uses `reqwest::StatusCode`. All release plugins
+should use the same typed status code to maintain workspace consistency.
+
+## Maintainability
+
+### Strengths
+
+- `src/plugin.rs:149-155` -- `convert_release` documents the GitLab-specific semantics of
+  `upcoming_release` vs. GitHub's `draft`/`prerelease` distinction, aiding future maintainers
+  who may not be familiar with the GitLab API.
+- `src/plugin.rs:179-181` -- The comment at lines 179-181 explicitly documents why `sources`
+  (auto-generated source archives) are excluded in favour of `links` (manually-uploaded assets).
+
+### Issues
+
+No maintainability issues found.

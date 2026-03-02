@@ -1,7 +1,7 @@
 # Code Review: uptrakit-internal-wire
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -161,6 +161,16 @@ No coding standards issues found.
 MQTT concerns without structural separation. When a new `ServiceHandler` author writes a custom
 service role, they face a flat enum with no type-level guidance about which variants are
 relevant. This is a latent correctness hazard as new service roles are added.
+
+**[LOW]** `src/lib.rs` -- `ErrorCode` has `#[non_exhaustive]` but no `Other` variant. Unknown
+error codes from a newer controller cause the entire error message to fall through to
+`ControllerMessage::Unknown`, losing the error payload. An `Other(String)` variant would
+preserve the error semantics even when the specific code is unrecognised.
+
+**[LOW]** `src/lib.rs` -- `EnrollmentStatus` has the same concern -- no `Other` variant.
+A newer controller returning a new enrollment status value will cause the message containing
+it to deserialize as `ControllerMessage::Unknown`, silently discarding the enrollment
+response.
 
 ## Tests
 

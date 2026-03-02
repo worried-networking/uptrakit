@@ -1,7 +1,7 @@
 # Code Review: uptrakit-plugin-infrastructure-registry
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -90,7 +90,10 @@ No coding standards issues found.
 
 ### Issues
 
-No extensibility issues found.
+**[MEDIUM]** `src/lib.rs:148-152` -- `validate_package_identifier_str` silently returns
+`Ok(())` for unknown plugin types. Asymmetry with config validation which fails for unknown
+types. A new plugin type added to the `PluginType` enum but not yet registered in
+`register_plugins!` would pass identifier validation without any actual check.
 
 ## Consistency
 

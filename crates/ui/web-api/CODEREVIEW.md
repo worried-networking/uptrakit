@@ -1,12 +1,12 @@
 # Code Review: uptrakit-web-api
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
 
-`uptrakit-web-api` is the largest crate (~32K LoC, ~98 `.rs` files) implementing the full
+`uptrakit-web-api` is the largest crate (~38K LoC, ~105 `.rs` files) implementing the full
 HTTP/WebSocket API server: 80+ REST endpoints, WebSocket lifecycle management, OIDC authentication
 flows, JWT/session management, PKI operations, MQTT lease coordination, cross-controller event
 delivery, and database query helpers. It is a library crate consumed by `uptrakit-controller`.
@@ -32,6 +32,11 @@ in-memory-only token denylist (revocations now persisted to `revoked_token_jtis`
 `revoked_token_users` DB tables and propagated to peer instances via
 `ControllerMessage::TokenRevoked` over NATS), and the OIDC registration code exposed in
 redirect URL query parameters (now transmitted via URL hash fragment) have been fixed.
+
+Updated on 2026-03-02 with findings for the batch updates feature
+(`routes/update_batches.rs`, `queries/update_batches.rs`, `batch_progress_broadcaster.rs`),
+the refactored update trigger pipeline (`queries/update_triggers.rs`), and SSE batch progress
+streaming.
 
 ## Architecture
 
@@ -79,18 +84,32 @@ redirect URL query parameters (now transmitted via URL hash fragment) have been 
 
 ### Issues
 
-**[HIGH]** `src/lib.rs:1-24` -- At ~32K LoC, this crate contains auth, middleware, routes,
+**[HIGH]** `src/lib.rs:1-24` -- At ~38K LoC, this crate contains auth, middleware, routes,
 queries, settings, MQTT coordination, NATS transport, OCSP, PKI, notifications, and update
 output broadcasting. Consider extracting auth, settings, and MQTT coordination into shared
 crates.
 
-**[HIGH]** `src/app_state.rs:37-96` -- `AppState` has 22+ public fields. Most have `pub`
+**[HIGH]** `src/app_state.rs:37-96` -- `AppState` has 26 public fields. Most have `pub`
 visibility. PKI, notification, and credential fields should have restricted visibility with
 accessor methods.
 
 **[MEDIUM]** `src/router.rs:17-209` -- OpenAPI `#[openapi(...)]` lists every path and schema
 explicitly (~200 lines). Adding a new endpoint requires modifying three places: route module,
 router function, and OpenAPI annotation.
+
+**[HIGH]** `src/queries/update_batches.rs:84-143` -- `find_outdated_items_for_host` N+1 query:
+per-item software_item and plugin_assignment queries inside loop. With 50 items, generates
+100+ extra queries.
+
+**[HIGH]** `src/queries/update_batches.rs:206-214` -- Same N+1 in `find_outdated_hosts_for_item`
+for plugin existence checks.
+
+**[MEDIUM]** `src/batch_progress_broadcaster.rs` -- Instance-local HashMap. Multi-instance
+deployments will not deliver SSE events cross-instance.
+
+**[MEDIUM]** `src/queries/update_batches.rs:563-579` -- `list_batches` loads ALL child
+update_history records to compute status counts. A GROUP BY aggregation would be more
+efficient.
 
 **[LOW]** `api_tokens` table has no `expires_at` column. API tokens valid indefinitely once
 issued. A compromised token that was never explicitly revoked remains valid forever.
@@ -122,6 +141,12 @@ issued. A compromised token that was never explicitly revoked remains valid fore
 - `SecretString` at all API input boundaries.
 
 ### Issues
+
+**[MEDIUM]** `src/routes/notifications.rs:620` -- Telegram webhook secret comparison uses `!=`,
+not constant-time. Timing side-channel risk.
+
+**[MEDIUM]** `src/routes/oidc_auth.rs` -- `oidc_complete_registration` consumes registration
+code before token validation. DoS via code burning.
 
 **[LOW]** `src/auth/token.rs:17-22` -- API tokens hashed with unsalted SHA-256. Per-token salt
 would strengthen defense-in-depth.
@@ -194,8 +219,20 @@ reduce duplication.
 **[LOW]** `src/notification_service.rs:46-63` -- `msg.clone()` on every `send()` and
 `broadcast()` call. Could compute serialized JSON first.
 
+**[MEDIUM]** `src/queries/update_batches.rs:106-125,206-213` -- N+1 query pattern violating
+batch query rule.
+
+**[MEDIUM]** `src/routes/update_batches.rs:355,365` -- `.unwrap_or_default()` silently
+swallows DB errors loading host/item names for SSE replay.
+
+**[LOW]** `src/routes/update_batches.rs:64-118,142-200` -- `trigger_host_batch_update` and
+`trigger_item_batch_update` share near-identical second half.
+
 **[LOW]** `src/queries/plugin_configs.rs:151-152` -- `unreachable!()` in `unwrap_or_else`
 creates a hidden panic path.
+
+**[INFO]** `src/routes/service_ws/handler/updates.rs:534-537` -- Wildcard `_` arm on
+`UpdateFinalStatus` maps to `Failed` without `tracing::warn!`.
 
 **[LOW]** `src/auth/authentication.rs` -- `resolve_oidc_user` (most complex function in auth
 module with 7 return paths) has no tests. Orphaned-link fallthrough, `LinkViaOidcRequired`
@@ -231,6 +268,21 @@ does NOT write to the outbox.
 - `broadcast_server_restarting_scattered` spreads notifications over jitter window.
 
 ### Issues
+
+**[HIGH]** `src/batch_progress_broadcaster.rs:64-66` -- Instance-local only. SSE clients on
+instance A get no live events for batches processed on instance B.
+
+**[HIGH]** `src/routes/update_batches.rs:373-483` -- SSE stream has no CancellationToken
+integration. Hangs during graceful shutdown.
+
+**[HIGH]** `src/queries/update_batches.rs:466-528` -- Non-atomic batch completion. Three
+COUNT queries + UPDATE without CAS guard. Concurrent completions may duplicate notifications.
+
+**[MEDIUM]** `src/batch_progress_broadcaster.rs:77-79` -- Orphaned channel leak if batch
+never reaches terminal state.
+
+**[MEDIUM]** `src/nats_transport.rs:162-164` -- Fixed 1-second NATS retry without jitter or
+backoff.
 
 **[MEDIUM]** `src/update_output_broadcaster.rs:80-96` -- `send_line` holds write lock for the
 entire operation. A read lock with per-entry interior mutability would allow concurrent sends to
@@ -272,6 +324,12 @@ No coding standards issues found.
   handling.
 
 ### Issues
+
+**[MEDIUM]** `src/routes/update_batches.rs:93,176` -- `batch_type` as bare string literal. No
+typed constant. Typo would silently create novel batch type.
+
+**[MEDIUM]** `src/queries/update_triggers.rs:91-94` -- `actor_type` as raw `&str` with no
+compile-time enforcement.
 
 **[MEDIUM]** `src/routes/oidc_auth.rs:873` -- `fake_claims` reverse-role-mapping ignores nested
 claim paths. If `role_claim_path = "realm.roles"`, reconstruction places values at `realm` not
@@ -334,6 +392,15 @@ changes.
 
 ### Issues
 
+**[CRITICAL]** `src/routes/update_batches.rs` (532 lines) -- Zero test coverage. All 5 batch
+route handlers untested.
+
+**[CRITICAL]** `src/queries/update_batches.rs` (699 lines) -- Zero test coverage. Entire
+batch query layer untested.
+
+**[CRITICAL]** `src/queries/update_triggers.rs` (436 lines) -- Zero test coverage. Refactored
+update trigger pipeline untested.
+
 **[CRITICAL]** `src/routes/oidc_auth.rs:221-625` -- `oidc_callback` is 404 lines with at
 least 10 distinct code paths (provider-error redirect, missing-params redirect, state-expired,
 state-DB-error, provider-gone, base-URL-missing, PKCE-build-failure, code-exchange-failure,
@@ -365,13 +432,19 @@ delivery, that an unsupported channel type is rejected with 400, or that a DB er
 channel load returns 500. This is a user-visible correctness risk for the notification feature.
 
 **[HIGH]** `src/routes/service_ws/handler/mod.rs` (810 lines) and
-`src/routes/service_ws/handler/updates.rs` (689 lines) -- The enrolled loop, authenticated
+`src/routes/service_ws/handler/updates.rs` (926 lines) -- The enrolled loop, authenticated
 loop, and all update-lifecycle handlers (`handle_update_started`, `handle_update_output`,
 `handle_update_result`, `deliver_pending_updates`) have no tests. These functions contain
 multiple branches: output truncation at `MAX_UPDATE_OUTPUT_BYTES`, sequence validation,
 ownership validation across service-host links, and `UpdateFinalStatus` mapping. The WebSocket
 handler files (`connection.rs`, `handler/messages.rs`, `handler/mqtt.rs`, `handler/discovery.rs`,
 `handler/renewal.rs`) are also all untested.
+
+**[HIGH]** `src/notifications/events.rs` -- Tests don't cover `BatchUpdateCompleted` or
+`BatchUpdatePartiallyCompleted` event variants.
+
+**[HIGH]** `src/notifications/message_builder.rs` -- Tests don't cover batch notification
+message templates.
 
 **[MEDIUM]** `src/queries/autodiscovery.rs` (1846 lines, no `#[cfg(test)]`) -- The largest
 query file in the crate with no tests. Functions `process_discovery_results`,
@@ -380,13 +453,9 @@ multi-step DB mutations that are difficult to verify without an in-memory SQLite
 `process_discovery_results` in particular has nested loops and conditional config creation
 that warrants at minimum a happy-path DB test.
 
-**[MEDIUM]** `src/queries/notifications.rs` (463 lines), `src/queries/update_triggers.rs`
-(293 lines), `src/queries/enrollment_tokens.rs` (194 lines), `src/queries/services.rs`
-(396 lines), `src/queries/plugin_configs.rs` (286 lines), `src/queries/scheduled_tasks.rs`
-(165 lines) -- All have zero inline tests. In particular `trigger_update` in
-`update_triggers.rs` spans 293 lines and coordinates plugin assignment resolution, update-
-history record creation, hook wiring, and cross-controller message dispatch — the most complex
-query function in the crate with no test coverage at all.
+**[MEDIUM]** `src/queries/notifications.rs` (463 lines), `src/queries/enrollment_tokens.rs`
+(194 lines), `src/queries/services.rs` (396 lines), `src/queries/plugin_configs.rs`
+(286 lines), `src/queries/scheduled_tasks.rs` (165 lines) -- All have zero inline tests.
 
 **[MEDIUM]** `src/routes/settings_mqtt.rs:58-79` -- `resolve_connection_status` calls
 `OffsetDateTime::now_utc()` directly to decide whether a heartbeat is stale. The function
@@ -457,6 +526,10 @@ if called — does NOT write to the NATS outbox; currently it only confirms the 
 
 ### Issues
 
+**[HIGH]** `src/queries/update_batches.rs:679` -- `format!("{:?}", child.status).to_lowercase()`
+produces `"inprogress"` for `InProgress`. DB stores `"in_progress"`. Batch list and detail
+endpoints return different status strings.
+
 **[HIGH]** `src/routes/enrollment_tokens.rs:183,199` (vs `src/routes/hosts.rs:149`,
 `src/routes/services.rs:305`, `src/routes/plugin_configs.rs:235`,
 `src/routes/notifications.rs:222,520`) -- `revoke_enrollment_token` returns HTTP 200 with a
@@ -483,6 +556,13 @@ messages (`"Host not found"`, `"Service not found"`, `"Enrollment token not foun
 message makes client-side error disambiguation harder when multiple request parameters could
 independently cause a 404. Preferred pattern: `"MQTT client not found"` to match the rest of
 the API.
+
+**[MEDIUM]** `src/routes/scheduler.rs` -- All four endpoints diverge from established patterns:
+`"Failed to ..."` error messages (not `"Internal server error"`), flat `Vec<T>` without
+pagination, bare `Json(resp)` without explicit `StatusCode::OK`.
+
+**[MEDIUM]** `src/routes/update_batches.rs:355-365` -- SSE replay `.unwrap_or_default()`
+consistent with `update_history` SSE but both silently swallow DB errors.
 
 ## Database
 
@@ -523,6 +603,12 @@ the API.
 
 ### Issues
 
+**[HIGH]** `src/queries/update_batches.rs:85-140` -- N+1 in `find_outdated_items_for_host`:
+per-item software_item and plugin queries.
+
+**[HIGH]** `src/queries/update_batches.rs:252-381` -- No transaction around `create_batch`.
+Partial failure leaves inconsistent state.
+
 **[HIGH]** `src/queries/hosts.rs:35-45` -- `load_host_agents` queries `ServiceHost` with only
 a `host_id` filter, bypassing the `TenantDb` abstraction entirely:
 `ServiceHost::find().filter(service_host::Column::HostId.eq(host_id)).all(tenant_db.db())`.
@@ -537,13 +623,17 @@ query itself. The test validates the end result but would not catch a regression
 query filter were removed. Use `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`
 to push the tenant filter into the first query.
 
-**[HIGH]** `src/queries/update_triggers.rs:176-181` -- `ServiceHost::find().filter(Column::HostId.eq(host_id)).one(db)` is called without any tenant filter. `service_host` has no `tenant_id`; the
-correct guard is to join through `service::Entity`. With the current code, if a host ID is
-known to an attacker (host IDs are UUIDs, but they appear in API responses), they could
-trigger an update destined for an agent in a different tenant by constructing a request that
-references a cross-tenant `host_id`. The subsequent agent status check (`service::Column::DeactivatedAt.is_null()` at line 184-189) provides some protection, but it does not verify
-`tenant_id` on the service. Adding `.filter(service::Column::TenantId.eq(tenant_id))` to the
-agent lookup would close this gap.
+**[HIGH]** `src/queries/update_triggers.rs:176-181` --
+`ServiceHost::find().filter(Column::HostId.eq(host_id)).one(db)` is called without any
+tenant filter. `service_host` has no `tenant_id`; the correct guard is to join through
+`service::Entity`. With the current code, if a host ID is known to an attacker (host IDs
+are UUIDs, but they appear in API responses), they could trigger an update destined for an
+agent in a different tenant by constructing a request that references a cross-tenant
+`host_id`. The subsequent agent status check
+(`service::Column::DeactivatedAt.is_null()` at line 184-189) provides some protection,
+but it does not verify `tenant_id` on the service. Adding
+`.filter(service::Column::TenantId.eq(tenant_id))` to the agent lookup would close
+this gap.
 
 **[MEDIUM]** `src/queries/scheduled_tasks.rs:155-162` -- `trigger_scheduled_task` performs a
 read-then-write in two separate statements without a transaction. The initial
@@ -591,6 +681,18 @@ at line 50. While the comment is accurate (a `Vec<String>` is always JSON-serial
 is a hidden panic in a production query path. Use `map_err` / `?` to propagate this as a
 `DbErr::Custom`, consistent with all other serialization error handling in the query layer.
 
+**[MEDIUM]** `src/queries/update_batches.rs:471-498` -- `maybe_complete_batch` executes three
+separate COUNT queries. Consolidate to one GROUP BY.
+
+**[MEDIUM]** `src/queries/update_batches.rs:402-460` -- `dispatch_next_in_batch` race:
+concurrent completions may double-update batch status.
+
+**[MEDIUM]** Missing index on `update_history(host_id, software_item_id, status)` for
+`validate_update_preconditions`.
+
+**[LOW]** `src/queries/update_batches.rs:617-651` -- Host/software item lookups in
+`get_batch_with_items` lack tenant filter (defense-in-depth).
+
 **[LOW]** `src/queries/notifications.rs:323-332` -- `find_log_by_action_token` takes a raw
 `&sea_orm::DatabaseConnection` rather than a `TenantDb`. The `notification_log` table has a
 `tenant_id` column and is `TenantScoped`. This function bypasses the tenant filter entirely,
@@ -610,10 +712,15 @@ tenant's notification log would be able to retrieve and act on it. Pass `&Tenant
   does and why. The permission macro is fully documented with examples.
 - `src/queries/` directory separates database concerns from HTTP routing. Query functions have
   consistent naming (`find_*`, `list_*`, `create_*`) and most have doc comments.
-- `src/app_state.rs` -- All 22 `AppState` fields carry inline doc comments explaining their
+- `src/app_state.rs` -- All 26 `AppState` fields carry inline doc comments explaining their
   purpose, which partially compensates for the wide public surface.
 
 ### Issues
+
+**[HIGH]** `src/queries/autodiscovery.rs` -- 1,848 lines in single query module.
+
+**[HIGH]** `src/queries/software_items.rs` -- 1,376 lines mixing CRUD, assignment, and
+version-check.
 
 **[HIGH]** `src/routes/oidc_auth.rs:221-634` -- `oidc_callback` is 413 lines with 7 distinct
 code paths and no inline doc comments explaining the `OidcUserResolution` state machine. A
@@ -638,7 +745,17 @@ several large private helpers (`find_or_create_software_items`, `process_discove
 `assign_plugin_configs`) that could be extracted into a `src/queries/autodiscovery/` submodule.
 The mixed concerns make it harder to audit changes to either concern in isolation.
 
-**[MEDIUM]** `src/app_state.rs:37-100` -- `AppState` has 22 public fields. Fields such as
+**[MEDIUM]** `src/routes/update_batches.rs:93,176` -- Batch type strings should be constants
+or enum.
+
+**[MEDIUM]** `src/queries/update_batches.rs` -- 699 lines with zero unit tests.
+
+**[MEDIUM]** `src/router.rs` -- 684 lines. OpenAPI path registration extremely verbose.
+
+**[MEDIUM]** `src/routes/service_ws/handler/updates.rs` -- 925 lines. Update lifecycle in
+single file.
+
+**[MEDIUM]** `src/app_state.rs:37-100` -- `AppState` has 26 public fields. Fields such as
 `crl_pem_cache`, `ca_rotation_trigger`, `rustls_config`, and `revocation_notify` are
 infrastructure concerns that route handlers should not access directly. Exposing them as `pub`
 fields means any future handler author can use them without restriction. Accessor methods

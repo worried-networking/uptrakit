@@ -1,22 +1,30 @@
 # Code Review: Shared Libraries (Umbrella)
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture | security | quality | HA | standards |
+  extensibility | tests | consistency | maintainability | database | crate-structure)
 - **Branch**: docs/codereview-backend
 
-**Crates covered:** `uptrakit-build-info`, `uptrakit-shared-macros`, `uptrakit-directories`,
-`uptrakit-update-hooks`
+**Crates covered:** `uptrakit-backoff`, `uptrakit-build-info`, `uptrakit-shared-macros`,
+`uptrakit-directories`, `uptrakit-update-hooks`
 
-These four crates are trivial (1-2 source files each) and are covered in this umbrella review.
-Non-trivial shared crates have individual `CODEREVIEW.md` files in their respective directories.
+These five crates are small utility crates (105-768 lines each) and are covered in this umbrella
+review. Non-trivial shared crates have individual `CODEREVIEW.md` files in their respective
+directories.
 
 ## Summary
 
-These four utility crates form the lowest layer of the workspace dependency graph. The overall
+These five utility crates form the lowest layer of the workspace dependency graph. The overall
 quality is high: `uptrakit-build-info` provides deterministic compile-time/runtime separation,
 `uptrakit-shared-macros` exports a single well-documented macro, `uptrakit-directories` provides
-async-first directory management with platform permission hardening, and `uptrakit-update-hooks`
-defines the hook execution model. No Critical or High issues apply.
+async-first directory management with platform permission hardening, `uptrakit-update-hooks`
+defines the hook execution model with both legacy and structured formats, and `uptrakit-backoff`
+provides a clean synchronous exponential backoff with jitter. No Critical or High issues apply.
+
+The `uptrakit-update-hooks` crate has grown to 768 lines with comprehensive test coverage for
+predefined hook resolution (systemd, docker-compose) and legacy merge behavior. The
+`uptrakit-backoff` crate is a well-tested 105-line single-file crate that is a candidate for
+merging into `service-sdk` or `agent-core` if the crate count becomes a maintenance concern.
 
 ## Architecture
 
@@ -31,6 +39,13 @@ defines the hook execution model. No Critical or High issues apply.
 - `crates/shared/directories/src/lib.rs` -- All public I/O functions are `async` (backed by
   `tokio::fs`). Platform permission hardening (0700 dirs, 0600 files) is conditioned on
   `#[cfg(unix)]` with documentation noting non-Unix paths are not security-hardened.
+- `crates/shared/backoff/src/lib.rs` -- Pure synchronous implementation with no async
+  dependency. Jitter calculation uses `rand::rng().random_range(0..=quarter_ms)` to prevent
+  thundering herd. The `next_delay` / `reset` API is minimal and correct.
+- `crates/shared/update-hooks/src/lib.rs` -- Clean two-phase resolution: structured hooks
+  (`HooksConfig` with predefined templates) take precedence, falling back to legacy
+  `pre_update_commands` / `post_update_commands` arrays. Override completely replaces base
+  when present, avoiding merge ambiguity.
 
 ### Issues
 
@@ -45,7 +60,10 @@ No architectural issues found.
 - `crates/shared/macros/src/lib.rs` -- The `impl_report_conversion!` closure arm enables secure
   error wrapping (e.g., `|e| ControllerError::WebSocket(Box::new(e))`) without losing error
   chain context.
-- Zero `unsafe` in production code across all four crates.
+- `crates/shared/update-hooks/src/lib.rs:143-156` -- Unknown `PredefinedHook` variants are
+  handled with `tracing::warn!` and a no-op `HookCommand::Exec { program: "true", .. }`,
+  following the `#[non_exhaustive]` wildcard convention.
+- Zero `unsafe` in production code across all five crates.
 
 ### Issues
 
@@ -66,6 +84,13 @@ mutex before calling `remove_var`/`set_var`.
   identifier must be a single segment, not a path) is explicitly documented with a rationale.
 - `crates/shared/directories/src/lib.rs` -- Comprehensive test suite covering `expand_tilde`,
   path validation, and directory creation scenarios.
+- `crates/shared/backoff/src/lib.rs` -- Four tests cover doubling behavior, max cap, reset,
+  and zero-base edge case. Jitter bounds are asserted with range checks rather than exact
+  equality, correctly accounting for randomness.
+- `crates/shared/update-hooks/src/lib.rs` -- 23 tests covering predefined hook resolution
+  (systemd stop/start/restart/reload, docker-compose down/up/pull/restart with and without
+  compose file and project dir), structured hooks with custom commands, override-replaces-base,
+  legacy merge, partial override, clear-with-empty-array, and config merge.
 
 ### Issues
 
@@ -80,6 +105,8 @@ Convert to `#[test]` where no `await` is present.
 
 - `crates/shared/directories/src/lib.rs` -- Async-first design means directory operations do not
   block the runtime. `tokio::fs` operations yield cooperative control.
+- `crates/shared/backoff/src/lib.rs` -- Jitter prevents thundering herd on reconnection,
+  supporting HA reconnect patterns in consumers like `agent-core` and `service-sdk`.
 
 ### Issues
 
@@ -89,15 +116,16 @@ No high availability issues found.
 
 ### Strengths
 
-- All four crates use `edition = "2024"` and workspace-pinned dependencies.
+- All five crates use `edition = "2024"` and workspace-pinned dependencies.
 - `crates/shared/macros/src/lib.rs` -- `impl_report_conversion!` enforces the `rootcause` error
   convention, generating `ReportConversion` implementations that use `context_transform` rather
   than constructing fresh reports.
-- Zero `#[allow(clippy::...)]` suppressions across all four crates.
+- Zero `#[allow(clippy::...)]` suppressions across all five crates.
 
 ### Issues
 
-No coding standards issues found.
+**[LOW]** `crates/shared/backoff/Cargo.toml` -- No `publish = false` declaration. The crate is
+an internal utility and should not be accidentally published to crates.io.
 
 ## Extensibility
 
@@ -108,6 +136,10 @@ No coding standards issues found.
 - `crates/shared/macros/src/lib.rs` -- The closure arm enables non-trivial error wrapping
   without writing a full `impl ReportConversion` block, covering cases where the source error
   must be heap-allocated.
+- `crates/shared/update-hooks/src/lib.rs:143-156` -- The `PredefinedHook` match has a wildcard
+  arm with `tracing::warn!` and no-op fallback. Adding a new `PredefinedHook` variant to
+  `web-api-types` does not require a simultaneous update to `update-hooks`; the new variant
+  will be logged and gracefully skipped until explicit support is added.
 
 ### Issues
 
@@ -127,6 +159,15 @@ No extensibility issues found.
 - `crates/shared/directories/src/lib.rs` -- Test suite covers `expand_tilde` (user syntax
   unchanged, home dir expansion), `validate_path_name` (valid, invalid characters, empty
   string), and directory creation.
+- `crates/shared/backoff/src/lib.rs:51-105` -- Four tests: `doubling_behaviour` verifies
+  exponential progression with jitter bounds, `max_cap` confirms the delay does not exceed
+  the configured maximum, `reset_returns_to_base` validates state reset after successful
+  connection, `zero_base_does_not_panic` covers the edge case of `Duration::ZERO` as base.
+- `crates/shared/update-hooks/src/lib.rs:266-768` -- 23 tests covering all hook resolution
+  paths. Predefined hooks are tested for all four systemd actions and four docker-compose
+  actions. The structured-vs-legacy fallback path is tested. Override semantics (full replace,
+  partial override, clear-with-empty-array) are tested for both legacy and structured formats.
+  `merge_config` is tested for basic merge, no-override, and empty-override cases.
 
 ### Issues
 
@@ -142,7 +183,40 @@ only synchronous filesystem or string operations with no `await` points (e.g.,
 instead of `#[tokio::test]` -- spinning up a Tokio runtime for synchronous tests adds
 overhead and misleads readers.
 
-**[LOW]** `crates/shared/update-hooks/src/lib.rs` -- The update-hooks crate has no tests.
-The hook execution logic (command dispatch, output streaming, error handling) is not complex,
-but it is used in the post-update path of the APT and other package-manager plugins. A unit
-test using a mock `CommandExecutor` would document the expected hook lifecycle.
+## Consistency
+
+### Strengths
+
+- All five crates follow the same `Cargo.toml` field inheritance pattern (workspace edition,
+  license, authors, repository, version).
+- Error handling is consistent: `rootcause` / `report!` / `bail!` used in `update-hooks` and
+  `directories`, while `backoff` and `build-info` are infallible by design.
+- `update-hooks` follows the established `#[non_exhaustive]` wildcard convention with
+  `tracing::warn!` on unknown variants, matching the pattern documented in `coding-standards.md`.
+
+### Issues
+
+No consistency issues found.
+
+## Maintainability
+
+### Strengths
+
+- Each crate has a focused responsibility and minimal public API surface.
+- `crates/shared/update-hooks/src/lib.rs` -- Despite growing to 768 lines, the file is
+  well-organized with clear section headers: predefined hook resolution, structured hooks
+  resolution, legacy merge, config merge, and a comprehensive test section.
+
+### Issues
+
+**[INFO]** `crates/shared/backoff/` -- At 105 lines with a single `rand` dependency, this
+crate is a candidate for merging into `service-sdk` or `agent-core` if reducing the workspace
+crate count becomes a priority. However, keeping it separate is reasonable if other crates
+need backoff without pulling in the larger SDK.
+
+**[INFO]** `crates/shared/macros/` -- At 142 lines, this crate must remain separate due to
+Rust's proc-macro compilation model. This is not a refactoring opportunity.
+
+**[INFO]** `crates/shared/build-info/` -- At 216 lines with a distinct `build.rs`
+compilation concern, this crate is reasonable to keep separate. The compile-time/runtime split
+requires an independent compilation unit.

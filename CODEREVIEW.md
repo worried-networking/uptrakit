@@ -1,12 +1,12 @@
 # Code Review: Workspace (Root)
 
-- **Review date**: 2026-03-01
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility | tests | consistency | maintainability | database | crate-structure)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
 
-The Uptrakit backend (~112K LoC, 31 crates) is a well-structured Rust workspace implementing an
+The Uptrakit backend (~133K LoC, 35 crates) is a well-structured Rust workspace implementing an
 agent-based update tracking toolkit. The codebase demonstrates mature Rust engineering practices:
 workspace-level `clippy::all = "deny"` and `warnings = "deny"` lints, consistent error handling
 via `rootcause` + `thiserror` + `impl_report_conversion!`, and strong type-system enforcement of
@@ -21,13 +21,20 @@ findings from new code committed after 2026-02-28: `ZeroizeOnDrop` on `MaskedEma
 (`5da34db`), NATS CLI subcommand (`33266c1`), and NATS openapi-client methods (`987f110`). Full
 reviews for the `forgejo` and `gitlab` release plugins were created on this date.
 
+Updated on 2026-03-02 to incorporate findings from the batch updates feature
+(`update_batches` table, `BatchStatus` enum, `UpdateCategory` enum, batch progress SSE
+streaming, sequential per-host dispatch), the update category feature (security update
+detection in APT plugin, `update_category` column on `host_software_items` and
+`update_history`), and the refactored update trigger pipeline (`trigger_update_for_host`
+split into three composable layers: validate, create_record, dispatch).
+
 The dependency graph is a clean DAG with no circular dependencies. Feature flags are used
 judiciously for database backends, OIDC, NATS, and embedded components. The plugin system is
 well-designed with a macro-generated registry. The service SDK provides an excellent abstraction
 for the enrollment-lifecycle-reconnect flow shared across all service binaries.
 
-Key areas for improvement: the `web-api` crate at ~32K LoC is approaching "god crate" territory
-and would benefit from decomposition; the wire protocol file (`wire/src/lib.rs`) at 3.5K lines
+Key areas for improvement: the `web-api` crate at ~38K LoC is approaching "god crate" territory
+and would benefit from decomposition; the wire protocol file (`wire/src/lib.rs`) at 3.8K lines
 should be split into domain modules; and remaining HA concerns should be addressed before
 multi-instance deployment. The previously-reported SSRF in Docker auth realm, the OIDC
 privilege escalation via `unwrap_or(0)`, all `#[cfg(not(feature))]` violations, the unbounded
@@ -87,6 +94,7 @@ NATS startup retry being absent (already implemented with exponential backoff in
 | `crates/shared/scheduler-engine` | [CODEREVIEW.md](crates/shared/scheduler-engine/CODEREVIEW.md) |
 | `crates/shared/service-sdk` | [CODEREVIEW.md](crates/shared/service-sdk/CODEREVIEW.md) |
 | `crates/shared/types` | [CODEREVIEW.md](crates/shared/types/CODEREVIEW.md) |
+| `crates/shared/notification-channels` | [CODEREVIEW.md](crates/shared/notification-channels/CODEREVIEW.md) |
 | `crates/shared/web-api-types` | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) |
 | `crates/shared/wire` | [CODEREVIEW.md](crates/shared/wire/CODEREVIEW.md) |
 | `crates/ui/web-api` | [CODEREVIEW.md](crates/ui/web-api/CODEREVIEW.md) |
@@ -107,11 +115,11 @@ NATS startup retry being absent (already implemented with exponential backoff in
 
 ### Strengths
 
-- `Cargo.toml` (workspace root) -- `resolver = "3"` and `edition = "2024"` set once; all 31
+- `Cargo.toml` (workspace root) -- `resolver = "3"` and `edition = "2024"` set once; all 35
   crates inherit via `edition.workspace` — no per-crate drift possible.
-- `Cargo.toml:13-60` (`[workspace.dependencies]`) -- All major external dependencies pinned here
-  with exact version ranges and default-feature overrides. Per-crate declarations only specify
-  `features = [...]`, eliminating duplicate version declarations.
+- `Cargo.toml:13-60` (`[workspace.dependencies]`) -- All 35 crates share major external
+  dependencies pinned here with exact version ranges and default-feature overrides. Per-crate
+  declarations only specify `features = [...]`, eliminating duplicate version declarations.
 - `Cargo.toml:62-67` (`[profile.release]`) -- `lto = "fat"`, `codegen-units = 1`,
   `panic = "abort"`, `strip = true` — production-hardened single-binary output.
 - `[workspace.package]` carries `license`, `authors`, `repository`, and `version`.
@@ -128,7 +136,7 @@ NATS startup retry being absent (already implemented with exponential backoff in
   typed paths.
 - Plugin system uses trait-based dispatch with `register_plugins!` macro that generates all six
   dispatch methods from a single declaration.
-- `[workspace.lints]` enforces `warnings = "deny"` and `clippy::all = "deny"` across all 31
+- `[workspace.lints]` enforces `warnings = "deny"` and `clippy::all = "deny"` across all 35
   crates via `[lints] workspace = true`.
 - UUID v7 primary keys throughout all entities -- time-ordered, index-friendly, no hot-spot
   write contention.
@@ -151,18 +159,28 @@ NATS startup retry being absent (already implemented with exponential backoff in
 layer (`web-api/settings_store.rs`) but is called from the core binary (`controller/startup.rs`).
 This creates a logical layering inversion where the controller depends on web-api internals.
 
-**[HIGH]** `crates/ui/web-api/src/lib.rs:1-24` -- At ~32K LoC, `web-api` is the largest crate
+**[HIGH]** `crates/ui/web-api/src/lib.rs:1-24` -- At ~38K LoC, `web-api` is the largest crate
 (~29% of total). Contains authentication, authorization, middleware, routes, queries, settings,
-MQTT coordination, NATS transport, OCSP, PKI, notifications, and update output broadcasting.
+MQTT coordination, NATS transport, OCSP, PKI, notifications, batch progress broadcasting,
+and update output broadcasting.
 
 **[HIGH]** `crates/core/controller/Cargo.toml:22-60` -- Controller depends directly on
 `uptrakit-web-api` (a UI crate), coupling the core binary to the entire web-api surface.
 
-**[HIGH]** `crates/shared/wire/src/lib.rs` -- At 3,524 lines in a single file, the entire wire
+**[HIGH]** `crates/shared/wire/src/lib.rs` -- At 3,798 lines in a single file, the entire wire
 protocol definition lives in one module. Should be decomposed into domain modules.
 
-**[HIGH]** `crates/ui/web-api/src/app_state.rs:37-96` -- `AppState` has 22+ public fields, most
+**[HIGH]** `crates/ui/web-api/src/app_state.rs:37-96` -- `AppState` has 26 public fields, most
 with `pub` visibility.
+
+**[HIGH]** `crates/ui/web-api/src/queries/update_batches.rs:106-125,206-213` -- N+1 query
+pattern in `find_outdated_items_for_host` and `find_outdated_hosts_for_item`. Per-item DB
+queries for software items and plugin assignments inside loops. With 50 items per host,
+generates 100+ extra queries.
+
+**[HIGH]** `crates/ui/web-api/src/queries/update_batches.rs:252-381` -- `create_batch`
+performs no transaction around multi-step mutation. If any step fails mid-way, the batch
+record exists with `total_count` that does not match actual children.
 
 **[MEDIUM]** `crates/shared/db/src/entity/oidc_provider.rs:89` -- Soft-delete column named
 `deleted_at` instead of `deactivated_at`. All other 7 soft-deletable entities use
@@ -208,6 +226,14 @@ issued.
 
 ### Issues
 
+**[MEDIUM]** `crates/ui/web-api/src/routes/notifications.rs:620` -- Telegram webhook secret
+comparison uses non-constant-time `!=` operator. Timing side-channel could allow
+brute-forcing the secret.
+
+**[MEDIUM]** `crates/ui/web-api/src/routes/oidc_auth.rs` -- In `oidc_complete_registration`,
+pending registration code consumed via `take()` before validating the registration token.
+Invalid token permanently consumes the code.
+
 **[MEDIUM]** `crates/shared/service-sdk/src/tls.rs` -- TOFU TLS verifier accepts any server
 certificate during initial CA fetch. MITM window during initial enrollment.
 
@@ -219,7 +245,7 @@ certificate during initial CA fetch. MITM window during initial enrollment.
 
 ### Strengths
 
-- Consistent `rootcause` + `thiserror` + `impl_report_conversion!` error handling across all 31
+- Consistent `rootcause` + `thiserror` + `impl_report_conversion!` error handling across all 35
   crates. Every crate with errors defines a custom error type with `#[derive(Debug, Error)]`.
 - 2,363 test functions across 217 files with meaningful assertions and realistic scenarios.
 - Zero `#[allow(dead_code)]` annotations. Zero `#[allow(clippy::...)]` suppressions.
@@ -241,7 +267,7 @@ certificate during initial CA fetch. MITM window during initial enrollment.
 
 ### Issues
 
-**[HIGH]** `crates/ui/cli/src/main.rs` -- At 3,870 lines (including ~1,500 lines of tests),
+**[HIGH]** `crates/ui/cli/src/main.rs` -- At 4,793 lines (including ~1,500 lines of tests),
 this is the largest single file.
 
 **[HIGH]** Route handlers in `crates/ui/web-api/src/routes/` -- Multiple handlers have no
@@ -258,6 +284,14 @@ duplicated with `unreachable!()` in two locations.
 
 **[MEDIUM]** `crates/ui/cli/tests/command_execution.rs` -- Only `hosts`, `services`, and
 `software_items` namespaces covered by integration tests.
+
+**[HIGH]** `crates/ui/web-api/src/queries/update_batches.rs` (699 lines) and
+`src/queries/update_triggers.rs` (436 lines) -- Zero test coverage on the batch query layer
+and the refactored update trigger pipeline.
+
+**[HIGH]** `crates/shared/web-api-types/src/notifications.rs:336` -- `ALL_EVENT_TYPES` lists
+only 6 of 8 variants, missing `BatchUpdateCompleted` and `BatchUpdatePartiallyCompleted`.
+Three tests iterate this array.
 
 **[MEDIUM]** `crates/shared/openapi-client/src/lib.rs:687-885` -- Retry-backoff tests do not
 verify delay durations. Eight tests assert only eventual success, not backoff timing.
@@ -287,6 +321,25 @@ verify delay durations. Eight tests assert only eventual success, not backoff ti
 
 ### Issues
 
+**[HIGH]** `crates/ui/web-api/src/batch_progress_broadcaster.rs` -- Instance-local only. In a
+multi-instance deployment, SSE clients connected to instance A receive no live events for
+batches processed by instance B.
+
+**[HIGH]** `crates/ui/web-api/src/routes/update_batches.rs:373-483` -- SSE stream has no
+CancellationToken integration. During graceful shutdown, existing SSE connections hang until
+shutdown timeout.
+
+**[HIGH]** `crates/ui/web-api/src/queries/update_batches.rs:466-528` -- Non-atomic batch
+completion: three separate COUNT queries followed by UPDATE. Concurrent completions can both
+transition the batch, causing duplicate notifications.
+
+**[MEDIUM]** `crates/ui/web-api/src/batch_progress_broadcaster.rs:64-66` and
+`update_output_broadcaster.rs:48-49` -- Orphaned channel leak. If batch/update never reaches
+terminal state, broadcast channel persists indefinitely.
+
+**[MEDIUM]** `crates/ui/web-api/src/nats_transport.rs:162-164` -- NATS consumer fetch error
+retry uses fixed 1-second delay with no exponential backoff or jitter.
+
 **[MEDIUM]** `crates/shared/service-sdk/src/event_loop.rs:244-246` -- `tick().await` inside
 `handle_service_settings` suspends the event loop, blocking incoming WebSocket reads and pings.
 
@@ -294,22 +347,34 @@ verify delay durations. Eight tests assert only eventual success, not backoff ti
 
 ### Strengths
 
-- All 31 crates use `workspace = true` for shared dependencies and `[lints] workspace = true`.
+- All 35 crates use `workspace = true` for shared dependencies and `[lints] workspace = true`.
 - `TenantDb` wrapper used consistently across all tenant-scoped web-api routes.
 - All string-to-type conversions use `FromStr` with dedicated `Parse{Type}Error` types.
-- No N+1 query patterns found. Batch loading with `is_in(ids)` and `HashMap` lookups used.
+- Batch loading with `is_in(ids)` and `HashMap` lookups used in established query modules.
 - Database-backed rate limiting with atomic SQL upsert, HA-safe across controller instances.
 - Structured tracing with proper levels. No sensitive data in log output.
 - `bail!` / `report!` / `context_to` / `impl_report_conversion!` pattern uniform; `Report::new()`
-  anti-pattern absent across all 31 crates; `Result<T, String>` absent from all library
+  anti-pattern absent across all 35 crates; `Result<T, String>` absent from all library
   boundaries.
 - No `StatusCode` numeric literal comparisons anywhere in the codebase.
 - 70+ endpoints carry `x-required-permission` OpenAPI extension annotations.
-- Zero `anyhow` usage across all 31 crates.
+- Zero `anyhow` usage across all 35 crates.
 
 ### Issues
 
-No coding standards issues found.
+**[CRITICAL]** `crates/plugins/releases/github/src/plugin.rs:107-118`,
+`crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs:115-127`,
+`crates/shared/service-sdk/src/ca.rs:49-76` -- Missing HTTP client timeouts
+(`connect_timeout`, `timeout`). An unresponsive upstream can hang the process indefinitely.
+
+**[CRITICAL]** `crates/plugins/releases/github/src/error.rs:13`,
+`crates/plugins/releases/forgejo/src/error.rs:13`,
+`crates/plugins/releases/gitlab/src/error.rs:13` -- `status: u16` in `ApiError` instead of
+`StatusCode`.
+
+**[HIGH]** `crates/plugins/releases/github/src/plugin.rs:29`,
+`crates/plugins/releases/forgejo/src/plugin.rs:29` -- `.unwrap()` in production
+`parse_owner_repo()` after guard. Violates no-unwrap rule.
 
 ## Extensibility
 
@@ -335,6 +400,18 @@ No coding standards issues found.
 **[MEDIUM]** `crates/shared/wire/src/lib.rs:214-234` -- `ServiceMessage` and
 `ControllerMessage` mix agent-specific and MQTT-specific variants.
 
+**[HIGH]** `crates/shared/web-api-types/src/update_batches.rs:30-43` --
+`HostBatchUpdateRequest::validate()` hardcodes valid category list as
+`["security", "bugfix", "feature", "unknown"]`. Duplicated source of truth from
+`UpdateCategory` enum.
+
+**[MEDIUM]** `crates/shared/types/src/batch_status.rs:8-29` and
+`src/update_category.rs:13-35` -- No `Other(String)` catch-all variant. New values in API
+responses will break older client deserialization.
+
+**[MEDIUM]** `crates/ui/web-api/src/routes/update_batches.rs:93,175` -- `batch_type` passed
+as bare strings (`"host_update"`, `"item_rollout"`) with no typed enum or constant.
+
 **[MEDIUM]** `crates/shared/service-sdk/src/lifecycle.rs:79,89` -- `ServiceHandler` is not
 object-safe due to associated constants. No documentation or `where Self: Sized` guards.
 
@@ -342,7 +419,7 @@ object-safe due to associated constants. No documentation or `where Self: Sized`
 
 ### Splitting Candidates
 
-#### `uptrakit-web-api` (~32K LoC, ~98 files)
+#### `uptrakit-web-api` (~38K LoC, ~98 files)
 
 **Current concerns:** The crate contains 8 distinct domains: authentication (JWT, OIDC, sessions,
 device flow, token denylist), authorization (permissions, rate limiting), routes (30+ handler
@@ -375,7 +452,7 @@ first.
 
 ---
 
-#### `uptrakit-shared-wire` (3,790 lines, single file)
+#### `uptrakit-shared-wire` (3,798 lines, single file)
 
 **Current concerns:** The entire wire protocol lives in `src/lib.rs`. Production code (~1,266
 lines) and test code (~2,524 lines) are in the same file. Finding a type definition requires
@@ -396,7 +473,7 @@ Tests move to `src/messages/tests.rs` etc., matching the sub-module they exercis
 
 **Priority:** HIGH — pure refactor (no behavioral change, no dependency changes). Reduces the
 cognitive overhead of navigating the protocol definition and makes it easier to review changes
-to a specific message type without scrolling through 3,700 lines.
+to a specific message type without scrolling through 3,800 lines.
 
 **Risk:** Low. All types remain in the same crate; consumers see no change to import paths
 (re-exports from `lib.rs`). The `asyncapi.yaml` spec-conformance tests continue to work.
@@ -536,7 +613,7 @@ The dependency graph is a valid DAG with no circular dependencies. Key observati
 The workspace crate organization is generally healthy. The four-domain layout (`core/`,
 `shared/`, `ui/`, `plugins/`) enforces a clean dependency gradient for most crates. The main
 structural debt is the `controller → web-api` upward dependency, which is a known issue and the
-root cause of several other concerns (settings logic in the UI layer, `AppState` with 22 public
+root cause of several other concerns (settings logic in the UI layer, `AppState` with 26 public
 fields). Resolving this one dependency inversion would enable the most impactful follow-on
 improvements: a web-api split, PKI extraction, and a cleaner `AppState` API surface.
 

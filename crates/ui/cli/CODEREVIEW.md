@@ -1,20 +1,23 @@
 # Code Review: uptrakit-cli
 
-- **Review date**: 2026-03-01
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility | NATS settings subcommand)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture | security | quality | HA | standards |
+  extensibility | tests | consistency | maintainability | database | crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
 
-`uptrakit-cli` is the operator-facing CLI binary. It depends on `uptrakit-openapi-client`
-(not `uptrakit-web-api`) for a clean dependency boundary. All eleven command namespaces are
-implemented with typed returns via the `HumanOutput` trait. The crate demonstrates good design
-decisions: `SecretString` at credential boundaries, URL scheme validation before browser open,
-`lib` + `bin` split for testability, and comprehensive CLI argument tests.
+`uptrakit-cli` is the operator-facing CLI binary at ~11,343 LoC. It depends on
+`uptrakit-openapi-client` (not `uptrakit-web-api`) for a clean dependency boundary. All thirteen
+command namespaces (including the recently added batch update commands) are implemented with typed
+returns via the `HumanOutput` trait. The crate demonstrates good design decisions: `SecretString` at
+credential boundaries, URL scheme validation before browser open, `lib` + `bin` split for
+testability, and comprehensive CLI argument tests.
 
-The main concerns are the plaintext API token storage, `main.rs` at 3,870 lines (including
-~1,500 lines of tests) needing splitting, and incomplete integration test coverage (only 3 of
-12 namespaces covered by `MockApiServer` tests).
+The main concerns are the plaintext API token storage, `main.rs` at 4,793 lines (including ~1,500
+lines of tests) needing splitting, a UTF-8 safety issue in `truncate()`, and incomplete integration
+test coverage (only 3 of 13 namespaces covered by `MockApiServer` tests). The batch update commands
+are well-structured with `*Params` structs and follow existing CLI patterns.
 
 ## Architecture
 
@@ -30,6 +33,9 @@ The main concerns are the plaintext API token storage, `main.rs` at 3,870 lines 
   construction. Every command calls it as its first step.
 - Param structs (`*Params<'a>`) for complex arities keep call sites readable (e.g.
   `hosts::ListParams`, `scheduler::TriggerParams`).
+- Batch update commands follow existing patterns: `HostBatchParams`, `ItemBatchParams`,
+  `ListBatchParams`, `ShowBatchParams`, `FollowBatchParams` mirror the established `*Params<'a>`
+  convention (`batch_update.rs:136-179`).
 - `SecretString` at credential boundaries. OIDC `client_secret` and MQTT `password`/`ca_pem`
   wrapped in `SecretString::new(...)` before API client calls (`settings.rs:576-577`,
   `settings.rs:695`). Device-flow token stored via `.expose_secret()` only at disk write
@@ -41,6 +47,9 @@ The main concerns are the plaintext API token storage, `main.rs` at 3,870 lines 
   verification disabled.
 - `src/error.rs:43` -- `serde_yaml_ng` error wrapped via `impl_report_conversion!` rather than
   leaking third-party error type.
+- `batch_update.rs:292-362` -- `follow_batch` uses `tokio::select!` with `biased` for clean
+  Ctrl+C handling. The SSE stream continues server-side when the CLI detaches, which is the
+  correct behavior for a long-running batch operation.
 
 ### Issues
 
@@ -56,8 +65,8 @@ read-only subcommands in the codebase use `Show` (e.g. `SmtpCommands::Show`,
 function backing it is even named `nats_show`. This breaks the naming convention and
 produces `uptrakit settings nats get` instead of the expected `uptrakit settings nats show`.
 
-**[LOW]** `src/main.rs` (dispatch section, ~834-1300 LoC) -- Monolithic dispatch block. The
-`run()` function's `match command { ... }` handles all twelve namespaces in a single
+**[LOW]** `src/main.rs` (dispatch section, ~834-1830 LoC) -- Monolithic dispatch block. The
+`run()` function's `match command { ... }` handles all thirteen namespaces in a single
 function. Splitting into per-namespace dispatch helpers would reduce navigation complexity.
 
 ## Security and Safety
@@ -101,6 +110,8 @@ an approved site. Function lacks inline comment justifying the exception.
 
 - `HumanOutput` implementations consistent and complete for all response types. Uniform
   pattern: empty-list guard returns early with "No X found.", non-empty renders header + data.
+  The new batch update types (`BatchUpdateResponse`, `PaginatedResponse<UpdateBatchSummaryResponse>`,
+  `UpdateBatchDetailResponse`) follow this pattern exactly (`batch_update.rs:16-132`).
 - `CliError` comprehensive with seven variants covering all failure modes, mapped via
   `impl_report_conversion!`. `ClientError` -> `CliError` mapping handles `RateLimited`,
   `NotFound`, `NotAuthenticated`, `InvalidMethod` explicitly.
@@ -118,7 +129,8 @@ an approved site. Function lacks inline comment justifying the exception.
   testing `HumanOutput` implementations.
 - `validate_url_scheme` exhaustively tested. Eight unit tests cover every scheme category.
 - `chrono_date` format validated structurally (`auth.rs:564-578`).
-- 84 unit tests covering all CLI subcommand parsing variations.
+- 92 unit tests covering all CLI subcommand parsing variations (84 original + 8 new batch
+  update parse tests).
 - `src/commands/settings.rs:1066-1090` -- `NatsSettingsResponse::to_human_string` tests
   explicitly assert that passwords embedded in a NATS URL (`nats://user:secret@host:4222`)
   do not appear in the output and that the masked form is present. This is the correct level
@@ -129,18 +141,11 @@ an approved site. Function lacks inline comment justifying the exception.
 
 ### Issues
 
-**[HIGH]** `src/main.rs` -- At 3,870 lines (including ~1,500 lines of tests), this is the
-largest single file. Command enum definitions (~900 lines), main dispatch, and tests should
-be split into separate modules.
-
-**[MEDIUM]** `tests/command_execution.rs` -- Only `hosts`, `services`, and `software_items`
-namespaces covered by integration tests. Ten of thirteen command namespaces have zero
-integration coverage against `MockApiServer`: `auth`, `scheduler`, `settings` (including the
-new NATS subcommand), `plugin_configs`, `autodiscovery`, `check`, `update`, `history`, and
-`api`. No mock endpoint for `settings_nats` was added to `MockApiServer`, so the round-trip
-behaviour of `nats_show`, `nats_set`, and `nats_clear` is unverified against an HTTP server.
-The `check::all` two-step interaction (list tasks, trigger by ID) would benefit particularly
-from a mock test.
+**[HIGH]** `src/main.rs` -- At 4,793 lines (including ~1,500 lines of tests), this is the
+largest single file in the workspace. The `run()` function is now ~1,730 lines. Command enum
+definitions (~900 lines), main dispatch, and tests should be split into separate modules.
+The recent addition of batch update command definitions and 8 new parse tests further
+increased the file size.
 
 **[MEDIUM]** `tests/command_execution.rs:195-210` -- `hosts_list_json_format` test does not
 assert JSON output. Asserts only `result.is_ok()`. The test is a duplicate of
@@ -149,6 +154,17 @@ assert JSON output. Asserts only `result.is_ok()`. The test is a duplicate of
 **[MEDIUM]** `src/commands/update.rs:50` -- `unwrap_or("")` on `release_url` sends empty string
 to server when only `--release-tag` provided. Server must distinguish "provided and empty" from
 "not provided".
+
+**[LOW]** `src/commands/batch_update.rs:367-373` -- `truncate()` slices by byte index
+(`&s[..max - 1]`), which will panic if the byte boundary falls within a multi-byte UTF-8
+character. Host names and software item names from external systems may contain non-ASCII
+characters. Use `s.chars().take(max - 1).collect::<String>()` or `s.char_indices()` to find a
+safe boundary.
+
+**[LOW]** `src/commands/batch_update.rs:268` -- `.parse().unwrap_or_default()` on the `status`
+filter silently accepts invalid status values (e.g. `--status garbage` resolves to the
+default enum variant). The user receives no feedback that their filter was ignored. Should
+return an error or print a warning listing valid values.
 
 **[LOW]** `src/commands/auth.rs:155-156` -- `chrono_date()` function name does not match its
 implementation (uses `time::OffsetDateTime`, not `chrono`).
@@ -185,6 +201,8 @@ N/A.
 - Zero `#[allow(clippy::...)]` suppressions.
 - No `StatusCode` numeric literals.
 - `--output` default documented and tested (`default_format_is_human`).
+- New batch update code follows `rootcause` error conventions: all fallible calls use
+  `.context_to()` rather than raw `?` or `.unwrap()`.
 
 ### Issues
 
@@ -204,6 +222,8 @@ published to crates.io.
   per-command work beyond `Serialize + HumanOutput`.
 - `CliError::Other(String)` catch-all allows surfacing domain-specific errors without new
   variants.
+- `FollowResult` and `follow_batch` are designed for reuse: the SSE follow pattern
+  (`batch_update.rs:292-362`) can serve as a template for future real-time streaming commands.
 
 ### Issues
 
@@ -213,62 +233,21 @@ for callers to capture output. Accepting `&mut dyn Write` would enable test asse
 **[LOW]** `src/commands/check.rs:43-69` -- `check::all` makes two sequential API calls where
 one would suffice with a dedicated endpoint. TOCTOU window between list and trigger.
 
-## Consistency
-
-### Strengths
-
-- All command functions follow the same invocation pattern: call `authenticated_client(server,
-  token, insecure, request_timeout)?`, call the API client method, return the typed response.
-  There are no direct `reqwest` calls or hand-rolled HTTP in any command module.
-- Every command module that renders tabular data follows the same empty-list guard: return early
-  with `"No X found.\n"` before entering the table header/row loop. Consistent across `hosts`,
-  `services`, `software_items`, `plugin_configs`, `notifications`, `enrollment_tokens`,
-  and `settings` (MQTT list, OIDC list). See `src/commands/settings.rs:162`.
-- `HumanOutput` unit tests exist in every command module. Each module's `#[cfg(test)]` section
-  exercises at least the happy-path human-string rendering for every response type defined in
-  that module.
-- Multi-field create/update operations consistently use `*Params<'a>` structs (e.g.,
-  `MqttCreateParams<'a>`, `MqttUpdateParams<'a>`, `SmtpSetParams<'a>`, `OidcCreateParams<'a>`,
-  `OidcUpdateParams<'a>`, `RegistrationUpdateParams<'a>`) rather than naked positional
-  arguments, keeping `main.rs` call sites readable and avoiding argument-order bugs.
-
-### Issues
-
-**[MEDIUM]** `src/commands/settings.rs:892` (vs `src/commands/settings.rs:846`) --
-`nats_set` uses bare positional arguments (`url: String`), while every other mutating settings
-command with connection parameters uses a `*Params<'a>` struct (`SmtpSetParams`,
-`MqttCreateParams`, `OidcCreateParams`, etc.). The NATS `set` operation currently carries
-only a single payload field, but the inconsistency creates an established-pattern exception.
-If NATS gains additional fields (credentials, TLS options) the function would need ad-hoc
-refactoring while smtp/mqtt equivalents already have the struct. Preferred pattern: introduce
-`NatsSetParams<'a>` to match `SmtpSetParams<'a>`.
-
-**[MEDIUM]** `src/commands/settings.rs:1066-1095` (vs integration tests for `hosts`,
-`services`, `software_items` in `tests/command_execution.rs`) -- The `NatsSettingsResponse`
-`HumanOutput` tests verify display content but no integration test exercises `nats_show`,
-`nats_set`, or `nats_clear` against a `MockApiServer`. This is the same gap as the nine
-other untested namespaces noted in Code Quality, but the NATS commands are additionally the
-most recently added, making regression risk higher before they accumulate operational history.
-
-**[LOW]** `src/commands/settings.rs:159-176` (vs `src/commands/hosts.rs` and other list
-renderers) -- `Vec<MqttClientResponse>::to_human_string` and
-`Vec<OidcProviderResponse>::to_human_string` render fixed-width table columns without
-truncation guards. If a host value or provider name exceeds the column width (25 and 20 chars
-respectively), the alignment breaks for subsequent columns. All other list `HumanOutput`
-implementations share this weakness, but there is no project-wide policy or helper that
-enforces consistent truncation or wrapping. A shared `truncate(s, n)` helper would make this
-consistent and testable across all table-rendering implementations.
-
 ## Tests
 
 ### Strengths
 
-- `src/main.rs` -- 84 named parse tests covering all eleven command namespaces: every subcommand
-  variant is instantiated via `Cli::try_parse_from`, and the parsed variant is pattern-matched
-  to assert correct field values. This is the primary regression guard for CLI argument wiring.
-- `src/main.rs:3835-3883` -- NATS settings commands (`settings nats get`, `settings nats set
-  --url`, `settings nats clear`) each have a parse test asserting the correct enum variant and
-  field value. New code is covered at the argument-parsing level immediately.
+- `src/main.rs` -- 92 named parse tests covering all thirteen command namespaces (including the
+  new batch update commands): every subcommand variant is instantiated via
+  `Cli::try_parse_from`, and the parsed variant is pattern-matched to assert correct field
+  values. This is the primary regression guard for CLI argument wiring.
+- `src/main.rs:3278-3461` -- 8 batch update parse tests cover `update batch-host` (with and
+  without options), `update batch-item` (with and without host IDs), `update-batches list`
+  (with and without filters), `update-batches show`, and `update-batches follow`. All new
+  command variants are exercised at the argument-parsing level.
+- `src/commands/batch_update.rs:377-455` -- 7 unit tests cover `BatchUpdateResponse` human
+  output (with batch ID and no-eligible), `FollowResult` exit codes, `truncate` short and
+  long strings, and list-batches empty output. Good coverage of the new module.
 - `tests/command_execution.rs` -- `MockApiServer`-based integration tests covering
   `hosts_list_success`, `hosts_list_empty`, `hosts_show_success`, `hosts_show_not_found`,
   `services_list_success`, `services_approve_success`, `services_approve_not_found`,
@@ -304,21 +283,33 @@ content or format is made. The test is a duplicate of `hosts_list_success` under
 name and provides no additional coverage. It should either assert the stdout is valid JSON
 containing the expected fields, or be removed.
 
-**[MEDIUM]** `tests/command_execution.rs` -- Nine of twelve command namespaces have zero
+**[MEDIUM]** `tests/command_execution.rs` -- Ten of thirteen command namespaces have zero
 integration test coverage against `MockApiServer`: `auth`, `scheduler`, `settings`,
-`plugin_configs`, `autodiscovery`, `enrollment_tokens`, `check`, `update`, and `history`.
-The NATS settings commands (`nats_show`, `nats_set`, `nats_clear`) are tested at the parse
-level but have no mock-server integration test verifying the API call and output. The
-`check::all` two-step sequence (list tasks, then trigger by ID) is particularly valuable to
-test because it involves two sequential API calls and a TOCTOU dependency.
+`plugin_configs`, `autodiscovery`, `enrollment_tokens`, `check`, `update` (including the new
+batch update commands), `history`, and `notifications`. The batch update commands
+(`trigger_host_batch`, `trigger_item_batch`, `list_batches`, `show_batch`, `follow_batch`) are
+tested at the parse level and unit level but have no mock-server integration test verifying the
+API calls, SSE streaming, or output formatting. The `check::all` two-step sequence (list
+tasks, then trigger by ID) is particularly valuable to test because it involves two sequential
+API calls and a TOCTOU dependency.
 
 **[MEDIUM]** `src/commands/auth.rs` -- The `login` function (device-flow polling loop,
 rate-limit backoff, timeout handling, file I/O, browser launch) at ~130 lines has zero test
-coverage. The polling loop logic — how it handles `AuthorizationPending`, `SlowDown`,
-`AccessDenied`, and `ExpiredToken` responses — is the most complex stateful behavior in the
+coverage. The polling loop logic -- how it handles `AuthorizationPending`, `SlowDown`,
+`AccessDenied`, and `ExpiredToken` responses -- is the most complex stateful behavior in the
 CLI binary and is exercised only by live OIDC integration. Extracting `poll_until_authorized`
 as a testable function accepting an injectable time source and a mock client would allow unit
 coverage of all the polling states.
+
+**[LOW]** `src/commands/batch_update.rs:408-430` -- `follow_result_exit_codes` tests
+"completed" (0), "partially_completed" (1), and "detached" (2) but does not test the "error"
+and "disconnected" statuses that `follow_batch` produces at lines 348 and 354. These statuses
+also map to exit code 2 via the catch-all arm, and while the behavior is correct, explicit
+assertions would document the contract and guard against regressions.
+
+**[LOW]** `src/commands/batch_update.rs:377-455` -- No test exercises `HumanOutput` for
+`BatchUpdateResponse` with skipped items. The `skipped` rendering path (lines 30-37) is
+untested.
 
 **[LOW]** `src/commands/settings.rs:1065-1088` -- The NATS output tests assert `has_url` or
 `Has URL` appears using `||` (either string). This is weaker than asserting the exact label
@@ -334,7 +325,77 @@ SSE byte stream would cover the parsing path.
 **[LOW]** `src/output.rs` -- No test calls `print_output(OutputFormat::Yaml, &val)`. A
 `serde_yaml_ng` serialization regression would not be caught by any current test.
 
-**[LOW]** `src/commands/notifications.rs` -- `HumanOutput` tests cover `channel_detail_human_output_contains_key_fields`
-and empty/non-empty channel list. Rule log and notification log entries are not covered in
-`HumanOutput` tests; `notification_log_response` and `rule_detail_human_output` outputs could
-be asserted to match expected field labels.
+**[LOW]** `src/commands/notifications.rs` -- `HumanOutput` tests cover
+`channel_detail_human_output_contains_key_fields` and empty/non-empty channel list. Rule log
+and notification log entries are not covered in `HumanOutput` tests;
+`notification_log_response` and `rule_detail_human_output` outputs could be asserted to match
+expected field labels.
+
+## Consistency
+
+### Strengths
+
+- All command functions follow the same invocation pattern: call `authenticated_client(server,
+  token, insecure, request_timeout)?`, call the API client method, return the typed response.
+  There are no direct `reqwest` calls or hand-rolled HTTP in any command module.
+- Every command module that renders tabular data follows the same empty-list guard: return early
+  with `"No X found.\n"` before entering the table header/row loop. Consistent across `hosts`,
+  `services`, `software_items`, `plugin_configs`, `notifications`, `enrollment_tokens`,
+  `settings` (MQTT list, OIDC list), and the new `batch_update` (list batches). See
+  `src/commands/batch_update.rs:45-47`.
+- `HumanOutput` unit tests exist in every command module. Each module's `#[cfg(test)]` section
+  exercises at least the happy-path human-string rendering for every response type defined in
+  that module.
+- Multi-field create/update operations consistently use `*Params<'a>` structs (e.g.,
+  `MqttCreateParams<'a>`, `MqttUpdateParams<'a>`, `SmtpSetParams<'a>`, `OidcCreateParams<'a>`,
+  `OidcUpdateParams<'a>`, `RegistrationUpdateParams<'a>`, `HostBatchParams<'a>`,
+  `ItemBatchParams<'a>`, `ListBatchParams<'a>`, `ShowBatchParams<'a>`,
+  `FollowBatchParams<'a>`) rather than naked positional arguments, keeping `main.rs` call
+  sites readable and avoiding argument-order bugs.
+
+### Issues
+
+**[MEDIUM]** `src/commands/settings.rs:892` (vs `src/commands/settings.rs:846`) --
+`nats_set` uses bare positional arguments (`url: String`), while every other mutating settings
+command with connection parameters uses a `*Params<'a>` struct (`SmtpSetParams`,
+`MqttCreateParams`, `OidcCreateParams`, etc.). The NATS `set` operation currently carries
+only a single payload field, but the inconsistency creates an established-pattern exception.
+If NATS gains additional fields (credentials, TLS options) the function would need ad-hoc
+refactoring while smtp/mqtt equivalents already have the struct. Preferred pattern: introduce
+`NatsSetParams<'a>` to match `SmtpSetParams<'a>`.
+
+**[MEDIUM]** `src/commands/settings.rs:1066-1095` (vs integration tests for `hosts`,
+`services`, `software_items` in `tests/command_execution.rs`) -- The `NatsSettingsResponse`
+`HumanOutput` tests verify display content but no integration test exercises `nats_show`,
+`nats_set`, or `nats_clear` against a `MockApiServer`. This is the same gap as the nine
+other untested namespaces noted in Code Quality, but the NATS commands are additionally the
+most recently added, making regression risk higher before they accumulate operational history.
+
+**[LOW]** `src/commands/settings.rs:159-176` (vs `src/commands/hosts.rs` and other list
+renderers) -- `Vec<MqttClientResponse>::to_human_string` and
+`Vec<OidcProviderResponse>::to_human_string` render fixed-width table columns without
+truncation guards. If a host value or provider name exceeds the column width (25 and 20 chars
+respectively), the alignment breaks for subsequent columns. All other list `HumanOutput`
+implementations share this weakness, but there is no project-wide policy or helper that
+enforces consistent truncation or wrapping. The new `truncate()` helper in `batch_update.rs`
+is a step toward solving this but is not shared across modules.
+
+## Maintainability
+
+### Strengths
+
+- `lib` + `bin` split enables the `tests/` directory to import command modules directly,
+  avoiding a monolithic integration-only test strategy.
+- Command modules are well-isolated: each file in `src/commands/` handles one namespace with
+  its own `HumanOutput` implementations and tests.
+- The new `batch_update.rs` at 455 lines is a self-contained module with params, commands,
+  helpers, and tests co-located. This is the target structure for all command modules.
+
+### Issues
+
+**[HIGH]** `src/main.rs` -- At 4,793 lines, this file combines CLI argument enum definitions
+(~900 lines), the main dispatch function (~1,730 lines), utility functions, and parse tests
+(~1,500 lines). This makes navigation, code review, and merge conflict resolution difficult.
+Recommended split: (1) move command enum definitions to `src/commands.rs` or `src/cli.rs`,
+(2) move parse tests to `tests/cli_parsing.rs`, (3) split the dispatch `match` into
+per-namespace helper functions.

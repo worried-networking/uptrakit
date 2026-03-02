@@ -1,7 +1,7 @@
 # Code Review: uptrakit-shared-types
 
-- **Review date**: 2026-03-01
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility | ZeroizeOnDrop on MaskedEmail)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -107,7 +107,14 @@ No coding standards issues found.
 
 ### Issues
 
-No extensibility issues found.
+**[MEDIUM]** `src/batch_status.rs:8-29` -- `BatchStatus` has `#[non_exhaustive]` but no
+`Other(String)` catch-all variant. New status values added by a newer controller will fail
+client deserialization. Unlike `PluginType` which correctly includes `Other(String)` for
+forward compatibility, `BatchStatus` silently breaks older clients when extended.
+
+**[MEDIUM]** `src/update_category.rs:13-35` -- `UpdateCategory` lacks an `Other` variant.
+Same concern as `BatchStatus`: new categories added server-side will cause deserialization
+failures on clients running an older version of this crate.
 
 ## Tests
 
@@ -125,6 +132,9 @@ No extensibility issues found.
   valid and invalid paths.
 - `src/session_token_type.rs` -- Five tests cover `SessionTokenType` round-trips.
 - `src/discovered_software.rs` -- Two tests for `DiscoveredSoftware` field validation.
+- `src/batch_status.rs:73` -- 4 tests covering serde round-trip, display, and `FromStr` for
+  all `BatchStatus` variants.
+- `src/update_category.rs:70` -- 4 tests covering all `UpdateCategory` variants.
 - All tests use synchronous `#[test]` (correct -- no async I/O anywhere in this crate).
 
 ### Issues

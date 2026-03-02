@@ -1,7 +1,7 @@
 # Code Review: uptrakit-web-api-types
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -89,6 +89,13 @@ three locations across `mqtt`, `agent`, and `web-api`. Centralize the conversion
 
 ### Issues
 
+**[HIGH]** `src/update_batches.rs:30-43` -- `HostBatchUpdateRequest::validate()` hardcodes the
+category list `["security", "bugfix", "feature", "unknown"]`. This duplicates the variant set
+from the `UpdateCategory` enum in `uptrakit-shared-types`. When a new category is added to the
+enum, the validation will reject it until the hardcoded list is manually updated. Use
+`UpdateCategory::iter()` (via `strum::IntoEnumIterator`) or validate by parsing through
+`UpdateCategory::from_str()` instead.
+
 **[LOW]** API version is embedded in route paths (`/api/v1/`) but not in response types or
 envelope headers. Future breaking changes to response shapes will require either a new route
 version or a migration period. Consider adding an `X-API-Version` header response field.
@@ -110,6 +117,8 @@ version or a migration period. Consider adding an `X-API-Version` header respons
 - `src/oidc_providers.rs` -- Eight tests cover `CreateOidcProviderRequest::validate`
   (empty name, empty client ID, empty client secret, empty discovery URL, invalid URL,
   valid request, URL format enforcement).
+- `src/update_batches.rs:205` -- 7 tests for batch request validation and response
+  serialization.
 - All tests use synchronous `#[test]` (correct -- no async I/O in this crate).
 
 ### Issues
@@ -122,6 +131,28 @@ have no tests. Validation logic is the primary security boundary for all HTTP en
 regression in any `validate()` implementation (e.g., accepting an empty field that should be
 rejected) would not be caught before deployment.
 
+**[HIGH]** `src/notifications.rs:336` -- `ALL_EVENT_TYPES` lists 6 of 8 variants, missing
+`BatchUpdateCompleted` and `BatchUpdatePartiallyCompleted`. Three tests iterate this array
+to verify exhaustive coverage of notification event types. Those tests now silently pass
+while leaving two event types untested. Any bug in the handling of the missing variants
+will not be caught by the test suite.
+
 **[LOW]** `src/masked_url.rs` -- `MaskedUrl` has no tests for its `Debug`/`Display`
 redaction behaviour. A regression that accidentally exposes embedded credentials in a URL
 (e.g., `mqtt://user:password@host`) would go undetected.
+
+## Consistency
+
+### Strengths
+
+N/A
+
+### Issues
+
+**[MEDIUM]** `src/update_batches.rs:83,121,148` -- Mixed integer types across batch-related
+structs: `total_created: usize` in `BatchUpdateResponse`, `total_count: i32` in the DB
+entity, and `completed_count: i64` in `BatchProgressEvent`. These represent the same
+conceptual quantity (number of updates) but use three different integer types. Conversions
+between them require explicit casts that can silently truncate on platforms where `usize`
+differs from `i32`. Standardise on a single integer type (e.g., `i64` to match the DB
+aggregate return type) across all batch-related structs.

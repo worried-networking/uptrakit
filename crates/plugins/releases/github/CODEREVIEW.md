@@ -1,7 +1,7 @@
 # Code Review: uptrakit-plugin-releases-github
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -92,7 +92,19 @@ exist in the workspace; a simple exponential retry (max 3 attempts) on `is_conne
 
 ### Issues
 
-No coding standards issues found.
+**[CRITICAL]** `src/plugin.rs:107-118` -- Missing `.connect_timeout()` and `.timeout()` on
+`reqwest::Client`. Every other HTTP-using plugin in the workspace applies
+`connect_timeout(10s)` and `timeout(60s)`. Without these, a network partition or slow GitHub
+API response can hang indefinitely, blocking the agent's update processing loop.
+
+**[CRITICAL]** `src/error.rs:13` -- `ApiError { status: u16 }` instead of `StatusCode`. Using
+a raw `u16` bypasses `reqwest::StatusCode` type safety and the workspace convention of using
+typed HTTP status codes throughout.
+
+**[HIGH]** `src/plugin.rs:29` -- `.unwrap()` in production `parse_owner_repo()` after guard.
+While the guard at the call site ensures the `unwrap()` cannot panic under current call
+patterns, this violates the project-wide no-unwrap-in-production rule. A `bail!` or
+`.ok_or_else(|| ...)` would be consistent with the workspace convention.
 
 ## Extensibility
 

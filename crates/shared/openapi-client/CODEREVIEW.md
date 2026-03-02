@@ -1,7 +1,7 @@
 # Code Review: uptrakit-openapi-client
 
-- **Review date**: 2026-03-01
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility | NATS settings client methods)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -155,6 +155,7 @@ consistent with `MockSettingsMqtt` would close this gap.
   builder helpers cover both set and clear (null) paths.
 - `src/mock.rs` -- `MockApiServer` feature enables hermetic testing of all callers with no
   live server dependency. Used correctly in `[dev-dependencies]` only.
+- `src/batch_progress_stream.rs:150` -- 4 tests for SSE batch progress event parsing.
 
 ### Issues
 
@@ -169,3 +170,27 @@ such regressions.
 **[LOW]** `src/lib.rs:687-885` -- Tests do not exercise the `Retry-After` header parsing
 code path (`parse_retry_after`). A mock responding with `429` and a `Retry-After: 5` header
 should verify that the client pauses for the specified duration before retrying.
+
+**[LOW]** `src/update_batches.rs` (61 lines) -- Five batch client methods
+(`trigger_host_batch_update`, `trigger_tenant_batch_update`, `get_batch_status`,
+`list_batches`, `get_batch_details`) have zero tests. Query-string construction and
+request body serialization are not verified.
+
+**[LOW]** `src/mock.rs` -- No `MockApiServer` section for batch operations. Integration
+tests in `cli/tests/` cannot mock batch endpoints without hard-coding paths, breaking the
+hermetic testing pattern established for all other endpoint groups.
+
+## Maintainability
+
+### Strengths
+
+- Clean module-per-endpoint structure. Each API group (`hosts`, `settings_mqtt`,
+  `settings_nats`, etc.) in its own file.
+
+### Issues
+
+**[MEDIUM]** `src/lib.rs` -- 918 lines. The main client struct, HTTP method helpers,
+authentication logic, retry/backoff engine, error types, and all retry tests live in a
+single file. Splitting into `src/client.rs` (struct + HTTP methods), `src/retry.rs`
+(backoff engine + `RetryConfig`), `src/error.rs` (error types), and `src/lib.rs`
+(re-exports only) would make each concern independently navigable and testable.

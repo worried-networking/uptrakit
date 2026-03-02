@@ -1,12 +1,12 @@
 # Code Review: uptrakit-plugin-releases-forgejo
 
-- **Review date**: 2026-03-01
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility | tests)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
 
-`uptrakit-plugin-releases-forgejo` (~1,050 LoC across 6 source files) provides Forgejo/Gitea
+`uptrakit-plugin-releases-forgejo` (~1,067 LoC across 6 source files) provides Forgejo/Gitea
 release integration for version checking. It fetches release metadata from the Forgejo v1 API
 and converts it to `UpstreamRelease` values for the controller. The plugin supports any
 self-hosted Forgejo or Gitea instance via a configurable `api_base_url`, optional bearer-style
@@ -143,7 +143,18 @@ GitHub plugin has the same gap. A simple exponential retry (max 3 attempts) on
 
 ### Issues
 
-No coding standards issues found.
+**[CRITICAL]** `src/error.rs:13` -- `ApiError { status: u16 }` instead of `StatusCode`. Using
+a raw `u16` bypasses `reqwest::StatusCode` type safety and the workspace convention of using
+typed HTTP status codes throughout. The Docker plugin correctly uses `reqwest::StatusCode`
+in its `ApiError` variant. The Forgejo plugin should follow the same pattern:
+`ApiError { status: reqwest::StatusCode, message: String }`.
+
+**[HIGH]** `src/plugin.rs:29` -- `.unwrap()` in production `parse_owner_repo()` after guard.
+The guard at line 24 verifies `slash_count == 1`, so the `.find('/').unwrap()` at line 29
+cannot panic under the current code. However, this violates the project-wide
+no-unwrap-in-production rule. Using `.expect("guard ensures slash exists")` at minimum, or
+preferably refactoring to use `split_once('/')` with `bail!` on `None`, would be consistent
+with the workspace convention.
 
 ## Extensibility
 
@@ -205,3 +216,35 @@ are correct -- `new()` is `async`. However, several tests such as `url_construct
 `convert_normal_release` also could be synchronous if `test_plugin()` were refactored to
 construct the plugin synchronously (since `new()` does no I/O). This is a minor style issue
 with no correctness impact.
+
+## Consistency
+
+### Strengths
+
+- The error type pattern (`ForgejoError` with `thiserror` derives + `impl_report_conversion!`)
+  matches the workspace convention used by all other plugins.
+- `SecretMasking` implementation follows the same sentinel-based pattern as the GitLab and
+  Docker plugins.
+- Config structure mirrors the GitLab plugin: same field names (`auth_token`, `api_base_url`,
+  `include_prereleases`, `tag_strip_prefix`, `asset_patterns`), same serde attributes.
+
+### Issues
+
+**[CRITICAL]** `src/error.rs:13` -- The `status: u16` field in `ApiError` is inconsistent
+with the Docker plugin which correctly uses `reqwest::StatusCode`. All release plugins
+should use the same typed status code to maintain workspace consistency.
+
+## Maintainability
+
+### Strengths
+
+- `src/plugin.rs:56-65` -- The struct-level doc comment explains that owner/repo are parsed
+  from `package_identifier` at call time, documenting the design decision that a single
+  plugin instance can serve multiple repositories.
+- `src/config.rs:17-20` -- The struct-level doc comment explains why `api_base_url` is
+  required (every Forgejo/Gitea instance is self-hosted), distinguishing this from the
+  GitLab plugin where the field is optional.
+
+### Issues
+
+No maintainability issues found.

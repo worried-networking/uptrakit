@@ -1,7 +1,7 @@
 # Code Review: uptrakit-agent-ssh
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -146,6 +146,11 @@ point of error reporting.
 
 ### Issues
 
+**[MEDIUM]** `src/ssh_executor.rs:34-76,78-119` -- `execute()` and `execute_quiet()` share ~90%
+identical structure. DRY violation -- both methods construct an SSH session, run the command,
+collect output, and handle errors via the same pattern. A shared inner method parameterised on
+whether output is streamed or accumulated would eliminate the duplication.
+
 **[MEDIUM]** No test coverage for `report_enrolled_hosts` or any `client.rs` handler. The three
 handlers (`handle_check_versions_ssh`, `handle_execute_update_ssh`,
 `handle_discover_software_ssh`) and `report_enrolled_hosts` have no unit tests. The handler
@@ -184,6 +189,9 @@ cover the full `run_bootstrap` orchestration path. Adding a trait seam for
   config changes.
 - `src/ssh_pool.rs:82-127` -- Pool acquires lock briefly for lookup, then releases before
   establishing new connections.
+- SSH pool uses `tokio::sync::Mutex` correctly -- the critical section awaits SSH connection
+  establishment. TOCTOU fix via `Entry` API ensures that two concurrent acquires for the same
+  host do not race to insert duplicate connections.
 - `in_flight_update` prevents concurrent updates. `SshAgentHandler` enforces one-update-at-a-
   time by holding `Option<InFlightUpdate>`.
 - `src/client.rs:60-70` and `src/client.rs:86-93` -- Per-host SSH connection errors are

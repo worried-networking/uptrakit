@@ -1,7 +1,7 @@
 # Code Review: uptrakit-controller
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -60,6 +60,10 @@ sub-module extraction.
   probe.
 
 ### Issues
+
+**[HIGH]** `main.rs:33-34` -- Controller depends on `web-api` internals: `AppState`, `Settings`,
+`auth::*`, `settings_store::*`. Known layering inversion -- a core binary imports UI-layer types
+directly rather than through an abstraction boundary.
 
 **[MEDIUM]** `Cargo.toml:22-60` -- Controller depends directly on `uptrakit-web-api`, creating
 a dependency from a core binary upward into the UI layer. The startup code directly constructs
@@ -199,8 +203,18 @@ and the bind.
   and `SO_REUSEPORT` support.
 - `src/tasks.rs:335-348` -- CA rotation uses optimistic locking via `expected_fp` for
   multi-instance safety.
+- `server.rs:42-60` -- `SO_REUSEPORT` for zero-downtime restarts. Allows a new controller
+  instance to bind the same port before the old one has fully shut down.
+- `tasks.rs:76-133` -- Ordered shutdown: stop accepting, scatter restart notification, cancel
+  cooperative tasks, abort non-cooperative tasks, await all handles. Each phase has a bounded
+  timeout.
 
 ### Issues
+
+**[MEDIUM]** `tasks.rs:529-539` -- NATS consumer spawn. If `create_consumer` fails, the handle
+appears completed. No mechanism to detect and restart a failed NATS consumer at runtime -- a
+transient NATS error during consumer creation silently leaves the controller without event
+delivery.
 
 **[LOW]** `src/main.rs:451-457` -- PKI HTTP server registered with `track_abort`, meaning
 in-flight OCSP/CRL requests are terminated mid-response on shutdown.
@@ -394,13 +408,19 @@ encrypted column requires copying ~50 lines of boilerplate. A generic `reencrypt
 parameterised by entity type and accessor closures would reduce each new column to a single
 call, and make the count-and-log logic testable once rather than five times.
 
-**[MEDIUM]** `src/pki.rs:1-1617` -- At 1,617 total lines, the file mixes CA lifecycle
+**[MEDIUM]** `src/pki.rs` -- 1,617 lines. PKI management in a single file mixing CA lifecycle
 operations, DER encoding helpers (`build_aia_extension_der`, `encode_access_description`,
-`encode_der_sequence`, `encode_der_length`), and ~1,000 lines of tests. The DER encoding
-functions are logically distinct from CA management and could be extracted to `src/pki/der.rs`,
-reducing the primary module to pure CA lifecycle code. Already noted in the existing review;
-the maintenance impact is that modifications to AIA/CDP extension logic require locating the
-correct helper among unrelated CA rotation code.
+`encode_der_sequence`, `encode_der_length`), and ~1,000 lines of tests. Candidate for splitting
+into `ca.rs`, `ocsp.rs`, `cert_signing.rs`. The DER encoding functions are logically distinct
+from CA management and could be extracted to `src/pki/der.rs`, reducing the primary module to
+pure CA lifecycle code. Already noted in the existing review; the maintenance impact is that
+modifications to AIA/CDP extension logic require locating the correct helper among unrelated
+CA rotation code.
+
+**[MEDIUM]** `src/startup.rs` -- 1,150 lines. Entire startup sequence in one file. While the
+individual phase functions are well-structured, the file length makes navigation difficult.
+Candidate for splitting into per-phase modules (e.g., `startup/pki.rs`, `startup/reconcile.rs`,
+`startup/db.rs`).
 
 **[LOW]** `src/startup.rs:247-500` -- `reconcile_all_settings` repeats `ReconcileParams {
 db, key, raw, cli_value, default_value, force, convert }` construction ~12 times. The struct

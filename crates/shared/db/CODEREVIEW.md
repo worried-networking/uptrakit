@@ -1,7 +1,7 @@
 # Code Review: uptrakit-shared-db
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -30,6 +30,10 @@ but all other entities have zero inline test coverage.
   transitive version surprises.
 - All `Relation` enum variants have matching `impl Related<...>` blocks. No dangling relation
   stubs.
+
+- `src/entity/update_batch.rs` -- Properly models tenant-scoped batch entity with SeaORM
+  relations. The batch record ties together tenant ownership, batch metadata, and child
+  update history records via declared `Relation` and `Related` implementations.
 
 ### Issues
 
@@ -172,6 +176,8 @@ edits produce runtime errors rather than constraint violations.
 - `src/migration/mod.rs:43` -- Migration smoke test runs all 28 table creations and
   rollback against an in-memory SQLite instance, verifying the migration `up()` and `down()`
   sequences are syntactically valid and execute without error.
+- `src/migration/mod.rs:92-98` -- Migration smoke test verifies `update_batches` table and
+  `batch_id` column exist after running all migrations.
 
 ### Issues
 
@@ -283,6 +289,25 @@ The `delivered_at` column partially fills this role, but the `action_taken` colu
 when a user acts on a notification email link) can change after delivery without any audit
 trail of when the action was recorded. An `updated_at` column would provide a complete
 write history.
+
+**[MEDIUM]** `src/migration/m20260306_000002_update_batches.rs` -- Drop-and-recreate approach
+for the `update_history` table loses the `idx_update_history_created_at` index added by an
+earlier migration. The migration drops the original table and recreates it with the new
+`batch_id` column, but does not re-add indexes that were added in subsequent migrations
+after the initial table creation. This silently regresses query performance for any query
+plan that relied on the dropped index.
+
+**[LOW]** `src/entity/update_batch.rs:11-12` -- `batch_type`, `actor_type`, and `actor_id`
+are all `String` columns with no CHECK constraint or enum backing. Any string value can be
+inserted, and invalid values are only caught at application-level parsing. Unlike
+`UpdateStatus` which uses `DeriveActiveEnum`, these columns have no DB-level validation.
+
+**[LOW]** `src/entity/update_batch.rs:13` -- `total_count: i32` is set at batch creation
+time. If candidates fail validation after the batch record is created but before all child
+update history records are inserted, the count will not match the actual number of children.
+The batch creation and child record insertion are not wrapped in a transaction, so a partial
+failure leaves `total_count` inconsistent with the actual `update_history` row count for
+that batch.
 
 **[LOW]** `src/entity/mqtt_client.rs` -- The `mqtt_clients` table has no unique constraint on
 `(tenant_id, client_id)`. MQTT `client_id` values must be unique within an MQTT broker

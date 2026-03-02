@@ -1,16 +1,17 @@
 # Code Review: uptrakit-service-sdk
 
-- **Review date**: 2026-02-28
-- **Reviewer**: AI code review (architecture | security | quality | HA | standards | extensibility)
+- **Review date**: 2026-03-02
+- **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
 
-`uptrakit-service-sdk` is the shared lifecycle library used by every agent and MQTT service binary.
-It provides enrollment, mTLS reconnection, certificate renewal, CA bundle management, exponential
-backoff, TLS configuration, and OS signal handling under a single `run_service_lifecycle` entry
-point. All three service binaries (`uptrakit-agent`, `uptrakit-agent-ssh`, `uptrakit-mqtt`) delegate
-to this library, meaning any lifecycle fix propagates automatically to all consumers.
+`uptrakit-service-sdk` (~4,593 LoC) is the shared lifecycle library used by every agent and MQTT
+service binary. It provides enrollment, mTLS reconnection, certificate renewal, CA bundle
+management, exponential backoff, TLS configuration, and OS signal handling under a single
+`run_service_lifecycle` entry point. All three service binaries (`uptrakit-agent`,
+`uptrakit-agent-ssh`, `uptrakit-mqtt`) delegate to this library, meaning any lifecycle fix
+propagates automatically to all consumers.
 
 The design is sound and the code quality is high. The main concerns are that `ServiceHandler` is
 not object-safe (undocumented), the `run_service_lifecycle` core function has zero test coverage,
@@ -18,7 +19,9 @@ and the `poll_service_event` cancellation-safety requirement is undocumented. Th
 `BasicConstraints::Unconstrained` divergence in the test CA helper has been fixed
 (`Constrained(0)` now matches production). The enrollment retry loop previously only retried on
 `ReceiveClosed`; it now retries all transient network errors (`WebSocket`, `Io` non-cert-expired,
-`ConnectionTimeout`) via `EnrollmentError::is_transient_network()`.
+`ConnectionTimeout`) via `EnrollmentError::is_transient_network()`. The CA certificate fetch in
+`src/ca.rs` builds a `reqwest::Client` without timeouts, violating the project-wide HTTP client
+requirement; this is the only critical finding in the crate.
 
 ## Architecture
 
@@ -46,9 +49,9 @@ No architectural issues found.
 
 ### Strengths
 
-- `src/backoff.rs:29-43` -- Exponential backoff with jitter prevents thundering herd. Base 2
-  seconds, cap 60 seconds, ~25% uniform jitter. On broker/controller restart, services reconnect
-  over a spread window.
+- `uptrakit_backoff::Backoff` (used in `src/lifecycle.rs:295,380`) -- Exponential backoff with
+  jitter prevents thundering herd. Base 2 seconds, cap 60 seconds, ~25% uniform jitter. On
+  broker/controller restart, services reconnect over a spread window.
 - `src/event_loop.rs:260-278` -- `dispatch_close_reason` correctly distinguishes cert-rotation
   (immediate reconnect, no backoff) from revocation (reconnect with backoff). Tested by
   dedicated unit tests.
@@ -60,6 +63,8 @@ No architectural issues found.
 - Zero `unsafe` in production code.
 
 ### Issues
+
+No security issues found.
 
 ## Code Quality
 
@@ -90,8 +95,9 @@ exercising signal delivery. Does not test signal dispatch path.
 
 ### Strengths
 
-- `src/backoff.rs:29-43` -- Exponential backoff with jitter. Both the authenticated reconnect
-  loop and enrollment retry loop use dedicated `Backoff` instances that do not interfere.
+- `src/lifecycle.rs:295,380` -- Exponential backoff with jitter via `uptrakit_backoff::Backoff`.
+  Both the authenticated reconnect loop and enrollment retry loop use dedicated `Backoff`
+  instances that do not interfere.
 - `src/lifecycle.rs:381-386` -- Zero-delay reconnect on cert rotation.
   `reconnect_backoff.reset()` before the fixed 2-second `CERT_RECONNECT_DELAY`. Cert rotation
   does not accumulate backoff from prior disconnection events.
@@ -101,7 +107,13 @@ exercising signal delivery. Does not test signal dispatch path.
 
 ### Issues
 
-No high availability issues found.
+**[MEDIUM]** `src/event_loop.rs:97-102` -- Service-specific `poll_service_event` is at
+highest priority in the `biased` `tokio::select!`. If a service implementation produces
+rapid events (e.g., an MQTT bridge with a burst of client status changes), the ping timer
+and certificate renewal arms will be starved until the event burst subsides. A missed ping
+causes the controller to consider the service dead and may trigger unnecessary failover.
+Consider moving `poll_service_event` to a lower-priority arm or adding a yield point after
+processing N consecutive service events.
 
 ## Coding Standards
 
@@ -115,7 +127,13 @@ No high availability issues found.
 
 ### Issues
 
-No coding standards issues found.
+**[CRITICAL]** `src/ca.rs:49-76` -- CA certificate fetch builds a `reqwest::Client` via
+`reqwest::Client::builder()` with no `.connect_timeout()` and no `.timeout()`. If the
+controller endpoint is unresponsive (e.g., stuck behind a load balancer that accepts TCP
+but never responds), the service hangs indefinitely waiting for the CA bundle. This violates
+the project-wide HTTP client requirement (`.connect_timeout(10s)` and `.timeout(60s)`) and
+can prevent service startup or certificate renewal from completing. All other HTTP clients
+in the workspace (plugins, openapi-client) comply with this requirement.
 
 ## Extensibility
 
@@ -151,19 +169,37 @@ requirement explicitly.
 
 ### Strengths
 
-- `src/cert_handler.rs:251-448` -- 14 tests cover the certificate renewal handler: state
+- `src/cert_handler.rs:251-454` -- 14 tests cover the certificate renewal handler: state
   transitions (idle, pending, handling response), the cert-expiry check (`is_expired`),
   `should_renew` threshold logic, and timer-based renewal scheduling. Three tests correctly
   use `#[tokio::test(start_paused = true)]` with `tokio::time::advance` for the timer
   tests; the remaining async tests do not use time APIs and correctly omit `start_paused`.
-- `src/error.rs:188-280` -- 13 synchronous tests exercise every `LoopError` and
+- `src/error.rs:188-286` -- 13 synchronous tests exercise every `LoopError` and
   `EnrollmentError` variant, the `is_transient_network()` predicate (all transient and
   non-transient paths), and `Display` output for each variant.
-- `src/event_loop.rs` -- `dispatch_close_reason` is tested for cert-rotation (immediate
-  reconnect path) and revocation (backoff reconnect path), verifying that the
-  `LoopOutcome` variant returned is correct for each `CloseReason`.
-- `src/signal.rs:91-103` -- Two synchronous tests verify `SignalWatcher` construction and
-  that `signal_watcher_new` returns `Ok` on the test platform.
+- `src/event_loop.rs:313-341` -- `dispatch_close_reason` is tested for cert-rotation (immediate
+  reconnect path), revocation (backoff reconnect path), unknown close reasons, and the `None`
+  case, verifying that the `LoopOutcome` variant returned is correct for each `CloseReason`.
+- `src/signal.rs:91-109` -- Three synchronous/async tests verify `Signal::Display`, equality
+  comparison, and `SignalWatcher` construction.
+- `src/identity.rs:526-866` -- 18 tests cover the full identity lifecycle: fresh state, separate
+  config/state directories, keypair generation and persistence, enrollment persistence and
+  directory placement, certificate save clearing enrollment secret, CSR generation, CA cert
+  storage in config directory, `clear_state` and `clear_enrollment_state` (preserving CA),
+  idempotent keypair generation, PEM-to-DER conversion, cert expiry detection, and directory
+  and file permissions verification.
+- `src/ca.rs:262-443` -- 12 tests cover CA fingerprint computation (determinism, different certs,
+  hex-only output, empty/truncated/invalid PEM errors) and `compute_local_ca_hash` (missing
+  file, valid file, determinism, different content, empty file, hex-only output).
+- `src/tls.rs:218-406` -- 16 tests cover every TLS builder function: `build_root_store` (valid,
+  empty, invalid, multiple CAs), `build_pinned_ca_client_config`, `build_mtls_client_config`,
+  `build_system_roots_client_config`, `build_tofu_client_config`, all `TlsConnector` builders,
+  and the `tls_connector` convenience wrapper.
+- `src/cli.rs:155-382` -- 18 tests cover CLI argument parsing: defaults, conflicting flags
+  (`--tofu`/`--ca-cert`, `--tofu`/`--pki-addr`), URL parsing (with port, default port,
+  trailing slash, HTTP rejection), base URL trimming, `--pki-addr` validation (HTTP, HTTPS,
+  trailing slash, FTP rejection), friendly name, directory resolution, `--version` without URL,
+  verbosity counting, and directory overrides.
 
 ### Issues
 
@@ -172,6 +208,17 @@ the entire enrollment-reconnect-shutdown state machine. The `ServiceHandler` tra
 intentionally mockable (all methods have defaults or clear signatures), but no test
 exercises the full lifecycle transitions: enrollment success, enrollment failure with retry,
 reconnect after `CertExpired`, reconnect after `Disconnected`, or graceful `Shutdown`.
+
+**[LOW]** `src/ws.rs` -- 472 lines of WebSocket enrollment protocol code (connect, send/enroll,
+wait for approval, request certificate, full and resume enrollment flows) with no unit tests.
+The individual protocol steps (`send_enroll`, `wait_for_approval`, `request_certificate_ws`,
+`run_enrollment`, `resume_enrollment`) are exercised indirectly through integration tests but
+have no isolated unit tests with mock WebSocket streams.
+
+**[LOW]** `src/connection.rs` -- 232 lines of authenticated connection management
+(`ControllerConnection`: connect, send, recv with envelope validation and sequence checking,
+close) with no unit tests. The `recv` method's dual-path handling (Text and Binary frames with
+identical validation pipelines) and close-reason extraction are untested in isolation.
 
 **[LOW]** `src/signal.rs:104-108` -- `signal_watcher_new` test asserts only `is_ok()`
 without delivering a signal. The signal dispatch path (e.g., `recv().await` returning after
@@ -194,7 +241,7 @@ in the shutdown path.
   in the module doc-comment and is applied consistently for a single loop, not split across
   multiple loops.
 - `src/connection.rs:100-182` -- `recv()` applies the same validation pipeline (header
-  parse → protocol version check → sequence check → full envelope deserialize) identically
+  parse, protocol version check, sequence check, full envelope deserialize) identically
   for both `Message::Text` and `Message::Binary` frames. Neither branch skips a step.
 
 ### Issues
@@ -206,7 +253,7 @@ in the shutdown path.
 `reconnect_backoff.next_delay()`. These two outcomes are explicitly differentiated. In the
 enrollment retry loop, all transient errors advance the backoff with
 `enrollment_backoff.next_delay()`, including `ReceiveClosed` which is semantically the same
-as a clean `Disconnected` event. A cert-rotation–driven enrollment disconnect would
+as a clean `Disconnected` event. A cert-rotation-driven enrollment disconnect would
 accumulate backoff in the enrollment phase that it would not accumulate in the reconnect
 phase. Adding a `ReceiveClosed`-specific reset in the enrollment loop would mirror the
 reconnect behavior.
@@ -241,16 +288,20 @@ documentation in `ServiceHandler`.
 - Named constants throughout (`FAR_FUTURE`, `CERT_RECONNECT_DELAY`, `DEFAULT_SHUTDOWN_TIMEOUT`)
   with doc comments. No magic numbers in the lifecycle logic.
 - `src/event_loop.rs:212-218` -- `LoopState` struct groups mutable references that would
-  otherwise form a long parameter list. The struct makes the function signature `handle_service_settings(state, settings)` instead of a 5+ parameter list.
+  otherwise form a long parameter list. The struct makes the function signature
+  `handle_service_settings(state, settings)` instead of a 5+ parameter list.
+- `src/ca.rs` -- Module-level doc comment (lines 1-8) clearly explains the CA bootstrap
+  priority chain and enumerates all five paths (cached, `--ca-cert`, `--pki-addr`, TOFU,
+  system roots).
 
 ### Issues
 
 **[HIGH]** `src/lifecycle.rs:481` (entire function) -- `run_service_lifecycle` is the central
 function of the crate with zero unit tests. The trait is designed for testability (all
 service-specific behavior is injected through `ServiceHandler`), yet no test exercises the
-enrollment → reconnect → shutdown state machine. A future refactor of the lifecycle transitions
-— adding a new `LoopOutcome` variant, changing backoff behavior, modifying enrollment retry
-conditions — will have no regression safety net. Adding even a minimal mock `ServiceHandler`
+enrollment, reconnect, or shutdown state machine. A future refactor of the lifecycle transitions
+-- adding a new `LoopOutcome` variant, changing backoff behavior, modifying enrollment retry
+conditions -- will have no regression safety net. Adding even a minimal mock `ServiceHandler`
 that exercises the happy path (fresh enrollment, authenticated connection, graceful shutdown)
 would catch most lifecycle regressions.
 
@@ -274,8 +325,3 @@ local constant inside `run_event_loop` rather than in a `durations` module. This
 invisible to operators looking for tunable timeouts. The constant is sent to the controller as
 the initial `ServiceSettings` fallback. Moving it to `src/lib.rs` or a `durations.rs` with a
 doc comment would make it discoverable.
-
-**[LOW]** `src/ca.rs` -- The CA bundle management module has no module-level doc comment. The
-module handles CA certificate loading, validation, and trust-chain building — operations that
-interact with the TLS and TOFU subsystems. A brief doc comment explaining the module's role in
-the identity lifecycle would aid navigation.
