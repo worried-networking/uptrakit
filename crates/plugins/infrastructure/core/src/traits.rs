@@ -2,6 +2,8 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use tokio::sync::mpsc;
 
+use crate::batch_detect::{BatchDetectItem, BatchDetectResult};
+use crate::batch_fetch::{BatchFetchItem, BatchFetchResult};
 use crate::batch_update::{BatchUpdateItem, BatchUpdateResult};
 use crate::error::{PluginError, Result};
 use crate::types::{
@@ -226,6 +228,70 @@ pub trait Plugin: Send + Sync {
         Ok(results)
     }
 
+    /// Detect installed versions for multiple packages in one operation.
+    ///
+    /// Default falls back to sequential [`detect_installed_version`](Self::detect_installed_version)
+    /// calls, capturing per-item errors without failing the whole batch.
+    /// Plugins backed by commands that accept multiple packages (APT, Homebrew, npm)
+    /// should override this for significant efficiency gains.
+    ///
+    /// The default implementation never returns `Err` at the batch level —
+    /// individual item failures are recorded in [`BatchDetectResult::error`].
+    /// An empty `items` slice always returns an empty `Vec`.
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[BatchDetectItem],
+    ) -> Result<Vec<BatchDetectResult>> {
+        let mut results = Vec::with_capacity(items.len());
+        for item in items {
+            match self.detect_installed_version(&item.package_identifier).await {
+                Ok(v) => results.push(BatchDetectResult {
+                    package_identifier: item.package_identifier.clone(),
+                    installed_version: v,
+                    error: None,
+                }),
+                Err(e) => results.push(BatchDetectResult {
+                    package_identifier: item.package_identifier.clone(),
+                    installed_version: None,
+                    error: Some(e.to_string()),
+                }),
+            }
+        }
+        Ok(results)
+    }
+
+    /// Fetch releases for multiple packages in one operation.
+    ///
+    /// Default falls back to sequential [`fetch_releases`](Self::fetch_releases)
+    /// calls, capturing per-item errors without failing the whole batch.
+    /// Plugins that can query multiple packages in one command (APT, Homebrew)
+    /// should override this.
+    ///
+    /// The default implementation never returns `Err` at the batch level —
+    /// individual item failures are recorded in [`BatchFetchResult::error`].
+    /// An empty `items` slice always returns an empty `Vec`.
+    async fn batch_fetch_releases(
+        &self,
+        items: &[BatchFetchItem],
+    ) -> Result<Vec<BatchFetchResult>> {
+        let mut results = Vec::with_capacity(items.len());
+        for item in items {
+            match self.fetch_releases(&item.package_identifier).await {
+                Ok(releases) => results.push(BatchFetchResult {
+                    package_identifier: item.package_identifier.clone(),
+                    releases,
+                    error: None,
+                }),
+                Err(e) => results.push(BatchFetchResult {
+                    package_identifier: item.package_identifier.clone(),
+                    releases: vec![],
+                    error: Some(e.to_string()),
+                }),
+            }
+        }
+        Ok(results)
+    }
+
     /// Discover software that this plugin can manage on the local system.
     ///
     /// Returns a list of discovered software with their identifiers and optionally
@@ -312,6 +378,8 @@ pub trait Plugin: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::batch_detect::BatchDetectItem;
+    use crate::batch_fetch::BatchFetchItem;
 
     /// Minimal plugin implementation that relies on all defaults.
     struct StubPlugin;
@@ -546,5 +614,81 @@ mod tests {
             }
             HostCompatibility::Compatible => panic!("expected Incompatible"),
         }
+    }
+
+    // ── batch_detect_installed_version default impl ───────────────────────
+
+    #[tokio::test]
+    async fn default_batch_detect_empty_slice_returns_empty() {
+        let plugin = StubPlugin;
+        let results = plugin
+            .batch_detect_installed_version(&[])
+            .await
+            .expect("batch detect ok");
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn default_batch_detect_records_per_item_error() {
+        // StubPlugin's detect_installed_version always returns Err.
+        let plugin = StubPlugin;
+        let items = vec![
+            BatchDetectItem {
+                package_identifier: "pkg-a".to_string(),
+            },
+            BatchDetectItem {
+                package_identifier: "pkg-b".to_string(),
+            },
+        ];
+        let results = plugin
+            .batch_detect_installed_version(&items)
+            .await
+            .expect("batch never fails at batch level");
+        assert_eq!(results.len(), 2);
+        // Per-item errors are recorded; batch call itself succeeds.
+        assert!(results[0].error.is_some());
+        assert!(results[0].installed_version.is_none());
+        assert!(results[1].error.is_some());
+        assert!(results[1].installed_version.is_none());
+        assert_eq!(results[0].package_identifier, "pkg-a");
+        assert_eq!(results[1].package_identifier, "pkg-b");
+    }
+
+    // ── batch_fetch_releases default impl ────────────────────────────────
+
+    #[tokio::test]
+    async fn default_batch_fetch_empty_slice_returns_empty() {
+        let plugin = StubPlugin;
+        let results = plugin
+            .batch_fetch_releases(&[])
+            .await
+            .expect("batch fetch ok");
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn default_batch_fetch_records_per_item_error() {
+        // StubPlugin's fetch_releases always returns Err.
+        let plugin = StubPlugin;
+        let items = vec![
+            BatchFetchItem {
+                package_identifier: "pkg-a".to_string(),
+            },
+            BatchFetchItem {
+                package_identifier: "pkg-b".to_string(),
+            },
+        ];
+        let results = plugin
+            .batch_fetch_releases(&items)
+            .await
+            .expect("batch never fails at batch level");
+        assert_eq!(results.len(), 2);
+        // Per-item errors are recorded; batch call itself succeeds.
+        assert!(results[0].error.is_some());
+        assert!(results[0].releases.is_empty());
+        assert!(results[1].error.is_some());
+        assert!(results[1].releases.is_empty());
+        assert_eq!(results[0].package_identifier, "pkg-a");
+        assert_eq!(results[1].package_identifier, "pkg-b");
     }
 }
