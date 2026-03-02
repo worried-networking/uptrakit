@@ -326,6 +326,240 @@ pub fn parse_command_topic(topic_prefix: &str, topic: &str) -> Option<(Uuid, Uui
     Some((item_id, host_id))
 }
 
+// =============================================================================
+// Host package entity helpers
+// =============================================================================
+
+/// Returns the MQTT topic carrying the installed-version string (state) for a
+/// host's package entity.
+///
+/// Format: `{prefix}/hosts/{host_id}/state`
+///
+/// The published value is `"{N} updates pending"` when `pending_count > 0`, or
+/// `"up-to-date"` when all packages are current.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_packages_state_topic;
+/// let topic = host_packages_state_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/state"));
+/// ```
+pub fn host_packages_state_topic(prefix: &str, host_id: Uuid) -> String {
+    format!("{prefix}/hosts/{host_id}/state")
+}
+
+/// Returns the MQTT topic carrying the latest-version string for a host's
+/// package entity.
+///
+/// Format: `{prefix}/hosts/{host_id}/latest_version`
+///
+/// The published value is always `"up-to-date"`. Home Assistant compares this
+/// against the state topic to determine whether an update badge is shown.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_packages_latest_version_topic;
+/// let topic = host_packages_latest_version_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/latest_version"));
+/// ```
+pub fn host_packages_latest_version_topic(prefix: &str, host_id: Uuid) -> String {
+    format!("{prefix}/hosts/{host_id}/latest_version")
+}
+
+/// Returns the MQTT topic for HA JSON attributes of a host's package entity.
+///
+/// Format: `{prefix}/hosts/{host_id}/attributes`
+///
+/// Published as a retained JSON payload with fields:
+/// - `"in_progress"` (bool) — whether a batch update is pending/running
+/// - `"pending_count"` (u32) — number of packages with available updates
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_packages_json_attributes_topic;
+/// let topic = host_packages_json_attributes_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/attributes"));
+/// ```
+pub fn host_packages_json_attributes_topic(prefix: &str, host_id: Uuid) -> String {
+    format!("{prefix}/hosts/{host_id}/attributes")
+}
+
+/// Returns the MQTT command topic that HA publishes `"install"` to for a host's
+/// package entity.
+///
+/// Format: `{prefix}/hosts/{host_id}/set`
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_packages_command_topic;
+/// let topic = host_packages_command_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/set"));
+/// ```
+pub fn host_packages_command_topic(prefix: &str, host_id: Uuid) -> String {
+    format!("{prefix}/hosts/{host_id}/set")
+}
+
+/// Returns the HA MQTT discovery config topic for a host's package `update`
+/// entity.
+///
+/// Format: `{ha_prefix}/update/uptrakit_pkgs_{t}_{h}/config`
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_packages_discovery_config_topic;
+/// let topic = host_packages_discovery_config_topic("homeassistant", Uuid::nil(), Uuid::nil());
+/// assert!(topic.starts_with("homeassistant/update/"));
+/// assert!(topic.ends_with("/config"));
+/// ```
+pub fn host_packages_discovery_config_topic(
+    ha_prefix: &str,
+    tenant_id: Uuid,
+    host_id: Uuid,
+) -> String {
+    let uid = host_packages_unique_id(tenant_id, host_id);
+    format!("{ha_prefix}/update/{uid}/config")
+}
+
+/// Returns a unique ID string for a host's package entity.
+///
+/// Format: `uptrakit_pkgs_{tenant_id_no_dashes}_{host_id_no_dashes}`
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_packages_unique_id;
+/// let uid = host_packages_unique_id(Uuid::nil(), Uuid::nil());
+/// assert!(uid.starts_with("uptrakit_pkgs_"));
+/// assert!(!uid.contains('-'));
+/// ```
+pub fn host_packages_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
+    let t = tenant_id.simple();
+    let h = host_id.simple();
+    format!("uptrakit_pkgs_{t}_{h}")
+}
+
+/// Build the JSON attributes payload for a host's package entity.
+///
+/// Returns a [`serde_json::Value`] to be serialized and published (retained)
+/// to [`host_packages_json_attributes_topic`].
+///
+/// # Examples
+///
+/// ```
+/// # use uptrakit_mqtt::ha_discovery::build_host_packages_attributes_payload;
+/// let payload = build_host_packages_attributes_payload(true, 3);
+/// assert_eq!(payload["in_progress"], true);
+/// assert_eq!(payload["pending_count"], 3u32);
+/// ```
+pub fn build_host_packages_attributes_payload(
+    in_progress: bool,
+    pending_count: u32,
+) -> serde_json::Value {
+    serde_json::json!({
+        "in_progress": in_progress,
+        "pending_count": pending_count
+    })
+}
+
+/// Build the HA MQTT discovery JSON for a host's package `update` entity.
+///
+/// Publishes a single entity per host that represents the overall package update
+/// status. The device is identified by the host (not the software item). Home
+/// Assistant displays an update badge when `installed_version != latest_version`,
+/// i.e. when `pending_count > 0`.
+///
+/// The returned JSON should be published (retained) on
+/// [`host_packages_discovery_config_topic`].
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::build_host_packages_discovery_config;
+/// let v = build_host_packages_discovery_config(
+///     "uptrakit",
+///     Uuid::nil(),
+///     Uuid::nil(),
+///     "myserver",
+/// );
+/// assert_eq!(v["name"], "myserver packages");
+/// assert_eq!(v["platform"], "mqtt");
+/// assert_eq!(v["payload_install"], "install");
+/// ```
+pub fn build_host_packages_discovery_config(
+    topic_prefix: &str,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    hostname: &str,
+) -> serde_json::Value {
+    let uid = host_packages_unique_id(tenant_id, host_id);
+    let host_simple = host_id.simple().to_string();
+    let tenant_simple = tenant_id.simple().to_string();
+    let default_entity_id = format!("{}_packages", slugify(hostname));
+
+    serde_json::json!({
+        "platform": "mqtt",
+        "unique_id": uid,
+        "name": format!("{hostname} packages"),
+        "default_entity_id": default_entity_id,
+        "state_topic": host_packages_state_topic(topic_prefix, host_id),
+        "latest_version_topic": host_packages_latest_version_topic(topic_prefix, host_id),
+        "command_topic": host_packages_command_topic(topic_prefix, host_id),
+        "payload_install": "install",
+        "json_attributes_topic": host_packages_json_attributes_topic(topic_prefix, host_id),
+        "availability_topic": format!("{topic_prefix}/status"),
+        "payload_available": "online",
+        "payload_not_available": "offline",
+        "device": {
+            "identifiers": [format!("uptrakit_host_{tenant_simple}_{host_simple}")],
+            "name": hostname,
+            "manufacturer": "Uptrakit"
+        }
+    })
+}
+
+/// Try to parse a host packages command topic back to the `host_id`.
+///
+/// Returns `None` if the topic doesn't match `{prefix}/hosts/{uuid}/set`.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::{host_packages_command_topic, parse_host_packages_command_topic};
+/// let host_id = Uuid::nil();
+/// let topic = host_packages_command_topic("uptrakit", host_id);
+/// let parsed = parse_host_packages_command_topic("uptrakit", &topic);
+/// assert_eq!(parsed, Some(host_id));
+///
+/// // Non-matching topic returns None.
+/// assert!(parse_host_packages_command_topic("uptrakit", "uptrakit/update/bad/set").is_none());
+/// ```
+pub fn parse_host_packages_command_topic(topic_prefix: &str, topic: &str) -> Option<Uuid> {
+    // Expected: "{prefix}/hosts/{uuid}/set"
+    let prefix = format!("{topic_prefix}/hosts/");
+    let rest = topic.strip_prefix(prefix.as_str())?;
+    let rest = rest.strip_suffix("/set")?;
+
+    // rest should now be just a UUID with no slashes.
+    if rest.contains('/') {
+        return None;
+    }
+
+    Uuid::parse_str(rest).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -932,5 +1166,249 @@ mod tests {
             slugify("pangolin.uk.home.yantsen.su"),
             "pangolin_uk_home_yantsen_su"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // host_packages_state_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_packages_state_topic_format() {
+        let t = host_packages_state_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/state"
+        );
+    }
+
+    #[test]
+    fn host_packages_state_topic_ends_with_state() {
+        assert!(host_packages_state_topic("pfx", host()).ends_with("/state"));
+    }
+
+    // -------------------------------------------------------------------------
+    // host_packages_latest_version_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_packages_latest_version_topic_format() {
+        let t = host_packages_latest_version_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/latest_version"
+        );
+    }
+
+    #[test]
+    fn host_packages_latest_version_topic_ends_with_latest_version() {
+        assert!(host_packages_latest_version_topic("pfx", host()).ends_with("/latest_version"));
+    }
+
+    // -------------------------------------------------------------------------
+    // host_packages_json_attributes_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_packages_json_attributes_topic_format() {
+        let t = host_packages_json_attributes_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/attributes"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // host_packages_command_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_packages_command_topic_format() {
+        let t = host_packages_command_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/set"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // host_packages_unique_id
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_packages_unique_id_starts_with_uptrakit_pkgs() {
+        assert!(host_packages_unique_id(tenant(), host()).starts_with("uptrakit_pkgs_"));
+    }
+
+    #[test]
+    fn host_packages_unique_id_no_dashes() {
+        let uid = host_packages_unique_id(tenant(), host());
+        assert!(!uid.contains('-'));
+    }
+
+    #[test]
+    fn host_packages_unique_id_deterministic() {
+        assert_eq!(
+            host_packages_unique_id(tenant(), host()),
+            host_packages_unique_id(tenant(), host())
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // build_host_packages_attributes_payload
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_host_packages_attributes_payload_in_progress() {
+        let payload = build_host_packages_attributes_payload(true, 5);
+        assert_eq!(payload["in_progress"], true);
+        assert_eq!(payload["pending_count"], 5u32);
+    }
+
+    #[test]
+    fn build_host_packages_attributes_payload_idle() {
+        let payload = build_host_packages_attributes_payload(false, 0);
+        assert_eq!(payload["in_progress"], false);
+        assert_eq!(payload["pending_count"], 0u32);
+    }
+
+    // -------------------------------------------------------------------------
+    // build_host_packages_discovery_config
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_host_packages_discovery_config_platform_mqtt() {
+        let v = build_host_packages_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+        );
+        assert_eq!(v["platform"], "mqtt");
+    }
+
+    #[test]
+    fn build_host_packages_discovery_config_payload_install() {
+        let v = build_host_packages_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+        );
+        assert_eq!(v["payload_install"], "install");
+    }
+
+    #[test]
+    fn build_host_packages_discovery_config_name_includes_packages() {
+        let v = build_host_packages_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "myserver",
+        );
+        assert_eq!(v["name"], "myserver packages");
+    }
+
+    #[test]
+    fn build_host_packages_discovery_config_default_entity_id() {
+        let v = build_host_packages_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "My Server",
+        );
+        assert_eq!(v["default_entity_id"], "my_server_packages");
+    }
+
+    #[test]
+    fn build_host_packages_discovery_config_state_topic_correct() {
+        let v = build_host_packages_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "h",
+        );
+        let expected = host_packages_state_topic("uptrakit", host());
+        assert_eq!(v["state_topic"], expected.as_str());
+    }
+
+    #[test]
+    fn build_host_packages_discovery_config_device_identifiers() {
+        let v = build_host_packages_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "h",
+        );
+        let tenant_simple = tenant().simple().to_string();
+        let host_simple = host().simple().to_string();
+        let expected_id = format!("uptrakit_host_{tenant_simple}_{host_simple}");
+        assert_eq!(v["device"]["identifiers"][0], expected_id.as_str());
+    }
+
+    #[test]
+    fn build_host_packages_discovery_config_device_name_is_hostname() {
+        let v = build_host_packages_discovery_config(
+            "uptrakit",
+            tenant(),
+            host(),
+            "pangolin",
+        );
+        assert_eq!(v["device"]["name"], "pangolin");
+    }
+
+    // -------------------------------------------------------------------------
+    // parse_host_packages_command_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn parse_host_packages_command_topic_roundtrip() {
+        let topic = host_packages_command_topic("uptrakit", host());
+        let parsed = parse_host_packages_command_topic("uptrakit", &topic);
+        assert_eq!(parsed, Some(host()));
+    }
+
+    #[test]
+    fn parse_host_packages_command_topic_wrong_suffix() {
+        let topic = host_packages_state_topic("uptrakit", host()); // ends with /state not /set
+        assert!(parse_host_packages_command_topic("uptrakit", &topic).is_none());
+    }
+
+    #[test]
+    fn parse_host_packages_command_topic_wrong_prefix() {
+        let topic = host_packages_command_topic("uptrakit", host());
+        assert!(parse_host_packages_command_topic("other", &topic).is_none());
+    }
+
+    #[test]
+    fn parse_host_packages_command_topic_invalid_uuid() {
+        let topic = "uptrakit/hosts/not-a-uuid/set";
+        assert!(parse_host_packages_command_topic("uptrakit", topic).is_none());
+    }
+
+    #[test]
+    fn parse_host_packages_command_topic_too_many_segments() {
+        let topic = format!("uptrakit/hosts/{}/extra/set", host());
+        assert!(parse_host_packages_command_topic("uptrakit", &topic).is_none());
+    }
+
+    #[test]
+    fn parse_host_packages_command_topic_nil_uuid() {
+        let zero = Uuid::nil();
+        let topic = host_packages_command_topic("pfx", zero);
+        let parsed = parse_host_packages_command_topic("pfx", &topic);
+        assert_eq!(parsed, Some(zero));
+    }
+
+    #[test]
+    fn parse_host_packages_command_topic_empty_string() {
+        assert!(parse_host_packages_command_topic("uptrakit", "").is_none());
+    }
+
+    // host packages and software items use distinct prefixes — no confusion
+    #[test]
+    fn parse_host_packages_command_topic_does_not_match_software_item_topic() {
+        // A software item command topic uses /update/ not /hosts/
+        let sw_topic = command_topic("uptrakit", item(), host());
+        assert!(parse_host_packages_command_topic("uptrakit", &sw_topic).is_none());
     }
 }
