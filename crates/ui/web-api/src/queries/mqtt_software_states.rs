@@ -3,10 +3,12 @@
 use sea_orm::{ColumnTrait, Condition, EntityTrait, FromQueryResult, QueryFilter, QuerySelect};
 use std::collections::{HashMap, HashSet};
 use uptrakit_internal_wire::{
-    MqttSoftwareStateHostEntry, MqttSoftwareStateItem, MqttSoftwareStatesPayload,
+    MqttHostPackageHostState, MqttSoftwareStateHostEntry, MqttSoftwareStateItem,
+    MqttSoftwareStatesPayload,
 };
 use uptrakit_shared_db::entity::{
-    host, host_software_item, prelude::*, software_item, update_history,
+    host, host_package, host_package_update_history, host_software_item, prelude::*,
+    software_item, update_history,
 };
 use uptrakit_shared_types::SoftwareDiscoveryState;
 use uuid::Uuid;
@@ -59,6 +61,7 @@ pub async fn load_software_states_for_tenant(
         return Ok(MqttSoftwareStatesPayload {
             tenant_id,
             items: vec![],
+            host_package_hosts: vec![],
         });
     }
 
@@ -187,7 +190,130 @@ pub async fn load_software_states_for_tenant(
     Ok(MqttSoftwareStatesPayload {
         tenant_id,
         items: result_items,
+        host_package_hosts: vec![],
     })
+}
+
+// ---------------------------------------------------------------------------
+// Host package host states
+// ---------------------------------------------------------------------------
+
+/// Lightweight projection for bulk-loading host package rows.
+#[derive(Debug, FromQueryResult)]
+struct HostPackageRow {
+    host_id: Uuid,
+    installed_version: Option<String>,
+    latest_version: Option<String>,
+}
+
+/// Lightweight projection for bulk-loading just the host_id from history rows.
+#[derive(Debug, FromQueryResult)]
+struct HistoryHostIdRow {
+    host_id: Uuid,
+}
+
+/// Load per-host package state data for all hosts that have at least one
+/// enabled, non-deactivated package under the given tenant.
+///
+/// Returns one [`MqttHostPackageHostState`] per qualifying host. Hosts with no
+/// tracked packages are omitted from the result.
+///
+/// # Errors
+///
+/// Returns a [`sea_orm::DbErr`] if any database query fails.
+pub async fn load_host_package_host_states_for_tenant(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+) -> Result<Vec<MqttHostPackageHostState>, sea_orm::DbErr> {
+    // 1. Bulk-load all enabled, non-deactivated packages for this tenant.
+    let packages: Vec<HostPackageRow> = HostPackage::find()
+        .select_only()
+        .column(host_package::Column::HostId)
+        .column(host_package::Column::InstalledVersion)
+        .column(host_package::Column::LatestVersion)
+        .filter(host_package::Column::TenantId.eq(tenant_id))
+        .filter(host_package::Column::Enabled.eq(true))
+        .filter(host_package::Column::DeactivatedAt.is_null())
+        .into_model::<HostPackageRow>()
+        .all(db)
+        .await?;
+
+    if packages.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // 2. Collect distinct host_ids referenced.
+    let host_ids: Vec<Uuid> = {
+        let mut seen = HashSet::new();
+        packages
+            .iter()
+            .filter(|p| seen.insert(p.host_id))
+            .map(|p| p.host_id)
+            .collect()
+    };
+
+    // 3. Bulk-load active host records for those host_ids.
+    let active_hosts: HashMap<Uuid, host::Model> = Host::find()
+        .filter(host::Column::Id.is_in(host_ids))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|h| (h.id, h))
+        .collect();
+
+    // 4. Bulk-load host_package_update_history rows that are Pending or
+    //    InProgress — used to detect which hosts currently have an update
+    //    running. We collect the distinct host_ids only.
+    let in_progress_host_ids: HashSet<Uuid> = HostPackageUpdateHistory::find()
+        .select_only()
+        .column(host_package_update_history::Column::HostId)
+        .filter(host_package_update_history::Column::TenantId.eq(tenant_id))
+        .filter(
+            Condition::any()
+                .add(host_package_update_history::Column::Status.eq("pending"))
+                .add(host_package_update_history::Column::Status.eq("in_progress")),
+        )
+        .into_model::<HistoryHostIdRow>()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|r| r.host_id)
+        .collect();
+
+    // 5. Group packages by host_id and build result entries.
+    let mut by_host: HashMap<Uuid, Vec<&HostPackageRow>> = HashMap::new();
+    for pkg in &packages {
+        by_host.entry(pkg.host_id).or_default().push(pkg);
+    }
+
+    let mut results: Vec<MqttHostPackageHostState> = Vec::with_capacity(by_host.len());
+    for (host_id, pkgs) in by_host {
+        // Skip hosts without an active host record (e.g. deactivated).
+        let Some(host) = active_hosts.get(&host_id) else {
+            continue;
+        };
+
+        let total_count = pkgs.len() as u32;
+        let pending_count = pkgs
+            .iter()
+            .filter(|p| match (&p.installed_version, &p.latest_version) {
+                (Some(installed), Some(latest)) => installed != latest,
+                _ => false,
+            })
+            .count() as u32;
+        let update_in_progress = in_progress_host_ids.contains(&host_id);
+
+        results.push(MqttHostPackageHostState {
+            host_id,
+            hostname: host.hostname.clone(),
+            pending_count,
+            total_count,
+            update_in_progress,
+        });
+    }
+
+    Ok(results)
 }
 
 /// Extract `release_url` and `release_notes` from a `latest_release_metadata` JSON blob.

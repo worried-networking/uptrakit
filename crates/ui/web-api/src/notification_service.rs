@@ -102,26 +102,48 @@ impl NotificationService {
 
     /// Load software states for a tenant and push to all locally connected MQTT
     /// services (immediately) and to NATS for cross-controller delivery.
+    ///
+    /// Loads both software-item states and host-package host states in two
+    /// independent bulk queries, then delivers the merged payload.
     pub async fn push_software_states_for_tenant(
         &self,
         db: &sea_orm::DatabaseConnection,
         tenant_id: uuid::Uuid,
     ) {
-        let payload = match crate::queries::mqtt_software_states::load_software_states_for_tenant(
+        let mut payload =
+            match crate::queries::mqtt_software_states::load_software_states_for_tenant(
+                db, tenant_id,
+            )
+            .await
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        %tenant_id,
+                        "failed to load software states for MQTT push"
+                    );
+                    return;
+                }
+            };
+
+        match crate::queries::mqtt_software_states::load_host_package_host_states_for_tenant(
             db, tenant_id,
         )
         .await
         {
-            Ok(p) => p,
+            Ok(host_states) => {
+                payload.host_package_hosts = host_states;
+            }
             Err(e) => {
                 tracing::warn!(
                     error = %e,
                     %tenant_id,
-                    "failed to load software states for MQTT push"
+                    "failed to load host package states for MQTT push; delivering without them"
                 );
-                return;
             }
-        };
+        }
+
         self.deliver_software_states(payload).await;
     }
 

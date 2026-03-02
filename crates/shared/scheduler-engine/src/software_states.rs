@@ -50,6 +50,7 @@ pub async fn load_software_states_for_tenant(
         return Ok(MqttSoftwareStatesPayload {
             tenant_id,
             items: vec![],
+            host_package_hosts: vec![],
         });
     }
 
@@ -154,6 +155,7 @@ pub async fn load_software_states_for_tenant(
     Ok(MqttSoftwareStatesPayload {
         tenant_id,
         items: result_items,
+        host_package_hosts: vec![],
     })
 }
 
