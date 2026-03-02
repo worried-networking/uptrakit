@@ -265,7 +265,7 @@ pub async fn list_batches(
     )?;
 
     let query = UpdateBatchListQuery {
-        status: params.status.map(|s| s.parse().unwrap_or_default()),
+        status: params.status.map(str::to_string),
         page: params.page,
         per_page: params.per_page,
     };

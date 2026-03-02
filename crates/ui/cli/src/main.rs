@@ -463,8 +463,8 @@ enum UpdateCommands {
 enum UpdateBatchesCommands {
     /// List update batches
     List {
-        /// Filter by status (in_progress, completed, partially_completed)
-        #[arg(long)]
+        /// Filter by status
+        #[arg(long, value_parser = ["in_progress", "completed", "partially_completed"])]
         status: Option<String>,
         /// Page number (1-indexed)
         #[arg(long)]
