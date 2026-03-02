@@ -194,7 +194,13 @@ impl BollardDockerClient {
 
     fn connect(docker_host: Option<&str>, ssh_key_path: Option<&str>) -> Result<bollard::Docker> {
         use bollard::API_DEFAULT_VERSION;
+        // Use a shorter timeout in test builds so that tests that probe the
+        // local Docker daemon do not block for 2 minutes when the daemon is
+        // not reachable (e.g. different socket path, CI without Docker, etc.).
+        #[cfg(not(test))]
         const TIMEOUT: u64 = 120;
+        #[cfg(test)]
+        const TIMEOUT: u64 = 5;
 
         match docker_host {
             None => bollard::Docker::connect_with_defaults().context_to::<DockerError>(),

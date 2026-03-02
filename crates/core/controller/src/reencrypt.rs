@@ -337,16 +337,27 @@ mod tests {
     /// FK enforcement is disabled so we can insert rows into tables that have
     /// FK references (e.g. `oidc_providers.tenant_id`) without having to build
     /// the full parent-record hierarchy.
+    ///
+    /// `max_connections(1)` / `min_connections(1)` pin all operations to a
+    /// single persistent connection.  sqlx 0.8 enables `PRAGMA foreign_keys =
+    /// ON` by default for each new SQLite connection; using a single
+    /// connection and disabling FKs after migrations ensures the PRAGMA
+    /// remains in effect for every subsequent query, and that the in-memory
+    /// database is never discarded when the pool recycles connections.
     async fn test_db() -> DatabaseConnection {
         let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
-        let opt = ConnectOptions::new("sqlite::memory:");
+        let mut opt = ConnectOptions::new("sqlite::memory:");
+        opt.max_connections(1).min_connections(1);
         let db = Database::connect(opt).await.expect("connect to test db");
-        db.execute_unprepared("PRAGMA foreign_keys = OFF")
-            .await
-            .expect("disable FK enforcement for test isolation");
         crate::migration::run_migrations(&db)
             .await
             .expect("run migrations");
+        // sqlx 0.8 enables PRAGMA foreign_keys = ON for every new SQLite
+        // connection by default.  Override it after migrations so that test
+        // helpers can insert rows without constructing the full FK hierarchy.
+        db.execute_unprepared("PRAGMA foreign_keys = OFF")
+            .await
+            .expect("disable FK enforcement for test isolation");
         db
     }
 

@@ -735,6 +735,12 @@ Comprehensive security hardening.
 - [x] Implement secrets management
   - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory in production; dev-only `--allow-plaintext-secrets`
     available)
+  - [x] Context-bound `ENC:v2:` ciphertext format for JWT signing key and master-key verification token (AAD prevents ciphertext relocation attacks)
+  - [ ] **Migrate `EncryptedString` DB columns to `ENC:v2:`** — all `EncryptedString`-typed columns (CA private keys, OIDC client secrets, MQTT
+    passwords, webhook secrets, etc.) currently use `ENC:v1:` (empty AAD). A future migration should re-encrypt them with context-bound `ENC:v2:`
+    using per-column AAD strings (e.g. `"uptrakit:ca_certificates:key_pem"`). This requires a startup re-encryption pass or a dedicated migration that
+    reads and re-writes each affected column. The `EncryptedString` SeaORM integration would also need to be updated to accept and produce `ENC:v2:`
+    values. Tracked separately because it requires a schema-level re-encryption pass across all tenants.
   - [ ] Credential rotation
   - [ ] Vault integration
 - [ ] Add security scanning to CI/CD

@@ -73,6 +73,15 @@ enum SshAgentEvent {
 
 struct SshAgentHandler {
     local_db: Option<sea_orm::DatabaseConnection>,
+    /// Path to the operator-controlled freeze file.
+    ///
+    /// When this file exists, the agent rejects all `ExecuteUpdate` messages
+    /// without executing them. Operators can create the file with
+    /// `touch <path>` to halt update execution from the agent side,
+    /// independent of the controller.
+    ///
+    /// Default path: `<state-dir>/update-freeze`.
+    freeze_file_path: std::path::PathBuf,
     /// Per-host in-flight update state, keyed by `host_machine_id`.
     ///
     /// The architectural invariant is **no overlapping update actions per
@@ -201,6 +210,17 @@ impl ServiceHandler for SshAgentHandler {
                 Ok(client::handle_check_versions_ssh(payload, db, conn, &self.pool).await)
             }
             ControllerMessage::ExecuteUpdate(payload) => {
+                if tokio::fs::try_exists(&self.freeze_file_path)
+                    .await
+                    .unwrap_or(false)
+                {
+                    tracing::warn!(
+                        freeze_file = %self.freeze_file_path.display(),
+                        "update execution is frozen; ignoring ExecuteUpdate message. \
+                         Remove the freeze file to re-enable update execution."
+                    );
+                    return Ok(None);
+                }
                 client::handle_execute_update_ssh(
                     *payload,
                     db,
@@ -591,8 +611,11 @@ async fn main() {
     let (aggregate_tx, aggregate_rx) =
         tokio::sync::mpsc::channel::<(String, client::UpdateEvent)>(256);
 
+    let freeze_file_path = state_dir.join("update-freeze");
+
     let mut handler = SshAgentHandler {
         local_db: Some(local_db),
+        freeze_file_path,
         in_flight_updates: HashMap::new(),
         aggregate_rx,
         aggregate_tx,

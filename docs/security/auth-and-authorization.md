@@ -37,9 +37,13 @@ The JWT signing key is stored in the `settings` table under `auth.jwt_signing_ke
 encoded) and is encrypted at rest using AES-256-GCM via `encrypt_str()` — the same algorithm used for all
 other sensitive fields (`EncryptedString`). On every read the value is decrypted transparently before use.
 
+The JWT key uses the context-bound `ENC:v2:` format with AAD `"uptrakit:settings:jwt_signing_key"`,
+preventing this ciphertext from being reused in any other encrypted column even if the master key is
+compromised and an attacker attempts a relocation attack.
+
 Legacy unencrypted keys (base64 only, written before encryption was introduced) are transparently
-re-encrypted on the next read. No operator intervention is required; the controller detects the absence of
-the `ENC:v1:` prefix, re-encrypts the value in place, and continues normally.
+re-encrypted on the next read using `ENC:v2:`. Legacy `ENC:v1:` keys are accepted during decryption
+for backward compatibility with existing installations. No operator intervention is required.
 
 See [Secrets Handling and Encryption](secrets-and-encryption.md) for the encryption format and master key
 requirements.
@@ -151,16 +155,21 @@ from `crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name stri
 | `ManageAgents` | `manage_agents` | Approve, reject, delete, merge agents; manage enrollment tokens |
 | `ManageGlobalSettings` | `manage_global_settings` | View and modify global settings (network, CA, TLS, system alerts) |
 | `ViewSoftware` | `view_software` | View software items, plugin configs, and update history |
-| `ManageSoftware` | `manage_software` | Manage software items, plugin configs, version checks, updates, and scheduler |
+| `ManageSoftware` | `manage_software` | Manage software items, version checks, update scheduling, and non-command plugin config fields |
+| `ManageCommands` | `manage_commands` | Create and modify plugin configs containing command-bearing fields (shell commands, `post_pull_command`, custom hook `commands` arrays). **Treat as equivalent to root access on all managed hosts.** |
 | `ViewHosts` | `view_hosts` | View hosts |
 | `ManageHosts` | `manage_hosts` | Manage hosts (update, deactivate) |
+
+> **Security note:** `ManageCommands` grants effective code-execution authority on all managed hosts
+> assigned to the affected software items. Users with this permission can configure arbitrary shell
+> commands that execute on managed hosts. Assign with the same care as granting `root` access.
 
 ### Roles
 
 | Role | Permissions |
 | --- | --- |
-| `owner` | All nine permissions |
-| `admin` | `view_settings`, `manage_settings`, `view_agents`, `manage_agents`, `view_software`, `manage_software`, `view_hosts`, `manage_hosts` |
+| `owner` | All permissions (including `manage_commands`) |
+| `admin` | All except `manage_global_settings` (including `manage_commands`) |
 | `user` | `view_settings`, `view_agents`, `view_software`, `view_hosts` |
 
 The first registered user gets the `owner` role — whether registered via password or OIDC. Subsequent users (password or
@@ -195,7 +204,7 @@ directly rather than a typed permission extractor, and carry:
 extensions(("x-required-permission" = json!("self")))
 ```
 
-The sentinel value `"self"` is distinct from the nine named `Permission` variants. It signals to automated
+The sentinel value `"self"` is distinct from the named `Permission` variants. It signals to automated
 permission-audit tooling that the endpoint requires only **authentication** (a valid token), not any specific
 RBAC permission. Tools must treat `"self"` as "any authenticated user is authorized".
 
@@ -210,6 +219,7 @@ RBAC permission. Tools must treat `"self"` as "any authenticated user is authori
 | `CanManageGlobalSettings` | `Permission::ManageGlobalSettings` |
 | `CanViewSoftware` | `Permission::ViewSoftware` |
 | `CanManageSoftware` | `Permission::ManageSoftware` |
+| `CanManageCommands` | `Permission::ManageCommands` |
 | `CanViewHosts` | `Permission::ViewHosts` |
 | `CanManageHosts` | `Permission::ManageHosts` |
 

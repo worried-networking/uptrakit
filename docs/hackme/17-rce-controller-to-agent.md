@@ -78,13 +78,22 @@ The same attack applies via:
 - **Controller access protection.** The controller is protected by HTTPS, JWT
   authentication, RBAC permissions, and rate limiting. Multiple layers must be
   breached to reach the message injection point.
+- **Agent-side execution freeze file.** *(Implemented)* Both the `uptrakit-agent`
+  and `uptrakit-agent-ssh` binaries check for the presence of a freeze file at
+  `<state-dir>/update-freeze` before processing any `ExecuteUpdate` or
+  `ExecuteBatchHostPackageUpdate` message. If the file exists the message is silently
+  dropped and the operation is logged. Creating this file (`touch
+  <state-dir>/update-freeze`) allows an operator to halt update execution from the
+  agent side, independently of and without modifying the controller, while the
+  WebSocket connection and all other agent functionality remain active. The freeze
+  applies immediately with no restart required.
 
 ## Residual risk
 
 - **Agents implicitly trust the controller.** By design, agents execute any command
   received from the authenticated controller. There is no mechanism for agents to
-  independently verify command legitimacy, rate-limit command execution, or require
-  operator confirmation.
+  independently verify command legitimacy or require operator confirmation. The freeze
+  file is an emergency stop, not a per-command review mechanism.
 - **No command signing.** `ExecuteUpdate` messages are not cryptographically signed
   by the originating admin user. The agent cannot distinguish between commands issued
   by a legitimate admin and commands injected by a compromised controller.
@@ -100,6 +109,9 @@ The same attack applies via:
 - **No execution rate limiting on agents.** Agents do not rate-limit the number of
   `execute_update` or `execute_batch_host_package_update` messages they process. A
   compromised controller could flood agents with concurrent executions.
+- **Freeze file requires local access.** To create the freeze file, an operator
+  must have shell access to the agent host. In a fully automated or headless
+  environment this may not be readily available during an incident.
 
 ## Recommended improvements
 
@@ -108,9 +120,9 @@ The same attack applies via:
   command provenance independently of the controller's TLS identity.
 - Add agent-side execution rate limiting (e.g., maximum one concurrent update per
   software item) to prevent flood attacks from a compromised controller.
-- Implement a "break glass" mechanism on agents that allows operators to freeze
-  command execution from the agent side (e.g., a local flag file or signal that
-  causes the agent to reject all `execute_update` messages).
+- Expose a remote freeze API on the controller that sets the freeze file on one or
+  more agents via the existing WebSocket connection, removing the requirement for
+  local shell access during an incident.
 - Add anomaly detection on agents for unusual command patterns (e.g., hooks that
   download and execute external scripts, commands targeting sensitive system files,
   or updates at unusual times).
@@ -130,3 +142,6 @@ The same attack applies via:
 - `crates/shared/wire/src/lib.rs` — `ExecuteUpdatePayload`, `HookCommand`
 - `crates/shared/agent-core/src/update.rs` — `run_hook_command()`
 - `crates/shared/command/src/command.rs` — `run_command_with_shell()`
+- `crates/core/agent/src/main.rs` — freeze file check in `AgentHandler::on_message()`
+- `crates/core/agent-ssh/src/main.rs` — freeze file check in `SshAgentHandler::on_message()`
+_with_shell()`

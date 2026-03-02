@@ -65,31 +65,38 @@ With the JWT signing key, the attacker can:
   tampering. An attacker cannot modify encrypted values without the key.
 - **Per-value random nonces.** Each encryption uses a fresh 12-byte random nonce,
   preventing ciphertext comparison attacks.
+- **`ENC:v2:` context-bound ciphertexts.** *(Implemented)* The JWT signing key and
+  master-key verification token are now encrypted using `ENC:v2:` format with a
+  per-field AAD string. A ciphertext produced for `"uptrakit:settings:jwt_signing_key"`
+  cannot be used as a valid ciphertext for the key-verification slot, and vice versa,
+  even if an attacker obtains the master key and attempts to relocate ciphertexts.
+- **Startup warning for env-var key source.** *(Implemented)* When the master key is
+  loaded from `UPTRAKIT_MASTER_KEY` env var (without `--master-key-file`), a `WARN`-
+  level log message is emitted at startup, nudging operators toward the more secure
+  file-based delivery method.
 
 ## Residual risk
 
 - **Static key with no rotation.** The master key is a single static value with no
   built-in rotation mechanism. Compromise is permanent until the key is manually
   changed and all encrypted values are re-encrypted.
-- **No key derivation per context.** `Aad::empty()` is used for all AES-256-GCM
-  operations. Ciphertexts are not bound to a specific table, column, or tenant. A
-  ciphertext from one column could be moved to another and would decrypt
-  successfully.
+- **`EncryptedString` DB columns still use `ENC:v1:` (empty AAD).** CA private keys,
+  OIDC client secrets, MQTT passwords, webhook secrets, etc. are not yet bound to a
+  column context. Migration to `ENC:v2:` per-column AAD is tracked in `TODO.md`.
 - **Process memory exposure.** The `OnceLock` static has `'static` lifetime, so the
   key material is present in process memory for the entire lifetime of the
   controller. A memory dump, core dump, or `/proc/pid/mem` read exposes the key.
-- **Environment variable visibility.** `UPTRAKIT_MASTER_KEY` is visible in
-  `/proc/pid/environ`, container inspection output, and orchestration manifests
-  unless explicitly protected.
+- **Environment variable visibility.** `UPTRAKIT_MASTER_KEY` is still accepted; it is
+  now warned about at startup but not prohibited. Operators may still use it in
+  automation without adopting `--master-key-file`.
 - **SSH agent uses independent key.** The SSH agent's master key is separate from the
   controller's. Compromise of one does not expose the other — but operators may
   reuse the same key for convenience, negating this isolation.
 
 ## Recommended improvements
 
-- Implement a key derivation step that binds ciphertexts to their context (table name,
-  column name, or row ID) via AES-256-GCM AAD (Additional Authenticated Data). This
-  prevents ciphertext relocation attacks.
+- Complete the `ENC:v2:` migration for all `EncryptedString` columns, binding each
+  ciphertext to its table and column via a dedicated AAD string.
 - Add a master key rotation workflow that re-encrypts all stored values under a new
   key, with a migration period where both old and new keys are accepted.
 - Support external key management systems (KMS) such as AWS KMS, HashiCorp Vault, or
@@ -98,8 +105,6 @@ With the JWT signing key, the attacker can:
 - Document recommended operator practices: use `--master-key-file` with restrictive
   permissions rather than environment variables; disable core dumps in production;
   ensure `/proc/pid/environ` is not readable by non-root users.
-- Add a startup warning if `UPTRAKIT_MASTER_KEY` is provided via environment variable
-  instead of `--master-key-file`, nudging operators toward the more secure option.
 
 ## References
 

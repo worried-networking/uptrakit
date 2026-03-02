@@ -96,25 +96,47 @@ Database columns using encryption:
 | `ssh_hosts` | `private_key` | SSH private key (agent-ssh local DB) |
 | `notification_channels` | `config` | Channel config JSON (bot tokens, webhook secrets, HMAC keys) |
 
-Ciphertext format: `ENC:v1:<hex(nonce || ciphertext || tag)>`. The `v1` marker enables future algorithm changes.
+### Ciphertext formats
+
+Two wire formats coexist for backward compatibility:
+
+| Format | Prefix | AAD | Used by |
+| --- | --- | --- | --- |
+| v1 | `ENC:v1:` | empty | `EncryptedString` DB columns (legacy) |
+| v2 | `ENC:v2:` | caller-supplied context string | JWT signing key, master-key verification token |
+
+The `is_encrypted()` helper returns `true` for both prefixes, so code that checks whether a value is
+encrypted before deciding whether to decrypt works correctly with both formats.
+
+`ENC:v2:` ciphertexts are **context-bound**: the AAD string is mixed into the GCM authentication tag.
+A ciphertext encrypted for one purpose (e.g. `"uptrakit:settings:jwt_signing_key"`) cannot be used as
+a valid ciphertext for any other purpose. This prevents ciphertext relocation attacks where an attacker
+moves an encrypted value from one column to another.
+
 Legacy plaintext detection allows old values to remain readable until rewritten.
 
-### Low-level helpers: `encrypt_str` / `decrypt_str`
+> **Note:** `EncryptedString` DB columns still use `ENC:v1:` (empty AAD). Migrating them to
+> context-bound `ENC:v2:` is tracked in `TODO.md` and requires a startup re-encryption pass with
+> per-column AAD strings.
 
-Two public functions in `crates/shared/db/src/crypto.rs` provide lower-level access to the same AES-256-GCM
-primitive, used internally for encrypting the JWT signing key at rest:
+### Low-level helpers: `encrypt_str`, `decrypt_str`, `encrypt_str_with_aad`, `decrypt_str_with_aad`
+
+Four public functions in `crates/shared/crypto/src/lib.rs` provide lower-level access to the AES-256-GCM
+primitive:
 
 - **`pub fn encrypt_str(plaintext: &str) -> Result<String>`** — encrypts any UTF-8 string and returns it in
-  the `"ENC:v1:<hex>"` format. Requires the master key to be initialized; returns
-  `Err(CryptoError::NotInitialized)` otherwise.
-- **`pub fn decrypt_str(stored: &str) -> Result<String>`** — decrypts an `"ENC:v1:<hex>"` string produced by
-  `encrypt_str`. Requires the master key to be initialized; returns `Err(CryptoError::NotInitialized)` if the
-  key is absent, or `Err(CryptoError::Decryption)` if the ciphertext is invalid or was encrypted with a
-  different key.
+  `"ENC:v1:<hex>"` format (empty AAD). For new code, prefer `encrypt_str_with_aad`.
+- **`pub fn decrypt_str(stored: &str) -> Result<String>`** — decrypts an `"ENC:v1:<hex>"` string.
+- **`pub fn encrypt_str_with_aad(plaintext: &str, aad: &str) -> Result<String>`** — encrypts with a
+  caller-supplied AAD and returns `"ENC:v2:<hex>"` format. Use a unique, stable, descriptive string for
+  `aad` (e.g. `"uptrakit:settings:jwt_signing_key"`).
+- **`pub fn decrypt_str_with_aad(stored: &str, aad: &str) -> Result<String>`** — decrypts both formats:
+  `ENC:v2:` ciphertexts require the matching AAD; `ENC:v1:` ciphertexts are accepted with any AAD (backward
+  compat, empty AAD used internally).
 
 These helpers are **not** a replacement for `EncryptedString`. Use `EncryptedString` for structured entity
-fields backed by SeaORM columns; use `encrypt_str` / `decrypt_str` only for ad-hoc string values (such as
-settings entries) that cannot use the SeaORM custom type.
+fields backed by SeaORM columns; use `encrypt_str_with_aad` / `decrypt_str_with_aad` only for ad-hoc string
+values (such as settings entries) that cannot use the SeaORM custom type.
 
 ### Startup Re-encryption of Legacy Plaintext
 
@@ -155,8 +177,8 @@ encryption.
 
 | Method | Details |
 | --- | --- |
-| `UPTRAKIT_MASTER_KEY` env var | 64-character hex string (32 bytes) |
-| `--master-key-file` CLI arg | Path to a file containing the 64-character hex key |
+| `UPTRAKIT_MASTER_KEY` env var | 64-character hex string (32 bytes). **Not recommended for production** — env vars are visible in `/proc/pid/environ`, container inspection output, and orchestration manifests. A `WARN`-level log message is emitted at startup when this method is used without `--master-key-file`. |
+| `--master-key-file` CLI arg | Path to a file containing the 64-character hex key. Use `chmod 0600` to restrict to the service user. **Recommended method.** |
 
 ### Master Key Verification (HA Safety)
 
@@ -166,13 +188,16 @@ instance using a different key would silently fail to decrypt values encrypted b
 To prevent this, the controller performs **startup key verification**:
 
 1. On first startup (when no verification token exists), `create_key_verification_token()` encrypts a
-   known sentinel value (`uptrakit-master-key-ok-v1`) and stores the ciphertext in the
+   known sentinel value (`uptrakit-master-key-ok-v1`) using `ENC:v2:` with AAD
+   `"uptrakit:master-key-verification"` and stores the ciphertext in the
    `crypto.master_key_verification` settings entry using `insert_setting_if_absent()` (INSERT with
    ON CONFLICT DO NOTHING). If another controller instance raced and stored a token first, the current
    instance detects the conflict, re-reads the stored token, and verifies it against the current key.
 2. On subsequent startups, `verify_key_verification_token()` reads the stored ciphertext, decrypts it,
-   and verifies it matches the expected sentinel. If decryption fails or the plaintext does not match,
-   the controller aborts with a `MasterKeyMismatch` error and a clear diagnostic message.
+   and verifies it matches the expected sentinel. It accepts both `ENC:v2:` (current, context-bound)
+   and `ENC:v1:` (legacy installations) tokens for backward compatibility.
+   If decryption fails or the plaintext does not match, the controller aborts with a `MasterKeyMismatch`
+   error and a clear diagnostic message.
 
 This ensures that key mismatches are detected immediately at startup rather than surfacing as
 mysterious decryption failures at runtime. The verification token is stored as a global (non-tenant-scoped)
@@ -307,8 +332,9 @@ flag). See [NATS Deployment](../end-user/deployment/nats.md) and
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/db/src/crypto.rs` | `EncryptedString` type, `init_master_key()`, AES-256-GCM encrypt/decrypt, key verification |
+| `crates/shared/crypto/src/lib.rs` | `EncryptedString` type, `init_master_key()`, AES-256-GCM encrypt/decrypt, key verification, `ENC:v1:`/`ENC:v2:` formats |
 | `crates/shared/types/src/secret_string.rs` | `SecretString` newtype with redacted Debug/Display |
+| `crates/ui/web-api/src/settings_store.rs` | JWT signing key storage with `ENC:v2:` and AAD `"uptrakit:settings:jwt_signing_key"` |
 | `crates/ui/web-api/src/setting_key.rs` | `SettingKey::MasterKeyVerification` — stores the key verification token |
-| `crates/core/controller/src/startup.rs` | `verify_master_key()` — startup phase that validates the master key |
+| `crates/core/controller/src/startup.rs` | `verify_master_key()` — startup phase that validates the master key; env var warning |
 | `crates/core/controller/src/reencrypt.rs` | Startup re-encryption of legacy plaintext values across encrypted columns |

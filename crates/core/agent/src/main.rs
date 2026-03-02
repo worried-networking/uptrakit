@@ -5,6 +5,7 @@ mod host_info;
 use clap::Parser;
 use rootcause::prelude::*;
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use uptrakit_internal_wire::{Capability, ControllerMessage, ReportHostsPayload, ServiceMessage};
 use uptrakit_service_sdk::{
@@ -19,6 +20,15 @@ struct AgentHandler {
     /// incoming `host_machine_id` fields as a defensive sanity check.
     machine_id: String,
     in_flight_update: Option<client::InFlightUpdate>,
+    /// Path to the operator-controlled freeze file.
+    ///
+    /// When this file exists, the agent rejects all `ExecuteUpdate` and
+    /// `ExecuteBatchHostPackageUpdate` messages without executing them.
+    /// Operators can create the file with `touch <path>` to halt update
+    /// execution from the agent side, independent of the controller.
+    ///
+    /// Default path: `<state-dir>/update-freeze`.
+    freeze_file_path: PathBuf,
 }
 
 #[async_trait::async_trait]
@@ -76,6 +86,14 @@ impl ServiceHandler for AgentHandler {
                     );
                     return Ok(None);
                 }
+                if is_frozen(&self.freeze_file_path).await {
+                    tracing::warn!(
+                        freeze_file = %self.freeze_file_path.display(),
+                        "update execution is frozen; ignoring ExecuteUpdate message. \
+                         Remove the freeze file to re-enable update execution."
+                    );
+                    return Ok(None);
+                }
                 client::handle_execute_update(*payload, &mut self.in_flight_update, conn).await;
                 Ok(None)
             }
@@ -96,6 +114,14 @@ impl ServiceHandler for AgentHandler {
                         expected = %self.machine_id,
                         received = %payload.host_machine_id,
                         "host_machine_id mismatch on ExecuteBatchHostPackageUpdate; ignoring message"
+                    );
+                    return Ok(None);
+                }
+                if is_frozen(&self.freeze_file_path).await {
+                    tracing::warn!(
+                        freeze_file = %self.freeze_file_path.display(),
+                        "update execution is frozen; ignoring ExecuteBatchHostPackageUpdate message. \
+                         Remove the freeze file to re-enable update execution."
                     );
                     return Ok(None);
                 }
@@ -173,6 +199,19 @@ impl ServiceHandler for AgentHandler {
     }
 }
 
+/// Returns `true` if the freeze file exists on the filesystem.
+///
+/// When the freeze file is present, the agent refuses to process any
+/// `ExecuteUpdate` or `ExecuteBatchHostPackageUpdate` messages.  Operators
+/// can create the file with `touch <path>` to halt update execution from the
+/// agent side without stopping the agent process or losing connectivity.
+///
+/// I/O errors are treated conservatively as *not frozen* so a transient
+/// filesystem error does not permanently halt the agent.
+async fn is_frozen(freeze_file_path: &std::path::Path) -> bool {
+    tokio::fs::try_exists(freeze_file_path).await.unwrap_or(false)
+}
+
 /// Capabilities advertised by the agent service.
 fn agent_capabilities() -> BTreeSet<Capability> {
     [
@@ -199,9 +238,19 @@ async fn main() {
     uptrakit_service_sdk::init_tracing("uptrakit_agent", args.common.verbose);
     uptrakit_service_sdk::init_crypto();
 
+    // Resolve the freeze file path early so we can pass it to the handler.
+    // The lifecycle will resolve dirs again internally; this is a cheap
+    // second call.  The default path is <state-dir>/update-freeze.
+    let freeze_file_path = args
+        .common
+        .resolve_dirs("agent")
+        .map(|dirs| dirs.state_dir().join("update-freeze"))
+        .unwrap_or_else(|_| PathBuf::from("update-freeze"));
+
     let mut handler = AgentHandler {
         machine_id: String::new(),
         in_flight_update: None,
+        freeze_file_path,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent",

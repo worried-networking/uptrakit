@@ -4,7 +4,7 @@
 | --- | --- |
 | Severity | Critical |
 | Attack surface | Plugin system / command execution |
-| Prerequisites | Authenticated user with `manage_software` permission |
+| Prerequisites | Authenticated user with `manage_commands` permission (previously `manage_software`) |
 | STRIDE | Elevation of Privilege |
 
 ## Attack description
@@ -91,9 +91,14 @@ code execution on managed hosts via plugin configuration manipulation.
 
 ## Current mitigations
 
-- **RBAC authorization.** Plugin config writes require the `manage_software`
-  permission. This permission is granted to the `owner` and `admin` roles but not
-  the `user` role.
+- **Separate `manage_commands` permission.** *(Implemented)* Creating or modifying
+  plugin configs requires the dedicated `manage_commands` permission, which is
+  distinct from `manage_software`. Users with `manage_software` alone can manage
+  software items, version tracking, and non-command config fields, but cannot alter
+  the commands that execute on managed hosts. The `manage_commands` permission is
+  granted only to the `owner` and `admin` roles. See
+  [Authentication and Authorization](../security/auth-and-authorization.md#permissions-model---detailed)
+  for the full permissions model.
 - **Shell escape for substitution variables.** Dynamic values like
   `{package_identifier}` and `{version}` are shell-escaped via `shell_escape()`
   before substitution into templates. Injection through substitution variables is
@@ -112,10 +117,10 @@ code execution on managed hosts via plugin configuration manipulation.
 
 ## Residual risk
 
-- **`manage_software` equals RCE.** This is the fundamental design trade-off: the
-  ability to configure software management necessarily includes the ability to define
-  what commands run on managed hosts. There is no mechanism to grant `manage_software`
-  without also granting effective RCE.
+- **`manage_commands` still equals RCE.** The permission separation reduces the blast
+  radius (fewer users can modify command-bearing fields), but users with
+  `manage_commands` retain full effective RCE on all assigned hosts. Assigning this
+  permission should be treated with the same care as granting `root` access.
 - **No command content validation.** Shell commands in `version_command`,
   `update_command`, `post_pull_command`, and custom hook `commands` arrays are
   accepted verbatim. There is no allowlist, blocklist, or pattern matching.
@@ -136,10 +141,6 @@ code execution on managed hosts via plugin configuration manipulation.
 - Implement a "command change review" workflow where modifications to command-bearing
   plugin config fields require approval from a second administrator before taking
   effect.
-- Add a distinct permission (e.g., `manage_commands`) separate from `manage_software`
-  that specifically controls the ability to modify command-bearing fields. Users with
-  `manage_software` but not `manage_commands` could manage software items and version
-  tracking but not alter what executes on hosts.
 - Implement an immutable audit log for all plugin config changes, with special
   attention to command-bearing fields, including the full before/after diff and the
   acting user's identity.
@@ -148,8 +149,6 @@ code execution on managed hosts via plugin configuration manipulation.
 - Consider an optional command allowlist or blocklist per tenant that restricts the
   shell commands that can be configured (e.g., only commands matching approved
   patterns or prefixes).
-- Document prominently that `manage_software` permission should be treated as
-  equivalent to root access on all managed hosts.
 
 ## References
 
