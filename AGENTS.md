@@ -67,7 +67,7 @@ uptrakit/
 │   │   └── scheduler/                  # uptrakit-scheduler                     (bin)  — external scheduler binary; enrolls as a service, receives credentials, runs scheduled tasks via direct DB + NATS
 │   ├── plugins/
 │   │   ├── infrastructure/
-│   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult
+│   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult; batch types: BatchDetectItem/Result, BatchFetchItem/Result, BatchUpdateItem/Result
 │   │   │   └── registry/              # uptrakit-plugin-infrastructure-registry               (lib)  — plugin dispatch & validation; `daemon` feature (default) enables Docker local ops
 │   │   ├── releases/
 │   │   │   ├── docker/                 # uptrakit-plugin-releases-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; `daemon` feature (default) gates bollard + local Docker ops; Docker-over-SSH via StdioTunnel proxy (unix socket bridge to `docker system dial-stdio`)
@@ -77,13 +77,13 @@ uptrakit/
 │   │   ├── generic/
 │   │   │   └── shell/                  # uptrakit-plugin-generic-shell                  (lib)  — generic agent-side plugin: version_command (detect_installed_version) + update_command (execute_update); supports {package_identifier}, {version}, {tag} placeholders; at least one field required
 │   │   ├── package-managers/
-│   │   │   ├── homebrew/               # uptrakit-plugin-package-manager-homebrew               (lib)  — Homebrew formulae/cask plugin; implements DetectHostCompatibility (checks `which brew`)
-│   │   │   ├── apt/                    # uptrakit-plugin-package-manager-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required)
-│   │   │   └── npm/                    # uptrakit-plugin-package-manager-npm                    (lib)  — npm global-package plugin; ControllerSideFetchReleases (queries registry.npmjs.org); discovery via `npm list -g --json`; updates via `sudo npm install -g <pkg>@<version>`; implements DetectHostCompatibility (checks `which npm`); validate_identifier exported for registry
+│   │   │   ├── homebrew/               # uptrakit-plugin-package-manager-homebrew               (lib)  — Homebrew formulae/cask plugin; implements DetectHostCompatibility (checks `which brew`); native batch_detect_installed_version + batch_fetch_releases (single `brew info --json=v2` call for all packages)
+│   │   │   ├── apt/                    # uptrakit-plugin-package-manager-apt                    (lib)  — APT (Debian/Ubuntu) plugin (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install); implements DetectHostCompatibility (checks `which apt-get`) and PostUpdateHook (checks /var/run/reboot-required); native batch_detect_installed_version (dpkg-query with all packages) + batch_fetch_releases (apt-cache madison with all packages)
+│   │   │   └── npm/                    # uptrakit-plugin-package-manager-npm                    (lib)  — npm global-package plugin; ControllerSideFetchReleases (queries registry.npmjs.org); discovery via `npm list -g --json`; updates via `sudo npm install -g <pkg>@<version>`; implements DetectHostCompatibility (checks `which npm`); validate_identifier exported for registry; native batch_detect_installed_version (single `npm list -g --depth=0 --json` call, filtered in memory)
 │   │   └── discovery/
 │   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Forgejo/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg/Forgejo-managed items, PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
 │   ├── shared/
-│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch host package updates, handle_check_versions/execute_update/handle_execute_batch_host_package_update/graceful_shutdown; start_update() for per-host parallel use by SSH agent
+│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch host package updates, handle_check_versions/execute_update/handle_execute_batch_host_package_update/graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (PluginType, effective_config) and calls batch_detect_installed_version/batch_fetch_releases once per group in parallel
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag; StdioTunnel trait (bidirectional byte-stream tunnel for remote command I/O)
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption (EncryptedString, init_master_key)
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, software_items, host_packages, host_package_ignores, host_package_update_history, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`
@@ -456,6 +456,26 @@ for user review. Key invariants:
    The `UpdateHookContext` struct contains `package_identifier`, `to_version`, and `from_version`.
    These plugin-level hooks are distinct from the user-configured `hooks` in plugin config JSON
    (documented in [Update Hooks](docs/development/update-hooks.md)).
+
+   **Batch trait methods** (all have default sequential fallbacks; override for efficiency):
+
+   - `batch_detect_installed_version(&[BatchDetectItem]) -> Result<Vec<BatchDetectResult>>` — detect
+     installed versions for multiple packages. Default calls `detect_installed_version` per item.
+     Override when the package manager accepts a list in one command (APT: `dpkg-query pkg1 pkg2`;
+     Homebrew: `brew info --json=v2 pkg1 pkg2`; npm: `npm list -g --depth=0 --json` + memory filter).
+   - `batch_fetch_releases(&[BatchFetchItem]) -> Result<Vec<BatchFetchResult>>` — fetch upstream
+     releases for multiple packages. Default calls `fetch_releases` per item. Override when the local
+     package index supports multi-package queries (APT: `apt-cache madison pkg1 pkg2`; Homebrew:
+     `brew info --json=v2 pkg1 pkg2`). Do **not** override for API-based plugins with per-package
+     HTTP endpoints (GitHub, GitLab, npm registry).
+   - `execute_batch_update(&[BatchUpdateItem], output_tx) -> Result<Vec<BatchUpdateResult>>` —
+     update multiple packages in one command. Default calls `execute_update` per item. Implemented by
+     APT, Homebrew, and npm.
+
+   Agent-core `batch_check_versions()` groups `VersionCheckAssignment`s by `(PluginType,
+   effective_config_json)` and calls these batch methods once per group via `join_all`, with
+   `RefreshPackageIndex` called once per group. Scheduler Phase A groups by `plugin_config_id` only
+   and calls `batch_fetch_releases` once per config.
 
 9. **Discovery allowlist controls which plugin types run.** Two tables, `tenant_discovery_allowlist`
    and `host_discovery_allowlist`, gate which discovery plugin types execute during

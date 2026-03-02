@@ -334,8 +334,9 @@ implementations. Two methods are required (no default implementation):
 
 All other methods (`detect_installed_version`, `fetch_releases`, `execute_update`,
 `discover_software`, `refresh_package_index`, `detect_host_compatibility`, `pre_update_hook`,
-`post_update_hook`) have default implementations that return errors or empty results, so plugins
-override only what they support.
+`post_update_hook`, `execute_batch_update`, `batch_detect_installed_version`,
+`batch_fetch_releases`) have default implementations that return errors or empty results, so
+plugins override only what they support.
 
 When implementing a new plugin, always return the correct `PluginType` variant from `plugin_type()`.
 This ensures that boxed `dyn Plugin` objects can be introspected after creation by
@@ -784,6 +785,144 @@ install), the default sequential fallback is sufficient.
 
 See [Host Packages Architecture](../architecture/host-packages.md#batch-updates) for the full
 batch update flow from controller to agent.
+
+## Batch Version Check
+
+The `Plugin` trait includes two optional batch methods for efficient version checking when the same
+plugin handles many packages. Both have default sequential fallbacks so existing plugins need no
+changes; native implementations reduce N subprocess or API calls to one.
+
+### Trait methods
+
+```rust
+async fn batch_detect_installed_version(
+    &self,
+    items: &[BatchDetectItem],
+) -> Result<Vec<BatchDetectResult>>
+
+async fn batch_fetch_releases(
+    &self,
+    items: &[BatchFetchItem],
+) -> Result<Vec<BatchFetchResult>>
+```
+
+### Types
+
+```rust
+pub struct BatchDetectItem {
+    pub package_identifier: String,
+}
+
+pub struct BatchDetectResult {
+    pub package_identifier: String,
+    pub installed_version: Option<Version>, // None = not installed
+    pub error: Option<String>,              // None = success
+}
+
+pub struct BatchFetchItem {
+    pub package_identifier: String,
+}
+
+pub struct BatchFetchResult {
+    pub package_identifier: String,
+    pub releases: Vec<UpstreamRelease>,
+    pub error: Option<String>,
+}
+```
+
+All four types are defined in `crates/plugins/infrastructure/core/src/batch_detect.rs` and
+`crates/plugins/infrastructure/core/src/batch_fetch.rs`, and re-exported from
+`uptrakit-plugin-infrastructure-core`.
+
+### Default behaviour
+
+The default implementations call `detect_installed_version()` or `fetch_releases()` sequentially for
+each item. A per-item error is stored in `BatchDetectResult::error` or `BatchFetchResult::error`
+rather than failing the entire batch. An empty input slice returns an empty result.
+
+### When to override
+
+Override these methods when your plugin's package manager accepts multiple packages in a single
+command invocation, producing equivalent results to N individual calls:
+
+- **`batch_detect_installed_version`**: your detection command accepts a package list (e.g.
+  `dpkg-query pkg1 pkg2`, `brew info --json=v2 pkg1 pkg2`, `npm list -g --depth=0 --json`).
+- **`batch_fetch_releases`**: your local index query accepts a package list (e.g.
+  `apt-cache madison pkg1 pkg2`, `brew info --json=v2 pkg1 pkg2`).
+
+Do **not** override these for plugins whose detection or fetching is inherently per-package (e.g.
+one HTTP request per package to a remote API). The sequential default is correct in those cases.
+
+### Implementation examples
+
+#### APT — `batch_detect_installed_version`
+
+Runs one `dpkg-query` call for all packages:
+
+```text
+dpkg-query --show --showformat='${Package}\t${Version}\n' pkg1 pkg2 pkg3
+```
+
+- Exit code is ignored (non-zero when any package is unknown; found packages still appear in stdout).
+- Parse stdout line-by-line: split on `\t` → `(package, version)`.
+- Empty version string → `installed_version: None, error: None` (known-uninstalled).
+- Package absent from stdout → `installed_version: None, error: None` (not installed).
+
+#### APT — `batch_fetch_releases`
+
+Runs one `apt-cache madison` call for all packages:
+
+```text
+apt-cache madison pkg1 pkg2 pkg3
+```
+
+- Lines grouped by the first `|`-delimited field (package name, trimmed).
+- First line per package is the highest-priority available version.
+
+#### Homebrew — both methods
+
+Passes all packages to a single `brew info --json=v2` call:
+
+```text
+brew info --json=v2 pkg1 pkg2 pkg3
+```
+
+The existing `parse_installed_version(json, pkg, is_cask)` and `parse_latest_version(json, pkg,
+is_cask)` helpers already search the returned JSON array by name, so they work for batch results
+without modification.
+
+#### npm — `batch_detect_installed_version`
+
+Fetches all globally installed packages in one call (no package filter):
+
+```text
+npm list -g --depth=0 --json
+```
+
+Results are filtered in memory via a `HashMap`. If the command fails, all items are treated as
+not installed (consistent with the single-item behaviour). `batch_fetch_releases` keeps the default
+sequential fallback because the npm registry has no batch endpoint.
+
+### How the system uses batch methods
+
+#### Agent-core `batch_check_versions()`
+
+`handle_check_versions` groups `VersionCheckAssignment` entries by `(PluginType, effective_config_json)`
+before calling plugins. For each group:
+
+1. One plugin instance is created.
+2. `batch_detect_installed_version` is called for all items in the detect group.
+3. `batch_fetch_releases` is called for all items in the fetch group.
+4. Groups run in parallel via `join_all`.
+
+`RefreshPackageIndex` is called once per unique group, regardless of the number of items sharing
+that group.
+
+#### Scheduler Phase A
+
+The controller-side `run_controller_side_fetch_releases` groups rows by `plugin_config_id` (instead
+of `(plugin_config_id, package_identifier)`). A single `batch_fetch_releases` call per config
+replaces the previous N-per-package loop.
 
 ## Testing
 
