@@ -30,7 +30,7 @@ mod tests {
                 password_auth_enabled: true,
             },
             agent_certificates: AgentCertificateSettingsResponse {
-                lifetime_days: 365,
+                lifetime_hours: 8_760,
                 renewal_window_hours_override: None,
                 effective_renewal_window_hours: 336,
             },
@@ -41,7 +41,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.registration.mode, RegistrationMode::Invite);
         assert!(de.authentication.password_auth_enabled);
-        assert_eq!(de.agent_certificates.lifetime_days, 365);
+        assert_eq!(de.agent_certificates.lifetime_hours, 8_760);
         assert_eq!(de.enrollment_tokens.active_count, 2);
     }
 }

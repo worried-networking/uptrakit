@@ -15,11 +15,11 @@ pub use uptrakit_web_api_types::settings_agent_certs::{
     AgentCertificateSettingsResponse, UpdateAgentCertificateSettingsRequest,
 };
 
-const MAX_AGENT_CERT_LIFETIME_DAYS: u16 = 730;
+const MAX_AGENT_CERT_LIFETIME_HOURS: u32 = 17_520;
 
 fn build_response(state: &AppState) -> AgentCertificateSettingsResponse {
     AgentCertificateSettingsResponse {
-        lifetime_days: state.settings.agent_cert_lifetime_days(),
+        lifetime_hours: state.settings.agent_cert_lifetime_hours(),
         renewal_window_hours_override: state.settings.renewal_window_hours_override(),
         effective_renewal_window_hours: state.settings.renewal_window_hours(),
     }
@@ -65,31 +65,31 @@ pub async fn update_agent_certificate_settings(
     CanManageSettings(_user): CanManageSettings,
     Json(req): Json<UpdateAgentCertificateSettingsRequest>,
 ) -> Response {
-    if let Some(days) = req.lifetime_days {
-        if days < 1 {
+    if let Some(hours) = req.lifetime_hours {
+        if hours < 1 {
             return error_response(
                 StatusCode::BAD_REQUEST,
-                "Certificate lifetime must be at least 1 day",
+                "Certificate lifetime must be at least 1 hour",
             );
         }
-        if days > MAX_AGENT_CERT_LIFETIME_DAYS {
+        if hours > MAX_AGENT_CERT_LIFETIME_HOURS {
             return error_response(
                 StatusCode::BAD_REQUEST,
-                "Certificate lifetime must not exceed 730 days",
+                "Certificate lifetime must not exceed 17520 hours",
             );
         }
         if let Err(e) = upsert_setting(
             state.db(),
             state.default_tenant_id,
-            SettingKey::AgentCertLifetimeDays,
-            serde_json::json!(days),
+            SettingKey::AgentCertLifetimeHours,
+            serde_json::json!(hours),
         )
         .await
         {
             tracing::error!("Failed to save agent cert lifetime: {e:?}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
-        state.settings.set_agent_cert_lifetime_days(days).await;
+        state.settings.set_agent_cert_lifetime_hours(hours).await;
     }
 
     if let Some(hours) = req.renewal_window_hours {

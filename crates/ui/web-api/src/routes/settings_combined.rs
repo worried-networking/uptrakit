@@ -60,7 +60,7 @@ pub async fn get_combined_settings(
     };
 
     let agent_certificates = AgentCertificateSettingsResponse {
-        lifetime_days: state.settings.agent_cert_lifetime_days(),
+        lifetime_hours: state.settings.agent_cert_lifetime_hours(),
         renewal_window_hours_override: state.settings.renewal_window_hours_override(),
         effective_renewal_window_hours: state.settings.renewal_window_hours(),
     };
@@ -106,9 +106,9 @@ mod tests {
                 password_auth_enabled: false,
             };
         let agent_certificates = AgentCertificateSettingsResponse {
-            lifetime_days: 14,
+            lifetime_hours: 336,
             renewal_window_hours_override: None,
-            // 14 days × 24 / 5 = 67 h, but ceiling is 14 days = 336 h → 67 h
+            // 336 h / 5 = 67 h; ceiling is 336 h → effective is 67 h
             effective_renewal_window_hours: 67,
         };
         let enrollment_tokens = EnrollmentTokensSummary { active_count: 3 };
@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(combined.registration.mode, RegistrationMode::Invite);
         assert!(combined.registration.require_token_for_oidc);
         assert!(!combined.authentication.password_auth_enabled);
-        assert_eq!(combined.agent_certificates.lifetime_days, 14);
+        assert_eq!(combined.agent_certificates.lifetime_hours, 336);
         assert_eq!(combined.agent_certificates.renewal_window_hours_override, None);
         assert_eq!(combined.agent_certificates.effective_renewal_window_hours, 67);
         assert_eq!(combined.enrollment_tokens.active_count, 3);
