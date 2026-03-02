@@ -479,6 +479,10 @@ pub fn build_host_packages_attributes_payload(
 /// Assistant displays an update badge when `installed_version != latest_version`,
 /// i.e. when `pending_count > 0`.
 ///
+/// The entity is **disabled by default** (`"enabled_by_default": false`). Users
+/// must explicitly enable it in Home Assistant to see it. This avoids noise for
+/// users who do not want package-level tracking.
+///
 /// The returned JSON should be published (retained) on
 /// [`host_packages_discovery_config_topic`].
 ///
@@ -496,6 +500,7 @@ pub fn build_host_packages_attributes_payload(
 /// assert_eq!(v["name"], "myserver packages");
 /// assert_eq!(v["platform"], "mqtt");
 /// assert_eq!(v["payload_install"], "install");
+/// assert_eq!(v["enabled_by_default"], false);
 /// ```
 pub fn build_host_packages_discovery_config(
     topic_prefix: &str,
@@ -513,6 +518,7 @@ pub fn build_host_packages_discovery_config(
         "unique_id": uid,
         "name": format!("{hostname} packages"),
         "default_entity_id": default_entity_id,
+        "enabled_by_default": false,
         "state_topic": host_packages_state_topic(topic_prefix, host_id),
         "latest_version_topic": host_packages_latest_version_topic(topic_prefix, host_id),
         "command_topic": host_packages_command_topic(topic_prefix, host_id),
@@ -551,6 +557,226 @@ pub fn parse_host_packages_command_topic(topic_prefix: &str, topic: &str) -> Opt
     let prefix = format!("{topic_prefix}/hosts/");
     let rest = topic.strip_prefix(prefix.as_str())?;
     let rest = rest.strip_suffix("/set")?;
+
+    // rest should now be just a UUID with no slashes.
+    if rest.contains('/') {
+        return None;
+    }
+
+    Uuid::parse_str(rest).ok()
+}
+
+// =============================================================================
+// Security-only host package entity helpers
+// =============================================================================
+
+/// Returns the MQTT topic carrying the state string for a host's security
+/// updates entity.
+///
+/// Format: `{prefix}/hosts/{host_id}/security/state`
+///
+/// The published value is `"{N} security updates pending"` when
+/// `security_pending_count > 0`, or `"up-to-date"` when all security
+/// packages are current.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_security_state_topic;
+/// let topic = host_security_state_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/security/state"));
+/// ```
+pub fn host_security_state_topic(prefix: &str, host_id: Uuid) -> String {
+    format!("{prefix}/hosts/{host_id}/security/state")
+}
+
+/// Returns the MQTT topic carrying the latest-version string for a host's
+/// security updates entity.
+///
+/// Format: `{prefix}/hosts/{host_id}/security/latest_version`
+///
+/// The published value is always `"up-to-date"`.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_security_latest_version_topic;
+/// let topic = host_security_latest_version_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/security/latest_version"));
+/// ```
+pub fn host_security_latest_version_topic(prefix: &str, host_id: Uuid) -> String {
+    format!("{prefix}/hosts/{host_id}/security/latest_version")
+}
+
+/// Returns the MQTT topic for HA JSON attributes of a host's security updates
+/// entity.
+///
+/// Format: `{prefix}/hosts/{host_id}/security/attributes`
+///
+/// Published as a retained JSON payload with fields:
+/// - `"in_progress"` (bool) — whether a security-only batch is pending/running
+/// - `"pending_count"` (u32) — number of security packages with available updates
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_security_json_attributes_topic;
+/// let topic = host_security_json_attributes_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/security/attributes"));
+/// ```
+pub fn host_security_json_attributes_topic(prefix: &str, host_id: Uuid) -> String {
+    format!("{prefix}/hosts/{host_id}/security/attributes")
+}
+
+/// Returns the MQTT command topic that HA publishes `"install"` to for a host's
+/// security updates entity.
+///
+/// Format: `{prefix}/hosts/{host_id}/security/set`
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_security_command_topic;
+/// let topic = host_security_command_topic("uptrakit", Uuid::nil());
+/// assert!(topic.ends_with("/security/set"));
+/// ```
+pub fn host_security_command_topic(prefix: &str, host_id: Uuid) -> String {
+    format!("{prefix}/hosts/{host_id}/security/set")
+}
+
+/// Returns a unique ID string for a host's security updates entity.
+///
+/// Format: `uptrakit_sec_{tenant_id_no_dashes}_{host_id_no_dashes}`
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_security_unique_id;
+/// let uid = host_security_unique_id(Uuid::nil(), Uuid::nil());
+/// assert!(uid.starts_with("uptrakit_sec_"));
+/// assert!(!uid.contains('-'));
+/// ```
+pub fn host_security_unique_id(tenant_id: Uuid, host_id: Uuid) -> String {
+    let t = tenant_id.simple();
+    let h = host_id.simple();
+    format!("uptrakit_sec_{t}_{h}")
+}
+
+/// Returns the HA MQTT discovery config topic for a host's security updates
+/// `update` entity.
+///
+/// Format: `{ha_prefix}/update/uptrakit_sec_{t}_{h}/config`
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::host_security_discovery_config_topic;
+/// let topic = host_security_discovery_config_topic("homeassistant", Uuid::nil(), Uuid::nil());
+/// assert!(topic.starts_with("homeassistant/update/"));
+/// assert!(topic.ends_with("/config"));
+/// ```
+pub fn host_security_discovery_config_topic(
+    ha_prefix: &str,
+    tenant_id: Uuid,
+    host_id: Uuid,
+) -> String {
+    let uid = host_security_unique_id(tenant_id, host_id);
+    format!("{ha_prefix}/update/{uid}/config")
+}
+
+/// Build the HA MQTT discovery JSON for a host's security updates `update`
+/// entity.
+///
+/// This is a second `update` entity per host (alongside the all-packages entity)
+/// that surfaces only packages with `update_category = "security"`. It is
+/// **disabled by default** — users opt in explicitly.
+///
+/// The device identifier is the same as the host packages entity
+/// (`uptrakit_host_{tenant}_{host}`), so both entities appear under the same
+/// HA device.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::build_host_security_discovery_config;
+/// let v = build_host_security_discovery_config(
+///     "uptrakit",
+///     Uuid::nil(),
+///     Uuid::nil(),
+///     "myserver",
+/// );
+/// assert_eq!(v["name"], "myserver security updates");
+/// assert_eq!(v["platform"], "mqtt");
+/// assert_eq!(v["payload_install"], "install");
+/// assert_eq!(v["enabled_by_default"], false);
+/// ```
+pub fn build_host_security_discovery_config(
+    topic_prefix: &str,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    hostname: &str,
+) -> serde_json::Value {
+    let uid = host_security_unique_id(tenant_id, host_id);
+    let host_simple = host_id.simple().to_string();
+    let tenant_simple = tenant_id.simple().to_string();
+    let default_entity_id = format!("{}_security_updates", slugify(hostname));
+
+    serde_json::json!({
+        "platform": "mqtt",
+        "unique_id": uid,
+        "name": format!("{hostname} security updates"),
+        "default_entity_id": default_entity_id,
+        "enabled_by_default": false,
+        "state_topic": host_security_state_topic(topic_prefix, host_id),
+        "latest_version_topic": host_security_latest_version_topic(topic_prefix, host_id),
+        "command_topic": host_security_command_topic(topic_prefix, host_id),
+        "payload_install": "install",
+        "json_attributes_topic": host_security_json_attributes_topic(topic_prefix, host_id),
+        "availability_topic": format!("{topic_prefix}/status"),
+        "payload_available": "online",
+        "payload_not_available": "offline",
+        "device": {
+            "identifiers": [format!("uptrakit_host_{tenant_simple}_{host_simple}")],
+            "name": hostname,
+            "manufacturer": "Uptrakit"
+        }
+    })
+}
+
+/// Try to parse a host security command topic back to the `host_id`.
+///
+/// Returns `None` if the topic doesn't match
+/// `{prefix}/hosts/{uuid}/security/set`.
+///
+/// This parser is unambiguous from [`parse_host_packages_command_topic`]:
+/// the latter rejects any topic whose UUID segment contains a `/`, so
+/// `{host_id}/security` cannot match the packages parser.
+///
+/// # Examples
+///
+/// ```
+/// # use uuid::Uuid;
+/// # use uptrakit_mqtt::ha_discovery::{host_security_command_topic, parse_host_security_command_topic};
+/// let host_id = Uuid::nil();
+/// let topic = host_security_command_topic("uptrakit", host_id);
+/// let parsed = parse_host_security_command_topic("uptrakit", &topic);
+/// assert_eq!(parsed, Some(host_id));
+///
+/// // Non-matching topic returns None.
+/// assert!(parse_host_security_command_topic("uptrakit", "uptrakit/hosts/bad/set").is_none());
+/// ```
+pub fn parse_host_security_command_topic(topic_prefix: &str, topic: &str) -> Option<Uuid> {
+    // Expected: "{prefix}/hosts/{uuid}/security/set"
+    let prefix = format!("{topic_prefix}/hosts/");
+    let rest = topic.strip_prefix(prefix.as_str())?;
+    let rest = rest.strip_suffix("/security/set")?;
 
     // rest should now be just a UUID with no slashes.
     if rest.contains('/') {
@@ -1410,5 +1636,203 @@ mod tests {
         // A software item command topic uses /update/ not /hosts/
         let sw_topic = command_topic("uptrakit", item(), host());
         assert!(parse_host_packages_command_topic("uptrakit", &sw_topic).is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // build_host_packages_discovery_config — enabled_by_default: false
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_host_packages_discovery_config_disabled_by_default() {
+        let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["enabled_by_default"], false);
+    }
+
+    // -------------------------------------------------------------------------
+    // host_security_state_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_security_state_topic_format() {
+        let t = host_security_state_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/security/state"
+        );
+    }
+
+    #[test]
+    fn host_security_state_topic_ends_with_security_state() {
+        assert!(host_security_state_topic("pfx", host()).ends_with("/security/state"));
+    }
+
+    // -------------------------------------------------------------------------
+    // host_security_latest_version_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_security_latest_version_topic_format() {
+        let t = host_security_latest_version_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/security/latest_version"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // host_security_json_attributes_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_security_json_attributes_topic_format() {
+        let t = host_security_json_attributes_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/security/attributes"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // host_security_command_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_security_command_topic_format() {
+        let t = host_security_command_topic("uptrakit", host());
+        assert_eq!(
+            t,
+            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/security/set"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // host_security_unique_id
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_security_unique_id_starts_with_uptrakit_sec() {
+        assert!(host_security_unique_id(tenant(), host()).starts_with("uptrakit_sec_"));
+    }
+
+    #[test]
+    fn host_security_unique_id_no_dashes() {
+        let uid = host_security_unique_id(tenant(), host());
+        assert!(!uid.contains('-'));
+    }
+
+    #[test]
+    fn host_security_unique_id_differs_from_packages_unique_id() {
+        assert_ne!(
+            host_security_unique_id(tenant(), host()),
+            host_packages_unique_id(tenant(), host())
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // host_security_discovery_config_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn host_security_discovery_config_topic_format() {
+        let topic = host_security_discovery_config_topic("homeassistant", tenant(), host());
+        assert!(topic.starts_with("homeassistant/update/"));
+        assert!(topic.ends_with("/config"));
+        assert!(topic.contains("uptrakit_sec_"));
+    }
+
+    // -------------------------------------------------------------------------
+    // build_host_security_discovery_config
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn build_host_security_discovery_config_platform_mqtt() {
+        let v = build_host_security_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["platform"], "mqtt");
+    }
+
+    #[test]
+    fn build_host_security_discovery_config_name_includes_security_updates() {
+        let v = build_host_security_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["name"], "myserver security updates");
+    }
+
+    #[test]
+    fn build_host_security_discovery_config_disabled_by_default() {
+        let v = build_host_security_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["enabled_by_default"], false);
+    }
+
+    #[test]
+    fn build_host_security_discovery_config_payload_install() {
+        let v = build_host_security_discovery_config("uptrakit", tenant(), host(), "myserver");
+        assert_eq!(v["payload_install"], "install");
+    }
+
+    #[test]
+    fn build_host_security_discovery_config_default_entity_id() {
+        let v = build_host_security_discovery_config("uptrakit", tenant(), host(), "My Server");
+        assert_eq!(v["default_entity_id"], "my_server_security_updates");
+    }
+
+    #[test]
+    fn build_host_security_discovery_config_uses_security_command_topic() {
+        let v = build_host_security_discovery_config("uptrakit", tenant(), host(), "h");
+        let expected = host_security_command_topic("uptrakit", host());
+        assert_eq!(v["command_topic"], expected.as_str());
+    }
+
+    #[test]
+    fn build_host_security_discovery_config_device_same_as_packages() {
+        let sec = build_host_security_discovery_config("uptrakit", tenant(), host(), "h");
+        let pkg = build_host_packages_discovery_config("uptrakit", tenant(), host(), "h");
+        // Both entities must belong to the same HA device.
+        assert_eq!(sec["device"]["identifiers"], pkg["device"]["identifiers"]);
+    }
+
+    // -------------------------------------------------------------------------
+    // parse_host_security_command_topic
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn parse_host_security_command_topic_roundtrip() {
+        let topic = host_security_command_topic("uptrakit", host());
+        let parsed = parse_host_security_command_topic("uptrakit", &topic);
+        assert_eq!(parsed, Some(host()));
+    }
+
+    #[test]
+    fn parse_host_security_command_topic_wrong_prefix() {
+        let topic = host_security_command_topic("uptrakit", host());
+        assert!(parse_host_security_command_topic("other", &topic).is_none());
+    }
+
+    #[test]
+    fn parse_host_security_command_topic_invalid_uuid() {
+        let topic = "uptrakit/hosts/not-a-uuid/security/set";
+        assert!(parse_host_security_command_topic("uptrakit", topic).is_none());
+    }
+
+    #[test]
+    fn parse_host_security_command_topic_nil_uuid() {
+        let zero = Uuid::nil();
+        let topic = host_security_command_topic("pfx", zero);
+        let parsed = parse_host_security_command_topic("pfx", &topic);
+        assert_eq!(parsed, Some(zero));
+    }
+
+    #[test]
+    fn parse_host_security_command_topic_does_not_match_packages_topic() {
+        // A host-packages command topic ({prefix}/hosts/{uuid}/set) must NOT
+        // match the security parser.
+        let pkg_topic = host_packages_command_topic("uptrakit", host());
+        assert!(parse_host_security_command_topic("uptrakit", &pkg_topic).is_none());
+    }
+
+    #[test]
+    fn parse_host_packages_command_topic_does_not_match_security_topic() {
+        // A security command topic ({prefix}/hosts/{uuid}/security/set) must
+        // NOT match the packages parser (the UUID segment contains '/security').
+        let sec_topic = host_security_command_topic("uptrakit", host());
+        assert!(parse_host_packages_command_topic("uptrakit", &sec_topic).is_none());
     }
 }
