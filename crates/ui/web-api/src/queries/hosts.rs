@@ -5,6 +5,7 @@ use sea_orm::{
 use std::collections::HashMap;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{host, prelude::ServiceHost, service, service_host};
+use uptrakit_web_api_types::host_packages::HostUpdateSummary;
 use uptrakit_web_api_types::hosts::{HostAgentSummary, HostResponse, UpdateHostRequest};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::services::ServiceStatus;
@@ -14,7 +15,11 @@ use crate::tenant_db::TenantDb;
 
 // --- Private helpers ---
 
-fn host_to_response(h: host::Model, agents: Vec<HostAgentSummary>) -> HostResponse {
+fn host_to_response(
+    h: host::Model,
+    agents: Vec<HostAgentSummary>,
+    update_summary: HostUpdateSummary,
+) -> HostResponse {
     HostResponse {
         id: h.id,
         machine_id: h.machine_id,
@@ -28,7 +33,7 @@ fn host_to_response(h: host::Model, agents: Vec<HostAgentSummary>) -> HostRespon
         created_at: h.created_at,
         updated_at: h.updated_at,
         agents,
-        update_summary: Default::default(),
+        update_summary,
     }
 }
 
@@ -152,11 +157,18 @@ pub async fn list_hosts(
         }
     };
 
+    // Batch-load update summaries for all hosts on this page.
+    let update_summaries =
+        super::host_packages::compute_update_summaries_batch(tenant_db, &host_ids)
+            .await
+            .unwrap_or_default();
+
     let items: Vec<HostResponse> = hosts
         .into_iter()
         .map(|h| {
+            let host_id = h.id;
             let agents: Vec<HostAgentSummary> = host_service_ids
-                .get(&h.id)
+                .get(&host_id)
                 .map(|svc_ids| {
                     svc_ids
                         .iter()
@@ -180,7 +192,11 @@ pub async fn list_hosts(
                         .collect()
                 })
                 .unwrap_or_default();
-            host_to_response(h, agents)
+            let summary = update_summaries
+                .get(&host_id)
+                .cloned()
+                .unwrap_or_default();
+            host_to_response(h, agents, summary)
         })
         .collect();
 
@@ -201,7 +217,10 @@ pub async fn get_active_host(
         return Ok(None);
     };
     let agents = load_host_agents(tenant_db, id).await;
-    Ok(Some(host_to_response(h, agents)))
+    let update_summary = super::host_packages::compute_update_summary(tenant_db, id)
+        .await
+        .unwrap_or_default();
+    Ok(Some(host_to_response(h, agents, update_summary)))
 }
 
 /// Update the host's friendly name. Returns `None` if not found.
@@ -227,7 +246,10 @@ pub async fn update_host(
 
     let updated = active.update(tenant_db.db()).await?;
     let agents = load_host_agents(tenant_db, id).await;
-    Ok(Some(host_to_response(updated, agents)))
+    let update_summary = super::host_packages::compute_update_summary(tenant_db, id)
+        .await
+        .unwrap_or_default();
+    Ok(Some(host_to_response(updated, agents, update_summary)))
 }
 
 /// Soft-delete a host. Returns `true` if deactivated, `false` if not found.

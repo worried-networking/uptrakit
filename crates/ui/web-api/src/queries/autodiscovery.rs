@@ -27,7 +27,7 @@ use uptrakit_shared_db::entity::{
 };
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_shared_types::SoftwareDiscoveryState;
+use uptrakit_shared_types::{SoftwareDiscoveryState, TrackingSystem};
 use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, DiscardDiscoveredResponse,
 };
@@ -421,9 +421,10 @@ pub async fn process_discovery_results(
 
 /// Process a single plugin's discovery results.
 ///
-/// Routes each item to the correct processing path based on its `targets` field
-/// and the result's `plugin_config_id`. This function is fully generic — no
-/// plugin-type-specific branching.
+/// Routes each item to the correct processing path based on its `tracking_system`
+/// field, `targets`, and the result's `plugin_config_id`. Items with
+/// `TrackingSystem::HostManaged` are routed to `host_packages`; targeted items
+/// go through the existing `software_items` flow.
 async fn process_plugin_result(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -432,34 +433,81 @@ async fn process_plugin_result(
     result: &DiscoveryPluginResult,
 ) -> Result<()> {
     for item in &result.discoveries {
-        let item_info = DiscoveredItemInfo {
-            package_identifier: &item.package_identifier,
-            name: &item.name,
-            installed_version: &item.installed_version,
-        };
-        if !item.targets.is_empty() {
-            // Target-based: each target specifies its own plugin config and roles.
-            process_targets_discovery(db, tenant_id, host_id, &item_info, &item.targets, now)
-                .await?;
-        } else if let Some(existing_pc_id) = result.plugin_config_id {
-            // Config-ID-based: use the pre-existing plugin config for all roles.
-            let ignore_set = load_ignore_set(db, tenant_id, existing_pc_id).await?;
-            process_one_discovery(
-                db,
-                tenant_id,
-                host_id,
-                existing_pc_id,
-                item_info,
-                &ignore_set,
-                now,
-            )
-            .await?;
-        } else {
-            tracing::warn!(
-                plugin_type = %result.plugin_type,
-                package_identifier = %item.package_identifier,
-                "discovery item has no targets and no plugin_config_id; skipping"
-            );
+        match item.tracking_system {
+            TrackingSystem::HostManaged => {
+                // Route to host_packages table.
+                if let Some(existing_pc_id) = result.plugin_config_id {
+                    let ignore_set = super::host_packages::load_host_package_ignore_set(
+                        db,
+                        tenant_id,
+                        host_id,
+                        existing_pc_id,
+                    )
+                    .await
+                    .map_err(|e| report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+
+                    super::host_packages::find_or_create_host_package(
+                        super::host_packages::FindOrCreateHostPackageParams {
+                            db,
+                            tenant_id,
+                            host_id,
+                            plugin_config_id: existing_pc_id,
+                            package_identifier: &item.package_identifier,
+                            name: &item.name,
+                            installed_version: &item.installed_version,
+                            ignore_set: &ignore_set,
+                        },
+                    )
+                    .await
+                    .map_err(|e| report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+                } else {
+                    tracing::warn!(
+                        plugin_type = %result.plugin_type,
+                        package_identifier = %item.package_identifier,
+                        "host-managed item has no plugin_config_id; skipping"
+                    );
+                }
+            }
+            TrackingSystem::Targeted => {
+                // Existing targeted flow.
+                let item_info = DiscoveredItemInfo {
+                    package_identifier: &item.package_identifier,
+                    name: &item.name,
+                    installed_version: &item.installed_version,
+                };
+                if !item.targets.is_empty() {
+                    process_targets_discovery(
+                        db, tenant_id, host_id, &item_info, &item.targets, now,
+                    )
+                    .await?;
+                } else if let Some(existing_pc_id) = result.plugin_config_id {
+                    let ignore_set = load_ignore_set(db, tenant_id, existing_pc_id).await?;
+                    process_one_discovery(
+                        db,
+                        tenant_id,
+                        host_id,
+                        existing_pc_id,
+                        item_info,
+                        &ignore_set,
+                        now,
+                    )
+                    .await?;
+                } else {
+                    tracing::warn!(
+                        plugin_type = %result.plugin_type,
+                        package_identifier = %item.package_identifier,
+                        "discovery item has no targets and no plugin_config_id; skipping"
+                    );
+                }
+            }
+            _ => {
+                tracing::warn!(
+                    plugin_type = %result.plugin_type,
+                    package_identifier = %item.package_identifier,
+                    tracking_system = %item.tracking_system,
+                    "unknown tracking system variant; skipping"
+                );
+            }
         }
     }
 

@@ -380,8 +380,14 @@ mod tests {
             has_update: false,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
-        assert!(!json.contains("installed_version"));
-        assert!(!json.contains("latest_version"));
+        assert!(
+            !json.contains(r#""installed_version":"#),
+            "installed_version should be omitted when None"
+        );
+        assert!(
+            !json.contains(r#""latest_version":"#),
+            "latest_version should be omitted when None"
+        );
     }
 
     // ── TriggerHostPackageUpdateRequest ───────────────────────────────
