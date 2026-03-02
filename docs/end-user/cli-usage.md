@@ -342,7 +342,7 @@ See also: [Discovery Allowlist API](../api/discovery-allowlist.md), [Autodiscove
 Trigger version checks to discover installed and available versions.
 
 ```sh
-# Trigger bulk version check (all items, all hosts via scheduler)
+# Trigger bulk release fetch (all items, all hosts via scheduler)
 uptrakit check all
 
 # Trigger version check for a specific software item (all assigned hosts)
@@ -352,11 +352,18 @@ uptrakit check item <ITEM_ID>
 uptrakit check item <ITEM_ID> --host <HOST_ID>
 ```
 
-`check item` triggers a version check for a specific software item. The agent checks both installed and available versions in a single operation.
+`check item` triggers a version check for a specific software item. The agent checks both installed
+and available versions in a single operation.
 
-`check all` finds the `version_check` scheduler task and triggers it.
+`check all` locates the `fetch_releases` scheduler task and triggers it immediately. This causes the
+controller to call external APIs for controller-side plugins (GitHub Releases, Docker Registry) and
+dispatch release-index queries to agents for agent-side plugins (APT, Homebrew, npm). It does
+**not** trigger installed-version detection — that runs on its own `detect_version` schedule (daily
+by default). To trigger installed-version detection immediately, use
+`uptrakit scheduler trigger <DETECT_VERSION_TASK_ID>`.
 
-See also: [Wire Protocol](../api/wire-protocol.md), [HTTP Web API](../api/http-web-api.md).
+See also: [Wire Protocol](../api/wire-protocol.md), [HTTP Web API](../api/http-web-api.md),
+[Scheduler](../architecture/scheduler.md).
 
 ## Updates
 

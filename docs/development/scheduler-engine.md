@@ -14,8 +14,11 @@ The engine provides:
 - **`TaskExecutor` trait** — implemented by each scheduled task type.
 - **`SchedulerNotifier` trait** — abstracts push notification delivery (local vs NATS).
 - **Shared query helpers** — `load_software_states_for_tenant()`, `should_rotate_ca()`.
-- **Five built-in executors** — `AuthCleanupExecutor`, `StaleLeaseCleanupExecutor`,
-  `VersionCheckExecutor`, `ServiceCertCheckExecutor`, `CrlRenewalExecutor`.
+- **Six built-in executors** — `AuthCleanupExecutor`, `StaleLeaseCleanupExecutor`,
+  `FetchReleasesExecutor`, `DetectVersionExecutor`, `ServiceCertCheckExecutor`, `CrlRenewalExecutor`.
+- **Shared query helpers** — `queries.rs` contains `AgentAssignmentRow`, `HostPackageAssignmentRow`,
+  `merge_config`, `query_agent_assignment_rows`, and `query_host_package_assignment_rows`, shared
+  by `FetchReleasesExecutor` and `DetectVersionExecutor`.
 
 The CA rotation check executor is **not** in the engine — it is mode-specific:
 
@@ -34,14 +37,17 @@ crates/shared/scheduler-engine/src/
     cron_utils.rs       — Cron parsing (chrono↔time bridge), next_run_after(), validate_cron()
     error.rs            — SchedulerError, Result<T>
     executor.rs         — TaskExecutor trait
-    notifier.rs         — SchedulerNotifier trait
+    notifier.rs         — SchedulerNotifier trait (+ NoopSchedulerNotifier for tests)
     ca_utils.rs         — should_rotate_ca() utility (x509 cert expiry check)
     software_states.rs  — load_software_states_for_tenant() query
     executors/
         mod.rs
         auth_cleanup.rs
         stale_lease_cleanup.rs
-        version_check.rs
+        queries.rs          — Shared: AgentAssignmentRow, HostPackageAssignmentRow, merge_config,
+                              query_agent_assignment_rows, query_host_package_assignment_rows
+        fetch_releases.rs   — FetchReleasesExecutor (Phase A parallel + Phase B agent dispatch)
+        detect_version.rs   — DetectVersionExecutor (agent-side installed-version detection)
         service_cert_check.rs
         crl_renewal.rs
 ```
@@ -118,12 +124,34 @@ Cleans expired authentication flow state from the database. With the `oidc` feat
 Releases stale MQTT client leases by running a direct DELETE query against the `mqtt_leases` table
 for entries whose `last_heartbeat` exceeds the stale threshold.
 
-### VersionCheckExecutor
+### FetchReleasesExecutor
 
-Queries enabled software items for the tenant, groups them by agent service, and sends
-`CheckVersionsPayload` messages via `SchedulerNotifier::send_to_service()`. Also triggers
-controller-side fetch for items with `ControllerSideFetchReleases` plugins and pushes
-`SoftwareStates` to MQTT services via `SchedulerNotifier::push_software_states_for_tenant()`.
+Handles the `fetch_releases` task. Phase A and Phase B run concurrently via `tokio::join!`.
+
+**Phase A — Controller-side fetch (parallel):** Queries `host_software_item_plugins` with
+`role = 'fetch_releases'` targeting the controller. Groups by `(plugin_config_id, package_identifier)`,
+instantiates plugins, then spawns them all into a `JoinSet` bounded by a
+`Semaphore(MAX_CONCURRENT_CONTROLLER_FETCHES = 10)`. After all spawned tasks complete, the
+DB update loop runs sequentially: updates `host_software_items.latest_version`, batch-updates
+`software_item.last_checked_at`, and pushes MQTT software states via
+`SchedulerNotifier::push_software_states_for_tenant()`.
+
+**Phase B — Agent-side dispatch:** Calls `query_agent_assignment_rows` with `roles = ["fetch_releases"]`,
+builds `VersionCheckAssignment` with only `fetch_releases` set, and sends `CheckVersions` messages
+to agents. Host packages are excluded (they only have `detect_version` assignments).
+
+### DetectVersionExecutor
+
+Handles the `detect_version` task. Calls `query_agent_assignment_rows` with
+`roles = ["detect_version"]` for targeted software items and `query_host_package_assignment_rows`
+for host packages. Builds `VersionCheckAssignment` with only `detect_version` set and sends
+`CheckVersions` messages. Agent responses arrive asynchronously via the existing
+`VersionCheckResults` wire message handler.
+
+The `detect_version` task was introduced by migration `m20260307_000001_split_version_check`, which
+split the old single `version_check` task into `fetch_releases` (every 6 hours, heavier API work)
+and `detect_version` (daily, agent-side only). Running them on independent schedules lets operators
+tune each cadence independently.
 
 ### ServiceCertCheckExecutor
 
@@ -154,7 +182,7 @@ Used by both the embedded and external CA rotation check executors.
 ### `load_software_states_for_tenant(db, tenant_id) -> Vec<SoftwareStateEntry>`
 
 Loads all enabled software items with per-host version data for a tenant. Used by
-`VersionCheckExecutor` and `SchedulerNotifier::push_software_states_for_tenant()`.
+`FetchReleasesExecutor` and `SchedulerNotifier::push_software_states_for_tenant()`.
 
 ## Testing
 

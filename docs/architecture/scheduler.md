@@ -5,8 +5,9 @@ the `scheduled_tasks` table for HA-safe exactly-once execution.
 
 ## Overview
 
-The scheduler ensures that periodic work (version checks, cleanup, CA rotation, certificate renewal,
-CRL renewal) runs exactly once, regardless of how many controller instances are deployed.
+The scheduler ensures that periodic work (release fetching, installed-version detection, cleanup,
+CA rotation, certificate renewal, CRL renewal) runs exactly once, regardless of how many
+controller instances are deployed.
 
 Key properties:
 
@@ -65,11 +66,14 @@ One task per type per tenant |
 | `auth_cleanup` | `*/5 * * * *` | Clean expired auth flow state from DB |
 | `stale_lease_cleanup` | `*/5 * * * *` | Release stale MQTT client leases |
 | `ca_rotation_check` | `0 3 * * *` | Check if managed CA needs rotation |
-| `version_check` | `0 */6 * * *` | Trigger version detection on agents |
+| `fetch_releases` | `0 */6 * * *` | Fetch latest available versions (controller-side API calls + agent-side package index queries). Replaces the old `version_check` task. |
+| `detect_version` | `0 0 * * *` | Detect currently installed versions on all agent hosts. |
 | `service_cert_check` | `0 */12 * * *` | Proactive certificate renewal for services |
 | `crl_renewal` | `0 */4 * * *` | Trigger CRL rebuild on all controller instances |
 
-All six rows are seeded during the migration with `next_run_at = now`.
+All seven rows are seeded during the migration with `next_run_at = now`. The `detect_version` row is
+seeded by migration `m20260307_000001_split_version_check` (one per tenant), which also renames any
+existing `version_check` rows to `fetch_releases`.
 
 ## HA Claim Mechanism
 
@@ -141,7 +145,9 @@ crates/shared/scheduler-engine/src/
         mod.rs
         auth_cleanup.rs
         stale_lease_cleanup.rs
-        version_check.rs
+        queries.rs         -- Shared agent-assignment query helpers (AgentAssignmentRow, merge_config, …)
+        fetch_releases.rs  -- FetchReleasesExecutor (was version_check.rs)
+        detect_version.rs  -- DetectVersionExecutor
         service_cert_check.rs
 ```
 
@@ -190,11 +196,34 @@ Mode-specific implementations:
   which publishes a `RequestCaRotation` message to the `uptrakit.events.controller` NATS subject.
   Controllers consume this and trigger their local rotation logic.
 
-### VersionCheckExecutor
+### FetchReleasesExecutor
 
-Queries all enabled software items for the tenant (joined through `plugin_config`, `host_software_item`, `service_host`, and `service`), groups them
-by agent, and sends `CheckVersionsPayload` messages via `NotificationService`. Agent responses arrive asynchronously through the existing
+Handles the **fetch_releases** scheduled task. Runs two phases concurrently via `tokio::join!`:
+
+**Phase A — Controller-side fetch:** Queries `host_software_item_plugins` rows with
+`role = 'fetch_releases'` that target the controller (`execution_site = 'controller'` or `'auto'`
+with `ControllerSideFetchReleases` capability). Groups by `(plugin_config_id, package_identifier)`,
+instantiates each plugin, then spawns all fetch calls into a `JoinSet` bounded by a `Semaphore`
+(max [`MAX_CONCURRENT_CONTROLLER_FETCHES`] = 10). After all fetches complete, stores
+`latest_version` in `host_software_items`, batch-updates `software_item.last_checked_at`, and
+pushes MQTT software states.
+
+**Phase B — Agent-side dispatch:** Builds `VersionCheckAssignment` per
+`(service_id, host_machine_id)` with only `fetch_releases` set (no `detect_version`, no host
+packages) and sends `CheckVersions` messages to agents that run package-index plugins
+(APT, Homebrew, npm).
+
+### DetectVersionExecutor
+
+Handles the **detect_version** scheduled task. Queries `host_software_item_plugins` rows with
+`role = 'detect_version'` and host packages, groups by agent, and sends `CheckVersions` messages
+with only `detect_version` set. Agent responses arrive asynchronously through the existing
 `VersionCheckResults` wire message handler.
+
+This executor was introduced when the old `version_check` task was split in two (migration
+`m20260307_000001_split_version_check`). Running release fetching and installed-version detection
+on independent schedules lets operators tune each cadence independently — for example, fetch
+releases every 6 hours but detect installed versions once daily.
 
 ### ServiceCertCheckExecutor
 
@@ -210,7 +239,8 @@ messages to the owning services via `NotificationService`.
 | Auth state cleanup | Inline 5-min interval in `main.rs` | `AuthCleanupExecutor` |
 | MQTT stale lease cleanup | No dedicated loop | `StaleLeaseCleanupExecutor` |
 | CA rotation check | Inline 24h interval in `main.rs` | `CaRotationCheckExecutor` |
-| Version checking | Not implemented | `VersionCheckExecutor` |
+| Release fetching | Not implemented | `FetchReleasesExecutor` |
+| Installed-version detection | Not implemented | `DetectVersionExecutor` |
 | Service cert renewal check | Not implemented | `ServiceCertCheckExecutor` |
 | CRL periodic renewal | 60-second poll loop in `CrlManager::run()` | `CrlRenewalExecutor` (default every 4 h) |
 
@@ -239,8 +269,9 @@ All endpoints require the `ManageSoftware` permission.
 
 ## Security Considerations
 
-- The scheduler never runs automatic updates. It triggers version *checks* and certificate *renewal requests* only. Update execution always requires
-  explicit user action.
+- The scheduler never runs automatic updates. It triggers release fetching, installed-version
+  detection, and certificate *renewal requests* only. Update execution always requires explicit
+  user action.
 - Optimistic locking prevents concurrent execution of the same task across controllers.
 - Task claims have a 10-minute stale timeout to prevent permanent locking if a controller crashes.
 - Each task execution is bounded by a 2-hour per-task timeout (`TASK_EXECUTION_TIMEOUT`). A task that exceeds
