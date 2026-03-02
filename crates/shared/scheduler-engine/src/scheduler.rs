@@ -612,7 +612,10 @@ mod tests {
         let db = {
             // Safety: we only test the synchronous HashMap guard, the DB is
             // never actually used before the panic.
-            let rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
             rt.block_on(async {
                 sea_orm::Database::connect("sqlite::memory:").await.unwrap()
             })

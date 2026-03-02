@@ -16,12 +16,14 @@ use uptrakit_internal_wire::{
 use uptrakit_plugin_infrastructure_core::PluginCapability;
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 use uptrakit_shared_db::entity::{
-    host, host_package, host_software_item, host_software_item_plugin, plugin_config,
-    scheduled_task, service, service_host, software_item,
+    host_software_item, host_software_item_plugin, plugin_config, scheduled_task, software_item,
 };
 use uptrakit_shared_types::PluginType;
 use uuid::Uuid;
 
+use super::queries::{
+    merge_config, query_agent_assignment_rows, query_host_package_assignment_rows,
+};
 use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::notifier::SchedulerNotifier;
@@ -102,33 +104,6 @@ struct FetchGroupKey {
 }
 
 // ── Phase B: agent-side assignments ──────────────────────────────────────────
-
-/// Row returned from the host-packages version check query.
-#[derive(Debug, sea_orm::FromQueryResult)]
-struct HostPackageAssignmentRow {
-    service_id: Uuid,
-    host_machine_id: String,
-    host_package_id: Uuid,
-    host_package_name: String,
-    plugin_type: String,
-    package_identifier: String,
-    config: serde_json::Value,
-}
-
-/// Row returned from the agent-side assignment query.
-#[derive(Debug, sea_orm::FromQueryResult)]
-struct AgentAssignmentRow {
-    service_id: Uuid,
-    host_machine_id: String,
-    software_item_id: Uuid,
-    software_item_name: String,
-    role: String,
-    plugin_type: String,
-    package_identifier: String,
-    config: serde_json::Value,
-    config_override: Option<serde_json::Value>,
-    execution_site: String,
-}
 
 #[async_trait::async_trait]
 impl TaskExecutor for VersionCheckExecutor {
@@ -442,8 +417,10 @@ impl VersionCheckExecutor {
     /// host-managed packages (from `host_packages`). Host packages include `host_package_id`
     /// so results can be routed back to the correct table.
     async fn send_agent_assignments(&self, tenant_id: Uuid) -> crate::error::Result<()> {
-        let rows = self.query_agent_assignment_rows(tenant_id).await?;
-        let hp_rows = self.query_host_package_assignment_rows(tenant_id).await?;
+        let rows =
+            query_agent_assignment_rows(&self.db, tenant_id, &["detect_version", "fetch_releases"])
+                .await?;
+        let hp_rows = query_host_package_assignment_rows(&self.db, tenant_id).await?;
 
         if rows.is_empty() && hp_rows.is_empty() {
             tracing::debug!("no items assigned to agents for version check");
@@ -574,178 +551,4 @@ impl VersionCheckExecutor {
         Ok(())
     }
 
-    /// Query agent-side plugin assignments (detect_version + fetch_releases roles)
-    /// joined through host -> service_host -> service for routing.
-    async fn query_agent_assignment_rows(
-        &self,
-        tenant_id: Uuid,
-    ) -> crate::error::Result<Vec<AgentAssignmentRow>> {
-        let rows: Vec<AgentAssignmentRow> = host_software_item_plugin::Entity::find()
-            .select_only()
-            .column_as(service::Column::Id, "service_id")
-            .column_as(host::Column::MachineId, "host_machine_id")
-            .column_as(
-                host_software_item_plugin::Column::SoftwareItemId,
-                "software_item_id",
-            )
-            .column_as(software_item::Column::Name, "software_item_name")
-            .column_as(host_software_item_plugin::Column::Role, "role")
-            .column_as(plugin_config::Column::PluginType, "plugin_type")
-            .column_as(
-                host_software_item_plugin::Column::PackageIdentifier,
-                "package_identifier",
-            )
-            .column_as(plugin_config::Column::Config, "config")
-            .column_as(
-                host_software_item_plugin::Column::ConfigOverride,
-                "config_override",
-            )
-            .column_as(
-                host_software_item_plugin::Column::ExecutionSite,
-                "execution_site",
-            )
-            .join(
-                JoinType::InnerJoin,
-                host_software_item_plugin::Relation::SoftwareItem.def(),
-            )
-            .join(
-                JoinType::InnerJoin,
-                host_software_item_plugin::Relation::PluginConfig.def(),
-            )
-            .join(
-                JoinType::InnerJoin,
-                host_software_item_plugin::Relation::Host.def(),
-            )
-            .join(
-                JoinType::InnerJoin,
-                service_host::Relation::Host.def().rev(),
-            )
-            .join(JoinType::InnerJoin, service_host::Relation::Service.def())
-            .filter(
-                host_software_item_plugin::Column::Role.is_in(["detect_version", "fetch_releases"]),
-            )
-            .filter(software_item::Column::TenantId.eq(tenant_id))
-            .filter(software_item::Column::Enabled.eq(true))
-            .filter(software_item::Column::DeactivatedAt.is_null())
-            .filter(plugin_config::Column::Enabled.eq(true))
-            .filter(plugin_config::Column::DeactivatedAt.is_null())
-            .filter(service::Column::DeactivatedAt.is_null())
-            .filter(
-                sea_orm::Condition::any()
-                    .add(software_item::Column::DiscoveryState.is_null())
-                    .add(software_item::Column::DiscoveryState.ne("pending")),
-            )
-            .into_model::<AgentAssignmentRow>()
-            .all(&self.db)
-            .await
-            .context_to::<SchedulerError>()?;
-
-        Ok(rows)
-    }
-
-    /// Query host packages that need agent-side version checks.
-    ///
-    /// Joins `host_packages → host → service_host → service` and
-    /// `host_packages → plugin_config` to find enabled, non-deactivated
-    /// host packages with an active plugin config and a linked agent.
-    async fn query_host_package_assignment_rows(
-        &self,
-        tenant_id: Uuid,
-    ) -> crate::error::Result<Vec<HostPackageAssignmentRow>> {
-        let rows: Vec<HostPackageAssignmentRow> = host_package::Entity::find()
-            .select_only()
-            .column_as(service::Column::Id, "service_id")
-            .column_as(host::Column::MachineId, "host_machine_id")
-            .column_as(host_package::Column::Id, "host_package_id")
-            .column_as(host_package::Column::Name, "host_package_name")
-            .column_as(plugin_config::Column::PluginType, "plugin_type")
-            .column_as(host_package::Column::PackageIdentifier, "package_identifier")
-            .column_as(plugin_config::Column::Config, "config")
-            .join(JoinType::InnerJoin, host_package::Relation::Host.def())
-            .join(
-                JoinType::InnerJoin,
-                host_package::Relation::PluginConfig.def(),
-            )
-            .join(
-                JoinType::InnerJoin,
-                service_host::Relation::Host.def().rev(),
-            )
-            .join(JoinType::InnerJoin, service_host::Relation::Service.def())
-            .filter(host_package::Column::TenantId.eq(tenant_id))
-            .filter(host_package::Column::Enabled.eq(true))
-            .filter(host_package::Column::DeactivatedAt.is_null())
-            .filter(host::Column::DeactivatedAt.is_null())
-            .filter(plugin_config::Column::Enabled.eq(true))
-            .filter(plugin_config::Column::DeactivatedAt.is_null())
-            .filter(service::Column::DeactivatedAt.is_null())
-            .into_model::<HostPackageAssignmentRow>()
-            .all(&self.db)
-            .await
-            .context_to::<SchedulerError>()?;
-
-        Ok(rows)
-    }
-}
-
-/// Merge a base plugin config with per-item overrides.
-fn merge_config(base: &serde_json::Value, overrides: &serde_json::Value) -> serde_json::Value {
-    match (base, overrides) {
-        (serde_json::Value::Object(b), serde_json::Value::Object(o)) => {
-            let mut merged = b.clone();
-            for (k, v) in o {
-                merged.insert(k.clone(), v.clone());
-            }
-            serde_json::Value::Object(merged)
-        }
-        _ => base.clone(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn merge_config_objects() {
-        let base = serde_json::json!({"key1": "val1", "key2": "val2"});
-        let overrides = serde_json::json!({"key2": "override2", "key3": "val3"});
-        let merged = merge_config(&base, &overrides);
-        assert_eq!(
-            merged,
-            serde_json::json!({"key1": "val1", "key2": "override2", "key3": "val3"})
-        );
-    }
-
-    #[test]
-    fn merge_config_non_object_override_returns_base() {
-        let base = serde_json::json!({"key": "val"});
-        let overrides = serde_json::json!("just a string");
-        let merged = merge_config(&base, &overrides);
-        assert_eq!(merged, base);
-    }
-
-    #[test]
-    fn merge_config_non_object_base_returns_base() {
-        let base = serde_json::json!(42);
-        let overrides = serde_json::json!({"key": "val"});
-        let merged = merge_config(&base, &overrides);
-        assert_eq!(merged, serde_json::json!(42));
-    }
-
-    #[test]
-    fn merge_config_empty_override() {
-        let base = serde_json::json!({"key": "val"});
-        let overrides = serde_json::json!({});
-        let merged = merge_config(&base, &overrides);
-        assert_eq!(merged, base);
-    }
-
-    #[test]
-    fn merge_config_nested_objects_replaced_not_deep_merged() {
-        let base = serde_json::json!({"nested": {"a": 1, "b": 2}});
-        let overrides = serde_json::json!({"nested": {"c": 3}});
-        let merged = merge_config(&base, &overrides);
-        // Shallow merge: the entire "nested" value is replaced.
-        assert_eq!(merged, serde_json::json!({"nested": {"c": 3}}));
-    }
 }
