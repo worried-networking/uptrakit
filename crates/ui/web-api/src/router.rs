@@ -28,6 +28,7 @@ use crate::AppState;
         (name = "Update History", description = "Software update history tracking"),
         (name = "Autodiscovery", description = "Automatic software discovery management"),
         (name = "Update Batches", description = "Batch update operations"),
+        (name = "Host Packages", description = "Host-level package tracking and ignore rules"),
         (name = "Notifications", description = "Notification channel, rule, and log management")
     ),
     paths(
@@ -95,6 +96,14 @@ use crate::AppState;
         crate::routes::software_items::approve_software_item,
         crate::routes::hosts::discover_host,
         crate::routes::hosts::discard_host_discovered,
+        // Host packages
+        crate::routes::host_packages::list_host_packages,
+        crate::routes::host_packages::get_host_package,
+        crate::routes::host_packages::update_host_package,
+        crate::routes::host_packages::delete_host_package,
+        crate::routes::host_packages::list_host_package_ignores,
+        crate::routes::host_packages::create_host_package_ignore,
+        crate::routes::host_packages::delete_host_package_ignore,
         crate::routes::plugin_configs::discover_plugin_config,
         crate::routes::plugin_configs::discard_plugin_config_discovered,
         crate::routes::autodiscovery::list_autodiscovery_ignores,
@@ -220,6 +229,15 @@ use crate::AppState;
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::update_history::UpdateHistoryResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::plugin_configs::PluginConfigResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::autodiscovery::AutodiscoveryIgnoreResponse>,
+            // Host packages
+            crate::routes::host_packages::HostPackageResponse,
+            crate::routes::host_packages::HostPackageDetailResponse,
+            uptrakit_web_api_types::host_packages::HostPackageUpdateHistoryResponse,
+            crate::routes::host_packages::UpdateHostPackageRequest,
+            crate::routes::host_packages::HostPackageIgnoreResponse,
+            crate::routes::host_packages::CreateHostPackageIgnoreRequest,
+            crate::routes::host_packages::HostUpdateSummary,
+            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::host_packages::HostPackageResponse>,
             crate::routes::notifications::CreateNotificationChannelRequest,
             crate::routes::notifications::UpdateNotificationChannelRequest,
             crate::routes::notifications::NotificationChannelResponse,
@@ -474,6 +492,20 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(crate::routes::hosts::discover_host))
         .routes(routes!(crate::routes::hosts::discard_host_discovered))
+        // Host packages
+        .routes(routes!(crate::routes::host_packages::list_host_packages))
+        .routes(routes!(
+            crate::routes::host_packages::get_host_package,
+            crate::routes::host_packages::update_host_package,
+            crate::routes::host_packages::delete_host_package
+        ))
+        .routes(routes!(
+            crate::routes::host_packages::list_host_package_ignores,
+            crate::routes::host_packages::create_host_package_ignore
+        ))
+        .routes(routes!(
+            crate::routes::host_packages::delete_host_package_ignore
+        ))
         .routes(routes!(
             crate::routes::plugin_configs::discover_plugin_config
         ))

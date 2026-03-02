@@ -7,6 +7,7 @@ pub mod ca;
 pub mod device_auth;
 pub mod enrollment_tokens;
 pub mod health;
+pub mod host_packages;
 pub mod hosts;
 pub mod notifications;
 pub mod ocsp;
