@@ -39,6 +39,9 @@ pub enum PluginConfigError {
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
+    /// An unexpected internal invariant was violated.
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<PluginConfigError>>;
@@ -163,8 +166,11 @@ pub async fn create_plugin_config(
             report!(PluginConfigError::Db(e))
         }
     })?;
-    Ok(plugin_config_to_response(ops, inserted)
-        .unwrap_or_else(|| unreachable!("plugin_type was just validated by the caller")))
+    plugin_config_to_response(ops, inserted).ok_or_else(|| {
+        report!(PluginConfigError::Internal(
+            "inserted plugin_config has unrecognised plugin_type".to_string()
+        ))
+    })
 }
 
 
