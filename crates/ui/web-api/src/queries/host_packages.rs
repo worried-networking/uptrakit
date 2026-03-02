@@ -8,6 +8,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
 };
+use sea_orm::sea_query::{Alias, Expr, ExprTrait};
 use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
@@ -90,6 +91,10 @@ pub async fn list_host_packages(
         );
     }
 
+    if let Some(has_update) = params.has_update {
+        condition = condition.add(ExprTrait::eq(Expr::col(Alias::new("has_update")), has_update));
+    }
+
     let base_query = tenant_db
         .find::<host_package::Entity>()
         .filter(condition.clone())
@@ -109,12 +114,7 @@ pub async fn list_host_packages(
         .await
         .context_to()?;
 
-    // Apply has_update filter in-memory (can't do SQL != on two nullable cols easily).
-    let mut responses: Vec<HostPackageResponse> = items.into_iter().map(model_to_response).collect();
-
-    if let Some(has_update) = params.has_update {
-        responses.retain(|r| r.has_update == has_update);
-    }
+    let responses: Vec<HostPackageResponse> = items.into_iter().map(model_to_response).collect();
 
     Ok(PaginatedResponse::new(responses, total, pagination))
 }
@@ -218,6 +218,7 @@ pub async fn compute_update_summary(
         .filter(host_package::Column::HostId.eq(host_id))
         .filter(host_package::Column::DeactivatedAt.is_null())
         .filter(host_package::Column::Enabled.eq(true))
+        .filter(ExprTrait::eq(Expr::col(Alias::new("has_update")), true))
         .all(tenant_db.db())
         .await
         .context_to()?;
@@ -226,13 +227,9 @@ pub async fn compute_update_summary(
     let mut security = 0u32;
 
     for pkg in &packages {
-        if let (Some(installed), Some(latest)) = (&pkg.installed_version, &pkg.latest_version)
-            && installed != latest
-        {
-            available += 1;
-            if pkg.update_category == "security" {
-                security += 1;
-            }
+        available += 1;
+        if pkg.update_category == "security" {
+            security += 1;
         }
     }
 
@@ -256,6 +253,7 @@ pub async fn compute_update_summaries_batch(
         .filter(host_package::Column::HostId.is_in(host_ids.to_vec()))
         .filter(host_package::Column::DeactivatedAt.is_null())
         .filter(host_package::Column::Enabled.eq(true))
+        .filter(ExprTrait::eq(Expr::col(Alias::new("has_update")), true))
         .all(tenant_db.db())
         .await
         .context_to()?;
@@ -264,14 +262,10 @@ pub async fn compute_update_summaries_batch(
         std::collections::HashMap::new();
 
     for pkg in &packages {
-        if let (Some(installed), Some(latest)) = (&pkg.installed_version, &pkg.latest_version)
-            && installed != latest
-        {
-            let entry = summaries.entry(pkg.host_id).or_default();
-            entry.available_updates_count += 1;
-            if pkg.update_category == "security" {
-                entry.security_updates_count += 1;
-            }
+        let entry = summaries.entry(pkg.host_id).or_default();
+        entry.available_updates_count += 1;
+        if pkg.update_category == "security" {
+            entry.security_updates_count += 1;
         }
     }
 
