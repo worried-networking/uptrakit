@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -6,9 +6,10 @@ use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    BatchUpdateItem, BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
-    OutputStreamType, Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo,
-    Result, SudoCommandEntry, TrackingSystem, UpdateCategory, UpdateHookContext, UpdateOutputLine,
+    BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
+    BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType,
+    Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result,
+    SudoCommandEntry, TrackingSystem, UpdateCategory, UpdateHookContext, UpdateOutputLine,
     UpstreamRelease, Version,
 };
 
@@ -168,6 +169,46 @@ impl AptPlugin {
     /// (e.g. `http://security.ubuntu.com/ubuntu noble-security/main`).
     fn is_security_source(source: &str) -> bool {
         source.to_ascii_lowercase().contains("security")
+    }
+
+    /// Parse `apt-cache madison pkg1 pkg2 ...` output for a batch query.
+    ///
+    /// Lines from a multi-package madison query are interleaved:
+    /// ```text
+    ///    nginx | 1.24.0 | http://archive.ubuntu.com/ubuntu noble/main amd64 Packages
+    ///    curl  | 7.88.1 | http://deb.debian.org/debian bookworm/main amd64 Packages
+    ///    nginx | 1.18.0 | http://archive.ubuntu.com/ubuntu focal/main amd64 Packages
+    /// ```
+    ///
+    /// Groups lines by package name (first `|`-delimited field). For each
+    /// package, only the *first* line is used (highest-priority candidate;
+    /// madison output is already ordered by pin priority).
+    fn parse_madison_output_batch(output: &str) -> HashMap<String, MadisonEntry> {
+        let mut results: HashMap<String, MadisonEntry> = HashMap::new();
+        for line in output.lines() {
+            let mut parts = line.splitn(3, '|');
+            let Some(pkg_name) = parts.next() else {
+                continue;
+            };
+            let pkg_name = pkg_name.trim().to_string();
+            if pkg_name.is_empty() {
+                continue;
+            }
+            let Some(version) = parts.next() else {
+                continue;
+            };
+            let version = version.trim();
+            if version.is_empty() {
+                continue;
+            }
+            let source = parts.next().map(|s| s.trim().to_string()).unwrap_or_default();
+            // Only keep the first entry per package (highest priority).
+            results.entry(pkg_name).or_insert_with(|| MadisonEntry {
+                version: version.to_string(),
+                source,
+            });
+        }
+        results
     }
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
@@ -621,6 +662,169 @@ impl Plugin for AptPlugin {
             })
             .collect();
 
+        Ok(results)
+    }
+
+    /// Detect installed versions for multiple packages using a single `dpkg-query` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// dpkg-query --show --showformat='${Package}\t${Version}\n' pkg1 pkg2 pkg3
+    /// ```
+    ///
+    /// The exit code is intentionally ignored: `dpkg-query` exits non-zero when any
+    /// requested package is unknown, but packages that *are* found still appear in
+    /// stdout. Packages absent from stdout are treated as not installed (`None` with
+    /// no error).
+    async fn batch_detect_installed_version(
+        &self,
+        items: &[BatchDetectItem],
+    ) -> Result<Vec<BatchDetectResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            validate_identifier(&item.package_identifier)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args = vec![
+            "--show".to_string(),
+            "--showformat=${Package}\\t${Version}\\n".to_string(),
+        ];
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        tracing::debug!(count = items.len(), "batch detecting APT installed versions");
+
+        // Non-zero exit is expected when any package is unknown; ignore it.
+        let stdout = match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("dpkg-query", args))
+            .await
+        {
+            Ok(o) => o.output,
+            Err(e) => {
+                // dpkg-query completely failed (e.g., not found on PATH).
+                let error_str = format!("dpkg-query failed: {e}");
+                return Ok(items
+                    .iter()
+                    .map(|item| BatchDetectResult {
+                        package_identifier: item.package_identifier.clone(),
+                        installed_version: None,
+                        error: Some(error_str.clone()),
+                    })
+                    .collect());
+            }
+        };
+
+        // Parse output into a map for O(1) lookup.
+        let dpkg_map: HashMap<String, String> =
+            Self::parse_dpkg_output(&stdout).into_iter().collect();
+
+        let results = items
+            .iter()
+            .map(|item| {
+                let installed_version = dpkg_map
+                    .get(&item.package_identifier)
+                    .map(Version::new);
+                BatchDetectResult {
+                    package_identifier: item.package_identifier.clone(),
+                    installed_version,
+                    error: None,
+                }
+            })
+            .collect();
+
+        tracing::debug!(count = items.len(), "APT batch version detection complete");
+        Ok(results)
+    }
+
+    /// Fetch available releases for multiple packages using a single `apt-cache madison` call.
+    ///
+    /// Runs:
+    /// ```text
+    /// apt-cache madison pkg1 pkg2 pkg3
+    /// ```
+    ///
+    /// Output lines are grouped by package name; only the first (highest-priority)
+    /// entry per package is used. Packages absent from the output have empty releases.
+    async fn batch_fetch_releases(
+        &self,
+        items: &[BatchFetchItem],
+    ) -> Result<Vec<BatchFetchResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate all identifiers up front.
+        for item in items {
+            validate_identifier(&item.package_identifier)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args = vec!["madison".to_string()];
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        tracing::debug!(count = items.len(), "batch fetching APT releases via apt-cache madison");
+
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("apt-cache", args))
+            .await
+            .map_err(|e| {
+                report!(PluginError::PluginInternal(format!(
+                    "apt-cache madison failed: {e}"
+                )))
+            })?;
+
+        if cmd_output.exit_code != 0 {
+            bail!(PluginError::CommandFailed(cmd_output.exit_code));
+        }
+
+        let parsed = Self::parse_madison_output_batch(&cmd_output.output);
+
+        let results = items
+            .iter()
+            .map(|item| {
+                let Some(entry) = parsed.get(&item.package_identifier) else {
+                    // Package not found in any configured repository.
+                    return BatchFetchResult {
+                        package_identifier: item.package_identifier.clone(),
+                        releases: vec![],
+                        error: None,
+                    };
+                };
+
+                let category = if Self::is_security_source(&entry.source) {
+                    Some(UpdateCategory::Security)
+                } else {
+                    None
+                };
+
+                BatchFetchResult {
+                    package_identifier: item.package_identifier.clone(),
+                    releases: vec![UpstreamRelease {
+                        version: Version::new(&entry.version),
+                        tag: entry.version.clone(),
+                        is_prerelease: false,
+                        release_url: String::new(),
+                        release_notes: None,
+                        published_at: None,
+                        assets: vec![],
+                        category,
+                    }],
+                    error: None,
+                }
+            })
+            .collect();
+
+        tracing::debug!(count = items.len(), "APT batch fetch complete");
         Ok(results)
     }
 }
@@ -1216,5 +1420,194 @@ mod tests {
             discoveries[0].targets.is_empty(),
             "manual filter with pre-existing config must not emit targets"
         );
+    }
+
+    // ── parse_madison_output_batch ───────────────────────────────────────
+
+    #[test]
+    fn parse_madison_output_batch_groups_by_package() {
+        let output = concat!(
+            "   nginx | 1.24.0-2ubuntu7.3 | http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages\n",
+            "   curl  | 7.88.1-10+deb12u5 | http://deb.debian.org/debian bookworm/main amd64 Packages\n",
+            "   nginx | 1.18.0-6ubuntu14  | http://archive.ubuntu.com/ubuntu focal/main amd64 Packages\n",
+        );
+        let result = AptPlugin::parse_madison_output_batch(output);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result["nginx"].version, "1.24.0-2ubuntu7.3");
+        assert_eq!(result["curl"].version, "7.88.1-10+deb12u5");
+    }
+
+    #[test]
+    fn parse_madison_output_batch_only_first_entry_kept() {
+        let output = concat!(
+            "   nginx | 1.24.0 | source1\n",
+            "   nginx | 1.18.0 | source2\n",
+        );
+        let result = AptPlugin::parse_madison_output_batch(output);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result["nginx"].version, "1.24.0");
+    }
+
+    #[test]
+    fn parse_madison_output_batch_security_source_detected() {
+        let output = "   openssl | 3.0.2-0ubuntu1.16 | http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages\n";
+        let result = AptPlugin::parse_madison_output_batch(output);
+        assert!(AptPlugin::is_security_source(&result["openssl"].source));
+    }
+
+    #[test]
+    fn parse_madison_output_batch_empty_returns_empty() {
+        let result = AptPlugin::parse_madison_output_batch("");
+        assert!(result.is_empty());
+    }
+
+    // ── batch_detect_installed_version ───────────────────────────────────
+
+    #[tokio::test]
+    async fn batch_detect_installed_version_found_packages() {
+        let executor = RoutedOutputExecutor::with_routes(vec![(
+            "dpkg-query",
+            "nginx\t1.24.0-2ubuntu7.3\npython3\t3.11.0-5ubuntu2\n",
+        )]);
+        let plugin = AptPlugin::new(AptConfig::default(), executor)
+            .await
+            .expect("create");
+
+        let items = vec![
+            BatchDetectItem {
+                package_identifier: "nginx".to_string(),
+            },
+            BatchDetectItem {
+                package_identifier: "python3".to_string(),
+            },
+        ];
+        let results = plugin
+            .batch_detect_installed_version(&items)
+            .await
+            .expect("ok");
+
+        assert_eq!(results.len(), 2);
+        let nginx = results.iter().find(|r| r.package_identifier == "nginx").unwrap();
+        assert_eq!(nginx.installed_version, Some(Version::new("1.24.0-2ubuntu7.3")));
+        assert!(nginx.error.is_none());
+
+        let python3 = results.iter().find(|r| r.package_identifier == "python3").unwrap();
+        assert_eq!(python3.installed_version, Some(Version::new("3.11.0-5ubuntu2")));
+        assert!(python3.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn batch_detect_installed_version_package_not_in_output_is_not_installed() {
+        // dpkg-query returns output for nginx only; curl is absent (not installed).
+        let executor = RoutedOutputExecutor::with_routes(vec![("dpkg-query", "nginx\t1.24.0\n")]);
+        let plugin = AptPlugin::new(AptConfig::default(), executor)
+            .await
+            .expect("create");
+
+        let items = vec![
+            BatchDetectItem {
+                package_identifier: "nginx".to_string(),
+            },
+            BatchDetectItem {
+                package_identifier: "curl".to_string(),
+            },
+        ];
+        let results = plugin
+            .batch_detect_installed_version(&items)
+            .await
+            .expect("ok");
+
+        assert_eq!(results.len(), 2);
+        let curl = results.iter().find(|r| r.package_identifier == "curl").unwrap();
+        assert!(curl.installed_version.is_none());
+        assert!(curl.error.is_none(), "absent package is not an error");
+    }
+
+    #[tokio::test]
+    async fn batch_detect_installed_version_empty_items_returns_empty() {
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
+            .await
+            .expect("create");
+        let results = plugin
+            .batch_detect_installed_version(&[])
+            .await
+            .expect("ok");
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn batch_detect_installed_version_invalid_identifier_fails() {
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
+            .await
+            .expect("create");
+        let items = vec![BatchDetectItem {
+            package_identifier: "INVALID_UPPERCASE".to_string(),
+        }];
+        let result = plugin.batch_detect_installed_version(&items).await;
+        assert!(result.is_err());
+    }
+
+    // ── batch_fetch_releases ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn batch_fetch_releases_mixed_packages() {
+        let executor = RoutedOutputExecutor::with_routes(vec![("apt-cache", concat!(
+            "   nginx | 1.24.0-2ubuntu7.3 | http://archive.ubuntu.com/ubuntu noble/main amd64 Packages\n",
+            "   openssl | 3.0.2-0ubuntu1.16 | http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages\n",
+        ))]);
+        let plugin = AptPlugin::new(AptConfig::default(), executor)
+            .await
+            .expect("create");
+
+        let items = vec![
+            BatchFetchItem {
+                package_identifier: "nginx".to_string(),
+            },
+            BatchFetchItem {
+                package_identifier: "openssl".to_string(),
+            },
+            BatchFetchItem {
+                package_identifier: "curl".to_string(),
+            },
+        ];
+        let results = plugin.batch_fetch_releases(&items).await.expect("ok");
+
+        assert_eq!(results.len(), 3);
+
+        let nginx = results.iter().find(|r| r.package_identifier == "nginx").unwrap();
+        assert_eq!(nginx.releases.len(), 1);
+        assert_eq!(nginx.releases[0].tag, "1.24.0-2ubuntu7.3");
+        assert!(nginx.releases[0].category.is_none());
+        assert!(nginx.error.is_none());
+
+        let openssl = results.iter().find(|r| r.package_identifier == "openssl").unwrap();
+        assert_eq!(openssl.releases.len(), 1);
+        assert_eq!(openssl.releases[0].category, Some(UpdateCategory::Security));
+        assert!(openssl.error.is_none());
+
+        let curl = results.iter().find(|r| r.package_identifier == "curl").unwrap();
+        assert!(curl.releases.is_empty(), "absent package has no releases");
+        assert!(curl.error.is_none(), "absent package is not an error");
+    }
+
+    #[tokio::test]
+    async fn batch_fetch_releases_empty_items_returns_empty() {
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
+            .await
+            .expect("create");
+        let results = plugin.batch_fetch_releases(&[]).await.expect("ok");
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn batch_fetch_releases_invalid_identifier_fails() {
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
+            .await
+            .expect("create");
+        let items = vec![BatchFetchItem {
+            package_identifier: "INVALID".to_string(),
+        }];
+        let result = plugin.batch_fetch_releases(&items).await;
+        assert!(result.is_err());
     }
 }
