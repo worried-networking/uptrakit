@@ -71,10 +71,14 @@ impl HumanOutput for CombinedSettingsResponse {
             "  Lifetime (days):         {}\n",
             self.agent_certificates.lifetime_days
         ));
-        out.push_str(&format!(
-            "  Renewal Window (hours):  {}\n",
-            self.agent_certificates.renewal_window_hours
-        ));
+        let window_desc = match self.agent_certificates.renewal_window_hours_override {
+            None => format!(
+                "automatic ({} hours)",
+                self.agent_certificates.effective_renewal_window_hours
+            ),
+            Some(h) => format!("{h} hours (custom override)"),
+        };
+        out.push_str(&format!("  Renewal Window:          {window_desc}\n"));
         out.push_str("\nEnrollment Tokens:\n");
         out.push_str(&format!(
             "  Active:                  {}\n",
@@ -112,10 +116,14 @@ impl HumanOutput for AgentCertificateSettingsResponse {
             "Lifetime (days):         {}\n",
             self.lifetime_days
         ));
-        out.push_str(&format!(
-            "Renewal Window (hours):  {}\n",
-            self.renewal_window_hours
-        ));
+        let window_desc = match self.renewal_window_hours_override {
+            None => format!(
+                "automatic ({} hours, 1/5 of lifetime capped at 14 days)",
+                self.effective_renewal_window_hours
+            ),
+            Some(h) => format!("{h} hours (custom override)"),
+        };
+        out.push_str(&format!("Renewal Window:          {window_desc}\n"));
         out
     }
 }
@@ -966,14 +974,29 @@ mod tests {
     }
 
     #[test]
-    fn certificate_settings_human_output() {
+    fn certificate_settings_human_output_auto_mode() {
         let resp = AgentCertificateSettingsResponse {
             lifetime_days: 365,
-            renewal_window_hours: 168,
+            renewal_window_hours_override: None,
+            effective_renewal_window_hours: 336,
         };
         let s = resp.to_human_string();
         assert!(s.contains("365"), "lifetime_days missing");
-        assert!(s.contains("168"), "renewal_window_hours missing");
+        assert!(s.contains("336"), "effective hours missing");
+        assert!(s.contains("automatic"), "auto mode indicator missing");
+    }
+
+    #[test]
+    fn certificate_settings_human_output_custom_override() {
+        let resp = AgentCertificateSettingsResponse {
+            lifetime_days: 365,
+            renewal_window_hours_override: Some(72),
+            effective_renewal_window_hours: 72,
+        };
+        let s = resp.to_human_string();
+        assert!(s.contains("365"), "lifetime_days missing");
+        assert!(s.contains("72"), "override hours missing");
+        assert!(s.contains("custom"), "custom indicator missing");
     }
 
     #[test]
@@ -988,7 +1011,8 @@ mod tests {
             },
             agent_certificates: AgentCertificateSettingsResponse {
                 lifetime_days: 365,
-                renewal_window_hours: 168,
+                renewal_window_hours_override: None,
+                effective_renewal_window_hours: 336,
             },
             enrollment_tokens: EnrollmentTokensSummary { active_count: 3 },
         };

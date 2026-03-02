@@ -8,7 +8,61 @@ Uptrakit operates an internal PKI for agents and MQTT services.
 | --- | --- | --- |
 | CA certificate | 5 years | Rotate 6 months before expiry |
 | Server HTTPS cert | 90 days | Renew 30 days before expiry |
-| Agent/MQTT client cert | 365 days (configurable) | Configurable via `renewal_window_hours` |
+| Agent/MQTT client cert | 7 days (default, max 730) | `min(14 days, lifetime / 5)` — see below |
+
+## Agent/MQTT Certificate Renewal Window
+
+The renewal window determines how early a service initiates a certificate renewal before the cert expires.
+
+### Automatic mode (default)
+
+The window is computed per-certificate as:
+
+```text
+renewal_window = min(14 days, cert_lifetime / 5)
+```
+
+Examples:
+
+| Cert lifetime | 1/5 | Ceiling | Effective window |
+| --- | --- | --- | --- |
+| 7 days | 33 h | 336 h | **33 hours** |
+| 30 days | 144 h | 336 h | **144 hours** |
+| 70 days | 336 h | 336 h | **336 hours (14 days)** |
+| 365 days | 1752 h | 336 h | **336 hours (14 days)** |
+
+This formula applies at **two layers**:
+
+1. **Server-side scheduler** (`ServiceCertCheckExecutor`): queries DB for certs approaching the
+   per-cert window (`not_after ≤ now + min(14 days, (not_after − not_before) / 5)`) and sends
+   `RequestCertRenewal` to the owning service.
+2. **On-service timer** (`cert_handler.rs`): when the service connects, the controller sends
+   `renewal_window_hours` in `ServiceSettingsPayload`; the service uses this to schedule its
+   local proactive renewal timer.
+
+### Custom override
+
+An admin can pin the renewal window via `PUT /api/v1/settings/agent-certificates`:
+
+```json
+{ "renewal_window_hours": 48 }
+```
+
+Send `0` to reset to automatic mode:
+
+```json
+{ "renewal_window_hours": 0 }
+```
+
+The API response includes both the raw override and the effective value:
+
+```json
+{
+  "lifetime_days": 7,
+  "renewal_window_hours_override": null,
+  "effective_renewal_window_hours": 33
+}
+```
 
 ## CA Basic Constraints and Path Length
 

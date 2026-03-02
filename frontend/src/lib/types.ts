@@ -116,11 +116,15 @@ export interface UpdateAuthenticationSettings {
 
 export interface AgentCertificateSettings {
 	lifetime_days: number;
-	renewal_window_hours: number;
+	/** Admin-configured override. `null` means automatic mode. */
+	renewal_window_hours_override: number | null;
+	/** Effective renewal window in hours. In auto mode: min(14 days, lifetime/5). */
+	effective_renewal_window_hours: number;
 }
 
 export interface UpdateAgentCertificateSettings {
 	lifetime_days?: number;
+	/** Set to `0` to reset to automatic mode (min(14 days, lifetime/5)). */
 	renewal_window_hours?: number;
 }
 

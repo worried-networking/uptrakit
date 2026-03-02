@@ -731,7 +731,7 @@ enum CertificateCommands {
         /// Certificate lifetime in days (max 730)
         #[arg(long)]
         lifetime_days: Option<u16>,
-        /// Certificate renewal window in hours
+        /// Certificate renewal window in hours (use 0 to reset to automatic: min(14 days, lifetime/5))
         #[arg(long)]
         renewal_window_hours: Option<u16>,
     },
