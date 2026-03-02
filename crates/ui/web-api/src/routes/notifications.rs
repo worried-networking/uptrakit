@@ -606,7 +606,12 @@ pub async fn telegram_callback(
             }
         };
 
-    // Verify secret token
+    // Verify secret token using constant-time comparison to prevent timing attacks.
+    // Both secrets are hashed to SHA-256 so ct_eq always compares equal-length arrays,
+    // eliminating any length-based information leak.
+    use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
+
     let expected_secret = config_json
         .get("webhook_secret")
         .and_then(serde_json::Value::as_str)
@@ -617,7 +622,11 @@ pub async fn telegram_callback(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    if expected_secret.is_empty() || provided_secret != expected_secret {
+    let expected_hash: [u8; 32] = Sha256::digest(expected_secret.as_bytes()).into();
+    let provided_hash: [u8; 32] = Sha256::digest(provided_secret.as_bytes()).into();
+    let secrets_match: bool = expected_hash.ct_eq(&provided_hash).into();
+
+    if expected_secret.is_empty() || !secrets_match {
         return error_response(StatusCode::UNAUTHORIZED, "Invalid secret token");
     }
 

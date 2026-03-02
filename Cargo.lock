@@ -7130,6 +7130,7 @@ dependencies = [
  "sha2 0.10.9",
  "spki 0.7.3",
  "strum",
+ "subtle",
  "thiserror 2.0.18",
  "time",
  "tokio",
