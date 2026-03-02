@@ -142,6 +142,8 @@ use crate::AppState;
         crate::routes::notifications::list_log,
         crate::routes::settings_smtp::get_smtp_settings,
         crate::routes::settings_smtp::update_smtp_settings,
+        crate::routes::settings_system_services::get_system_services_settings,
+        crate::routes::settings_system_services::update_system_services_settings,
     ),
     components(
         schemas(
@@ -251,6 +253,8 @@ use crate::AppState;
             crate::routes::notifications::TestNotificationResponse,
             crate::routes::settings_smtp::SmtpSettingsResponse,
             crate::routes::settings_smtp::UpdateSmtpSettingsRequest,
+            crate::routes::settings_system_services::SystemServicesSettingsResponse,
+            crate::routes::settings_system_services::UpdateSystemServicesSettingsRequest,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationChannelResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationRuleResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationLogResponse>,
@@ -544,6 +548,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(
             crate::routes::settings_smtp::get_smtp_settings,
             crate::routes::settings_smtp::update_smtp_settings
+        ))
+        // System services settings
+        .routes(routes!(
+            crate::routes::settings_system_services::get_system_services_settings,
+            crate::routes::settings_system_services::update_system_services_settings
         ));
 
     // NATS settings

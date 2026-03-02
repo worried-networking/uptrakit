@@ -136,6 +136,12 @@ pub struct SettingsSnapshot {
     /// NATS server URL (raw, decrypted). `None` when not configured.
     /// Stored as `Option<MaskedUrl>` so `Debug` automatically masks any password.
     pub nats_url: Option<MaskedUrl>,
+    /// System services enrollment token (decrypted). `None` when not configured.
+    ///
+    /// When present, system services that provide this token during enrollment are
+    /// automatically approved. When absent, all system service enrollments require
+    /// manual approval.
+    pub system_services_enrollment_token: Option<String>,
 }
 
 #[derive(Clone)]
@@ -180,6 +186,7 @@ impl Settings {
             mqtt_max_clients_per_tenant: DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT,
             smtp: SmtpSettingsSnapshot::default(),
             nats_url: None,
+            system_services_enrollment_token: None,
         };
         let (tx, rx) = tokio::sync::watch::channel(snapshot);
         Self {
@@ -233,6 +240,7 @@ impl Settings {
 
         let smtp = Self::load_smtp_settings(&combined);
         let nats_url = Self::load_nats_url(&global_raw);
+        let system_services_enrollment_token = Self::load_system_services_enrollment_token(&global_raw);
 
         // Read initial version counters
         let (version, global_version) =
@@ -247,6 +255,7 @@ impl Settings {
             mqtt_max_clients_per_tenant,
             smtp,
             nats_url,
+            system_services_enrollment_token,
         };
         let (tx, rx) = tokio::sync::watch::channel(snapshot);
         let settings = Self {
@@ -361,9 +370,12 @@ impl Settings {
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
         let smtp = Self::load_smtp_settings(&combined);
-        // NatsUrl is a global-only key, so it is present in `combined`
-        // (which started as a copy of global_raw extended with per-tenant rows).
+        // NatsUrl and SystemServicesEnrollmentToken are global-only keys, so they
+        // are present in `combined` (which started as a copy of global_raw extended
+        // with per-tenant rows).
         let nats_url = Self::load_nats_url(&combined);
+        let system_services_enrollment_token =
+            Self::load_system_services_enrollment_token(&combined);
 
         // Publish complete snapshot atomically
         let _guard = self.inner.write_mutex.lock().await;
@@ -376,6 +388,7 @@ impl Settings {
             mqtt_max_clients_per_tenant,
             smtp,
             nats_url,
+            system_services_enrollment_token,
         });
 
         // Update cached version counters
@@ -690,6 +703,47 @@ impl Settings {
             None
         } else {
             Some(MaskedUrl::new(raw_url))
+        }
+    }
+
+    // --- System services settings ---
+
+    /// Read the system services enrollment token (synchronous, decrypted).
+    ///
+    /// Returns `None` if no token is configured.
+    pub fn system_services_enrollment_token(&self) -> Option<String> {
+        self.inner
+            .snapshot_rx
+            .borrow()
+            .system_services_enrollment_token
+            .clone()
+    }
+
+    /// Replace the system services enrollment token (acquires write mutex for atomic publish).
+    pub async fn set_system_services_enrollment_token(&self, token: Option<String>) {
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.system_services_enrollment_token = token);
+    }
+
+    /// Load system services enrollment token from a [`RawSettings`] map.
+    ///
+    /// The stored value may be encrypted. Returns `None` if absent or empty.
+    pub fn load_system_services_enrollment_token(raw: &RawSettings) -> Option<String> {
+        let stored = raw
+            .get_setting(SettingKey::SystemServicesEnrollmentToken)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())?;
+
+        if uptrakit_crypto::is_encrypted(stored) {
+            uptrakit_crypto::decrypt_str(stored)
+                .map_err(|e| {
+                    tracing::warn!("failed to decrypt system_services.enrollment_token: {e}");
+                })
+                .ok()
+        } else {
+            Some(stored.to_string())
         }
     }
 

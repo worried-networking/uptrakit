@@ -41,6 +41,7 @@ pub mod masked_url;
 pub use masked_url::MaskedUrl;
 pub mod settings_nats;
 pub mod settings_smtp;
+pub mod settings_system_services;
 pub mod software_items;
 pub mod system_alerts;
 pub mod update_batches;
@@ -135,7 +136,7 @@ mod tests {
 
     #[test]
     fn permission_iter_covers_all_variants() {
-        assert_eq!(Permission::iter().count(), 12);
+        assert_eq!(Permission::iter().count(), 14);
     }
 
     #[test]
