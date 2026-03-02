@@ -14,8 +14,9 @@ use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectingPayload, ServiceMessage};
 use uptrakit_scheduler_engine::executors::{
     auth_cleanup::AuthCleanupExecutor, crl_renewal::CrlRenewalExecutor,
+    detect_version::DetectVersionExecutor, fetch_releases::FetchReleasesExecutor,
     service_cert_check::ServiceCertCheckExecutor,
-    stale_lease_cleanup::StaleLeaseCleanupExecutor, version_check::VersionCheckExecutor,
+    stale_lease_cleanup::StaleLeaseCleanupExecutor,
 };
 use uptrakit_scheduler_engine::{Scheduler, SchedulerConfig, SchedulerNotifier};
 use uptrakit_service_sdk::{
@@ -215,8 +216,12 @@ impl ServiceHandler for SchedulerHandler {
                     Box::new(StaleLeaseCleanupExecutor::new(db.clone())),
                 );
                 scheduler.register(
-                    ScheduledTaskType::VersionCheck,
-                    Box::new(VersionCheckExecutor::new(db.clone(), notifier.clone())),
+                    ScheduledTaskType::FetchReleases,
+                    Box::new(FetchReleasesExecutor::new(db.clone(), notifier.clone())),
+                );
+                scheduler.register(
+                    ScheduledTaskType::DetectVersion,
+                    Box::new(DetectVersionExecutor::new(db.clone(), notifier.clone())),
                 );
                 scheduler.register(
                     ScheduledTaskType::ServiceCertCheck,

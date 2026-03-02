@@ -15,8 +15,10 @@ pub enum ScheduledTaskType {
     StaleLeaseCleanup,
     #[sea_orm(string_value = "ca_rotation_check")]
     CaRotationCheck,
-    #[sea_orm(string_value = "version_check")]
-    VersionCheck,
+    #[sea_orm(string_value = "fetch_releases")]
+    FetchReleases,
+    #[sea_orm(string_value = "detect_version")]
+    DetectVersion,
     #[sea_orm(string_value = "service_cert_check")]
     ServiceCertCheck,
     #[sea_orm(string_value = "crl_renewal")]
@@ -30,7 +32,8 @@ impl ScheduledTaskType {
             Self::AuthCleanup => "Auth Cleanup",
             Self::StaleLeaseCleanup => "Stale Lease Cleanup",
             Self::CaRotationCheck => "CA Rotation Check",
-            Self::VersionCheck => "Version Check",
+            Self::FetchReleases => "Fetch Latest Releases",
+            Self::DetectVersion => "Detect Installed Versions",
             Self::ServiceCertCheck => "Service Cert Check",
             Self::CrlRenewal => "CRL Renewal",
         }

@@ -4,7 +4,7 @@ use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::scheduler::{
-    TASK_TYPE_VERSION_CHECK, TriggerScheduledTaskResponse,
+    TASK_TYPE_FETCH_RELEASES, TriggerScheduledTaskResponse,
 };
 use uptrakit_openapi_client::types::software_items::TriggerVersionCheckResponse;
 
@@ -47,7 +47,7 @@ pub struct ItemParams<'a> {
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
-/// Trigger a bulk version check by finding and triggering the `version_check` scheduler task.
+/// Trigger a bulk release fetch by finding and triggering the `fetch_releases` scheduler task.
 pub async fn all(params: AllParams<'_>) -> Result<TriggerScheduledTaskResponse> {
     let client = authenticated_client(
         params.server,
@@ -56,16 +56,16 @@ pub async fn all(params: AllParams<'_>) -> Result<TriggerScheduledTaskResponse> 
         params.request_timeout,
     )?;
 
-    // Find the version_check scheduler task
+    // Find the fetch_releases scheduler task.
     let tasks = client.list_scheduled_tasks().await.context_to()?;
-    let task = tasks.iter().find(|t| t.task_type == TASK_TYPE_VERSION_CHECK);
+    let task = tasks.iter().find(|t| t.task_type == TASK_TYPE_FETCH_RELEASES);
 
     let task = match task {
         Some(t) => t,
         None => {
             return Ok(TriggerScheduledTaskResponse {
                 triggered: false,
-                message: format!("No {TASK_TYPE_VERSION_CHECK} scheduler task found"),
+                message: format!("No {TASK_TYPE_FETCH_RELEASES} scheduler task found"),
             });
         }
     };

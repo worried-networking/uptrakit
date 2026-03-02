@@ -13,6 +13,7 @@ mod m20260305_000001_crl_cache;
 mod m20260306_000001_update_category;
 mod m20260306_000002_update_batches;
 mod m20260302_000002_host_packages;
+mod m20260307_000001_split_version_check;
 
 pub struct Migrator;
 
@@ -32,6 +33,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260306_000001_update_category::Migration),
             Box::new(m20260306_000002_update_batches::Migration),
             Box::new(m20260302_000002_host_packages::Migration),
+            Box::new(m20260307_000001_split_version_check::Migration),
         ]
     }
 }
@@ -108,5 +110,28 @@ mod tests {
         db.execute_unprepared("SELECT count(*) FROM host_package_update_history")
             .await
             .unwrap();
+        // Verify split_version_check migration: detect_version task row exists.
+        let count_stmt = sea_orm_migration::prelude::Query::select()
+            .expr(sea_orm_migration::prelude::Func::count(
+                sea_orm_migration::prelude::Expr::col(Alias::new("id")),
+            ))
+            .from(Alias::new("scheduled_tasks"))
+            .and_where(
+                sea_orm_migration::prelude::Expr::col(Alias::new("task_type"))
+                    .eq("detect_version"),
+            )
+            .to_owned();
+        let detect_version_count_rows = db.query_all(&count_stmt).await.unwrap();
+        let detect_version_count: i64 = {
+            use sea_orm::TryGetable;
+            detect_version_count_rows
+                .first()
+                .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
+                .unwrap_or(0)
+        };
+        assert!(
+            detect_version_count >= 1,
+            "expected at least one detect_version task after migration, found {detect_version_count}"
+        );
     }
 }

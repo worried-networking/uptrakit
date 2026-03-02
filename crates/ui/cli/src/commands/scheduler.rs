@@ -154,15 +154,15 @@ mod tests {
     use super::*;
     use time::macros::datetime;
     use uptrakit_openapi_client::Uuid;
-    use uptrakit_openapi_client::types::scheduler::TASK_TYPE_VERSION_CHECK;
+    use uptrakit_openapi_client::types::scheduler::TASK_TYPE_FETCH_RELEASES;
 
     fn sample_task() -> ScheduledTaskResponse {
         ScheduledTaskResponse {
             id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                 .parse::<Uuid>()
                 .unwrap(),
-            task_type: TASK_TYPE_VERSION_CHECK.to_string(),
-            label: "Version Check".to_string(),
+            task_type: TASK_TYPE_FETCH_RELEASES.to_string(),
+            label: "Fetch Latest Releases".to_string(),
             cron_expression: "0 * * * *".to_string(),
             enabled: true,
             task_config: None,
@@ -180,8 +180,8 @@ mod tests {
     fn scheduled_task_human_output_contains_key_fields() {
         let task = sample_task();
         let s = task.to_human_string();
-        assert!(s.contains("version_check"), "task_type missing");
-        assert!(s.contains("Version Check"), "label missing");
+        assert!(s.contains("fetch_releases"), "task_type missing");
+        assert!(s.contains("Fetch Latest Releases"), "label missing");
         assert!(s.contains("0 * * * *"), "cron missing");
         assert!(s.contains("true"), "enabled missing");
     }
@@ -197,7 +197,7 @@ mod tests {
         let tasks = vec![sample_task()];
         let s = tasks.to_human_string();
         assert!(s.contains("TYPE"), "header missing");
-        assert!(s.contains("version_check"), "task type missing");
+        assert!(s.contains("fetch_releases"), "task type missing");
     }
 
     #[test]

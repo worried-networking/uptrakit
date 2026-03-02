@@ -33,3 +33,21 @@ pub trait SchedulerNotifier: Send + Sync {
     /// The NATS-only implementation (external scheduler) publishes to NATS only.
     async fn signal_crl_renewal(&self);
 }
+
+/// No-op implementation of [`SchedulerNotifier`] for use in unit tests.
+///
+/// All methods are no-ops. Use this when the test only needs the executor to
+/// run without actually delivering any messages.
+#[cfg(test)]
+pub(crate) struct NoopSchedulerNotifier;
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl SchedulerNotifier for NoopSchedulerNotifier {
+    async fn send_to_service(&self, _service_id: &Uuid, _msg: ControllerMessage) {}
+    async fn broadcast(&self, _msg: ControllerMessage) {}
+    async fn send_by_capability(&self, _capability: &str, _msg: ControllerMessage) {}
+    async fn signal_ca_rotation(&self, _reason: &str) {}
+    async fn push_software_states_for_tenant(&self, _payload: MqttSoftwareStatesPayload) {}
+    async fn signal_crl_renewal(&self) {}
+}

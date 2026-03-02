@@ -392,8 +392,15 @@ async fn run(args: cli::Args) -> Result<()> {
             );
         }
         sched.register(
-            ScheduledTaskType::VersionCheck,
-            Box::new(version_check::VersionCheckExecutor::new(
+            ScheduledTaskType::FetchReleases,
+            Box::new(fetch_releases::FetchReleasesExecutor::new(
+                app_state.db().clone(),
+                Arc::clone(&notifier),
+            )),
+        );
+        sched.register(
+            ScheduledTaskType::DetectVersion,
+            Box::new(detect_version::DetectVersionExecutor::new(
                 app_state.db().clone(),
                 Arc::clone(&notifier),
             )),

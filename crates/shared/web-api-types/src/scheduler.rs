@@ -4,12 +4,24 @@ use uuid::Uuid;
 
 use crate::validation::{Validate, ValidationError};
 
-/// Task type string for the version-check scheduler task.
+/// Task type string for the fetch-releases scheduler task.
 ///
 /// Use this constant instead of a raw string literal wherever the `task_type`
 /// field of [`ScheduledTaskResponse`] is compared or displayed, to avoid a
 /// silent mismatch if the DB-side string value is ever changed.
-pub const TASK_TYPE_VERSION_CHECK: &str = "version_check";
+///
+/// This task fetches the latest available versions from external APIs and
+/// dispatches agent-side package-index queries. It replaces the old
+/// `version_check` task, which was renamed in migration
+/// `m20260307_000001_split_version_check`.
+pub const TASK_TYPE_FETCH_RELEASES: &str = "fetch_releases";
+
+/// Task type string for the detect-version scheduler task.
+///
+/// This task detects the currently installed versions on all agent hosts.
+/// It is the counterpart to [`TASK_TYPE_FETCH_RELEASES`] and was introduced
+/// alongside it when the old `version_check` task was split in two.
+pub const TASK_TYPE_DETECT_VERSION: &str = "detect_version";
 
 /// Response for a single scheduled task.
 #[derive(Serialize, Deserialize)]
@@ -99,8 +111,8 @@ mod tests {
         use time::macros::datetime;
         let resp = ScheduledTaskResponse {
             id: sample_uuid(),
-            task_type: "version_check".to_string(),
-            label: "Nightly version check".to_string(),
+            task_type: "fetch_releases".to_string(),
+            label: "Fetch Latest Releases".to_string(),
             cron_expression: "0 0 * * *".to_string(),
             enabled: true,
             task_config: Some(serde_json::json!({"timeout": 30})),
@@ -116,8 +128,8 @@ mod tests {
         let deserialized: ScheduledTaskResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.id, sample_uuid());
-        assert_eq!(deserialized.task_type, "version_check");
-        assert_eq!(deserialized.label, "Nightly version check");
+        assert_eq!(deserialized.task_type, "fetch_releases");
+        assert_eq!(deserialized.label, "Fetch Latest Releases");
         assert_eq!(deserialized.cron_expression, "0 0 * * *");
         assert!(deserialized.enabled);
         assert!(deserialized.task_config.is_some());

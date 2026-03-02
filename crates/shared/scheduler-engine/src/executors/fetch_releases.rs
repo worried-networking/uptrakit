@@ -21,9 +21,7 @@ use uptrakit_shared_db::entity::{
 use uptrakit_shared_types::PluginType;
 use uuid::Uuid;
 
-use super::queries::{
-    merge_config, query_agent_assignment_rows, query_host_package_assignment_rows,
-};
+use super::queries::{merge_config, query_agent_assignment_rows};
 use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::notifier::SchedulerNotifier;
@@ -54,10 +52,10 @@ impl CommandExecutor for NoopCommandExecutor {
     }
 }
 
-/// Sends `CheckVersions` messages to connected agents for installed-version detection
-/// and performs controller-side `fetch_releases` for API-based plugins.
+/// Fetches latest available release information for all tracked software items.
 ///
-/// The executor runs in two phases:
+/// This executor handles the **fetch_releases** half of what was previously the
+/// single `version_check` task. It runs in two phases:
 ///
 /// **Phase A — Controller-side fetch_releases:**
 /// Queries `host_software_item_plugins` rows with `role = 'fetch_releases'` that
@@ -66,16 +64,18 @@ impl CommandExecutor for NoopCommandExecutor {
 /// capability). Groups by `(plugin_config_id, package_identifier)` to deduplicate
 /// API calls, then stores the latest version in `host_software_items.latest_version`.
 ///
-/// **Phase B — Agent-side assignments:**
+/// **Phase B — Agent-side fetch_releases assignments:**
 /// Builds `VersionCheckAssignment` per `(service_id, host_machine_id)` group using
-/// `detect_version` role plugins and `fetch_releases` role plugins that should run
-/// on the agent. Sends `CheckVersions` messages as before.
-pub struct VersionCheckExecutor {
+/// `fetch_releases` role plugins that should run on the agent (APT, Homebrew, npm).
+/// Sends `CheckVersions` messages with only `fetch_releases` set (no `detect_version`).
+///
+/// Installed-version detection is handled by the separate [`DetectVersionExecutor`](super::detect_version::DetectVersionExecutor).
+pub struct FetchReleasesExecutor {
     db: DatabaseConnection,
     notifier: Arc<dyn SchedulerNotifier>,
 }
 
-impl VersionCheckExecutor {
+impl FetchReleasesExecutor {
     pub fn new(db: DatabaseConnection, notifier: Arc<dyn SchedulerNotifier>) -> Self {
         Self { db, notifier }
     }
@@ -103,24 +103,22 @@ struct FetchGroupKey {
     package_identifier: String,
 }
 
-// ── Phase B: agent-side assignments ──────────────────────────────────────────
-
 #[async_trait::async_trait]
-impl TaskExecutor for VersionCheckExecutor {
+impl TaskExecutor for FetchReleasesExecutor {
     async fn execute(&self, task: &scheduled_task::Model) -> crate::error::Result<()> {
         let tenant_id = task.tenant_id;
 
         // ── Phase A: controller-side fetch_releases ──────────────────────
         self.run_controller_side_fetch_releases(tenant_id).await?;
 
-        // ── Phase B: agent-side assignments ──────────────────────────────
-        self.send_agent_assignments(tenant_id).await?;
+        // ── Phase B: agent-side fetch_releases assignments ────────────────
+        self.send_agent_fetch_release_assignments(tenant_id).await?;
 
         Ok(())
     }
 }
 
-impl VersionCheckExecutor {
+impl FetchReleasesExecutor {
     // ── Phase A ──────────────────────────────────────────────────────────
 
     /// Execute controller-side fetch_releases for eligible plugins and store
@@ -145,7 +143,7 @@ impl VersionCheckExecutor {
         // We also collect the (host_id, software_item_id) pairs to update afterward.
         type FetchGroupValue = (
             String,            // plugin_type
-            serde_json::Value, // merged config (base; override applied per-row below)
+            serde_json::Value, // base config (override applied per-row below)
             String,            // execution_site (from first row; all should match)
             Vec<(Uuid, Uuid)>, // (host_id, software_item_id) targets
         );
@@ -157,8 +155,6 @@ impl VersionCheckExecutor {
                 package_identifier: row.package_identifier.clone(),
             };
             let entry = groups.entry(key).or_insert_with(|| {
-                // Use the base config from plugin_config; the first row's
-                // config_override is applied below.
                 (
                     row.plugin_type.clone(),
                     row.config.clone(),
@@ -286,10 +282,7 @@ impl VersionCheckExecutor {
                 "controller-side fetch_releases succeeded"
             );
 
-            let category_str = latest
-                .category
-                .unwrap_or_default()
-                .to_string();
+            let category_str = latest.category.unwrap_or_default().to_string();
 
             // Update all host_software_items rows sharing this plugin_config + package_identifier.
             for (host_id, software_item_id) in targets {
@@ -411,32 +404,26 @@ impl VersionCheckExecutor {
 
     // ── Phase B ──────────────────────────────────────────────────────────
 
-    /// Build and send `CheckVersions` messages to agents.
-    ///
-    /// Includes both targeted software items (from `host_software_item_plugins`) and
-    /// host-managed packages (from `host_packages`). Host packages include `host_package_id`
-    /// so results can be routed back to the correct table.
-    async fn send_agent_assignments(&self, tenant_id: Uuid) -> crate::error::Result<()> {
+    /// Build and send `CheckVersions` messages to agents containing only
+    /// `fetch_releases` assignments (APT, Homebrew, npm and other agent-side
+    /// release-index plugins). Host packages are excluded here — they only
+    /// have `detect_version` assignments handled by [`DetectVersionExecutor`](super::detect_version::DetectVersionExecutor).
+    async fn send_agent_fetch_release_assignments(
+        &self,
+        tenant_id: Uuid,
+    ) -> crate::error::Result<()> {
         let rows =
-            query_agent_assignment_rows(&self.db, tenant_id, &["detect_version", "fetch_releases"])
-                .await?;
-        let hp_rows = query_host_package_assignment_rows(&self.db, tenant_id).await?;
+            query_agent_assignment_rows(&self.db, tenant_id, &["fetch_releases"]).await?;
 
-        if rows.is_empty() && hp_rows.is_empty() {
-            tracing::debug!("no items assigned to agents for version check");
+        if rows.is_empty() {
+            tracing::debug!("no agent-side fetch_releases items");
             return Ok(());
         }
 
         // Build VersionCheckAssignment per (service_id, host_machine_id).
-        // Use a unique key (Uuid) per assignment. For targeted items, the key is
-        // software_item_id. For host packages, the key is host_package_id.
-        //
-        // Key: (service_id, host_machine_id)
-        // Inner key: assignment key Uuid -> partial VersionCheckAssignment
         let mut by_agent_host: HashMap<(Uuid, String), HashMap<Uuid, VersionCheckAssignment>> =
             HashMap::new();
 
-        // Targeted software items.
         for row in rows {
             let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
                 report!(SchedulerError::Execution(format!(
@@ -451,75 +438,38 @@ impl VersionCheckExecutor {
             };
 
             let assignment = PluginAssignment {
-                plugin_type,
+                plugin_type: plugin_type.clone(),
                 package_identifier: row.package_identifier,
                 config,
             };
 
-            let agent_key = (row.service_id, row.host_machine_id.clone());
-            let items = by_agent_host.entry(agent_key).or_default();
-            let item =
-                items
-                    .entry(row.software_item_id)
-                    .or_insert_with(|| VersionCheckAssignment {
-                        software_item_id: row.software_item_id,
-                        name: row.software_item_name.clone(),
-                        detect_version: None,
-                        fetch_releases: None,
-                        host_package_id: None,
-                    });
-
-            match row.role.as_str() {
-                "detect_version" => {
-                    item.detect_version = Some(assignment);
+            // Only include fetch_releases for agent-side execution.
+            let should_agent_handle = match row.execution_site.as_str() {
+                "agent" => true,
+                "controller" => false,
+                _ => {
+                    // "auto" — check static capability (no instantiation)
+                    !PluginRegistry::capabilities_for(plugin_type)
+                        .contains(&PluginCapability::ControllerSideFetchReleases)
                 }
-                "fetch_releases" => {
-                    // Only include fetch_releases for agent-side execution.
-                    let should_agent_handle = match row.execution_site.as_str() {
-                        "agent" => true,
-                        "controller" => false,
-                        _ => {
-                            // "auto" — check static capability (no instantiation)
-                            !PluginRegistry::capabilities_for(assignment.plugin_type.clone())
-                                .contains(&PluginCapability::ControllerSideFetchReleases)
-                        }
-                    };
-                    if should_agent_handle {
-                        item.fetch_releases = Some(assignment);
-                    }
-                }
-                other => {
-                    tracing::warn!(role = other, "unexpected role in version check query");
-                }
+            };
+            if !should_agent_handle {
+                continue;
             }
-        }
-
-        // Host packages — each gets a detect_version assignment from its plugin config.
-        for row in hp_rows {
-            let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
-                report!(SchedulerError::Execution(format!(
-                    "unknown plugin type: {}",
-                    row.plugin_type
-                )))
-            })?;
 
             let agent_key = (row.service_id, row.host_machine_id.clone());
             let items = by_agent_host.entry(agent_key).or_default();
-
-            // Use host_package_id as the map key (guaranteed unique per host package).
-            items.entry(row.host_package_id).or_insert_with(|| {
-                VersionCheckAssignment {
-                    software_item_id: row.host_package_id, // used for wire compat; handler routes via host_package_id
-                    name: row.host_package_name.clone(),
-                    detect_version: Some(PluginAssignment {
-                        plugin_type,
-                        package_identifier: row.package_identifier,
-                        config: row.config,
-                    }),
+            let item = items
+                .entry(row.software_item_id)
+                .or_insert_with(|| VersionCheckAssignment {
+                    software_item_id: row.software_item_id,
+                    name: row.software_item_name.clone(),
+                    detect_version: None,
                     fetch_releases: None,
-                    host_package_id: Some(row.host_package_id),
-                }
-            });
+                    host_package_id: None,
+                });
+
+            item.fetch_releases = Some(assignment);
         }
 
         // Flatten and send messages.
@@ -529,7 +479,7 @@ impl VersionCheckExecutor {
         for ((service_id, host_machine_id), items) in by_agent_host {
             let assignments: Vec<VersionCheckAssignment> = items
                 .into_values()
-                .filter(|a| a.detect_version.is_some() || a.fetch_releases.is_some())
+                .filter(|a| a.fetch_releases.is_some())
                 .collect();
             if assignments.is_empty() {
                 continue;
@@ -546,9 +496,50 @@ impl VersionCheckExecutor {
         tracing::debug!(
             messages = msg_count,
             items = item_count,
-            "sent version check requests"
+            "sent fetch_releases requests to agents"
         );
         Ok(())
     }
+}
 
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::notifier::NoopSchedulerNotifier;
+    use sea_orm::{ConnectOptions, Database};
+    use uptrakit_shared_db::migration::run_migrations;
+
+    #[tokio::test]
+    async fn fetch_releases_executor_empty_db_returns_ok() {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+        run_migrations(&db).await.unwrap();
+
+        let notifier = Arc::new(NoopSchedulerNotifier);
+        let executor = FetchReleasesExecutor::new(db.clone(), notifier);
+
+        // Build a minimal scheduled_task model for the call.
+        let tenant_id = uuid::Uuid::now_v7();
+        let task = scheduled_task::Model {
+            id: uuid::Uuid::now_v7(),
+            tenant_id,
+            task_type: uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType::FetchReleases,
+            cron_expression: "0 */6 * * *".to_string(),
+            enabled: true,
+            task_config: None,
+            last_run_at: None,
+            next_run_at: time::OffsetDateTime::now_utc(),
+            locked_by: None,
+            locked_at: None,
+            last_error: None,
+            run_count: 0,
+            created_at: time::OffsetDateTime::now_utc(),
+            updated_at: time::OffsetDateTime::now_utc(),
+        };
+
+        // With no software items in the DB, execute should return Ok(()).
+        executor.execute(&task).await.unwrap();
+    }
 }

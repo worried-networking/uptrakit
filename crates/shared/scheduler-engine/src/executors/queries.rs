@@ -19,7 +19,6 @@ pub(crate) struct AgentAssignmentRow {
     pub(crate) host_machine_id: String,
     pub(crate) software_item_id: Uuid,
     pub(crate) software_item_name: String,
-    pub(crate) role: String,
     pub(crate) plugin_type: String,
     pub(crate) package_identifier: String,
     pub(crate) config: serde_json::Value,
@@ -62,7 +61,6 @@ pub(crate) async fn query_agent_assignment_rows(
             "software_item_id",
         )
         .column_as(software_item::Column::Name, "software_item_name")
-        .column_as(host_software_item_plugin::Column::Role, "role")
         .column_as(plugin_config::Column::PluginType, "plugin_type")
         .column_as(
             host_software_item_plugin::Column::PackageIdentifier,
