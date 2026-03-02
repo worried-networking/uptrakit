@@ -80,6 +80,9 @@ impl HumanOutput for ServiceResponse {
         if let Some(ping) = self.ping_interval_seconds {
             out.push_str(&format!("Ping Interval: {}s\n", ping));
         }
+        if let Some(h) = self.cert_lifetime_hours {
+            out.push_str(&format!("Cert Lifetime: {}h\n", h));
+        }
         out.push_str(&format!(
             "Created:       {}\n",
             self.created_at
@@ -167,6 +170,7 @@ pub async fn show(
 pub async fn update(
     id: &Uuid,
     ping_interval: Option<u32>,
+    cert_lifetime_hours: Option<u32>,
     server: Option<&str>,
     token: Option<&str>,
     insecure: bool,
@@ -175,6 +179,7 @@ pub async fn update(
     let client = authenticated_client(server, token, insecure, request_timeout)?;
     let req = UpdateServiceRequest {
         ping_interval_seconds: ping_interval,
+        cert_lifetime_hours,
     };
     client.update_service(id, &req).await.context_to()
 }
@@ -265,6 +270,7 @@ mod tests {
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
             ping_interval_seconds: None,
+            cert_lifetime_hours: None,
         }
     }
 

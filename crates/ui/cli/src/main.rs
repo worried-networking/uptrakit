@@ -561,6 +561,9 @@ enum ServicesCommands {
         /// Custom ping interval in seconds (0 to clear override)
         #[arg(long)]
         ping_interval: Option<u32>,
+        /// Per-service certificate lifetime in hours (0 to clear override)
+        #[arg(long)]
+        cert_lifetime_hours: Option<u32>,
     },
     /// Merge a source service into a target service
     Merge {
@@ -728,9 +731,9 @@ enum CertificateCommands {
     Show,
     /// Update agent certificate settings
     Update {
-        /// Certificate lifetime in days (max 730)
+        /// Certificate lifetime in hours (max 17520)
         #[arg(long)]
-        lifetime_days: Option<u16>,
+        lifetime_hours: Option<u32>,
         /// Certificate renewal window in hours (use 0 to reset to automatic: min(14 days, lifetime/5))
         #[arg(long)]
         renewal_window_hours: Option<u16>,
@@ -1491,10 +1494,15 @@ async fn run(cli: Cli) -> error::Result<()> {
                 .await?;
                 output::print_output(format, &resp)?;
             }
-            ServicesCommands::Update { id, ping_interval } => {
+            ServicesCommands::Update {
+                id,
+                ping_interval,
+                cert_lifetime_hours,
+            } => {
                 let resp = commands::services::update(
                     &id,
                     ping_interval,
+                    cert_lifetime_hours,
                     cli.server.as_deref(),
                     cli.token.as_deref(),
                     insecure,
@@ -2231,11 +2239,11 @@ async fn run(cli: Cli) -> error::Result<()> {
                     output::print_output(format, &resp)?;
                 }
                 CertificateCommands::Update {
-                    lifetime_days,
+                    lifetime_hours,
                     renewal_window_hours,
                 } => {
                     let resp = commands::settings::certificates_update(
-                        lifetime_days,
+                        lifetime_hours,
                         renewal_window_hours,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
@@ -4222,8 +4230,8 @@ mod tests {
             "settings",
             "certificates",
             "update",
-            "--lifetime-days",
-            "365",
+            "--lifetime-hours",
+            "8760",
             "--renewal-window-hours",
             "72",
         ])
@@ -4234,12 +4242,12 @@ mod tests {
                     SettingsCommands::Certificates {
                         command:
                             CertificateCommands::Update {
-                                lifetime_days,
+                                lifetime_hours,
                                 renewal_window_hours,
                             },
                     },
             }) => {
-                assert_eq!(lifetime_days, Some(365));
+                assert_eq!(lifetime_hours, Some(8760));
                 assert_eq!(renewal_window_hours, Some(72));
             }
             _ => panic!("expected Settings Certificates Update"),

@@ -68,8 +68,8 @@ impl HumanOutput for CombinedSettingsResponse {
         ));
         out.push_str("\nAgent Certificates:\n");
         out.push_str(&format!(
-            "  Lifetime (days):         {}\n",
-            self.agent_certificates.lifetime_days
+            "  Lifetime (hours):        {}\n",
+            self.agent_certificates.lifetime_hours
         ));
         let window_desc = match self.agent_certificates.renewal_window_hours_override {
             None => format!(
@@ -113,8 +113,8 @@ impl HumanOutput for AgentCertificateSettingsResponse {
     fn to_human_string(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!(
-            "Lifetime (days):         {}\n",
-            self.lifetime_days
+            "Lifetime (hours):        {}\n",
+            self.lifetime_hours
         ));
         let window_desc = match self.renewal_window_hours_override {
             None => format!(
@@ -507,7 +507,7 @@ pub async fn certificates_show(
 
 /// Update agent certificate settings.
 pub async fn certificates_update(
-    lifetime_days: Option<u16>,
+    lifetime_hours: Option<u32>,
     renewal_window_hours: Option<u16>,
     server: Option<&str>,
     token: Option<&str>,
@@ -516,7 +516,7 @@ pub async fn certificates_update(
 ) -> Result<AgentCertificateSettingsResponse> {
     let client = authenticated_client(server, token, insecure, request_timeout)?;
     let req = UpdateAgentCertificateSettingsRequest {
-        lifetime_days,
+        lifetime_hours,
         renewal_window_hours,
     };
     client
@@ -975,13 +975,14 @@ mod tests {
 
     #[test]
     fn certificate_settings_human_output_auto_mode() {
+        // 8760 h = 365 days
         let resp = AgentCertificateSettingsResponse {
-            lifetime_days: 365,
+            lifetime_hours: 8760,
             renewal_window_hours_override: None,
             effective_renewal_window_hours: 336,
         };
         let s = resp.to_human_string();
-        assert!(s.contains("365"), "lifetime_days missing");
+        assert!(s.contains("8760"), "lifetime_hours missing");
         assert!(s.contains("336"), "effective hours missing");
         assert!(s.contains("automatic"), "auto mode indicator missing");
     }
@@ -989,12 +990,12 @@ mod tests {
     #[test]
     fn certificate_settings_human_output_custom_override() {
         let resp = AgentCertificateSettingsResponse {
-            lifetime_days: 365,
+            lifetime_hours: 8760,
             renewal_window_hours_override: Some(72),
             effective_renewal_window_hours: 72,
         };
         let s = resp.to_human_string();
-        assert!(s.contains("365"), "lifetime_days missing");
+        assert!(s.contains("8760"), "lifetime_hours missing");
         assert!(s.contains("72"), "override hours missing");
         assert!(s.contains("custom"), "custom indicator missing");
     }
@@ -1010,7 +1011,7 @@ mod tests {
                 password_auth_enabled: true,
             },
             agent_certificates: AgentCertificateSettingsResponse {
-                lifetime_days: 365,
+                lifetime_hours: 8760,
                 renewal_window_hours_override: None,
                 effective_renewal_window_hours: 336,
             },
@@ -1022,7 +1023,7 @@ mod tests {
             s.contains("Authentication"),
             "authentication section missing"
         );
-        assert!(s.contains("365"), "lifetime_days missing");
+        assert!(s.contains("8760"), "lifetime_hours missing");
     }
 
     #[test]
