@@ -16,7 +16,9 @@ mod m20260302_000002_host_packages;
 mod m20260302_000003_host_packages_has_update;
 mod m20260307_000001_split_version_check;
 mod m20260302_000004_service_cert_lifetime;
+mod m20260302_000005_system_services;
 mod m20260307_000002_manage_commands_permission;
+mod m20260308_000001_system_services_permissions;
 
 pub struct Migrator;
 
@@ -39,7 +41,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260302_000003_host_packages_has_update::Migration),
             Box::new(m20260307_000001_split_version_check::Migration),
             Box::new(m20260302_000004_service_cert_lifetime::Migration),
+            Box::new(m20260302_000005_system_services::Migration),
             Box::new(m20260307_000002_manage_commands_permission::Migration),
+            Box::new(m20260308_000001_system_services_permissions::Migration),
         ]
     }
 }
@@ -58,7 +62,8 @@ mod tests {
         crl_cache, global_setting, host_discovery_allowlist, host_package, host_package_ignore,
         host_package_update_history, host_software_item, notification_channel, notification_log,
         notification_rule, plugin_config, revoked_token_jti, revoked_token_user, service,
-        software_item, tenant_discovery_allowlist, update_batch, update_history,
+        software_item, system_service, system_service_certificate, tenant_discovery_allowlist,
+        update_batch, update_history,
     };
 
     /// Verify that the `has_update` generated column exists in `host_packages`.
@@ -193,6 +198,12 @@ mod tests {
         assert_has_update_column_exists(&db).await;
 
         service::Entity::find().count(&db).await.unwrap();
+        system_service::Entity::find().count(&db).await.unwrap();
+        system_service_certificate::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
+
 
         // Verify split_version_check migration: detect_version task row exists.
         let count_stmt = Query::select()
@@ -236,6 +247,32 @@ mod tests {
             perm_count, 1,
             "manage_commands permission must exist after all migrations"
         );
+
+        // Verify view_system_services and manage_system_services permissions exist.
+        for perm_name in ["view_system_services", "manage_system_services"] {
+            let ss_perm_stmt = sea_orm_migration::prelude::Query::select()
+                .expr(sea_orm_migration::prelude::Func::count(
+                    sea_orm_migration::prelude::Expr::col(Alias::new("id")),
+                ))
+                .from(Alias::new("permissions"))
+                .and_where(
+                    sea_orm_migration::prelude::Expr::col(Alias::new("name"))
+                        .eq(perm_name),
+                )
+                .to_owned();
+            let ss_rows = db.query_all(&ss_perm_stmt).await.unwrap();
+            let ss_count: i64 = {
+                use sea_orm::TryGetable;
+                ss_rows
+                    .first()
+                    .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
+                    .unwrap_or(0)
+            };
+            assert_eq!(
+                ss_count, 1,
+                "{perm_name} permission must exist after all migrations"
+            );
+        }
     }
 
     /// After all migrations, owner and admin roles must have manage_commands.

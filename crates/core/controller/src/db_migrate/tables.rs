@@ -7,7 +7,7 @@ use uptrakit_shared_db::entity::prelude::*;
 
 use super::error::{DbMigrateError, Result};
 
-/// Names of all 38 application tables in FK-safe copy order
+/// Names of all application tables in FK-safe copy order
 /// (parent tables first, leaf tables last).
 ///
 /// This is the reverse of the `drop_tables!` list in the initial migration's
@@ -34,6 +34,8 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "enrollment_tokens",
     "services",
     "service_certificates",
+    "system_services",
+    "system_service_certificates",
     "hosts",
     "service_hosts",
     "plugin_configs",
@@ -90,6 +92,8 @@ pub async fn copy_all(
     copy!(EnrollmentToken, "enrollment_tokens");
     copy!(Service, "services");
     copy!(ServiceCertificate, "service_certificates");
+    copy!(SystemService, "system_services");
+    copy!(SystemServiceCertificate, "system_service_certificates");
     copy!(Host, "hosts");
     copy!(ServiceHost, "service_hosts");
     copy!(PluginConfig, "plugin_configs");
@@ -148,6 +152,8 @@ pub async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(PluginConfig, "plugin_configs");
     clean!(ServiceHost, "service_hosts");
     clean!(Host, "hosts");
+    clean!(SystemServiceCertificate, "system_service_certificates");
+    clean!(SystemService, "system_services");
     clean!(ServiceCertificate, "service_certificates");
     clean!(Service, "services");
     clean!(EnrollmentToken, "enrollment_tokens");
@@ -199,6 +205,8 @@ pub async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnection) -> R
     verify!(EnrollmentToken, "enrollment_tokens");
     verify!(Service, "services");
     verify!(ServiceCertificate, "service_certificates");
+    verify!(SystemService, "system_services");
+    verify!(SystemServiceCertificate, "system_service_certificates");
     verify!(Host, "hosts");
     verify!(ServiceHost, "service_hosts");
     verify!(PluginConfig, "plugin_configs");
@@ -349,11 +357,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copy_order_has_all_38_tables() {
+    fn copy_order_has_all_40_tables() {
         assert_eq!(
             COPY_ORDER.len(),
-            38,
-            "COPY_ORDER must list all 38 app tables"
+            40,
+            "COPY_ORDER must list all 40 app tables"
         );
     }
 }
