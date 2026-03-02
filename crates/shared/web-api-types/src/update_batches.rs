@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use uptrakit_shared_types::UpdateCategory;
 use uuid::Uuid;
 
 use crate::software_items::TriggerUpdateStatus;
@@ -28,14 +29,10 @@ pub struct HostBatchUpdateRequest {
 impl Validate for HostBatchUpdateRequest {
     fn validate(&self) -> Result<(), ValidationError> {
         if let Some(ref cat) = self.category_filter {
-            let valid = ["security", "bugfix", "feature", "unknown"];
-            if !valid.contains(&cat.as_str()) {
+            if cat.parse::<UpdateCategory>().is_err() {
                 return Err(ValidationError {
                     field: "category_filter",
-                    message: format!(
-                        "must be one of: {}",
-                        valid.join(", ")
-                    ),
+                    message: "must be a valid update category".to_string(),
                 });
             }
         }
@@ -208,11 +205,13 @@ mod tests {
 
     #[test]
     fn host_batch_request_validate_valid_category() {
-        let req = HostBatchUpdateRequest {
-            category_filter: Some("security".to_string()),
-            exclude_item_ids: None,
-        };
-        assert!(req.validate().is_ok());
+        for category in ["security", "bugfix", "feature", "unknown"] {
+            let req = HostBatchUpdateRequest {
+                category_filter: Some(category.to_string()),
+                exclude_item_ids: None,
+            };
+            assert!(req.validate().is_ok(), "expected {category:?} to be valid");
+        }
     }
 
     #[test]
