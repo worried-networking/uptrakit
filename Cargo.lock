@@ -6733,6 +6733,7 @@ dependencies = [
  "tracing",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "url",
 ]
 
 [[package]]
@@ -6912,6 +6913,7 @@ dependencies = [
  "tracing",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
  "url",
 ]
 
@@ -6931,6 +6933,7 @@ dependencies = [
  "tracing",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
  "url",
 ]
 
@@ -6950,6 +6953,7 @@ dependencies = [
  "tracing",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
  "url",
 ]
 

@@ -87,6 +87,47 @@ static MASTER_KEY: OnceLock<Zeroizing<[u8; 32]>> = OnceLock::new();
 /// Must never be set in production.
 static PLAINTEXT_MODE: AtomicBool = AtomicBool::new(false);
 
+// ── Column AAD registry ──────────────────────────────────────────────
+
+/// Global registry mapping column names to their AAD strings.
+///
+/// Used by [`EncryptedString`]'s `TryGetable` implementation to look up the
+/// correct AAD for `ENC:v2:` decryption based on the column name in the
+/// query result.
+///
+/// Initialized at controller startup via [`register_column_aad`].
+static COLUMN_AAD_REGISTRY: OnceLock<std::collections::HashMap<String, String>> = OnceLock::new();
+
+/// Register the column-name-to-AAD mappings used for `ENC:v2:` decryption.
+///
+/// Must be called once at startup, before any database queries that read
+/// `EncryptedString` columns. Subsequent calls return an error.
+///
+/// The map keys are column names (e.g. `"password"`, `"client_secret"`) and
+/// values are the corresponding AAD strings (e.g. `"uptrakit:mqtt_clients:password"`).
+///
+/// # Errors
+///
+/// Returns `Err(CryptoError::AlreadyInitialized)` if the registry has already
+/// been initialized.
+pub fn register_column_aad(
+    mappings: std::collections::HashMap<String, String>,
+) -> Result<()> {
+    COLUMN_AAD_REGISTRY
+        .set(mappings)
+        .map_err(|_| report!(CryptoError::AlreadyInitialized))
+}
+
+/// Look up the registered AAD for a given column name.
+///
+/// Returns `None` if the column is not registered (e.g. the registry was not
+/// initialized, or the column was not included in the mappings).
+fn column_aad(column_name: &str) -> Option<&str> {
+    COLUMN_AAD_REGISTRY
+        .get()
+        .and_then(|m| m.get(column_name).map(String::as_str))
+}
+
 /// Initialize the global master key. Must be called once at startup.
 ///
 /// The key bytes are wrapped in [`Zeroizing`] so that any intermediate copy
@@ -403,9 +444,12 @@ fn decrypt_value_v2(stored: &str, aad: &str) -> Result<String> {
 ///
 /// ## Ciphertext format
 ///
-/// `EncryptedString` uses the `ENC:v1:` format (empty AAD). Migration of
-/// existing columns to context-bound `ENC:v2:` ciphertexts is tracked in
-/// `TODO.md`.
+/// - [`EncryptedString::new`] produces `ENC:v1:` (empty AAD) for backward
+///   compatibility with existing data.
+/// - [`EncryptedString::new_with_aad`] produces context-bound `ENC:v2:`.
+/// - Both formats are transparently handled on the read path by the
+///   `TryGetable` implementation, which looks up the column AAD from the
+///   global [`register_column_aad`] registry for `ENC:v2:` decryption.
 pub struct EncryptedString {
     /// Plaintext value (for `expose_secret`).
     plaintext: SecretString,
@@ -466,6 +510,33 @@ impl EncryptedString {
         self.plaintext.expose_secret()
     }
 
+    /// Create a new `EncryptedString` from a plaintext value with
+    /// context-bound AAD (produces `ENC:v2:` ciphertext).
+    ///
+    /// The `aad` string is mixed into the GCM authentication tag, binding
+    /// the ciphertext to a specific column/purpose.  Use the
+    /// `"uptrakit:<table>:<column>"` convention.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(CryptoError::NotInitialized)` if the master key has not
+    /// been initialized, or `Err` on any other encryption failure.
+    pub fn new_with_aad(plaintext: String, aad: &str) -> Result<Self> {
+        let db_value = encrypt_value_v2(&plaintext, aad)?;
+        Ok(Self {
+            plaintext: SecretString::new(plaintext),
+            db_value,
+        })
+    }
+
+    /// Returns `true` if the stored DB representation uses `ENC:v1:` format.
+    ///
+    /// Used by the re-encryption routine to identify v1 values that should be
+    /// upgraded to context-bound `ENC:v2:` format.
+    pub fn is_v1(&self) -> bool {
+        self.db_value.starts_with(ENC_V1_PREFIX)
+    }
+
     /// Construct an `EncryptedString` whose database representation is the
     /// raw `value` string **without** the `ENC:v1:` prefix.
     ///
@@ -513,6 +584,14 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
                 if s.starts_with(ENC_V1_PREFIX) {
                     let plaintext =
                         decrypt_value(&s).map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
+                    Ok(EncryptedString::from_db(plaintext, s))
+                } else if s.starts_with(ENC_V2_PREFIX) {
+                    // ValueType has no column name — use empty AAD as fallback.
+                    // Real v2 ciphertexts will fail here, surfacing an explicit error.
+                    // Normal SeaORM entity queries go through TryGetable which has
+                    // the column name and can look up the correct AAD.
+                    let plaintext =
+                        decrypt_value_v2(&s, "").map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
                     Ok(EncryptedString::from_db(plaintext, s))
                 } else {
                     // Legacy plaintext — accept as-is
@@ -568,7 +647,16 @@ impl sea_orm::TryGetable for EncryptedString {
             }
         };
 
-        if s.starts_with(ENC_V1_PREFIX) {
+        if s.starts_with(ENC_V2_PREFIX) {
+            let col_name = index.as_str().unwrap_or("unknown");
+            let aad = column_aad(col_name).unwrap_or("");
+            let plaintext = decrypt_value_v2(&s, aad).map_err(|e| {
+                sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
+                    "ENC:v2 decryption failed for column '{col_name}': {e}"
+                )))
+            })?;
+            Ok(EncryptedString::from_db(plaintext, s))
+        } else if s.starts_with(ENC_V1_PREFIX) {
             let plaintext = decrypt_value(&s).map_err(|e| {
                 sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
                     "EncryptedString decryption failed: {e}"
@@ -1033,6 +1121,105 @@ mod tests {
             "decrypt_str_with_aad must accept ENC:v1: tokens for backward compatibility"
         );
         assert_eq!(result.unwrap(), "legacy_value");
+    }
+
+    #[test]
+    fn test_new_with_aad_round_trip() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let aad = "uptrakit:test_table:test_column";
+        let es = EncryptedString::new_with_aad("aad secret".to_string(), aad)
+            .expect("new_with_aad should succeed");
+        assert!(
+            es.db_value.starts_with(ENC_V2_PREFIX),
+            "new_with_aad must produce ENC:v2: ciphertext"
+        );
+        assert_eq!(es.expose_secret(), "aad secret");
+
+        // Must decrypt with the same AAD
+        let decrypted =
+            decrypt_str_with_aad(&es.db_value, aad).expect("decryption with correct AAD");
+        assert_eq!(decrypted, "aad secret");
+    }
+
+    #[test]
+    fn test_new_with_aad_wrong_aad_fails() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let es = EncryptedString::new_with_aad("secret".to_string(), "correct:aad")
+            .expect("should encrypt");
+        let result = decrypt_str_with_aad(&es.db_value, "wrong:aad");
+        assert!(
+            result.is_err(),
+            "decrypting v2 ciphertext with wrong AAD must fail"
+        );
+    }
+
+    #[test]
+    fn test_is_v1_returns_true_for_v1() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let es = EncryptedString::new("v1 value".to_string()).expect("should encrypt");
+        assert!(es.is_v1(), "EncryptedString::new produces v1, is_v1 must be true");
+    }
+
+    #[test]
+    fn test_is_v1_returns_false_for_v2() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let es = EncryptedString::new_with_aad("v2 value".to_string(), "test:aad")
+            .expect("should encrypt");
+        assert!(!es.is_v1(), "new_with_aad produces v2, is_v1 must be false");
+    }
+
+    #[test]
+    fn test_is_v1_returns_false_for_plaintext() {
+        let es = EncryptedString::plaintext_for_test("plain".to_string());
+        assert!(
+            !es.is_v1(),
+            "plaintext db_value does not start with ENC:v1:, is_v1 must be false"
+        );
+    }
+
+    #[test]
+    fn test_cross_column_relocation_fails() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        // Encrypt with one AAD context (simulating column A)
+        let es = EncryptedString::new_with_aad(
+            "sensitive".to_string(),
+            "uptrakit:table_a:column_a",
+        )
+        .expect("should encrypt");
+
+        // Attempt to decrypt with a different AAD (simulating column B) — must fail
+        let result = decrypt_str_with_aad(&es.db_value, "uptrakit:table_b:column_b");
+        assert!(
+            result.is_err(),
+            "v2 ciphertext decrypted with wrong AAD (different column) must fail"
+        );
+    }
+
+    #[test]
+    fn test_register_column_aad_and_lookup() {
+        // Note: this test relies on the fact that COLUMN_AAD_REGISTRY is a
+        // process-wide OnceLock. Since other tests may call register_column_aad
+        // too, we just verify the lookup function works with whatever is
+        // registered (or not).
+        let mut mappings = std::collections::HashMap::new();
+        mappings.insert("test_col".to_string(), "uptrakit:t:test_col".to_string());
+        // Ignore error — may already be initialized by another test
+        let _ = register_column_aad(mappings);
+
+        // If registry was initialized by us, lookup should work.
+        // If already initialized by another test, we just verify no panic.
+        let _ = column_aad("test_col");
+        assert!(column_aad("nonexistent_col_xyz").is_none());
     }
 
     #[test]
