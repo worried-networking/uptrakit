@@ -595,6 +595,10 @@ pub async fn list_batches(
                 update_history::UpdateStatus::Failed => entry.1 += 1,
                 update_history::UpdateStatus::Pending
                 | update_history::UpdateStatus::InProgress => entry.2 += 1,
+                _ => {
+                    tracing::warn!("Unknown update status {:?}, counting as pending", child.status);
+                    entry.2 += 1;
+                }
             }
         }
     }
@@ -683,6 +687,10 @@ pub async fn get_batch_with_items(
                 update_history::UpdateStatus::Failed => failed_count += 1,
                 update_history::UpdateStatus::Pending
                 | update_history::UpdateStatus::InProgress => pending_count += 1,
+                _ => {
+                    tracing::warn!("Unknown update status {:?}, counting as pending", child.status);
+                    pending_count += 1;
+                }
             }
             UpdateBatchItemSummary {
                 update_history_id: child.id,

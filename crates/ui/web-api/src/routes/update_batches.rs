@@ -420,6 +420,15 @@ pub async fn stream_batch_progress(
                         host_name,
                     }
                 }
+                _ => {
+                    tracing::warn!("Unknown update status {:?}, treating as pending", child.status);
+                    pending += 1;
+                    BatchProgressEvent::UpdateDispatched {
+                        update_history_id: child.id,
+                        software_item_name: sw_name,
+                        host_name,
+                    }
+                }
             };
 
             if let Ok(json) = serde_json::to_string(&event) {

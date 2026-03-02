@@ -5,7 +5,6 @@ use uptrakit_web_api_types::enrollment_tokens::{
     ListEnrollmentTokensQuery,
 };
 use uptrakit_web_api_types::pagination::PaginatedResponse;
-use uptrakit_web_api_types::services::MessageResponse;
 use uuid::Uuid;
 
 impl UptrakitClient {
@@ -42,8 +41,8 @@ impl UptrakitClient {
     }
 
     /// Revoke an enrollment token (soft-delete).
-    pub async fn revoke_enrollment_token(&self, id: &Uuid) -> Result<MessageResponse> {
-        self.delete_json(&crate::paths::enrollment_tokens::by_id(id))
+    pub async fn revoke_enrollment_token(&self, id: &Uuid) -> Result<()> {
+        self.delete(&crate::paths::enrollment_tokens::by_id(id))
             .await
     }
 }

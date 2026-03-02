@@ -20,6 +20,10 @@ fn db_status_to_api(status: &update_history::UpdateStatus) -> UpdateStatus {
         update_history::UpdateStatus::InProgress => UpdateStatus::InProgress,
         update_history::UpdateStatus::Completed => UpdateStatus::Completed,
         update_history::UpdateStatus::Failed => UpdateStatus::Failed,
+        _ => {
+            tracing::warn!("Unknown update status encountered, defaulting to Pending");
+            UpdateStatus::Pending
+        }
     }
 }
 

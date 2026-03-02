@@ -864,6 +864,10 @@ async fn emit_batch_progress_from_db(state: &Arc<AppState>, batch_id: uuid::Uuid
             update_history::UpdateStatus::Pending | update_history::UpdateStatus::InProgress => {
                 pending += 1;
             }
+            _ => {
+                tracing::warn!("Unknown update status {:?}, counting as pending", r.status);
+                pending += 1;
+            }
         }
     }
 

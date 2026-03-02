@@ -19,8 +19,6 @@ pub use uptrakit_web_api_types::enrollment_tokens::{
     EnrollmentTokensSummary, ListEnrollmentTokensQuery,
 };
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
-pub use uptrakit_web_api_types::services::MessageResponse;
-
 /// Create a new enrollment token
 #[utoipa::path(
     post,
@@ -180,7 +178,7 @@ pub async fn get_enrollment_token(
         ("id" = Uuid, Path, description = "Enrollment token UUID")
     ),
     responses(
-        (status = 200, description = "Enrollment token revoked", body = MessageResponse),
+        (status = 204, description = "Enrollment token revoked"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
         (status = 404, description = "Enrollment token not found")
@@ -195,13 +193,7 @@ pub async fn revoke_enrollment_token(
     Path(token_id): Path<Uuid>,
 ) -> Response {
     match et_queries::revoke_enrollment_token(&tenant_db, token_id).await {
-        Ok(true) => (
-            StatusCode::OK,
-            Json(MessageResponse {
-                message: "Enrollment token revoked".to_string(),
-            }),
-        )
-            .into_response(),
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(
             StatusCode::NOT_FOUND,
             "Enrollment token not found or already revoked",
