@@ -43,30 +43,33 @@ non-fatal and does not mark the update as failed.
 
 | Value | Description |
 | --- | --- |
-| `manual` | (default) Only packages the user explicitly installed (`apt-mark showmanual`) |
-| `all` | All installed packages reported by `dpkg` |
+| *(omitted — default `{}`)* | All installed packages reported by `dpkg`. Plugin config is auto-created on first discovery. |
+| `"all"` | All installed packages reported by `dpkg` (explicit; uses pre-existing plugin config). |
+| `"manual"` | Only packages the user explicitly installed (`apt-mark showmanual`). |
 
-**Default config** (equivalent to `{}` or `{"discovery_filter": "manual"}`):
+**Default config** — no `discovery_filter` key, serialises as `{}`):
 
 ```json
 {}
 ```
 
-**Discovery all installed packages:**
+When the config is `{}` the plugin runs in **discover-all mode**: it discovers every package
+reported by `dpkg` and emits `DiscoveryTarget` values so the controller can auto-create the
+plugin config on the first run. Subsequent runs use the auto-created config ID.
+
+**Restrict to manually-installed packages:**
 
 ```json
-{ "discovery_filter": "all" }
+{ "discovery_filter": "manual" }
 ```
 
-Use `all` when you want to track every package on the system, including libraries and
-dependencies automatically installed with other packages. Use `manual` (the default) to
-limit discovery to packages you intentionally installed.
+Use `"manual"` when you want to limit discovery to packages you intentionally installed via
+`apt install`, omitting libraries and transitive dependencies.
 
 ## Auto-Created Plugin Config
 
-When an agent with an APT plugin assignment connects and no matching plugin config
-exists, Uptrakit automatically creates one named **`APT`** with the default configuration
-(`{"discovery_filter": "manual"}`).
+When an agent discovers APT packages and no matching plugin config exists yet, Uptrakit
+automatically creates one named **`APT`** with the default configuration (`{}`).
 
 ## Package Identifier Format
 
@@ -103,17 +106,17 @@ sudo visudo -c -f /etc/sudoers.d/uptrakit
 ## Creating an APT Plugin Config via CLI
 
 ```bash
-# Create a plugin config with the default (manual) filter
+# Create a plugin config with the default filter (discovers all packages)
 uptrakit plugin-configs create \
-  --name "APT Packages" \
+  --name "APT" \
   --type package_manager_apt \
   --config '{}'
 
-# Create a plugin config that discovers all installed packages
+# Create a plugin config that discovers only manually-installed packages
 uptrakit plugin-configs create \
-  --name "APT All Packages" \
+  --name "APT (Manual)" \
   --type package_manager_apt \
-  --config '{"discovery_filter": "all"}'
+  --config '{"discovery_filter": "manual"}'
 ```
 
 ## How It Works
@@ -131,12 +134,13 @@ version information.
 
 ### Autodiscovery
 
-The plugin discovers installed packages in two steps:
+The plugin discovers installed packages in up to two steps:
 
 1. **Query all installed packages:** Runs `dpkg-query --show --showformat=...` to get
    all packages with non-empty versions.
-2. **Filter (Manual mode only):** Runs `apt-mark showmanual` to get the set of
-   manually-installed packages and filters the results to that set.
+2. **Filter (only when `discovery_filter: "manual"`):** Runs `apt-mark showmanual` to get
+   the set of manually-installed packages and filters the results to that set. This step
+   is skipped when the filter is `"all"` or when using the default empty config.
 
 ### Version Detection
 

@@ -655,9 +655,16 @@ DiscoveredSoftware {
 | Proxmox Helper Scripts | all modes | `Targeted` |
 
 The controller's `process_discovery_results()` inspects the `tracking_system` field and routes
-accordingly. For `HostManaged` items, it calls `find_or_create_host_package()` which checks the
-host package ignore list and either updates an existing record or creates a new one. For
-`Targeted` items, it follows the existing `find_or_create_software_item()` path.
+accordingly. For `HostManaged` items the controller resolves the plugin config ID first:
+
+1. If `result.plugin_config_id` is `Some(_)` (pre-existing config), that ID is used directly.
+2. Otherwise, the controller reads `item.targets.first()` and calls
+   `find_or_create_default_plugin_config()` to auto-create the config on the first run.
+3. If neither is present the item is skipped with a warning.
+
+Once the config ID is known, `find_or_create_host_package()` checks the host package ignore list
+and either updates an existing record or creates a new one. For `Targeted` items, the controller
+follows the `find_or_create_software_item()` path.
 
 See [Autodiscovery — Tracking system routing](../end-user/autodiscovery.md#tracking-system-routing)
 for the end-user perspective.

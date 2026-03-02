@@ -390,11 +390,14 @@ for user review. Key invariants:
    three roles.  When a real config is present (`plugin_config_id: Some(_)`), targets are empty and
    the controller uses the config-ID path.
 
-   **APT** uses `AptConfig::is_discover_all_mode()` (true when `discovery_filter == Manual`,
-   the default) to decide whether to emit targets. When `plugin_config_id: None` with `config: {}`,
-   each discovered item emits one `DiscoveryTarget` with `plugin_type: PackageManagerApt`,
-   config `{}`, name `"APT"`, and all three roles.  When `discovery_filter: "all"` (non-default)
-   is set, `plugin_config_id: Some(_)` is expected and items use the config-ID path.
+   **APT** uses `AptConfig::is_discover_all_mode()` (true when `discovery_filter` is `None`,
+   i.e. the default empty config `{}`) to decide whether to emit targets. When
+   `plugin_config_id: None` with `config: {}`, each discovered item discovers **all** installed
+   dpkg packages and emits one `DiscoveryTarget` with `plugin_type: PackageManagerApt`, config
+   `{}`, name `"APT"`, and all three roles. When a real config is present (`plugin_config_id:
+   Some(_)`) with `discovery_filter: "all"` or `discovery_filter: "manual"`, targets are empty
+   and items use the config-ID path. (`discovery_filter: "manual"` restricts discovery to packages
+   reported by `apt-mark showmanual`.)
 
    The `extra` field on `DiscoveredSoftware` is purely informational metadata (e.g. Docker's
    `{"containers": ["web-server"]}`) — the controller never interprets it for config synthesis.
