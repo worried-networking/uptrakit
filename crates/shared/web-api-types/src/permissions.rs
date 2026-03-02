@@ -15,6 +15,12 @@ pub enum Permission {
     ManageGlobalSettings,
     ViewSoftware,
     ManageSoftware,
+    /// Controls the ability to modify command-bearing plugin config fields
+    /// (shell commands, Docker `post_pull_command`, and custom hook `commands`
+    /// arrays). Granting this permission is equivalent to granting effective
+    /// code-execution authority on all managed hosts assigned to the affected
+    /// software items. Assign with the same care as granting root access.
+    ManageCommands,
     ViewHosts,
     ManageHosts,
     ViewNotifications,
@@ -31,6 +37,7 @@ impl Permission {
             Permission::ManageGlobalSettings => "manage_global_settings",
             Permission::ViewSoftware => "view_software",
             Permission::ManageSoftware => "manage_software",
+            Permission::ManageCommands => "manage_commands",
             Permission::ViewHosts => "view_hosts",
             Permission::ManageHosts => "manage_hosts",
             Permission::ViewNotifications => "view_notifications",
@@ -56,6 +63,7 @@ impl FromStr for Permission {
             "manage_global_settings" => Ok(Self::ManageGlobalSettings),
             "view_software" => Ok(Self::ViewSoftware),
             "manage_software" => Ok(Self::ManageSoftware),
+            "manage_commands" => Ok(Self::ManageCommands),
             "view_hosts" => Ok(Self::ViewHosts),
             "manage_hosts" => Ok(Self::ManageHosts),
             "view_notifications" => Ok(Self::ViewNotifications),

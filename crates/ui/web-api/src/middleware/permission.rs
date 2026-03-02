@@ -103,6 +103,11 @@ permission_extractor! {
     CanViewSoftware => Permission::ViewSoftware,
     /// Extractor that requires [`Permission::ManageSoftware`].
     CanManageSoftware => Permission::ManageSoftware,
+    /// Extractor that requires [`Permission::ManageCommands`].
+    ///
+    /// Grants ability to modify command-bearing plugin config fields. Treat
+    /// this as equivalent to root access on all managed hosts.
+    CanManageCommands => Permission::ManageCommands,
     /// Extractor that requires [`Permission::ViewHosts`].
     CanViewHosts => Permission::ViewHosts,
     /// Extractor that requires [`Permission::ManageHosts`].

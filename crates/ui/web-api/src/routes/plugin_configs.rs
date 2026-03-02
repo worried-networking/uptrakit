@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
+use crate::middleware::permission::{CanManageCommands, CanManageSoftware, CanViewSoftware};
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::{self as pc_queries, PluginConfigError};
 use crate::tenant_db::TenantDb;
@@ -62,11 +62,14 @@ pub async fn list_plugin_types(
 }
 
 /// Create a new plugin configuration.
+///
+/// Requires `manage_commands` permission because plugin configs can contain
+/// arbitrary shell commands executed on managed hosts.
 #[utoipa::path(
     post,
     path = "/api/v1/plugin-configs",
     request_body = CreatePluginConfigRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_commands"))),
     responses(
         (status = 201, description = "Plugin config created", body = PluginConfigResponse),
         (status = 400, description = "Invalid input"),
@@ -78,7 +81,7 @@ pub async fn list_plugin_types(
 pub async fn create_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageCommands(_user): CanManageCommands,
     Json(req): Json<CreatePluginConfigRequest>,
 ) -> Response {
     if let Err(e) = req.validate() {
@@ -164,12 +167,15 @@ pub async fn get_plugin_config(
 }
 
 /// Update a plugin configuration (partial update).
+///
+/// Requires `manage_commands` permission because plugin configs can contain
+/// arbitrary shell commands executed on managed hosts.
 #[utoipa::path(
     put,
     path = "/api/v1/plugin-configs/{id}",
     params(("id" = Uuid, Path, description = "Plugin config ID")),
     request_body = UpdatePluginConfigRequest,
-    extensions(("x-required-permission" = json!("manage_software"))),
+    extensions(("x-required-permission" = json!("manage_commands"))),
     responses(
         (status = 200, description = "Plugin config updated", body = PluginConfigResponse),
         (status = 404, description = "Plugin config not found")
@@ -181,7 +187,7 @@ pub async fn update_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageCommands(_user): CanManageCommands,
     Json(req): Json<UpdatePluginConfigRequest>,
 ) -> Response {
     match pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)

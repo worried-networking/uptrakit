@@ -16,6 +16,7 @@ mod m20260302_000002_host_packages;
 mod m20260302_000003_host_packages_has_update;
 mod m20260307_000001_split_version_check;
 mod m20260302_000004_service_cert_lifetime;
+mod m20260307_000002_manage_commands_permission;
 
 pub struct Migrator;
 
@@ -38,6 +39,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260302_000003_host_packages_has_update::Migration),
             Box::new(m20260307_000001_split_version_check::Migration),
             Box::new(m20260302_000004_service_cert_lifetime::Migration),
+            Box::new(m20260307_000002_manage_commands_permission::Migration),
         ]
     }
 }
@@ -222,6 +224,138 @@ mod tests {
         assert!(
             detect_version_count >= 1,
             "expected at least one detect_version task after migration, found {detect_version_count}"
+        );
+
+        // Verify manage_commands permission was created and assigned.
+        let perm_count_stmt = sea_orm_migration::prelude::Query::select()
+            .expr(sea_orm_migration::prelude::Func::count(
+                sea_orm_migration::prelude::Expr::col(Alias::new("id")),
+            ))
+            .from(Alias::new("permissions"))
+            .and_where(
+                sea_orm_migration::prelude::Expr::col(Alias::new("name"))
+                    .eq("manage_commands"),
+            )
+            .to_owned();
+        let perm_rows = db.query_all(&perm_count_stmt).await.unwrap();
+        let perm_count: i64 = {
+            use sea_orm::TryGetable;
+            perm_rows
+                .first()
+                .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
+                .unwrap_or(0)
+        };
+        assert_eq!(
+            perm_count, 1,
+            "manage_commands permission must exist after all migrations"
+        );
+    }
+
+    /// After all migrations, owner and admin roles must have manage_commands.
+    #[tokio::test]
+    async fn manage_commands_assigned_to_owner_and_admin() {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+        run_migrations(&db).await.unwrap();
+
+        for role_name in ["owner", "admin"] {
+            let count_stmt = sea_orm_migration::prelude::Query::select()
+                .expr(sea_orm_migration::prelude::Func::count(
+                    sea_orm_migration::prelude::Expr::col(Alias::new("rp.role_id")),
+                ))
+                .from_as(Alias::new("role_permissions"), Alias::new("rp"))
+                .join_as(
+                    sea_orm_migration::prelude::JoinType::InnerJoin,
+                    Alias::new("roles"),
+                    Alias::new("r"),
+                    sea_orm_migration::prelude::Expr::col(
+                        (Alias::new("r"), Alias::new("id")),
+                    )
+                    .equals((Alias::new("rp"), Alias::new("role_id"))),
+                )
+                .join_as(
+                    sea_orm_migration::prelude::JoinType::InnerJoin,
+                    Alias::new("permissions"),
+                    Alias::new("p"),
+                    sea_orm_migration::prelude::Expr::col(
+                        (Alias::new("p"), Alias::new("id")),
+                    )
+                    .equals((Alias::new("rp"), Alias::new("permission_id"))),
+                )
+                .and_where(
+                    sea_orm_migration::prelude::Expr::col((Alias::new("r"), Alias::new("name")))
+                        .eq(role_name),
+                )
+                .and_where(
+                    sea_orm_migration::prelude::Expr::col((Alias::new("p"), Alias::new("name")))
+                        .eq("manage_commands"),
+                )
+                .to_owned();
+
+            let rows = db.query_all(&count_stmt).await.unwrap();
+            let count: i64 = {
+                use sea_orm::TryGetable;
+                rows.first()
+                    .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
+                    .unwrap_or(0)
+            };
+            assert_eq!(
+                count, 1,
+                "{role_name} role must have manage_commands permission after all migrations"
+            );
+        }
+    }
+
+    /// The user role must NOT have manage_commands.
+    #[tokio::test]
+    async fn manage_commands_not_assigned_to_user_role() {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+        run_migrations(&db).await.unwrap();
+
+        let count_stmt = sea_orm_migration::prelude::Query::select()
+            .expr(sea_orm_migration::prelude::Func::count(
+                sea_orm_migration::prelude::Expr::col(Alias::new("rp.role_id")),
+            ))
+            .from_as(Alias::new("role_permissions"), Alias::new("rp"))
+            .join_as(
+                sea_orm_migration::prelude::JoinType::InnerJoin,
+                Alias::new("roles"),
+                Alias::new("r"),
+                sea_orm_migration::prelude::Expr::col(
+                    (Alias::new("r"), Alias::new("id")),
+                )
+                .equals((Alias::new("rp"), Alias::new("role_id"))),
+            )
+            .join_as(
+                sea_orm_migration::prelude::JoinType::InnerJoin,
+                Alias::new("permissions"),
+                Alias::new("p"),
+                sea_orm_migration::prelude::Expr::col(
+                    (Alias::new("p"), Alias::new("id")),
+                )
+                .equals((Alias::new("rp"), Alias::new("permission_id"))),
+            )
+            .and_where(
+                sea_orm_migration::prelude::Expr::col((Alias::new("r"), Alias::new("name")))
+                    .eq("user"),
+            )
+            .and_where(
+                sea_orm_migration::prelude::Expr::col((Alias::new("p"), Alias::new("name")))
+                    .eq("manage_commands"),
+            )
+            .to_owned();
+
+        let rows = db.query_all(&count_stmt).await.unwrap();
+        let count: i64 = {
+            use sea_orm::TryGetable;
+            rows.first()
+                .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
+                .unwrap_or(0)
+        };
+        assert_eq!(
+            count, 0,
+            "user role must NOT have manage_commands permission"
         );
     }
 }
