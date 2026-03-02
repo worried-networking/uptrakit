@@ -146,18 +146,6 @@ state machine without an active WebSocket connection.
 
 ### Issues
 
-**[HIGH]** `src/client.rs:234` vs `src/client.rs:139-144` -- `handle_check_versions` uses
-`conn.send` (error-propagating) for the `VersionCheckResults` response and returns
-`Some(LoopOutcome::Disconnected)` on failure. `handle_discover_software` at line 495 does
-the same. But the update output path — `send_update_output` at line 27-38 — uses
-`conn.send_best_effort` (error-absorbed) for individual `UpdateOutput` chunks, and
-`send_update_result` uses `conn.send_best_effort` for the final `UpdateResult` at line 50.
-The treatment is inconsistent: version-check and discovery results are treated as fatal if
-undeliverable, while the final update result (which the controller needs to mark the update
-complete) is silently absorbed on send failure. A dropped `UpdateResult` leaves the update
-in a permanent in-progress state on the controller side until a timeout, with no reconnect
-triggered.
-
 **[MEDIUM]** `src/update.rs:282-297` (`detect_current_version`) -- This helper calls
 `crate::version_check::check_version` with `&crate::connection_context::ConnectionContext::default()`.
 The caller (`execute_update`) has already merged the connection context into the plugin config

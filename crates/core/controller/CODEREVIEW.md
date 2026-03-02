@@ -307,16 +307,13 @@ Adding a comment noting "single-tenant by design" would make the limitation visi
   test…"]` with an exact `cargo test` runbook command, consistent with AGENTS.md requirements.
 - `src/reconcile.rs` -- Tests use plain `#[tokio::test]` (no `start_paused`): correct, because
   they acquire SQLite connections and `start_paused` would trigger `ConnectionAcquire(Timeout)`.
+- `src/reencrypt.rs` -- 12 integration tests using in-memory SQLite cover all five per-table
+  helpers and the top-level `reencrypt_legacy_plaintext` orchestrator. Each helper is tested
+  with plaintext (re-encrypted, count +1), already-encrypted (skipped, count 0), and
+  NULL/None (skipped, count 0) rows. The combined test verifies the summed count across all
+  five tables.
 
 ### Issues
-
-**[HIGH]** `src/reencrypt.rs` -- `reencrypt_legacy_plaintext` and all five per-table helpers
-have zero test coverage. The function is idempotent and HA-safe by design, but the logic that
-distinguishes already-encrypted values (`is_db_value_encrypted()` prefix check) from plaintext
-values, skips `None` passwords, and counts re-encrypted rows is entirely untested. A test using
-an in-memory SQLite database with a mix of plaintext and pre-encrypted rows for each table
-(CA keys, OIDC secrets, MQTT passwords, MQTT CA certs, OIDC PKCE verifiers) should be added.
-The skip-when-no-master-key path also warrants a test.
 
 **[MEDIUM]** `src/startup.rs` -- `reconcile_all_settings` (the 50+ setting reconciliation
 orchestrator at line 247) has no direct test coverage. The individual `reconcile_setting`

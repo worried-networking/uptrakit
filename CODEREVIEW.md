@@ -73,7 +73,19 @@ duplicated `tokio::time::timeout` logic in `command/src/executor.rs` (extracted 
 (now retries all transient network errors via `EnrollmentError::is_transient_network()`), the
 `Scheduler::register` silently overwriting executors (now guarded by `debug_assert!`), and the
 NATS startup retry being absent (already implemented with exponential backoff in
-`nats/src/connection.rs`) have been fixed.
+`nats/src/connection.rs`) have been fixed. The Telegram webhook secret now uses SHA-256 +
+constant-time `ct_eq` (no timing side-channel), the non-atomic batch completion
+(`maybe_complete_batch`) is now wrapped in a DB transaction with a terminal-state guard,
+the SSE batch progress and update output streams integrate `CancellationToken` for clean
+shutdown, and the discovery allowlist TOCTOU has been resolved via unique DB constraints
+with `ON CONFLICT DO NOTHING`. The `UpdateResult` message from agents now uses
+`conn.send()` (error-propagating) instead of `conn.send_best_effort()`, preventing
+permanent in-progress state on send failure. `BatchStatus` and `UpdateCategory` now carry
+an `Other(String)` catch-all for forward-compatible deserialization. All ten `Validate`
+implementations in `web-api-types` now have test coverage. The `truncate()` helper in
+`cli/batch_update.rs` now uses `chars().count()` / `chars().take()` to avoid panic on
+multi-byte UTF-8 boundaries. `reencrypt_legacy_plaintext` and its five per-table helpers
+now have 12 integration tests.
 
 ## Per-Crate Review Files
 
@@ -217,10 +229,6 @@ issued.
 
 ### Issues
 
-**[MEDIUM]** `crates/ui/web-api/src/routes/notifications.rs:620` -- Telegram webhook secret
-comparison uses non-constant-time `!=` operator. Timing side-channel could allow
-brute-forcing the secret.
-
 **[MEDIUM]** `crates/ui/web-api/src/routes/oidc_auth.rs` -- In `oidc_complete_registration`,
 pending registration code consumed via `take()` before validating the registration token.
 Invalid token permanently consumes the code.
@@ -312,14 +320,6 @@ verify delay durations. Eight tests assert only eventual success, not backoff ti
 multi-instance deployment, SSE clients connected to instance A receive no live events for
 batches processed by instance B.
 
-**[HIGH]** `crates/ui/web-api/src/routes/update_batches.rs:373-483` -- SSE stream has no
-CancellationToken integration. During graceful shutdown, existing SSE connections hang until
-shutdown timeout.
-
-**[HIGH]** `crates/ui/web-api/src/queries/update_batches.rs:466-528` -- Non-atomic batch
-completion: three separate COUNT queries followed by UPDATE. Concurrent completions can both
-transition the batch, causing duplicate notifications.
-
 **[MEDIUM]** `crates/ui/web-api/src/batch_progress_broadcaster.rs:64-66` and
 `update_output_broadcaster.rs:48-49` -- Orphaned channel leak. If batch/update never reaches
 terminal state, broadcast channel persists indefinitely.
@@ -374,10 +374,6 @@ No coding standards issues found.
 
 **[MEDIUM]** `crates/shared/wire/src/lib.rs:214-234` -- `ServiceMessage` and
 `ControllerMessage` mix agent-specific and MQTT-specific variants.
-
-**[MEDIUM]** `crates/shared/types/src/batch_status.rs:8-29` and
-`src/update_category.rs:13-35` -- No `Other(String)` catch-all variant. New values in API
-responses will break older client deserialization.
 
 **[MEDIUM]** `crates/ui/web-api/src/routes/update_batches.rs:93,175` -- `batch_type` passed
 as bare strings (`"host_update"`, `"item_rollout"`) with no typed enum or constant.

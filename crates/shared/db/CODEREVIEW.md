@@ -257,16 +257,6 @@ value. If the column contains malformed JSON (e.g., from a direct DB edit), the 
 restriction is silently dropped instead of causing an error. Storing as `Json` column type
 would enable DB-level structural validation.
 
-**[MEDIUM]** `src/entity/host_discovery_allowlist.rs` and
-`src/entity/tenant_discovery_allowlist.rs` -- Both tables lack a unique constraint on
-`(tenant_id, host_id, plugin_type)` and `(tenant_id, plugin_type)` respectively. The
-`add_host_allowlist_entry` / `add_tenant_allowlist_entry` functions in
-`queries/discovery_allowlist.rs` perform a read-then-insert (select existing, return early if
-found, else insert) pattern without holding a transaction lock. A concurrent request can
-create duplicate entries in the window between the existence check and the insert. A unique
-constraint at the DB level would turn the race into a constraint error that the application
-can handle idempotently via `ON CONFLICT DO NOTHING`, matching the MQTT lease pattern.
-
 **[LOW]** `src/entity/revoked_token_jti.rs:20` and `src/entity/revoked_token_user.rs:15-22`
 -- `expires_at`, `iat_cutoff`, and `purge_after` are stored as `i64` Unix timestamps (seconds
 since epoch) rather than `OffsetDateTime`. This is inconsistent with every other timestamp

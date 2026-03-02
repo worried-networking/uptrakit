@@ -156,12 +156,6 @@ assert JSON output. Asserts only `result.is_ok()`. The test is a duplicate of
 to server when only `--release-tag` provided. Server must distinguish "provided and empty" from
 "not provided".
 
-**[LOW]** `src/commands/batch_update.rs:367-373` -- `truncate()` slices by byte index
-(`&s[..max - 1]`), which will panic if the byte boundary falls within a multi-byte UTF-8
-character. Host names and software item names from external systems may contain non-ASCII
-characters. Use `s.chars().take(max - 1).collect::<String>()` or `s.char_indices()` to find a
-safe boundary.
-
 **[LOW]** `src/commands/auth.rs:155-156` -- `chrono_date()` function name does not match its
 implementation (uses `time::OffsetDateTime`, not `chrono`).
 
@@ -241,9 +235,10 @@ one would suffice with a dedicated endpoint. TOCTOU window between list and trig
   without options), `update batch-item` (with and without host IDs), `update-batches list`
   (with and without filters), `update-batches show`, and `update-batches follow`. All new
   command variants are exercised at the argument-parsing level.
-- `src/commands/batch_update.rs:377-455` -- 7 unit tests cover `BatchUpdateResponse` human
-  output (with batch ID and no-eligible), `FollowResult` exit codes, `truncate` short and
-  long strings, and list-batches empty output. Good coverage of the new module.
+- `src/commands/batch_update.rs:377-455` -- 9 unit tests cover `BatchUpdateResponse` human
+  output (with batch ID and no-eligible), `FollowResult` exit codes, `truncate` short
+  strings, long strings, and multi-byte UTF-8 boundaries (`héllo`, CJK `こんにちは`), and
+  list-batches empty output. Good coverage of the new module.
 - `tests/command_execution.rs` -- `MockApiServer`-based integration tests covering
   `hosts_list_success`, `hosts_list_empty`, `hosts_show_success`, `hosts_show_not_found`,
   `services_list_success`, `services_approve_success`, `services_approve_not_found`,

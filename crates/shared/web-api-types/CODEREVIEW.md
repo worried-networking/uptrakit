@@ -112,17 +112,12 @@ version or a migration period. Consider adding an `X-API-Version` header respons
   valid request, URL format enforcement).
 - `src/update_batches.rs:205` -- 7 tests for batch request validation and response
   serialization.
+- `src/auth.rs` -- 10 tests cover `RegisterRequest::validate` (valid input, email too long,
+  no `@` sign, empty first name, password too short, password too long) and
+  `LoginRequest::validate` (valid input, email too long, no `@` sign, empty password).
 - All tests use synchronous `#[test]` (correct -- no async I/O in this crate).
 
 ### Issues
-
-**[MEDIUM]** `src/validation.rs` -- The `Validate` trait and its implementations for
-`RegisterRequest`, `LoginRequest`, `UpdateScheduledTaskRequest`, `UpdateNetworkSettingsRequest`,
-`CreateSoftwareItemRequest`, `CreatePluginConfigRequest`, `CreateApiTokenRequest`,
-`CreateEnrollmentTokenRequest`, `UpdateServiceRequest`, and `CreateAutodiscoveryIgnoreRequest`
-have no tests. Validation logic is the primary security boundary for all HTTP endpoints; a
-regression in any `validate()` implementation (e.g., accepting an empty field that should be
-rejected) would not be caught before deployment.
 
 **[LOW]** `src/masked_url.rs` -- `MaskedUrl` has no tests for its `Debug`/`Display`
 redaction behaviour. A regression that accidentally exposes embedded credentials in a URL

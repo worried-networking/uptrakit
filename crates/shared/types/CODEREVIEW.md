@@ -91,6 +91,8 @@ No high availability issues found.
   derives gated behind `sea-orm` feature flag.
 - `src/plugin_types.rs` -- `PluginType` correctly includes `#[non_exhaustive]` and
   `Other(String)` for forward compatibility.
+- `src/batch_status.rs` and `src/update_category.rs` -- Both now include `Other(String)` with
+  custom serde for infallible round-trips and strict `FromStr` for DB/URL contexts.
 
 ### Issues
 
@@ -106,15 +108,6 @@ No coding standards issues found.
 - `src/hook_shell.rs` -- `HookShell` has `#[non_exhaustive]` with typed variants.
 
 ### Issues
-
-**[MEDIUM]** `src/batch_status.rs:8-29` -- `BatchStatus` has `#[non_exhaustive]` but no
-`Other(String)` catch-all variant. New status values added by a newer controller will fail
-client deserialization. Unlike `PluginType` which correctly includes `Other(String)` for
-forward compatibility, `BatchStatus` silently breaks older clients when extended.
-
-**[MEDIUM]** `src/update_category.rs:13-35` -- `UpdateCategory` lacks an `Other` variant.
-Same concern as `BatchStatus`: new categories added server-side will cause deserialization
-failures on clients running an older version of this crate.
 
 ## Tests
 
@@ -132,9 +125,11 @@ failures on clients running an older version of this crate.
   valid and invalid paths.
 - `src/session_token_type.rs` -- Five tests cover `SessionTokenType` round-trips.
 - `src/discovered_software.rs` -- Two tests for `DiscoveredSoftware` field validation.
-- `src/batch_status.rs:73` -- 4 tests covering serde round-trip, display, and `FromStr` for
-  all `BatchStatus` variants.
-- `src/update_category.rs:70` -- 4 tests covering all `UpdateCategory` variants.
+- `src/batch_status.rs` -- 8 tests covering serde round-trip, display, `FromStr` for all
+  known variants, and the `Other(String)` unknown-variant round-trip (deserialise unknown
+  string → `Other`, serialise back → original string, `FromStr` strict for unknowns).
+- `src/update_category.rs` -- 9 tests covering all known variants, `Other(String)` unknown
+  round-trip, `Default` is `Unknown`, and `FromStr` strictness for unrecognised values.
 - All tests use synchronous `#[test]` (correct -- no async I/O anywhere in this crate).
 
 ### Issues
