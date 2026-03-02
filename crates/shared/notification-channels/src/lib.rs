@@ -17,7 +17,7 @@ mod webhook;
 
 pub use channel::{DeliveryMessage, MessageAction, NotificationChannel};
 pub use error::ChannelError;
-pub use registry::ChannelRegistry;
+pub use registry::{ChannelRegistry, ChannelRegistryConfig};
 
 #[cfg(feature = "email")]
 pub use email::EmailChannel;

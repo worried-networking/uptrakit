@@ -192,7 +192,7 @@ async fn build_state(
     );
 
     let channel_registry = Arc::new(
-        uptrakit_notification_channels::ChannelRegistry::new()
+        uptrakit_notification_channels::ChannelRegistry::new(Default::default())
             .expect("channel registry for test"),
     );
     let notification_dispatcher =

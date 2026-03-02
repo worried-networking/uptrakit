@@ -244,8 +244,11 @@ async fn run(args: cli::Args) -> Result<()> {
         uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
     );
 
+    let channel_registry_config = uptrakit_notification_channels::ChannelRegistryConfig {
+        allow_private_urls: args.allow_private_notification_urls,
+    };
     let channel_registry = Arc::new(
-        uptrakit_notification_channels::ChannelRegistry::new()
+        uptrakit_notification_channels::ChannelRegistry::new(channel_registry_config)
             .context_transform(|_| AppError::Config("failed to build channel registry".to_string()))?,
     );
 

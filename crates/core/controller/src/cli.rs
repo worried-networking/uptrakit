@@ -210,6 +210,15 @@ pub struct Args {
     #[arg(long)]
     pub allow_plaintext_secrets: bool,
 
+    /// Allow notification webhook URLs that point to private / loopback /
+    /// link-local addresses. By default, the webhook channel rejects such
+    /// URLs to prevent SSRF. Enable this in single-tenant or self-hosted
+    /// deployments where internal webhook targets (e.g. a Mattermost on the
+    /// LAN) are legitimate. The header blocklist is always enforced regardless
+    /// of this flag.
+    #[arg(long)]
+    pub allow_private_notification_urls: bool,
+
     /// PID of old controller process to take over from.
     /// Sends SIGUSR1 to the old process to initiate graceful shutdown.
     /// Should be used together with --reuseport.

@@ -30,6 +30,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
