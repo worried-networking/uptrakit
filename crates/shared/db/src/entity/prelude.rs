@@ -16,6 +16,11 @@ pub use super::ca_certificate::{Entity as CaCertificate, Model as CaCertificateM
 pub use super::enrollment_token::{Entity as EnrollmentToken, Model as EnrollmentTokenModel};
 pub use super::global_setting::{Entity as GlobalSetting, Model as GlobalSettingModel};
 pub use super::host::{Entity as Host, Model as HostModel};
+pub use super::host_package::{Entity as HostPackage, Model as HostPackageModel};
+pub use super::host_package_ignore::{Entity as HostPackageIgnore, Model as HostPackageIgnoreModel};
+pub use super::host_package_update_history::{
+    Entity as HostPackageUpdateHistory, Model as HostPackageUpdateHistoryModel,
+};
 pub use super::host_software_item::{Entity as HostSoftwareItem, Model as HostSoftwareItemModel};
 pub use super::host_software_item_plugin::{
     Entity as HostSoftwareItemPlugin, Model as HostSoftwareItemPluginModel,

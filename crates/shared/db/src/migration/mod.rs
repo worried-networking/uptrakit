@@ -12,6 +12,7 @@ mod m20260303_000002_revoked_tokens;
 mod m20260305_000001_crl_cache;
 mod m20260306_000001_update_category;
 mod m20260306_000002_update_batches;
+mod m20260302_000002_host_packages;
 
 pub struct Migrator;
 
@@ -30,6 +31,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260305_000001_crl_cache::Migration),
             Box::new(m20260306_000001_update_category::Migration),
             Box::new(m20260306_000002_update_batches::Migration),
+            Box::new(m20260302_000002_host_packages::Migration),
         ]
     }
 }
@@ -94,6 +96,16 @@ mod tests {
             .await
             .unwrap();
         db.execute_unprepared("SELECT batch_id FROM update_history LIMIT 0")
+            .await
+            .unwrap();
+        // Verify host_packages tables exist.
+        db.execute_unprepared("SELECT count(*) FROM host_packages")
+            .await
+            .unwrap();
+        db.execute_unprepared("SELECT count(*) FROM host_package_ignores")
+            .await
+            .unwrap();
+        db.execute_unprepared("SELECT count(*) FROM host_package_update_history")
             .await
             .unwrap();
     }

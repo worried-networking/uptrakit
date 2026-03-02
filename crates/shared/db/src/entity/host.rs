@@ -30,6 +30,10 @@ pub enum Relation {
     Tenant,
     #[sea_orm(has_many = "super::update_history::Entity")]
     UpdateHistory,
+    #[sea_orm(has_many = "super::host_package::Entity")]
+    HostPackage,
+    #[sea_orm(has_many = "super::host_package_update_history::Entity")]
+    HostPackageUpdateHistory,
 }
 
 impl Related<super::tenant::Entity> for Entity {
@@ -61,6 +65,18 @@ impl Related<super::software_item::Entity> for Entity {
 impl Related<super::update_history::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::UpdateHistory.def()
+    }
+}
+
+impl Related<super::host_package::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::HostPackage.def()
+    }
+}
+
+impl Related<super::host_package_update_history::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::HostPackageUpdateHistory.def()
     }
 }
 

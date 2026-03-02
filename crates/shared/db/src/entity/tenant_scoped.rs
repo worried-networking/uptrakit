@@ -1,9 +1,10 @@
 use sea_orm::EntityTrait;
 
 use super::{
-    enrollment_token, host, host_discovery_allowlist, mqtt_client, notification_channel,
-    notification_log, notification_rule, oidc_provider, plugin_config, scheduled_task, service,
-    setting, settings_version, software_item, tenant_discovery_allowlist, update_batch, user_role,
+    enrollment_token, host, host_discovery_allowlist, host_package, host_package_ignore,
+    host_package_update_history, mqtt_client, notification_channel, notification_log,
+    notification_rule, oidc_provider, plugin_config, scheduled_task, service, setting,
+    settings_version, software_item, tenant_discovery_allowlist, update_batch, user_role,
 };
 
 /// Marker trait for SeaORM entities that are scoped to a tenant via a `tenant_id` column.
@@ -114,5 +115,23 @@ impl TenantScoped for notification_log::Entity {
 impl TenantScoped for update_batch::Entity {
     fn tenant_id_column() -> Self::Column {
         update_batch::Column::TenantId
+    }
+}
+
+impl TenantScoped for host_package::Entity {
+    fn tenant_id_column() -> Self::Column {
+        host_package::Column::TenantId
+    }
+}
+
+impl TenantScoped for host_package_ignore::Entity {
+    fn tenant_id_column() -> Self::Column {
+        host_package_ignore::Column::TenantId
+    }
+}
+
+impl TenantScoped for host_package_update_history::Entity {
+    fn tenant_id_column() -> Self::Column {
+        host_package_update_history::Column::TenantId
     }
 }
