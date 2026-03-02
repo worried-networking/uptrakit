@@ -262,6 +262,34 @@ async fn apply_timeout(
     }
 }
 
+/// A [`CommandExecutor`] that panics on use.
+///
+/// The controller process never executes local commands directly for
+/// API-based plugins (GitHub, Docker, npm registry). This struct satisfies
+/// the `Arc<dyn CommandExecutor>` requirement of plugin construction without
+/// pulling in a real executor.
+///
+/// Calling either method is a bug in the calling code; the `unreachable!()`
+/// macro causes an immediate panic with a clear error message to aid diagnosis.
+pub struct NoopCommandExecutor;
+
+#[async_trait]
+impl CommandExecutor for NoopCommandExecutor {
+    async fn execute(
+        &self,
+        _spec: &CommandSpec,
+        _output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> crate::Result<CommandOutput> {
+        unreachable!("NoopCommandExecutor::execute called on the controller — this is a bug")
+    }
+
+    async fn execute_quiet(&self, _spec: &CommandSpec) -> crate::Result<CommandOutput> {
+        unreachable!(
+            "NoopCommandExecutor::execute_quiet called on the controller — this is a bug"
+        )
+    }
+}
+
 /// Executes commands on the local machine via `tokio::process::Command`.
 pub struct LocalCommandExecutor;
 

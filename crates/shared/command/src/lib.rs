@@ -10,7 +10,8 @@ pub use command::{
 };
 pub use error::{CommandError, Result};
 pub use executor::{
-    CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor, StdioTunnel,
+    CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor,
+    NoopCommandExecutor, StdioTunnel,
 };
 pub use sudo::{ParseSudoPolicyError, SudoAwareCommandExecutor, SudoContext, SudoPolicy};
 pub use types::UpdateOutputLine;

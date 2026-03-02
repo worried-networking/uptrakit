@@ -189,9 +189,9 @@ cover the full `run_bootstrap` orchestration path. Adding a trait seam for
   config changes.
 - `src/ssh_pool.rs:82-127` -- Pool acquires lock briefly for lookup, then releases before
   establishing new connections.
-- SSH pool uses `tokio::sync::Mutex` correctly -- the critical section awaits SSH connection
-  establishment. TOCTOU fix via `Entry` API ensures that two concurrent acquires for the same
-  host do not race to insert duplicate connections.
+- SSH pool uses `parking_lot::Mutex` with the lock dropped before every `.await` — the critical
+  section is scoped to lookup/insert only. TOCTOU fix via `Entry` API ensures that two
+  concurrent acquires for the same host do not race to insert duplicate connections.
 - `in_flight_update` prevents concurrent updates. `SshAgentHandler` enforces one-update-at-a-
   time by holding `Option<InFlightUpdate>`.
 - `src/client.rs:60-70` and `src/client.rs:86-93` -- Per-host SSH connection errors are
@@ -320,15 +320,6 @@ handler. A shared `make_ssh_error_response(host_name, error)` helper would make 
 format consistent and reduce the surface area for future format changes. Already noted as
 `[LOW]` in the Code Quality section; elevated here because it will compound as new SSH-backed
 message types are added.
-
-**[MEDIUM]** `src/ssh_pool.rs:22` -- `tokio::sync::Mutex` used instead of `parking_lot::Mutex`.
-The workspace standard documented in `MEMORY.md` requires `parking_lot::Mutex` in async code
-because `std::sync::Mutex::lock()` requires `.unwrap()` and `tokio::sync::Mutex` holds the lock
-across `.await` boundaries. The pool lock in `acquire` is held across the SSH connection
-handshake (`connect_to_host.await`) at `ssh_pool.rs:109`, meaning the Tokio mutex guard is
-held across an `.await` — the exact case where `parking_lot::Mutex` is preferred. If the pool
-lock is needed across an await, the lock should be dropped before the await (acquire the lock,
-clone/extract the needed value, drop the guard, then await).
 
 **[MEDIUM]** `src/commands/host.rs` -- The file contains no doc comments on any of the five
 `run_*` public functions (`run_add`, `run_list`, `run_show`, `run_update`, `run_remove`). The

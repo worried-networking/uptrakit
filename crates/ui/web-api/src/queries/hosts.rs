@@ -1,6 +1,6 @@
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set,
+    QuerySelect, RelationTrait, Set,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -38,7 +38,10 @@ fn host_to_response(
 }
 
 pub(crate) async fn load_host_agents(tenant_db: &TenantDb, host_id: Uuid) -> Vec<HostAgentSummary> {
-    let links = match ServiceHost::find()
+    let links = match tenant_db
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
         .filter(service_host::Column::HostId.eq(host_id))
         .all(tenant_db.db())
         .await

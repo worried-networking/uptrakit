@@ -1,4 +1,5 @@
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use rootcause::prelude::*;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{api_rate_limit, pending_device_flow, scheduled_task};
@@ -10,6 +11,11 @@ use crate::executor::TaskExecutor;
 /// Uses direct DB queries instead of store wrappers so the scheduler engine
 /// does not depend on `uptrakit-web-api`. Does NOT clean `TokenDenylist`
 /// (that stays per-controller, in-memory).
+///
+/// All DELETE statements run inside a single database transaction so that the
+/// cleanup is atomic: either all expired records are removed in one round trip,
+/// or none are (the transaction rolls back on error). This reduces the number
+/// of PostgreSQL round trips and prevents partial cleanup states.
 pub struct AuthCleanupExecutor {
     db: DatabaseConnection,
 }
@@ -18,49 +24,6 @@ impl AuthCleanupExecutor {
     pub fn new(db: DatabaseConnection) -> Self {
         Self { db }
     }
-
-    /// Delete expired OIDC flow entries.
-    #[cfg(feature = "oidc")]
-    async fn cleanup_oidc_flows(&self) {
-        use uptrakit_shared_db::entity::{
-            pending_account_link, pending_oidc_flow, pending_oidc_registration,
-            pending_oidc_token_exchange,
-        };
-
-        let now = OffsetDateTime::now_utc();
-
-        if let Err(e) = PendingOidcFlow::delete_many()
-            .filter(pending_oidc_flow::Column::ExpiresAt.lt(now))
-            .exec(&self.db)
-            .await
-        {
-            tracing::warn!(error = %e, "failed to clean up expired OIDC flows");
-        }
-
-        if let Err(e) = PendingAccountLink::delete_many()
-            .filter(pending_account_link::Column::ExpiresAt.lt(now))
-            .exec(&self.db)
-            .await
-        {
-            tracing::warn!(error = %e, "failed to clean up expired account links");
-        }
-
-        if let Err(e) = PendingOidcTokenExchange::delete_many()
-            .filter(pending_oidc_token_exchange::Column::ExpiresAt.lt(now))
-            .exec(&self.db)
-            .await
-        {
-            tracing::warn!(error = %e, "failed to clean up expired OIDC token exchanges");
-        }
-
-        if let Err(e) = PendingOidcRegistration::delete_many()
-            .filter(pending_oidc_registration::Column::ExpiresAt.lt(now))
-            .exec(&self.db)
-            .await
-        {
-            tracing::warn!(error = %e, "failed to clean up expired OIDC registrations");
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -68,24 +31,53 @@ impl TaskExecutor for AuthCleanupExecutor {
     async fn execute(&self, _task: &scheduled_task::Model) -> crate::error::Result<()> {
         let now = OffsetDateTime::now_utc();
 
+        let txn = self.db.begin().await.context_to()?;
+
         #[cfg(feature = "oidc")]
-        self.cleanup_oidc_flows().await;
+        {
+            use uptrakit_shared_db::entity::{
+                pending_account_link, pending_oidc_flow, pending_oidc_registration,
+                pending_oidc_token_exchange,
+            };
 
-        if let Err(e) = PendingDeviceFlow::delete_many()
+            PendingOidcFlow::delete_many()
+                .filter(pending_oidc_flow::Column::ExpiresAt.lt(now))
+                .exec(&txn)
+                .await
+                .context_to()?;
+
+            PendingAccountLink::delete_many()
+                .filter(pending_account_link::Column::ExpiresAt.lt(now))
+                .exec(&txn)
+                .await
+                .context_to()?;
+
+            PendingOidcTokenExchange::delete_many()
+                .filter(pending_oidc_token_exchange::Column::ExpiresAt.lt(now))
+                .exec(&txn)
+                .await
+                .context_to()?;
+
+            PendingOidcRegistration::delete_many()
+                .filter(pending_oidc_registration::Column::ExpiresAt.lt(now))
+                .exec(&txn)
+                .await
+                .context_to()?;
+        }
+
+        PendingDeviceFlow::delete_many()
             .filter(pending_device_flow::Column::ExpiresAt.lt(now))
-            .exec(&self.db)
+            .exec(&txn)
             .await
-        {
-            tracing::warn!(error = %e, "failed to clean up expired device flows");
-        }
+            .context_to()?;
 
-        if let Err(e) = ApiRateLimit::delete_many()
+        ApiRateLimit::delete_many()
             .filter(api_rate_limit::Column::ExpiresAt.lt(now))
-            .exec(&self.db)
+            .exec(&txn)
             .await
-        {
-            tracing::warn!(error = %e, "failed to clean up expired rate limit entries");
-        }
+            .context_to()?;
+
+        txn.commit().await.context_to()?;
 
         tracing::debug!("auth state cleanup completed");
         Ok(())

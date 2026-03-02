@@ -11,7 +11,7 @@ use sea_orm::{
     QuerySelect, RelationTrait, Set, prelude::Expr,
 };
 use time::OffsetDateTime;
-use uptrakit_command::CommandExecutor;
+use uptrakit_command::{CommandExecutor, NoopCommandExecutor};
 use uptrakit_internal_wire::{
     CheckVersionsPayload, ControllerMessage, PluginAssignment, VersionCheckAssignment,
 };
@@ -27,32 +27,6 @@ use super::queries::{merge_config, query_agent_assignment_rows, query_host_packa
 use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::notifier::SchedulerNotifier;
-
-/// A [`CommandExecutor`] that panics on use.
-///
-/// The controller process never executes local commands for plugins. API-based
-/// plugins (GitHub, Docker) perform HTTP calls internally and never invoke the
-/// executor. This struct satisfies the `Arc<dyn CommandExecutor>` requirement
-/// of [`PluginRegistry::create_plugin`] without pulling in a real executor.
-struct NoopCommandExecutor;
-
-#[async_trait::async_trait]
-impl CommandExecutor for NoopCommandExecutor {
-    async fn execute(
-        &self,
-        _spec: &uptrakit_command::CommandSpec,
-        _output_tx: &tokio::sync::mpsc::Sender<uptrakit_command::UpdateOutputLine>,
-    ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
-        unreachable!("NoopCommandExecutor::execute called on the controller — this is a bug")
-    }
-
-    async fn execute_quiet(
-        &self,
-        _spec: &uptrakit_command::CommandSpec,
-    ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
-        unreachable!("NoopCommandExecutor::execute_quiet called on the controller — this is a bug")
-    }
-}
 
 /// Fetches latest available release information for all tracked software items.
 ///

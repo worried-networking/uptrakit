@@ -237,8 +237,9 @@ pub async fn validate_update_preconditions(
         .context_to()?
         .ok_or_else(|| report!(TriggerUpdateError::NoAgent))?;
 
-    // 5. Verify agent exists and is approved.
+    // 5. Verify agent exists, belongs to the tenant, and is approved.
     let agent = Service::find_by_id(agent_link.service_id)
+        .filter(service::Column::TenantId.eq(tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
         .one(db)
         .await

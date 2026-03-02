@@ -12,9 +12,7 @@ binary). The core claim/release cycle uses TOCTOU-free optimistic locking and st
 which are strong correctness properties. The `SchedulerNotifier` ORM coupling has been fixed
 (callers now load and pass a `MqttSoftwareStatesPayload`), and the sequential execution model
 now uses a `JoinSet` for parallel task execution within each poll cycle. Three of five executors
-(`AuthCleanupExecutor`, `ServiceCertCheckExecutor`, `StaleLeaseCleanupExecutor`) have no tests,
-and the `AuthCleanupExecutor` runs multiple independent `DELETE` statements without a wrapping
-transaction.
+(`AuthCleanupExecutor`, `ServiceCertCheckExecutor`, `StaleLeaseCleanupExecutor`) have no tests.
 
 ## Architecture
 
@@ -231,14 +229,6 @@ a hard constraint or a conservative default. Promote to a typed `Duration` const
 comment explaining the relationship (poll interval should be much shorter than the stale claim
 threshold of 600 s), and move to a `durations` module for discoverability.
 
-**[MEDIUM]** `src/executors/version_check.rs` -- The `NoopCommandExecutor` at lines 29-53 is a
-duplicate of the same struct in `crates/ui/web-api/src/routes/software_items.rs`. Both
-`unreachable!()` with identical error messages. The existing Code Quality review at the root
-level noted this; it is included here because the scheduler-engine is a library crate and the
-`NoopCommandExecutor` is conceptually an infrastructure detail that should live in
-`uptrakit-command` or `uptrakit-plugin-infrastructure-core` rather than being duplicated in two
-consumers.
-
 **[LOW]** `src/executors/` -- Four executor files (`auth_cleanup.rs`, `crl_renewal.rs`,
 `service_cert_check.rs`, `stale_lease_cleanup.rs`) have no module-level doc comment. Each
 executor performs a distinct maintenance operation but the file gives no indication of when it
@@ -274,10 +264,10 @@ executor's purpose visible without reading the implementation.
   are excluded at the query level rather than causing deserialization failures in the Rust ORM
   layer. The test at `src/claim.rs:424-463` validates this behaviour by injecting a raw SQL row
   with an unknown type and confirming it is absent from the result.
-- `src/executors/auth_cleanup.rs:32-62` -- `AuthCleanupExecutor` deletes rows using direct
-  `DELETE WHERE expires_at < now` queries on each pending-flow table. Each delete is a single
-  DB round-trip with no per-row application logic. This is the correct bulk-delete pattern for
-  TTL cleanup; individual row iteration would be O(n) round-trips.
+- `src/executors/auth_cleanup.rs` -- `AuthCleanupExecutor` wraps all `DELETE WHERE expires_at <
+  now` statements in a single transaction. Each delete is a single DB round-trip with no
+  per-row application logic. The transaction makes the cleanup cycle atomic (all-or-nothing)
+  and reduces PostgreSQL round-trips. This is the correct bulk-delete pattern for TTL cleanup.
 - `src/executors/stale_lease_cleanup.rs:30-36` -- `StaleLeaseCleanupExecutor` deletes all MQTT
   leases with `heartbeat_at < cutoff` in a single `DELETE WHERE` statement. The cutoff constant
   `STALE_AFTER_SECS = 60` matches the heartbeat interval documented in the MQTT lease
@@ -288,16 +278,6 @@ executor's purpose visible without reading the implementation.
   efficient with an index on `(revoked_at, not_after)`.
 
 ### Issues
-
-**[MEDIUM]** `src/executors/auth_cleanup.rs:68-92` -- `AuthCleanupExecutor::execute` runs five
-independent `DELETE` statements (one per pending-flow table, one for rate limits) without a
-wrapping transaction. If the database connection is lost after the first delete succeeds but
-before the last one completes, the cleanup run is partially applied: some expired rows are
-deleted while others remain. On the next scheduler cycle the partially-cleaned state is
-harmless (the surviving rows are still past their `expires_at` and will be deleted then), but
-the partial state could cause confusion in post-mortem analysis. A single transaction wrapping
-all five deletes would make the cleanup cycle all-or-nothing and would also be more efficient
-on PostgreSQL (five autocommit round-trips vs one transaction commit).
 
 **[MEDIUM]** `src/executors/service_cert_check.rs:36-43` -- The expiry query has no index
 coverage guarantee on `(revoked_at, not_after)` for the `service_certificates` table. The

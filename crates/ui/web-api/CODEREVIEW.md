@@ -42,7 +42,13 @@ comparison now uses SHA-256 + constant-time `ct_eq` to eliminate the timing side
 The non-atomic batch completion race (`maybe_complete_batch` three separate COUNT queries + UPDATE
 outside a transaction) has been fixed by wrapping the entire function in a DB transaction with a
 terminal-state guard. The SSE batch progress and update output streams now integrate
-`CancellationToken` and exit cleanly during graceful server shutdown.
+`CancellationToken` and exit cleanly during graceful server shutdown. The tenant isolation
+bypass in `load_host_agents` (`ServiceHost::find()` without join through `service::Entity`)
+has been fixed via `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`
+with a regression test (`load_host_agents_filters_by_tenant`). The same bypass in
+`validate_update_preconditions` and `trigger_all_host_package_updates_for_host` (service lookup
+missing `.filter(service::Column::TenantId.eq(tenant_id))`) has been fixed. The
+`AuthCleanupExecutor` now wraps all DELETE statements in a single transaction.
 
 ## Architecture
 
@@ -574,32 +580,6 @@ consistent with `update_history` SSE but both silently swallow DB errors.
   transaction.
 
 ### Issues
-
-**[HIGH]** `src/queries/hosts.rs:35-45` -- `load_host_agents` queries `ServiceHost` with only
-a `host_id` filter, bypassing the `TenantDb` abstraction entirely:
-`ServiceHost::find().filter(service_host::Column::HostId.eq(host_id)).all(tenant_db.db())`.
-`service_host` has no `tenant_id` column, so the correct guard is `find_via_tenant_join`
-through `service::Entity` (which is `TenantScoped`). Without this join, the function returns
-all agents across all tenants linked to the given host ID. If two tenants share a host record
-(which the schema does not explicitly prevent), the returned agent list would include agents
-from a foreign tenant. The test at line 304-372 specifically verifies that agent B (tenant B)
-is not returned, but this protection is currently provided by the subsequent service query
-(`tenant_db.find::<service::Entity>().filter(...)` at line 52-64), not by the `ServiceHost`
-query itself. The test validates the end result but would not catch a regression if the service
-query filter were removed. Use `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`
-to push the tenant filter into the first query.
-
-**[HIGH]** `src/queries/update_triggers.rs:176-181` --
-`ServiceHost::find().filter(Column::HostId.eq(host_id)).one(db)` is called without any
-tenant filter. `service_host` has no `tenant_id`; the correct guard is to join through
-`service::Entity`. With the current code, if a host ID is known to an attacker (host IDs
-are UUIDs, but they appear in API responses), they could trigger an update destined for an
-agent in a different tenant by constructing a request that references a cross-tenant
-`host_id`. The subsequent agent status check
-(`service::Column::DeactivatedAt.is_null()` at line 184-189) provides some protection,
-but it does not verify `tenant_id` on the service. Adding
-`.filter(service::Column::TenantId.eq(tenant_id))` to the agent lookup would close
-this gap.
 
 **[MEDIUM]** `src/queries/scheduled_tasks.rs:155-162` -- `trigger_scheduled_task` performs a
 read-then-write in two separate statements without a transaction. The initial

@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::Mutex;
+use parking_lot::Mutex;
 use tokio::time::Instant;
 
 use crate::db::entity::ssh_host::Model;
@@ -88,7 +88,7 @@ impl SshConnectionPool {
     pub async fn acquire(&self, host: &Model) -> Result<Arc<SshSession>> {
         // Check the pool under the lock first.
         {
-            let mut pool = self.sessions.lock().await;
+            let mut pool = self.sessions.lock();
             if let Some(entry) = pool.get_mut(&host.id) {
                 if !is_expired(entry.last_used) {
                     entry.last_used = Instant::now();
@@ -124,7 +124,7 @@ impl SshConnectionPool {
         // Re-acquire the lock and use the Entry API to handle a concurrent
         // acquire() that may have inserted a session while we were connecting.
         let session = {
-            let mut pool = self.sessions.lock().await;
+            let mut pool = self.sessions.lock();
             match pool.entry(host.id.clone()) {
                 std::collections::hash_map::Entry::Vacant(v) => {
                     Arc::clone(&v.insert(PoolEntry { session, last_used: Instant::now() }).session)
@@ -150,7 +150,7 @@ impl SshConnectionPool {
     ///
     /// [`acquire`]: Self::acquire
     pub async fn evict(&self, host_id: &str) {
-        let removed = self.sessions.lock().await.remove(host_id).is_some();
+        let removed = self.sessions.lock().remove(host_id).is_some();
         if removed {
             tracing::debug!(host_id = %host_id, "evicted SSH session from pool");
         }
@@ -162,7 +162,7 @@ impl SshConnectionPool {
     /// SSH disconnect instead of a silent idle drop.
     pub async fn disconnect_all(&self) {
         let sessions: Vec<Arc<SshSession>> = {
-            let mut pool = self.sessions.lock().await;
+            let mut pool = self.sessions.lock();
             pool.drain().map(|(_, e)| e.session).collect()
         };
 
@@ -187,13 +187,13 @@ impl SshConnectionPool {
     /// Return whether `host_id` has a cached session.
     #[cfg(test)]
     pub async fn is_cached(&self, host_id: &str) -> bool {
-        self.sessions.lock().await.contains_key(host_id)
+        self.sessions.lock().contains_key(host_id)
     }
 
     /// Return the number of currently cached sessions.
     #[cfg(test)]
     pub async fn len(&self) -> usize {
-        self.sessions.lock().await.len()
+        self.sessions.lock().len()
     }
 
 }

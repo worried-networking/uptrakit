@@ -5,7 +5,6 @@ use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::find_raw_active_config;
 use crate::queries::software_items::{self as item_queries, SoftwareItemQueryError};
 use crate::tenant_db::TenantDb;
-use async_trait::async_trait;
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -18,8 +17,7 @@ use sea_orm::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use time::OffsetDateTime;
-use tokio::sync::mpsc;
-use uptrakit_command::{CommandOutput, CommandSpec, UpdateOutputLine};
+use uptrakit_command::NoopCommandExecutor;
 use uptrakit_plugin_infrastructure_registry::{
     CommandExecutor, PluginCapability, PluginRegistry, PluginType,
 };
@@ -79,29 +77,6 @@ fn query_error_to_response(report: rootcause::Report<SoftwareItemQueryError>) ->
 }
 
 // --- Controller-side fetch_releases helpers ---
-
-/// Controller-side command executor stub.
-///
-/// The controller never executes local shell commands. API-based plugins
-/// (GitHub, Docker) perform HTTP calls internally and never invoke the executor.
-/// This struct satisfies the `Arc<dyn CommandExecutor>` requirement of
-/// `PluginRegistry::create_plugin` without pulling in a real executor.
-struct NoopCommandExecutor;
-
-#[async_trait]
-impl CommandExecutor for NoopCommandExecutor {
-    async fn execute(
-        &self,
-        _: &CommandSpec,
-        _: &mpsc::Sender<UpdateOutputLine>,
-    ) -> uptrakit_command::Result<CommandOutput> {
-        unreachable!("NoopCommandExecutor::execute called on the controller — this is a bug")
-    }
-
-    async fn execute_quiet(&self, _: &CommandSpec) -> uptrakit_command::Result<CommandOutput> {
-        unreachable!("NoopCommandExecutor::execute_quiet called on the controller — this is a bug")
-    }
-}
 
 /// Describes a single controller-side `fetch_releases` job.
 struct ControllerFetchJob {

@@ -844,6 +844,7 @@ pub async fn trigger_all_host_package_updates_for_host(
         .ok_or_else(|| report!(TriggerUpdateError::NoAgent))?;
 
     let agent = Service::find_by_id(agent_link.service_id)
+        .filter(service::Column::TenantId.eq(tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
         .one(db)
         .await

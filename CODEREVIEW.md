@@ -85,7 +85,10 @@ an `Other(String)` catch-all for forward-compatible deserialization. All ten `Va
 implementations in `web-api-types` now have test coverage. The `truncate()` helper in
 `cli/batch_update.rs` now uses `chars().count()` / `chars().take()` to avoid panic on
 multi-byte UTF-8 boundaries. `reencrypt_legacy_plaintext` and its five per-table helpers
-now have 12 integration tests.
+now have 12 integration tests. The duplicated `NoopCommandExecutor` (inline in
+`web-api/src/routes/software_items.rs` and `scheduler-engine/src/executors/fetch_releases.rs`)
+has been extracted to `uptrakit_command::NoopCommandExecutor` and re-exported from `lib.rs`;
+both consumers now import it from the canonical location.
 
 ## Per-Crate Review Files
 
@@ -273,10 +276,6 @@ this is the largest single file.
 inline unit tests. `hosts.rs`, `agents.rs`, `settings_ca.rs`, `settings_mqtt.rs`,
 `oidc_providers.rs`, `server_cert.rs`, `settings_auth.rs`, and `ocsp.rs` carry no
 `#[cfg(test)]` module.
-
-**[MEDIUM]** `crates/ui/web-api/src/routes/software_items.rs:98,102` and
-`crates/shared/scheduler-engine/src/executors/version_check.rs:44,51` -- `NoopCommandExecutor`
-duplicated with `unreachable!()` in two locations.
 
 **[MEDIUM]** `test_state(db)` / `test_db()` / `NoopCertSigner` construction duplicated across
 17+ test modules. Shared `test_helpers` module would eliminate duplication.
