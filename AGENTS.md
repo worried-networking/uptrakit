@@ -561,9 +561,11 @@ Key invariants:
    controller validates the request and dispatches `execute_update` to the agent. On failure the
    controller sends `error` back (soft error — WebSocket is not closed).
 7. **Updates triggered via MQTT (host packages).** When a user presses Install in HA on the per-host
-   packages entity, the MQTT service sends `ServiceMessage::MqttTriggerHostPackageUpdate` to the
-   controller. The controller finds all outdated host packages, creates an `update_batch`, and dispatches
-   `execute_batch_host_package_update` to the agent. On completion the controller pushes `software_states`
+   packages entity or the security updates entity, the MQTT service sends
+   `ServiceMessage::MqttTriggerHostPackageUpdate` to the controller (with `security_only = true` for
+   the security entity). The controller finds all qualifying outdated host packages, creates an
+   `update_batch`, and dispatches `execute_batch_host_package_update` to the agent. On completion
+   the controller pushes `software_states`
    again to reflect the updated `installed_version` values and `update_in_progress = false`.
 8. **Actor attribution.** Updates triggered via MQTT have `actor_type = "mqtt"` and
    `actor_id = <mqtt_client_id>` in the `update_history` / `host_package_update_history` record.
@@ -590,21 +592,31 @@ All topics use the MQTT client's `topic_prefix` field.
 | `{prefix}/hosts/{host_id}/state` | ✓ | publish | `"N updates pending"` or `"up-to-date"` |
 | `{prefix}/hosts/{host_id}/latest_version` | ✓ | publish | Always `"up-to-date"` |
 | `{prefix}/hosts/{host_id}/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
-| `{prefix}/hosts/{host_id}/set` | — | subscribe | Receives `"install"` → triggers batch update |
-| `{ha_prefix}/update/uptrakit_pkgs_{t}_{h}/config` | ✓ | publish | HA discovery config for host packages entity |
+| `{prefix}/hosts/{host_id}/set` | — | subscribe | Receives `"install"` → triggers batch update (all packages) |
+| `{ha_prefix}/update/uptrakit_pkgs_{t}_{h}/config` | ✓ | publish | HA discovery config for host packages entity (disabled by default) |
+| `{prefix}/hosts/{host_id}/security/state` | ✓ | publish | `"N security updates pending"` or `"up-to-date"` |
+| `{prefix}/hosts/{host_id}/security/latest_version` | ✓ | publish | Always `"up-to-date"` |
+| `{prefix}/hosts/{host_id}/security/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
+| `{prefix}/hosts/{host_id}/security/set` | — | subscribe | Receives `"install"` → triggers security-only batch update |
+| `{ha_prefix}/update/uptrakit_sec_{t}_{h}/config` | ✓ | publish | HA discovery config for security updates entity (disabled by default) |
 
 Software item entities: device `uptrakit_{t}_{i}`, unique_id `uptrakit_{t}_{i}_{h}`,
 `default_entity_id` = `{item_slug}_on_{host_slug}`.
 
 Host package entities: device `uptrakit_host_{t}_{h}` (name = hostname), unique_id `uptrakit_pkgs_{t}_{h}`,
 entity name `"{hostname} packages"`, `default_entity_id` = `{host_slug}_packages`.
+Both host package entities are **disabled by default** in HA (`"enabled_by_default": false`).
+
+Security update entities: same device as host package entities (`uptrakit_host_{t}_{h}`), unique_id
+`uptrakit_sec_{t}_{h}`, entity name `"{hostname} security updates"`,
+`default_entity_id` = `{host_slug}_security_updates`. Install triggers a `security_only = true` batch.
 
 #### Key files
 
 | File | Purpose |
 | --- | --- |
-| `crates/core/mqtt/src/ha_discovery.rs` | Pure HA topic/config helpers for both software items and host packages; `parse_command_topic`, `parse_host_packages_command_topic` |
-| `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager`: software state + host package state cache, `publish_host_package_states`, `resolve_update_trigger`, `resolve_host_package_update_trigger` |
+| `crates/core/mqtt/src/ha_discovery.rs` | Pure HA topic/config helpers for software items, host packages, and security entities; `parse_command_topic`, `parse_host_packages_command_topic`, `parse_host_security_command_topic` |
+| `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager`: software state + host package state cache, `publish_host_package_states`, `resolve_update_trigger`, `resolve_host_package_update_trigger`, `resolve_host_security_update_trigger` |
 | `crates/core/mqtt/src/mqtt_client.rs` | `MqttServiceEvent` enum, `publish_retained`, `subscribe_topic`, HA status topic handling |
 | `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `MqttTriggerHostPackageUpdate` dispatch |
 | `crates/ui/web-api/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items + `load_host_package_host_states_for_tenant` |

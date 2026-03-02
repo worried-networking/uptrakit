@@ -645,17 +645,24 @@ The `host_package_hosts` field (defaults to `[]` when absent — older controlle
 | `host_id` | UUID | Host UUID |
 | `hostname` | String | Human-readable hostname |
 | `pending_count` | u32 | Number of packages where both versions are known and differ |
+| `security_pending_count` | u32 | Number of packages with `update_category = "security"` where both versions are known and differ |
 | `total_count` | u32 | Total number of enabled, non-deactivated packages tracked for this host |
 | `update_in_progress` | bool | `true` while a `host_package_update_history` record is `pending` or `in_progress` for this host |
 
-The MQTT service publishes these to three additional retained topics per host:
+The MQTT service publishes these to retained topics per host. For the **all-packages** entity:
 
 - `{prefix}/hosts/{host_id}/state` — `"N updates pending"` (when `pending_count > 0`) or `"up-to-date"`
 - `{prefix}/hosts/{host_id}/latest_version` — always `"up-to-date"`
 - `{prefix}/hosts/{host_id}/attributes` — `{"in_progress": bool, "pending_count": N}`
 
-When `ha_discovery = true`, the MQTT service also publishes an HA discovery config for a per-host
-`update` entity. See [Home Assistant Integration](../end-user/home-assistant-mqtt.md).
+And for the **security updates** entity:
+
+- `{prefix}/hosts/{host_id}/security/state` — `"N security updates pending"` or `"up-to-date"`
+- `{prefix}/hosts/{host_id}/security/latest_version` — always `"up-to-date"`
+- `{prefix}/hosts/{host_id}/security/attributes` — `{"in_progress": bool, "pending_count": N}`
+
+When `ha_discovery = true`, the MQTT service also publishes HA discovery configs for both per-host
+`update` entities (both disabled by default). See [Home Assistant Integration](../end-user/home-assistant-mqtt.md).
 
 When `ha_discovery = true` for an MQTT client, the MQTT service publishes HA discovery configs and retained
 state topics from this payload. The `update_in_progress` field is published to the
@@ -702,9 +709,9 @@ The controller rejects the request with an `error` message (no WS close) in the 
 
 ## `mqtt_trigger_host_package_update` Payload
 
-Sent by the MQTT service to the controller when a Home Assistant user presses **Install** on the
-per-host packages update entity. The controller finds all outdated host packages for the host and
-dispatches a single `execute_batch_host_package_update` to the agent.
+Sent by the MQTT service to the controller when a Home Assistant user presses **Install** on a
+per-host packages or security updates entity. The controller finds all qualifying outdated host
+packages for the host and dispatches a single `execute_batch_host_package_update` to the agent.
 
 ```json
 {
@@ -713,29 +720,34 @@ dispatches a single `execute_batch_host_package_update` to the agent.
   "type": "mqtt_trigger_host_package_update",
   "tenant_id": "550e8400-e29b-41d4-a716-446655440001",
   "host_id": "770e8400-e29b-41d4-a716-446655440003",
-  "mqtt_client_id": "880e8400-e29b-41d4-a716-446655440004"
+  "mqtt_client_id": "880e8400-e29b-41d4-a716-446655440004",
+  "security_only": false
 }
 ```
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `tenant_id` | UUID | Tenant scope — must match an assigned tenant for this MQTT service |
-| `host_id` | UUID | The host whose outdated packages should all be updated |
-| `mqtt_client_id` | UUID | The MQTT client that received the Install command; stored as `actor_id` in `host_package_update_history` |
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `tenant_id` | UUID | — | Tenant scope — must match an assigned tenant for this MQTT service |
+| `host_id` | UUID | — | The host whose outdated packages should be updated |
+| `mqtt_client_id` | UUID | — | The MQTT client that received the Install command; stored as `actor_id` in `host_package_update_history` |
+| `security_only` | bool | `false` | When `true`, only packages with `update_category = "security"` are included in the batch. Set automatically by the MQTT service when the security updates entity is triggered. |
 
 The controller:
 
 1. Validates that `tenant_id` is assigned to this MQTT service instance.
-2. Loads all enabled, non-deactivated host packages where `installed_version != latest_version` (both must be known).
+2. Loads all enabled, non-deactivated host packages where `installed_version != latest_version` (both
+   must be known). When `security_only = true`, further filters to `update_category = "security"`.
 3. Guards against a concurrent batch already `pending` or `in_progress` for this host.
-4. Creates one `update_batch` and one `host_package_update_history` row per outdated package (both inside a transaction).
-5. Groups packages by `plugin_config_id` and sends one `execute_batch_host_package_update` per group to the agent.
+4. Creates one `update_batch` and one `host_package_update_history` row per outdated package (both
+   inside a transaction).
+5. Groups packages by `plugin_config_id` and sends one `execute_batch_host_package_update` per group
+   to the agent.
 6. Immediately pushes a `software_states` message so MQTT/HA reflects `update_in_progress: true`.
 
 The controller responds with an `error` message (no WS close) in the following cases:
 
 - `tenant_id` is not assigned to this MQTT service instance.
-- No outdated packages exist for the host (nothing to do).
+- No qualifying outdated packages exist for the host (nothing to do).
 - A batch is already `pending` or `in_progress` for this host.
 - The host has no connected agent.
 
