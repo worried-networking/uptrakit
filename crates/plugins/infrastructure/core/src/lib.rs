@@ -1,3 +1,5 @@
+pub mod batch_detect;
+pub mod batch_fetch;
 pub mod batch_update;
 pub mod command;
 pub mod error;
@@ -7,6 +9,8 @@ pub mod traits;
 pub mod types;
 pub mod version;
 
+pub use batch_detect::{BatchDetectItem, BatchDetectResult};
+pub use batch_fetch::{BatchFetchItem, BatchFetchResult};
 pub use batch_update::{BatchUpdateItem, BatchUpdateResult};
 pub use error::{PluginError, Result};
 pub use secrets::SecretMasking;
