@@ -219,6 +219,15 @@ pub struct Args {
     #[arg(long)]
     pub allow_private_notification_urls: bool,
 
+    /// Re-encrypt all ENC:v1 database values to context-bound ENC:v2 format.
+    ///
+    /// Run once after all controllers in an HA deployment have been updated to
+    /// a version that supports ENC:v2 decryption. The operation is idempotent:
+    /// rows already at v2 are skipped. In non-HA (single-controller)
+    /// deployments this can be enabled immediately.
+    #[arg(long)]
+    pub upgrade_encryption: bool,
+
     /// PID of old controller process to take over from.
     /// Sends SIGUSR1 to the old process to initiate graceful shutdown.
     /// Should be used together with --reuseport.

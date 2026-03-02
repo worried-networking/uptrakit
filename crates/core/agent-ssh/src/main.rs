@@ -26,6 +26,9 @@ use uptrakit_service_sdk::{
 
 use cli::{Args, Commands};
 
+/// AAD string for the `ssh_hosts.private_key` column.
+const AAD_SSH_PRIVATE_KEY: &str = "uptrakit:ssh_hosts:private_key";
+
 /// How often the daemon polls the local `ssh_hosts` table for changes.
 const HOST_RELOAD_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -528,6 +531,71 @@ fn diff_host_snapshots<'a>(
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// ENC:v2 support
+// ---------------------------------------------------------------------------
+
+/// Register the column AAD mapping for `ssh_hosts.private_key`.
+///
+/// Must be called after `init_master_key` and before any DB queries.
+fn register_ssh_column_aad() {
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
+    let mut mappings = std::collections::HashMap::new();
+    mappings.insert("private_key".to_string(), AAD_SSH_PRIVATE_KEY.to_string());
+    if let Err(e) = uptrakit_crypto::register_column_aad(mappings) {
+        tracing::warn!(error = %e, "column AAD registry already initialized (harmless)");
+    }
+}
+
+/// Re-encrypt all `ENC:v1:` `ssh_hosts.private_key` values to `ENC:v2:`.
+async fn reencrypt_ssh_v1_to_v2(db: &sea_orm::DatabaseConnection) {
+    use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel};
+    use uptrakit_crypto::EncryptedString;
+
+    let rows = match db::entity::ssh_host::Entity::find().all(db).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to query ssh_hosts for v2 upgrade");
+            return;
+        }
+    };
+
+    let mut count = 0u64;
+    for row in rows {
+        if !row.private_key.is_v1() {
+            continue;
+        }
+        let plaintext = row.private_key.expose_secret().to_string();
+        let id = row.id.clone();
+        match EncryptedString::new_with_aad(plaintext, AAD_SSH_PRIVATE_KEY) {
+            Ok(encrypted) => {
+                let mut am = row.into_active_model();
+                am.private_key = sea_orm::Set(encrypted);
+                if let Err(e) = am.update(db).await {
+                    tracing::warn!(id = %id, error = %e, "v2 upgrade failed: ssh_hosts.private_key");
+                } else {
+                    count += 1;
+                }
+            }
+            Err(e) => {
+                tracing::warn!(id = %id, error = %e, "v2 encrypt failed: ssh_hosts.private_key");
+            }
+        }
+    }
+    if count > 0 {
+        tracing::info!(
+            table = "ssh_hosts",
+            column = "private_key",
+            count,
+            "upgraded to ENC:v2"
+        );
+    } else {
+        tracing::info!("no ENC:v1 ssh_hosts.private_key values found");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -552,6 +620,7 @@ async fn main() {
             eprintln!("error: {e}");
             std::process::exit(1);
         }
+        register_ssh_column_aad();
 
         let state_dir = match resolve_state_dir_from_common(&args.common).await {
             Ok(dir) => dir,
@@ -583,6 +652,7 @@ async fn main() {
         tracing::error!("{e}");
         std::process::exit(1);
     }
+    register_ssh_column_aad();
 
     // Resolve state directory early so we can pass it to the handler.
     let state_dir = match resolve_state_dir_from_common(&args.common).await {
@@ -607,6 +677,11 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    // Gated v1→v2 re-encryption of ssh_hosts.private_key.
+    if args.upgrade_encryption {
+        reencrypt_ssh_v1_to_v2(&local_db).await;
+    }
 
     let (aggregate_tx, aggregate_rx) =
         tokio::sync::mpsc::channel::<(String, client::UpdateEvent)>(256);

@@ -25,6 +25,14 @@ pub struct Args {
     #[arg(long)]
     pub allow_plaintext_secrets: bool,
 
+    /// Re-encrypt all ENC:v1 database values to context-bound ENC:v2 format.
+    ///
+    /// Upgrades the `ssh_hosts.private_key` column from ENC:v1 (empty AAD) to
+    /// ENC:v2 (context-bound AAD). The operation is idempotent: rows already at
+    /// v2 are skipped.
+    #[arg(long)]
+    pub upgrade_encryption: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

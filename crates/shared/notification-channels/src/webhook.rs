@@ -153,16 +153,14 @@ impl NotificationChannel for WebhookChannel {
         }
 
         // Private-host SSRF check (skipped when allow_private_urls is true).
-        if !self.allow_private_urls {
-            if let Ok(parsed) = url::Url::parse(url) {
-                if let Some(host) = parsed.host_str() {
-                    if is_private_host(host) {
-                        bail!(ChannelError::InvalidConfig(
-                            "'url' must not point to private/loopback addresses".to_string()
-                        ));
-                    }
-                }
-            }
+        if !self.allow_private_urls
+            && let Ok(parsed) = url::Url::parse(url)
+            && let Some(host) = parsed.host_str()
+            && is_private_host(host)
+        {
+            bail!(ChannelError::InvalidConfig(
+                "'url' must not point to private/loopback addresses".to_string()
+            ));
         }
 
         // Validate headers structure and enforce blocked-header list.
