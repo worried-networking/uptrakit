@@ -469,6 +469,7 @@ impl VersionCheckExecutor {
                         name: row.software_item_name.clone(),
                         detect_version: None,
                         fetch_releases: None,
+                        host_package_id: None,
                     });
 
             match row.role.as_str() {

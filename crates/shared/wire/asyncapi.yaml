@@ -181,6 +181,10 @@ channels:
         $ref: "#/components/messages/discoverSoftware"
       discoveryResults:
         $ref: "#/components/messages/discoveryResults"
+      executeBatchHostPackageUpdate:
+        $ref: "#/components/messages/executeBatchHostPackageUpdate"
+      batchHostPackageUpdateResult:
+        $ref: "#/components/messages/batchHostPackageUpdateResult"
 
   controllerEvents:
     address: uptrakit.events.controller
@@ -680,6 +684,32 @@ operations:
       `revocation_notify.notify_one()` so that `CrlManager::run()` rebuilds
       the CRL and hot-reloads the TLS configuration.
 
+  receiveExecuteBatchHostPackageUpdate:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/executeBatchHostPackageUpdate"
+    summary: Agent receives a batch host package update command (agent-only)
+    description: |
+      The controller pushes this message to trigger a batch update of host packages
+      on the agent. All packages in the batch belong to the same plugin type and are
+      updated in a single command (e.g., `apt-get upgrade`, `brew upgrade pkg1 pkg2`).
+      The agent reports per-package results via `BatchHostPackageUpdateResult`.
+
+  sendBatchHostPackageUpdateResult:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/batchHostPackageUpdateResult"
+    summary: Agent reports batch host package update results
+    description: |
+      Sent after completing a batch host package update. Contains per-package
+      outcomes (success/failure, output, detected installed version). The
+      controller uses these results to update individual `host_package_update_history`
+      records and `host_packages.installed_version` fields.
+
 components:
   securitySchemes:
     mtls:
@@ -995,6 +1025,22 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/discoveryResultsPayload"
+
+    executeBatchHostPackageUpdate:
+      name: execute_batch_host_package_update
+      title: Execute Batch Host Package Update Message
+      summary: Controller sends a batch of host packages to update in a single operation (agent-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/executeBatchHostPackageUpdatePayload"
+
+    batchHostPackageUpdateResult:
+      name: batch_host_package_update_result
+      title: Batch Host Package Update Result Message
+      summary: Agent reports per-package results from a batch host package update
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/batchHostPackageUpdateResultPayload"
 
     serviceCredentials:
       name: service_credentials
@@ -1813,6 +1859,12 @@ components:
           description: |
             Plugin for the fetch_releases role (agent-side only).
             Absent for controller-side fetch_releases plugins.
+        host_package_id:
+          type: string
+          format: uuid
+          description: |
+            Host package UUID when this assignment is for a host-managed package
+            (from `host_packages` table). Absent for targeted software items.
 
     versionCheckResultsPayload:
       type: object
@@ -1857,6 +1909,12 @@ components:
           description: Software item UUID
           examples:
             - 550e8400-e29b-41d4-a716-446655440000
+        host_package_id:
+          type: string
+          format: uuid
+          description: |
+            Host package UUID when this result is for a host-managed package.
+            Absent for targeted software items.
         installed_version:
           type: string
           description: Detected installed version, if any
@@ -3077,6 +3135,186 @@ components:
           description: Per-plugin discovery results
           items:
             $ref: "#/components/schemas/discoveryPluginResult"
+
+    executeBatchHostPackageUpdatePayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - host_machine_id
+        - batch_id
+        - plugin_type
+        - plugin_config
+        - updates
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: execute_batch_host_package_update
+          description: Message type discriminator
+        host_machine_id:
+          type: string
+          description: |
+            The machine_id of the host to run the batch update on. For the regular
+            agent (one service = one host), the agent validates this matches its
+            own machine_id. For the SSH agent, this routes to the correct remote host.
+          examples:
+            - 5b3e9f2a-4c1d-4e6b-8f7a-1234567890ab
+        batch_id:
+          type: string
+          format: uuid
+          description: UUID identifying this batch update operation
+        plugin_type:
+          type: string
+          description: Plugin type for all packages in this batch
+          examples:
+            - package_manager_apt
+            - package_manager_homebrew
+            - package_manager_npm
+        plugin_config:
+          type: object
+          description: Plugin configuration shared by all packages in the batch
+        updates:
+          type: array
+          items:
+            $ref: "#/components/schemas/batchHostPackageUpdate"
+          description: List of host packages to update in a single operation
+        pre_update_hooks:
+          type: array
+          items:
+            $ref: "#/components/schemas/hookCommand"
+          description: Hook commands to run before the batch update
+          default: []
+        post_update_hooks:
+          type: array
+          items:
+            $ref: "#/components/schemas/hookCommand"
+          description: Hook commands to run after the batch update
+          default: []
+        timeout_seconds:
+          type: integer
+          format: int32
+          description: Maximum execution time in seconds
+          default: 7200
+          examples:
+            - 7200
+
+    batchHostPackageUpdate:
+      type: object
+      required:
+        - host_package_id
+        - update_history_id
+        - package_identifier
+        - to_version
+      properties:
+        host_package_id:
+          type: string
+          format: uuid
+          description: UUID of the host_package record
+        update_history_id:
+          type: string
+          format: uuid
+          description: UUID of the host_package_update_history record
+        package_identifier:
+          type: string
+          description: Package identifier (e.g., nginx, node)
+          examples:
+            - nginx
+            - nodejs
+        to_version:
+          type: string
+          description: Target version to update to
+          examples:
+            - "1.24.0-2"
+            - "20.10.0"
+        release_info:
+          $ref: "#/components/schemas/releaseInfo"
+          description: Optional release information for the target version
+
+    batchHostPackageUpdateResultPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - batch_id
+        - results
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: batch_host_package_update_result
+          description: Message type discriminator
+        batch_id:
+          type: string
+          format: uuid
+          description: UUID of the batch update operation this result belongs to
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/batchHostPackageUpdateResult"
+          description: Per-package update outcomes
+
+    batchHostPackageUpdateResult:
+      type: object
+      required:
+        - host_package_id
+        - update_history_id
+        - status
+        - output
+      properties:
+        host_package_id:
+          type: string
+          format: uuid
+          description: UUID of the host_package record
+        update_history_id:
+          type: string
+          format: uuid
+          description: UUID of the host_package_update_history record
+        status:
+          type: string
+          enum:
+            - completed
+            - failed
+          description: Final outcome of the individual package update
+        output:
+          type: string
+          description: Combined stdout/stderr output for this package
+        installed_version:
+          type: string
+          description: |
+            Detected installed version after the update, if detection was successful.
+            Absent if version detection was not performed or failed.
+          examples:
+            - "1.24.0-2"
+        error:
+          type: string
+          description: Error message if the update failed
 
     serviceCredentialsPayload:
       type: object

@@ -277,6 +277,7 @@ pub enum ServiceMessage {
     UpdateStarted(UpdateStartedPayload),
     UpdateOutput(UpdateOutputPayload),
     UpdateResult(UpdateResultPayload),
+    BatchHostPackageUpdateResult(BatchHostPackageUpdateResultPayload),
     DiscoveryResults(DiscoveryResultsPayload),
     // -- MQTT-specific --
     Register(MqttRegisterPayload),
@@ -319,6 +320,7 @@ pub enum ControllerMessage {
     // -- Agent-specific --
     CheckVersions(CheckVersionsPayload),
     ExecuteUpdate(Box<ExecuteUpdatePayload>),
+    ExecuteBatchHostPackageUpdate(Box<ExecuteBatchHostPackageUpdatePayload>),
     DiscoverSoftware(DiscoverSoftwarePayload),
     // -- MQTT-specific --
     Registered(MqttRegisteredPayload),
@@ -670,6 +672,11 @@ pub struct VersionCheckAssignment {
     /// Controller-side fetch_releases is handled by the scheduler, not sent to the agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fetch_releases: Option<PluginAssignment>,
+    /// Host package ID for routing results to the host_packages table.
+    /// When set, this assignment is for a host-managed package rather than
+    /// a targeted software item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_package_id: Option<Uuid>,
 }
 
 /// Payload for version check results from the agent.
@@ -699,6 +706,10 @@ pub struct VersionCheckResult {
     /// Defaults to `Unknown` when the plugin cannot classify the update.
     #[serde(default)]
     pub update_category: UpdateCategory,
+    /// Host package ID for routing results to the host_packages table.
+    /// Mirrors the value from the corresponding [`VersionCheckAssignment`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_package_id: Option<Uuid>,
 }
 
 // --- Update execution messages ---
@@ -781,6 +792,79 @@ pub struct UpdateResultPayload {
     pub to_version: Option<String>,
     pub output: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+// --- Batch host package update messages ---
+
+/// Controller → Agent: execute a batch update of host packages.
+///
+/// Groups multiple packages under a single plugin type so the agent can
+/// run a single bulk command (e.g., `apt-get upgrade`, `brew upgrade`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecuteBatchHostPackageUpdatePayload {
+    /// The machine_id of the host to run the update on.
+    pub host_machine_id: String,
+    /// Unique identifier for this batch operation.
+    pub batch_id: Uuid,
+    /// Plugin type for all packages in this batch.
+    pub plugin_type: PluginType,
+    /// Merged plugin configuration.
+    pub plugin_config: serde_json::Value,
+    /// Individual packages to update.
+    pub updates: Vec<BatchHostPackageUpdate>,
+    /// Pre-update hook commands to execute before the batch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_update_hooks: Vec<HookCommand>,
+    /// Post-update hook commands to execute after the batch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub post_update_hooks: Vec<HookCommand>,
+    /// Timeout in seconds for the entire batch operation.
+    #[serde(default = "default_update_timeout")]
+    pub timeout_seconds: u32,
+}
+
+/// A single host package within a batch update request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchHostPackageUpdate {
+    /// Host package entity ID.
+    pub host_package_id: Uuid,
+    /// Update history record ID (pre-created by the controller).
+    pub update_history_id: Uuid,
+    /// Plugin-specific package identifier (e.g., APT package name).
+    pub package_identifier: String,
+    /// Target version to install.
+    pub to_version: String,
+    /// Optional release metadata from the upstream source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_info: Option<ReleaseInfo>,
+}
+
+/// Agent → Controller: result of a batch host package update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchHostPackageUpdateResultPayload {
+    /// Batch ID matching the request.
+    pub batch_id: Uuid,
+    /// Per-package results.
+    pub results: Vec<BatchHostPackageUpdateResult>,
+}
+
+/// Result of updating a single package within a batch operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchHostPackageUpdateResult {
+    /// Host package entity ID.
+    pub host_package_id: Uuid,
+    /// Update history record ID.
+    pub update_history_id: Uuid,
+    /// Final status of this package's update.
+    pub status: UpdateFinalStatus,
+    /// Accumulated output from the update.
+    pub output: String,
+    /// Detected installed version after the update (if detection succeeded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_version: Option<String>,
+    /// Error message if the update failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
@@ -1477,6 +1561,7 @@ mod tests {
             results: vec![
                 VersionCheckResult {
                     software_item_id: TEST_UUID_1,
+                    host_package_id: None,
                     installed_version: Some("1.2.3".to_string()),
                     latest_version: None,
                     error: None,
@@ -1484,6 +1569,7 @@ mod tests {
                 },
                 VersionCheckResult {
                     software_item_id: TEST_UUID_2,
+                    host_package_id: None,
                     installed_version: None,
                     latest_version: None,
                     error: Some("detection failed".to_string()),
@@ -1507,6 +1593,7 @@ mod tests {
         let msg = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload {
             results: vec![VersionCheckResult {
                 software_item_id: TEST_UUID_1,
+                host_package_id: None,
                 installed_version: Some("1.24.4".to_string()),
                 latest_version: Some("1.24.5".to_string()),
                 error: None,
@@ -1971,6 +2058,7 @@ mod tests {
                     config: serde_json::json!({}),
                 }),
                 fetch_releases: None,
+                host_package_id: None,
             }],
         });
         let json = serde_json::to_string(&msg).unwrap();
@@ -2478,6 +2566,7 @@ mod tests {
                 config: serde_json::json!({}),
             }),
             fetch_releases: None,
+            host_package_id: None,
         };
         let json = serde_json::to_string(&assignment).unwrap();
         assert!(json.contains(r#""plugin_type":"releases_docker""#));
@@ -3051,6 +3140,7 @@ mod tests {
             VersionCheckResultsPayload {
                 results: vec![VersionCheckResult {
                     software_item_id: TEST_UUID_1,
+                    host_package_id: None,
                     installed_version: Some("1.2.3".to_string()),
                     latest_version: Some("1.3.0".to_string()),
                     error: None,
@@ -3273,6 +3363,7 @@ mod tests {
                         config: serde_json::json!({}),
                     }),
                     fetch_releases: None,
+                    host_package_id: None,
                 }],
             }));
         spec.validate("checkVersionsPayload", &json);
@@ -3512,6 +3603,102 @@ mod tests {
                 }],
             }));
         spec.validate("discoveryResultsPayload", &json);
+    }
+
+    #[test]
+    fn execute_batch_host_package_update_serialization_roundtrip() {
+        let msg =
+            ControllerMessage::ExecuteBatchHostPackageUpdate(Box::new(
+                ExecuteBatchHostPackageUpdatePayload {
+                    host_machine_id: "test-machine-id".to_string(),
+                    batch_id: TEST_UUID_1,
+                    plugin_type: PluginType::PackageManagerApt,
+                    plugin_config: serde_json::json!({}),
+                    updates: vec![BatchHostPackageUpdate {
+                        host_package_id: TEST_UUID_1,
+                        update_history_id: TEST_UUID_2,
+                        package_identifier: "nginx".to_string(),
+                        to_version: "1.24.0-2".to_string(),
+                        release_info: None,
+                    }],
+                    pre_update_hooks: vec![],
+                    post_update_hooks: vec![],
+                    timeout_seconds: 7200,
+                },
+            ));
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"execute_batch_host_package_update"#));
+        assert!(json.contains(r#""plugin_type":"package_manager_apt"#));
+        assert!(json.contains(r#""package_identifier":"nginx"#));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn batch_host_package_update_result_serialization_roundtrip() {
+        let msg = ServiceMessage::BatchHostPackageUpdateResult(
+            BatchHostPackageUpdateResultPayload {
+                batch_id: TEST_UUID_1,
+                results: vec![BatchHostPackageUpdateResult {
+                    host_package_id: TEST_UUID_1,
+                    update_history_id: TEST_UUID_2,
+                    status: UpdateFinalStatus::Completed,
+                    output: "Unpacking nginx 1.24.0-2 ...\n".to_string(),
+                    installed_version: Some("1.24.0-2".to_string()),
+                    error: None,
+                }],
+            },
+        );
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"batch_host_package_update_result"#));
+        assert!(json.contains(r#""status":"completed"#));
+        let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn spec_conformance_execute_batch_host_package_update() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(
+            ControllerMessage::ExecuteBatchHostPackageUpdate(Box::new(
+                ExecuteBatchHostPackageUpdatePayload {
+                    host_machine_id: "test-machine-id".to_string(),
+                    batch_id: TEST_UUID_1,
+                    plugin_type: PluginType::PackageManagerApt,
+                    plugin_config: serde_json::json!({}),
+                    updates: vec![BatchHostPackageUpdate {
+                        host_package_id: TEST_UUID_1,
+                        update_history_id: TEST_UUID_2,
+                        package_identifier: "nginx".to_string(),
+                        to_version: "1.24.0-2".to_string(),
+                        release_info: None,
+                    }],
+                    pre_update_hooks: vec![],
+                    post_update_hooks: vec![],
+                    timeout_seconds: 7200,
+                },
+            )),
+        );
+        spec.validate("executeBatchHostPackageUpdatePayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_batch_host_package_update_result() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::BatchHostPackageUpdateResult(
+            BatchHostPackageUpdateResultPayload {
+                batch_id: TEST_UUID_1,
+                results: vec![BatchHostPackageUpdateResult {
+                    host_package_id: TEST_UUID_1,
+                    update_history_id: TEST_UUID_2,
+                    status: UpdateFinalStatus::Completed,
+                    output: "Unpacking nginx 1.24.0-2 ...\n".to_string(),
+                    installed_version: Some("1.24.0-2".to_string()),
+                    error: None,
+                }],
+            },
+        ));
+        spec.validate("batchHostPackageUpdateResultPayload", &json);
     }
 
     // =========================================================================

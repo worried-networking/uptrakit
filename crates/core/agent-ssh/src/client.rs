@@ -712,6 +712,7 @@ fn error_results_for_check(payload: &CheckVersionsPayload, error: &str) -> Vec<V
         .iter()
         .map(|a| VersionCheckResult {
             software_item_id: a.software_item_id,
+            host_package_id: a.host_package_id,
             installed_version: None,
             latest_version: None,
             error: Some(error.to_string()),

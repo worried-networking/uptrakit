@@ -220,6 +220,7 @@ pub async fn handle_check_versions(
                 .await;
                 VersionCheckResult {
                     software_item_id: assignment.software_item_id,
+                    host_package_id: assignment.host_package_id,
                     installed_version: outcome.installed_version,
                     latest_version: outcome.latest_version,
                     error: outcome.error,

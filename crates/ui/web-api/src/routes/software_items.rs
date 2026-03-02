@@ -1019,6 +1019,7 @@ pub async fn check_versions(
             name: item.name.clone(),
             detect_version,
             fetch_releases,
+            host_package_id: None,
         };
 
         let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
@@ -1251,6 +1252,7 @@ pub async fn check_versions_host(
         name: item.name.clone(),
         detect_version,
         fetch_releases,
+        host_package_id: None,
     };
 
     let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
