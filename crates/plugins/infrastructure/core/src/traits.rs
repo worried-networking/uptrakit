@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use tokio::sync::mpsc;
 
+use crate::batch_update::{BatchUpdateItem, BatchUpdateResult};
 use crate::error::{PluginError, Result};
 use crate::types::{
     DiscoveredSoftware, PluginCapability, PluginType, ReleaseInfo, UpstreamRelease,
@@ -175,6 +176,45 @@ pub trait Plugin: Send + Sync {
         Err(report!(PluginError::Configuration(
             "execute_update not supported by this plugin".to_string()
         )))
+    }
+
+    /// Execute updates for multiple packages in a single operation.
+    ///
+    /// Package managers like APT, Homebrew, and npm can update multiple packages
+    /// in a single command, which is more efficient than per-package calls.
+    ///
+    /// The default implementation falls back to calling [`execute_update`](Self::execute_update)
+    /// sequentially for each item. Plugins that support native batch operations
+    /// should override this for efficiency.
+    async fn execute_batch_update(
+        &self,
+        items: &[BatchUpdateItem],
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<Vec<BatchUpdateResult>> {
+        let mut results = Vec::with_capacity(items.len());
+        for item in items {
+            match self
+                .execute_update(
+                    &item.package_identifier,
+                    &item.to_version,
+                    item.release_info.as_ref(),
+                    output_tx,
+                )
+                .await
+            {
+                Ok(output) => results.push(BatchUpdateResult {
+                    package_identifier: item.package_identifier.clone(),
+                    success: true,
+                    output,
+                }),
+                Err(e) => results.push(BatchUpdateResult {
+                    package_identifier: item.package_identifier.clone(),
+                    success: false,
+                    output: format!("{e}"),
+                }),
+            }
+        }
+        Ok(results)
     }
 
     /// Discover software that this plugin can manage on the local system.

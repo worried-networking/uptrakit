@@ -1,3 +1,4 @@
+pub mod batch_update;
 pub mod command;
 pub mod error;
 pub mod secrets;
@@ -6,6 +7,7 @@ pub mod traits;
 pub mod types;
 pub mod version;
 
+pub use batch_update::{BatchUpdateItem, BatchUpdateResult};
 pub use error::{PluginError, Result};
 pub use secrets::SecretMasking;
 pub use traits::{
@@ -14,7 +16,7 @@ pub use traits::{
 };
 pub use types::{
     DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole, PluginType, ReleaseAsset,
-    ReleaseInfo, UpdateCategory, UpstreamRelease,
+    ReleaseInfo, TrackingSystem, UpdateCategory, UpstreamRelease,
 };
 pub use version::Version;
 
