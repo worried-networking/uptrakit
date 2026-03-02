@@ -167,71 +167,12 @@ pub async fn handle_check_versions(
         "received CheckVersions request"
     );
 
-    // Pre-refresh package indexes for plugin types that support it.
-    // Deduplicate by plugin type so we only refresh once per type.
-    // Look at both detect_version and fetch_releases assignments.
-    {
-        let mut refreshed_types = std::collections::HashSet::new();
-        for assignment in &payload.assignments {
-            for plugin_assignment in assignment
-                .detect_version
-                .iter()
-                .chain(assignment.fetch_releases.iter())
-            {
-                if refreshed_types.contains(&plugin_assignment.plugin_type) {
-                    continue;
-                }
-                let mut effective_config = plugin_assignment.config.clone();
-                ctx.apply_to_config(&plugin_assignment.plugin_type, &mut effective_config);
-
-                if let Ok(plugin) = uptrakit_plugin_infrastructure_registry::PluginRegistry::create_plugin(
-                    plugin_assignment.plugin_type.clone(),
-                    &effective_config,
-                    Arc::clone(&executor),
-                ).await && plugin.has_capability(
-                    uptrakit_plugin_infrastructure_registry::PluginCapability::RefreshPackageIndex,
-                ) {
-                    tracing::info!(plugin_type = %plugin_assignment.plugin_type, "refreshing package index");
-                    if let Err(e) = plugin.refresh_package_index().await {
-                        tracing::warn!(plugin_type = %plugin_assignment.plugin_type, error = %e, "failed to refresh package index");
-                    }
-                    refreshed_types.insert(plugin_assignment.plugin_type.clone());
-                }
-            }
-        }
-    }
-
-    use futures_util::stream::{self, StreamExt};
-    let results: Vec<VersionCheckResult> = stream::iter(payload.assignments)
-        .map(|assignment| {
-            let executor = Arc::clone(&executor);
-            let ctx = ctx.clone();
-            async move {
-                tracing::debug!(
-                    software_item_id = %assignment.software_item_id,
-                    name = %assignment.name,
-                    "checking version"
-                );
-                let outcome = crate::version_check::check_version(
-                    assignment.detect_version.as_ref(),
-                    assignment.fetch_releases.as_ref(),
-                    executor,
-                    &ctx,
-                )
-                .await;
-                VersionCheckResult {
-                    software_item_id: assignment.software_item_id,
-                    host_package_id: assignment.host_package_id,
-                    installed_version: outcome.installed_version,
-                    latest_version: outcome.latest_version,
-                    error: outcome.error,
-                    update_category: outcome.update_category,
-                }
-            }
-        })
-        .buffer_unordered(8)
-        .collect()
-        .await;
+    let results: Vec<VersionCheckResult> = crate::version_check::batch_check_versions(
+        payload.assignments,
+        Arc::clone(&executor),
+        ctx,
+    )
+    .await;
 
     let response = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results });
     if let Err(e) = conn.send(response).await {

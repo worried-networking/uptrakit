@@ -20,4 +20,4 @@ pub use client::{
 };
 pub use connection_context::ConnectionContext;
 pub use update::{UpdateExecutionResult, UpdateOutputMessage};
-pub use version_check::{VersionCheckOutcome, check_version};
+pub use version_check::{VersionCheckOutcome, batch_check_versions, check_version};
