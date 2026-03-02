@@ -19,7 +19,8 @@ use uptrakit_shared_db::entity::service as service_entity;
 
 use super::protocol::{
     AuthenticatedContext, CertIdentity, ServiceWsError, close_with_reason, controller_capabilities,
-    deserialize_service_msg, record_service_activity, serialize_controller_msg,
+    deserialize_service_msg, record_service_activity, record_system_service_activity,
+    serialize_controller_msg,
 };
 use crate::AppState;
 
@@ -63,31 +64,75 @@ pub(super) async fn handle_authenticated(
 
     let (mut sink, mut stream) = socket.split();
 
-    // 1. Certificate validation check
-    let cert_record = if cert_serial.is_empty() {
-        match uptrakit_shared_db::entity::prelude::ServiceCertificate::find()
+    // ---------------------------------------------------------------------------
+    // 1. Certificate validation check.
+    //
+    // Try the tenant service_certificates table first. If not found, fall back to
+    // system_service_certificates. The table that contains the record determines
+    // whether this is a system service (is_system).
+    // ---------------------------------------------------------------------------
+    use uptrakit_shared_db::entity::system_service as sys_svc_entity;
+    use uptrakit_shared_db::entity::system_service_certificate as sys_cert_entity;
+
+    // Returns (ca_fingerprint, revoked_at, is_system) after looking up in both
+    // tables. We use a helper enum so we can update last_seen_at on the correct
+    // record type after the status check.
+    enum CertLookupResult {
+        Tenant(uptrakit_shared_db::entity::service_certificate::Model),
+        System(uptrakit_shared_db::entity::system_service_certificate::Model),
+    }
+
+    let cert_lookup = if cert_serial.is_empty() {
+        // No serial: try tenant certs first, then system certs.
+        let tenant_result = uptrakit_shared_db::entity::prelude::ServiceCertificate::find()
             .filter(
                 uptrakit_shared_db::entity::service_certificate::Column::ServiceId.eq(service_id),
             )
             .filter(uptrakit_shared_db::entity::service_certificate::Column::RevokedAt.is_null())
             .order_by_desc(uptrakit_shared_db::entity::service_certificate::Column::CreatedAt)
             .one(state.db())
-            .await
-        {
+            .await;
+
+        match tenant_result {
             Ok(Some(record)) => {
                 tracing::warn!(
                     %service_id,
                     "service connected via proxy without cert serial, using service-id-only lookup"
                 );
-                record
+                CertLookupResult::Tenant(record)
             }
             Ok(None) => {
-                tracing::warn!(
-                    %service_id,
-                    "rejected connection: no non-revoked certificate found for service"
-                );
-                let _ = close_with_reason(&mut sink, CloseReason::NoValidCertificate).await;
-                return;
+                // Try system certs.
+                let sys_result = sys_cert_entity::Entity::find()
+                    .filter(sys_cert_entity::Column::SystemServiceId.eq(service_id))
+                    .filter(sys_cert_entity::Column::RevokedAt.is_null())
+                    .order_by_desc(sys_cert_entity::Column::CreatedAt)
+                    .one(state.db())
+                    .await;
+
+                match sys_result {
+                    Ok(Some(record)) => {
+                        tracing::warn!(
+                            %service_id,
+                            "system service connected via proxy without cert serial"
+                        );
+                        CertLookupResult::System(record)
+                    }
+                    Ok(None) => {
+                        tracing::warn!(
+                            %service_id,
+                            "rejected connection: no non-revoked certificate found"
+                        );
+                        let _ =
+                            close_with_reason(&mut sink, CloseReason::NoValidCertificate).await;
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "system certificate validation check failed");
+                        let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
+                        return;
+                    }
+                }
             }
             Err(e) => {
                 tracing::error!(error = %e, "certificate validation check failed");
@@ -96,7 +141,8 @@ pub(super) async fn handle_authenticated(
             }
         }
     } else {
-        match uptrakit_shared_db::entity::prelude::ServiceCertificate::find()
+        // Serial present: try tenant certs first, then system certs.
+        let tenant_result = uptrakit_shared_db::entity::prelude::ServiceCertificate::find()
             .filter(
                 uptrakit_shared_db::entity::service_certificate::Column::SerialNumber
                     .eq(cert_serial.clone()),
@@ -105,8 +151,9 @@ pub(super) async fn handle_authenticated(
                 uptrakit_shared_db::entity::service_certificate::Column::ServiceId.eq(service_id),
             )
             .one(state.db())
-            .await
-        {
+            .await;
+
+        match tenant_result {
             Ok(Some(record)) => {
                 if record.revoked_at.is_some() {
                     tracing::warn!(
@@ -114,19 +161,59 @@ pub(super) async fn handle_authenticated(
                         serial_number = %cert_serial,
                         "rejected connection: certificate is revoked"
                     );
-                    let _ = close_with_reason(&mut sink, CloseReason::CertificateRevoked).await;
+                    let _ =
+                        close_with_reason(&mut sink, CloseReason::CertificateRevoked).await;
                     return;
                 }
-                record
+                CertLookupResult::Tenant(record)
             }
             Ok(None) => {
-                tracing::warn!(
-                    %service_id,
-                    serial_number = %cert_serial,
-                    "rejected connection: certificate not recognized"
-                );
-                let _ = close_with_reason(&mut sink, CloseReason::CertificateNotRecognized).await;
-                return;
+                // Not in tenant table — try system certs.
+                let sys_result = sys_cert_entity::Entity::find()
+                    .filter(sys_cert_entity::Column::SerialNumber.eq(cert_serial.clone()))
+                    .filter(sys_cert_entity::Column::SystemServiceId.eq(service_id))
+                    .one(state.db())
+                    .await;
+
+                match sys_result {
+                    Ok(Some(record)) => {
+                        if record.revoked_at.is_some() {
+                            tracing::warn!(
+                                %service_id,
+                                serial_number = %cert_serial,
+                                "rejected connection: system service certificate is revoked"
+                            );
+                            let _ = close_with_reason(
+                                &mut sink,
+                                CloseReason::CertificateRevoked,
+                            )
+                            .await;
+                            return;
+                        }
+                        CertLookupResult::System(record)
+                    }
+                    Ok(None) => {
+                        tracing::warn!(
+                            %service_id,
+                            serial_number = %cert_serial,
+                            "rejected connection: certificate not recognized"
+                        );
+                        let _ = close_with_reason(
+                            &mut sink,
+                            CloseReason::CertificateNotRecognized,
+                        )
+                        .await;
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            error = %e,
+                            "system certificate validation check failed"
+                        );
+                        let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
+                        return;
+                    }
+                }
             }
             Err(e) => {
                 tracing::error!(error = %e, "certificate validation check failed");
@@ -136,65 +223,131 @@ pub(super) async fn handle_authenticated(
         }
     };
 
-    // 2. Service status check.
-    let service = match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
-        .one(state.db())
-        .await
-    {
-        Ok(Some(svc)) => {
-            if svc.deactivated_at.is_some() {
-                tracing::warn!(%service_id, "deactivated service connected with valid certificate");
-                let _ = close_with_reason(&mut sink, CloseReason::ServiceDeactivated).await;
-                return;
-            }
-            if svc.status != service_entity::ServiceStatus::Approved {
-                tracing::warn!(%service_id, "rejected connection: service not approved");
-                let _ = close_with_reason(&mut sink, CloseReason::ServiceNotApproved).await;
-                return;
-            }
-            svc
-        }
-        Ok(None) => {
-            tracing::warn!(%service_id, "rejected connection: service not found");
-            let _ = close_with_reason(&mut sink, CloseReason::ServiceNotFound).await;
-            return;
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "service status check failed");
-            let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
-            return;
-        }
+    let is_system = matches!(cert_lookup, CertLookupResult::System(_));
+    let cert_ca_fingerprint = match &cert_lookup {
+        CertLookupResult::Tenant(r) => r.ca_fingerprint.clone(),
+        CertLookupResult::System(r) => r.ca_fingerprint.clone(),
     };
 
-    // Bundle certificate identity before moving cert_record.
+    // ---------------------------------------------------------------------------
+    // 2. Service status check.
+    // ---------------------------------------------------------------------------
+    use uptrakit_internal_wire::service_profile::{ServiceProfile, parse_capabilities};
+
+    let (capabilities_json, ping_interval_seconds) = if is_system {
+        let svc = match sys_svc_entity::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                tracing::warn!(%service_id, "rejected connection: system service not found");
+                let _ = close_with_reason(&mut sink, CloseReason::ServiceNotFound).await;
+                return;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "system service status check failed");
+                let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
+                return;
+            }
+        };
+
+        if svc.deactivated_at.is_some() {
+            tracing::warn!(
+                %service_id,
+                "deactivated system service connected with valid certificate"
+            );
+            let _ = close_with_reason(&mut sink, CloseReason::ServiceDeactivated).await;
+            return;
+        }
+        if svc.status != sys_svc_entity::SystemServiceStatus::Approved {
+            tracing::warn!(%service_id, "rejected connection: system service not approved");
+            let _ = close_with_reason(&mut sink, CloseReason::ServiceNotApproved).await;
+            return;
+        }
+
+        (svc.capabilities.clone(), svc.ping_interval_seconds)
+    } else {
+        let svc = match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                tracing::warn!(%service_id, "rejected connection: service not found");
+                let _ = close_with_reason(&mut sink, CloseReason::ServiceNotFound).await;
+                return;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "service status check failed");
+                let _ = close_with_reason(&mut sink, CloseReason::InternalError).await;
+                return;
+            }
+        };
+
+        if svc.deactivated_at.is_some() {
+            tracing::warn!(
+                %service_id,
+                "deactivated service connected with valid certificate"
+            );
+            let _ = close_with_reason(&mut sink, CloseReason::ServiceDeactivated).await;
+            return;
+        }
+        if svc.status != service_entity::ServiceStatus::Approved {
+            tracing::warn!(%service_id, "rejected connection: service not approved");
+            let _ = close_with_reason(&mut sink, CloseReason::ServiceNotApproved).await;
+            return;
+        }
+
+        (svc.capabilities.clone(), svc.ping_interval_seconds)
+    };
+
+    // Bundle certificate identity.
     let cert_id = CertIdentity {
         serial: cert_serial,
-        ca_fingerprint: cert_record.ca_fingerprint.clone(),
+        ca_fingerprint: cert_ca_fingerprint,
     };
 
     let now = time::OffsetDateTime::now_utc();
 
-    if let Err(e) = record_service_activity(state.db(), service_id, client_ip).await {
+    // Record service activity in the appropriate table.
+    if is_system {
+        if let Err(e) = record_system_service_activity(state.db(), service_id, client_ip).await {
+            tracing::error!(error = %e, %service_id, "failed to update system service activity");
+        }
+    } else if let Err(e) = record_service_activity(state.db(), service_id, client_ip).await {
         tracing::error!(error = %e, %service_id, "failed to update service activity");
     }
 
-    // Record certificate usage.
-    let mut active: uptrakit_shared_db::entity::service_certificate::ActiveModel =
-        cert_record.into();
-    active.last_seen_at = Set(Some(now));
-    if let Err(e) = active.update(state.db()).await {
-        tracing::error!(error = %e, "failed to update certificate last_seen_at");
+    // Record certificate usage (last_seen_at).
+    match cert_lookup {
+        CertLookupResult::Tenant(record) => {
+            let mut active: uptrakit_shared_db::entity::service_certificate::ActiveModel =
+                record.into();
+            active.last_seen_at = Set(Some(now));
+            if let Err(e) = active.update(state.db()).await {
+                tracing::error!(error = %e, "failed to update certificate last_seen_at");
+            }
+        }
+        CertLookupResult::System(record) => {
+            let mut active: sys_cert_entity::ActiveModel = record.into();
+            active.last_seen_at = Set(Some(now));
+            if let Err(e) = active.update(state.db()).await {
+                tracing::error!(
+                    error = %e,
+                    "failed to update system service certificate last_seen_at"
+                );
+            }
+        }
     }
 
     // Send ServiceSettings on connect.
     let renewal_window_hours = state.settings.renewal_window_hours();
     let ca_bundle_hash = state.ca_snapshot.borrow().bundle_hash.clone();
-    use uptrakit_internal_wire::service_profile::{ServiceProfile, parse_capabilities};
-    let capabilities = parse_capabilities(&service.capabilities);
+    let capabilities = parse_capabilities(&capabilities_json);
     let profile = ServiceProfile::from_capabilities(&capabilities);
     let shutdown_timeout = profile.shutdown_timeout_secs();
-    let ping_secs = service
-        .ping_interval_seconds
+    let ping_secs = ping_interval_seconds
         .map_or_else(|| profile.default_ping_interval_secs(), |v| v as u32);
     let ping_interval = std::time::Duration::from_secs(u64::from(ping_secs));
     let settings_msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
@@ -215,6 +368,7 @@ pub(super) async fn handle_authenticated(
     let ctx = AuthenticatedContext {
         service_id,
         cert: cert_id,
+        is_system,
         out_seq,
         in_seq,
     };
@@ -230,54 +384,99 @@ pub(super) async fn handle_enrolled(
     socket: WebSocket,
     state: Arc<AppState>,
     service_id: uuid::Uuid,
+    is_system: bool,
     client_ip: Option<IpAddr>,
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) {
-    tracing::debug!(%service_id, "enrolled service connected (bearer)");
+    tracing::debug!(%service_id, is_system, "enrolled service connected (bearer)");
 
-    // Look up service to determine type and current status.
-    let service = match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
-        .one(state.db())
-        .await
-    {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            tracing::warn!(%service_id, "service not found in DB");
-            return;
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "DB lookup failed");
-            return;
-        }
-    };
+    use uptrakit_shared_db::entity::system_service as sys_svc_entity;
 
     let (mut sink, mut stream) = socket.split();
 
-    if let Err(e) = record_service_activity(state.db(), service_id, client_ip).await {
-        tracing::error!(error = %e, %service_id, "failed to update service activity");
-    }
+    // Record activity and determine initial status.
+    if is_system {
+        if let Err(e) = record_system_service_activity(state.db(), service_id, client_ip).await {
+            tracing::error!(error = %e, %service_id, "failed to update system service activity");
+        }
 
-    // If already approved/rejected, push immediately.
-    match service.status {
-        service_entity::ServiceStatus::Approved => {
-            let msg = ControllerMessage::Approved(ApprovedPayload { service_id });
-            let Some(json) = serialize_controller_msg(out_seq, msg) else {
-                return;
-            };
-            if sink.send(Message::Text(json.into())).await.is_err() {
+        let svc = match sys_svc_entity::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                tracing::warn!(%service_id, "system service not found in DB");
                 return;
             }
-        }
-        service_entity::ServiceStatus::Rejected => {
-            let msg = ControllerMessage::Rejected(RejectedPayload { service_id });
-            if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                let _ = sink.send(Message::Text(json.into())).await;
+            Err(e) => {
+                tracing::error!(error = %e, "DB lookup failed for system service");
+                return;
             }
-            return;
+        };
+
+        match svc.status {
+            sys_svc_entity::SystemServiceStatus::Approved => {
+                let msg = ControllerMessage::Approved(ApprovedPayload { service_id });
+                let Some(json) = serialize_controller_msg(out_seq, msg) else {
+                    return;
+                };
+                if sink.send(Message::Text(json.into())).await.is_err() {
+                    return;
+                }
+            }
+            sys_svc_entity::SystemServiceStatus::Rejected => {
+                let msg = ControllerMessage::Rejected(RejectedPayload { service_id });
+                if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                return;
+            }
+            _ => {
+                // Pending or Deactivated -- wait for push.
+            }
         }
-        _ => {
-            // Pending -- wait for push.
+    } else {
+        if let Err(e) = record_service_activity(state.db(), service_id, client_ip).await {
+            tracing::error!(error = %e, %service_id, "failed to update service activity");
+        }
+
+        let service = match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                tracing::warn!(%service_id, "service not found in DB");
+                return;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "DB lookup failed");
+                return;
+            }
+        };
+
+        match service.status {
+            service_entity::ServiceStatus::Approved => {
+                let msg = ControllerMessage::Approved(ApprovedPayload { service_id });
+                let Some(json) = serialize_controller_msg(out_seq, msg) else {
+                    return;
+                };
+                if sink.send(Message::Text(json.into())).await.is_err() {
+                    return;
+                }
+            }
+            service_entity::ServiceStatus::Rejected => {
+                let msg = ControllerMessage::Rejected(RejectedPayload { service_id });
+                if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                return;
+            }
+            _ => {
+                // Pending -- wait for push.
+            }
         }
     }
 
@@ -287,6 +486,7 @@ pub(super) async fn handle_enrolled(
         &mut stream,
         &state,
         service_id,
+        is_system,
         out_seq,
         in_seq,
     )
@@ -314,7 +514,7 @@ pub(super) async fn handle_anonymous(
     let deadline = tokio::time::Instant::now() + ANONYMOUS_TIMEOUT;
 
     // Wait for first message -- must be Enroll.
-    let (service_id, _enroll_capabilities, _initial_approved) = loop {
+    let (service_id, is_system) = loop {
         let msg = match tokio::time::timeout_at(deadline, stream.next()).await {
             Ok(Some(Ok(m))) => m,
             Ok(Some(Err(e))) => {
@@ -351,13 +551,12 @@ pub(super) async fn handle_anonymous(
 
                 match service_msg {
                     ServiceMessage::Enroll(payload) => {
-                        let caps = payload.capabilities.clone();
                         let enrollment_result =
                             enroll_service(&state, &payload, client_ip, &mut sink, out_seq).await;
 
                         match enrollment_result {
-                            Some((id, approved)) => {
-                                break (id, caps, approved);
+                            Some((id, sys)) => {
+                                break (id, sys);
                             }
                             None => return, // enrollment failed, error already sent
                         }
@@ -385,6 +584,7 @@ pub(super) async fn handle_anonymous(
         &mut stream,
         &state,
         service_id,
+        is_system,
         out_seq,
         in_seq,
     )
@@ -397,11 +597,11 @@ pub(super) async fn handle_anonymous(
 // Enrollment
 // ---------------------------------------------------------------------------
 
-/// Perform service enrollment. Returns `(service_id, approved)` on success, or
+/// Perform service enrollment. Returns `(service_id, is_system)` on success, or
 /// `None` if enrollment failed (error already sent to client).
 ///
-/// Uses the unified `do_enroll` which stores whatever capabilities the service
-/// declares in its `EnrollPayload`.
+/// Routes to `do_enroll_system_service` when the payload includes the
+/// `SystemService` capability, and to `do_enroll` (tenant path) otherwise.
 async fn enroll_service(
     state: &Arc<AppState>,
     payload: &uptrakit_internal_wire::EnrollPayload,
@@ -409,67 +609,130 @@ async fn enroll_service(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
 ) -> Option<(uuid::Uuid, bool)> {
-    use crate::routes::agents::{EnrollParams, ServiceStatus, do_enroll};
+    use crate::routes::agents::{
+        EnrollParams, ServiceStatus, SystemServiceEnrollParams, do_enroll,
+        do_enroll_system_service,
+    };
+    use uptrakit_internal_wire::Capability;
 
-    let result = do_enroll(EnrollParams {
-        db: state.db(),
-        settings: &state.settings,
-        tenant_id: state.default_tenant_id,
-        hostname: &payload.hostname,
-        friendly_name: &payload.friendly_name,
-        enrollment_token: payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
-        ip_address: client_ip,
-        capabilities_json: uptrakit_internal_wire::service_profile::serialize_capabilities(
-            &payload.capabilities,
-        ),
-    })
-    .await;
+    let has_system_service = payload.capabilities.contains(&Capability::SystemService);
+    let capabilities_json =
+        uptrakit_internal_wire::service_profile::serialize_capabilities(&payload.capabilities);
 
-    match result {
-        Ok(enroll_result) => {
-            let service_id = enroll_result.service.id;
-            let wire_status = match enroll_result.status {
-                ServiceStatus::Approved => uptrakit_internal_wire::EnrollmentStatus::Approved,
-                _ => uptrakit_internal_wire::EnrollmentStatus::Pending,
-            };
-            let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
-                service_id,
-                enrollment_secret: uptrakit_internal_wire::SecretString::new(
-                    enroll_result.enrollment_secret,
-                ),
-                status: wire_status.clone(),
-            });
-            let json = serialize_controller_msg(out_seq, enrolled_msg)?;
-            if sink.send(Message::Text(json.into())).await.is_err() {
-                return None;
-            }
+    if has_system_service {
+        // Route to system_services table.
+        let result = do_enroll_system_service(SystemServiceEnrollParams {
+            db: state.db(),
+            settings: &state.settings,
+            hostname: &payload.hostname,
+            friendly_name: &payload.friendly_name,
+            enrollment_token: payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
+            ip_address: client_ip,
+            capabilities_json,
+        })
+        .await;
 
-            tracing::info!(
-                %service_id,
-                ?wire_status,
-                "service enrolled via WS"
-            );
-
-            let approved = enroll_result.status == ServiceStatus::Approved;
-            if approved {
-                let approved_msg = ControllerMessage::Approved(ApprovedPayload { service_id });
-                let json = serialize_controller_msg(out_seq, approved_msg)?;
+        match result {
+            Ok(enroll_result) => {
+                let service_id = enroll_result.system_service.id;
+                let wire_status = match enroll_result.status {
+                    ServiceStatus::Approved => uptrakit_internal_wire::EnrollmentStatus::Approved,
+                    _ => uptrakit_internal_wire::EnrollmentStatus::Pending,
+                };
+                let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
+                    service_id,
+                    enrollment_secret: uptrakit_internal_wire::SecretString::new(
+                        enroll_result.enrollment_secret,
+                    ),
+                    status: wire_status.clone(),
+                });
+                let json = serialize_controller_msg(out_seq, enrolled_msg)?;
                 if sink.send(Message::Text(json.into())).await.is_err() {
                     return None;
                 }
-            }
 
-            Some((service_id, approved))
-        }
-        Err(e) => {
-            let err = ControllerMessage::Error(ErrorPayload {
-                code: ErrorCode::EnrollmentFailed,
-                message: e.current_context().to_string(),
-            });
-            if let Some(json) = serialize_controller_msg(out_seq, err) {
-                let _ = sink.send(Message::Text(json.into())).await;
+                tracing::info!(%service_id, ?wire_status, "system service enrolled via WS");
+
+                let approved = enroll_result.status == ServiceStatus::Approved;
+                if approved {
+                    let approved_msg =
+                        ControllerMessage::Approved(ApprovedPayload { service_id });
+                    let json = serialize_controller_msg(out_seq, approved_msg)?;
+                    if sink.send(Message::Text(json.into())).await.is_err() {
+                        return None;
+                    }
+                }
+
+                Some((service_id, true)) // is_system = true
             }
-            None
+            Err(e) => {
+                let err = ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::EnrollmentFailed,
+                    message: e.current_context().to_string(),
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                None
+            }
+        }
+    } else {
+        // Existing tenant path.
+        let result = do_enroll(EnrollParams {
+            db: state.db(),
+            settings: &state.settings,
+            tenant_id: state.default_tenant_id,
+            hostname: &payload.hostname,
+            friendly_name: &payload.friendly_name,
+            enrollment_token: payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
+            ip_address: client_ip,
+            capabilities_json,
+        })
+        .await;
+
+        match result {
+            Ok(enroll_result) => {
+                let service_id = enroll_result.service.id;
+                let wire_status = match enroll_result.status {
+                    ServiceStatus::Approved => uptrakit_internal_wire::EnrollmentStatus::Approved,
+                    _ => uptrakit_internal_wire::EnrollmentStatus::Pending,
+                };
+                let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
+                    service_id,
+                    enrollment_secret: uptrakit_internal_wire::SecretString::new(
+                        enroll_result.enrollment_secret,
+                    ),
+                    status: wire_status.clone(),
+                });
+                let json = serialize_controller_msg(out_seq, enrolled_msg)?;
+                if sink.send(Message::Text(json.into())).await.is_err() {
+                    return None;
+                }
+
+                tracing::info!(%service_id, ?wire_status, "service enrolled via WS");
+
+                let approved = enroll_result.status == ServiceStatus::Approved;
+                if approved {
+                    let approved_msg =
+                        ControllerMessage::Approved(ApprovedPayload { service_id });
+                    let json = serialize_controller_msg(out_seq, approved_msg)?;
+                    if sink.send(Message::Text(json.into())).await.is_err() {
+                        return None;
+                    }
+                }
+
+                Some((service_id, false)) // is_system = false
+            }
+            Err(e) => {
+                let err = ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::EnrollmentFailed,
+                    message: e.current_context().to_string(),
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                None
+            }
         }
     }
 }

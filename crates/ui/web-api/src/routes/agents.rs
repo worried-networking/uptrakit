@@ -2,16 +2,33 @@ use crate::auth::{password, token};
 use crate::cert_signer::SignedCertBundle;
 use crate::queries::enrollment_tokens as et_queries;
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr,
+};
 use std::net::IpAddr;
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::HostInfo;
 use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
-use uptrakit_shared_db::entity::{host, prelude::Host, service, service_certificate, service_host};
+use uptrakit_shared_db::entity::{
+    host, prelude::Host, service, service_certificate, service_host, system_service,
+    system_service_certificate,
+};
 use uptrakit_shared_macros::impl_report_conversion;
 
 pub use uptrakit_web_api_types::services::ServiceStatus;
+
+// ---------------------------------------------------------------------------
+// System credential capability guard
+// ---------------------------------------------------------------------------
+
+/// Capabilities that require the `system_service` capability to request.
+const SYSTEM_CREDENTIAL_CAPS: &[&str] = &[
+    "database_access",
+    "nats_access",
+    "master_key_access",
+    "ca_management",
+];
 
 // --- Agent route error type ---
 
@@ -73,6 +90,22 @@ pub(crate) async fn do_enroll(
         ip_address,
         capabilities_json,
     } = params;
+
+    // Credential guard: system credentials require the system_service capability.
+    {
+        let caps: Vec<String> = serde_json::from_str(&capabilities_json).unwrap_or_default();
+        let has_system_service = caps.iter().any(|c| c == "system_service");
+        let requests_system_creds =
+            caps.iter().any(|c| SYSTEM_CREDENTIAL_CAPS.contains(&c.as_str()));
+        if requests_system_creds && !has_system_service {
+            bail!(AgentRouteError::Forbidden(
+                "system credentials (database_access, nats_access, master_key_access, \
+                 ca_management) require the system_service capability"
+                    .into(),
+            ));
+        }
+    }
+
     if hostname.trim().is_empty() {
         bail!(AgentRouteError::BadRequest(
             "hostname must not be empty".into()
@@ -403,7 +436,7 @@ pub(crate) async fn revoke_certificate(
     Ok(())
 }
 
-fn parse_cert_metadata(
+pub(crate) fn parse_cert_metadata(
     pem: &str,
 ) -> Result<(String, OffsetDateTime, OffsetDateTime), Report<CertRecordError>> {
     let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes())
@@ -420,4 +453,205 @@ fn parse_cert_metadata(
         .context_to::<CertRecordError>()?;
 
     Ok((serial, not_before, not_after))
+}
+
+// ---------------------------------------------------------------------------
+// System service enrollment
+// ---------------------------------------------------------------------------
+
+/// Parameters for [`do_enroll_system_service`].
+pub(crate) struct SystemServiceEnrollParams<'a> {
+    pub db: &'a sea_orm::DatabaseConnection,
+    pub settings: &'a crate::settings::Settings,
+    pub hostname: &'a str,
+    pub friendly_name: &'a str,
+    pub enrollment_token: Option<&'a str>,
+    pub ip_address: Option<IpAddr>,
+    pub capabilities_json: String,
+}
+
+/// Result of a successful system service enrollment.
+pub(crate) struct EnrollSystemServiceResult {
+    pub system_service: system_service::Model,
+    pub enrollment_secret: String,
+    pub status: ServiceStatus,
+}
+
+/// Core enrollment logic for system (tenant-agnostic) services.
+///
+/// Inserts into `system_services` table. Token comparison is direct equality
+/// (no Argon2id) — the stored token is the authoritative plaintext secret.
+///
+/// When a token is configured and matches, the service is auto-approved.
+/// When no token is configured, the service is placed in Pending status.
+/// An incorrect token is rejected with `Forbidden`.
+pub(crate) async fn do_enroll_system_service(
+    params: SystemServiceEnrollParams<'_>,
+) -> Result<EnrollSystemServiceResult, Report<AgentRouteError>> {
+    let SystemServiceEnrollParams {
+        db,
+        settings,
+        hostname,
+        friendly_name,
+        enrollment_token,
+        ip_address,
+        capabilities_json,
+    } = params;
+
+    if hostname.trim().is_empty() {
+        bail!(AgentRouteError::BadRequest(
+            "hostname must not be empty".into()
+        ));
+    }
+
+    // Token comparison: direct plaintext equality with stored (decrypted) token.
+    let status = if let Some(provided_token) = enrollment_token {
+        let stored_token = settings.system_services_enrollment_token();
+        match stored_token {
+            Some(ref stored) if stored == provided_token => ServiceStatus::Approved,
+            Some(_) => {
+                bail!(AgentRouteError::Forbidden(
+                    "Invalid system services enrollment token".into()
+                ));
+            }
+            None => ServiceStatus::Pending,
+        }
+    } else {
+        ServiceStatus::Pending
+    };
+
+    let service_id = uuid::Uuid::now_v7();
+    let enrollment_secret = match token::generate_secure_token() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to generate enrollment secret: {:?}", e);
+            bail!(AgentRouteError::Internal("Internal server error".into()));
+        }
+    };
+    let secret_hash = token::hash_token(&enrollment_secret);
+    let ip_str = ip_address.map(|ip| ip.to_string());
+    let _ = settings; // settings already consumed above for token check
+    let now = OffsetDateTime::now_utc();
+
+    let db_status = match status {
+        ServiceStatus::Pending => system_service::SystemServiceStatus::Pending,
+        ServiceStatus::Approved => system_service::SystemServiceStatus::Approved,
+        ServiceStatus::Rejected => system_service::SystemServiceStatus::Rejected,
+        ServiceStatus::Deactivated => system_service::SystemServiceStatus::Deactivated,
+        _ => bail!(AgentRouteError::Internal("unknown service status variant".into())),
+    };
+
+    let model = system_service::ActiveModel {
+        id: Set(service_id),
+        capabilities: Set(capabilities_json),
+        hostname: Set(hostname.to_string()),
+        friendly_name: Set(friendly_name.to_string()),
+        ip_address: Set(ip_str),
+        status: Set(db_status),
+        enrollment_secret_hash: Set(secret_hash),
+        client_version: Set(None),
+        last_seen_at: Set(Some(now)),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+        ping_interval_seconds: Set(None),
+        cert_lifetime_hours: Set(None),
+    };
+
+    let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;
+
+    Ok(EnrollSystemServiceResult {
+        system_service: inserted,
+        enrollment_secret,
+        status,
+    })
+}
+
+/// Sign a CSR for a system service at initial enrollment (first certificate
+/// issuance). Records the cert in `system_service_certificates` and invalidates
+/// the enrollment secret hash.
+pub(crate) async fn do_sign_csr_for_system_service(
+    cert_signer: &dyn crate::cert_signer::AgentCertSigner,
+    settings: &crate::settings::Settings,
+    db: &sea_orm::DatabaseConnection,
+    svc: system_service::Model,
+    csr_pem: &str,
+) -> Result<SignedCertBundle, Report<AgentRouteError>> {
+    if svc.status != system_service::SystemServiceStatus::Approved {
+        bail!(AgentRouteError::Forbidden(
+            "System service is not approved".into()
+        ));
+    }
+
+    let effective_hours = svc
+        .cert_lifetime_hours
+        .map(|h| h as u32)
+        .unwrap_or_else(|| settings.agent_cert_lifetime_hours());
+    let lifetime = time::Duration::hours(i64::from(effective_hours));
+    let ca_fp = cert_signer.active_ca_fingerprint();
+
+    let bundle = cert_signer
+        .sign_agent_csr(csr_pem, &svc.id, lifetime)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to sign system service certificate: {e}");
+            report!(AgentRouteError::CertSigning)
+        })?;
+
+    // Record certificate in system_service_certificates.
+    let (serial, not_before, not_after) = parse_cert_metadata(&bundle.cert_pem)
+        .map_err(|e| {
+            tracing::error!("Failed to parse cert metadata: {e}");
+            report!(AgentRouteError::Internal("cert metadata parse failed".into()))
+        })?;
+
+    let record = system_service_certificate::ActiveModel {
+        ca_fingerprint: Set(ca_fp),
+        serial_number: Set(serial),
+        system_service_id: Set(svc.id),
+        not_before: Set(not_before),
+        not_after: Set(not_after),
+        revoked_at: Set(None),
+        revocation_reason: Set(None),
+        created_at: Set(OffsetDateTime::now_utc()),
+        last_seen_at: Set(None),
+    };
+    record.insert(db).await.context_to::<AgentRouteError>()?;
+
+    // Invalidate enrollment secret.
+    let invalidated_hash = token::hash_token(&token::generate_uuid().to_string());
+    let now = OffsetDateTime::now_utc();
+    let mut active: system_service::ActiveModel = svc.into();
+    active.enrollment_secret_hash = Set(invalidated_hash);
+    active.last_seen_at = Set(Some(now));
+    active.updated_at = Set(now);
+    active.update(db).await.context_to::<AgentRouteError>()?;
+
+    Ok(bundle)
+}
+
+/// Revoke a system service certificate (marks as `CertificateRenewed`).
+pub(crate) async fn revoke_system_certificate(
+    db: &sea_orm::DatabaseConnection,
+    serial_number: &str,
+    ca_fingerprint: &str,
+) -> Result<(), Report<CertRecordError>> {
+    use uptrakit_shared_db::entity::system_service_certificate::SystemRevocationReason;
+
+    system_service_certificate::Entity::update_many()
+        .col_expr(
+            system_service_certificate::Column::RevokedAt,
+            Expr::value(Some(OffsetDateTime::now_utc())),
+        )
+        .col_expr(
+            system_service_certificate::Column::RevocationReason,
+            Expr::value(Some(SystemRevocationReason::CertificateRenewed)),
+        )
+        .filter(system_service_certificate::Column::CaFingerprint.eq(ca_fingerprint))
+        .filter(system_service_certificate::Column::SerialNumber.eq(serial_number))
+        .filter(system_service_certificate::Column::RevokedAt.is_null())
+        .exec(db)
+        .await
+        .context_to::<CertRecordError>()?;
+    Ok(())
 }

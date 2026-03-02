@@ -259,6 +259,35 @@ pub(crate) async fn record_service_activity(
     Ok(())
 }
 
+/// Record activity (last_seen_at, ip_address) for a system service.
+pub(crate) async fn record_system_service_activity(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+    ip_address: Option<IpAddr>,
+) -> ServiceActivityResult<()> {
+    use uptrakit_shared_db::entity::system_service as ss_entity;
+
+    let svc = ss_entity::Entity::find_by_id(service_id)
+        .one(db)
+        .await
+        .context_to::<ServiceActivityError>()?
+        .ok_or_else(|| report!(ServiceActivityError::ServiceNotFound(service_id)))?;
+
+    let now = time::OffsetDateTime::now_utc();
+    let mut active: ss_entity::ActiveModel = svc.into();
+    active.last_seen_at = Set(Some(now));
+    active.updated_at = Set(now);
+    if let Some(ip) = ip_address {
+        active.ip_address = Set(Some(ip.to_string()));
+    }
+    active
+        .update(db)
+        .await
+        .context_to::<ServiceActivityError>()?;
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Connection types
 // ---------------------------------------------------------------------------
@@ -275,6 +304,7 @@ pub(crate) struct CertIdentity {
 pub(crate) struct AuthenticatedContext<'a> {
     pub service_id: uuid::Uuid,
     pub cert: CertIdentity,
+    pub is_system: bool,
     pub out_seq: &'a mut OutgoingSeq,
     pub in_seq: &'a mut IncomingSeq,
 }
@@ -282,12 +312,18 @@ pub(crate) struct AuthenticatedContext<'a> {
 /// Connection type determined at WebSocket upgrade time.
 pub(super) enum ConnectionType {
     /// mTLS client cert present -- authenticated service.
+    ///
+    /// `is_system` is determined during cert table lookup inside
+    /// `handle_authenticated()` and is not known at upgrade time.
     Authenticated {
         service_id: uuid::Uuid,
         cert_serial: String,
     },
     /// Authorization: Bearer <secret> -- reconnecting enrolled service.
-    Enrolled(uuid::Uuid),
+    Enrolled {
+        service_id: uuid::Uuid,
+        is_system: bool,
+    },
     /// No auth -- expects Enroll message.
     Anonymous,
 }

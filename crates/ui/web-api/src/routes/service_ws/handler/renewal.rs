@@ -7,7 +7,7 @@ use sea_orm::{ActiveModelTrait, Set};
 
 use rootcause::prelude::*;
 use thiserror::Error;
-use uptrakit_shared_db::entity::{service, service_certificate};
+use uptrakit_shared_db::entity::{service, service_certificate, system_service, system_service_certificate};
 use uptrakit_shared_macros::impl_report_conversion;
 
 // ---------------------------------------------------------------------------
@@ -109,4 +109,68 @@ async fn record_renewal_certificate(
     record.insert(db).await.context_to::<RenewalError>()?;
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// sign_renewal_csr_system
+// ---------------------------------------------------------------------------
+
+/// Sign a CSR for system service certificate renewal.
+///
+/// Writes the new cert to `system_service_certificates`. Does NOT invalidate
+/// the enrollment secret (renewal, not re-enrollment).
+pub(super) async fn sign_renewal_csr_system(
+    cert_signer: &dyn crate::cert_signer::AgentCertSigner,
+    settings: &crate::settings::Settings,
+    db: &sea_orm::DatabaseConnection,
+    svc: system_service::Model,
+    csr_pem: &str,
+) -> Result<crate::cert_signer::SignedCertBundle, Report<RenewalError>> {
+    let effective_hours = svc
+        .cert_lifetime_hours
+        .map(|h| h as u32)
+        .unwrap_or_else(|| settings.agent_cert_lifetime_hours());
+    let validity = time::Duration::hours(i64::from(effective_hours));
+    let ca_fp = cert_signer.active_ca_fingerprint();
+
+    let bundle = cert_signer
+        .sign_agent_csr(csr_pem, &svc.id, validity)
+        .await
+        .map_err(|e| report!(RenewalError::Signing(format!("failed to sign CSR: {e}"))))?;
+
+    // Parse cert metadata.
+    let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes())
+        .map_err(|_| report!(RenewalError::PemParse))?;
+    let cert = pem_block
+        .parse_x509()
+        .map_err(|_| report!(RenewalError::X509Parse))?;
+    let serial = cert.raw_serial_as_string();
+    let validity_meta = cert.validity();
+    let not_before =
+        time::OffsetDateTime::from_unix_timestamp(validity_meta.not_before.timestamp())
+            .map_err(|e| report!(RenewalError::Timestamp(format!("not_before: {e}"))))?;
+    let not_after =
+        time::OffsetDateTime::from_unix_timestamp(validity_meta.not_after.timestamp())
+            .map_err(|e| report!(RenewalError::Timestamp(format!("not_after: {e}"))))?;
+
+    let record = system_service_certificate::ActiveModel {
+        ca_fingerprint: Set(ca_fp),
+        serial_number: Set(serial),
+        system_service_id: Set(svc.id),
+        not_before: Set(not_before),
+        not_after: Set(not_after),
+        revoked_at: Set(None),
+        revocation_reason: Set(None),
+        created_at: Set(time::OffsetDateTime::now_utc()),
+        last_seen_at: Set(None),
+    };
+    record.insert(db).await.context_to::<RenewalError>()?;
+
+    // Update timestamps (no enrollment secret invalidation).
+    let mut active: system_service::ActiveModel = svc.into();
+    active.last_seen_at = Set(Some(time::OffsetDateTime::now_utc()));
+    active.updated_at = Set(time::OffsetDateTime::now_utc());
+    let _ = active.update(db).await;
+
+    Ok(bundle)
 }

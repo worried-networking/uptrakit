@@ -92,12 +92,16 @@ pub async fn service_ws(
 
         // Try unified lookup: find any non-deactivated service by secret hash.
         match lookup_by_secret(state.db(), &secret, query_service_id).await {
-            Ok(service) => {
+            Ok((id, is_system)) => {
                 tracing::info!(
-                    service_id = %service.id,
+                    service_id = %id,
+                    is_system,
                     "enrolled service WS upgrade (bearer)"
                 );
-                ConnectionType::Enrolled(service.id)
+                ConnectionType::Enrolled {
+                    service_id: id,
+                    is_system,
+                }
             }
             Err(e) => {
                 // Per-IP auth failure rate limit: 10 failures per 300 seconds.
@@ -154,8 +158,8 @@ pub async fn service_ws(
 
 /// Look up a service by bearer enrollment secret.
 ///
-/// All services (agent and MQTT) use deterministic SHA-256 hashing for enrollment
-/// secrets. This allows a single indexed DB query instead of iterating rows.
+/// Tries the tenant `services` table first, then the `system_services` table.
+/// Returns `(service_id, is_system)` on success.
 ///
 /// When `service_id` is `Some`, the query is further filtered to that specific
 /// service. If the secret hash matches a different service, `InvalidSecret` is
@@ -165,21 +169,33 @@ async fn lookup_by_secret(
     db: &sea_orm::DatabaseConnection,
     secret: &str,
     service_id: Option<Uuid>,
-) -> ServiceWsResult<service_entity::Model> {
+) -> ServiceWsResult<(Uuid, bool)> {
     let secret_hash = crate::auth::token::hash_token(secret);
+
+    // Try tenant services first.
     let mut query = uptrakit_shared_db::entity::prelude::Service::find()
         .filter(service_entity::Column::EnrollmentSecretHash.eq(&secret_hash))
         .filter(service_entity::Column::DeactivatedAt.is_null());
-
     if let Some(id) = service_id {
         query = query.filter(service_entity::Column::Id.eq(id));
     }
+    if let Some(svc) = query.one(db).await.context_to::<ServiceWsError>()? {
+        return Ok((svc.id, false));
+    }
 
-    query
-        .one(db)
-        .await
-        .context_to::<ServiceWsError>()?
-        .ok_or_else(|| report!(ServiceWsError::InvalidSecret))
+    // Try system services.
+    use uptrakit_shared_db::entity::system_service as sys_svc_entity;
+    let mut sys_query = uptrakit_shared_db::entity::prelude::SystemService::find()
+        .filter(sys_svc_entity::Column::EnrollmentSecretHash.eq(&secret_hash))
+        .filter(sys_svc_entity::Column::DeactivatedAt.is_null());
+    if let Some(id) = service_id {
+        sys_query = sys_query.filter(sys_svc_entity::Column::Id.eq(id));
+    }
+    if let Some(svc) = sys_query.one(db).await.context_to::<ServiceWsError>()? {
+        return Ok((svc.id, true));
+    }
+
+    Err(report!(ServiceWsError::InvalidSecret))
 }
 
 // ---------------------------------------------------------------------------
@@ -211,11 +227,15 @@ async fn handle_connection(
             )
             .await;
         }
-        ConnectionType::Enrolled(service_id) => {
+        ConnectionType::Enrolled {
+            service_id,
+            is_system,
+        } => {
             connection::handle_enrolled(
                 socket,
                 state,
                 service_id,
+                is_system,
                 client_ip,
                 &mut out_seq,
                 &mut in_seq,

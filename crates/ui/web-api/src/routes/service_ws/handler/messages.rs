@@ -20,16 +20,21 @@ use uptrakit_shared_db::entity::{
     host, host_package, host_software_item, service, service_host, software_item,
 };
 
+use uptrakit_shared_db::entity::system_service as sys_svc_entity;
+
 use super::LoopAction;
 use super::discovery::trigger_discovery_for_agent_host;
-use super::renewal::sign_renewal_csr;
+use super::renewal::{sign_renewal_csr, sign_renewal_csr_system};
 use super::updates::load_linked_host_ids;
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
-use crate::routes::agents::{find_or_create_host_and_link, revoke_certificate};
+use crate::routes::agents::{
+    find_or_create_host_and_link, revoke_certificate, revoke_system_certificate,
+};
 use crate::routes::service_ws::protocol::{
-    CertIdentity, close_with_reason, record_service_activity, send_pong, serialize_controller_msg,
+    CertIdentity, close_with_reason, record_service_activity, record_system_service_activity,
+    send_pong, serialize_controller_msg,
 };
 
 // ---------------------------------------------------------------------------
@@ -44,12 +49,18 @@ pub(super) async fn handle_ping(
     service_id: uuid::Uuid,
     service_ts: i64,
     lease_coordinator: Option<&MqttLeaseCoordinator>,
+    is_system: bool,
 ) -> LoopAction {
     let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else {
         return LoopAction::Break;
     };
     tracing::trace!(service_ts, controller_ts, "ping/pong");
-    if let Err(e) = record_service_activity(state.db(), service_id, None).await {
+    let activity_result = if is_system {
+        record_system_service_activity(state.db(), service_id, None).await
+    } else {
+        record_service_activity(state.db(), service_id, None).await
+    };
+    if let Err(e) = activity_result {
         tracing::warn!(
             error = %e,
             %service_id,
@@ -81,95 +92,178 @@ pub(super) async fn handle_renew_certificate(
     service_id: uuid::Uuid,
     cert: &CertIdentity,
     payload: &uptrakit_internal_wire::RenewCertificatePayload,
+    is_system: bool,
 ) -> LoopAction {
-    // Re-fetch service, verify still approved.
-    let svc = match service::Entity::find_by_id(service_id)
-        .one(state.db())
-        .await
-    {
-        Ok(Some(s))
-            if s.status == service::ServiceStatus::Approved && s.deactivated_at.is_none() =>
-        {
-            s
-        }
-        _ => {
-            let err = ControllerMessage::Error(ErrorPayload {
-                code: ErrorCode::Forbidden,
-                message: "service is not approved".to_string(),
-            });
-            if let Some(json) = serialize_controller_msg(out_seq, err) {
-                let _ = sink.send(Message::Text(json.into())).await;
-            }
-            return LoopAction::Break;
-        }
-    };
-
-    match sign_renewal_csr(
-        state.cert_signer.as_ref(),
-        &state.settings,
-        state.db(),
-        svc,
-        &payload.csr_pem,
-    )
-    .await
-    {
-        Ok(bundle) => {
-            let cert_msg = ControllerMessage::Certificate(CertificatePayload {
-                cert_pem: bundle.cert_pem,
-                not_after: bundle.not_after,
-            });
-            if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
-                let _ = sink.send(Message::Text(json.into())).await;
-            }
-
-            // Revoke old certificate.
-            if let Err(e) = revoke_certificate(
-                state.db(),
-                &cert.serial,
-                &cert.ca_fingerprint,
-                uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed,
-            )
+    if is_system {
+        // System service renewal path.
+        let svc = match sys_svc_entity::Entity::find_by_id(service_id)
+            .one(state.db())
             .await
+        {
+            Ok(Some(s))
+                if s.status == sys_svc_entity::SystemServiceStatus::Approved
+                    && s.deactivated_at.is_none() =>
             {
-                tracing::error!(
-                    error = %e,
-                    "failed to revoke old certificate"
-                );
+                s
             }
+            _ => {
+                let err = ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::Forbidden,
+                    message: "service is not approved".to_string(),
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                return LoopAction::Break;
+            }
+        };
 
-            if let Err(e) =
-                crate::settings_store::bump_revocation_version(state.db(), state.default_tenant_id)
-                    .await
-            {
-                tracing::warn!(
-                    error = ?e,
-                    "failed to bump revocation version counter"
+        match sign_renewal_csr_system(
+            state.cert_signer.as_ref(),
+            &state.settings,
+            state.db(),
+            svc,
+            &payload.csr_pem,
+        )
+        .await
+        {
+            Ok(bundle) => {
+                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+                    cert_pem: bundle.cert_pem,
+                    not_after: bundle.not_after,
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+
+                // Revoke old system service certificate.
+                if let Err(e) =
+                    revoke_system_certificate(state.db(), &cert.serial, &cert.ca_fingerprint).await
+                {
+                    tracing::error!(error = %e, "failed to revoke old system service certificate");
+                }
+
+                // Bump CRL and notify (system certs share the CRL).
+                if let Err(e) = crate::settings_store::bump_revocation_version(
+                    state.db(),
+                    state.default_tenant_id,
+                )
+                .await
+                {
+                    tracing::warn!(error = ?e, "failed to bump revocation version counter");
+                }
+                state.revocation_notify.notify_one();
+                state
+                    .notification_service
+                    .publish_controller_event(ControllerMessage::RequestCrlRenewal(
+                        RequestCrlRenewalPayload::default(),
+                    ))
+                    .await;
+                tracing::info!(
+                    %service_id,
+                    old_serial = %cert.serial,
+                    "system service certificate renewed, old cert revoked"
                 );
+                let _ = close_with_reason(sink, CloseReason::CertificateRotated).await;
+                LoopAction::Break
             }
-            state.revocation_notify.notify_one();
-            state
-                .notification_service
-                .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-                    RequestCrlRenewalPayload::default(),
-                ))
-                .await;
-            tracing::info!(
-                %service_id,
-                old_serial = %cert.serial,
-                "certificate renewed, old cert revoked"
-            );
-            let _ = close_with_reason(sink, CloseReason::CertificateRotated).await;
-            LoopAction::Break
+            Err(e) => {
+                let err = ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::CertificateError,
+                    message: e.to_string(),
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                LoopAction::Break
+            }
         }
-        Err(e) => {
-            let err = ControllerMessage::Error(ErrorPayload {
-                code: ErrorCode::CertificateError,
-                message: e.to_string(),
-            });
-            if let Some(json) = serialize_controller_msg(out_seq, err) {
-                let _ = sink.send(Message::Text(json.into())).await;
+    } else {
+        // Tenant service renewal path.
+        let svc = match service::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(s))
+                if s.status == service::ServiceStatus::Approved && s.deactivated_at.is_none() =>
+            {
+                s
             }
-            LoopAction::Break
+            _ => {
+                let err = ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::Forbidden,
+                    message: "service is not approved".to_string(),
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                return LoopAction::Break;
+            }
+        };
+
+        match sign_renewal_csr(
+            state.cert_signer.as_ref(),
+            &state.settings,
+            state.db(),
+            svc,
+            &payload.csr_pem,
+        )
+        .await
+        {
+            Ok(bundle) => {
+                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+                    cert_pem: bundle.cert_pem,
+                    not_after: bundle.not_after,
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+
+                // Revoke old certificate.
+                if let Err(e) = revoke_certificate(
+                    state.db(),
+                    &cert.serial,
+                    &cert.ca_fingerprint,
+                    uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed,
+                )
+                .await
+                {
+                    tracing::error!(error = %e, "failed to revoke old certificate");
+                }
+
+                if let Err(e) = crate::settings_store::bump_revocation_version(
+                    state.db(),
+                    state.default_tenant_id,
+                )
+                .await
+                {
+                    tracing::warn!(error = ?e, "failed to bump revocation version counter");
+                }
+                state.revocation_notify.notify_one();
+                state
+                    .notification_service
+                    .publish_controller_event(ControllerMessage::RequestCrlRenewal(
+                        RequestCrlRenewalPayload::default(),
+                    ))
+                    .await;
+                tracing::info!(
+                    %service_id,
+                    old_serial = %cert.serial,
+                    "certificate renewed, old cert revoked"
+                );
+                let _ = close_with_reason(sink, CloseReason::CertificateRotated).await;
+                LoopAction::Break
+            }
+            Err(e) => {
+                let err = ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::CertificateError,
+                    message: e.to_string(),
+                });
+                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+                LoopAction::Break
+            }
         }
     }
 }

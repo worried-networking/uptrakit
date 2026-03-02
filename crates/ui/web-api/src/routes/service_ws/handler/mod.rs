@@ -36,17 +36,17 @@ use uptrakit_internal_wire::{
     ErrorPayload, IncomingSeq, MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq,
     PingPayload, RejectedPayload, ServiceCredentialsPayload, ServiceMessage,
 };
-use uptrakit_shared_db::entity::service;
+use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
 use uptrakit_shared_macros::impl_report_conversion;
 
 use super::protocol::{
     AuthenticatedContext, MessageRateLimiter, WS_MESSAGE_RATE_LIMIT, WS_MESSAGE_RATE_WINDOW,
-    close_with_reason, deserialize_service_msg, record_service_activity, send_pong,
-    serialize_controller_msg,
+    close_with_reason, deserialize_service_msg, record_service_activity,
+    record_system_service_activity, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
-use crate::routes::agents::do_sign_csr;
+use crate::routes::agents::{do_sign_csr, do_sign_csr_for_system_service};
 use uptrakit_internal_wire::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------
@@ -116,17 +116,28 @@ pub(crate) async fn handle_authenticated_loop(
     let AuthenticatedContext {
         service_id,
         cert,
+        is_system,
         out_seq,
         in_seq,
     } = ctx;
 
     // Load service from DB, derive capabilities.
-    let capabilities: BTreeSet<Capability> = match service::Entity::find_by_id(service_id)
-        .one(state.db())
-        .await
-    {
-        Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
-        _ => BTreeSet::new(),
+    let capabilities: BTreeSet<Capability> = if is_system {
+        match sys_svc_entity::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
+            _ => BTreeSet::new(),
+        }
+    } else {
+        match service::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
+            _ => BTreeSet::new(),
+        }
     };
 
     let is_mqtt = capabilities.contains(&Capability::MqttBridge);
@@ -356,7 +367,7 @@ pub(crate) async fn handle_authenticated_loop(
                             // Ping (all capabilities)
                             // -------------------------------------------------
                             ServiceMessage::Ping(PingPayload { service_ts, .. }) => {
-                                if messages::handle_ping(sink, out_seq, state, service_id, service_ts, lease_coordinator.as_ref()).await.is_break() {
+                                if messages::handle_ping(sink, out_seq, state, service_id, service_ts, lease_coordinator.as_ref(), is_system).await.is_break() {
                                     break;
                                 }
                             }
@@ -365,7 +376,7 @@ pub(crate) async fn handle_authenticated_loop(
                             // RenewCertificate (all capabilities)
                             // -------------------------------------------------
                             ServiceMessage::RenewCertificate(payload) => {
-                                if messages::handle_renew_certificate(sink, out_seq, state, service_id, &cert, &payload).await.is_break() {
+                                if messages::handle_renew_certificate(sink, out_seq, state, service_id, &cert, &payload, is_system).await.is_break() {
                                     break;
                                 }
                             }
@@ -568,16 +579,27 @@ pub(crate) async fn handle_enrolled_loop(
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
+    is_system: bool,
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) {
     // Fetch service to derive capabilities for registration.
-    let capabilities: BTreeSet<Capability> = match service::Entity::find_by_id(service_id)
-        .one(state.db())
-        .await
-    {
-        Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
-        _ => BTreeSet::new(),
+    let capabilities: BTreeSet<Capability> = if is_system {
+        match sys_svc_entity::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
+            _ => BTreeSet::new(),
+        }
+    } else {
+        match service::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
+            _ => BTreeSet::new(),
+        }
     };
 
     // Register in service_connections.
@@ -588,7 +610,15 @@ pub(crate) async fn handle_enrolled_loop(
 
     // Check current status to set initial approved flag.
     let mut approved = false;
-    if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+    if is_system {
+        if let Ok(Some(svc)) = sys_svc_entity::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+            && svc.status == sys_svc_entity::SystemServiceStatus::Approved
+        {
+            approved = true;
+        }
+    } else if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
         .one(state.db())
         .await
         && svc.status == service::ServiceStatus::Approved
@@ -642,9 +672,17 @@ pub(crate) async fn handle_enrolled_loop(
                                     controller_ts,
                                     "ping/pong (enrolled)"
                                 );
-                                if let Err(e) =
+                                let activity_result = if is_system {
+                                    record_system_service_activity(
+                                        state.db(),
+                                        service_id,
+                                        None,
+                                    )
+                                    .await
+                                } else {
                                     record_service_activity(state.db(), service_id, None).await
-                                {
+                                };
+                                if let Err(e) = activity_result {
                                     tracing::warn!(
                                         error = %e,
                                         %service_id,
@@ -667,69 +705,137 @@ pub(crate) async fn handle_enrolled_loop(
                                     continue;
                                 }
 
-                                // Re-fetch service from DB.
-                                let svc = match service::Entity::find_by_id(service_id)
+                                if is_system {
+                                    // System service: use do_sign_csr_for_system_service.
+                                    let sys_svc = match sys_svc_entity::Entity::find_by_id(
+                                        service_id,
+                                    )
                                     .one(state.db())
                                     .await
-                                {
-                                    Ok(Some(s)) => s,
-                                    _ => {
-                                        let err = ControllerMessage::Error(ErrorPayload {
-                                            code: ErrorCode::InternalError,
-                                            message: "service not found".to_string(),
-                                        });
-                                        if let Some(json) =
-                                            serialize_controller_msg(out_seq, err)
-                                        {
-                                            let _ =
-                                                sink.send(Message::Text(json.into())).await;
+                                    {
+                                        Ok(Some(s)) => s,
+                                        _ => {
+                                            let err = ControllerMessage::Error(ErrorPayload {
+                                                code: ErrorCode::InternalError,
+                                                message: "system service not found".to_string(),
+                                            });
+                                            if let Some(json) =
+                                                serialize_controller_msg(out_seq, err)
+                                            {
+                                                let _ =
+                                                    sink.send(Message::Text(json.into())).await;
+                                            }
+                                            break;
                                         }
-                                        break;
-                                    }
-                                };
+                                    };
 
-                                // Use do_sign_csr (invalidates enrollment secret -- correct
-                                // for initial certificate issuance during enrollment).
-                                match do_sign_csr(
-                                    state.cert_signer.as_ref(),
-                                    &state.settings,
-                                    state.db(),
-                                    svc,
-                                    &payload.csr_pem,
-                                )
-                                .await
-                                {
-                                    Ok(bundle) => {
-                                        let cert_msg = ControllerMessage::Certificate(
-                                            CertificatePayload {
-                                                cert_pem: bundle.cert_pem,
-                                                not_after: bundle.not_after,
-                                            },
-                                        );
-                                        if let Some(json) =
-                                            serialize_controller_msg(out_seq, cert_msg)
-                                        {
-                                            let _ =
-                                                sink.send(Message::Text(json.into())).await;
+                                    match do_sign_csr_for_system_service(
+                                        state.cert_signer.as_ref(),
+                                        &state.settings,
+                                        state.db(),
+                                        sys_svc,
+                                        &payload.csr_pem,
+                                    )
+                                    .await
+                                    {
+                                        Ok(bundle) => {
+                                            let cert_msg = ControllerMessage::Certificate(
+                                                CertificatePayload {
+                                                    cert_pem: bundle.cert_pem,
+                                                    not_after: bundle.not_after,
+                                                },
+                                            );
+                                            if let Some(json) =
+                                                serialize_controller_msg(out_seq, cert_msg)
+                                            {
+                                                let _ =
+                                                    sink.send(Message::Text(json.into())).await;
+                                            }
+                                            tracing::info!(
+                                                %service_id,
+                                                "system service certificate issued via WS"
+                                            );
+                                            break; // close after certificate issuance
                                         }
-                                        tracing::info!(
-                                            %service_id,
-                                            "certificate issued via WS"
-                                        );
-                                        break; // close connection after certificate issuance
+                                        Err(e) => {
+                                            let err = ControllerMessage::Error(ErrorPayload {
+                                                code: ErrorCode::CertificateError,
+                                                message: e.current_context().to_string(),
+                                            });
+                                            if let Some(json) =
+                                                serialize_controller_msg(out_seq, err)
+                                            {
+                                                let _ =
+                                                    sink.send(Message::Text(json.into())).await;
+                                            }
+                                            break;
+                                        }
                                     }
-                                    Err(e) => {
-                                        let err = ControllerMessage::Error(ErrorPayload {
-                                            code: ErrorCode::CertificateError,
-                                            message: e.current_context().to_string(),
-                                        });
-                                        if let Some(json) =
-                                            serialize_controller_msg(out_seq, err)
-                                        {
-                                            let _ =
-                                                sink.send(Message::Text(json.into())).await;
+                                } else {
+                                    // Tenant service: re-fetch and use do_sign_csr.
+                                    let svc = match service::Entity::find_by_id(service_id)
+                                        .one(state.db())
+                                        .await
+                                    {
+                                        Ok(Some(s)) => s,
+                                        _ => {
+                                            let err = ControllerMessage::Error(ErrorPayload {
+                                                code: ErrorCode::InternalError,
+                                                message: "service not found".to_string(),
+                                            });
+                                            if let Some(json) =
+                                                serialize_controller_msg(out_seq, err)
+                                            {
+                                                let _ =
+                                                    sink.send(Message::Text(json.into())).await;
+                                            }
+                                            break;
                                         }
-                                        break;
+                                    };
+
+                                    // Use do_sign_csr (invalidates enrollment secret -- correct
+                                    // for initial certificate issuance during enrollment).
+                                    match do_sign_csr(
+                                        state.cert_signer.as_ref(),
+                                        &state.settings,
+                                        state.db(),
+                                        svc,
+                                        &payload.csr_pem,
+                                    )
+                                    .await
+                                    {
+                                        Ok(bundle) => {
+                                            let cert_msg = ControllerMessage::Certificate(
+                                                CertificatePayload {
+                                                    cert_pem: bundle.cert_pem,
+                                                    not_after: bundle.not_after,
+                                                },
+                                            );
+                                            if let Some(json) =
+                                                serialize_controller_msg(out_seq, cert_msg)
+                                            {
+                                                let _ =
+                                                    sink.send(Message::Text(json.into())).await;
+                                            }
+                                            tracing::info!(
+                                                %service_id,
+                                                "certificate issued via WS"
+                                            );
+                                            break; // close connection after certificate issuance
+                                        }
+                                        Err(e) => {
+                                            let err = ControllerMessage::Error(ErrorPayload {
+                                                code: ErrorCode::CertificateError,
+                                                message: e.current_context().to_string(),
+                                            });
+                                            if let Some(json) =
+                                                serialize_controller_msg(out_seq, err)
+                                            {
+                                                let _ =
+                                                    sink.send(Message::Text(json.into())).await;
+                                            }
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -784,7 +890,34 @@ pub(crate) async fn handle_enrolled_loop(
             }
             // Dedicated approval poll at a fixed interval.
             _ = approval_poll.tick(), if !approved => {
-                if let Ok(Some(s)) = service::Entity::find_by_id(service_id)
+                if is_system {
+                    if let Ok(Some(s)) = sys_svc_entity::Entity::find_by_id(service_id)
+                        .one(state.db())
+                        .await
+                    {
+                        match s.status {
+                            sys_svc_entity::SystemServiceStatus::Approved => {
+                                approved = true;
+                                let msg = ControllerMessage::Approved(ApprovedPayload {
+                                    service_id,
+                                });
+                                if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                }
+                            }
+                            sys_svc_entity::SystemServiceStatus::Rejected => {
+                                let msg = ControllerMessage::Rejected(RejectedPayload {
+                                    service_id,
+                                });
+                                if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                }
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                } else if let Ok(Some(s)) = service::Entity::find_by_id(service_id)
                     .one(state.db())
                     .await
                 {
