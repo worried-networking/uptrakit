@@ -14,12 +14,14 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
-    ControllerMessage, ExecuteUpdatePayload, OutgoingSeq, PluginAssignment, UpdateFinalStatus,
-    UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
+    BatchHostPackageUpdateResultPayload, ControllerMessage, ExecuteUpdatePayload, OutgoingSeq,
+    PluginAssignment, UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload,
+    UpdateStartedPayload,
 };
 use uptrakit_shared_db::entity::{
-    host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
-    software_item, update_history, update_output_line,
+    host, host_package, host_package_update_history, host_software_item,
+    host_software_item_plugin, plugin_config, service, service_host, software_item, update_history,
+    update_output_line,
 };
 
 use super::{HandlerError, HandlerResult, LoopAction, MAX_UPDATE_OUTPUT_BYTES};
@@ -898,6 +900,135 @@ async fn resolve_host_name(state: &Arc<AppState>, host_id: uuid::Uuid) -> String
         .flatten()
         .map(|h| h.friendly_name)
         .unwrap_or_else(|| "Unknown Host".to_string())
+}
+
+// ---------------------------------------------------------------------------
+// handle_batch_host_package_update_result
+// ---------------------------------------------------------------------------
+
+/// Handle a `BatchHostPackageUpdateResult` message: update per-package
+/// `host_package_update_history` rows and `host_package.installed_version`
+/// for successful packages.
+pub(super) async fn handle_batch_host_package_update_result(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: BatchHostPackageUpdateResultPayload,
+    linked_host_ids: &HashSet<uuid::Uuid>,
+) -> LoopAction {
+    tracing::info!(
+        batch_id = %payload.batch_id,
+        results = payload.results.len(),
+        "batch host package update result"
+    );
+
+    let now = time::OffsetDateTime::now_utc();
+
+    for result in &payload.results {
+        // Validate ownership: the host_package_update_history record must
+        // belong to a host linked to this service.
+        let history_record =
+            match host_package_update_history::Entity::find_by_id(result.update_history_id)
+                .one(state.db())
+                .await
+            {
+                Ok(Some(r)) => r,
+                Ok(None) => {
+                    tracing::warn!(
+                        update_history_id = %result.update_history_id,
+                        "host_package_update_history record not found"
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        update_history_id = %result.update_history_id,
+                        "failed to look up host_package_update_history"
+                    );
+                    continue;
+                }
+            };
+
+        if !linked_host_ids.contains(&history_record.host_id) {
+            tracing::warn!(
+                %service_id,
+                update_history_id = %result.update_history_id,
+                host_id = %history_record.host_id,
+                "service attempted to update host_package_update_history for unlinked host"
+            );
+            continue;
+        }
+
+        // Update the history record.
+        let status_str = match result.status {
+            UpdateFinalStatus::Completed => "completed",
+            UpdateFinalStatus::Failed => "failed",
+            _ => "failed",
+        };
+        let mut active: host_package_update_history::ActiveModel = history_record.into();
+        active.status = Set(status_str.to_string());
+        active.output = Set(if result.output.is_empty() {
+            None
+        } else {
+            Some(result.output.clone())
+        });
+        active.output_bytes = Set(result.output.len() as i64);
+        active.completed_at = Set(Some(now));
+        if let Some(ref error) = result.error {
+            // Store error in output if no other output.
+            if result.output.is_empty() {
+                active.output = Set(Some(error.clone()));
+                active.output_bytes = Set(error.len() as i64);
+            }
+        }
+        if let Err(e) = active.update(state.db()).await {
+            tracing::warn!(
+                error = %e,
+                update_history_id = %result.update_history_id,
+                "failed to update host_package_update_history"
+            );
+        }
+
+        // On success, update host_package.installed_version.
+        if result.status == UpdateFinalStatus::Completed {
+            match host_package::Entity::find_by_id(result.host_package_id)
+                .one(state.db())
+                .await
+            {
+                Ok(Some(hp)) => {
+                    let mut hp_active: host_package::ActiveModel = hp.into();
+                    if let Some(ref new_version) = result.installed_version {
+                        hp_active.installed_version = Set(Some(new_version.clone()));
+                        hp_active.installed_version_detected_at = Set(Some(now));
+                    }
+                    hp_active.last_updated_at = Set(Some(now));
+                    hp_active.updated_at = Set(now);
+                    if let Err(e) = hp_active.update(state.db()).await {
+                        tracing::warn!(
+                            error = %e,
+                            host_package_id = %result.host_package_id,
+                            "failed to update host_package installed_version"
+                        );
+                    }
+                }
+                Ok(None) => {
+                    tracing::debug!(
+                        host_package_id = %result.host_package_id,
+                        "host_package not found for batch update result"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        host_package_id = %result.host_package_id,
+                        "failed to look up host_package"
+                    );
+                }
+            }
+        }
+    }
+
+    LoopAction::Continue
 }
 
 // ---------------------------------------------------------------------------

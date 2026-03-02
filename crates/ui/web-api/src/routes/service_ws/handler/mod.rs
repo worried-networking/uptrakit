@@ -418,6 +418,15 @@ pub(crate) async fn handle_authenticated_loop(
                             }
 
                             // -------------------------------------------------
+                            // BatchHostPackageUpdateResult (requires UpdateHooks)
+                            // -------------------------------------------------
+                            ServiceMessage::BatchHostPackageUpdateResult(payload) if has_update_hooks => {
+                                if updates::handle_batch_host_package_update_result(state, service_id, payload, &linked_host_ids).await.is_break() {
+                                    break;
+                                }
+                            }
+
+                            // -------------------------------------------------
                             // DiscoveryResults (requires SoftwareDiscovery)
                             // -------------------------------------------------
                             ServiceMessage::DiscoveryResults(payload)

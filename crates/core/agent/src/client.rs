@@ -83,6 +83,26 @@ pub(crate) async fn handle_discover_software(
     .await
 }
 
+/// Handle an `ExecuteBatchHostPackageUpdate` message from the controller.
+///
+/// Creates a sudo-aware executor and delegates to the shared agent-core
+/// implementation.
+///
+/// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
+pub(crate) async fn handle_execute_batch_host_package_update(
+    payload: uptrakit_internal_wire::ExecuteBatchHostPackageUpdatePayload,
+    conn: &mut ControllerConnection,
+) -> Option<LoopOutcome> {
+    let executor = make_executor();
+    uptrakit_agent_core::handle_execute_batch_host_package_update(
+        payload,
+        executor,
+        conn,
+        &ConnectionContext::default(),
+    )
+    .await
+}
+
 pub(crate) use uptrakit_agent_core::{
     handle_graceful_shutdown, send_update_output, send_update_result,
 };

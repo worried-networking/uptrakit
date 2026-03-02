@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
-    DisconnectReason, DisconnectingPayload, DiscoverSoftwarePayload, DiscoveryPluginResult,
-    DiscoveryResultsPayload, ServiceMessage, UpdateOutputPayload, UpdateResultPayload,
-    UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
+    BatchHostPackageUpdateResult, BatchHostPackageUpdateResultPayload, DisconnectReason,
+    DisconnectingPayload, DiscoverSoftwarePayload, DiscoveryPluginResult, DiscoveryResultsPayload,
+    ExecuteBatchHostPackageUpdatePayload, ServiceMessage, UpdateFinalStatus, UpdateOutputPayload,
+    UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
 };
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
 
@@ -340,6 +341,199 @@ pub async fn handle_execute_update(
     }
 
     *in_flight_update = Some(start_update(payload, executor, conn, ctx).await);
+}
+
+/// Handle an `ExecuteBatchHostPackageUpdate` message from the controller.
+///
+/// Instantiates the plugin for the batch, runs pre-update hooks, calls
+/// `execute_batch_update()`, runs post-update hooks, and sends back
+/// `BatchHostPackageUpdateResult` to the controller.
+///
+/// The `executor` is provided by the caller — `LocalCommandExecutor` for the
+/// regular agent, `SshCommandExecutor` for the SSH agent.
+///
+/// The `ctx` is used to inject connection-specific overrides into the plugin
+/// config before instantiation.
+///
+/// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
+pub async fn handle_execute_batch_host_package_update(
+    payload: ExecuteBatchHostPackageUpdatePayload,
+    executor: Arc<dyn CommandExecutor>,
+    conn: &mut ControllerConnection,
+    ctx: &ConnectionContext,
+) -> Option<LoopOutcome> {
+    tracing::info!(
+        batch_id = %payload.batch_id,
+        plugin_type = %payload.plugin_type,
+        count = payload.updates.len(),
+        host_machine_id = %payload.host_machine_id,
+        "received batch host package update request"
+    );
+
+    // Build a correlation map: package_identifier → (host_package_id, update_history_id)
+    let correlation: std::collections::HashMap<String, (uuid::Uuid, uuid::Uuid)> = payload
+        .updates
+        .iter()
+        .map(|u| {
+            (
+                u.package_identifier.clone(),
+                (u.host_package_id, u.update_history_id),
+            )
+        })
+        .collect();
+
+    // Map wire updates to plugin BatchUpdateItems
+    let items: Vec<uptrakit_plugin_infrastructure_core::BatchUpdateItem> = payload
+        .updates
+        .iter()
+        .map(|u| uptrakit_plugin_infrastructure_core::BatchUpdateItem {
+            package_identifier: u.package_identifier.clone(),
+            to_version: u.to_version.clone(),
+            release_info: u.release_info.clone(),
+        })
+        .collect();
+
+    // Apply connection context to plugin config
+    let mut effective_config = payload.plugin_config.clone();
+    ctx.apply_to_config(&payload.plugin_type, &mut effective_config);
+
+    // Create output channel for streaming
+    let (output_tx, _output_rx) =
+        tokio::sync::mpsc::channel::<uptrakit_command::UpdateOutputLine>(100);
+
+    // Execute with timeout
+    let timeout_duration = std::time::Duration::from_secs(u64::from(payload.timeout_seconds));
+    let batch_results = tokio::time::timeout(timeout_duration, async {
+        // Create plugin
+        let plugin = match uptrakit_plugin_infrastructure_registry::PluginRegistry::create_plugin(
+            payload.plugin_type.clone(),
+            &effective_config,
+            Arc::clone(&executor),
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to create plugin for batch update");
+                return Err(format!("Failed to create plugin: {e}"));
+            }
+        };
+
+        // Run pre-update hooks
+        for hook_cmd in &payload.pre_update_hooks {
+            tracing::debug!(hook = ?hook_cmd, "running batch pre-update hook");
+            match crate::update::run_hook_for_batch(hook_cmd).await {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(error = %e, "batch pre-update hook failed");
+                    return Err(format!("Pre-update hook failed: {e}"));
+                }
+            }
+        }
+
+        // Execute batch update
+        let results = match plugin.execute_batch_update(&items, &output_tx).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!(error = %e, "batch update execution failed");
+                return Err(format!("Batch update failed: {e}"));
+            }
+        };
+
+        // Run post-update hooks (non-fatal)
+        for hook_cmd in &payload.post_update_hooks {
+            tracing::debug!(hook = ?hook_cmd, "running batch post-update hook");
+            if let Err(e) = crate::update::run_hook_for_batch(hook_cmd).await {
+                tracing::warn!(error = %e, "batch post-update hook failed (non-fatal)");
+            }
+        }
+
+        Ok(results)
+    })
+    .await;
+
+    // Build per-package results
+    let results: Vec<BatchHostPackageUpdateResult> = match batch_results {
+        Ok(Ok(plugin_results)) => {
+            plugin_results
+                .into_iter()
+                .map(|r| {
+                    let (host_package_id, update_history_id) = correlation
+                        .get(&r.package_identifier)
+                        .copied()
+                        .unwrap_or((uuid::Uuid::nil(), uuid::Uuid::nil()));
+                    BatchHostPackageUpdateResult {
+                        host_package_id,
+                        update_history_id,
+                        status: if r.success {
+                            UpdateFinalStatus::Completed
+                        } else {
+                            UpdateFinalStatus::Failed
+                        },
+                        output: r.output,
+                        installed_version: None, // post-detection not yet implemented
+                        error: if r.success {
+                            None
+                        } else {
+                            Some("Package update failed".to_string())
+                        },
+                    }
+                })
+                .collect()
+        }
+        Ok(Err(error_msg)) => {
+            // All packages failed (plugin creation or hook failure)
+            payload
+                .updates
+                .iter()
+                .map(|u| BatchHostPackageUpdateResult {
+                    host_package_id: u.host_package_id,
+                    update_history_id: u.update_history_id,
+                    status: UpdateFinalStatus::Failed,
+                    output: String::new(),
+                    installed_version: None,
+                    error: Some(error_msg.clone()),
+                })
+                .collect()
+        }
+        Err(_) => {
+            // Timeout
+            let timeout_msg = format!(
+                "Batch update timed out after {} seconds",
+                payload.timeout_seconds
+            );
+            tracing::warn!(
+                batch_id = %payload.batch_id,
+                timeout_seconds = payload.timeout_seconds,
+                "batch update timed out"
+            );
+            payload
+                .updates
+                .iter()
+                .map(|u| BatchHostPackageUpdateResult {
+                    host_package_id: u.host_package_id,
+                    update_history_id: u.update_history_id,
+                    status: UpdateFinalStatus::Failed,
+                    output: String::new(),
+                    installed_version: None,
+                    error: Some(timeout_msg.clone()),
+                })
+                .collect()
+        }
+    };
+
+    let response = ServiceMessage::BatchHostPackageUpdateResult(
+        BatchHostPackageUpdateResultPayload {
+            batch_id: payload.batch_id,
+            results,
+        },
+    );
+    if let Err(e) = conn.send(response).await {
+        tracing::error!(error = %e, "failed to send BatchHostPackageUpdateResult");
+        return Some(LoopOutcome::Disconnected);
+    }
+    tracing::info!(batch_id = %payload.batch_id, "sent BatchHostPackageUpdateResult");
+    None
 }
 
 /// Handle a `DiscoverSoftware` message from the controller.

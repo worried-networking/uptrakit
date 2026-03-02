@@ -90,6 +90,17 @@ impl ServiceHandler for AgentHandler {
                 }
                 Ok(client::handle_discover_software(payload, conn).await)
             }
+            ControllerMessage::ExecuteBatchHostPackageUpdate(payload) => {
+                if payload.host_machine_id != self.machine_id {
+                    tracing::warn!(
+                        expected = %self.machine_id,
+                        received = %payload.host_machine_id,
+                        "host_machine_id mismatch on ExecuteBatchHostPackageUpdate; ignoring message"
+                    );
+                    return Ok(None);
+                }
+                Ok(client::handle_execute_batch_host_package_update(*payload, conn).await)
+            }
             _ => {
                 tracing::debug!("ignoring unrecognized message in authenticated loop");
                 Ok(None)

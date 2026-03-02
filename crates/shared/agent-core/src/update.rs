@@ -468,6 +468,46 @@ async fn run_hook_command(
     result
 }
 
+/// Execute a hook command for batch operations.
+///
+/// Unlike `run_hook_command` (which streams output into an update output
+/// channel), this variant is fire-and-forget: it runs the hook, checks the
+/// exit code, and returns an error if non-zero.
+pub(crate) async fn run_hook_for_batch(hook_cmd: &HookCommand) -> UpdateResult<()> {
+    let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
+    // Drain output in the background — we don't stream it for batch hooks.
+    let drain_handle = tokio::spawn(async move {
+        while plugin_rx.recv().await.is_some() {}
+    });
+
+    let result = match hook_cmd {
+        HookCommand::Shell { command, shell } => {
+            uptrakit_command::run_command_with_shell(command, *shell, &plugin_tx).await
+        }
+        HookCommand::Exec {
+            program,
+            args,
+            working_dir,
+        } => {
+            uptrakit_command::run_command_exec(program, args, working_dir.as_deref(), &plugin_tx)
+                .await
+        }
+        _ => {
+            tracing::warn!("unknown HookCommand variant; cannot execute hook");
+            return Err(report!(UpdateError::HookFailed(
+                "unsupported HookCommand variant".to_string()
+            )));
+        }
+    };
+
+    drop(plugin_tx);
+    let _ = drain_handle.await;
+
+    result
+        .map(|(_, _)| ())
+        .map_err(|e| report!(UpdateError::HookFailed(e.to_string())))
+}
+
 /// Send an output message.
 async fn send_output(
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
