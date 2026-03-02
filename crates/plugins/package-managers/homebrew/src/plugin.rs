@@ -5,9 +5,9 @@ use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, DiscoveryTarget, HostCompatibility, OutputStreamType, Plugin,
-    PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo, Result, TrackingSystem,
-    UpdateOutputLine, UpstreamRelease, Version,
+    BatchUpdateItem, BatchUpdateResult, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
+    OutputStreamType, Plugin, PluginCapability, PluginError, PluginRole, PluginType, ReleaseInfo,
+    Result, TrackingSystem, UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::{HomebrewConfig, HomebrewPackageType};
@@ -504,6 +504,62 @@ impl Plugin for HomebrewPlugin {
         output.push_str(&cmd_output.output);
 
         Ok(output)
+    }
+
+    /// Execute batch updates using a single `brew upgrade pkg1 pkg2 ...` command.
+    async fn execute_batch_update(
+        &self,
+        items: &[BatchUpdateItem],
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<Vec<BatchUpdateResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        for item in items {
+            self.require_package_identifier(&item.package_identifier)?;
+        }
+
+        let mut args: Vec<String> = vec!["upgrade".to_string()];
+        if self.is_cask() {
+            args.push("--cask".to_string());
+        }
+        for item in items {
+            args.push(item.package_identifier.clone());
+        }
+
+        let display_cmd = format!("brew {}", args.join(" "));
+        send_output(
+            output_tx,
+            &format!(
+                "Batch updating {} packages\nRunning: {display_cmd}",
+                items.len()
+            ),
+            OutputStreamType::Stdout,
+        )
+        .await;
+        let mut output = format!("Running: {display_cmd}\n");
+
+        tracing::debug!(count = items.len(), "running brew batch upgrade");
+
+        let cmd_output = self
+            .executor
+            .execute(&CommandSpec::exec("brew", args), output_tx)
+            .await
+            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
+        output.push_str(&cmd_output.output);
+
+        let success = cmd_output.exit_code == 0;
+        let results = items
+            .iter()
+            .map(|item| BatchUpdateResult {
+                package_identifier: item.package_identifier.clone(),
+                success,
+                output: output.clone(),
+            })
+            .collect();
+
+        Ok(results)
     }
 }
 

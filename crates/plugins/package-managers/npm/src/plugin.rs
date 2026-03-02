@@ -8,9 +8,9 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    DiscoveredSoftware, HostCompatibility, OutputStreamType, Plugin, PluginCapability, PluginError,
-    PluginType, ReleaseInfo, Result, SudoCommandEntry, TrackingSystem, UpdateOutputLine,
-    UpstreamRelease, Version,
+    BatchUpdateItem, BatchUpdateResult, DiscoveredSoftware, HostCompatibility, OutputStreamType,
+    Plugin, PluginCapability, PluginError, PluginType, ReleaseInfo, Result, SudoCommandEntry,
+    TrackingSystem, UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::config::NpmConfig;
@@ -494,6 +494,65 @@ impl Plugin for NpmPlugin {
 
         output.push_str(&cmd_output.output);
         Ok(output)
+    }
+
+    /// Execute batch updates using a single `npm install -g pkg1@v1 pkg2@v2 ...` command.
+    async fn execute_batch_update(
+        &self,
+        items: &[BatchUpdateItem],
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<Vec<BatchUpdateResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        for item in items {
+            self.require_package_identifier(&item.package_identifier)?;
+            validate_version(&item.to_version)
+                .map_err(|e| report!(PluginError::Configuration(e)))?;
+        }
+
+        let mut args = vec!["install".to_string(), "-g".to_string()];
+        for item in items {
+            args.push(format!("{}@{}", item.package_identifier, item.to_version));
+        }
+
+        let display_args = std::iter::once("npm")
+            .chain(args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        send_output(
+            output_tx,
+            &format!(
+                "Batch updating {} packages\nRunning: {display_args}",
+                items.len()
+            ),
+            OutputStreamType::Stdout,
+        )
+        .await;
+        let mut output = format!("Running: {display_args}\n");
+
+        tracing::debug!(count = items.len(), "running npm batch install -g");
+
+        let cmd_output = self
+            .executor
+            .execute(&CommandSpec::exec("npm", args).privileged(), output_tx)
+            .await
+            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
+        output.push_str(&cmd_output.output);
+
+        let success = cmd_output.exit_code == 0;
+        let results = items
+            .iter()
+            .map(|item| BatchUpdateResult {
+                package_identifier: item.package_identifier.clone(),
+                success,
+                output: output.clone(),
+            })
+            .collect();
+
+        Ok(results)
     }
 
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
