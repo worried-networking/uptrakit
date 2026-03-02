@@ -43,7 +43,8 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ### Agent-specific (service -> controller)
 
-`report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`
+`report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`,
+`batch_host_package_update_result`
 
 ### SSH agent-specific (service -> controller)
 
@@ -90,9 +91,10 @@ entirely (`LoopOutcome::Shutdown`), while `server_restarting` causes it to recon
 
 ### Agent-specific (controller -> service)
 
-`check_versions`, `execute_update`, `discover_software`
+`check_versions`, `execute_update`, `discover_software`, `execute_batch_host_package_update`
 
-Both the regular agent and the SSH agent receive `check_versions`, `execute_update`, and `discover_software` messages.
+Both the regular agent and the SSH agent receive `check_versions`, `execute_update`, `discover_software`, and
+`execute_batch_host_package_update` messages.
 The `host_machine_id` field in each payload determines which host the operation targets
 (see [`host_machine_id` Field](#host_machine_id-field)).
 
@@ -710,6 +712,62 @@ Consumed by controllers to trigger `ca_rotation_trigger.notify_one()`.
   "reason": "CA certificate approaching expiry (detected by external scheduler)"
 }
 ```
+
+## Batch host package update messages
+
+### `execute_batch_host_package_update` (controller -> agent)
+
+Triggers a batch update for host packages grouped by plugin type. The agent calls
+`plugin.execute_batch_update()` to execute a single bulk command (e.g., `apt-get upgrade`).
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "type": "execute_batch_host_package_update",
+  "host_machine_id": "abc-123",
+  "batch_id": "550e8400-...",
+  "plugin_type": "package_manager_apt",
+  "plugin_config": { "...merged config..." },
+  "updates": [
+    {
+      "host_package_id": "uuid",
+      "update_history_id": "uuid",
+      "package_identifier": "nginx",
+      "to_version": "1.24.0",
+      "release_info": null
+    }
+  ],
+  "pre_update_hooks": [],
+  "post_update_hooks": [],
+  "timeout_seconds": 600
+}
+```
+
+### `batch_host_package_update_result` (agent -> controller)
+
+Reports per-package outcomes after a batch update completes.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "type": "batch_host_package_update_result",
+  "batch_id": "550e8400-...",
+  "results": [
+    {
+      "host_package_id": "uuid",
+      "update_history_id": "uuid",
+      "status": "completed",
+      "output": "...command output...",
+      "installed_version": "1.24.0",
+      "error": null
+    }
+  ]
+}
+```
+
+See [Host Packages Architecture](../architecture/host-packages.md) for the full entity design.
 
 ## AsyncAPI Specification
 

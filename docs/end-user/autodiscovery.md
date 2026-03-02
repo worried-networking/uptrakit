@@ -12,7 +12,38 @@ without your explicit approval.
 
 When an agent registers a new host (or reconnects with a previously unseen host), the controller
 sends a discovery request to that agent. The agent queries each of its discovery-capable plugins
-and returns a list of installed packages. The controller then creates software items in a `pending`
+and returns a list of installed packages.
+
+### Tracking system routing
+
+Each discovered item declares a **tracking system** that determines how the controller processes
+it:
+
+| Tracking system | Destination | Approval required | Typical plugins |
+| --- | --- | --- | --- |
+| `Targeted` | `software_items` table (cross-host catalog) | Yes — items start as `pending` | Docker, GitHub Releases, Proxmox Helper Scripts |
+| `HostManaged` | `host_packages` table (per-host packages) | No — items are created enabled immediately | APT (discover-all), Homebrew, npm (discover-all) |
+
+**Targeted** items follow the existing autodiscovery workflow described below: they appear in the
+Software list as pending items for manual review.
+
+**Host-managed** items are created directly in the [host packages](host-packages.md) table with
+`enabled: true`. They bypass the pending/approval workflow because package managers typically
+discover hundreds of system packages, and requiring manual approval for each would be impractical.
+Host-managed items are not shown in the main Software list — they appear on the
+[host packages page](host-packages.md) instead.
+
+The same package can exist in both systems simultaneously. For example, `nginx` might be tracked
+as a targeted software item (for fine-grained control) and also appear as a host package (for
+aggregate update counts). Both systems operate independently.
+
+Plugins set the tracking system explicitly during discovery. The controller routes items based on
+this field — see [Plugin Guidelines](../development/plugin-guidelines.md#tracking-system-routing)
+for plugin implementation details.
+
+### Targeted discovery flow
+
+For items with `TrackingSystem::Targeted`, the controller creates software items in a `pending`
 state for any packages it has not seen before.
 
 Discovery results carry structured **discovery targets** that tell the controller exactly which
@@ -278,6 +309,8 @@ in the API reference.
   shapes, and ignore rule management.
 - [API Reference: Discovery Allowlist](../api/discovery-allowlist.md) — full endpoint reference
   for tenant-wide and host-specific allowlist management.
+- [Host Packages](host-packages.md) — host-level package tracking for items routed via
+  `TrackingSystem::HostManaged`.
 - [Software Item Entity](../architecture/software-item-entity.md) — underlying data model and
   database schema.
 - [System Overview](system-overview.md) — agent and plugin architecture.

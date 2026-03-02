@@ -599,6 +599,12 @@ Polish and additional capabilities for production use.
   - [ ] Update A must complete before update B
   - [ ] Cross-host dependencies
 - [ ] Create batch update UI
+- [x] **Host packages tracking system** — per-host package tracking separate from targeted software items.
+  `TrackingSystem` enum routes discovery results. Database tables: `host_packages`, `host_package_ignores`,
+  `host_package_update_history`. Plugin `execute_batch_update()` trait method with APT pin-priority, Homebrew,
+  and npm implementations. Wire protocol messages: `ExecuteBatchHostPackageUpdate`,
+  `BatchHostPackageUpdateResult`. REST API, CLI (`host-packages`), and frontend (update counts on hosts list,
+  packages sub-page) all implemented.
 - [ ] Implement canary deployment patterns
 - [ ] Rolling strategies (N-at-a-time, failure thresholds)
 

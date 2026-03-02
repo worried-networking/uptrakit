@@ -608,14 +608,59 @@ software they can manage on the local system. Plugins that support this capabili
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `package_identifier` | `String` | Plugin-specific identifier (maps to `SoftwareItem.package_identifier`). |
+| `package_identifier` | `String` | Plugin-specific identifier (maps to `SoftwareItem.package_identifier` or `HostPackage.package_identifier`). |
 | `name` | `String` | Human-readable display name. |
 | `installed_version` | `String` | Currently installed version (required; plugins omit items with unknown versions). |
+| `tracking_system` | `TrackingSystem` | Determines routing: `Targeted` → software items table, `HostManaged` → host packages table. |
 | `targets` | `Vec<DiscoveryTarget>` | Structured targets for plugin config creation. Empty = use discovering plugin's config. |
 | `extra` | `Option<serde_json::Value>` | Informational metadata only (e.g. Docker container names). Not used for config synthesis. |
 
 The default implementation returns an empty list. Plugins that support discovery (e.g.,
 Proxmox Helper-Scripts) override this method to scan the local system.
+
+### Tracking system routing
+
+Every discovery plugin must set the `tracking_system` field on each `DiscoveredSoftware` item.
+This field determines how the controller processes the discovery result:
+
+- **`TrackingSystem::Targeted`** — the item is routed to the `software_items` table. It follows
+  the standard pending/approval workflow with role-based plugin assignments. Use this for items
+  the user explicitly wants to track (Docker images, GitHub releases, PHS-discovered apps).
+
+- **`TrackingSystem::HostManaged`** — the item is routed to the `host_packages` table. It is
+  created immediately with `enabled: true` (no approval step). Use this for package managers that
+  discover large numbers of system packages (APT, Homebrew, npm in discover-all mode).
+
+```rust
+use uptrakit_shared_types::TrackingSystem;
+
+DiscoveredSoftware {
+    package_identifier: "nginx".to_string(),
+    name: "nginx".to_string(),
+    installed_version: "1.24.0".to_string(),
+    tracking_system: TrackingSystem::HostManaged,
+    targets: vec![],
+    extra: None,
+}
+```
+
+**Current plugin routing:**
+
+| Plugin | Mode | Tracking system |
+| :--- | :--- | :--- |
+| APT | discover-all | `HostManaged` |
+| Homebrew | discover-all (no pre-existing config) | `HostManaged` |
+| npm | discover-all | `HostManaged` |
+| Docker | all modes | `Targeted` |
+| Proxmox Helper Scripts | all modes | `Targeted` |
+
+The controller's `process_discovery_results()` inspects the `tracking_system` field and routes
+accordingly. For `HostManaged` items, it calls `find_or_create_host_package()` which checks the
+host package ignore list and either updates an existing record or creates a new one. For
+`Targeted` items, it follows the existing `find_or_create_software_item()` path.
+
+See [Autodiscovery — Tracking system routing](../end-user/autodiscovery.md#tracking-system-routing)
+for the end-user perspective.
 
 ### Emitting `DiscoveryTarget` values
 
@@ -665,6 +710,73 @@ DiscoveredSoftware {
 The controller processes targets generically: for each target, it finds or creates a plugin config
 matching `(plugin_type, plugin_config)` and creates role assignments per `target.roles`. No
 plugin-specific synthesis logic exists in the controller.
+
+## Batch Updates
+
+The `Plugin` trait includes an optional `execute_batch_update()` method for plugins that can
+update multiple packages in a single system command. This is primarily used by host packages
+where a package manager might update dozens of packages at once.
+
+### Trait method
+
+```rust
+async fn execute_batch_update(
+    &self,
+    updates: &[BatchUpdateItem],
+    output_tx: &mpsc::Sender<UpdateOutputLine>,
+) -> Result<Vec<BatchUpdateResult>>
+```
+
+The default implementation falls back to calling `execute_update()` sequentially for each item.
+Plugins that support efficient batch operations should override this method.
+
+### Types
+
+```rust
+pub struct BatchUpdateItem {
+    pub package_identifier: String,
+    pub to_version: String,
+    pub release_info: Option<ReleaseInfo>,
+}
+
+pub struct BatchUpdateResult {
+    pub package_identifier: String,
+    pub success: bool,
+    pub output: String,
+}
+```
+
+Both types are defined in `crates/plugins/infrastructure/core/src/batch_update.rs` and re-exported
+from `uptrakit-plugin-infrastructure-core`.
+
+### Implementation examples
+
+**APT** — uses `apt_preferences` pin-priority mechanism for safe, targeted upgrades:
+
+1. Generate a preferences file that blocks all upgrades (`Pin-Priority: -1`) except the requested
+   packages (pin at priority 990).
+2. Write to a temp file (no sudo needed — agent owns it).
+3. Run `sudo apt-get -o Dir::Etc::Preferences=<temp-file> upgrade --yes`.
+4. Delete the temp file.
+
+This approach preserves auto/manual package marks and is crash-safe (the temp file is not in
+`/etc/apt/preferences.d/`).
+
+**Homebrew** — runs `brew upgrade pkg1 pkg2 ...` as a single command.
+
+**npm** — runs `npm install -g pkg1@v1 pkg2@v2 ...` as a single command.
+
+### When to implement batch updates
+
+Override `execute_batch_update()` when your plugin's package manager supports updating multiple
+packages in a single command invocation. This avoids the overhead of separate process spawns and
+index refreshes per package.
+
+If your plugin does not benefit from batching (e.g., each update requires a unique download and
+install), the default sequential fallback is sufficient.
+
+See [Host Packages Architecture](../architecture/host-packages.md#batch-updates) for the full
+batch update flow from controller to agent.
 
 ## Testing
 

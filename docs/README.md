@@ -25,6 +25,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Notifications](end-user/notifications.md) | Setting up notification channels (Webhook, Telegram), creating rules, scoping, actionable notifications. See also: [Notifications API](api/notifications.md), [Notifications Security](security/notifications-security.md). |
 | [CLI Usage Guide](end-user/cli-usage.md) | Command reference for the `uptrakit` binary (all command groups: hosts, software-items, plugin-configs, autodiscovery, check, update, history, scheduler, settings, notifications). See also: [CLI Output](development/cli-output.md), [Auth Flows](api/auth-flows.md). |
 | [Plugin Configurations](end-user/plugin-configs.md) | Plugin config management, supported plugin types, autodiscovery, and ignore rules. See also: [Autodiscovery](end-user/autodiscovery.md), [Software Item Entity](architecture/software-item-entity.md). |
+| [Host Packages](end-user/host-packages.md) | Host-level package tracking, batch updates, and system update management. See also: [Host Packages API](api/host-packages.md), [Host Packages Architecture](architecture/host-packages.md). |
 | [Update History](end-user/update-history.md) | Viewing update history, status reference, filters, and triggering updates. See also: [Update Workflow](end-user/update-workflow.md), [Update History Entity](architecture/update-history-entity.md). |
 | [Profile and API Tokens](end-user/profile-tokens.md) | Account info, API token lifecycle, security best practices. See also: [Auth Flows](api/auth-flows.md), [Auth and Authorization](security/auth-and-authorization.md). |
 | [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md) | Reverse proxy deployment choices, headers, and API snippets. See also: [PKI and Certificates](security/pki-certificates.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
@@ -39,6 +40,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Auth Flows](api/auth-flows.md) | Device auth, tokens, MQTT enrollment, and denylist behavior. See also: [Auth and Authorization](security/auth-and-authorization.md), [Secrets and Encryption](security/secrets-and-encryption.md). |
 | [Services and Operations](api/services-operations.md) | Agent/MQTT flows, update history, and tenant-scoped tables. See also: [Update Workflow](end-user/update-workflow.md). |
 | [Enrollment Tokens](api/enrollment-tokens.md) | Enrollment token CRUD, capability scoping, usage limits, TTL, and enrollment flow. See also: [Auth and Authorization](security/auth-and-authorization.md). |
+| [Host Packages API](api/host-packages.md) | Host package REST API reference (CRUD, updates, ignores). See also: [Host Packages Guide](end-user/host-packages.md), [Host Packages Architecture](architecture/host-packages.md). |
 | [Notifications](api/notifications.md) | Notification channel, rule, and delivery log REST API reference. See also: [Notifications Guide](end-user/notifications.md), [Notifications Security](security/notifications-security.md). |
 
 ## Security
@@ -66,6 +68,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Software Item Entity](architecture/software-item-entity.md) | Software item definition and plugin configuration. See also: [Plugin Guidelines](development/plugin-guidelines.md), [Plugin System](development/plugin-system.md). |
 | [Update History Entity](architecture/update-history-entity.md) | Immutable update history records. See also: [Update Workflow](end-user/update-workflow.md). |
 | [Scheduler](architecture/scheduler.md) | Centralised DB-backed task scheduler with HA-safe optimistic locking (embedded or external). See also: [Scheduler Engine](development/scheduler-engine.md), [External Scheduler Deployment](end-user/deployment/external-scheduler.md), [HTTP Web API](api/http-web-api.md), [Cross-Controller Communication](development/cross-controller-comm.md). |
+| [Host Packages](architecture/host-packages.md) | Host packages entity design, tracking system routing, batch updates, and relationship to targeted items. See also: [Host Packages Guide](end-user/host-packages.md), [Host Packages API](api/host-packages.md). |
 | [SSH Agent](architecture/ssh-agent.md) | SSH-backed agent architecture, local DB schema, and self-managed encryption. See also: [SSH Agent Secrets](security/ssh-agent-secrets.md), [Service Lifecycle](development/service-lifecycle.md). |
 
 ## Development

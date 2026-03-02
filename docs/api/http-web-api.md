@@ -386,6 +386,42 @@ Types are defined in `crates/shared/web-api-types/src/update_batches.rs`:
 | `crates/shared/web-api-types/src/update_batches.rs` | Request/response types |
 | `crates/shared/db/src/entity/update_batch.rs` | SeaORM entity |
 
+## Host Package Endpoints
+
+Host packages represent per-host system-level packages tracked through the host packages subsystem.
+See [Host Packages API](host-packages.md) for the full endpoint reference with request/response
+examples.
+
+- `GET /api/v1/hosts/{host_id}/packages` — list packages with pagination and filters
+  (`?enabled=`, `?has_update=`, `?category=`, `?search=`). Requires `ViewSoftware`.
+- `GET /api/v1/hosts/{host_id}/packages/{id}` — single package detail with update history.
+  Requires `ViewSoftware`.
+- `PUT /api/v1/hosts/{host_id}/packages/{id}` — update (enable/disable). Requires
+  `ManageSoftware`.
+- `DELETE /api/v1/hosts/{host_id}/packages/{id}` — soft-delete (`?ignore=true` to also create
+  ignore rule). Requires `ManageSoftware`.
+- `POST /api/v1/hosts/{host_id}/packages/{id}/update` — trigger single package update. Requires
+  `ManageSoftware`.
+- `POST /api/v1/hosts/{host_id}/packages/update-all` — trigger batch update for outdated
+  packages (`?category=security` for security-only). Requires `ManageSoftware`.
+- `POST /api/v1/hosts/{host_id}/packages/check-versions` — trigger version check. Requires
+  `ManageSoftware`.
+- `GET /api/v1/hosts/{host_id}/package-ignores` — list ignore rules. Requires `ViewSoftware`.
+- `POST /api/v1/hosts/{host_id}/package-ignores` — create ignore rule. Requires
+  `ManageSoftware`.
+- `DELETE /api/v1/hosts/{host_id}/package-ignores/{id}` — remove ignore rule. Requires
+  `ManageSoftware`.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/host_packages.rs` | Route handlers |
+| `crates/ui/web-api/src/queries/host_packages.rs` | CRUD queries |
+| `crates/ui/web-api/src/queries/host_package_ignores.rs` | Ignore list queries |
+| `crates/ui/web-api/src/queries/host_package_triggers.rs` | Update trigger pipeline |
+| `crates/shared/web-api-types/src/host_packages.rs` | Request/response types |
+
 ## Service Operations
 
 - `/api/v1/agents/{id}/version-check`: trigger a version check (requires `ManageSoftware`).
@@ -740,6 +776,7 @@ All paginated endpoints return a `PaginatedResponse<T>`:
 | `GET /api/v1/notifications/rules` | `ListRulesQuery` (includes `page`/`per_page`) | Filterable by `channel_id`, `event_type` |
 | `GET /api/v1/notifications/log` | `PaginationParams` | |
 | `GET /api/v1/update-batches` | `UpdateBatchListQuery` (includes `page`/`per_page`) | Filterable by `status` |
+| `GET /api/v1/hosts/{host_id}/packages` | `ListHostPackagesQuery` (includes `page`/`per_page`) | Filterable by `enabled`, `has_update`, `category`, `search` |
 
 ### Endpoints NOT paginated (already bounded)
 

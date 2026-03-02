@@ -83,13 +83,13 @@ uptrakit/
 │   │   └── discovery/
 │   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Forgejo/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg/Forgejo-managed items, PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
 │   ├── shared/
-│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, handle_check_versions/execute_update/graceful_shutdown; start_update() for per-host parallel use by SSH agent
+│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch host package updates, handle_check_versions/execute_update/handle_execute_batch_host_package_update/graceful_shutdown; start_update() for per-host parallel use by SSH agent
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag; StdioTunnel trait (bidirectional byte-stream tunnel for remote command I/O)
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption (EncryptedString, init_master_key)
-│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities; `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`
+│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, software_items, host_packages, host_package_ignores, host_package_update_history, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
-│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, etc.); feature-gated: sea-orm, openapi
+│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, TrackingSystem, etc.); feature-gated: sea-orm, openapi
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
@@ -99,7 +99,7 @@ uptrakit/
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, services, software-items, plugin-configs, autodiscovery, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
+│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-packages, services, software-items, plugin-configs, autodiscovery, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API; split into app_state.rs, ca_snapshot.rs, router.rs modules; auth/auth_method.rs hosts AuthMethod
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/

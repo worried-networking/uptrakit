@@ -227,6 +227,16 @@ commands and additionally sets `ip_address` to the SSH target address from the l
 - Called on `ReportHosts` messages (not during enrollment)
 - Non-fatal on failure
 
+## Host packages
+
+Hosts have a one-to-many relationship with `host_packages` — system-level packages tracked per-host by package
+manager plugins. The `HostResponse` includes an `update_summary` field with aggregate update counts:
+
+- `available_updates_count`: total host packages where `installed_version != latest_version`
+- `security_updates_count`: subset where `update_category = 'security'`
+
+See [host packages architecture](host-packages.md) for the full entity design.
+
 ## REST API
 
 | Method | Path | Permission | Action |
@@ -235,3 +245,6 @@ commands and additionally sets `ip_address` to the SSH target address from the l
 | GET | `/api/v1/hosts/{id}` | ViewHosts | Get single host with linked agents |
 | PUT | `/api/v1/hosts/{id}` | ManageHosts | Update friendly_name |
 | DELETE | `/api/v1/hosts/{id}` | ManageHosts | Soft-delete (set deactivated_at) |
+
+See also [host packages API](../api/host-packages.md) for package management endpoints scoped under
+`/api/v1/hosts/{host_id}/packages`.

@@ -214,6 +214,20 @@ A `BatchProgressBroadcaster` (`crates/ui/web-api/src/batch_progress_broadcaster.
 See [Update History Entity](docs/architecture/update-history-entity.md) and
 [Batch Update Endpoints](docs/api/http-web-api.md#batch-update-endpoints).
 
+## Host packages (system-level tracking)
+
+In addition to targeted software items (cross-host tracking), the system supports per-host package tracking for
+system-level package managers. Host packages are tracked in separate `host_packages`, `host_package_ignores`, and
+`host_package_update_history` tables. A `TrackingSystem` enum (`Targeted` | `HostManaged`) on `DiscoveredSoftware`
+routes discovery results to the appropriate system.
+
+Key differences from targeted software items: no cross-host deduplication, no approval step (created enabled
+immediately), single `plugin_config_id` per package (no role-based plugin assignments), and batch update support
+via `Plugin::execute_batch_update()`. The `HostResponse` includes an `HostUpdateSummary` with aggregate update
+counts.
+
+See [Host Packages Architecture](docs/architecture/host-packages.md) for the full entity design.
+
 ## Update output streaming (SSE)
 
 The controller provides a browser-facing SSE endpoint (`GET /api/v1/update-history/{id}/output/stream`) for real-time

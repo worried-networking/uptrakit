@@ -140,6 +140,51 @@ allowlist (or the system default of all plugins if the tenant list is also empty
 See also: [Host Entity](../architecture/host-entity.md), [Autodiscovery](autodiscovery.md),
 [Discovery Allowlist API](../api/discovery-allowlist.md).
 
+## Host Packages
+
+Manage system-level packages tracked per-host by package manager plugins.
+
+```sh
+# List all packages on a host (paginated)
+uptrakit host-packages list <HOST_ID>
+uptrakit host-packages list <HOST_ID> --page 1 --per-page 50
+
+# Filter to packages with available updates
+uptrakit host-packages list <HOST_ID> --has-update true
+
+# Filter by update category
+uptrakit host-packages list <HOST_ID> --category security
+
+# Search by package name
+uptrakit host-packages list <HOST_ID> --search nginx
+
+# Show package detail with update history
+uptrakit host-packages show <HOST_ID> <PACKAGE_ID>
+
+# Enable/disable a package
+uptrakit host-packages enable <HOST_ID> <PACKAGE_ID>
+uptrakit host-packages disable <HOST_ID> <PACKAGE_ID>
+
+# Delete a package
+uptrakit host-packages delete <HOST_ID> <PACKAGE_ID>
+
+# Delete and create an ignore rule to prevent re-discovery
+uptrakit host-packages delete <HOST_ID> <PACKAGE_ID> --ignore
+
+# List ignore rules for a host
+uptrakit host-packages ignore list <HOST_ID>
+
+# Add an ignore rule
+uptrakit host-packages ignore add <HOST_ID> --plugin-config <PLUGIN_CONFIG_ID> --package nginx
+
+# Remove an ignore rule
+uptrakit host-packages ignore remove <HOST_ID> <IGNORE_ID>
+```
+
+See also: [Host Packages Guide](host-packages.md),
+[Host Packages API](../api/host-packages.md),
+[Host Packages Architecture](../architecture/host-packages.md).
+
 ## Software Items
 
 List, inspect, and manage software items configured on the controller.
