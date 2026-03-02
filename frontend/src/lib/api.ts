@@ -64,7 +64,13 @@ import type {
 	CreateDiscoveryAllowlistEntryRequest,
 	NatsSettingsResponse,
 	UpdateNatsSettingsRequest,
-	PluginTypeInfo
+	PluginTypeInfo,
+	HostPackageResponse,
+	HostPackageDetailResponse,
+	UpdateHostPackageRequest,
+	HostPackageIgnoreResponse,
+	CreateHostPackageIgnoreRequest,
+	ListHostPackagesParams
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -372,6 +378,65 @@ export function updateHost(id: string, data: UpdateHostRequest): Promise<HostRes
 
 export function deactivateHost(id: string): Promise<MessageResponse> {
 	return request(`/hosts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// --- Host Package APIs ---
+
+export function listHostPackages(
+	hostId: string,
+	opts?: ListHostPackagesParams
+): Promise<PaginatedResponse<HostPackageResponse>> {
+	const params = new URLSearchParams();
+	if (opts?.page != null) params.set('page', String(opts.page));
+	if (opts?.per_page != null) params.set('per_page', String(opts.per_page));
+	if (opts?.enabled != null) params.set('enabled', String(opts.enabled));
+	if (opts?.has_update != null) params.set('has_update', String(opts.has_update));
+	if (opts?.category) params.set('category', opts.category);
+	if (opts?.search) params.set('search', opts.search);
+	const query = params.toString();
+	return request(`/hosts/${encodeURIComponent(hostId)}/packages${query ? `?${query}` : ''}`);
+}
+
+export function getHostPackage(hostId: string, packageId: string): Promise<HostPackageDetailResponse> {
+	return request(`/hosts/${encodeURIComponent(hostId)}/packages/${encodeURIComponent(packageId)}`);
+}
+
+export function updateHostPackage(
+	hostId: string,
+	packageId: string,
+	data: UpdateHostPackageRequest
+): Promise<HostPackageResponse> {
+	return request(`/hosts/${encodeURIComponent(hostId)}/packages/${encodeURIComponent(packageId)}`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
+}
+
+export function deleteHostPackage(hostId: string, packageId: string, ignore = false): Promise<void> {
+	const query = ignore ? '?ignore=true' : '';
+	return requestVoid(`/hosts/${encodeURIComponent(hostId)}/packages/${encodeURIComponent(packageId)}${query}`, {
+		method: 'DELETE'
+	});
+}
+
+export function listHostPackageIgnores(hostId: string): Promise<HostPackageIgnoreResponse[]> {
+	return request(`/hosts/${encodeURIComponent(hostId)}/package-ignores`);
+}
+
+export function createHostPackageIgnore(
+	hostId: string,
+	data: CreateHostPackageIgnoreRequest
+): Promise<HostPackageIgnoreResponse> {
+	return request(`/hosts/${encodeURIComponent(hostId)}/package-ignores`, {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
+}
+
+export function deleteHostPackageIgnore(hostId: string, ignoreId: string): Promise<void> {
+	return requestVoid(`/hosts/${encodeURIComponent(hostId)}/package-ignores/${encodeURIComponent(ignoreId)}`, {
+		method: 'DELETE'
+	});
 }
 
 // --- Settings APIs ---

@@ -290,6 +290,11 @@ export interface HostAgentSummary {
 	status: ServiceStatus;
 }
 
+export interface HostUpdateSummary {
+	available_updates_count: number;
+	security_updates_count: number;
+}
+
 export interface HostResponse {
 	id: string;
 	machine_id: string;
@@ -303,6 +308,7 @@ export interface HostResponse {
 	created_at: string;
 	updated_at: string;
 	agents: HostAgentSummary[];
+	update_summary: HostUpdateSummary;
 }
 
 export interface UpdateHostRequest {
@@ -592,4 +598,63 @@ export interface NatsSettingsResponse {
 
 export interface UpdateNatsSettingsRequest {
 	url?: string | null;
+}
+
+// Host packages
+
+export interface HostPackageResponse {
+	id: string;
+	host_id: string;
+	plugin_config_id: string;
+	package_identifier: string;
+	name: string;
+	installed_version: string | null;
+	installed_version_detected_at: string | null;
+	latest_version: string | null;
+	latest_version_fetched_at: string | null;
+	update_category: string;
+	enabled: boolean;
+	last_checked_at: string | null;
+	last_updated_at: string | null;
+	created_at: string;
+	has_update: boolean;
+}
+
+export interface HostPackageDetailResponse {
+	package: HostPackageResponse;
+	recent_updates: HostPackageUpdateHistoryEntry[];
+}
+
+export interface HostPackageUpdateHistoryEntry {
+	id: string;
+	from_version: string | null;
+	to_version: string | null;
+	status: string;
+	output: string | null;
+	created_at: string;
+}
+
+export interface UpdateHostPackageRequest {
+	enabled: boolean;
+}
+
+export interface HostPackageIgnoreResponse {
+	id: string;
+	plugin_config_id: string;
+	package_identifier: string;
+	created_at: string;
+}
+
+export interface CreateHostPackageIgnoreRequest {
+	plugin_config_id: string;
+	package_identifier: string;
+}
+
+export interface ListHostPackagesParams {
+	page?: number;
+	per_page?: number;
+	enabled?: boolean;
+	has_update?: boolean;
+	category?: string;
+	search?: string;
 }
