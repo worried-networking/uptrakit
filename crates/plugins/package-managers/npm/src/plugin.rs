@@ -354,6 +354,7 @@ impl Plugin for NpmPlugin {
             command: "npm".into(),
             explanation: "Global npm package installation requires root".into(),
             helper_script: None,
+            needs_setenv: false,
         }]
     }
 

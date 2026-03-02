@@ -229,6 +229,7 @@ impl Plugin for AptPlugin {
             command: "apt-get".into(),
             explanation: "Package installation and index refresh require root privileges".into(),
             helper_script: None,
+            needs_setenv: true,
         }]
     }
 

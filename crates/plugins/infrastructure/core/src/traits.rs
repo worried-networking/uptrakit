@@ -112,6 +112,14 @@ pub struct SudoCommandEntry {
     /// entry. The sudoers entry uses the install path directly. The script must
     /// validate its own arguments to enforce the least-privilege contract.
     pub helper_script: Option<SudoHelperScript>,
+    /// When `true`, the sudoers entry is generated with the `SETENV:` tag, which
+    /// allows the agent to pass inline `NAME=VALUE` env var assignments before
+    /// the program name (e.g. `sudo DEBIAN_FRONTEND=noninteractive apt-get …`).
+    ///
+    /// Set this to `true` only when the plugin invokes the command with
+    /// [`CommandSpec::with_env`] in combination with `.privileged()`.
+    /// Defaults to `false` for commands that don't need env var forwarding.
+    pub needs_setenv: bool,
 }
 
 /// A unified plugin trait for both remote and local operations.

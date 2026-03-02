@@ -25,10 +25,12 @@ approach instead:
 uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get
 ```
 
-The `SETENV:` tag is required so that the agent can pass environment variables as
-inline `NAME=VALUE` assignments before the program name
-(e.g. `sudo DEBIAN_FRONTEND=noninteractive apt-get update`). Without `SETENV:`,
-sudo rejects those assignments. Importantly, `SETENV:` does **not** bypass
+The `SETENV:` tag is included only for commands whose plugin sets
+`SudoCommandEntry::needs_setenv = true` — those that invoke the command with
+[`CommandSpec::with_env`] combined with `.privileged()`. It allows the agent to
+pass inline `NAME=VALUE` env var assignments before the program name
+(e.g. `sudo DEBIAN_FRONTEND=noninteractive apt-get update`). Without it, sudo
+rejects those assignments. Importantly, `SETENV:` does **not** bypass
 `env_reset` — sudo's built-in `env_delete` list still strips dangerous variables
 such as `LD_PRELOAD` before they reach the privileged process.
 
@@ -62,7 +64,8 @@ During bootstrap or `update-sudoers`:
      with mode `0755`, and its path is used directly as the sudoers command.
    - **Without `helper_script`**: `command -v <name>` is run on the remote host to resolve
      the absolute path. Commands not found are skipped with a warning (non-fatal).
-3. Resolved entries become `<username> ALL=(root) NOPASSWD: SETENV: <absolute-path>` lines.
+3. Resolved entries become `<username> ALL=(root) NOPASSWD: <absolute-path>` lines, with `SETENV:` inserted
+   only when `SudoCommandEntry::needs_setenv` is `true` for that entry.
 4. The file is written with permissions `440` and validated with `visudo -cf`.
 
 If no commands resolve (all plugin tools are missing or incompatible), the command fails unless `--allow-all` is passed.
@@ -236,8 +239,10 @@ uptrakit-agent-ssh host update-sudoers my-server --dry-run
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
 # Regenerate: uptrakit-agent-ssh host update-sudoers <host>
 # <absolute-path>: <explanation>
-<username> ALL=(root) NOPASSWD: SETENV: <absolute-path>
+<username> ALL=(root) NOPASSWD: [SETENV: ]<absolute-path>
 ```
+
+`SETENV:` is included only when the plugin sets `needs_setenv = true` (currently only `apt-get`).
 
 Or with `--allow-all`:
 

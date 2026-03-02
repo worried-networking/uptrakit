@@ -405,6 +405,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
                 resolved.push(ResolvedSudoCommand {
                     command_path: helper.install_path.to_string(),
                     explanation: entry.explanation.clone(),
+                    needs_setenv: entry.needs_setenv,
                 });
             } else {
                 match resolve_command_path(&session, &entry.command).await? {
@@ -413,6 +414,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
                         resolved.push(ResolvedSudoCommand {
                             command_path: path,
                             explanation: entry.explanation.clone(),
+                            needs_setenv: entry.needs_setenv,
                         });
                     }
                     None => {

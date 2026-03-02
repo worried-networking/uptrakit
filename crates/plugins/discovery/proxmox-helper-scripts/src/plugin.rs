@@ -384,6 +384,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     install_path: PHS_VERSION_HELPER_PATH,
                     content: PHS_VERSION_HELPER_CONTENT,
                 }),
+                needs_setenv: false,
             },
             SudoCommandEntry {
                 command: "uptrakit-phs-update".into(),
@@ -395,6 +396,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     install_path: PHS_UPDATE_HELPER_PATH,
                     content: PHS_UPDATE_HELPER_CONTENT,
                 }),
+                needs_setenv: false,
             },
         ]
     }
