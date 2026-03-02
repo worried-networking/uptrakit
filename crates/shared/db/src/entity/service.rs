@@ -25,6 +25,7 @@ pub struct Model {
     pub deactivated_at: Option<OffsetDateTime>,
     pub ping_interval_seconds: Option<i32>,
     pub enrollment_token_id: Option<Uuid>,
+    pub cert_lifetime_hours: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

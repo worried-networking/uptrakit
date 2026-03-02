@@ -15,6 +15,7 @@ mod m20260306_000002_update_batches;
 mod m20260302_000002_host_packages;
 mod m20260302_000003_host_packages_has_update;
 mod m20260307_000001_split_version_check;
+mod m20260302_000004_service_cert_lifetime;
 
 pub struct Migrator;
 
@@ -36,6 +37,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260302_000002_host_packages::Migration),
             Box::new(m20260302_000003_host_packages_has_update::Migration),
             Box::new(m20260307_000001_split_version_check::Migration),
+            Box::new(m20260302_000004_service_cert_lifetime::Migration),
         ]
     }
 }
@@ -192,6 +194,10 @@ mod tests {
             .unwrap();
         // Verify has_update generated column exists.
         db.execute_unprepared("SELECT has_update FROM host_packages LIMIT 0")
+            .await
+            .unwrap();
+        // Verify cert_lifetime_hours column exists on services.
+        db.execute_unprepared("SELECT cert_lifetime_hours FROM services LIMIT 0")
             .await
             .unwrap();
         // Verify split_version_check migration: detect_version task row exists.
