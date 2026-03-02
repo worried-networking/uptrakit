@@ -120,6 +120,8 @@ Enums currently annotated with `#[non_exhaustive]`:
 - `HookCommand`
 - `CloseReason`
 - `ServiceMessage`, `ControllerMessage`
+- `EnrollmentStatus`
+- `ErrorCode`
 
 **`uptrakit-web-api-types`:**
 
@@ -204,6 +206,215 @@ for status in &ALL_STATUSES { ... }
 // ✓ Correct
 for status in MyStatus::iter() { ... }
 ```
+
+### `strum::EnumIter` incompatibility with `Other(String)` variants
+
+`strum::EnumIter` cannot be derived on enums that contain an `Other(String)` catch-all variant
+(see [Wire-Safe `Other(String)` Catch-All](#wire-safe-otherstring-catch-all-for-enums) below).
+Instead, enumerate known variants explicitly in a `const` array inside the test:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KNOWN_VARIANTS: &[MyStatus] = &[
+        MyStatus::Pending,
+        MyStatus::Approved,
+    ];
+
+    #[test]
+    fn serde_round_trip() {
+        for variant in KNOWN_VARIANTS {
+            // ...
+        }
+    }
+
+    #[test]
+    fn unknown_becomes_other() {
+        let s = "\"future_variant\"";
+        let v: MyStatus = serde_json::from_str(s).unwrap();
+        assert!(matches!(v, MyStatus::Other(_)));
+    }
+}
+```
+
+## Wire-Safe `Other(String)` Catch-All for Enums
+
+Any enum serialised over the wire (WebSocket, NATS, REST body) that may gain new variants in
+future releases **must** include an `Other(String)` catch-all variant. This ensures rolling upgrades
+are safe: an older peer receiving an unknown variant from a newer peer deserialises it as
+`Other("future_variant")` and handles it gracefully instead of returning a
+deserialization error.
+
+### When to use
+
+Apply this pattern to every `#[non_exhaustive]` enum that:
+
+- is transmitted over a network protocol (`ServiceMessage`, `ControllerMessage`, `EnrollmentStatus`, `ErrorCode`, etc.),
+- or is persisted in a column and read back by potentially older software versions.
+
+### Required implementation
+
+Because `Other(String)` cannot implement `Copy`, and the standard `serde` `rename_all` derive
+cannot produce it automatically, use a manual `Serialize`/`Deserialize` implementation with an
+`as_str()` helper:
+
+```rust
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MyStatus {
+    Pending,
+    Approved,
+    /// Unknown variant received from a newer peer or future schema version.
+    Other(String),
+}
+
+impl MyStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending  => "pending",
+            Self::Approved => "approved",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl std::fmt::Display for MyStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<String> for MyStatus {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "pending"  => Self::Pending,
+            "approved" => Self::Approved,
+            _          => Self::Other(s),
+        }
+    }
+}
+
+impl serde::Serialize for MyStatus {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MyStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        String::deserialize(d).map(Self::from)
+    }
+}
+```
+
+### Consequences
+
+- The enum **loses `Copy`** (because `String` is not `Copy`). Any call-site that relied on
+  copy semantics must be updated to `.clone()`.
+- `strum::EnumIter` cannot be derived. See the
+  [test coverage section above](#strum-enumiter-incompatibility-with-otherstring-variants).
+
+## `#[non_exhaustive]` on Public Structs
+
+`#[non_exhaustive]` applies to structs as well as enums. Add it to any public struct defined in a
+shared crate (`wire`, `shared-types`, `web-api-types`, etc.) that may gain new fields in the future.
+This prevents external crates from using struct-literal syntax and breaks at compile time if they try
+to match exhaustively.
+
+### Required constructor
+
+Because `#[non_exhaustive]` prevents external callers from constructing the struct with a literal,
+every `#[non_exhaustive]` struct **must** expose a constructor or implement `Default`:
+
+```rust
+// In the shared crate (defining crate — struct literal is allowed here):
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PingPayload {
+    pub service_ts: Timestamp,
+}
+
+impl PingPayload {
+    pub fn new(service_ts: Timestamp) -> Self {
+        Self { service_ts }
+    }
+}
+
+// Empty structs use Default:
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RequestCrlRenewalPayload {}
+```
+
+### External crate callers
+
+External crates constructing the struct must use the provided constructor:
+
+```rust
+// ✓ Correct — constructor provided by the shared crate
+PingPayload::new(service_ts)
+
+// ✗ Wrong — breaks when a new field is added
+PingPayload { service_ts }
+```
+
+Pattern matching in external crates must use `..` to ignore unknown fields:
+
+```rust
+// ✓ Correct — forward-compatible
+ServiceMessage::Ping(PingPayload { service_ts, .. }) => { ... }
+
+// ✗ Wrong — breaks on new fields
+ServiceMessage::Ping(PingPayload { service_ts }) => { ... }
+```
+
+## Typed Enum Parameters for Internal Write APIs
+
+Internal query functions that write to the database should use typed enums instead of bare `&str`
+parameters for discriminator values such as actor type, batch type, and similar classification
+fields. Bare strings produce no compile-time guarantees and make it trivial to introduce silent
+typos.
+
+Define the typed enum in the relevant `queries` module and implement `as_str()` + `Display`:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActorType {
+    User,
+    Mqtt,
+    Scheduler,
+}
+
+impl ActorType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User      => "user",
+            Self::Mqtt      => "mqtt",
+            Self::Scheduler => "scheduler",
+        }
+    }
+}
+
+impl std::fmt::Display for ActorType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+```
+
+When writing to the database, convert with `.as_str().to_string()` (not `format!("{self}")`):
+
+```rust
+actor_type: Set(params.actor_type.as_str().to_string()),
+```
+
+These enums are **internal** (not wire-protocol types) and therefore:
+
+- do **not** need `#[non_exhaustive]` (they are exhaustively matched in the same crate),
+- do **not** need `Other(String)` (they are never deserialised from untrusted input),
+- **do** implement `Copy` (no heap allocation).
 
 ## Feature Flags
 

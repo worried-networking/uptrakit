@@ -218,14 +218,8 @@ reduce duplication.
 **[LOW]** `src/notification_service.rs:46-63` -- `msg.clone()` on every `send()` and
 `broadcast()` call. Could compute serialized JSON first.
 
-**[MEDIUM]** `src/routes/update_batches.rs:355,365` -- `.unwrap_or_default()` silently
-swallows DB errors loading host/item names for SSE replay.
-
 **[LOW]** `src/routes/update_batches.rs:64-118,142-200` -- `trigger_host_batch_update` and
 `trigger_item_batch_update` share near-identical second half.
-
-**[LOW]** `src/queries/plugin_configs.rs:151-152` -- `unreachable!()` in `unwrap_or_else`
-creates a hidden panic path.
 
 **[INFO]** `src/routes/service_ws/handler/updates.rs:534-537` -- Wildcard `_` arm on
 `UpdateFinalStatus` maps to `Failed` without `tracing::warn!`.
@@ -314,12 +308,6 @@ No coding standards issues found.
   handling.
 
 ### Issues
-
-**[MEDIUM]** `src/routes/update_batches.rs:93,176` -- `batch_type` as bare string literal. No
-typed constant. Typo would silently create novel batch type.
-
-**[MEDIUM]** `src/queries/update_triggers.rs:91-94` -- `actor_type` as raw `&str` with no
-compile-time enforcement.
 
 **[MEDIUM]** `src/routes/oidc_auth.rs:873` -- `fake_claims` reverse-role-mapping ignores nested
 claim paths. If `role_claim_path = "realm.roles"`, reconstruction places values at `realm` not
@@ -539,9 +527,6 @@ the API.
 `"Failed to ..."` error messages (not `"Internal server error"`), flat `Vec<T>` without
 pagination, bare `Json(resp)` without explicit `StatusCode::OK`.
 
-**[MEDIUM]** `src/routes/update_batches.rs:355-365` -- SSE replay `.unwrap_or_default()`
-consistent with `update_history` SSE but both silently swallow DB errors.
-
 ## Database
 
 ### Strengths
@@ -684,9 +669,6 @@ and discovery-result processing (lines 171-1846). The discovery processing half 
 several large private helpers (`find_or_create_software_items`, `process_discovery_results`,
 `assign_plugin_configs`) that could be extracted into a `src/queries/autodiscovery/` submodule.
 The mixed concerns make it harder to audit changes to either concern in isolation.
-
-**[MEDIUM]** `src/routes/update_batches.rs:93,176` -- Batch type strings should be constants
-or enum.
 
 **[MEDIUM]** `src/queries/update_batches.rs` -- 699 lines with zero unit tests.
 

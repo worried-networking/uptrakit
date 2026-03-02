@@ -374,9 +374,6 @@ No coding standards issues found.
 **[MEDIUM]** `crates/shared/wire/src/lib.rs:214-234` -- `ServiceMessage` and
 `ControllerMessage` mix agent-specific and MQTT-specific variants.
 
-**[MEDIUM]** `crates/ui/web-api/src/routes/update_batches.rs:93,175` -- `batch_type` passed
-as bare strings (`"host_update"`, `"item_rollout"`) with no typed enum or constant.
-
 **[MEDIUM]** `crates/shared/service-sdk/src/lifecycle.rs:79,89` -- `ServiceHandler` is not
 object-safe due to associated constants. No documentation or `where Self: Sized` guards.
 

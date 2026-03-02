@@ -162,16 +162,6 @@ MQTT concerns without structural separation. When a new `ServiceHandler` author 
 service role, they face a flat enum with no type-level guidance about which variants are
 relevant. This is a latent correctness hazard as new service roles are added.
 
-**[LOW]** `src/lib.rs` -- `ErrorCode` has `#[non_exhaustive]` but no `Other` variant. Unknown
-error codes from a newer controller cause the entire error message to fall through to
-`ControllerMessage::Unknown`, losing the error payload. An `Other(String)` variant would
-preserve the error semantics even when the specific code is unrecognised.
-
-**[LOW]** `src/lib.rs` -- `EnrollmentStatus` has the same concern -- no `Other` variant.
-A newer controller returning a new enrollment status value will cause the message containing
-it to deserialize as `ControllerMessage::Unknown`, silently discarding the enrollment
-response.
-
 ## Tests
 
 ### Strengths
@@ -244,17 +234,6 @@ needed), or all as `std::time::Duration` with `#[serde(with = "duration_seconds"
 type-safe). The `duration_seconds` module is already well-tested and available; the bare-u32
 fields are legacy.
 
-**[LOW]** `src/lib.rs:396-403` (`PingPayload`, `PongPayload`) -- `PingPayload` and
-`PongPayload` are empty structs (`pub struct PingPayload {}`, `pub struct PongPayload {}`),
-while all other payload types that carry no data are omitted from the enum entirely (the
-tag-only variant is handled by `#[serde(tag = "type")]` with an empty payload struct). The
-empty structs themselves are fine, but they are not annotated with `#[non_exhaustive]` unlike
-every other named payload type that could evolve. If a future protocol version adds a
-`PingPayload.timestamp` for round-trip latency measurement, adding that field without
-`#[non_exhaustive]` on `PingPayload` would be a breaking API change for any code constructing
-the struct with `PingPayload {}`. Preferred fix: add `#[non_exhaustive]` to `PingPayload` and
-`PongPayload` consistent with the project's stated policy for extensible public types.
-
 ## Maintainability
 
 ### Strengths
@@ -297,9 +276,3 @@ declares `type Err = std::convert::Infallible` directly, making the struct redun
 is either to remove the struct or to annotate it `#[deprecated = "Use std::convert::Infallible
 directly"]` to signal intent to future readers.
 
-**[LOW]** `src/lib.rs:978` -- `RequestCrlRenewalPayload {}` is an empty struct with no fields
-and no doc comment beyond the type-level doc. Empty payload structs are correct (future fields
-can be added without breaking changes due to `#[non_exhaustive]`) but `RequestCrlRenewalPayload`
-does not carry `#[non_exhaustive]`. If a future protocol version adds a `reason: String` field
-to this payload, callers constructing `RequestCrlRenewalPayload {}` will have a compile error.
-Apply `#[non_exhaustive]` for consistency with the stated policy.
