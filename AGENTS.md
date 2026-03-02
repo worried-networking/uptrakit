@@ -435,7 +435,9 @@ for user review. Key invariants:
    - `DiscoverLocalSoftware` — the plugin can discover locally installed software.
    - `RefreshPackageIndex` — the plugin can refresh/sync a local package index from remote sources.
    - `DetectHostCompatibility` — the plugin implements `detect_host_compatibility()` which returns a
-     `HostCompatibility` enum (`Compatible` or `Incompatible { reason: String }`). Implemented by:
+     `HostCompatibility` enum (`Compatible` or `Incompatible { reason: String }`). Both
+     `HostCompatibility` and `PluginError` carry `#[non_exhaustive]`; external match sites must
+     include a wildcard arm (see `coding-standards.md` § Public Enum Extensibility). Implemented by:
      `AptPlugin` (checks `which apt-get`) and `HomebrewPlugin` (checks `which brew`).
    - `PreUpdateHook` — the plugin implements `pre_update_hook(context: &UpdateHookContext)` which
      returns `PreUpdateHookResult` (`Proceed` or `Abort { reason: String }`). An `Abort` cancels the
