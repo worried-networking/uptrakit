@@ -31,7 +31,8 @@ mod tests {
             },
             agent_certificates: AgentCertificateSettingsResponse {
                 lifetime_days: 365,
-                renewal_window_hours: 168,
+                renewal_window_hours_override: None,
+                effective_renewal_window_hours: 336,
             },
             enrollment_tokens: EnrollmentTokensSummary { active_count: 2 },
         };

@@ -1607,9 +1607,11 @@ components:
           format: int32
           description: |
             Number of hours before certificate expiry when the service
-            should initiate certificate renewal.
+            should initiate certificate renewal. This is the effective value
+            computed as `min(14 days, cert_lifetime / 5)`, or the admin-configured
+            override when one is set.
           examples:
-            - 6
+            - 33
         ca_bundle_hash:
           type: string
           description: |

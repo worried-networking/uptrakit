@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::SettingKey;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSettings, CanViewSettings};
-use crate::settings_store::upsert_setting;
+use crate::settings_store::{delete_setting, upsert_setting};
 use axum::{
     Json,
     extract::State,
@@ -16,6 +16,14 @@ pub use uptrakit_web_api_types::settings_agent_certs::{
 };
 
 const MAX_AGENT_CERT_LIFETIME_DAYS: u16 = 730;
+
+fn build_response(state: &AppState) -> AgentCertificateSettingsResponse {
+    AgentCertificateSettingsResponse {
+        lifetime_days: state.settings.agent_cert_lifetime_days(),
+        renewal_window_hours_override: state.settings.renewal_window_hours_override(),
+        effective_renewal_window_hours: state.settings.renewal_window_hours(),
+    }
+}
 
 /// Get agent certificate settings
 #[utoipa::path(
@@ -34,11 +42,7 @@ pub async fn get_agent_certificate_settings(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    let response = AgentCertificateSettingsResponse {
-        lifetime_days: state.settings.agent_cert_lifetime_days(),
-        renewal_window_hours: state.settings.renewal_window_hours(),
-    };
-    (StatusCode::OK, Json(response)).into_response()
+    (StatusCode::OK, Json(build_response(&state))).into_response()
 }
 
 /// Update agent certificate settings
@@ -89,29 +93,40 @@ pub async fn update_agent_certificate_settings(
     }
 
     if let Some(hours) = req.renewal_window_hours {
-        if hours < 1 {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "Renewal window must be at least 1 hour",
-            );
+        if hours == 0 {
+            // Reset to automatic mode: remove the override from the DB.
+            if let Err(e) = delete_setting(
+                state.db(),
+                state.default_tenant_id,
+                SettingKey::AgentCertRenewalWindowHours,
+            )
+            .await
+            {
+                tracing::error!("Failed to delete renewal window setting: {e:?}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+            state
+                .settings
+                .set_renewal_window_hours_override(None)
+                .await;
+        } else {
+            if let Err(e) = upsert_setting(
+                state.db(),
+                state.default_tenant_id,
+                SettingKey::AgentCertRenewalWindowHours,
+                serde_json::json!(hours),
+            )
+            .await
+            {
+                tracing::error!("Failed to save renewal window: {e:?}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+            state
+                .settings
+                .set_renewal_window_hours_override(Some(hours))
+                .await;
         }
-        if let Err(e) = upsert_setting(
-            state.db(),
-            state.default_tenant_id,
-            SettingKey::AgentCertRenewalWindowHours,
-            serde_json::json!(hours),
-        )
-        .await
-        {
-            tracing::error!("Failed to save renewal window: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-        state.settings.set_renewal_window_hours(hours).await;
     }
 
-    let response = AgentCertificateSettingsResponse {
-        lifetime_days: state.settings.agent_cert_lifetime_days(),
-        renewal_window_hours: state.settings.renewal_window_hours(),
-    };
-    (StatusCode::OK, Json(response)).into_response()
+    (StatusCode::OK, Json(build_response(&state))).into_response()
 }

@@ -16,8 +16,26 @@ use crate::auth::registration::RegistrationSettings;
 use crate::settings_store::{RawSettings, RawSettingsExt};
 
 const DEFAULT_AGENT_CERT_LIFETIME_DAYS: u16 = 7;
-const DEFAULT_RENEWAL_WINDOW_HOURS: u16 = 6;
 const DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT: u16 = 10;
+
+/// Maximum automatic renewal window in days (ceiling, matches scheduler-engine executor).
+pub const MAX_RENEWAL_WINDOW_DAYS: u16 = 14;
+
+/// Compute the effective renewal window in hours.
+///
+/// If an explicit override is set, that value is returned unchanged.
+/// Otherwise the window is `min(14 days, lifetime_days * 24 / 5)`,
+/// giving an automatic 1/5-of-lifetime window with a 14-day ceiling.
+pub fn compute_effective_renewal_window_hours(
+    lifetime_days: u16,
+    override_hours: Option<u16>,
+) -> u16 {
+    override_hours.unwrap_or_else(|| {
+        let auto = u32::from(lifetime_days).saturating_mul(24) / 5;
+        let ceiling = u32::from(MAX_RENEWAL_WINDOW_DAYS) * 24;
+        u16::try_from(auto.min(ceiling)).unwrap_or(u16::MAX)
+    })
+}
 
 /// Default listen addresses used when neither CLI nor DB provides a value.
 pub const DEFAULT_HTTPS_ADDR: &str = "[::]:8443";
@@ -109,7 +127,9 @@ pub struct SettingsSnapshot {
     pub registration: RegistrationSettings,
     pub authentication: AuthenticationSettings,
     pub agent_cert_lifetime_days: u16,
-    pub renewal_window_hours: u16,
+    /// Explicit admin override for the renewal window, in hours.
+    /// `None` means use the automatic 1/5-of-lifetime default.
+    pub renewal_window_hours_override: Option<u16>,
     pub network: NetworkSettings,
     pub mqtt_max_clients_per_tenant: u16,
     pub smtp: SmtpSettingsSnapshot,
@@ -136,25 +156,26 @@ struct Inner {
 
 impl Settings {
     /// Construct from pre-loaded values (for tests).
+    ///
+    /// The renewal window uses automatic mode (1/5 of lifetime with a 14-day ceiling).
     pub fn new(registration: RegistrationSettings, agent_cert_lifetime_days: u16) -> Self {
-        Self::with_renewal_window(
-            registration,
-            agent_cert_lifetime_days,
-            DEFAULT_RENEWAL_WINDOW_HOURS,
-        )
+        Self::with_renewal_window(registration, agent_cert_lifetime_days, None)
     }
 
     /// Construct with all values (for tests or when loading from DB).
+    ///
+    /// `renewal_window_hours_override` is `None` for automatic mode (1/5 of lifetime
+    /// with a 14-day ceiling) or `Some(n)` to pin the window to `n` hours.
     pub fn with_renewal_window(
         registration: RegistrationSettings,
         agent_cert_lifetime_days: u16,
-        renewal_window_hours: u16,
+        renewal_window_hours_override: Option<u16>,
     ) -> Self {
         let snapshot = SettingsSnapshot {
             registration,
             authentication: AuthenticationSettings::default(),
             agent_cert_lifetime_days,
-            renewal_window_hours,
+            renewal_window_hours_override,
             network: NetworkSettings::default(),
             mqtt_max_clients_per_tenant: DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT,
             smtp: SmtpSettingsSnapshot::default(),
@@ -199,10 +220,9 @@ impl Settings {
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS);
 
-        let renewal_window_hours = combined
+        let renewal_window_hours_override = combined
             .get_setting(SettingKey::AgentCertRenewalWindowHours)
-            .and_then(|v| v.as_u64()?.try_into().ok())
-            .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS);
+            .and_then(|v| v.as_u64()?.try_into().ok());
 
         let network = Self::load_network_settings(&combined);
 
@@ -222,7 +242,7 @@ impl Settings {
             registration,
             authentication,
             agent_cert_lifetime_days,
-            renewal_window_hours,
+            renewal_window_hours_override,
             network,
             mqtt_max_clients_per_tenant,
             smtp,
@@ -329,10 +349,9 @@ impl Settings {
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS);
 
-        let renewal_window_hours = combined
+        let renewal_window_hours_override = combined
             .get_setting(SettingKey::AgentCertRenewalWindowHours)
-            .and_then(|v| v.as_u64()?.try_into().ok())
-            .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS);
+            .and_then(|v| v.as_u64()?.try_into().ok());
 
         let network = Self::load_network_settings(&combined);
 
@@ -352,7 +371,7 @@ impl Settings {
             registration,
             authentication,
             agent_cert_lifetime_days,
-            renewal_window_hours,
+            renewal_window_hours_override,
             network,
             mqtt_max_clients_per_tenant,
             smtp,
@@ -444,17 +463,34 @@ impl Settings {
             .send_modify(|snap| snap.agent_cert_lifetime_days = days);
     }
 
-    /// Read the certificate renewal window in hours (synchronous).
+    /// Read the effective certificate renewal window in hours (synchronous).
+    ///
+    /// Returns the admin-configured override if set, otherwise the automatic
+    /// value: `min(14 days, lifetime_days * 24 / 5)`.
     pub fn renewal_window_hours(&self) -> u16 {
-        self.inner.snapshot_rx.borrow().renewal_window_hours
+        let snap = self.inner.snapshot_rx.borrow();
+        compute_effective_renewal_window_hours(
+            snap.agent_cert_lifetime_days,
+            snap.renewal_window_hours_override,
+        )
     }
 
-    /// Update the certificate renewal window in hours.
-    pub async fn set_renewal_window_hours(&self, hours: u16) {
+    /// Read the raw renewal window override in hours (synchronous).
+    ///
+    /// Returns `None` when automatic mode is active (no override configured).
+    pub fn renewal_window_hours_override(&self) -> Option<u16> {
+        self.inner.snapshot_rx.borrow().renewal_window_hours_override
+    }
+
+    /// Set or clear the renewal window override.
+    ///
+    /// Pass `Some(hours)` to pin the window to an explicit value.
+    /// Pass `None` to restore automatic mode (1/5 of lifetime, 14-day ceiling).
+    pub async fn set_renewal_window_hours_override(&self, hours: Option<u16>) {
         let _guard = self.inner.write_mutex.lock().await;
         self.inner
             .snapshot_tx
-            .send_modify(|snap| snap.renewal_window_hours = hours);
+            .send_modify(|snap| snap.renewal_window_hours_override = hours);
     }
 
     // --- Network settings ---
