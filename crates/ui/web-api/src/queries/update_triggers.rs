@@ -29,6 +29,7 @@ use uuid::Uuid;
 use crate::auth::token::generate_uuid;
 use crate::notification_service::NotificationService;
 use crate::queries::software_items::find_active_item;
+use crate::queries::update_types::ActorType;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -91,8 +92,8 @@ pub struct TriggerUpdateParams<'a> {
     pub item_id: Uuid,
     pub host_id: Uuid,
     pub to_version: String,
-    /// `"user"`, `"mqtt"`, or `"scheduler"`.
-    pub actor_type: &'a str,
+    /// Who initiated the update.
+    pub actor_type: ActorType,
     /// User UUID string, MQTT client UUID string, or empty string.
     pub actor_id: &'a str,
     /// Optional release metadata supplied by the REST caller.
@@ -118,7 +119,8 @@ pub struct CreateUpdateRecordParams<'a> {
     pub host_id: Uuid,
     pub item_id: Uuid,
     pub to_version: &'a str,
-    pub actor_type: &'a str,
+    /// Who initiated the update.
+    pub actor_type: ActorType,
     pub actor_id: &'a str,
     pub update_category: &'a str,
     /// Set when the update belongs to a batch.
@@ -309,7 +311,7 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         status: Set(update_history::UpdateStatus::Pending),
         output: Set(String::new()),
         output_bytes: Set(0),
-        actor_type: Set(params.actor_type.to_string()),
+        actor_type: Set(params.actor_type.as_str().to_string()),
         actor_id: Set(params.actor_id.to_string()),
         started_at: Set(now),
         completed_at: Set(None),

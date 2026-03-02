@@ -17,3 +17,4 @@ pub mod software_items;
 pub mod update_batches;
 pub mod update_history;
 pub mod update_triggers;
+pub mod update_types;

@@ -303,7 +303,7 @@ pub async fn deactivate_service(
             state
                 .notification_service
                 .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-                    RequestCrlRenewalPayload {},
+                    RequestCrlRenewalPayload::default(),
                 ))
                 .await;
             state.service_connections.unregister(&service_id).await;
@@ -398,7 +398,7 @@ pub async fn merge_service(
     state
         .notification_service
         .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-            RequestCrlRenewalPayload {},
+            RequestCrlRenewalPayload::default(),
         ))
         .await;
     state.service_connections.unregister(&source_uuid).await;

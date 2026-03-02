@@ -20,6 +20,7 @@ use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqtt
 use super::LoopAction;
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
+use crate::queries::update_types::ActorType;
 use crate::routes::service_ws::protocol::{
     MessageRateLimiter, close_with_reason, deserialize_service_msg, record_service_activity,
     send_pong, serialize_controller_msg,
@@ -105,7 +106,7 @@ pub(super) async fn handle_mqtt_register_handshake(
                             payload.active_mqtt_clients,
                         );
                     }
-                    ServiceMessage::Ping(PingPayload { service_ts }) => {
+                    ServiceMessage::Ping(PingPayload { service_ts, .. }) => {
                         if send_pong(sink, out_seq, service_ts).await.is_err() {
                             return None;
                         }
@@ -298,7 +299,7 @@ pub(super) async fn handle_mqtt_trigger_update(
             item_id: payload.software_item_id,
             host_id: payload.host_id,
             to_version: payload.to_version.clone(),
-            actor_type: "mqtt",
+            actor_type: ActorType::Mqtt,
             actor_id: &payload.mqtt_client_id.to_string(),
             release_info: None,
         },
@@ -380,7 +381,7 @@ pub(super) async fn handle_mqtt_trigger_host_package_update(
         &state.notification_service,
         payload.tenant_id,
         payload.host_id,
-        "mqtt",
+        ActorType::Mqtt,
         &payload.mqtt_client_id.to_string(),
         payload.security_only,
     )

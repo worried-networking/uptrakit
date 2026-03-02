@@ -30,7 +30,11 @@ use crate::AppState;
 use crate::batch_progress_broadcaster::BatchProgressEvent;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
-use crate::queries::{update_batches as batch_queries, update_triggers::TriggerUpdateError};
+use crate::queries::{
+    update_batches as batch_queries,
+    update_triggers::TriggerUpdateError,
+    update_types::{ActorType, BatchType},
+};
 use crate::tenant_db::TenantDb;
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
@@ -90,8 +94,8 @@ pub async fn trigger_host_batch_update(
         &state.notification_service,
         &batch_queries::CreateBatchParams {
             tenant_id: tenant_db.tenant_id,
-            batch_type: "host_update",
-            actor_type: "user",
+            batch_type: BatchType::HostUpdate,
+            actor_type: ActorType::User,
             actor_id: &user.user_id.to_string(),
         },
         candidates,
@@ -173,8 +177,8 @@ pub async fn trigger_item_batch_update(
         &state.notification_service,
         &batch_queries::CreateBatchParams {
             tenant_id: tenant_db.tenant_id,
-            batch_type: "item_rollout",
-            actor_type: "user",
+            batch_type: BatchType::ItemRollout,
+            actor_type: ActorType::User,
             actor_id: &user.user_id.to_string(),
         },
         candidates,
@@ -348,24 +352,37 @@ pub async fn stream_batch_progress(
         .into_iter()
         .collect();
 
-    let host_names: std::collections::HashMap<Uuid, String> = host::Entity::find()
-        .filter(host::Column::Id.is_in(host_ids))
-        .all(tenant_db.db())
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|h| (h.id, h.friendly_name))
-        .collect();
+    let host_names: std::collections::HashMap<Uuid, String> =
+        match host::Entity::find()
+            .filter(host::Column::Id.is_in(host_ids))
+            .all(tenant_db.db())
+            .await
+        {
+            Ok(records) => records.into_iter().map(|h| (h.id, h.friendly_name)).collect(),
+            Err(e) => {
+                tracing::error!("Failed to load host names for SSE replay: {e}");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                );
+            }
+        };
 
     let si_names: std::collections::HashMap<Uuid, String> =
-        uptrakit_shared_db::entity::software_item::Entity::find()
+        match uptrakit_shared_db::entity::software_item::Entity::find()
             .filter(uptrakit_shared_db::entity::software_item::Column::Id.is_in(si_ids))
             .all(tenant_db.db())
             .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|si| (si.id, si.name))
-            .collect();
+        {
+            Ok(records) => records.into_iter().map(|si| (si.id, si.name)).collect(),
+            Err(e) => {
+                tracing::error!("Failed to load software item names for SSE replay: {e}");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                );
+            }
+        };
 
     let total = batch.total_count;
     let batch_status_str = batch.status.as_str().to_string();

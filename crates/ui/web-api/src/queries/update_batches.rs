@@ -33,6 +33,7 @@ use crate::notification_service::NotificationService;
 use crate::queries::update_triggers::{
     CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, ValidatedUpdateTarget,
 };
+use crate::queries::update_types::{ActorType, BatchType};
 use crate::tenant_db::TenantDb;
 
 type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
@@ -259,8 +260,10 @@ pub async fn find_outdated_hosts_for_item(
 /// Parameters for creating a batch update.
 pub struct CreateBatchParams<'a> {
     pub tenant_id: Uuid,
-    pub batch_type: &'a str,
-    pub actor_type: &'a str,
+    /// The batch category.
+    pub batch_type: BatchType,
+    /// Who initiated the batch.
+    pub actor_type: ActorType,
     pub actor_id: &'a str,
 }
 
@@ -335,10 +338,10 @@ pub async fn create_batch(
     let batch_record = update_batch::ActiveModel {
         id: Set(batch_id),
         tenant_id: Set(params.tenant_id),
-        batch_type: Set(params.batch_type.to_string()),
+        batch_type: Set(params.batch_type.as_str().to_string()),
         status: Set(BatchStatus::InProgress),
         total_count: Set(validated.len() as i32),
-        actor_type: Set(params.actor_type.to_string()),
+        actor_type: Set(params.actor_type.as_str().to_string()),
         actor_id: Set(params.actor_id.to_string()),
         created_at: Set(now),
         completed_at: Set(None),
@@ -784,7 +787,7 @@ pub async fn trigger_all_host_package_updates_for_host(
     notifier: &NotificationService,
     tenant_id: Uuid,
     host_id: Uuid,
-    actor_type: &str,
+    actor_type: ActorType,
     actor_id: &str,
     security_only: bool,
 ) -> Result<Option<Uuid>> {
@@ -898,10 +901,10 @@ pub async fn trigger_all_host_package_updates_for_host(
     let batch_record = update_batch::ActiveModel {
         id: Set(batch_id),
         tenant_id: Set(tenant_id),
-        batch_type: Set("host_package".to_string()),
+        batch_type: Set(BatchType::HostPackage.as_str().to_string()),
         status: Set(BatchStatus::InProgress),
         total_count: Set(total_count),
-        actor_type: Set(actor_type.to_string()),
+        actor_type: Set(actor_type.as_str().to_string()),
         actor_id: Set(actor_id.to_string()),
         created_at: Set(now),
         completed_at: Set(None),
@@ -922,7 +925,7 @@ pub async fn trigger_all_host_package_updates_for_host(
             status: Set("pending".to_string()),
             output: Set(None),
             output_bytes: Set(0),
-            actor_type: Set(actor_type.to_string()),
+            actor_type: Set(actor_type.as_str().to_string()),
             actor_id: Set(actor_id.to_string()),
             update_category: Set(pkg.update_category.clone()),
             started_at: Set(None),

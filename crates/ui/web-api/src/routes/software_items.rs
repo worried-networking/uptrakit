@@ -4,6 +4,7 @@ use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::find_raw_active_config;
 use crate::queries::software_items::{self as item_queries, SoftwareItemQueryError};
+use crate::queries::update_types::ActorType;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -677,7 +678,7 @@ pub async fn trigger_update(
             item_id,
             host_id,
             to_version: req.to_version,
-            actor_type: "user",
+            actor_type: ActorType::User,
             actor_id: &user.user_id.to_string(),
             release_info,
         },
