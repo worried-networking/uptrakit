@@ -116,6 +116,10 @@ permission_extractor! {
     CanViewNotifications => Permission::ViewNotifications,
     /// Extractor that requires [`Permission::ManageNotifications`].
     CanManageNotifications => Permission::ManageNotifications,
+    /// Extractor that requires [`Permission::ViewSystemServices`].
+    CanViewSystemServices => Permission::ViewSystemServices,
+    /// Extractor that requires [`Permission::ManageSystemServices`].
+    CanManageSystemServices => Permission::ManageSystemServices,
 }
 
 // ---------------------------------------------------------------------------

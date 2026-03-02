@@ -25,6 +25,15 @@ pub enum Permission {
     ManageHosts,
     ViewNotifications,
     ManageNotifications,
+    /// View system services (MQTT bridge, external scheduler).
+    ///
+    /// Controls read access to the `/api/v1/system-services` endpoints.
+    ViewSystemServices,
+    /// Manage system services (approve, reject, deactivate, update settings).
+    ///
+    /// Controls write access to the `/api/v1/system-services` endpoints and
+    /// the `/api/v1/settings/system-services` enrollment token endpoint.
+    ManageSystemServices,
 }
 
 impl Permission {
@@ -42,6 +51,8 @@ impl Permission {
             Permission::ManageHosts => "manage_hosts",
             Permission::ViewNotifications => "view_notifications",
             Permission::ManageNotifications => "manage_notifications",
+            Permission::ViewSystemServices => "view_system_services",
+            Permission::ManageSystemServices => "manage_system_services",
         }
     }
 }
@@ -68,6 +79,8 @@ impl FromStr for Permission {
             "manage_hosts" => Ok(Self::ManageHosts),
             "view_notifications" => Ok(Self::ViewNotifications),
             "manage_notifications" => Ok(Self::ManageNotifications),
+            "view_system_services" => Ok(Self::ViewSystemServices),
+            "manage_system_services" => Ok(Self::ManageSystemServices),
             _ => Err(ParsePermissionError),
         }
     }
