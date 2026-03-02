@@ -175,6 +175,8 @@ channels:
         $ref: "#/components/messages/softwareStates"
       mqttTriggerUpdate:
         $ref: "#/components/messages/mqttTriggerUpdate"
+      mqttTriggerHostPackageUpdate:
+        $ref: "#/components/messages/mqttTriggerHostPackageUpdate"
       serviceCredentials:
         $ref: "#/components/messages/serviceCredentials"
       discoverSoftware:
@@ -621,6 +623,26 @@ operations:
 
       Attribution: `actor_type = "mqtt"`, `actor_id = mqtt_client_id`.
 
+  sendMqttTriggerHostPackageUpdate:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/mqttTriggerHostPackageUpdate"
+    summary: MQTT service requests a batch host package update via Home Assistant (MQTT-only)
+    description: |
+      Sent when a Home Assistant user presses "Install" on a host-packages update
+      entity (the per-host aggregated entity, not a software-item entity).
+
+      The controller finds all outdated host packages on the host (enabled,
+      non-deactivated, both versions known and differing), guards against
+      a concurrent batch already running, and dispatches
+      `ExecuteBatchHostPackageUpdate` to the appropriate agent. On error or
+      when no outdated packages are found, the controller responds with an
+      `Error` message (soft error — WS not closed).
+
+      Attribution: `actor_type = "mqtt"`, `actor_id = mqtt_client_id`.
+
   receiveServiceCredentials:
     action: receive
     channel:
@@ -975,7 +997,7 @@ components:
       title: Software States Message
       summary: Controller pushes software version state for a tenant to MQTT services (MQTT-only)
       description: |
-        Sent whenever version data changes for any software item in a tenant.
+        Sent whenever version data changes for any software item or host package in a tenant.
         Push triggers include:
 
         - Version check results received from an agent
@@ -983,6 +1005,7 @@ components:
         - An agent sends `update_started` (status transitions to `in_progress`)
         - An update result (completed or failed) is received from an agent
         - An MQTT service first connects and receives its tenant assignments
+        - A batch host package update is triggered or completed
 
         The `update_in_progress` field in each host entry reflects whether an
         `update_history` record with status `pending` or `in_progress` exists
@@ -994,6 +1017,13 @@ components:
         - `{prefix}/update/{item_id}/{host_id}/state` — installed version string
         - `{prefix}/update/{item_id}/{host_id}/latest_version` — latest version string
         - `{prefix}/update/{item_id}/{host_id}/attributes` — JSON attributes: `{"in_progress": true/false}`
+
+        Additionally, the `host_package_hosts` field (default: empty array) contains
+        per-host package summary data. The MQTT service publishes these to:
+
+        - `{prefix}/hosts/{host_id}/state` — `"N updates pending"` or `"up-to-date"`
+        - `{prefix}/hosts/{host_id}/latest_version` — always `"up-to-date"`
+        - `{prefix}/hosts/{host_id}/attributes` — JSON: `{"in_progress": bool, "pending_count": N}`
 
         The `attributes` topic payload is recognised by the Home Assistant
         `update` entity as a first-class `in_progress` attribute, which causes
@@ -1009,6 +1039,14 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/mqttTriggerUpdatePayload"
+
+    mqttTriggerHostPackageUpdate:
+      name: mqtt_trigger_host_package_update
+      title: MQTT Trigger Host Package Update Message
+      summary: MQTT service requests a batch update of all outdated host packages on a host (MQTT-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/mqttTriggerHostPackageUpdatePayload"
 
     discoverSoftware:
       name: discover_software
@@ -2817,6 +2855,99 @@ components:
           items:
             $ref: "#/components/schemas/mqttSoftwareStateHostEntry"
 
+    mqttHostPackageHostState:
+      type: object
+      required:
+        - host_id
+        - hostname
+        - pending_count
+        - total_count
+        - update_in_progress
+      description: |
+        Per-host summary of host package update status. Included in `software_states`
+        payloads for every host that has at least one enabled, non-deactivated host
+        package tracked for the tenant.
+      properties:
+        host_id:
+          type: string
+          format: uuid
+          description: Host UUID
+          examples:
+            - 770e8400-e29b-41d4-a716-446655440001
+        hostname:
+          type: string
+          description: Human-readable hostname
+          examples:
+            - web-server-01
+        pending_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: |
+            Number of packages where both `installed_version` and `latest_version`
+            are known and the two differ (update is available).
+        total_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Total number of enabled, non-deactivated packages tracked for this host.
+        update_in_progress:
+          type: boolean
+          description: |
+            Whether a batch host package update is currently pending or in progress
+            for this host. Set to `true` from the moment a batch is created until
+            all history records reach a terminal state.
+
+    mqttTriggerHostPackageUpdatePayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - tenant_id
+        - host_id
+        - mqtt_client_id
+      description: |
+        Sent by the MQTT service when a Home Assistant user presses "Install"
+        on the per-host packages update entity. The controller resolves all
+        currently outdated packages and dispatches a single batch update.
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+            Receivers that encounter an unknown version must close the connection
+            with a protocol error.
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: mqtt_trigger_host_package_update
+          description: Message type discriminator
+        tenant_id:
+          type: string
+          format: uuid
+          description: Tenant UUID (validated against the MQTT service's assigned tenant)
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        host_id:
+          type: string
+          format: uuid
+          description: Host UUID whose outdated packages should be updated
+          examples:
+            - 770e8400-e29b-41d4-a716-446655440001
+        mqtt_client_id:
+          type: string
+          format: uuid
+          description: MQTT client UUID that initiated the trigger (used as actor_id)
+          examples:
+            - 660e8400-e29b-41d4-a716-446655440001
+
     softwareStatesPayload:
       type: object
       required:
@@ -2854,6 +2985,16 @@ components:
           description: All active software items for the tenant with per-host version data
           items:
             $ref: "#/components/schemas/mqttSoftwareStateItem"
+        host_package_hosts:
+          type: array
+          default: []
+          description: |
+            Per-host summary of host package update status. One entry per host that
+            has at least one enabled, non-deactivated host package tracked for this
+            tenant. Absent from payloads generated by older controllers (defaults to
+            empty array — receivers must tolerate the missing field).
+          items:
+            $ref: "#/components/schemas/mqttHostPackageHostState"
 
     mqttTriggerUpdatePayload:
       type: object

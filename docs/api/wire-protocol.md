@@ -58,7 +58,8 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ### MQTT-specific (service -> controller)
 
-`register`, `release_tenants`, `mqtt_client_status`, `mqtt_trigger_update`
+`register`, `release_tenants`, `mqtt_client_status`, `mqtt_trigger_update`,
+`mqtt_trigger_host_package_update`
 
 ### Shared (controller -> service)
 
@@ -576,6 +577,7 @@ credentials). MQTT services filter by `tenant_id`.
 - An agent sends `update_started` (status transitions to `in_progress`) — `update_in_progress` stays `true`
 - An update result (completed or failed) is received — clears `update_in_progress: false`
 - An MQTT service first connects and receives its tenant assignments
+- A host package batch update is triggered or completed
 
 ```json
 {
@@ -600,6 +602,15 @@ credentials). MQTT services filter by `tenant_id`.
         }
       ]
     }
+  ],
+  "host_package_hosts": [
+    {
+      "host_id": "770e8400-e29b-41d4-a716-446655440003",
+      "hostname": "my-host",
+      "pending_count": 3,
+      "total_count": 42,
+      "update_in_progress": false
+    }
   ]
 }
 ```
@@ -623,6 +634,28 @@ The `hosts` entries use the following fields:
 
 `release_url` and `release_notes` are populated only when the plugin fetches release metadata (e.g. GitHub
 Releases). They are absent (`null` / omitted) for plugins that track only version numbers.
+
+### `host_package_hosts` field
+
+The `host_package_hosts` field (defaults to `[]` when absent — older controllers omit it) carries one
+`MqttHostPackageHostState` entry per host that has at least one tracked host package for the tenant.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `host_id` | UUID | Host UUID |
+| `hostname` | String | Human-readable hostname |
+| `pending_count` | u32 | Number of packages where both versions are known and differ |
+| `total_count` | u32 | Total number of enabled, non-deactivated packages tracked for this host |
+| `update_in_progress` | bool | `true` while a `host_package_update_history` record is `pending` or `in_progress` for this host |
+
+The MQTT service publishes these to three additional retained topics per host:
+
+- `{prefix}/hosts/{host_id}/state` — `"N updates pending"` (when `pending_count > 0`) or `"up-to-date"`
+- `{prefix}/hosts/{host_id}/latest_version` — always `"up-to-date"`
+- `{prefix}/hosts/{host_id}/attributes` — `{"in_progress": bool, "pending_count": N}`
+
+When `ha_discovery = true`, the MQTT service also publishes an HA discovery config for a per-host
+`update` entity. See [Home Assistant Integration](../end-user/home-assistant-mqtt.md).
 
 When `ha_discovery = true` for an MQTT client, the MQTT service publishes HA discovery configs and retained
 state topics from this payload. The `update_in_progress` field is published to the
@@ -666,6 +699,48 @@ The controller rejects the request with an `error` message (no WS close) in the 
 - The software item, host, or host assignment does not exist or is deactivated.
 - The host has no approved agent linked.
 - An update with status `pending` or `in_progress` already exists for the same `(host_id, software_item_id)` pair.
+
+## `mqtt_trigger_host_package_update` Payload
+
+Sent by the MQTT service to the controller when a Home Assistant user presses **Install** on the
+per-host packages update entity. The controller finds all outdated host packages for the host and
+dispatches a single `execute_batch_host_package_update` to the agent.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 3,
+  "type": "mqtt_trigger_host_package_update",
+  "tenant_id": "550e8400-e29b-41d4-a716-446655440001",
+  "host_id": "770e8400-e29b-41d4-a716-446655440003",
+  "mqtt_client_id": "880e8400-e29b-41d4-a716-446655440004"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `tenant_id` | UUID | Tenant scope — must match an assigned tenant for this MQTT service |
+| `host_id` | UUID | The host whose outdated packages should all be updated |
+| `mqtt_client_id` | UUID | The MQTT client that received the Install command; stored as `actor_id` in `host_package_update_history` |
+
+The controller:
+
+1. Validates that `tenant_id` is assigned to this MQTT service instance.
+2. Loads all enabled, non-deactivated host packages where `installed_version != latest_version` (both must be known).
+3. Guards against a concurrent batch already `pending` or `in_progress` for this host.
+4. Creates one `update_batch` and one `host_package_update_history` row per outdated package (both inside a transaction).
+5. Groups packages by `plugin_config_id` and sends one `execute_batch_host_package_update` per group to the agent.
+6. Immediately pushes a `software_states` message so MQTT/HA reflects `update_in_progress: true`.
+
+The controller responds with an `error` message (no WS close) in the following cases:
+
+- `tenant_id` is not assigned to this MQTT service instance.
+- No outdated packages exist for the host (nothing to do).
+- A batch is already `pending` or `in_progress` for this host.
+- The host has no connected agent.
+
+The resulting `update_batch` record has `actor_type = "mqtt"`, `actor_id = <mqtt_client_id>`, and
+`batch_type = "host_package"`. Each `host_package_update_history` row gets the same actor attribution.
 
 ## Controller–Controller Messages (NATS only)
 

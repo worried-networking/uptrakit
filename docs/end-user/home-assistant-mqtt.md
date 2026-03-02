@@ -6,6 +6,10 @@ item to the broker automatically. Home Assistant Discovery is an optional layer 
 `update` entities in Home Assistant — one per tracked software item per host — so you can view versions
 and trigger updates from the Home Assistant UI.
 
+Uptrakit also publishes a **per-host packages entity**: a single `update` entity per host summarising
+the overall state of all auto-discovered host packages (APT packages, Homebrew formulae, npm globals,
+etc.) on that host. See [Host Package Update Entities](#host-package-update-entities) below.
+
 ## MQTT State Topics (always active)
 
 Once an MQTT client is **enabled** and connected to the broker, Uptrakit publishes the following retained
@@ -17,6 +21,16 @@ topics for every `(software item, host)` pair regardless of whether Home Assista
 | `{prefix}/update/{item_id}/{host_id}/latest_version` | ✓ | Latest available version string (empty if unknown) |
 | `{prefix}/update/{item_id}/{host_id}/attributes` | ✓ | JSON attributes: `{"in_progress": true/false}` |
 | `{prefix}/update/{item_id}/{host_id}/set` | — | Command topic — publish `"install"` to trigger an update |
+
+Additionally, Uptrakit publishes the following retained topics for every **host** that has at least one
+tracked host package:
+
+| Topic | Retained | Purpose |
+| --- | :---: | --- |
+| `{prefix}/hosts/{host_id}/state` | ✓ | `"N updates pending"` or `"up-to-date"` |
+| `{prefix}/hosts/{host_id}/latest_version` | ✓ | Always `"up-to-date"` |
+| `{prefix}/hosts/{host_id}/attributes` | ✓ | JSON: `{"in_progress": bool, "pending_count": N}` |
+| `{prefix}/hosts/{host_id}/set` | — | Command topic — publish `"install"` to update all outdated packages |
 
 Where `{prefix}` is the **Topic Prefix** configured on the MQTT client (default: `uptrakit`).
 
@@ -126,6 +140,70 @@ result (completed or failed), Uptrakit publishes updated state topics including 
 > **Note:** Uptrakit never triggers updates automatically. Update execution always requires an explicit
 > user action — from the web UI, CLI, or Home Assistant.
 
+## Host Package Update Entities
+
+In addition to per-software-item entities, Uptrakit creates one Home Assistant `update` entity **per
+host** summarising that host's overall host package status. This entity represents auto-discovered
+packages (APT, Homebrew, npm, etc.) grouped at the host level.
+
+### When Is the Entity Created
+
+A host package entity is published when:
+
+- The host has at least one **enabled**, non-deactivated host package tracked.
+- The MQTT client is connected and has the host's tenant assigned.
+
+If a host has no tracked packages, no entity is published for it.
+
+### What the Entity Shows
+
+| State | Meaning |
+| --- | --- |
+| `"N updates pending"` | N packages have a known newer version available |
+| `"up-to-date"` | All packages are at their latest known version |
+
+Home Assistant shows the **Update available** badge whenever `installed_version != latest_version`
+(i.e. `state != "up-to-date"`).
+
+The entity also exposes two attributes:
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `pending_count` | integer | Number of packages with an available update |
+| `in_progress` | boolean | `true` while a batch update is pending or running |
+
+### Triggering a Host Package Update from Home Assistant
+
+When at least one package update is available, an **Install** button appears on the entity card.
+Pressing it sends an MQTT command to the `{prefix}/hosts/{host_id}/set` topic with the value
+`"install"`.
+
+Uptrakit validates the request and, if accepted:
+
+1. Finds all host packages on the host where `installed_version != latest_version` (both must be known).
+2. Creates a `host_package_update_history` record per package and a single `update_batch`.
+3. Sends an `execute_batch_host_package_update` command to the agent for each plugin group.
+4. Immediately sets `in_progress: true` in the `attributes` topic so the HA spinner appears.
+
+Once the agent completes the update, Uptrakit updates installed versions and publishes fresh state
+topics, returning `in_progress: false` and recalculating `pending_count`.
+
+> **Note:** The batch always includes all currently outdated packages. It is not possible to select
+> individual packages via the HA Install button. Individual package control is available via the
+> Uptrakit web UI.
+
+### Device and Entity Naming
+
+Each host package entity uses:
+
+- **Device**: one per host — `identifiers: ["uptrakit_host_{tenant_id_hex}_{host_id_hex}"]`,
+  `name: {hostname}`
+- **Entity unique ID**: `uptrakit_pkgs_{tenant_id_hex}_{host_id_hex}`
+- **Entity name**: `{hostname} packages`
+- **Default entity ID**: `update.{host_slug}_packages`
+
+Where `{tenant_id_hex}` and `{host_id_hex}` are the UUID strings with dashes removed.
+
 ## Reconnect Resilience
 
 If the MQTT broker restarts or the connection is interrupted, Uptrakit automatically republishes all
@@ -177,13 +255,16 @@ the `settings mqtt create` and `settings mqtt update` subcommands.
 
 - MQTT credentials (username, password, CA certificate) are stored encrypted at rest using AES-256-GCM.
   See [Secrets and Encryption](../security/secrets-and-encryption.md).
-- The MQTT command topics that accept Install commands are scoped per `(software item, host)` and are
-  accessible to anyone with publish access to the broker. Ensure your broker uses authentication and
-  access control to limit who can publish to Uptrakit command topics.
+- The MQTT command topics that accept Install commands are scoped per entity and are accessible to anyone
+  with publish access to the broker. Ensure your broker uses authentication and access control to limit
+  who can publish to Uptrakit command topics.
+  - Software item command topics: `{prefix}/update/{item_id}/{host_id}/set`
+  - Host package command topics: `{prefix}/hosts/{host_id}/set`
 - Update requests received via MQTT are validated by the controller (same checks as REST API triggers):
-  - Tenant scope verification (the MQTT client must be assigned the same tenant as the software item).
+  - Tenant scope verification (the MQTT client must be assigned the same tenant as the target resource).
   - Host assignment and agent approval checks.
-  - Duplicate update prevention (no two concurrent updates for the same `(host, software item)` pair).
+  - Duplicate update prevention (no two concurrent batches for the same host; no two concurrent updates
+    for the same `(host, software item)` pair).
 
 ## Troubleshooting
 

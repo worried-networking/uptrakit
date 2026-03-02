@@ -530,6 +530,7 @@ for user review. Key invariants:
 
 The MQTT service can publish [Home Assistant MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery)
 topics for each tracked software item, creating `update` entities in HA — one per `(software_item, host)` pair.
+It also publishes **one per-host packages entity** summarising all auto-discovered host packages for that host.
 
 Key invariants:
 
@@ -540,10 +541,11 @@ Key invariants:
 2. **State push is controller-initiated.** The controller sends `SoftwareStates` (wire type
    `software_states`) to MQTT services whenever version data changes. Push triggers: version check
    completed, update triggered (REST/MQTT/scheduler), `update_started` received from agent, update
-   result received. The `update_in_progress` field in each host entry reflects whether a `Pending` or
-   `InProgress` update exists at query time. The MQTT service stores the states in memory and publishes
-   state, `latest_version`, and `attributes` (JSON `in_progress` flag) retained topics to the broker
-   for **all** connected clients, plus HA discovery config topics for HA-enabled clients.
+   result received, host package batch triggered or completed. The `update_in_progress` field in each
+   host entry reflects whether a `Pending` or `InProgress` update exists at query time. The MQTT
+   service stores the states in memory and publishes state, `latest_version`, and `attributes` (JSON
+   `in_progress` flag) retained topics to the broker for **all** connected clients, plus HA discovery
+   config topics for HA-enabled clients.
 3. **`SoftwareStates` is safe for cross-controller delivery.** It contains no credentials and is published
    to NATS (when configured) with `target_capability = "mqtt_bridge"` so only MQTT services receive it.
 4. **Reconnect resilience.** On every `ConnAck` the MQTT service emits a `Reconnected` event, causing
@@ -553,17 +555,24 @@ Key invariants:
    (birth message). The MQTT service subscribes to this topic and republishes **only** the HA discovery
    config topics when `"online"` is received (`HaOnline` event). State and version topics are retained on
    the broker and do not need re-sending after an HA restart.
-6. **Updates triggered via MQTT.** When a user presses Install in HA, HA publishes `"install"` to the
-   entity's command topic. The MQTT service resolves `to_version` from the in-memory state cache and
-   sends `ServiceMessage::MqttTriggerUpdate` to the controller. The controller validates the request
-   and dispatches `execute_update` to the agent. On failure the controller sends `error` back (soft
-   error — WebSocket is not closed).
-7. **Actor attribution.** Updates triggered via MQTT have `actor_type = "mqtt"` and
-   `actor_id = <mqtt_client_id>` in the `update_history` record.
+6. **Updates triggered via MQTT (software items).** When a user presses Install in HA on a software-item
+   entity, HA publishes `"install"` to the entity's command topic. The MQTT service resolves `to_version`
+   from the in-memory state cache and sends `ServiceMessage::MqttTriggerUpdate` to the controller. The
+   controller validates the request and dispatches `execute_update` to the agent. On failure the
+   controller sends `error` back (soft error — WebSocket is not closed).
+7. **Updates triggered via MQTT (host packages).** When a user presses Install in HA on the per-host
+   packages entity, the MQTT service sends `ServiceMessage::MqttTriggerHostPackageUpdate` to the
+   controller. The controller finds all outdated host packages, creates an `update_batch`, and dispatches
+   `execute_batch_host_package_update` to the agent. On completion the controller pushes `software_states`
+   again to reflect the updated `installed_version` values and `update_in_progress = false`.
+8. **Actor attribution.** Updates triggered via MQTT have `actor_type = "mqtt"` and
+   `actor_id = <mqtt_client_id>` in the `update_history` / `host_package_update_history` record.
 
 #### MQTT topic scheme
 
 All topics use the MQTT client's `topic_prefix` field.
+
+**Software item topics** (`{t}` = tenant UUID hex, `{i}` = item UUID hex, `{h}` = host UUID hex):
 
 | Topic | Retained | Direction | Purpose |
 | --- | :---: | --- | --- |
@@ -574,30 +583,35 @@ All topics use the MQTT client's `topic_prefix` field.
 | `{ha_prefix}/update/uptrakit_{t}_{i}_{h}/config` | ✓ | publish | HA discovery config (JSON) |
 | `{ha_prefix}/status` | — | subscribe | HA birth/will (`"online"` / `"offline"`) |
 
-`{t}`, `{i}`, `{h}` are UUID hex strings with dashes removed. The `unique_id` format is
-`uptrakit_{t}_{i}_{h}`.
+**Host package topics** (`{t}` = tenant UUID hex, `{h}` = host UUID hex):
 
-Each software item is modelled as a separate HA device identified by `uptrakit_{t}_{i}` and named
-after the software item. Entities within that device are named after the hostname. A
-`default_entity_id` of the form `{item_slug}_on_{host_slug}` is included in every discovery config
-so HA assigns a stable, human-readable entity ID on first registration. Slugs are lowercase with
-non-alphanumeric characters replaced by underscores (consecutive separators collapsed). The
-`default_entity_id` is only applied by HA when the entity is first created; existing registrations
-(matched by `unique_id`) are unaffected.
+| Topic | Retained | Direction | Purpose |
+| --- | :---: | --- | --- |
+| `{prefix}/hosts/{host_id}/state` | ✓ | publish | `"N updates pending"` or `"up-to-date"` |
+| `{prefix}/hosts/{host_id}/latest_version` | ✓ | publish | Always `"up-to-date"` |
+| `{prefix}/hosts/{host_id}/attributes` | ✓ | publish | JSON: `{"in_progress": bool, "pending_count": N}` |
+| `{prefix}/hosts/{host_id}/set` | — | subscribe | Receives `"install"` → triggers batch update |
+| `{ha_prefix}/update/uptrakit_pkgs_{t}_{h}/config` | ✓ | publish | HA discovery config for host packages entity |
+
+Software item entities: device `uptrakit_{t}_{i}`, unique_id `uptrakit_{t}_{i}_{h}`,
+`default_entity_id` = `{item_slug}_on_{host_slug}`.
+
+Host package entities: device `uptrakit_host_{t}_{h}` (name = hostname), unique_id `uptrakit_pkgs_{t}_{h}`,
+entity name `"{hostname} packages"`, `default_entity_id` = `{host_slug}_packages`.
 
 #### Key files
 
 | File | Purpose |
 | --- | --- |
-| `crates/core/mqtt/src/ha_discovery.rs` | Pure HA topic/config helpers + `parse_command_topic` |
-| `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager`: software state cache, `publish_ha_state_full`, `resolve_update_trigger` |
+| `crates/core/mqtt/src/ha_discovery.rs` | Pure HA topic/config helpers for both software items and host packages; `parse_command_topic`, `parse_host_packages_command_topic` |
+| `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager`: software state + host package state cache, `publish_host_package_states`, `resolve_update_trigger`, `resolve_host_package_update_trigger` |
 | `crates/core/mqtt/src/mqtt_client.rs` | `MqttServiceEvent` enum, `publish_retained`, `subscribe_topic`, HA status topic handling |
-| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler |
-| `crates/ui/web-api/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items with per-host version data |
-| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish) |
-| `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` handler; states push after `TenantAssignments`, `VersionCheckResults`, and `UpdateResult` |
+| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `MqttTriggerHostPackageUpdate` dispatch |
+| `crates/ui/web-api/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items + `load_host_package_host_states_for_tenant` |
+| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish); merges host package states |
+| `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` and `MqttTriggerHostPackageUpdate` handlers |
 | `crates/ui/web-api/src/queries/update_triggers.rs` | `trigger_update_for_host` (refactored into `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent` layers); shared by REST, MQTT, and batch handlers |
-| `crates/ui/web-api/src/queries/update_batches.rs` | Batch update query logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch` |
+| `crates/ui/web-api/src/queries/update_batches.rs` | Batch update logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch`, `trigger_all_host_package_updates_for_host` |
 | `crates/ui/web-api/src/routes/update_batches.rs` | Batch update route handlers + SSE batch progress endpoint |
 | `crates/ui/web-api/src/batch_progress_broadcaster.rs` | `BatchProgressBroadcaster`: per-batch `broadcast` channels for SSE streaming |
 | `crates/shared/web-api-types/src/update_batches.rs` | Batch API types (`HostBatchUpdateRequest`, `ItemBatchUpdateRequest`, `BatchUpdateResponse`, etc.) |
@@ -605,8 +619,8 @@ non-alphanumeric characters replaced by underscores (consecutive separators coll
 | `crates/shared/openapi-client/src/update_batches.rs` | Typed HTTP client methods for batch endpoints |
 | `crates/shared/openapi-client/src/batch_progress_stream.rs` | SSE streaming client for batch progress events |
 | `crates/ui/cli/src/commands/batch_update.rs` | CLI batch update commands |
-| `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide |
-| `docs/api/wire-protocol.md` | `software_states` and `mqtt_trigger_update` payload docs |
+| `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide including host package entities |
+| `docs/api/wire-protocol.md` | `software_states`, `mqtt_trigger_update`, and `mqtt_trigger_host_package_update` payload docs |
 | `crates/shared/wire/asyncapi.yaml` | AsyncAPI schemas for both new messages |
 
 ### Service ping interval
