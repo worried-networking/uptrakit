@@ -276,9 +276,7 @@ impl Plugin for GitLabPlugin {
                 .map(|e| e.message)
                 .unwrap_or(body);
 
-            bail!(PluginError::Configuration(format!(
-                "GitLab API error: {status} {message}"
-            )));
+            return Err(report!(GitLabError::ApiError { status, message })).context_to();
         }
 
         let releases: Vec<GitLabRelease> = response.json().await.map_err(|e| {

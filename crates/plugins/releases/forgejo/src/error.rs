@@ -10,7 +10,10 @@ pub enum ForgejoError {
     Request(String),
 
     #[error("Forgejo API error: {status} {message}")]
-    ApiError { status: u16, message: String },
+    ApiError {
+        status: reqwest::StatusCode,
+        message: String,
+    },
 
     #[error("Forgejo API rate limit exceeded")]
     RateLimited,
@@ -34,3 +37,32 @@ pub type Result<T> = std::result::Result<T, Report<ForgejoError>>;
 impl_report_conversion!(reqwest::Error => ForgejoError, |e| ForgejoError::Request(e.to_string()));
 impl_report_conversion!(PluginError => ForgejoError, |e| ForgejoError::Configuration(e.to_string()));
 impl_report_conversion!(ForgejoError => PluginError, |e| PluginError::PluginInternal(e.to_string()));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_api_error() {
+        let err = ForgejoError::ApiError {
+            status: reqwest::StatusCode::UNAUTHORIZED,
+            message: "token required".to_string(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "Forgejo API error: 401 Unauthorized token required"
+        );
+    }
+
+    #[test]
+    fn display_rate_limited() {
+        let err = ForgejoError::RateLimited;
+        assert_eq!(err.to_string(), "Forgejo API rate limit exceeded");
+    }
+
+    #[test]
+    fn display_configuration() {
+        let err = ForgejoError::Configuration("api_base_url required".to_string());
+        assert_eq!(err.to_string(), "configuration error: api_base_url required");
+    }
+}

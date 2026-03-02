@@ -20,15 +20,16 @@ use crate::tag::strip_tag_prefix;
 /// - Both `owner` and `repo` parts must be non-empty.
 /// - Neither part may contain `..` (path traversal guard).
 pub fn parse_owner_repo(package_identifier: &str) -> Result<(&str, &str)> {
-    let slash_count = package_identifier.chars().filter(|&c| c == '/').count();
-    if slash_count != 1 {
+    let Some((owner, repo)) = package_identifier.split_once('/') else {
+        bail!(ForgejoError::Configuration(format!(
+            "package_identifier must be 'owner/repo' (got '{package_identifier}')"
+        )));
+    };
+    if repo.contains('/') {
         bail!(ForgejoError::Configuration(format!(
             "package_identifier must be 'owner/repo' (got '{package_identifier}')"
         )));
     }
-    let slash = package_identifier.find('/').unwrap();
-    let owner = &package_identifier[..slash];
-    let repo = &package_identifier[slash + 1..];
     if owner.is_empty() {
         bail!(ForgejoError::Configuration(
             "package_identifier owner must not be empty".to_string()
@@ -279,9 +280,7 @@ impl Plugin for ForgejoPlugin {
                 .map(|e| e.message)
                 .unwrap_or(body);
 
-            bail!(PluginError::Configuration(format!(
-                "Forgejo API error: {status} {message}"
-            )));
+            return Err(report!(ForgejoError::ApiError { status, message })).context_to();
         }
 
         let releases: Vec<ForgejoRelease> = response.json().await.map_err(|e| {
