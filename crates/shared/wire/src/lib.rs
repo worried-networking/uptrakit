@@ -285,6 +285,11 @@ pub enum ServiceMessage {
     ReleaseTenants(MqttReleaseTenantsPayload),
     MqttClientStatus(MqttClientStatusPayload),
     MqttTriggerUpdate(MqttUpdateTriggerPayload),
+    /// MQTT service → Controller: trigger a batch update of all outdated host packages on a host.
+    ///
+    /// Sent when a Home Assistant user presses "Install" on a host packages update entity.
+    #[serde(rename = "mqtt_trigger_host_package_update")]
+    MqttTriggerHostPackageUpdate(MqttTriggerHostPackageUpdatePayload),
     /// Unknown message type from a newer service build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
@@ -1109,6 +1114,14 @@ pub struct MqttSoftwareStatesPayload {
     pub tenant_id: Uuid,
     /// All active software items for the tenant with per-host version data.
     pub items: Vec<MqttSoftwareStateItem>,
+    /// Per-host aggregate state of tracked host packages.
+    ///
+    /// Each entry summarises all enabled, non-deactivated host packages for
+    /// one host. Only hosts with at least one tracked package are included.
+    /// Defaults to an empty list on deserialization for backward compatibility
+    /// with older MQTT services that do not know about host packages.
+    #[serde(default)]
+    pub host_package_hosts: Vec<MqttHostPackageHostState>,
 }
 
 /// A single software item entry in [`MqttSoftwareStatesPayload`].
@@ -1166,6 +1179,39 @@ pub struct MqttUpdateTriggerPayload {
     pub host_id: Uuid,
     /// Target version to install.
     pub to_version: String,
+    /// MQTT client UUID that initiated the trigger (used as actor_id).
+    pub mqtt_client_id: Uuid,
+}
+
+/// Per-host aggregate state of tracked host packages.
+///
+/// Included in [`MqttSoftwareStatesPayload`] to surface overall package update
+/// status per host to Home Assistant via a single `update` entity per host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttHostPackageHostState {
+    /// Host UUID.
+    pub host_id: Uuid,
+    /// Human-readable hostname.
+    pub hostname: String,
+    /// Count of packages where `installed_version != latest_version` (both known).
+    pub pending_count: u32,
+    /// Total count of enabled, non-deactivated packages for this host.
+    pub total_count: u32,
+    /// Whether a batch update is currently pending or in progress for this host.
+    pub update_in_progress: bool,
+}
+
+/// MQTT service → Controller: trigger a batch update of all outdated host packages on a host.
+///
+/// Sent when a Home Assistant user presses "Install" on a host packages update
+/// entity. The controller resolves the latest versions for all outdated packages
+/// at trigger time and dispatches a `ExecuteBatchHostPackageUpdate` to the agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttTriggerHostPackageUpdatePayload {
+    /// Tenant UUID (for validation).
+    pub tenant_id: Uuid,
+    /// Host whose packages should be updated.
+    pub host_id: Uuid,
     /// MQTT client UUID that initiated the trigger (used as actor_id).
     pub mqtt_client_id: Uuid,
 }
@@ -3697,6 +3743,65 @@ mod tests {
             },
         ));
         spec.validate("batchHostPackageUpdateResultPayload", &json);
+    }
+
+    // =========================================================================
+    // Host package MQTT types tests
+    // =========================================================================
+
+    #[test]
+    fn mqtt_host_package_host_state_roundtrip() {
+        let state = MqttHostPackageHostState {
+            host_id: TEST_UUID_1,
+            hostname: "myserver.local".to_string(),
+            pending_count: 3,
+            total_count: 42,
+            update_in_progress: false,
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let deserialized: MqttHostPackageHostState = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, state);
+    }
+
+    #[test]
+    fn mqtt_software_states_payload_default_host_package_hosts() {
+        // Deserializing a payload without host_package_hosts should default to empty vec.
+        let json = r#"{"tenant_id":"11111111-1111-1111-1111-111111111111","items":[]}"#;
+        let payload: MqttSoftwareStatesPayload = serde_json::from_str(json).unwrap();
+        assert!(payload.host_package_hosts.is_empty());
+    }
+
+    #[test]
+    fn mqtt_software_states_payload_with_host_package_hosts_roundtrip() {
+        let payload = MqttSoftwareStatesPayload {
+            tenant_id: TEST_UUID_1,
+            items: vec![],
+            host_package_hosts: vec![MqttHostPackageHostState {
+                host_id: TEST_UUID_2,
+                hostname: "host1".to_string(),
+                pending_count: 5,
+                total_count: 100,
+                update_in_progress: true,
+            }],
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let deserialized: MqttSoftwareStatesPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, payload);
+    }
+
+    #[test]
+    fn mqtt_trigger_host_package_update_roundtrip() {
+        let msg = ServiceMessage::MqttTriggerHostPackageUpdate(
+            MqttTriggerHostPackageUpdatePayload {
+                tenant_id: TEST_UUID_1,
+                host_id: TEST_UUID_2,
+                mqtt_client_id: TEST_UUID_3,
+            },
+        );
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"mqtt_trigger_host_package_update""#));
+        let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
     }
 
     // =========================================================================
