@@ -378,7 +378,21 @@ async fn run_authenticated_with_reconnect(
     handler: &mut impl ServiceHandler,
 ) -> Result<()> {
     let mut reconnect_backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+
+    // Seed from the bootstrapped CA bytes. Updated each iteration from the
+    // in-memory identity state so that a `CaBundleUpdated` message received
+    // during a prior connection (which calls `identity.save_ca_cert()`) is
+    // picked up without a restart.
+    let mut current_ca: Option<Vec<u8>> = ca_pem.map(<[u8]>::to_vec);
+
     loop {
+        // Refresh the CA from the in-memory identity cache.
+        // `save_ca_cert` (called by `CaBundleUpdated` and `check_ca_staleness`)
+        // keeps `identity.ca_cert_pem()` current between reconnects.
+        if let Some(s) = identity.ca_cert_pem() {
+            current_ca = Some(s.as_bytes().to_vec());
+        }
+
         // Rebuild the mTLS connector each iteration (certificates may have rotated).
         let cert_pem = identity
             .cert_pem()
@@ -387,7 +401,7 @@ async fn run_authenticated_with_reconnect(
             .key_pem()
             .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotCertified)))?;
 
-        let mtls_connector = match ca_pem {
+        let mtls_connector = match current_ca.as_deref() {
             Some(pem) => crate::tls::build_tls_connector_with_client_cert(pem, cert_pem, &key_pem)?,
             None => {
                 crate::tls::build_system_trust_tls_connector_with_client_cert(cert_pem, &key_pem)?
@@ -397,7 +411,7 @@ async fn run_authenticated_with_reconnect(
         let ctx = crate::event_loop::EventLoopContext {
             base_url,
             pki_addr,
-            ca_pem,
+            ca_pem: current_ca.as_deref(),
         };
 
         match crate::event_loop::run_event_loop(
