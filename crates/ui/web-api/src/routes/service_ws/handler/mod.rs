@@ -355,7 +355,7 @@ pub(crate) async fn handle_authenticated_loop(
                             // -------------------------------------------------
                             // Ping (all capabilities)
                             // -------------------------------------------------
-                            ServiceMessage::Ping(PingPayload { service_ts }) => {
+                            ServiceMessage::Ping(PingPayload { service_ts, .. }) => {
                                 if messages::handle_ping(sink, out_seq, state, service_id, service_ts, lease_coordinator.as_ref()).await.is_break() {
                                     break;
                                 }
@@ -631,7 +631,7 @@ pub(crate) async fn handle_enrolled_loop(
                             };
 
                         match service_msg {
-                            ServiceMessage::Ping(PingPayload { service_ts }) => {
+                            ServiceMessage::Ping(PingPayload { service_ts, .. }) => {
                                 let Ok(controller_ts) =
                                     send_pong(sink, out_seq, service_ts).await
                                 else {

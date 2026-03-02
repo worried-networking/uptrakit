@@ -110,7 +110,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
             _ = async { if let Some(t) = ping_timer.as_mut() { t.tick().await; } }, if ping_timer.is_some() => {
                 let service_ts = now_millis();
                 tracing::trace!(service_ts, "sending ping");
-                conn.send(ServiceMessage::Ping(PingPayload { service_ts }))
+                conn.send(ServiceMessage::Ping(PingPayload::new(service_ts)))
                     .await
                     .context_to::<LoopError>()?;
             }

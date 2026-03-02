@@ -222,10 +222,7 @@ pub(crate) async fn send_pong(
     service_ts: i64,
 ) -> Result<i64, ()> {
     let controller_ts = now_millis();
-    let response = ControllerMessage::Pong(PongPayload {
-        service_ts,
-        controller_ts,
-    });
+    let response = ControllerMessage::Pong(PongPayload::new(service_ts, controller_ts));
     let Some(json) = serialize_controller_msg(out_seq, response) else {
         return Err(());
     };

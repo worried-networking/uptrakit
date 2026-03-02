@@ -150,7 +150,7 @@ pub(super) async fn handle_renew_certificate(
             state
                 .notification_service
                 .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-                    RequestCrlRenewalPayload {},
+                    RequestCrlRenewalPayload::default(),
                 ))
                 .await;
             tracing::info!(

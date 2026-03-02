@@ -437,7 +437,7 @@ async fn enroll_service(
                 enrollment_secret: uptrakit_internal_wire::SecretString::new(
                     enroll_result.enrollment_secret,
                 ),
-                status: wire_status,
+                status: wire_status.clone(),
             });
             let json = serialize_controller_msg(out_seq, enrolled_msg)?;
             if sink.send(Message::Text(json.into())).await.is_err() {

@@ -70,7 +70,7 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
                 self.scheduler_id,
                 None,
                 Some("controller"),
-                ControllerMessage::RequestCrlRenewal(RequestCrlRenewalPayload {}),
+                ControllerMessage::RequestCrlRenewal(RequestCrlRenewalPayload::default()),
             )
             .await;
     }

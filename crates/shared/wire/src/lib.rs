@@ -186,14 +186,67 @@ impl<'de> Deserialize<'de> for Capability {
 }
 
 /// Enrollment status returned in the `Enrolled` message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::Display)]
-#[cfg_attr(test, derive(strum::EnumIter))]
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` is a catch-all for status strings received from a newer
+/// controller that this build does not yet recognise. Serde deserialization
+/// is infallible: an unknown string becomes `Other(...)` rather than a parse
+/// error, allowing older agents to survive rolling upgrades without dropping
+/// the enclosing `Enrolled` message.
 #[non_exhaustive]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnrollmentStatus {
     Pending,
     Approved,
+    /// An unknown status received from a newer peer.
+    ///
+    /// The inner string is the raw snake_case value as it appeared on the wire.
+    Other(String),
+}
+
+impl EnrollmentStatus {
+    /// Returns the string representation.
+    ///
+    /// For [`EnrollmentStatus::Other`], returns the inner string as-is.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending => "pending",
+            Self::Approved => "approved",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl fmt::Display for EnrollmentStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<String> for EnrollmentStatus {
+    /// Converts a snake_case string to an enrollment status.
+    ///
+    /// Unknown strings map to [`EnrollmentStatus::Other`] rather than failing.
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "pending" => Self::Pending,
+            "approved" => Self::Approved,
+            _ => Self::Other(s),
+        }
+    }
+}
+
+impl Serialize for EnrollmentStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for EnrollmentStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(EnrollmentStatus::from)
+    }
 }
 
 /// A single hook command to execute on the agent.
@@ -401,19 +454,38 @@ impl ControllerMessage {
 }
 
 /// Payload for ping messages.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PingPayload {
     /// Timestamp when the service sent the ping.
     pub service_ts: Timestamp,
 }
 
+impl PingPayload {
+    /// Creates a new `PingPayload` with the given service timestamp.
+    pub fn new(service_ts: Timestamp) -> Self {
+        Self { service_ts }
+    }
+}
+
 /// Payload for pong messages.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PongPayload {
     /// Original timestamp from the service's ping.
     pub service_ts: Timestamp,
     /// Timestamp when the controller processed the ping.
     pub controller_ts: Timestamp,
+}
+
+impl PongPayload {
+    /// Creates a new `PongPayload` with the given service and controller timestamps.
+    pub fn new(service_ts: Timestamp, controller_ts: Timestamp) -> Self {
+        Self {
+            service_ts,
+            controller_ts,
+        }
+    }
 }
 
 /// Information about the host machine running the agent.
@@ -537,10 +609,16 @@ mod utc_datetime_millis {
 }
 
 /// Machine-readable error code sent in `ErrorPayload`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::Display)]
+///
+/// # Wire forward-compatibility
+///
+/// `Other(String)` is a catch-all for error codes received from a newer
+/// controller that this build does not yet recognise. Serde deserialization
+/// is infallible: an unknown string becomes `Other(...)` rather than a parse
+/// error, allowing older agents to survive rolling upgrades without dropping
+/// the enclosing `Error` message.
 #[non_exhaustive]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorCode {
     /// Malformed or unexpected message from the service.
     BadRequest,
@@ -556,6 +634,64 @@ pub enum ErrorCode {
     InternalError,
     /// Message sequence number mismatch (replay protection).
     SequenceError,
+    /// An unknown error code received from a newer peer.
+    ///
+    /// The inner string is the raw snake_case value as it appeared on the wire.
+    Other(String),
+}
+
+impl ErrorCode {
+    /// Returns the string representation.
+    ///
+    /// For [`ErrorCode::Other`], returns the inner string as-is.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::BadRequest => "bad_request",
+            Self::EnrollmentFailed => "enrollment_failed",
+            Self::NotApproved => "not_approved",
+            Self::Forbidden => "forbidden",
+            Self::CertificateError => "certificate_error",
+            Self::InternalError => "internal_error",
+            Self::SequenceError => "sequence_error",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<String> for ErrorCode {
+    /// Converts a snake_case string to an error code.
+    ///
+    /// Unknown strings map to [`ErrorCode::Other`] rather than failing.
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "bad_request" => Self::BadRequest,
+            "enrollment_failed" => Self::EnrollmentFailed,
+            "not_approved" => Self::NotApproved,
+            "forbidden" => Self::Forbidden,
+            "certificate_error" => Self::CertificateError,
+            "internal_error" => Self::InternalError,
+            "sequence_error" => Self::SequenceError,
+            _ => Self::Other(s),
+        }
+    }
+}
+
+impl Serialize for ErrorCode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ErrorCode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(ErrorCode::from)
+    }
 }
 
 /// Payload for error responses.
@@ -1069,7 +1205,8 @@ pub struct RequestCaRotationPayload {
 /// Published via NATS to the `uptrakit.events.controller` subject by any
 /// controller that revokes a certificate or by the `CrlRenewal` scheduled
 /// task.  Receiving controllers fire `revocation_notify.notify_one()`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RequestCrlRenewalPayload {}
 
 /// Cross-controller token revocation event.
@@ -1408,7 +1545,6 @@ pub struct SeqError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strum::IntoEnumIterator;
 
     const TEST_UUID_1: Uuid = Uuid::from_bytes([
         0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00,
@@ -2437,7 +2573,7 @@ mod tests {
 
     #[test]
     fn enrollment_status_all_variants() {
-        for status in EnrollmentStatus::iter() {
+        for status in [EnrollmentStatus::Pending, EnrollmentStatus::Approved] {
             let json = serde_json::to_string(&status).unwrap();
             let deserialized: EnrollmentStatus = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, status);
@@ -2465,14 +2601,32 @@ mod tests {
 
     #[test]
     fn enrollment_status_display_matches_serde() {
-        for status in EnrollmentStatus::iter() {
-            let serde_str = serde_json::to_value(status).unwrap();
+        for status in [EnrollmentStatus::Pending, EnrollmentStatus::Approved] {
+            let serde_str = serde_json::to_value(&status).unwrap();
             assert_eq!(
                 status.to_string(),
                 serde_str.as_str().unwrap(),
                 "Display must match serde for {status:?}"
             );
         }
+    }
+
+    #[test]
+    fn enrollment_status_unknown_becomes_other() {
+        let result: EnrollmentStatus = serde_json::from_str(r#""suspended""#).unwrap();
+        assert_eq!(result, EnrollmentStatus::Other("suspended".to_string()));
+    }
+
+    #[test]
+    fn enrollment_status_other_round_trip() {
+        let original = r#""future_status""#;
+        let deserialized: EnrollmentStatus = serde_json::from_str(original).unwrap();
+        assert_eq!(
+            deserialized,
+            EnrollmentStatus::Other("future_status".to_string())
+        );
+        let reserialized = serde_json::to_string(&deserialized).unwrap();
+        assert_eq!(reserialized, original);
     }
 
     #[test]
@@ -2486,19 +2640,14 @@ mod tests {
             ErrorCode::InternalError,
             ErrorCode::SequenceError,
         ] {
-            let serde_str = serde_json::to_value(code).unwrap();
+            let display = code.to_string();
+            let serde_str = serde_json::to_value(&code).unwrap();
             assert_eq!(
-                code.to_string(),
+                display,
                 serde_str.as_str().unwrap(),
                 "Display must match serde for {code:?}"
             );
         }
-    }
-
-    #[test]
-    fn enrollment_status_rejects_invalid() {
-        let result: std::result::Result<EnrollmentStatus, _> = serde_json::from_str(r#""invalid""#);
-        assert!(result.is_err());
     }
 
     #[test]
@@ -2575,9 +2724,18 @@ mod tests {
     }
 
     #[test]
-    fn error_code_rejects_invalid() {
-        let result: std::result::Result<ErrorCode, _> = serde_json::from_str(r#""unknown_code""#);
-        assert!(result.is_err());
+    fn error_code_unknown_becomes_other() {
+        let result: ErrorCode = serde_json::from_str(r#""unknown_code""#).unwrap();
+        assert_eq!(result, ErrorCode::Other("unknown_code".to_string()));
+    }
+
+    #[test]
+    fn error_code_other_round_trip() {
+        let original = r#""future_error""#;
+        let deserialized: ErrorCode = serde_json::from_str(original).unwrap();
+        assert_eq!(deserialized, ErrorCode::Other("future_error".to_string()));
+        let reserialized = serde_json::to_string(&deserialized).unwrap();
+        assert_eq!(reserialized, original);
     }
 
     #[test]
@@ -2589,6 +2747,7 @@ mod tests {
         assert_eq!(ErrorCode::CertificateError.to_string(), "certificate_error");
         assert_eq!(ErrorCode::InternalError.to_string(), "internal_error");
         assert_eq!(ErrorCode::SequenceError.to_string(), "sequence_error");
+        assert_eq!(ErrorCode::Other("custom".to_string()).to_string(), "custom");
     }
 
     #[test]

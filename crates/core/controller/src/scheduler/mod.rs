@@ -131,7 +131,7 @@ impl SchedulerNotifier for ControllerSchedulerNotifier {
         self.revocation_notify.notify_one();
         self.notification_service
             .publish_controller_event(ControllerMessage::RequestCrlRenewal(
-                RequestCrlRenewalPayload {},
+                RequestCrlRenewalPayload::default(),
             ))
             .await;
     }
