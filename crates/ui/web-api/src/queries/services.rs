@@ -67,6 +67,7 @@ fn model_to_response(m: service::Model) -> ServiceResponse {
         created_at: m.created_at,
         updated_at: m.updated_at,
         ping_interval_seconds: m.ping_interval_seconds.map(|v| v as u32),
+        cert_lifetime_hours: m.cert_lifetime_hours.map(|v| v as u32),
     }
 }
 
@@ -119,12 +120,19 @@ pub async fn get_active_service(
     Ok(svc.map(model_to_response))
 }
 
-/// Update `ping_interval_seconds`. `None` = clear the override.
-/// Returns `None` if not found.
+/// Update configurable service settings.
+///
+/// For both `ping_interval_seconds` and `cert_lifetime_hours`:
+/// - `None` — keep the current value (field not touched)
+/// - `Some(0)` — clear the override (set column to `NULL`)
+/// - `Some(v)` — set column to `v`
+///
+/// Returns `None` if the service is not found.
 pub async fn update_service_settings(
     tenant_db: &TenantDb,
     id: Uuid,
     ping_interval_seconds: Option<u32>,
+    cert_lifetime_hours: Option<u32>,
 ) -> Result<Option<ServiceResponse>> {
     let Some(svc) = tenant_db
         .find_by_id::<service::Entity, _>(id)
@@ -140,6 +148,11 @@ pub async fn update_service_settings(
     match ping_interval_seconds {
         Some(0) => active.ping_interval_seconds = Set(None),
         Some(v) => active.ping_interval_seconds = Set(Some(v as i32)),
+        None => {}
+    }
+    match cert_lifetime_hours {
+        Some(0) => active.cert_lifetime_hours = Set(None),
+        Some(v) => active.cert_lifetime_hours = Set(Some(v as i32)),
         None => {}
     }
     active.updated_at = Set(OffsetDateTime::now_utc());

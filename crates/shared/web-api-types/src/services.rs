@@ -41,6 +41,10 @@ pub struct ServiceResponse {
     /// service-profile default is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ping_interval_seconds: Option<u32>,
+    /// Per-service certificate lifetime override in hours. `None` means the
+    /// global default is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cert_lifetime_hours: Option<u32>,
 }
 
 /// Query parameters for listing services.
@@ -76,6 +80,11 @@ pub struct UpdateServiceRequest {
     /// override the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ping_interval_seconds: Option<u32>,
+    /// Per-service certificate lifetime in hours.
+    /// Omit to keep current value. Set to `0` to clear the override and revert
+    /// to the global default. Set to a positive value (1–17520) to override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cert_lifetime_hours: Option<u32>,
 }
 
 impl Validate for UpdateServiceRequest {
@@ -89,6 +98,16 @@ impl Validate for UpdateServiceRequest {
                     message: "ping_interval_seconds must be 0 (to clear) or at least 5".to_string(),
                 });
             }
+        }
+        if let Some(hours) = self.cert_lifetime_hours
+            && hours != 0
+            && !(1..=17_520u32).contains(&hours)
+        {
+            return Err(ValidationError {
+                field: "cert_lifetime_hours",
+                message: "cert_lifetime_hours must be 0 (to clear) or between 1 and 17520"
+                    .to_string(),
+            });
         }
         Ok(())
     }
@@ -128,6 +147,7 @@ mod tests {
             created_at: datetime!(2025-01-01 0:00:00 UTC),
             updated_at: datetime!(2025-06-01 12:00:00 UTC),
             ping_interval_seconds: Some(60),
+            cert_lifetime_hours: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ServiceResponse =
@@ -162,6 +182,7 @@ mod tests {
             created_at: datetime!(2025-01-01 0:00:00 UTC),
             updated_at: datetime!(2025-01-01 0:00:00 UTC),
             ping_interval_seconds: None,
+            cert_lifetime_hours: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ServiceResponse =
@@ -193,6 +214,7 @@ mod tests {
             created_at: datetime!(2025-01-01 0:00:00 UTC),
             updated_at: datetime!(2025-01-01 0:00:00 UTC),
             ping_interval_seconds: None,
+            cert_lifetime_hours: None,
         };
         let json_value =
             serde_json::to_value(&resp).expect("serialization to Value should succeed");
@@ -293,6 +315,7 @@ mod tests {
     fn update_service_request_with_ping_interval() {
         let req = UpdateServiceRequest {
             ping_interval_seconds: Some(60),
+            cert_lifetime_hours: None,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         assert!(json.contains(r#""ping_interval_seconds":60"#));
@@ -305,6 +328,7 @@ mod tests {
     fn update_service_request_without_ping_interval() {
         let req = UpdateServiceRequest {
             ping_interval_seconds: None,
+            cert_lifetime_hours: None,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         assert!(!json.contains("ping_interval_seconds"));
@@ -324,6 +348,7 @@ mod tests {
     fn validate_accepts_none_interval() {
         let req = UpdateServiceRequest {
             ping_interval_seconds: None,
+            cert_lifetime_hours: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -332,6 +357,7 @@ mod tests {
     fn validate_accepts_zero_interval_as_clear_sentinel() {
         let req = UpdateServiceRequest {
             ping_interval_seconds: Some(0),
+            cert_lifetime_hours: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -341,6 +367,7 @@ mod tests {
         for v in [5u32, 10, 60, 3600] {
             let req = UpdateServiceRequest {
                 ping_interval_seconds: Some(v),
+                cert_lifetime_hours: None,
             };
             assert!(req.validate().is_ok(), "expected ok for {v}");
         }
@@ -351,9 +378,100 @@ mod tests {
         for v in [1u32, 2, 3, 4] {
             let req = UpdateServiceRequest {
                 ping_interval_seconds: Some(v),
+                cert_lifetime_hours: None,
             };
             let err = req.validate().unwrap_err();
             assert_eq!(err.field, "ping_interval_seconds", "field mismatch for {v}");
         }
+    }
+
+    // ── cert_lifetime_hours ───────────────────────────────────────────
+
+    #[test]
+    fn service_response_includes_cert_lifetime_hours() {
+        let resp = ServiceResponse {
+            id: sample_uuid(),
+            capabilities: vec!["graceful_shutdown".into()],
+            service_label: "Agent".into(),
+            hostname: "host".to_string(),
+            friendly_name: "H".to_string(),
+            ip_address: None,
+            status: ServiceStatus::Approved,
+            client_version: None,
+            last_seen_at: None,
+            created_at: datetime!(2025-01-01 0:00:00 UTC),
+            updated_at: datetime!(2025-01-01 0:00:00 UTC),
+            ping_interval_seconds: None,
+            cert_lifetime_hours: Some(48),
+        };
+        let json = serde_json::to_string(&resp).expect("serialization should succeed");
+        assert!(json.contains(r#""cert_lifetime_hours":48"#));
+        let de: ServiceResponse =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(de.cert_lifetime_hours, Some(48));
+    }
+
+    #[test]
+    fn service_response_omits_cert_lifetime_hours_when_none() {
+        let resp = ServiceResponse {
+            id: sample_uuid(),
+            capabilities: vec!["graceful_shutdown".into()],
+            service_label: "Agent".into(),
+            hostname: "host".to_string(),
+            friendly_name: "H".to_string(),
+            ip_address: None,
+            status: ServiceStatus::Approved,
+            client_version: None,
+            last_seen_at: None,
+            created_at: datetime!(2025-01-01 0:00:00 UTC),
+            updated_at: datetime!(2025-01-01 0:00:00 UTC),
+            ping_interval_seconds: None,
+            cert_lifetime_hours: None,
+        };
+        let json = serde_json::to_string(&resp).expect("serialization should succeed");
+        assert!(!json.contains("cert_lifetime_hours"));
+    }
+
+    #[test]
+    fn update_service_request_with_cert_lifetime_hours() {
+        let req = UpdateServiceRequest {
+            ping_interval_seconds: None,
+            cert_lifetime_hours: Some(48),
+        };
+        let json = serde_json::to_string(&req).expect("serialization should succeed");
+        assert!(json.contains(r#""cert_lifetime_hours":48"#));
+        let parsed: UpdateServiceRequest =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(parsed.cert_lifetime_hours, Some(48));
+    }
+
+    #[test]
+    fn update_service_request_clear_cert_lifetime_with_zero() {
+        let json = r#"{"cert_lifetime_hours":0}"#;
+        let parsed: UpdateServiceRequest =
+            serde_json::from_str(json).expect("deserialization should succeed");
+        assert_eq!(parsed.cert_lifetime_hours, Some(0));
+        assert!(parsed.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_cert_lifetime_hours_in_range() {
+        for v in [1u32, 12, 48, 168, 17_520] {
+            let req = UpdateServiceRequest {
+                ping_interval_seconds: None,
+                cert_lifetime_hours: Some(v),
+            };
+            assert!(req.validate().is_ok(), "expected ok for {v}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_cert_lifetime_hours_above_max() {
+        let req = UpdateServiceRequest {
+            ping_interval_seconds: None,
+            cert_lifetime_hours: Some(17_521),
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "cert_lifetime_hours");
     }
 }

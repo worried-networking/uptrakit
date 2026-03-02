@@ -117,4 +117,18 @@ mod tests {
         let parsed: MergeAgentRequest = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed.source_id, req.source_id);
     }
+
+    #[test]
+    fn update_service_request_cert_lifetime_hours_round_trip() {
+        use uptrakit_web_api_types::services::UpdateServiceRequest;
+
+        let req = UpdateServiceRequest {
+            ping_interval_seconds: None,
+            cert_lifetime_hours: Some(48),
+        };
+        let json = serde_json::to_string(&req).expect("serialize");
+        assert!(json.contains(r#""cert_lifetime_hours":48"#));
+        let parsed: UpdateServiceRequest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed.cert_lifetime_hours, Some(48));
+    }
 }

@@ -110,8 +110,8 @@ fn sign_agent_csr(
     if lifetime > MAX_CERT_LIFETIME {
         tracing::warn!(
             agent_id = %agent_id,
-            requested_days = lifetime.whole_days(),
-            capped_days = MAX_CERT_LIFETIME.whole_days(),
+            requested_hours = lifetime.whole_hours(),
+            capped_hours = MAX_CERT_LIFETIME.whole_hours(),
             "Certificate lifetime capped to maximum allowed value"
         );
     }
@@ -216,15 +216,15 @@ mod tests {
         let agent_id = Uuid::now_v7();
         let csr_pem = generate_test_csr(&agent_id.to_string());
         let bundle = signer
-            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(7))
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::hours(168))
             .await
             .unwrap();
 
         assert!(bundle.cert_pem.contains("BEGIN CERTIFICATE"));
-        // not_after should be ~7 days from now
+        // not_after should be ~168 hours (7 days) from now
         let now = UtcDateTime::now();
-        assert!(bundle.not_after > now + time::Duration::days(6));
-        assert!(bundle.not_after < now + time::Duration::days(8));
+        assert!(bundle.not_after > now + time::Duration::hours(166));
+        assert!(bundle.not_after < now + time::Duration::hours(170));
 
         // Verify CN contains the agent UUID
         let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
@@ -258,7 +258,7 @@ mod tests {
         let csr_pem = generate_test_csr(&agent_id.to_string());
 
         let bundle = signer
-            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(1000))
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::hours(24_000))
             .await
             .unwrap();
 
@@ -276,7 +276,7 @@ mod tests {
         let agent_id = Uuid::now_v7();
         let csr_pem = generate_test_csr(&agent_id.to_string());
         let bundle = signer
-            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(30))
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::hours(720))
             .await
             .unwrap();
 
@@ -304,7 +304,7 @@ mod tests {
         let csr_pem = generate_test_csr(&wrong_id.to_string());
 
         let result = signer
-            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(7))
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::hours(168))
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -323,7 +323,7 @@ mod tests {
 
         let agent_id = Uuid::now_v7();
         let result = signer
-            .sign_agent_csr("not-a-csr", &agent_id, time::Duration::days(7))
+            .sign_agent_csr("not-a-csr", &agent_id, time::Duration::hours(168))
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err();

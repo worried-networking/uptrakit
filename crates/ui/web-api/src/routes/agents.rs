@@ -187,6 +187,7 @@ pub(crate) async fn do_enroll(
         deactivated_at: Set(None),
         ping_interval_seconds: Set(None),
         enrollment_token_id: Set(enrollment_token_id),
+        cert_lifetime_hours: Set(None),
     };
 
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;
@@ -296,7 +297,11 @@ pub(crate) async fn do_sign_csr(
         bail!(AgentRouteError::Forbidden("Agent is not approved".into()));
     }
 
-    let lifetime = time::Duration::days(i64::from(settings.agent_cert_lifetime_days()));
+    let effective_hours = service
+        .cert_lifetime_hours
+        .map(|h| h as u32)
+        .unwrap_or_else(|| settings.agent_cert_lifetime_hours());
+    let lifetime = time::Duration::hours(i64::from(effective_hours));
 
     let ca_fp = cert_signer.active_ca_fingerprint();
 

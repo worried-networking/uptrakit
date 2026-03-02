@@ -129,7 +129,7 @@ mod tests {
                 token_hash: None,
                 require_token_for_oidc: false,
             },
-            7,
+            168,
         );
         if !trusted_proxies.is_empty() {
             settings.set_trusted_proxies(trusted_proxies).await;

@@ -45,8 +45,11 @@ pub(super) async fn sign_renewal_csr(
     svc: service::Model,
     csr_pem: &str,
 ) -> Result<crate::cert_signer::SignedCertBundle, Report<RenewalError>> {
-    let validity_days = settings.agent_cert_lifetime_days();
-    let validity = time::Duration::days(validity_days as i64);
+    let effective_hours = svc
+        .cert_lifetime_hours
+        .map(|h| h as u32)
+        .unwrap_or_else(|| settings.agent_cert_lifetime_hours());
+    let validity = time::Duration::hours(i64::from(effective_hours));
 
     let ca_fp = cert_signer.active_ca_fingerprint();
 

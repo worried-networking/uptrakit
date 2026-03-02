@@ -204,7 +204,7 @@ mod tests {
                 token_hash: None,
                 require_token_for_oidc: false,
             },
-            7,
+            168,
         );
         settings.set_trusted_proxies(proxies).await;
         settings.set_real_ip_header(header.to_string()).await;

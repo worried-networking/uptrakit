@@ -120,8 +120,13 @@ pub async fn update_service(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match svc_queries::update_service_settings(&tenant_db, service_id, body.ping_interval_seconds)
-        .await
+    match svc_queries::update_service_settings(
+        &tenant_db,
+        service_id,
+        body.ping_interval_seconds,
+        body.cert_lifetime_hours,
+    )
+    .await
     {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Service not found"),
@@ -532,7 +537,7 @@ mod tests {
                 token_hash: None,
                 require_token_for_oidc: false,
             },
-            7,
+            168,
         );
 
         let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
@@ -619,6 +624,7 @@ mod tests {
             deactivated_at: Set(None),
             ping_interval_seconds: Set(None),
             enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
         };
         let target = target.insert(db).await.unwrap();
 
@@ -638,6 +644,7 @@ mod tests {
             deactivated_at: Set(None),
             ping_interval_seconds: Set(None),
             enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
         };
         let source = source.insert(db).await.unwrap();
 

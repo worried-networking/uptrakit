@@ -228,18 +228,15 @@ async fn handle_connection(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::protocol::{
         MessageRateLimiter, ServiceWsError, WS_MESSAGE_RATE_WINDOW, deserialize_service_msg,
         record_service_activity,
     };
-    use sea_orm::{
-        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
-        EntityTrait, Set,
-    };
+    use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set};
     use uptrakit_internal_wire::IncomingSeq;
-    use uptrakit_shared_db::entity::service as service_entity;
+    use uptrakit_shared_db::entity::{service as service_entity, tenant};
 
     #[test]
     fn deserialize_unknown_type_returns_unknown_variant() {
@@ -284,38 +281,39 @@ mod tests {
     }
 
     async fn setup_test_db() -> DatabaseConnection {
-        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let opt = ConnectOptions::new("sqlite::memory:");
         let db = Database::connect(opt).await.expect("test db");
-        db.execute_unprepared(
-            "CREATE TABLE services (
-                id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
-                capabilities TEXT NOT NULL DEFAULT '[]',
-                hostname TEXT NOT NULL,
-                friendly_name TEXT NOT NULL,
-                ip_address TEXT,
-                status TEXT NOT NULL,
-                enrollment_secret_hash TEXT NOT NULL UNIQUE,
-                client_version TEXT,
-                last_seen_at INTEGER,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                deactivated_at INTEGER,
-                ping_interval_seconds INTEGER,
-                enrollment_token_id TEXT
-            )",
-        )
-        .await
-        .expect("create services");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("run migrations");
         db
     }
 
+    async fn insert_tenant(db: &DatabaseConnection) -> uuid::Uuid {
+        let id = uuid::Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(id),
+            name: Set("test-tenant".to_string()),
+            slug: Set(id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert tenant");
+        id
+    }
+
     async fn insert_service(db: &DatabaseConnection, ip_address: Option<&str>) -> uuid::Uuid {
+        let tenant_id = insert_tenant(db).await;
         let id = uuid::Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
         service_entity::ActiveModel {
             id: Set(id),
-            tenant_id: Set(uuid::Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
             capabilities: Set("[]".to_string()),
             hostname: Set("test-host".to_string()),
             friendly_name: Set("test-host".to_string()),
@@ -329,6 +327,7 @@ mod tests {
             deactivated_at: Set(None),
             ping_interval_seconds: Set(None),
             enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
         }
         .insert(db)
         .await

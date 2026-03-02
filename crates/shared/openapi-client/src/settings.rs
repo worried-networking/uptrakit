@@ -123,11 +123,11 @@ mod tests {
     #[test]
     fn update_agent_certificate_settings_serialization() {
         let req = UpdateAgentCertificateSettingsRequest {
-            lifetime_days: Some(365),
+            lifetime_hours: Some(8_760),
             renewal_window_hours: Some(72),
         };
         let json = serde_json::to_value(&req).expect("serialize");
-        assert_eq!(json["lifetime_days"], 365);
+        assert_eq!(json["lifetime_hours"], 8_760);
         assert_eq!(json["renewal_window_hours"], 72);
     }
 

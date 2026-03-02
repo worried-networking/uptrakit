@@ -284,7 +284,7 @@ mod tests {
                 token_hash: None,
                 require_token_for_oidc: false,
             },
-            7,
+            168,
         );
 
         let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
