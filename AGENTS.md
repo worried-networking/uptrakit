@@ -83,7 +83,7 @@ uptrakit/
 │   │   └── discovery/
 │   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Forgejo/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg/Forgejo-managed items, PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
 │   ├── shared/
-│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch host package updates, handle_check_versions/execute_update/handle_execute_batch_host_package_update/graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (PluginType, effective_config) and calls batch_detect_installed_version/batch_fetch_releases once per group in parallel
+│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch host package updates, handle_check_versions/execute_update/handle_execute_batch_host_package_update/graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (PluginType, effective_config), calls batch_detect_installed_version in parallel, refreshes package index once per fetch group, then calls batch_fetch_releases in parallel
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag; StdioTunnel trait (bidirectional byte-stream tunnel for remote command I/O)
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption (EncryptedString, init_master_key)
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, software_items, host_packages, host_package_ignores, host_package_update_history, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`
@@ -473,9 +473,10 @@ for user review. Key invariants:
      APT, Homebrew, and npm.
 
    Agent-core `batch_check_versions()` groups `VersionCheckAssignment`s by `(PluginType,
-   effective_config_json)` and calls these batch methods once per group via `join_all`, with
-   `RefreshPackageIndex` called once per group. Scheduler Phase A groups by `plugin_config_id` only
-   and calls `batch_fetch_releases` once per config.
+   effective_config_json)` and calls these batch methods once per group via `join_all`.
+   `RefreshPackageIndex` is called at most once per unique fetch group (before `batch_fetch_releases`
+   runs); it is not called for detect-only groups. Scheduler Phase A groups by `plugin_config_id`
+   only and calls `batch_fetch_releases` once per config.
 
 9. **Discovery allowlist controls which plugin types run.** Two tables, `tenant_discovery_allowlist`
    and `host_discovery_allowlist`, gate which discovery plugin types execute during

@@ -89,8 +89,9 @@ pub async fn check_version(
 /// `batch_fetch_releases` (e.g. APT, Homebrew, npm) benefit from a single
 /// subprocess call per group instead of N per-item calls.
 ///
-/// `RefreshPackageIndex` is called at most once per unique (plugin_type, config)
-/// group, regardless of how many items share that group.
+/// `RefreshPackageIndex` is called at most once per unique fetch-group
+/// (plugin_type, config) before `batch_fetch_releases` runs. It is not called
+/// for detect-only groups.
 ///
 /// Results are returned in the same order as `assignments`.
 pub async fn batch_check_versions(
@@ -112,7 +113,7 @@ pub async fn batch_check_versions(
         items: Vec<(usize, String)>,
     }
 
-    // ── Step 1 & 2: Build detect and fetch groups ────────────────────────────
+    // ── Step 1: Build detect and fetch groups ────────────────────────────────
     let mut detect_groups: HashMap<GroupKey, Group> = HashMap::new();
     let mut fetch_groups: HashMap<GroupKey, Group> = HashMap::new();
 
@@ -141,49 +142,7 @@ pub async fn batch_check_versions(
         }
     }
 
-    // ── Step 3: RefreshPackageIndex – at most once per unique group ──────────
-    {
-        // Collect one (plugin_type, effective_config) per unique group key.
-        let mut all_configs: HashMap<GroupKey, (PluginType, serde_json::Value)> = HashMap::new();
-        for (key, group) in detect_groups.iter().chain(fetch_groups.iter()) {
-            all_configs
-                .entry(key.clone())
-                .or_insert_with(|| (group.plugin_type.clone(), group.effective_config.clone()));
-        }
-        for (plugin_type, effective_config) in all_configs.into_values() {
-            match PluginRegistry::create_plugin(
-                plugin_type.clone(),
-                &effective_config,
-                Arc::clone(&executor),
-            )
-            .await
-            {
-                Ok(plugin) if plugin.has_capability(PluginCapability::RefreshPackageIndex) => {
-                    tracing::info!(
-                        plugin_type = %plugin_type,
-                        "refreshing package index"
-                    );
-                    if let Err(e) = plugin.refresh_package_index().await {
-                        tracing::warn!(
-                            plugin_type = %plugin_type,
-                            error = %e,
-                            "failed to refresh package index"
-                        );
-                    }
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::warn!(
-                        plugin_type = %plugin_type,
-                        error = %e,
-                        "failed to create plugin for index refresh"
-                    );
-                }
-            }
-        }
-    }
-
-    // ── Step 4: Run detect groups in parallel ────────────────────────────────
+    // ── Step 2: Run detect groups in parallel ────────────────────────────────
     // Each future resolves to Vec<(item_idx, (Option<version_str>, Option<error_str>))>.
     let detect_futs: Vec<_> = detect_groups
         .into_values()
@@ -257,7 +216,43 @@ pub async fn batch_check_versions(
         }
     }
 
-    // ── Step 5: Run fetch groups in parallel ─────────────────────────────────
+    // ── Step 3: RefreshPackageIndex – at most once per unique fetch group ───
+    // Runs sequentially to avoid concurrent `apt-get update` / `brew update`.
+    for (plugin_type, effective_config) in
+        fetch_groups.values().map(|g| (g.plugin_type.clone(), g.effective_config.clone()))
+    {
+        match PluginRegistry::create_plugin(
+            plugin_type.clone(),
+            &effective_config,
+            Arc::clone(&executor),
+        )
+        .await
+        {
+            Ok(plugin) if plugin.has_capability(PluginCapability::RefreshPackageIndex) => {
+                tracing::info!(
+                    plugin_type = %plugin_type,
+                    "refreshing package index"
+                );
+                if let Err(e) = plugin.refresh_package_index().await {
+                    tracing::warn!(
+                        plugin_type = %plugin_type,
+                        error = %e,
+                        "failed to refresh package index"
+                    );
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(
+                    plugin_type = %plugin_type,
+                    error = %e,
+                    "failed to create plugin for index refresh"
+                );
+            }
+        }
+    }
+
+    // ── Step 4: Run fetch groups in parallel ─────────────────────────────────
     // Each future resolves to Vec<(item_idx, (Option<version_str>, UpdateCategory, Option<error_str>))>.
     let fetch_futs: Vec<_> = fetch_groups
         .into_values()
@@ -347,7 +342,7 @@ pub async fn batch_check_versions(
         }
     }
 
-    // ── Step 6: Merge per-item into VersionCheckResult (preserving order) ────
+    // ── Step 5: Merge per-item into VersionCheckResult (preserving order) ────
     assignments
         .iter()
         .enumerate()
