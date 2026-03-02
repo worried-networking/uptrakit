@@ -169,6 +169,7 @@ pub async fn stream_update_output(
         record.status,
         update_history::UpdateStatus::Completed | update_history::UpdateStatus::Failed
     );
+    let shutdown_token = state.shutdown_token.clone();
     let terminal_status = match record.status {
         update_history::UpdateStatus::Completed => "completed",
         update_history::UpdateStatus::Failed => "failed",
@@ -224,36 +225,44 @@ pub async fn stream_update_output(
         // Stream from broadcast (if we got a subscription).
         if let Some(mut rx) = broadcast_rx {
             loop {
-                match rx.recv().await {
-                    Ok(BroadcastEvent::Line { id, text, stream, timestamp, seq }) => {
-                        // Skip lines already replayed from DB.
-                        if seq < replay_count {
-                            continue;
-                        }
-                        let payload = OutputLineSSE {
-                            id,
-                            text,
-                            stream: stream.to_string(),
-                            timestamp,
-                            seq,
-                        };
-                        if let Ok(json) = serde_json::to_string(&payload) {
-                            yield Ok::<_, Infallible>(Event::default().event("output").data(json));
+                tokio::select! {
+                    ev = rx.recv() => {
+                        match ev {
+                            Ok(BroadcastEvent::Line { id, text, stream, timestamp, seq }) => {
+                                // Skip lines already replayed from DB.
+                                if seq < replay_count {
+                                    continue;
+                                }
+                                let payload = OutputLineSSE {
+                                    id,
+                                    text,
+                                    stream: stream.to_string(),
+                                    timestamp,
+                                    seq,
+                                };
+                                if let Ok(json) = serde_json::to_string(&payload) {
+                                    yield Ok::<_, Infallible>(Event::default().event("output").data(json));
+                                }
+                            }
+                            Ok(BroadcastEvent::Completed { status, error }) => {
+                                let payload = UpdateCompletedSSE { status, error };
+                                if let Ok(json) = serde_json::to_string(&payload) {
+                                    yield Ok::<_, Infallible>(Event::default().event("completed").data(json));
+                                }
+                                return;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::debug!(lagged = n, "SSE subscriber lagged, continuing");
+                                continue;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                // Channel closed without a Completed event (e.g. server shutdown).
+                                return;
+                            }
                         }
                     }
-                    Ok(BroadcastEvent::Completed { status, error }) => {
-                        let payload = UpdateCompletedSSE { status, error };
-                        if let Ok(json) = serde_json::to_string(&payload) {
-                            yield Ok::<_, Infallible>(Event::default().event("completed").data(json));
-                        }
-                        return;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        tracing::debug!(lagged = n, "SSE subscriber lagged, continuing");
-                        continue;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        // Channel closed without a Completed event (e.g. server shutdown).
+                    _ = shutdown_token.cancelled() => {
+                        // Server is shutting down; terminate the SSE stream.
                         return;
                     }
                 }

@@ -369,6 +369,7 @@ pub async fn stream_batch_progress(
 
     let total = batch.total_count;
     let batch_status_str = batch.status.as_str().to_string();
+    let shutdown_token = state.shutdown_token.clone();
 
     let stream = async_stream::stream! {
         // Replay per-item status from DB.
@@ -461,29 +462,37 @@ pub async fn stream_batch_progress(
         // Stream from broadcast (if we got a subscription).
         if let Some(mut rx) = broadcast_rx {
             loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        let event_name = match &event {
-                            BatchProgressEvent::UpdateDispatched { .. }
-                            | BatchProgressEvent::UpdateStarted { .. }
-                            | BatchProgressEvent::UpdateCompleted { .. }
-                            | BatchProgressEvent::UpdateFailed { .. } => "update",
-                            BatchProgressEvent::Progress { .. } => "progress",
-                            BatchProgressEvent::BatchCompleted { .. } => "batch_completed",
-                        };
-                        let is_batch_completed = matches!(event, BatchProgressEvent::BatchCompleted { .. });
-                        if let Ok(json) = serde_json::to_string(&event) {
-                            yield Ok::<_, Infallible>(Event::default().event(event_name).data(json));
-                        }
-                        if is_batch_completed {
-                            return;
+                tokio::select! {
+                    ev = rx.recv() => {
+                        match ev {
+                            Ok(event) => {
+                                let event_name = match &event {
+                                    BatchProgressEvent::UpdateDispatched { .. }
+                                    | BatchProgressEvent::UpdateStarted { .. }
+                                    | BatchProgressEvent::UpdateCompleted { .. }
+                                    | BatchProgressEvent::UpdateFailed { .. } => "update",
+                                    BatchProgressEvent::Progress { .. } => "progress",
+                                    BatchProgressEvent::BatchCompleted { .. } => "batch_completed",
+                                };
+                                let is_batch_completed = matches!(event, BatchProgressEvent::BatchCompleted { .. });
+                                if let Ok(json) = serde_json::to_string(&event) {
+                                    yield Ok::<_, Infallible>(Event::default().event(event_name).data(json));
+                                }
+                                if is_batch_completed {
+                                    return;
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::debug!(lagged = n, "batch SSE subscriber lagged, continuing");
+                                continue;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                return;
+                            }
                         }
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        tracing::debug!(lagged = n, "batch SSE subscriber lagged, continuing");
-                        continue;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    _ = shutdown_token.cancelled() => {
+                        // Server is shutting down; terminate the SSE stream.
                         return;
                     }
                 }

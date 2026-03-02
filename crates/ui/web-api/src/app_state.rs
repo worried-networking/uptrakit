@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use sea_orm::DatabaseConnection;
+use tokio_util::sync::CancellationToken;
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 
 use crate::auth::device_flow::DeviceFlowStore;
@@ -100,6 +101,12 @@ pub struct AppState {
     /// Per-batch broadcast channels for real-time batch progress streaming via SSE.
     pub batch_progress_broadcaster:
         crate::batch_progress_broadcaster::BatchProgressBroadcaster,
+    /// Cancellation token signalled during server shutdown to terminate open SSE streams.
+    ///
+    /// SSE handler loops `tokio::select!` on this token so that in-flight streams exit
+    /// cleanly when axum initiates a graceful shutdown rather than blocking indefinitely
+    /// on a broadcast channel that may never close.
+    pub shutdown_token: CancellationToken,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -152,6 +159,7 @@ pub struct AppStateBuilder {
     update_output_broadcaster: Option<crate::update_output_broadcaster::UpdateOutputBroadcaster>,
     batch_progress_broadcaster:
         Option<crate::batch_progress_broadcaster::BatchProgressBroadcaster>,
+    shutdown_token: Option<CancellationToken>,
 }
 
 impl AppStateBuilder {
@@ -189,6 +197,7 @@ impl AppStateBuilder {
             credential_sources: None,
             update_output_broadcaster: None,
             batch_progress_broadcaster: None,
+            shutdown_token: None,
         }
     }
 
@@ -334,6 +343,17 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the shutdown cancellation token for SSE stream graceful termination.
+    ///
+    /// Optional — defaults to a new, never-cancelled token (no-op for tests
+    /// or deployments that rely on broadcast channel close for termination).
+    /// Production controller should pass the shared token that is cancelled
+    /// during graceful shutdown so that SSE streams exit cleanly.
+    pub fn shutdown_token(mut self, v: CancellationToken) -> Self {
+        self.shutdown_token = Some(v);
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -413,6 +433,7 @@ impl AppStateBuilder {
             credential_sources: self.credential_sources.unwrap_or_default(),
             update_output_broadcaster: self.update_output_broadcaster.unwrap_or_default(),
             batch_progress_broadcaster: self.batch_progress_broadcaster.unwrap_or_default(),
+            shutdown_token: self.shutdown_token.unwrap_or_default(),
         })
     }
 }

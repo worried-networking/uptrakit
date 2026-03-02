@@ -272,6 +272,10 @@ async fn run(args: cli::Args) -> Result<()> {
         sources
     };
 
+    // Shared cancellation token: cancelled by BackgroundTasks::shutdown(), which
+    // also signals open SSE streams in the web API to terminate cleanly.
+    let shutdown_token = CancellationToken::new();
+
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)
         .ca_key_store(ca_key_store)
@@ -293,7 +297,8 @@ async fn run(args: cli::Args) -> Result<()> {
         .notification_dispatcher(notification_dispatcher)
         .channel_registry(channel_registry)
         .token_denylist(token_denylist)
-        .credential_sources(credential_sources);
+        .credential_sources(credential_sources)
+        .shutdown_token(shutdown_token.clone());
 
     #[cfg(feature = "oidc")]
     let builder = builder
@@ -317,7 +322,7 @@ async fn run(args: cli::Args) -> Result<()> {
         .map_err(|e| report!(AppError::Config(format!("failed to seed token denylist: {e}"))))?;
 
     // Spawn background tasks
-    let mut bg = tasks::BackgroundTasks::new(CancellationToken::new());
+    let mut bg = tasks::BackgroundTasks::new(shutdown_token);
 
     // CRL manager: uses the child cancellation token for cooperative shutdown.
     // Must use track() (not track_abort()) so the manager finishes its current
