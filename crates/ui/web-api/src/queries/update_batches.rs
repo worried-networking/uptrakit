@@ -555,13 +555,13 @@ async fn maybe_complete_batch(
 
     // Guard against double-write: if the batch is already in a terminal
     // status another concurrent call already committed its update.
-    if matches!(batch.status, BatchStatus::Completed | BatchStatus::PartiallyCompleted) {
+    if matches!(&batch.status, BatchStatus::Completed | BatchStatus::PartiallyCompleted) {
         return Ok(None);
     }
 
     let total_count = batch.total_count;
     let mut active: update_batch::ActiveModel = batch.into();
-    active.status = Set(new_status);
+    active.status = Set(new_status.clone());
     active.completed_at = Set(Some(OffsetDateTime::now_utc()));
     active.update(&txn).await.context_to()?;
 

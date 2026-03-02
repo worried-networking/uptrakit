@@ -311,7 +311,7 @@ pub async fn batch_check_versions(
                                 .releases
                                 .first()
                                 .map(|release| {
-                                    let category = release.category.unwrap_or_default();
+                                    let category = release.category.clone().unwrap_or_default();
                                     (Some(release.version.to_string()), category)
                                 })
                                 .unwrap_or((None, UpdateCategory::Unknown));
@@ -435,7 +435,7 @@ async fn fetch_latest(
         Ok(releases) => {
             tracing::debug!(count = releases.len(), "releases fetched");
             Ok(releases.first().map(|r| {
-                let category = r.category.unwrap_or_default();
+                let category = r.category.clone().unwrap_or_default();
                 (r.version.to_string(), category)
             }))
         }

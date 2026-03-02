@@ -217,6 +217,7 @@ async fn run_controller_fetch_jobs(
 
         let category_str = latest
             .category
+            .clone()
             .unwrap_or_default()
             .to_string();
 
