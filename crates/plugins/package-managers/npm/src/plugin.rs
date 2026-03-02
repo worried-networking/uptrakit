@@ -65,16 +65,15 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
 
 /// Validate a single npm name component (scope or package name).
 fn validate_npm_name_part(part: &str, role: &str) -> std::result::Result<(), String> {
-    if part.is_empty() {
-        return Err(format!("package_identifier {role} must not be empty"));
-    }
     if part.len() > 214 {
         return Err(format!(
             "package_identifier {role} must not exceed 214 characters"
         ));
     }
 
-    let first = part.chars().next().unwrap();
+    let Some(first) = part.chars().next() else {
+        return Err(format!("package_identifier {role} must not be empty"));
+    };
     if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
         return Err(format!(
             "package_identifier {role} must start with a lowercase letter or digit, found '{first}'"
@@ -951,6 +950,7 @@ mod tests {
                 assert_eq!(msg, "npm not found");
             }
             HostCompatibility::Compatible => panic!("expected Incompatible"),
+            _ => panic!("unexpected HostCompatibility variant"),
         }
     }
 
