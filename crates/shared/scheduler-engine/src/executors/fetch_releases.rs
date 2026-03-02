@@ -15,7 +15,7 @@ use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
     CheckVersionsPayload, ControllerMessage, PluginAssignment, VersionCheckAssignment,
 };
-use uptrakit_plugin_infrastructure_core::PluginCapability;
+use uptrakit_plugin_infrastructure_core::{BatchFetchItem, PluginCapability};
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, plugin_config, scheduled_task, software_item,
@@ -63,8 +63,9 @@ impl CommandExecutor for NoopCommandExecutor {
 /// Queries `host_software_item_plugins` rows with `role = 'fetch_releases'` that
 /// should run on the controller (either `execution_site = 'controller'`, or
 /// `execution_site = 'auto'` with a plugin that has `ControllerSideFetchReleases`
-/// capability). Groups by `(plugin_config_id, package_identifier)` to deduplicate
-/// API calls, then stores the latest version in `host_software_items.latest_version`.
+/// capability). Groups by `plugin_config_id` and calls `batch_fetch_releases` once
+/// per config, reducing API or subprocess overhead for multi-package configs.
+/// Stores the latest version in `host_software_items.latest_version`.
 ///
 /// **Phase B — Agent-side fetch_releases assignments:**
 /// Builds `VersionCheckAssignment` per `(service_id, host_machine_id)` group using
@@ -104,17 +105,22 @@ struct ControllerFetchRow {
     execution_site: String,
 }
 
-/// Key for deduplicating controller-side fetch_releases calls.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct FetchGroupKey {
-    plugin_config_id: Uuid,
-    package_identifier: String,
+/// Data for a single controller-side Phase A fetch group.
+///
+/// All packages sharing the same `plugin_config_id` are batched into one
+/// `batch_fetch_releases` call, reducing API or subprocess overhead.
+struct PhaseAGroup {
+    plugin_type: String,
+    /// Merged plugin config (base + representative override from the first row).
+    merged_config: serde_json::Value,
+    execution_site: String,
+    /// package_identifier → `(host_id, software_item_id)` targets to update.
+    packages: HashMap<String, Vec<(Uuid, Uuid)>>,
 }
 
-/// One independent controller-side fetch job, ready to be spawned.
+/// One independent controller-side fetch job, ready to be spawned into a `JoinSet`.
 struct FetchJob {
-    key: FetchGroupKey,
-    targets: Vec<(Uuid, Uuid)>,
+    packages: HashMap<String, Vec<(Uuid, Uuid)>>,
     plugin: Box<dyn uptrakit_plugin_infrastructure_core::Plugin>,
 }
 
@@ -141,9 +147,10 @@ impl FetchReleasesExecutor {
     /// Execute controller-side fetch_releases for eligible plugins and store
     /// the latest version on all matching `host_software_items` rows.
     ///
-    /// Phase A runs all eligible fetch calls concurrently (up to
-    /// [`MAX_CONCURRENT_CONTROLLER_FETCHES`] at a time) via a `JoinSet` and a
-    /// `Semaphore`. After all fetches complete, the DB update loop and MQTT
+    /// Rows are grouped by `plugin_config_id`; all packages within a group are
+    /// passed to `batch_fetch_releases` in a single call. Groups run concurrently
+    /// (up to [`MAX_CONCURRENT_CONTROLLER_FETCHES`] at a time) via a `JoinSet`
+    /// and a `Semaphore`. After all fetches complete, the DB update loop and MQTT
     /// push run sequentially.
     ///
     /// After updating `host_software_items`, batch-updates `software_item.last_checked_at`
@@ -161,59 +168,47 @@ impl FetchReleasesExecutor {
         let noop_executor: Arc<dyn CommandExecutor> = Arc::new(NoopCommandExecutor);
 
         // ── 1. Build groups map ───────────────────────────────────────────
-        // Group rows by (plugin_config_id, package_identifier). Each group shares
-        // the same plugin type + config, so we only call fetch_releases once per group.
-        type FetchGroupValue = (
-            String,            // plugin_type
-            serde_json::Value, // base config
-            String,            // execution_site
-            Vec<(Uuid, Uuid)>, // (host_id, software_item_id) targets
-        );
-        let mut groups: HashMap<FetchGroupKey, FetchGroupValue> = HashMap::new();
+        // Group rows by plugin_config_id only. All packages sharing the same plugin
+        // config are batched into a single batch_fetch_releases call instead of N
+        // individual fetch_releases calls. The first row's config_override is used
+        // as a representative merge for plugin instantiation.
+        let mut groups: HashMap<Uuid, PhaseAGroup> = HashMap::new();
 
         for row in &rows {
-            let key = FetchGroupKey {
-                plugin_config_id: row.plugin_config_id,
-                package_identifier: row.package_identifier.clone(),
-            };
-            let entry = groups.entry(key).or_insert_with(|| {
-                (
-                    row.plugin_type.clone(),
-                    row.config.clone(),
-                    row.execution_site.clone(),
-                    Vec::new(),
-                )
+            let entry = groups.entry(row.plugin_config_id).or_insert_with(|| {
+                let merged_config = match row.config_override.as_ref() {
+                    Some(ovr) => merge_config(&row.config, ovr),
+                    None => row.config.clone(),
+                };
+                PhaseAGroup {
+                    plugin_type: row.plugin_type.clone(),
+                    merged_config,
+                    execution_site: row.execution_site.clone(),
+                    packages: HashMap::new(),
+                }
             });
-            entry.3.push((row.host_id, row.software_item_id));
+            entry
+                .packages
+                .entry(row.package_identifier.clone())
+                .or_default()
+                .push((row.host_id, row.software_item_id));
         }
 
         // ── 2. Build FetchJobs ────────────────────────────────────────────
         // Instantiate plugins synchronously here (cheap config construction),
-        // skipping non-controller-side groups. Each job is then spawned into
-        // the JoinSet.
+        // skipping non-controller-side groups. Each job carries all packages
+        // for its plugin config and is spawned into the JoinSet.
         let mut jobs: Vec<FetchJob> = Vec::new();
 
-        for (key, (plugin_type_str, base_config, execution_site, targets)) in &groups {
-            let plugin_type = PluginType::from_str(plugin_type_str).map_err(|_| {
+        for (_plugin_config_id, group) in groups {
+            let plugin_type = PluginType::from_str(&group.plugin_type).map_err(|_| {
                 report!(SchedulerError::Execution(format!(
-                    "unknown plugin type: {plugin_type_str}"
+                    "unknown plugin type: {}",
+                    group.plugin_type
                 )))
             })?;
 
-            let representative_override = rows
-                .iter()
-                .find(|r| {
-                    r.plugin_config_id == key.plugin_config_id
-                        && r.package_identifier == key.package_identifier
-                })
-                .and_then(|r| r.config_override.as_ref());
-
-            let merged = match representative_override {
-                Some(ovr) => merge_config(base_config, ovr),
-                None => base_config.clone(),
-            };
-
-            let should_run_controller_side = match execution_site.as_str() {
+            let should_run_controller_side = match group.execution_site.as_str() {
                 "controller" => true,
                 "agent" => false,
                 _ => PluginRegistry::capabilities_for(plugin_type.clone())
@@ -226,7 +221,7 @@ impl FetchReleasesExecutor {
 
             let plugin = PluginRegistry::create_plugin(
                 plugin_type.clone(),
-                &merged,
+                &group.merged_config,
                 noop_executor.clone(),
             )
             .await
@@ -237,8 +232,7 @@ impl FetchReleasesExecutor {
             })?;
 
             jobs.push(FetchJob {
-                key: key.clone(),
-                targets: targets.clone(),
+                packages: group.packages,
                 plugin,
             });
         }
@@ -251,17 +245,15 @@ impl FetchReleasesExecutor {
         // The semaphore bounds peak concurrency to avoid hammering rate-limited APIs.
         // AcquireError only fires if the semaphore is closed, which cannot happen
         // here — map it to a fatal SchedulerError rather than unwrapping.
-        /// `(group_key, targets, releases)` tuples accumulated after all spawned fetches complete.
+        /// `(packages, batch_results)` tuples accumulated after all spawned fetches complete.
         type FetchRecord = (
-            FetchGroupKey,
-            Vec<(Uuid, Uuid)>,
-            Vec<uptrakit_plugin_infrastructure_core::UpstreamRelease>,
+            HashMap<String, Vec<(Uuid, Uuid)>>,
+            Vec<uptrakit_plugin_infrastructure_core::BatchFetchResult>,
         );
         type FetchResult = crate::error::Result<(
-            FetchGroupKey,
-            Vec<(Uuid, Uuid)>,
+            HashMap<String, Vec<(Uuid, Uuid)>>,
             uptrakit_plugin_infrastructure_core::Result<
-                Vec<uptrakit_plugin_infrastructure_core::UpstreamRelease>,
+                Vec<uptrakit_plugin_infrastructure_core::BatchFetchResult>,
             >,
         )>;
         let sem = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_CONTROLLER_FETCHES));
@@ -275,8 +267,15 @@ impl FetchReleasesExecutor {
                         "semaphore acquire failed (this is a bug): {e}"
                     )))
                 })?;
-                let releases = job.plugin.fetch_releases(&job.key.package_identifier).await;
-                Ok((job.key, job.targets, releases))
+                let fetch_items: Vec<BatchFetchItem> = job
+                    .packages
+                    .keys()
+                    .map(|pkg| BatchFetchItem {
+                        package_identifier: pkg.clone(),
+                    })
+                    .collect();
+                let results = job.plugin.batch_fetch_releases(&fetch_items).await;
+                Ok((job.packages, results))
             });
         }
 
@@ -286,14 +285,13 @@ impl FetchReleasesExecutor {
 
         while let Some(join_result) = join_set.join_next().await {
             match join_result {
-                Ok(Ok((key, targets, Ok(releases)))) => {
-                    fetch_results.push((key, targets, releases));
+                Ok(Ok((packages, Ok(results)))) => {
+                    fetch_results.push((packages, results));
                 }
-                Ok(Ok((key, _, Err(e)))) => {
+                Ok(Ok((_, Err(e)))) => {
                     tracing::warn!(
-                        package = %key.package_identifier,
                         error = %e,
-                        "controller-side fetch_releases failed; skipping"
+                        "controller-side batch_fetch_releases failed; skipping group"
                     );
                 }
                 Ok(Err(e)) => {
@@ -310,51 +308,68 @@ impl FetchReleasesExecutor {
         let now = OffsetDateTime::now_utc();
         let mut updated_item_ids: HashSet<Uuid> = HashSet::new();
 
-        for (key, targets, releases) in fetch_results {
-            // Determine the latest stable version (first non-prerelease, or first overall).
-            let latest = releases
-                .iter()
-                .find(|r| !r.is_prerelease)
-                .or(releases.first());
-
-            let Some(latest) = latest else {
-                tracing::debug!(
-                    package = %key.package_identifier,
-                    "fetch_releases returned no releases"
-                );
-                continue;
-            };
-
-            let latest_version_str = latest.version.to_string();
-            let release_metadata = serde_json::to_value(latest).unwrap_or(serde_json::Value::Null);
-            let category_str = latest.category.unwrap_or_default().to_string();
-
-            tracing::debug!(
-                package = %key.package_identifier,
-                latest_version = %latest_version_str,
-                host_count = targets.len(),
-                "controller-side fetch_releases succeeded"
-            );
-
-            for (host_id, software_item_id) in &targets {
-                let active = host_software_item::ActiveModel {
-                    host_id: Set(*host_id),
-                    software_item_id: Set(*software_item_id),
-                    latest_version: Set(Some(latest_version_str.clone())),
-                    latest_version_fetched_at: Set(Some(now)),
-                    latest_release_metadata: Set(Some(release_metadata.clone())),
-                    update_category: Set(category_str.clone()),
-                    ..Default::default()
-                };
-                if let Err(e) = active.update(&self.db).await {
+        for (packages, batch_results) in fetch_results {
+            for result in batch_results {
+                if let Some(ref err) = result.error {
                     tracing::warn!(
-                        host_id = %host_id,
-                        software_item_id = %software_item_id,
-                        error = %e,
-                        "failed to update host_software_item with latest version"
+                        package = %result.package_identifier,
+                        error = %err,
+                        "controller-side fetch_releases failed for package; skipping"
                     );
-                } else {
-                    updated_item_ids.insert(*software_item_id);
+                    continue;
+                }
+
+                // Determine the latest stable version (first non-prerelease, or first overall).
+                let latest = result
+                    .releases
+                    .iter()
+                    .find(|r| !r.is_prerelease)
+                    .or(result.releases.first());
+
+                let Some(latest) = latest else {
+                    tracing::debug!(
+                        package = %result.package_identifier,
+                        "fetch_releases returned no releases"
+                    );
+                    continue;
+                };
+
+                let latest_version_str = latest.version.to_string();
+                let release_metadata =
+                    serde_json::to_value(latest).unwrap_or(serde_json::Value::Null);
+                let category_str = latest.category.unwrap_or_default().to_string();
+
+                let Some(targets) = packages.get(&result.package_identifier) else {
+                    continue;
+                };
+
+                tracing::debug!(
+                    package = %result.package_identifier,
+                    latest_version = %latest_version_str,
+                    host_count = targets.len(),
+                    "controller-side fetch_releases succeeded"
+                );
+
+                for (host_id, software_item_id) in targets {
+                    let active = host_software_item::ActiveModel {
+                        host_id: Set(*host_id),
+                        software_item_id: Set(*software_item_id),
+                        latest_version: Set(Some(latest_version_str.clone())),
+                        latest_version_fetched_at: Set(Some(now)),
+                        latest_release_metadata: Set(Some(release_metadata.clone())),
+                        update_category: Set(category_str.clone()),
+                        ..Default::default()
+                    };
+                    if let Err(e) = active.update(&self.db).await {
+                        tracing::warn!(
+                            host_id = %host_id,
+                            software_item_id = %software_item_id,
+                            error = %e,
+                            "failed to update host_software_item with latest version"
+                        );
+                    } else {
+                        updated_item_ids.insert(*software_item_id);
+                    }
                 }
             }
         }
