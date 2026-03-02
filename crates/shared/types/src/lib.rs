@@ -15,6 +15,7 @@ mod secret_string;
 mod service_status;
 mod session_token_type;
 mod software_discovery_state;
+mod tracking_system;
 mod update_category;
 
 pub use batch_status::{BatchStatus, ParseBatchStatusError};
@@ -35,4 +36,5 @@ pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};
 pub use software_discovery_state::{ParseSoftwareDiscoveryStateError, SoftwareDiscoveryState};
+pub use tracking_system::{ParseTrackingSystemError, TrackingSystem};
 pub use update_category::{ParseUpdateCategoryError, UpdateCategory};
