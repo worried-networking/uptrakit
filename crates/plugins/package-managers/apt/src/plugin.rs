@@ -284,7 +284,7 @@ impl Plugin for AptPlugin {
         let all_packages = Self::parse_dpkg_output(&dpkg_output.output);
 
         // Step 2: For the Manual filter, build a set of manually-installed packages.
-        let manual_set: Option<HashSet<String>> = match self.config.discovery_filter {
+        let manual_set: Option<HashSet<String>> = match self.config.effective_filter() {
             AptDiscoveryFilter::Manual => {
                 let mark_output = self
                     .executor
@@ -1133,11 +1133,10 @@ mod tests {
 
     #[tokio::test]
     async fn discover_software_emits_targets_when_default_config() {
-        // Default config (discovery_filter: manual) → discover-all mode.
-        // dpkg-query returns "nginx\t1.24.0"; apt-mark showmanual returns "nginx".
+        // Default config (discovery_filter: None) → discover-all mode.
+        // Effective filter is All, so only dpkg-query is called (no apt-mark).
         let executor = RoutedOutputExecutor::with_routes(vec![
             ("dpkg-query", "nginx\t1.24.0\n"),
-            ("apt-mark", "nginx\n"),
         ]);
         let plugin = AptPlugin::new(AptConfig::default(), executor)
             .await
@@ -1157,13 +1156,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_software_no_targets_when_all_filter() {
-        // discovery_filter: "all" → non-default config → config-ID path → no targets.
+    async fn discover_software_default_config_discovers_all_packages() {
+        // Default config → effective filter All → all dpkg packages discovered.
+        let executor = RoutedOutputExecutor::with_routes(vec![(
+            "dpkg-query",
+            "nginx\t1.24.0\npython3\t3.11.0\n",
+        )]);
+        let plugin = AptPlugin::new(AptConfig::default(), executor)
+            .await
+            .expect("create plugin");
+
+        let discoveries = plugin.discover_software().await.expect("discover");
+        assert_eq!(discoveries.len(), 2, "all dpkg packages must be discovered");
+    }
+
+    #[tokio::test]
+    async fn discover_software_no_targets_when_explicit_all_filter() {
+        // discovery_filter: Some(All) → pre-existing config → config-ID path → no targets.
         // Only dpkg-query is called (no apt-mark for the "all" filter).
         let executor = RoutedOutputExecutor::with_routes(vec![("dpkg-query", "nginx\t1.24.0\n")]);
         let plugin = AptPlugin::new(
             AptConfig {
-                discovery_filter: AptDiscoveryFilter::All,
+                discovery_filter: Some(AptDiscoveryFilter::All),
             },
             executor,
         )
@@ -1174,7 +1188,33 @@ mod tests {
         assert_eq!(discoveries.len(), 1);
         assert!(
             discoveries[0].targets.is_empty(),
-            "non-default config must not emit targets (config-ID path)"
+            "explicit config must not emit targets (config-ID path)"
+        );
+    }
+
+    #[tokio::test]
+    async fn discover_software_no_targets_when_manual_filter() {
+        // discovery_filter: Some(Manual) → pre-existing config → config-ID path →
+        // no targets. apt-mark showmanual narrows the package list.
+        let executor = RoutedOutputExecutor::with_routes(vec![
+            ("dpkg-query", "nginx\t1.24.0\npython3\t3.11.0\n"),
+            ("apt-mark", "nginx\n"), // only nginx is manually installed
+        ]);
+        let plugin = AptPlugin::new(
+            AptConfig {
+                discovery_filter: Some(AptDiscoveryFilter::Manual),
+            },
+            executor,
+        )
+        .await
+        .expect("create plugin");
+
+        let discoveries = plugin.discover_software().await.expect("discover");
+        assert_eq!(discoveries.len(), 1);
+        assert_eq!(discoveries[0].package_identifier, "nginx");
+        assert!(
+            discoveries[0].targets.is_empty(),
+            "manual filter with pre-existing config must not emit targets"
         );
     }
 }
