@@ -146,3 +146,103 @@ impl Validate for LoginRequest {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── RegisterRequest ──────────────────────────────────────────────────────
+
+    fn valid_register() -> RegisterRequest {
+        RegisterRequest {
+            email: "user@example.com".to_string(),
+            first_name: "Alice".to_string(),
+            last_name: "Smith".to_string(),
+            password: SecretString::new("password123".to_string()),
+            registration_token: None,
+        }
+    }
+
+    #[test]
+    fn register_valid() {
+        assert!(valid_register().validate().is_ok());
+    }
+
+    #[test]
+    fn register_email_too_long() {
+        let mut req = valid_register();
+        req.email = format!("{}@x.com", "a".repeat(250));
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "email");
+    }
+
+    #[test]
+    fn register_email_no_at_sign() {
+        let mut req = valid_register();
+        req.email = "notanemail".to_string();
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "email");
+    }
+
+    #[test]
+    fn register_first_name_empty() {
+        let mut req = valid_register();
+        req.first_name = String::new();
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "first_name");
+    }
+
+    #[test]
+    fn register_password_too_short() {
+        let mut req = valid_register();
+        req.password = SecretString::new("short".to_string());
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "password");
+    }
+
+    #[test]
+    fn register_password_too_long() {
+        let mut req = valid_register();
+        req.password = SecretString::new("a".repeat(1025));
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "password");
+    }
+
+    // ── LoginRequest ─────────────────────────────────────────────────────────
+
+    fn valid_login() -> LoginRequest {
+        LoginRequest {
+            email: "user@example.com".to_string(),
+            password: SecretString::new("password123".to_string()),
+        }
+    }
+
+    #[test]
+    fn login_valid() {
+        assert!(valid_login().validate().is_ok());
+    }
+
+    #[test]
+    fn login_email_too_long() {
+        let mut req = valid_login();
+        req.email = format!("{}@x.com", "a".repeat(250));
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "email");
+    }
+
+    #[test]
+    fn login_email_no_at_sign() {
+        let mut req = valid_login();
+        req.email = "notanemail".to_string();
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "email");
+    }
+
+    #[test]
+    fn login_password_empty() {
+        let mut req = valid_login();
+        req.password = SecretString::new(String::new());
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "password");
+    }
+}
