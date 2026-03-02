@@ -260,7 +260,11 @@ impl ServiceHandler for SshAgentHandler {
                         client::send_update_output(conn, update_history_id, output_msg).await;
                     }
                     client::UpdateEvent::Completed(result) => {
-                        client::send_update_result(conn, update_history_id, result).await;
+                        if let Err(e) = client::send_update_result(conn, update_history_id, result).await {
+                            tracing::error!(error = %e, "failed to send UpdateResult; disconnecting");
+                            self.in_flight_updates.remove(&host_machine_id);
+                            return Ok(Some(LoopOutcome::Disconnected));
+                        }
                         self.in_flight_updates.remove(&host_machine_id);
                     }
                 }
@@ -310,7 +314,9 @@ impl ServiceHandler for SshAgentHandler {
                                     client::send_update_output(conn, uid, msg).await;
                                 }
                                 client::UpdateEvent::Completed(result) => {
-                                    client::send_update_result(conn, uid, result).await;
+                                    if let Err(e) = client::send_update_result(conn, uid, result).await {
+                                        tracing::warn!(error = %e, "failed to send UpdateResult during shutdown");
+                                    }
                                     self.in_flight_updates.remove(&host_id);
                                 }
                             }

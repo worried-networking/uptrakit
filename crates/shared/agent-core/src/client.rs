@@ -7,7 +7,7 @@ use uptrakit_internal_wire::{
     ExecuteBatchHostPackageUpdatePayload, ServiceMessage, UpdateFinalStatus, UpdateOutputPayload,
     UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
 };
-use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
+use uptrakit_service_sdk::{ControllerConnection, LoopOutcome, Result};
 
 use crate::connection_context::ConnectionContext;
 
@@ -39,17 +39,21 @@ pub async fn send_update_output(
 }
 
 /// Send the final update result to the controller.
+///
+/// Returns `Err` if the WebSocket write fails. Callers should treat this as a
+/// reason to terminate the connection so the reconnect loop re-establishes the
+/// session; otherwise the controller has no signal to close the in-progress
+/// update record.
 pub async fn send_update_result(
     conn: &mut ControllerConnection,
     update_history_id: uuid::Uuid,
     result: std::result::Result<crate::update::UpdateExecutionResult, tokio::task::JoinError>,
-) {
+) -> Result<()> {
     match result {
         Ok(exec_result) => {
             let status = exec_result.result.status;
             let error = exec_result.result.error.clone();
-            conn.send_best_effort(ServiceMessage::UpdateResult(exec_result.result))
-                .await;
+            conn.send(ServiceMessage::UpdateResult(exec_result.result)).await?;
             match status {
                 uptrakit_internal_wire::UpdateFinalStatus::Completed => {
                     tracing::info!(update_id = %update_history_id, "update execution completed successfully");
@@ -65,7 +69,7 @@ pub async fn send_update_result(
         }
         Err(e) => {
             tracing::error!(error = %e, "update task panicked");
-            conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
+            conn.send(ServiceMessage::UpdateResult(UpdateResultPayload {
                 update_history_id,
                 status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                 from_version: None,
@@ -73,9 +77,10 @@ pub async fn send_update_result(
                 output: String::new(),
                 error: Some(format!("Update task panicked: {e}")),
             }))
-            .await;
+            .await?;
         }
     }
+    Ok(())
 }
 
 /// Handle graceful shutdown: drain in-flight update, send Disconnecting.
@@ -107,7 +112,9 @@ pub async fn handle_graceful_shutdown(
                     send_update_output(conn, update.update_history_id, output_msg).await;
                 }
                 result = &mut update.handle => {
-                    send_update_result(conn, update.update_history_id, result).await;
+                    if let Err(e) = send_update_result(conn, update.update_history_id, result).await {
+                        tracing::warn!(error = %e, "failed to send UpdateResult during shutdown");
+                    }
                     break;
                 }
                 _ = tokio::time::sleep_until(deadline) => {
