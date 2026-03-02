@@ -113,20 +113,23 @@ uptrakit ALL=(root) NOPASSWD: /usr/local/bin/uptrakit-phs-version
 This restricts root access to exactly one path pattern — PHS dot-files in `/root/` —
 and argument injection is prevented by the script's `case` guard.
 
-**Example: PHS updates.** Executing a PHS update requires root to run `pct exec` on
-the Proxmox host. Rather than granting `NOPASSWD: /usr/bin/update` directly (which
-would allow passing arbitrary arguments) or granting `NOPASSWD: /usr/bin/env` (too
-broad), bootstrap installs `/usr/local/bin/uptrakit-phs-update`. The script accepts
-no arguments and simply runs `env PHS_SILENT=1 /usr/bin/update` so the update
-proceeds without interactive whiptail prompts. The resulting sudoers line is:
+**Example: PHS updates.** Executing a PHS update requires root to run
+`/usr/bin/update` with `PHS_SILENT=1` (suppresses interactive whiptail dialogs) and
+`TERM=xterm` (ensures terminal commands succeed over a non-interactive SSH channel).
+The agent embeds these as inline `NAME=VALUE` assignments in the `sudo` call:
 
 ```text
-uptrakit ALL=(root) NOPASSWD: /usr/local/bin/uptrakit-phs-update
+sudo PHS_SILENT=1 TERM=xterm /usr/bin/update
 ```
 
-The Shell plugin embeds `sudo` directly in the `update_command` string
-(`sudo /usr/local/bin/uptrakit-phs-update`) because `CommandSpec::shell()` does not
-support the `.privileged()` flag.
+The `SETENV:` tag in the sudoers entry allows sudo to accept those assignments:
+
+```text
+uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/update
+```
+
+The Shell plugin embeds `sudo` directly in the `update_command` string because
+`CommandSpec::shell()` does not support the `.privileged()` flag.
 
 ### Implementing a helper script in a plugin
 
