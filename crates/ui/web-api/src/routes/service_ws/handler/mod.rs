@@ -465,6 +465,15 @@ pub(crate) async fn handle_authenticated_loop(
                             }
 
                             // -------------------------------------------------
+                            // MqttTriggerHostPackageUpdate (requires MqttBridge)
+                            // -------------------------------------------------
+                            ServiceMessage::MqttTriggerHostPackageUpdate(payload) if is_mqtt => {
+                                if mqtt::handle_mqtt_trigger_host_package_update(sink, out_seq, state, &payload, mqtt_context.as_ref()).await.is_break() {
+                                    break;
+                                }
+                            }
+
+                            // -------------------------------------------------
                             // Disconnecting (all capabilities)
                             // -------------------------------------------------
                             ServiceMessage::Disconnecting(payload) => {

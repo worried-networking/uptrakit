@@ -12,8 +12,8 @@ use futures_util::{SinkExt, StreamExt};
 use uptrakit_internal_wire::{
     CloseReason, ControllerMessage, ErrorCode, ErrorPayload, IncomingSeq,
     MqttClientConnectionStatus as WireMqttClientConnectionStatus, MqttClientStatusPayload,
-    MqttReleaseTenantsPayload, MqttTenantConfig, MqttUpdateTriggerPayload, OutgoingSeq,
-    PingPayload, ServiceMessage,
+    MqttReleaseTenantsPayload, MqttTenantConfig, MqttTriggerHostPackageUpdatePayload,
+    MqttUpdateTriggerPayload, OutgoingSeq, PingPayload, ServiceMessage,
 };
 use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqttClientConnectionStatus;
 
@@ -328,6 +328,91 @@ pub(super) async fn handle_mqtt_trigger_update(
                 software_item_id = %payload.software_item_id,
                 host_id = %payload.host_id,
                 "MQTT-triggered update failed"
+            );
+            let err_msg = ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::BadRequest,
+                message: err.to_string(),
+            });
+            if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
+                let _ = sink.send(Message::Text(json.into())).await;
+            }
+        }
+    }
+
+    LoopAction::Continue
+}
+
+// ---------------------------------------------------------------------------
+// handle_mqtt_trigger_host_package_update
+// ---------------------------------------------------------------------------
+
+/// Handle a `MqttTriggerHostPackageUpdate` message: trigger a batch update of
+/// all outdated host packages on a host.
+pub(super) async fn handle_mqtt_trigger_host_package_update(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
+    state: &Arc<AppState>,
+    payload: &MqttTriggerHostPackageUpdatePayload,
+    mqtt_context: Option<&MqttContext>,
+) -> LoopAction {
+    // Validate tenant is assigned to this MQTT service.
+    let tenant_assigned = mqtt_context
+        .map(|mctx| {
+            mctx.tenant_configs
+                .iter()
+                .any(|c| c.tenant_id == payload.tenant_id)
+        })
+        .unwrap_or(false);
+
+    if !tenant_assigned {
+        let err_msg = ControllerMessage::Error(ErrorPayload {
+            code: ErrorCode::BadRequest,
+            message: "tenant not assigned to this MQTT service".to_string(),
+        });
+        if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
+            let _ = sink.send(Message::Text(json.into())).await;
+        }
+        return LoopAction::Continue;
+    }
+
+    match crate::queries::update_batches::trigger_all_host_package_updates_for_host(
+        state.db(),
+        &state.notification_service,
+        payload.tenant_id,
+        payload.host_id,
+        "mqtt",
+        &payload.mqtt_client_id.to_string(),
+    )
+    .await
+    {
+        Ok(Some(batch_id)) => {
+            tracing::info!(
+                %batch_id,
+                host_id = %payload.host_id,
+                mqtt_client_id = %payload.mqtt_client_id,
+                "MQTT-triggered host package batch update dispatched"
+            );
+            // Push updated software states so that `update_in_progress: true`
+            // is reflected in the MQTT/HA entity immediately.
+            state
+                .notification_service
+                .push_software_states_for_tenant(state.db(), payload.tenant_id)
+                .await;
+        }
+        Ok(None) => {
+            let err_msg = ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::BadRequest,
+                message: "no outdated packages found on this host".to_string(),
+            });
+            if let Some(json) = serialize_controller_msg(out_seq, err_msg) {
+                let _ = sink.send(Message::Text(json.into())).await;
+            }
+        }
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                host_id = %payload.host_id,
+                "MQTT-triggered host package batch update failed"
             );
             let err_msg = ControllerMessage::Error(ErrorPayload {
                 code: ErrorCode::BadRequest,

@@ -1032,6 +1032,19 @@ pub(super) async fn handle_batch_host_package_update_result(
         }
     }
 
+    // Push updated host-package states to MQTT so that `in_progress = false`
+    // and the new `installed_version` are reflected immediately after the batch
+    // completes — mirroring what `handle_update_result` does for software items.
+    if let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        state
+            .notification_service
+            .push_software_states_for_tenant(state.db(), svc.tenant_id)
+            .await;
+    }
+
     LoopAction::Continue
 }
 
