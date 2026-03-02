@@ -8,7 +8,7 @@ Uptrakit operates an internal PKI for agents and MQTT services.
 | --- | --- | --- |
 | CA certificate | 5 years | Rotate 6 months before expiry |
 | Server HTTPS cert | 90 days | Renew 30 days before expiry |
-| Agent/MQTT client cert | 7 days (default, max 730) | `min(14 days, lifetime / 5)` — see below |
+| Agent/MQTT client cert | 168 h (default, max 17 520 h) | `min(14 days, lifetime / 5)` — see below |
 
 ## Agent/MQTT Certificate Renewal Window
 
@@ -26,10 +26,12 @@ Examples:
 
 | Cert lifetime | 1/5 | Ceiling | Effective window |
 | --- | --- | --- | --- |
-| 7 days | 33 h | 336 h | **33 hours** |
-| 30 days | 144 h | 336 h | **144 hours** |
-| 70 days | 336 h | 336 h | **336 hours (14 days)** |
-| 365 days | 1752 h | 336 h | **336 hours (14 days)** |
+| 2 h | < 1 h | 336 h | **< 1 hour (rounds down to 0 — service renews immediately)** |
+| 12 h | 2 h | 336 h | **2 hours** |
+| 168 h (7 days) | 33 h | 336 h | **33 hours** |
+| 720 h (30 days) | 144 h | 336 h | **144 hours** |
+| 1 680 h (70 days) | 336 h | 336 h | **336 hours (14 days)** |
+| 8 760 h (365 days) | 1 752 h | 336 h | **336 hours (14 days)** |
 
 This formula applies at **two layers**:
 
@@ -58,11 +60,32 @@ The API response includes both the raw override and the effective value:
 
 ```json
 {
-  "lifetime_days": 7,
+  "lifetime_hours": 168,
   "renewal_window_hours_override": null,
   "effective_renewal_window_hours": 33
 }
 ```
+
+### Per-service override
+
+Each individual service can have its own certificate lifetime, independent of the global default.
+Set it via `PUT /api/v1/services/{id}`:
+
+```json
+{ "cert_lifetime_hours": 48 }
+```
+
+Send `0` to clear the per-service override and revert to the global default:
+
+```json
+{ "cert_lifetime_hours": 0 }
+```
+
+Valid values: `0` (clear) or `1`–`17520`. When set, this value takes precedence over the global
+setting at certificate signing time. The per-service value is visible in `GET /api/v1/services/{id}`
+as `cert_lifetime_hours` (omitted when the global default applies).
+
+See also: [Services Operations](../api/services-operations.md) for the full `UpdateServiceRequest` reference.
 
 ## CA Basic Constraints and Path Length
 

@@ -27,6 +27,25 @@ CRL refresh.
 - `/api/v1/agents/{agent_id}/execute-update` triggers `execute_update` with the software item ID(s).
 - `/api/v1/update-history` provides audit logs for updates; each row tracks `status`, `output`, `actor_type`, `actor_id`, and `tenant_id`.
 
+## Configuring a Service
+
+`PUT /api/v1/services/{id}` accepts an `UpdateServiceRequest` body with the following optional fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `ping_interval_seconds` | `u32` (optional) | Custom ping interval in seconds. `0` clears the override; minimum positive value is `5`. Omit to keep current value. |
+| `cert_lifetime_hours` | `u32` (optional) | Per-service certificate lifetime in hours. `0` clears the per-service override and reverts to the global default. Valid positive range: `1`–`17520`. Omit to keep current value. |
+
+When `cert_lifetime_hours` is set, it takes precedence over the global agent certificate lifetime setting
+(`PUT /api/v1/settings/agent-certificates`) at certificate signing time — both during initial enrollment
+and on renewals.
+
+The `ServiceResponse` includes `cert_lifetime_hours` only when a per-service override is active (the field
+is omitted from JSON when the service uses the global default).
+
+See also: [PKI and Certificate Lifecycle](../security/pki-certificates.md) for renewal window details and
+the per-service override section.
+
 ## MQTT Service
 
 - `/api/v1/enrollment-tokens` manages multiple named enrollment tokens with optional capability scoping,
