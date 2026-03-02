@@ -95,6 +95,19 @@ pub enum Capability {
     ///
     /// Wire string: `ca_management`.
     CaManagement,
+    /// Service is a global infrastructure service, not bound to any tenant.
+    ///
+    /// When present in an `EnrollPayload`, the controller routes enrollment to
+    /// the `system_services` table instead of the per-tenant `services` table.
+    ///
+    /// **Credential guard**: any service requesting `DatabaseAccess`,
+    /// `NatsAccess`, `MasterKeyAccess`, or `CaManagement` without also
+    /// advertising `SystemService` will be rejected at enrollment with a 403
+    /// error. This prevents regular tenant agents from claiming infrastructure
+    /// credentials.
+    ///
+    /// Wire string: `system_service`.
+    SystemService,
     /// Unknown capability from a newer peer; never participates in intersection.
     ///
     /// Provides forward compatibility: a newer peer may advertise capabilities
@@ -117,6 +130,7 @@ impl Capability {
             Self::NatsAccess => "nats_access",
             Self::MasterKeyAccess => "master_key_access",
             Self::CaManagement => "ca_management",
+            Self::SystemService => "system_service",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -167,6 +181,7 @@ impl FromStr for Capability {
             "nats_access" => Self::NatsAccess,
             "master_key_access" => Self::MasterKeyAccess,
             "ca_management" => Self::CaManagement,
+            "system_service" => Self::SystemService,
             other => Self::Other(other.to_string()),
         })
     }
@@ -4172,6 +4187,19 @@ mod tests {
         assert_eq!(cap.as_str(), "ca_management");
         let parsed: Capability = "ca_management".parse().unwrap();
         assert_eq!(parsed, cap);
+    }
+
+    #[test]
+    fn system_service_capability_roundtrip() {
+        let cap = Capability::SystemService;
+        assert_eq!(cap.as_str(), "system_service");
+        assert!(cap.is_known());
+        let json = serde_json::to_string(&cap).unwrap();
+        assert_eq!(json, r#""system_service""#);
+        let parsed: Capability = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, cap);
+        let from_str: Capability = "system_service".parse().unwrap();
+        assert_eq!(from_str, cap);
     }
 
     // =========================================================================

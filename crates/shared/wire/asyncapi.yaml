@@ -1222,12 +1222,13 @@ components:
             and derives behavioral defaults from the resulting service profile.
             Known capabilities: software_discovery, update_hooks, graceful_shutdown,
             mqtt_bridge, ssh_remote, scheduler, database_access, nats_access,
-            master_key_access, ca_management.
+            master_key_access, ca_management, system_service.
           examples:
             - - graceful_shutdown
               - software_discovery
               - update_hooks
-            - - scheduler
+            - - system_service
+              - scheduler
               - database_access
               - nats_access
               - master_key_access

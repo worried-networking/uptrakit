@@ -191,10 +191,17 @@ impl ServiceHandler for MqttHandler {
 }
 
 /// Capabilities advertised by the MQTT service.
+///
+/// `SystemService` marks this service as global infrastructure (routed to the
+/// `system_services` table instead of the per-tenant `services` table).
 fn mqtt_capabilities() -> BTreeSet<Capability> {
-    [Capability::MqttBridge, Capability::GracefulShutdown]
-        .into_iter()
-        .collect()
+    [
+        Capability::SystemService,
+        Capability::MqttBridge,
+        Capability::GracefulShutdown,
+    ]
+    .into_iter()
+    .collect()
 }
 
 #[tokio::main]
