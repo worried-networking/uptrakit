@@ -150,8 +150,14 @@ non-root user, sudo available, auto policy. This matches the old hardcoded-sudo 
 `SudoAwareCommandExecutor::apply_sudo()` inspects each spec before delegating to the inner executor:
 
 1. If `!spec.privileged` or `!context.should_use_sudo()` — passes the spec through unchanged.
-2. If `spec.privileged && context.should_use_sudo()` and mode is `Exec { program, args }` — rewrites
-   to `Exec { program: "sudo", args: [old_program] + old_args }`.
+2. If `spec.privileged && context.should_use_sudo()` and mode is `Exec { program, args }`:
+   - Rewrites to `Exec { program: "sudo", args: [VAR=val…, old_program] + old_args }`.
+   - Any `envs` on the spec are forwarded as inline `NAME=VALUE` assignments **before** the program name
+     (e.g. `sudo DEBIAN_FRONTEND=noninteractive apt-get update -q`). Sudo parses these natively when the
+     sudoers entry carries `SETENV:`, which all Uptrakit-generated entries include. The `envs` field is
+     cleared on the resulting spec to avoid double-setting.
+   - Using `env VAR=val PROG` is intentionally avoided: it would cause sudo to authorise `/usr/bin/env`
+     rather than the actual program, breaking the `NOPASSWD: SETENV: /path/to/PROG` sudoers match.
 3. If mode is `Shell { .. }` — emits `tracing::warn!` and passes through unchanged (shell commands handle their own privilege).
 
 #### Usage

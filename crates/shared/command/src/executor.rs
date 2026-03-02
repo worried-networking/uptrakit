@@ -51,8 +51,9 @@ pub struct CommandSpec {
     /// Each entry is a `(name, value)` pair. For local execution these are set
     /// directly on the spawned process. For SSH execution they are prepended
     /// as `NAME='VALUE'` assignments in the remote command string. When sudo
-    /// is in use they are forwarded as `sudo env NAME=VALUE …` so they
-    /// survive the privilege-boundary environment reset.
+    /// is in use they are forwarded as inline `NAME=VALUE` assignments before
+    /// the program name (`sudo NAME=VALUE PROG …`); the sudoers entry must
+    /// carry `SETENV:` for sudo to accept this form.
     pub envs: Vec<(String, String)>,
 }
 

@@ -119,9 +119,18 @@ pub async fn resolve_command_path(session: &SshSession, command: &str) -> Result
 /// ```text
 /// # Managed by Uptrakit - DO NOT EDIT MANUALLY
 /// # Regenerate: uptrakit-agent-ssh host update-sudoers <host>
-/// # apt-get: Package installation and index refresh require root privileges
-/// alice ALL=(root) NOPASSWD: /usr/bin/apt-get
+/// # /usr/bin/apt-get: Package installation and index refresh require root privileges
+/// alice ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get
 /// ```
+///
+/// ## Why `SETENV:`
+///
+/// The `SETENV:` tag allows the Uptrakit agent user to pass environment
+/// variables as inline `NAME=VALUE` assignments before the program name when
+/// calling `sudo` (e.g. `sudo DEBIAN_FRONTEND=noninteractive apt-get update`).
+/// Without it, sudo rejects such assignments. `SETENV:` does **not** override
+/// `env_reset` — sudo's built-in `env_delete` list still strips dangerous vars
+/// like `LD_PRELOAD` before they reach the privileged process.
 pub fn generate_sudoers_content(username: &str, content: &SudoersContent) -> String {
     let mut out = String::new();
     out.push_str("# Managed by Uptrakit - DO NOT EDIT MANUALLY\n");
@@ -138,7 +147,7 @@ pub fn generate_sudoers_content(username: &str, content: &SudoersContent) -> Str
                     entry.command_path, entry.explanation
                 ));
                 out.push_str(&format!(
-                    "{username} ALL=(root) NOPASSWD: {}\n",
+                    "{username} ALL=(root) NOPASSWD: SETENV: {}\n",
                     entry.command_path
                 ));
             }
@@ -230,7 +239,8 @@ mod tests {
 
         assert!(text.contains("# Managed by Uptrakit"));
         assert!(text.contains("# /usr/bin/apt-get: Package installation requires root"));
-        assert!(text.contains("bob ALL=(root) NOPASSWD: /usr/bin/apt-get"));
+        // SETENV: must be present so inline `VAR=val` sudo assignments are accepted.
+        assert!(text.contains("bob ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get"));
         assert!(!text.contains("NOPASSWD: ALL\n"));
     }
 
@@ -248,8 +258,16 @@ mod tests {
         ]);
         let text = generate_sudoers_content("deploy", &content);
 
-        assert!(text.contains("deploy ALL=(root) NOPASSWD: /usr/bin/apt-get"));
-        assert!(text.contains("deploy ALL=(root) NOPASSWD: /usr/sbin/service"));
+        assert!(text.contains("deploy ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get"));
+        assert!(text.contains("deploy ALL=(root) NOPASSWD: SETENV: /usr/sbin/service"));
+    }
+
+    #[test]
+    fn generate_sudoers_specific_commands_no_setenv_in_all_commands() {
+        // SETENV: only applies to per-command entries, not AllCommands (which grants ALL anyway).
+        let text = generate_sudoers_content("alice", &SudoersContent::AllCommands);
+        assert!(text.contains("alice ALL=(root) NOPASSWD: ALL"));
+        assert!(!text.contains("SETENV:"));
     }
 
     #[test]
