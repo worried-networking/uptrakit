@@ -319,6 +319,26 @@ pub(crate) mod update_batches {
     }
 }
 
+pub(crate) mod host_packages {
+    use uuid::Uuid;
+    /// `GET /api/v1/hosts/{host_id}/packages`
+    pub(crate) fn base(host_id: &Uuid) -> String {
+        format!("/api/v1/hosts/{host_id}/packages")
+    }
+    /// `GET /api/v1/hosts/{host_id}/packages/{id}` · `PUT …` · `DELETE …`
+    pub(crate) fn by_id(host_id: &Uuid, id: &Uuid) -> String {
+        format!("/api/v1/hosts/{host_id}/packages/{id}")
+    }
+    /// `GET /api/v1/hosts/{host_id}/package-ignores` · `POST …`
+    pub(crate) fn ignores(host_id: &Uuid) -> String {
+        format!("/api/v1/hosts/{host_id}/package-ignores")
+    }
+    /// `DELETE /api/v1/hosts/{host_id}/package-ignores/{id}`
+    pub(crate) fn ignore_by_id(host_id: &Uuid, id: &Uuid) -> String {
+        format!("/api/v1/hosts/{host_id}/package-ignores/{id}")
+    }
+}
+
 pub(crate) mod update_history {
     use uuid::Uuid;
     /// `GET /api/v1/update-history`

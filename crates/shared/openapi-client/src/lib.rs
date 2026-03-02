@@ -11,6 +11,7 @@ pub mod discovery_allowlist;
 pub mod enrollment_tokens;
 pub mod error;
 pub mod health;
+pub mod host_packages;
 pub mod hosts;
 pub mod notifications;
 pub mod oidc_auth;
