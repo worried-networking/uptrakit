@@ -50,6 +50,84 @@ mod tests {
     use super::*;
     use sea_orm::{ConnectOptions, Database};
 
+    /// Simulate the "existing database" upgrade scenario:
+    /// the first twelve migrations are applied in a first run, then the
+    /// remaining migrations (starting with m20260302_000003_host_packages_has_update)
+    /// are applied in a second run.  This catches bugs that only surface when
+    /// `host_packages` already exists at the time the recreation migration runs.
+    #[tokio::test]
+    async fn migrations_run_incrementally_sqlite() {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+        // Apply the first twelve migrations (everything before
+        // m20260302_000003_host_packages_has_update).
+        Migrator::up(&db, Some(12))
+            .await
+            .expect("first 12 migrations should succeed");
+        // Apply the rest (m20260302_000003 + m20260307_000001).
+        Migrator::up(&db, None)
+            .await
+            .expect("remaining migrations should succeed on existing database");
+        db.execute_unprepared("SELECT has_update FROM host_packages LIMIT 0")
+            .await
+            .expect("has_update column must exist after incremental migration");
+    }
+
+    /// State B recovery: a previous run of m20260302_000003 created
+    /// `host_packages_new` but crashed before dropping the original.  Both
+    /// tables exist.  The migration must discard the partial temp table and
+    /// restart from scratch.
+    #[tokio::test]
+    async fn migrations_tolerate_leftover_temp_table_state_b() {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+        // Apply everything up to and including m20260302_000002_host_packages.
+        Migrator::up(&db, Some(12)).await.unwrap();
+
+        // Simulate: host_packages_new was created but host_packages was NOT yet
+        // dropped (both tables exist).
+        db.execute_unprepared(
+            "CREATE TABLE host_packages_new AS SELECT * FROM host_packages",
+        )
+        .await
+        .unwrap();
+
+        // The next Migrator::up call must not crash.
+        Migrator::up(&db, None).await.expect(
+            "migration must succeed even when host_packages_new already exists alongside original",
+        );
+        db.execute_unprepared("SELECT has_update FROM host_packages LIMIT 0")
+            .await
+            .expect("has_update column must exist after State B recovery");
+    }
+
+    /// State C recovery: a previous run of m20260302_000003 created
+    /// `host_packages_new`, copied all data, and dropped the original, but
+    /// crashed before the rename.  Only `host_packages_new` exists.  The
+    /// migration must rename it without re-creating or re-copying.
+    #[tokio::test]
+    async fn migrations_tolerate_leftover_temp_table_state_c() {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+        Migrator::up(&db, Some(12)).await.unwrap();
+
+        // Simulate: copy done, original dropped, rename not yet done.
+        // Use the real schema so the rename results in a valid host_packages.
+        db.execute_unprepared(
+            "CREATE TABLE host_packages_new AS SELECT * FROM host_packages",
+        )
+        .await
+        .unwrap();
+        db.execute_unprepared("DROP TABLE host_packages")
+            .await
+            .unwrap();
+
+        // The next Migrator::up call must not crash.
+        Migrator::up(&db, None).await.expect(
+            "migration must succeed when only host_packages_new exists (State C)",
+        );
+    }
+
     #[tokio::test]
     async fn migrations_run_on_empty_sqlite() {
         let opt = ConnectOptions::new("sqlite::memory:");
