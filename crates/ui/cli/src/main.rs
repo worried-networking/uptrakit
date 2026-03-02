@@ -130,6 +130,11 @@ enum Commands {
         #[command(subcommand)]
         command: NotificationsCommands,
     },
+    /// Manage host packages (system-level package updates)
+    HostPackages {
+        #[command(subcommand)]
+        command: HostPackagesCommands,
+    },
     /// Manage update batches
     UpdateBatches {
         #[command(subcommand)]
@@ -215,6 +220,96 @@ enum HostsCommands {
         id: Uuid,
         #[command(subcommand)]
         command: HostDiscoveryAllowlistCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum HostPackagesCommands {
+    /// List host packages
+    List {
+        /// Host UUID
+        host_id: Uuid,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+        /// Filter by enabled status
+        #[arg(long)]
+        enabled: Option<bool>,
+        /// Filter packages that have an available update
+        #[arg(long)]
+        has_update: Option<bool>,
+        /// Filter by update category (e.g. security, standard)
+        #[arg(long)]
+        category: Option<String>,
+        /// Search by package name
+        #[arg(long)]
+        search: Option<String>,
+    },
+    /// Show host package details with update history
+    Show {
+        /// Host UUID
+        host_id: Uuid,
+        /// Package UUID
+        package_id: Uuid,
+    },
+    /// Enable a host package
+    Enable {
+        /// Host UUID
+        host_id: Uuid,
+        /// Package UUID
+        package_id: Uuid,
+    },
+    /// Disable a host package
+    Disable {
+        /// Host UUID
+        host_id: Uuid,
+        /// Package UUID
+        package_id: Uuid,
+    },
+    /// Delete a host package
+    Delete {
+        /// Host UUID
+        host_id: Uuid,
+        /// Package UUID
+        package_id: Uuid,
+        /// Also create an ignore rule to prevent rediscovery
+        #[arg(long)]
+        ignore: bool,
+    },
+    /// Manage ignore rules
+    Ignore {
+        #[command(subcommand)]
+        command: HostPackageIgnoreCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum HostPackageIgnoreCommands {
+    /// List ignore rules for a host
+    List {
+        /// Host UUID
+        host_id: Uuid,
+    },
+    /// Add an ignore rule
+    Add {
+        /// Host UUID
+        host_id: Uuid,
+        /// Plugin config UUID
+        #[arg(long)]
+        plugin_config: Uuid,
+        /// Package identifier to ignore
+        #[arg(long)]
+        package: String,
+    },
+    /// Remove an ignore rule
+    Remove {
+        /// Host UUID
+        host_id: Uuid,
+        /// Ignore rule UUID
+        ignore_id: Uuid,
     },
 }
 
@@ -1788,6 +1883,151 @@ async fn run(cli: Cli) -> error::Result<()> {
                 }
             }
         },
+        Commands::HostPackages { command } => match command {
+            HostPackagesCommands::List {
+                host_id,
+                page,
+                per_page,
+                enabled,
+                has_update,
+                category,
+                search,
+            } => {
+                let resp = commands::host_packages::list(commands::host_packages::ListParams {
+                    host_id: &host_id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                    page,
+                    per_page,
+                    enabled,
+                    has_update,
+                    category,
+                    search,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostPackagesCommands::Show {
+                host_id,
+                package_id,
+            } => {
+                let resp = commands::host_packages::show(commands::host_packages::ShowParams {
+                    host_id: &host_id,
+                    package_id: &package_id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostPackagesCommands::Enable {
+                host_id,
+                package_id,
+            } => {
+                let resp =
+                    commands::host_packages::update(commands::host_packages::UpdateParams {
+                        host_id: &host_id,
+                        package_id: &package_id,
+                        enabled: true,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    })
+                    .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostPackagesCommands::Disable {
+                host_id,
+                package_id,
+            } => {
+                let resp =
+                    commands::host_packages::update(commands::host_packages::UpdateParams {
+                        host_id: &host_id,
+                        package_id: &package_id,
+                        enabled: false,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    })
+                    .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostPackagesCommands::Delete {
+                host_id,
+                package_id,
+                ignore,
+            } => {
+                let resp =
+                    commands::host_packages::delete(commands::host_packages::DeleteParams {
+                        host_id: &host_id,
+                        package_id: &package_id,
+                        ignore,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    })
+                    .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostPackagesCommands::Ignore { command } => match command {
+                HostPackageIgnoreCommands::List { host_id } => {
+                    let resp = commands::host_packages::list_ignores(
+                        commands::host_packages::ListIgnoresParams {
+                            host_id: &host_id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                HostPackageIgnoreCommands::Add {
+                    host_id,
+                    plugin_config,
+                    package,
+                } => {
+                    let resp = commands::host_packages::add_ignore(
+                        commands::host_packages::AddIgnoreParams {
+                            host_id: &host_id,
+                            plugin_config_id: &plugin_config,
+                            package_identifier: package,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                HostPackageIgnoreCommands::Remove {
+                    host_id,
+                    ignore_id,
+                } => {
+                    let resp = commands::host_packages::remove_ignore(
+                        commands::host_packages::RemoveIgnoreParams {
+                            host_id: &host_id,
+                            ignore_id: &ignore_id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+            },
+        },
         Commands::UpdateBatches { command } => match command {
             UpdateBatchesCommands::List {
                 status,
@@ -2974,6 +3214,7 @@ mod tests {
     const PC_UUID: &str = "aa100000-bb00-cc00-dd00-ee0000000001";
     const IGNORE_UUID: &str = "aa200000-bb00-cc00-dd00-ee0000000001";
     const ET_UUID: &str = "aa300000-bb00-cc00-dd00-ee0000000001";
+    const PKG_UUID: &str = "aa400000-bb00-cc00-dd00-ee0000000001";
 
     /// Parse a UUID constant (safe in tests).
     fn uuid(s: &str) -> Uuid {
@@ -3390,6 +3631,217 @@ mod tests {
             _ => panic!("expected Update BatchItem"),
         }
     }
+
+    // ── host-packages ────────────────────────────────────────────────
+
+    #[test]
+    fn host_packages_list_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "host-packages", "list", HOST_UUID])
+                .expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::HostPackages {
+                command: HostPackagesCommands::List { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn host_packages_list_with_filters() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "host-packages",
+            "list",
+            HOST_UUID,
+            "--enabled",
+            "true",
+            "--has-update",
+            "true",
+            "--category",
+            "security",
+            "--search",
+            "nginx",
+            "--page",
+            "2",
+            "--per-page",
+            "10",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::HostPackages {
+                command:
+                    HostPackagesCommands::List {
+                        host_id,
+                        page,
+                        per_page,
+                        enabled,
+                        has_update,
+                        category,
+                        search,
+                    },
+            }) => {
+                assert_eq!(host_id, uuid(HOST_UUID));
+                assert_eq!(page, Some(2));
+                assert_eq!(per_page, Some(10));
+                assert_eq!(enabled, Some(true));
+                assert_eq!(has_update, Some(true));
+                assert_eq!(category.as_deref(), Some("security"));
+                assert_eq!(search.as_deref(), Some("nginx"));
+            }
+            _ => panic!("expected HostPackages List"),
+        }
+    }
+
+    #[test]
+    fn host_packages_show_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "host-packages", "show", HOST_UUID, PKG_UUID])
+                .expect("should parse");
+        match args.command {
+            Some(Commands::HostPackages {
+                command: HostPackagesCommands::Show { host_id, package_id },
+            }) => {
+                assert_eq!(host_id, uuid(HOST_UUID));
+                assert_eq!(package_id, uuid(PKG_UUID));
+            }
+            _ => panic!("expected HostPackages Show"),
+        }
+    }
+
+    #[test]
+    fn host_packages_enable_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "host-packages", "enable", HOST_UUID, PKG_UUID])
+                .expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::HostPackages {
+                command: HostPackagesCommands::Enable { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn host_packages_disable_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "host-packages", "disable", HOST_UUID, PKG_UUID])
+                .expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::HostPackages {
+                command: HostPackagesCommands::Disable { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn host_packages_delete_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "host-packages",
+            "delete",
+            HOST_UUID,
+            PKG_UUID,
+            "--ignore",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::HostPackages {
+                command:
+                    HostPackagesCommands::Delete {
+                        host_id,
+                        package_id,
+                        ignore,
+                    },
+            }) => {
+                assert_eq!(host_id, uuid(HOST_UUID));
+                assert_eq!(package_id, uuid(PKG_UUID));
+                assert!(ignore);
+            }
+            _ => panic!("expected HostPackages Delete"),
+        }
+    }
+
+    #[test]
+    fn host_packages_ignore_list_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "host-packages", "ignore", "list", HOST_UUID])
+                .expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::HostPackages {
+                command: HostPackagesCommands::Ignore {
+                    command: HostPackageIgnoreCommands::List { .. }
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn host_packages_ignore_add_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "host-packages",
+            "ignore",
+            "add",
+            HOST_UUID,
+            "--plugin-config",
+            PC_UUID,
+            "--package",
+            "nginx",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::HostPackages {
+                command:
+                    HostPackagesCommands::Ignore {
+                        command:
+                            HostPackageIgnoreCommands::Add {
+                                host_id,
+                                plugin_config,
+                                package,
+                            },
+                    },
+            }) => {
+                assert_eq!(host_id, uuid(HOST_UUID));
+                assert_eq!(plugin_config, uuid(PC_UUID));
+                assert_eq!(package, "nginx");
+            }
+            _ => panic!("expected HostPackages Ignore Add"),
+        }
+    }
+
+    #[test]
+    fn host_packages_ignore_remove_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "host-packages",
+            "ignore",
+            "remove",
+            HOST_UUID,
+            IGNORE_UUID,
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::HostPackages {
+                command:
+                    HostPackagesCommands::Ignore {
+                        command:
+                            HostPackageIgnoreCommands::Remove {
+                                host_id,
+                                ignore_id,
+                            },
+                    },
+            }) => {
+                assert_eq!(host_id, uuid(HOST_UUID));
+                assert_eq!(ignore_id, uuid(IGNORE_UUID));
+            }
+            _ => panic!("expected HostPackages Ignore Remove"),
+        }
+    }
+
+    // ── update-batches ──────────────────────────────────────────────
 
     #[test]
     fn update_batches_list_parses() {

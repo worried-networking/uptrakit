@@ -6,6 +6,7 @@ pub mod discovery_allowlist;
 pub mod check;
 pub mod enrollment_tokens;
 pub mod history;
+pub mod host_packages;
 pub mod hosts;
 pub mod notifications;
 pub mod plugin_configs;
