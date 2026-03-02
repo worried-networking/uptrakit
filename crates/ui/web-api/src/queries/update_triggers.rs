@@ -13,7 +13,10 @@
 //! validation, bulk insert, selective dispatch).
 
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set,
+};
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{ControllerMessage, PluginAssignment, ReleaseInfo};
 use uptrakit_shared_db::entity::{
@@ -287,8 +290,11 @@ pub async fn validate_update_preconditions(
 ///
 /// If `batch_id` is `Some`, the record is associated with a batch for
 /// sequential per-host dispatch.
-pub async fn create_update_history_record(
-    db: &DatabaseConnection,
+///
+/// Accepts any `ConnectionTrait` implementor (bare `DatabaseConnection` or a
+/// SeaORM transaction) so callers can run this inside or outside a transaction.
+pub async fn create_update_history_record<C: ConnectionTrait>(
+    db: &C,
     params: &CreateUpdateRecordParams<'_>,
 ) -> Result<Uuid> {
     let now = OffsetDateTime::now_utc();

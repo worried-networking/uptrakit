@@ -10,7 +10,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set,
+    QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
@@ -325,7 +325,12 @@ pub async fn create_batch(
         });
     }
 
-    // Create the batch record
+    // Insert the batch record and all update_history rows atomically so that a
+    // mid-flight failure cannot leave a batch record with an incorrect total_count.
+    // Dispatch (WebSocket sends) happens outside the transaction because it cannot
+    // be rolled back.
+    let txn = db.begin().await.context_to()?;
+
     let batch_record = update_batch::ActiveModel {
         id: Set(batch_id),
         tenant_id: Set(params.tenant_id),
@@ -337,15 +342,13 @@ pub async fn create_batch(
         created_at: Set(now),
         completed_at: Set(None),
     };
-    batch_record.insert(db).await.context_to()?;
+    batch_record.insert(&txn).await.context_to()?;
 
-    // Create update_history records and dispatch first per host
-    let mut updates: Vec<BatchUpdateItem> = Vec::new();
-    let mut dispatched_hosts: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
-
-    for (candidate, target) in &validated {
+    // Collect (history_id, index) inside the transaction, then dispatch after commit.
+    let mut history_ids: Vec<Uuid> = Vec::with_capacity(validated.len());
+    for (candidate, _target) in &validated {
         let update_history_id = super::update_triggers::create_update_history_record(
-            db,
+            &txn,
             &CreateUpdateRecordParams {
                 host_id: candidate.host_id,
                 item_id: candidate.software_item_id,
@@ -357,8 +360,17 @@ pub async fn create_batch(
             },
         )
         .await?;
+        history_ids.push(update_history_id);
+    }
 
-        // Dispatch only the first pending update per host
+    txn.commit().await.context_to()?;
+
+    // Dispatch the first pending update per host (outside the transaction —
+    // WebSocket sends are not transactional).
+    let mut updates: Vec<BatchUpdateItem> = Vec::new();
+    let mut dispatched_hosts: HashSet<Uuid> = HashSet::new();
+
+    for ((candidate, target), update_history_id) in validated.iter().zip(history_ids) {
         let trigger_status = if !dispatched_hosts.contains(&candidate.host_id) {
             dispatched_hosts.insert(candidate.host_id);
             let connected = super::update_triggers::dispatch_update_to_agent(
