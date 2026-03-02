@@ -36,7 +36,7 @@ x509-parser = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
-uptrakit-shared-db = { workspace = true, features = ["db-sqlite"] }
+uptrakit-shared-db = { workspace = true, features = ["db-sqlite", "migration"] }
 
 [lints]
 workspace = true

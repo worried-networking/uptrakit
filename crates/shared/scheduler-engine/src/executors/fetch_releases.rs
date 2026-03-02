@@ -23,7 +23,7 @@ use uptrakit_shared_db::entity::{
 use uptrakit_shared_types::PluginType;
 use uuid::Uuid;
 
-use super::queries::{merge_config, query_agent_assignment_rows};
+use super::queries::{merge_config, query_agent_assignment_rows, query_host_package_assignment_rows};
 use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::notifier::SchedulerNotifier;
@@ -69,10 +69,17 @@ impl CommandExecutor for NoopCommandExecutor {
 ///
 /// **Phase B — Agent-side fetch_releases assignments:**
 /// Builds `VersionCheckAssignment` per `(service_id, host_machine_id)` group using
-/// `fetch_releases` role plugins that should run on the agent (APT, Homebrew, npm).
-/// Sends `CheckVersions` messages with only `fetch_releases` set (no `detect_version`).
+/// two sources:
 ///
-/// Installed-version detection is handled by the separate [`DetectVersionExecutor`](super::detect_version::DetectVersionExecutor).
+/// 1. `host_software_item_plugins` rows with `role = 'fetch_releases'` that should
+///    run on the agent (APT, Homebrew, npm — i.e. without `ControllerSideFetchReleases`).
+///    Results update `host_software_items.latest_version`.
+/// 2. `host_packages` rows (auto-discovered packages). Each carries `host_package_id`
+///    so the controller handler routes results to `host_packages.latest_version`.
+///
+/// Both sources send `CheckVersions` messages with only `fetch_releases` set
+/// (no `detect_version`). Installed-version detection is handled by the separate
+/// [`DetectVersionExecutor`](super::detect_version::DetectVersionExecutor).
 pub struct FetchReleasesExecutor {
     db: DatabaseConnection,
     notifier: Arc<dyn SchedulerNotifier>,
@@ -471,17 +478,24 @@ impl FetchReleasesExecutor {
     // ── Phase B ──────────────────────────────────────────────────────────
 
     /// Build and send `CheckVersions` messages to agents containing only
-    /// `fetch_releases` assignments (APT, Homebrew, npm and other agent-side
-    /// release-index plugins). Host packages are excluded here — they only
-    /// have `detect_version` assignments handled by [`DetectVersionExecutor`](super::detect_version::DetectVersionExecutor).
+    /// `fetch_releases` assignments. Covers two sources:
+    ///
+    /// - Targeted software items with a `role = 'fetch_releases'` plugin
+    ///   assignment (APT, Homebrew, npm, and other agent-side release-index
+    ///   plugins that are not [`PluginCapability::ControllerSideFetchReleases`]).
+    /// - Auto-discovered host packages (`host_packages` table) whose plugin
+    ///   config supports agent-side release fetching. These assignments carry
+    ///   `host_package_id` so the controller handler routes results to the
+    ///   `host_packages.latest_version` column.
     async fn send_agent_fetch_release_assignments(
         &self,
         tenant_id: Uuid,
     ) -> crate::error::Result<()> {
         let rows =
             query_agent_assignment_rows(&self.db, tenant_id, &["fetch_releases"]).await?;
+        let hp_rows = query_host_package_assignment_rows(&self.db, tenant_id).await?;
 
-        if rows.is_empty() {
+        if rows.is_empty() && hp_rows.is_empty() {
             tracing::debug!("no agent-side fetch_releases items");
             return Ok(());
         }
@@ -490,6 +504,7 @@ impl FetchReleasesExecutor {
         let mut by_agent_host: HashMap<(Uuid, String), HashMap<Uuid, VersionCheckAssignment>> =
             HashMap::new();
 
+        // Targeted software items (fetch_releases role).
         for row in rows {
             let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
                 report!(SchedulerError::Execution(format!(
@@ -533,6 +548,47 @@ impl FetchReleasesExecutor {
                     detect_version: None,
                     fetch_releases: None,
                     host_package_id: None,
+                });
+
+            item.fetch_releases = Some(assignment);
+        }
+
+        // Host packages — use the same plugin config for fetch_releases so that
+        // `host_packages.latest_version` is populated alongside `installed_version`.
+        for row in hp_rows {
+            let plugin_type = PluginType::from_str(&row.plugin_type).map_err(|_| {
+                report!(SchedulerError::Execution(format!(
+                    "unknown plugin type: {}",
+                    row.plugin_type
+                )))
+            })?;
+
+            // Skip any plugin that declares controller-side capability; host
+            // package plugins (APT, Homebrew, npm) are always agent-side.
+            if PluginRegistry::capabilities_for(plugin_type.clone())
+                .contains(&PluginCapability::ControllerSideFetchReleases)
+            {
+                continue;
+            }
+
+            let assignment = PluginAssignment {
+                plugin_type,
+                package_identifier: row.package_identifier,
+                config: row.config,
+            };
+
+            let agent_key = (row.service_id, row.host_machine_id.clone());
+            let items = by_agent_host.entry(agent_key).or_default();
+            // Use host_package_id as the map key (guaranteed unique per host package).
+            let item = items
+                .entry(row.host_package_id)
+                .or_insert_with(|| VersionCheckAssignment {
+                    // Wire-compat: software_item_id reused; handler routes via host_package_id.
+                    software_item_id: row.host_package_id,
+                    name: row.host_package_name.clone(),
+                    detect_version: None,
+                    fetch_releases: None,
+                    host_package_id: Some(row.host_package_id),
                 });
 
             item.fetch_releases = Some(assignment);

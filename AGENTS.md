@@ -93,7 +93,7 @@ uptrakit/
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
-│   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, cron utils, TaskExecutor trait, SchedulerNotifier trait, 5 built-in executors (AuthCleanup, StaleLeaseCleanup, VersionCheck, ServiceCertCheck, CrlRenewal)
+│   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, cron utils, TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); FetchReleasesExecutor Phase B sends fetch assignments for both host_software_items and host_packages so that latest_version is populated in both tables
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers; default_resolve_shutdown(), init_tracing()
 │   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry; webhook (default) + telegram + email (feature-gated) channel impls
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
@@ -220,8 +220,10 @@ These are non-negotiable design constraints. Do not violate them.
    declaring the `ControllerSideFetchReleases` capability (e.g. GitHub, Docker, npm) have their `fetch_releases`
    executed on the controller by default; local package-index plugins (Homebrew, APT) run agent-side via
    `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in `VersionCheckResult`. Per-host version
-   tracking (`installed_version`, `latest_version`) lives on `host_software_items`; the old centralised
-   `available_versions` table has been removed. Keep this boundary clear.
+   tracking (`installed_version`, `latest_version`) lives on `host_software_items` for targeted items and on
+   `host_packages` for auto-discovered packages. `FetchReleasesExecutor` Phase B also builds fetch assignments for
+   `host_packages` so that `host_packages.latest_version` is populated alongside `installed_version`. The old
+   centralised `available_versions` table has been removed. Keep this boundary clear.
 1. **No shell injection.** Any path that constructs or executes shell commands must validate inputs. Custom scripts are
    treated as untrusted input.
 1. **No secrets in logs.** Never log tokens, passwords, API keys, or other credentials. All secret fields in HTTP API
