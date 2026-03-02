@@ -153,15 +153,10 @@ mod tests {
 
     #[test]
     fn registration_mode_serde_round_trip() {
-        let variants = [
-            RegistrationMode::Open,
-            RegistrationMode::Invite,
-            RegistrationMode::Closed,
-        ];
-        for mode in &variants {
-            let json = serde_json::to_string(mode).unwrap();
+        for mode in RegistrationMode::iter() {
+            let json = serde_json::to_string(&mode).unwrap();
             let deserialized: RegistrationMode = serde_json::from_str(&json).unwrap();
-            assert_eq!(&deserialized, mode);
+            assert_eq!(deserialized, mode);
         }
     }
 
@@ -197,28 +192,18 @@ mod tests {
 
     #[test]
     fn registration_mode_as_str_round_trips_through_from_str() {
-        let variants = [
-            RegistrationMode::Open,
-            RegistrationMode::Invite,
-            RegistrationMode::Closed,
-        ];
-        for mode in &variants {
+        for mode in RegistrationMode::iter() {
             let s = mode.as_str();
             let parsed: RegistrationMode = s
                 .parse()
                 .expect("from_str should succeed for as_str output");
-            assert_eq!(&parsed, mode);
+            assert_eq!(parsed, mode);
         }
     }
 
     #[test]
     fn registration_mode_display_matches_as_str() {
-        let variants = [
-            RegistrationMode::Open,
-            RegistrationMode::Invite,
-            RegistrationMode::Closed,
-        ];
-        for mode in &variants {
+        for mode in RegistrationMode::iter() {
             assert_eq!(format!("{mode}"), mode.as_str());
         }
     }
@@ -484,16 +469,10 @@ mod tests {
 
     #[test]
     fn update_status_serde_round_trip() {
-        let variants = [
-            UpdateStatus::Pending,
-            UpdateStatus::InProgress,
-            UpdateStatus::Completed,
-            UpdateStatus::Failed,
-        ];
-        for status in &variants {
-            let json = serde_json::to_string(status).unwrap();
+        for status in UpdateStatus::iter() {
+            let json = serde_json::to_string(&status).unwrap();
             let deserialized: UpdateStatus = serde_json::from_str(&json).unwrap();
-            assert_eq!(&deserialized, status);
+            assert_eq!(deserialized, status);
         }
     }
 
@@ -534,30 +513,18 @@ mod tests {
 
     #[test]
     fn update_status_as_str_round_trips_through_from_str() {
-        let variants = [
-            UpdateStatus::Pending,
-            UpdateStatus::InProgress,
-            UpdateStatus::Completed,
-            UpdateStatus::Failed,
-        ];
-        for status in &variants {
+        for status in UpdateStatus::iter() {
             let s = status.as_str();
             let parsed: UpdateStatus = s
                 .parse()
                 .expect("from_str should succeed for as_str output");
-            assert_eq!(&parsed, status);
+            assert_eq!(parsed, status);
         }
     }
 
     #[test]
     fn update_status_display_matches_as_str() {
-        let variants = [
-            UpdateStatus::Pending,
-            UpdateStatus::InProgress,
-            UpdateStatus::Completed,
-            UpdateStatus::Failed,
-        ];
-        for status in &variants {
+        for status in UpdateStatus::iter() {
             assert_eq!(format!("{status}"), status.as_str());
         }
     }

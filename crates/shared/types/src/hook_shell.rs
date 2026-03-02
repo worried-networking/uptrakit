@@ -12,6 +12,7 @@ use std::str::FromStr;
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum HookShell {
     /// Bash shell with `set -euo pipefail`
@@ -110,10 +111,11 @@ impl FromStr for HookShell {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strum::IntoEnumIterator;
 
     #[test]
     fn serde_round_trip() {
-        for shell in [HookShell::Bash, HookShell::Sh, HookShell::PowerShell] {
+        for shell in HookShell::iter() {
             let json = serde_json::to_string(&shell).unwrap();
             let deserialized: HookShell = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, shell);
@@ -122,14 +124,14 @@ mod tests {
 
     #[test]
     fn display_matches_as_str() {
-        for shell in [HookShell::Bash, HookShell::Sh, HookShell::PowerShell] {
+        for shell in HookShell::iter() {
             assert_eq!(format!("{shell}"), shell.as_str());
         }
     }
 
     #[test]
     fn from_str_round_trip() {
-        for shell in [HookShell::Bash, HookShell::Sh, HookShell::PowerShell] {
+        for shell in HookShell::iter() {
             let s = shell.as_str();
             let parsed: HookShell = s.parse().unwrap();
             assert_eq!(parsed, shell);

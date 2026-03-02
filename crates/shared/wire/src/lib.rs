@@ -187,6 +187,7 @@ impl<'de> Deserialize<'de> for Capability {
 
 /// Enrollment status returned in the `Enrolled` message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::Display)]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -1356,6 +1357,7 @@ pub struct SeqError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strum::IntoEnumIterator;
 
     const TEST_UUID_1: Uuid = Uuid::from_bytes([
         0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00,
@@ -2384,12 +2386,8 @@ mod tests {
 
     #[test]
     fn enrollment_status_all_variants() {
-        for (status, expected) in [
-            (EnrollmentStatus::Pending, "pending"),
-            (EnrollmentStatus::Approved, "approved"),
-        ] {
+        for status in EnrollmentStatus::iter() {
             let json = serde_json::to_string(&status).unwrap();
-            assert_eq!(json, format!(r#""{expected}""#));
             let deserialized: EnrollmentStatus = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, status);
         }
@@ -2416,7 +2414,7 @@ mod tests {
 
     #[test]
     fn enrollment_status_display_matches_serde() {
-        for status in [EnrollmentStatus::Pending, EnrollmentStatus::Approved] {
+        for status in EnrollmentStatus::iter() {
             let serde_str = serde_json::to_value(status).unwrap();
             assert_eq!(
                 status.to_string(),

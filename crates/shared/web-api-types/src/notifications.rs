@@ -12,6 +12,7 @@ use crate::validation::{Validate, ValidationError};
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationEventType {
     UpdateAvailable,
@@ -72,6 +73,7 @@ impl FromStr for NotificationEventType {
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationChannelType {
     Webhook,
@@ -117,6 +119,7 @@ impl FromStr for NotificationChannelType {
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationDeliveryStatus {
     Pending,
@@ -331,28 +334,8 @@ pub struct TestNotificationResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strum::IntoEnumIterator;
     use time::macros::datetime;
-
-    const ALL_EVENT_TYPES: [NotificationEventType; 6] = [
-        NotificationEventType::UpdateAvailable,
-        NotificationEventType::UpdateCompleted,
-        NotificationEventType::UpdateFailed,
-        NotificationEventType::NewSoftwareDiscovered,
-        NotificationEventType::NewServiceEnrolled,
-        NotificationEventType::CaRotated,
-    ];
-
-    const ALL_CHANNEL_TYPES: [NotificationChannelType; 3] = [
-        NotificationChannelType::Webhook,
-        NotificationChannelType::Telegram,
-        NotificationChannelType::Email,
-    ];
-
-    const ALL_DELIVERY_STATUSES: [NotificationDeliveryStatus; 3] = [
-        NotificationDeliveryStatus::Pending,
-        NotificationDeliveryStatus::Delivered,
-        NotificationDeliveryStatus::Failed,
-    ];
 
     fn sample_uuid() -> Uuid {
         Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6")
@@ -363,11 +346,11 @@ mod tests {
 
     #[test]
     fn event_type_serde_round_trip() {
-        for event in &ALL_EVENT_TYPES {
-            let json = serde_json::to_string(event).expect("serialization should succeed");
+        for event in NotificationEventType::iter() {
+            let json = serde_json::to_string(&event).expect("serialization should succeed");
             let deserialized: NotificationEventType =
                 serde_json::from_str(&json).expect("deserialization should succeed");
-            assert_eq!(&deserialized, event);
+            assert_eq!(deserialized, event);
         }
     }
 
@@ -437,19 +420,19 @@ mod tests {
 
     #[test]
     fn event_type_display_matches_as_str() {
-        for event in &ALL_EVENT_TYPES {
+        for event in NotificationEventType::iter() {
             assert_eq!(format!("{event}"), event.as_str());
         }
     }
 
     #[test]
     fn event_type_as_str_round_trips_through_from_str() {
-        for event in &ALL_EVENT_TYPES {
+        for event in NotificationEventType::iter() {
             let s = event.as_str();
             let parsed: NotificationEventType = s
                 .parse()
                 .expect("from_str should succeed for as_str output");
-            assert_eq!(&parsed, event);
+            assert_eq!(parsed, event);
         }
     }
 
@@ -463,11 +446,11 @@ mod tests {
 
     #[test]
     fn channel_type_serde_round_trip() {
-        for ct in &ALL_CHANNEL_TYPES {
-            let json = serde_json::to_string(ct).expect("serialization should succeed");
+        for ct in NotificationChannelType::iter() {
+            let json = serde_json::to_string(&ct).expect("serialization should succeed");
             let deserialized: NotificationChannelType =
                 serde_json::from_str(&json).expect("deserialization should succeed");
-            assert_eq!(&deserialized, ct);
+            assert_eq!(deserialized, ct);
         }
     }
 
@@ -503,19 +486,19 @@ mod tests {
 
     #[test]
     fn channel_type_display_matches_as_str() {
-        for ct in &ALL_CHANNEL_TYPES {
+        for ct in NotificationChannelType::iter() {
             assert_eq!(format!("{ct}"), ct.as_str());
         }
     }
 
     #[test]
     fn channel_type_as_str_round_trips_through_from_str() {
-        for ct in &ALL_CHANNEL_TYPES {
+        for ct in NotificationChannelType::iter() {
             let s = ct.as_str();
             let parsed: NotificationChannelType = s
                 .parse()
                 .expect("from_str should succeed for as_str output");
-            assert_eq!(&parsed, ct);
+            assert_eq!(parsed, ct);
         }
     }
 
@@ -529,11 +512,11 @@ mod tests {
 
     #[test]
     fn delivery_status_serde_round_trip() {
-        for status in &ALL_DELIVERY_STATUSES {
-            let json = serde_json::to_string(status).expect("serialization should succeed");
+        for status in NotificationDeliveryStatus::iter() {
+            let json = serde_json::to_string(&status).expect("serialization should succeed");
             let deserialized: NotificationDeliveryStatus =
                 serde_json::from_str(&json).expect("deserialization should succeed");
-            assert_eq!(&deserialized, status);
+            assert_eq!(deserialized, status);
         }
     }
 
@@ -569,19 +552,19 @@ mod tests {
 
     #[test]
     fn delivery_status_display_matches_as_str() {
-        for status in &ALL_DELIVERY_STATUSES {
+        for status in NotificationDeliveryStatus::iter() {
             assert_eq!(format!("{status}"), status.as_str());
         }
     }
 
     #[test]
     fn delivery_status_as_str_round_trips_through_from_str() {
-        for status in &ALL_DELIVERY_STATUSES {
+        for status in NotificationDeliveryStatus::iter() {
             let s = status.as_str();
             let parsed: NotificationDeliveryStatus = s
                 .parse()
                 .expect("from_str should succeed for as_str output");
-            assert_eq!(&parsed, status);
+            assert_eq!(parsed, status);
         }
     }
 

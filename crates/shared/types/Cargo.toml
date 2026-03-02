@@ -21,6 +21,7 @@ utoipa = { workspace = true, optional = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+strum = { workspace = true }
 
 [lints]
 workspace = true

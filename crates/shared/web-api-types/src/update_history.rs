@@ -6,6 +6,7 @@ use uuid::Uuid;
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateStatus {
     Pending,

@@ -6,6 +6,7 @@ use thiserror::Error;
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum RegistrationMode {
     /// Anyone can register without a token.
@@ -52,22 +53,17 @@ impl FromStr for RegistrationMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const ALL_VARIANTS: [RegistrationMode; 3] = [
-        RegistrationMode::Open,
-        RegistrationMode::Invite,
-        RegistrationMode::Closed,
-    ];
+    use strum::IntoEnumIterator;
 
     // ── Serde round-trip ─────────────────────────────────────────────
 
     #[test]
     fn serde_round_trip_all_variants() {
-        for mode in &ALL_VARIANTS {
-            let json = serde_json::to_string(mode).expect("serialization should succeed");
+        for mode in RegistrationMode::iter() {
+            let json = serde_json::to_string(&mode).expect("serialization should succeed");
             let deserialized: RegistrationMode =
                 serde_json::from_str(&json).expect("deserialization should succeed");
-            assert_eq!(&deserialized, mode);
+            assert_eq!(deserialized, mode);
         }
     }
 
@@ -118,7 +114,7 @@ mod tests {
 
     #[test]
     fn display_matches_as_str_for_all_variants() {
-        for mode in &ALL_VARIANTS {
+        for mode in RegistrationMode::iter() {
             assert_eq!(format!("{mode}"), mode.as_str());
         }
     }
@@ -145,12 +141,12 @@ mod tests {
 
     #[test]
     fn from_str_round_trips_through_as_str() {
-        for mode in &ALL_VARIANTS {
+        for mode in RegistrationMode::iter() {
             let s = mode.as_str();
             let parsed: RegistrationMode = s
                 .parse()
                 .expect("from_str should succeed for as_str output");
-            assert_eq!(&parsed, mode);
+            assert_eq!(parsed, mode);
         }
     }
 
