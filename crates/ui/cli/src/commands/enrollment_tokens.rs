@@ -9,7 +9,8 @@ use uptrakit_openapi_client::types::enrollment_tokens::{
     ListEnrollmentTokensQuery,
 };
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
-use uptrakit_openapi_client::types::services::MessageResponse;
+
+use crate::commands::settings::DeletedOutput;
 
 // ── Human output ────────────────────────────────────────────────────────────
 
@@ -221,14 +222,20 @@ pub async fn show(params: ShowParams<'_>) -> Result<EnrollmentTokenResponse> {
 }
 
 /// Revoke an enrollment token by ID.
-pub async fn revoke(params: RevokeParams<'_>) -> Result<MessageResponse> {
+pub async fn revoke(params: RevokeParams<'_>) -> Result<DeletedOutput> {
     let client = authenticated_client(
         params.server,
         params.token,
         params.insecure,
         params.request_timeout,
     )?;
-    client.revoke_enrollment_token(params.id).await.context_to()
+    client
+        .revoke_enrollment_token(params.id)
+        .await
+        .context_to()?;
+    Ok(DeletedOutput {
+        message: "Enrollment token revoked.".to_string(),
+    })
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

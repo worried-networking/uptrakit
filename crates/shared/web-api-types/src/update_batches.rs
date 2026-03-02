@@ -28,13 +28,15 @@ pub struct HostBatchUpdateRequest {
 
 impl Validate for HostBatchUpdateRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if let Some(ref cat) = self.category_filter {
-            if cat.parse::<UpdateCategory>().is_err() {
-                return Err(ValidationError {
-                    field: "category_filter",
-                    message: "must be a valid update category".to_string(),
-                });
-            }
+        if self
+            .category_filter
+            .as_deref()
+            .is_some_and(|cat| cat.parse::<UpdateCategory>().is_err())
+        {
+            return Err(ValidationError {
+                field: "category_filter",
+                message: "must be a valid update category".to_string(),
+            });
         }
         Ok(())
     }
