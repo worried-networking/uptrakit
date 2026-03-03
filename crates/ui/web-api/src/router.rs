@@ -19,6 +19,7 @@ use crate::AppState;
         (name = "Authentication", description = "User authentication endpoints"),
         (name = "Settings", description = "Application settings management"),
         (name = "Services", description = "Unified service (agent and MQTT) enrollment and management"),
+        (name = "System Services", description = "Tenant-agnostic infrastructure service management"),
         (name = "Enrollment Tokens", description = "Enrollment token management"),
         (name = "OIDC Providers", description = "OIDC provider configuration"),
         (name = "API Tokens", description = "Personal access token management"),
@@ -49,6 +50,12 @@ use crate::AppState;
         crate::routes::services::reject_service,
         crate::routes::services::deactivate_service,
         crate::routes::services::merge_service,
+        crate::routes::system_services::list_system_services,
+        crate::routes::system_services::get_system_service,
+        crate::routes::system_services::update_system_service,
+        crate::routes::system_services::approve_system_service,
+        crate::routes::system_services::reject_system_service,
+        crate::routes::system_services::deactivate_system_service,
         crate::routes::enrollment_tokens::create_enrollment_token,
         crate::routes::enrollment_tokens::list_enrollment_tokens,
         crate::routes::enrollment_tokens::get_enrollment_token,
@@ -166,6 +173,9 @@ use crate::AppState;
             crate::routes::services::UpdateServiceRequest,
             crate::routes::services::MessageResponse,
             crate::routes::services::MergeAgentRequest,
+            crate::routes::system_services::SystemServiceResponse,
+            crate::routes::system_services::UpdateSystemServiceRequest,
+            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::system_services::SystemServiceResponse>,
             crate::routes::enrollment_tokens::CreateEnrollmentTokenRequest,
             crate::routes::enrollment_tokens::EnrollmentTokenCreatedResponse,
             crate::routes::enrollment_tokens::EnrollmentTokenResponse,
@@ -421,6 +431,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::services::deactivate_service
         ))
         .routes(routes!(crate::routes::services::merge_service))
+        .routes(routes!(crate::routes::system_services::list_system_services))
+        .routes(routes!(crate::routes::system_services::approve_system_service))
+        .routes(routes!(crate::routes::system_services::reject_system_service))
+        .routes(routes!(
+            crate::routes::system_services::get_system_service,
+            crate::routes::system_services::update_system_service,
+            crate::routes::system_services::deactivate_system_service
+        ))
         .routes(routes!(crate::routes::system_alerts::get_system_alerts))
         .routes(routes!(
             crate::routes::server_cert::renew_server_certificate

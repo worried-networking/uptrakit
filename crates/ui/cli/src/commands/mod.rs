@@ -12,6 +12,7 @@ pub mod notifications;
 pub mod plugin_configs;
 pub mod scheduler;
 pub mod services;
+pub mod system_services;
 pub mod settings;
 pub mod software_items;
 pub mod tail;

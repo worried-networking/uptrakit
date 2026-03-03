@@ -20,6 +20,7 @@ pub mod scheduler;
 pub mod server_cert;
 pub mod service_ws;
 pub mod services;
+pub mod system_services;
 pub mod settings;
 pub mod settings_agent_certs;
 pub mod settings_auth;

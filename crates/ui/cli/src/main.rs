@@ -140,6 +140,11 @@ enum Commands {
         #[command(subcommand)]
         command: UpdateBatchesCommands,
     },
+    /// Manage system services (MQTT bridge, external scheduler)
+    SystemServices {
+        #[command(subcommand)]
+        command: SystemServicesCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -571,6 +576,56 @@ enum ServicesCommands {
         target_id: Uuid,
         /// Source service UUID (pending)
         source_id: Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SystemServicesCommands {
+    /// List all system services
+    List {
+        /// Filter by capability (mqtt_bridge, scheduler)
+        #[arg(long)]
+        capability: Option<String>,
+        /// Filter by status (pending, approved, rejected, deactivated)
+        #[arg(long)]
+        status: Option<String>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show system service details
+    Show {
+        /// System service UUID
+        id: Uuid,
+    },
+    /// Approve a pending system service
+    Approve {
+        /// System service UUID
+        id: Uuid,
+    },
+    /// Reject a pending system service
+    Reject {
+        /// System service UUID
+        id: Uuid,
+    },
+    /// Remove (deactivate) a system service
+    Remove {
+        /// System service UUID
+        id: Uuid,
+    },
+    /// Update a system service's settings
+    Update {
+        /// System service UUID
+        id: Uuid,
+        /// Custom ping interval in seconds (0 to clear override)
+        #[arg(long)]
+        ping_interval: Option<u32>,
+        /// Per-service certificate lifetime in hours (0 to clear override)
+        #[arg(long)]
+        cert_lifetime_hours: Option<u32>,
     },
 }
 
@@ -3186,6 +3241,89 @@ async fn run(cli: Cli) -> error::Result<()> {
                         page,
                         per_page,
                     },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+        },
+        Commands::SystemServices { command } => match command {
+            SystemServicesCommands::List {
+                capability,
+                status,
+                page,
+                per_page,
+            } => {
+                let resp =
+                    commands::system_services::list(commands::system_services::ListParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        capability: capability.as_deref(),
+                        status: status.as_deref(),
+                        page,
+                        per_page,
+                        request_timeout,
+                    })
+                    .await?;
+                output::print_output(format, &resp)?;
+            }
+            SystemServicesCommands::Show { id } => {
+                let resp = commands::system_services::show(
+                    &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SystemServicesCommands::Approve { id } => {
+                let resp = commands::system_services::approve(
+                    &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SystemServicesCommands::Reject { id } => {
+                let resp = commands::system_services::reject(
+                    &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SystemServicesCommands::Remove { id } => {
+                let resp = commands::system_services::remove(
+                    &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SystemServicesCommands::Update {
+                id,
+                ping_interval,
+                cert_lifetime_hours,
+            } => {
+                let resp = commands::system_services::update(
+                    &id,
+                    ping_interval,
+                    cert_lifetime_hours,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
                 )
                 .await?;
                 output::print_output(format, &resp)?;

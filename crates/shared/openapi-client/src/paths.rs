@@ -219,6 +219,29 @@ pub(crate) mod services {
     }
 }
 
+pub(crate) mod system_services {
+    use uuid::Uuid;
+    /// `GET /api/v1/system-services`
+    pub(crate) const BASE: &str = "/api/v1/system-services";
+    /// `GET /api/v1/system-services/{id}` · `PUT …` · `DELETE …`
+    pub(crate) fn by_id(id: &Uuid) -> String {
+        format!("/api/v1/system-services/{id}")
+    }
+    /// `POST /api/v1/system-services/{id}/approve`
+    pub(crate) fn approve(id: &Uuid) -> String {
+        format!("/api/v1/system-services/{id}/approve")
+    }
+    /// `POST /api/v1/system-services/{id}/reject`
+    pub(crate) fn reject(id: &Uuid) -> String {
+        format!("/api/v1/system-services/{id}/reject")
+    }
+}
+
+pub(crate) mod settings_system_services {
+    /// `GET /api/v1/settings/system-services` · `PUT …`
+    pub(crate) const BASE: &str = "/api/v1/settings/system-services";
+}
+
 pub(crate) mod settings {
     /// `GET /api/v1/settings`
     pub(crate) const COMBINED: &str = "/api/v1/settings";
