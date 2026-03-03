@@ -173,13 +173,8 @@ async fn run(args: cli::Args) -> Result<()> {
     // Phase 4c: Initialize data key ring (envelope encryption)
     startup::init_data_key_ring(&db_conn).await?;
 
-    // Phase 4d: Re-encrypt legacy plaintext secrets
-    reencrypt::reencrypt_legacy_plaintext(&db_conn).await;
-
-    // Phase 4e: Upgrade ENC:v1 → ENC:v2 (operator-triggered, HA-safe)
-    if args.upgrade_encryption {
-        reencrypt::reencrypt_v1_to_v2(&db_conn).await;
-    }
+    // Phase 4d: Migrate all encrypted values to ENC:v3 (automatic)
+    reencrypt::reencrypt_to_v3(&db_conn).await;
 
     // Phase 5: Load settings
     let (settings, global_raw, _tenant_raw, reg_token) =
