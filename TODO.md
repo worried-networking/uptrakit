@@ -805,12 +805,12 @@ Comprehensive security hardening.
 - [x] Implement secrets management
   - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory in production; dev-only `--allow-plaintext-secrets`
     available)
-  - [x] Context-bound `ENC:v2:` ciphertext format for JWT signing key and master-key verification token (AAD prevents ciphertext relocation attacks)
-  - [x] **Migrate `EncryptedString` DB columns to `ENC:v2:`** — all 7 `EncryptedString`-typed columns now support context-bound `ENC:v2:` with
-    per-column AAD strings (e.g. `"uptrakit:ca_certificates:key_pem"`). The migration is operator-triggered via `--upgrade-encryption` CLI flag on
-    the controller and agent-ssh binaries. HA-safe two-phase deployment: Phase A (always active) adds v2 read support; Phase B (gated behind the flag)
-    performs the v1→v2 re-encryption pass. The pass is idempotent — rows already at v2 are skipped. See
-    [Secrets and Encryption](docs/security/secrets-and-encryption.md) for details.
+  - [x] Context-bound `ENC:v3:` ciphertext format with envelope encryption (KEK wraps DEKs; AAD prevents ciphertext relocation attacks)
+  - [x] **Envelope encryption with automatic v3 migration** — all `EncryptedString`-typed columns and encrypted settings use `ENC:v3:<key_id>:<hex>`
+    format with per-column AAD and data encryption keys (DEKs). Migration from plaintext, `ENC:v1:`, and `ENC:v2:` to `ENC:v3:` runs automatically
+    on every startup (no CLI flag needed). See [Secrets and Encryption](docs/security/secrets-and-encryption.md) for details.
+  - [x] **Master key rotation** — `--rotate-master-key-file` re-wraps all DEKs with a new KEK in O(1) time. See
+    [Key Rotation](docs/security/key-rotation.md).
   - [ ] Credential rotation
   - [ ] Vault integration
 - [ ] Add security scanning to CI/CD

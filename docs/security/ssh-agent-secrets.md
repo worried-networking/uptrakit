@@ -4,27 +4,33 @@ This document describes how the SSH-backed agent (`uptrakit-agent-ssh`) stores a
 
 ## Encryption Model
 
-The SSH agent uses the same encryption infrastructure as the controller (`uptrakit-crypto`), but with an **independent master key**.
+The SSH agent uses the same encryption infrastructure as the controller
+(`uptrakit-crypto`), but with an **independent master key** and its own local
+`data_encryption_keys` table.
 
 ### Key Hierarchy
 
 ```text
-SSH Agent Master Key (32 bytes, provided by operator)
-  └── AES-256-GCM (via aws-lc-rs)
-      └── SSH private keys in local SQLite (EncryptedString)
+SSH Agent Master Key (KEK, 32 bytes, provided by operator)
+  └── wraps → DEK (32 bytes, stored encrypted in local data_encryption_keys table)
+                └── AES-256-GCM (via aws-lc-rs)
+                    └── SSH private keys in local SQLite (EncryptedString)
 ```
 
 ### Storage Format
 
-SSH private keys are stored in the `ssh_hosts.private_key` column as `EncryptedString` values. When encrypted, the stored format is:
+SSH private keys are stored in the `ssh_hosts.private_key` column as `EncryptedString` values. The current format is:
 
 ```text
-ENC:v1:<hex(nonce || ciphertext || tag)>
+ENC:v3:<key_id>:<hex(nonce || ciphertext || tag)>
 ```
 
+- **key_id**: First 8 hex chars of SHA-256 of the DEK (identifies which DEK encrypted the value)
 - **Nonce**: 12 bytes, randomly generated per encryption (unique per value)
-- **Ciphertext**: AES-256-GCM encrypted plaintext
+- **Ciphertext**: AES-256-GCM encrypted plaintext with AAD `"uptrakit:ssh_hosts:private_key"`
 - **Tag**: 16-byte authentication tag
+
+Legacy formats (`ENC:v1:`, `ENC:v2:`) are automatically upgraded to `ENC:v3:` on startup.
 
 When no master key is configured (development mode with `--allow-plaintext-secrets`), the private key is stored as plaintext. This mode logs a warning
 and must never be used in production.

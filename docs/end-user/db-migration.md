@@ -90,9 +90,10 @@ data. Type `yes` to proceed.
 
 ## Master Key Handling
 
-Encrypted fields are stored as opaque blobs (format: `ENC:v1:<base64>`). The
-migration copies these blobs **without decryption or re-encryption**. The
-target database must therefore be used with the same master key as the source.
+Encrypted fields are stored as opaque blobs (format: `ENC:v3:<key_id>:<hex>`).
+The migration copies these blobs **without decryption or re-encryption**,
+including the `data_encryption_keys` table (wrapped DEKs). The target database
+must therefore be used with the same master key as the source.
 
 Provide the master key the same way you do for normal server operation:
 

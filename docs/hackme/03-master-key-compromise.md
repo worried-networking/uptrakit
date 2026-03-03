@@ -17,7 +17,8 @@
    - Dumping the controller process memory (the key is stored in a global `OnceLock`
      with `Zeroizing` wrapper, but the static has `'static` lifetime so the key is
      present for the entire process lifetime).
-2. With the master key, the attacker can decrypt all `ENC:v1:<hex>` ciphertext values
+2. With the master key (KEK), the attacker can unwrap all DEKs from the
+   `data_encryption_keys` table and decrypt all `ENC:v3:` ciphertext values
    in the database.
 3. The attacker gains access to all encrypted secrets.
 
@@ -65,11 +66,11 @@ With the JWT signing key, the attacker can:
   tampering. An attacker cannot modify encrypted values without the key.
 - **Per-value random nonces.** Each encryption uses a fresh 12-byte random nonce,
   preventing ciphertext comparison attacks.
-- **`ENC:v2:` context-bound ciphertexts.** *(Implemented)* The JWT signing key and
-  master-key verification token are now encrypted using `ENC:v2:` format with a
-  per-field AAD string. A ciphertext produced for `"uptrakit:settings:jwt_signing_key"`
-  cannot be used as a valid ciphertext for the key-verification slot, and vice versa,
-  even if an attacker obtains the master key and attempts to relocate ciphertexts.
+- **`ENC:v3:` context-bound envelope encryption.** *(Implemented)* All encrypted
+  database columns and settings use `ENC:v3:` format with envelope encryption
+  (DEK wraps data) and per-field AAD strings. A ciphertext produced for one column
+  cannot be used as a valid ciphertext for another, even if an attacker obtains the
+  master key and attempts to relocate ciphertexts.
 - **Startup warning for env-var key source.** *(Implemented)* When the master key is
   loaded from `UPTRAKIT_MASTER_KEY` env var (without `--master-key-file`), a `WARN`-
   level log message is emitted at startup, nudging operators toward the more secure
@@ -77,19 +78,10 @@ With the JWT signing key, the attacker can:
 
 ## Residual risk
 
-- **Static key with no rotation.** The master key is a single static value with no
-  built-in rotation mechanism. Compromise is permanent until the key is manually
-  changed and all encrypted values are re-encrypted.
-- **`EncryptedString` DB columns default to `ENC:v1:` until operator-triggered
-  migration.** The `--upgrade-encryption` CLI flag (controller and agent-ssh) performs
-  a one-time v1→v2 re-encryption pass, binding each column's ciphertext to a unique
-  AAD string (e.g. `"uptrakit:ca_certificates:key_pem"`). Until the operator runs this
-  migration, existing rows remain at v1 (empty AAD) and are vulnerable to ciphertext
-  relocation within the same database. New rows continue using v1 for HA backward
-  compatibility until the migration is triggered.
 - **Process memory exposure.** The `OnceLock` static has `'static` lifetime, so the
-  key material is present in process memory for the entire lifetime of the
-  controller. A memory dump, core dump, or `/proc/pid/mem` read exposes the key.
+  key material (KEK and unwrapped DEKs) is present in process memory for the entire
+  lifetime of the controller. A memory dump, core dump, or `/proc/pid/mem` read
+  exposes the keys.
 - **Environment variable visibility.** `UPTRAKIT_MASTER_KEY` is still accepted; it is
   now warned about at startup but not prohibited. Operators may still use it in
   automation without adopting `--master-key-file`.
@@ -100,10 +92,10 @@ With the JWT signing key, the attacker can:
 ## Recommended improvements
 
 - ~~Complete the `ENC:v2:` migration for all `EncryptedString` columns~~ — **Done.**
-  The `--upgrade-encryption` CLI flag triggers the v1→v2 re-encryption pass. Operators
-  should run this once all controllers/agents support v2 reads.
-- Add a master key rotation workflow that re-encrypts all stored values under a new
-  key, with a migration period where both old and new keys are accepted.
+  Automatic v3 re-encryption runs on startup (no CLI flag needed).
+- ~~Add a master key rotation workflow~~ — **Done.** The `--rotate-master-key-file`
+  flag re-wraps DEKs with a new KEK in O(1) time. See
+  [Key Rotation](../security/key-rotation.md).
 - Support external key management systems (KMS) such as AWS KMS, HashiCorp Vault, or
   PKCS#11 HSMs for master key storage, removing the key from process memory and
   environment variables.
@@ -114,10 +106,11 @@ With the JWT signing key, the attacker can:
 ## References
 
 - [Secrets and Encryption](../security/secrets-and-encryption.md)
+- [Key Rotation](../security/key-rotation.md)
 - [Cryptography](../security/cryptography.md)
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md)
-- `crates/shared/crypto/src/lib.rs` — `init_master_key()`, `encrypt_value()`,
-  `decrypt_value()`
-- `crates/core/controller/src/startup.rs` — `verify_master_key()`
-- `crates/core/controller/src/reencrypt.rs` — startup re-encryption of legacy values
-  and gated v1→v2 upgrade (`--upgrade-encryption`)
+- `crates/shared/crypto/src/lib.rs` — `init_master_key()`, `DataKeyRing`,
+  DEK wrap/unwrap, `encrypt_str()`, `decrypt_str()`
+- `crates/core/controller/src/startup.rs` — `verify_master_key()`,
+  `init_data_key_ring()`, `rotate_master_key()`
+- `crates/core/controller/src/reencrypt.rs` — automatic v3 re-encryption

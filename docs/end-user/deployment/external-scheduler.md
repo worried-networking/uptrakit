@@ -23,7 +23,7 @@ controller's embedded scheduler because they require in-process access to contro
 - Network connectivity from the scheduler to the controller (WebSocket) and to the NATS server.
 - Network connectivity from the scheduler to the database.
 - The controller's master encryption key must be configured (the scheduler receives it via
-  `ServiceCredentials` and uses it for database encryption/decryption).
+  `ServiceCredentials` and uses it to unwrap data encryption keys from the database).
 
 ## Installation
 
@@ -107,7 +107,7 @@ tasks from the embedded scheduler.
 The external scheduler receives sensitive infrastructure credentials:
 
 - **Database URL**: Grants full read/write access to the application database.
-- **Master encryption key**: Can decrypt all encrypted fields in the database.
+- **Master encryption key**: Can unwrap DEKs and decrypt all encrypted fields in the database.
 - **NATS URL**: Can publish messages to the NATS event stream.
 
 When approving the scheduler service in the admin UI, security warnings are displayed for each

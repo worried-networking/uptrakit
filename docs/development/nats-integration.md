@@ -245,8 +245,8 @@ The `uptrakit_nats::config_protection` module provides two functions:
 
 - `encrypt_message_configs(msg)` — Called in `NatsConnection::publish()` before
   serialization. Serializes each `serde_json::Value` config to a JSON string,
-  encrypts it with `uptrakit_crypto::encrypt_str()` (AES-256-GCM using the
-  shared master key), and replaces the config with `Value::String("ENC:v1:...")`.
+  encrypts it with `uptrakit_crypto::encrypt_str()` (AES-256-GCM + AAD), and
+  replaces the config with `Value::String("ENC:v3:...")`.
 - `decrypt_message_configs(msg)` — Called in `NatsTransport::run_consumer()`
   after deserialization. Detects encrypted config strings via
   `uptrakit_crypto::is_encrypted()`, decrypts with `decrypt_str()`, and

@@ -77,157 +77,127 @@ domain in full. Original delimiters are preserved.
 ## Encryption at Rest
 
 Sensitive credentials stored in the database are encrypted using AES-256-GCM via the `EncryptedString` SeaORM custom
-type (defined in `crates/shared/db/src/crypto.rs`). `EncryptedString` stores the plaintext (wrapped in `SecretString`
+type (defined in `crates/shared/crypto/src/lib.rs`). `EncryptedString` stores the plaintext (wrapped in `SecretString`
 for redacted debug/display) alongside a pre-computed database representation (encrypted ciphertext).
 
-`EncryptedString::new()` is **fallible** — it encrypts eagerly at construction time and returns
+`EncryptedString::new(plaintext, aad)` is **fallible** — it encrypts eagerly at construction time and returns
 `Result<Self, Report<CryptoError>>`. The master key **must** be initialized before calling this function. If no master
 key has been configured, `EncryptedString::new()` returns `Err(CryptoError::NotInitialized)`. There is no plaintext
 fallback or development mode: a missing master key is a hard failure that must be resolved before the service starts.
 
 Database columns using encryption:
 
-| Table | Column | Description |
-| --- | --- | --- |
-| `mqtt_clients` | `password` | MQTT broker password |
-| `oidc_providers` | `client_secret` | OIDC client secret |
-| `ca_certificates` | `key_pem` | CA private key |
-| `pending_oidc_flows` | `pkce_verifier` | PKCE code verifier for in-flight OIDC authorization |
-| `ssh_hosts` | `private_key` | SSH private key (agent-ssh local DB) |
-| `notification_channels` | `config` | Channel config JSON (bot tokens, webhook secrets, HMAC keys) |
+| Table | Column | AAD string | Description |
+| --- | --- | --- | --- |
+| `mqtt_clients` | `password` | `uptrakit:mqtt_clients:password` | MQTT broker password |
+| `mqtt_clients` | `ca_cert_pem` | `uptrakit:mqtt_clients:ca_cert_pem` | Custom MQTT CA certificate |
+| `oidc_providers` | `client_secret` | `uptrakit:oidc_providers:client_secret` | OIDC client secret |
+| `ca_certificates` | `key_pem` | `uptrakit:ca_certificates:key_pem` | CA private key |
+| `pending_oidc_flows` | `pkce_verifier` | `uptrakit:pending_oidc_flows:pkce_verifier` | PKCE code verifier for in-flight OIDC authorization |
+| `ssh_hosts` | `private_key` | `uptrakit:ssh_hosts:private_key` | SSH private key (agent-ssh local DB) |
+| `notification_channels` | `config` | `uptrakit:notification_channels:config` | Channel config JSON (bot tokens, webhook secrets, HMAC keys) |
+
+### Envelope encryption
+
+The system uses **envelope encryption**: a master key (KEK — key encryption key) wraps data encryption
+keys (DEKs) stored in the `data_encryption_keys` table. Data is encrypted with DEKs, never directly
+with the KEK. This enables O(1) master key rotation — re-wrap the DEKs only, no data re-encryption.
+
+```text
+Master Key (KEK, 32 bytes, from file/env)
+  └── wraps → DEK (32 bytes, stored encrypted in data_encryption_keys table)
+                └── encrypts → ENC:v3:<key_id>:<hex(nonce || ciphertext || tag)>
+```
+
+Each DEK is identified by a `key_id` — the first 8 hex characters of `SHA-256(DEK)`. The `key_id` is
+embedded in the ciphertext prefix so the correct DEK can be looked up at decryption time.
 
 ### Ciphertext formats
 
-Two wire formats coexist for backward compatibility:
+Three wire formats coexist for backward compatibility:
 
-| Format | Prefix | AAD | Used by |
-| --- | --- | --- | --- |
-| v1 | `ENC:v1:` | empty | `EncryptedString` DB columns (pre-migration) |
-| v2 | `ENC:v2:` | caller-supplied context string | JWT signing key, master-key verification token, and all `EncryptedString` DB columns after `--upgrade-encryption` migration |
+| Format | Prefix | AAD | Key | Used by |
+| --- | --- | --- | --- | --- |
+| v1 | `ENC:v1:` | empty | KEK direct | Legacy (read-only during migration) |
+| v2 | `ENC:v2:` | caller-supplied | KEK direct | Migration compat, key verification |
+| v3 | `ENC:v3:<key_id>:` | caller-supplied | DEK (envelope) | Current default |
 
-The `is_encrypted()` helper returns `true` for both prefixes, so code that checks whether a value is
-encrypted before deciding whether to decrypt works correctly with both formats.
+The `is_encrypted()` helper returns `true` for all three prefixes.
 
-`ENC:v2:` ciphertexts are **context-bound**: the AAD string is mixed into the GCM authentication tag.
-A ciphertext encrypted for one purpose (e.g. `"uptrakit:settings:jwt_signing_key"`) cannot be used as
+`ENC:v3:` ciphertexts are **context-bound**: the AAD string is mixed into the GCM authentication tag.
+A ciphertext encrypted for one purpose (e.g. `"uptrakit:mqtt_clients:password"`) cannot be used as
 a valid ciphertext for any other purpose. This prevents ciphertext relocation attacks where an attacker
 moves an encrypted value from one column to another.
 
-Legacy plaintext detection allows old values to remain readable until rewritten.
+### Low-level helpers: `encrypt_str` and `decrypt_str`
 
-> **Note:** `EncryptedString` DB columns default to `ENC:v1:` (empty AAD) until the operator
-> triggers the v1→v2 migration via `--upgrade-encryption`. See [v1→v2 Migration](#v1v2-migration)
-> below.
-
-### Low-level helpers: `encrypt_str`, `decrypt_str`, `encrypt_str_with_aad`, `decrypt_str_with_aad`
-
-Four public functions in `crates/shared/crypto/src/lib.rs` provide lower-level access to the AES-256-GCM
+Two public functions in `crates/shared/crypto/src/lib.rs` provide lower-level access to the AES-256-GCM
 primitive:
 
-- **`pub fn encrypt_str(plaintext: &str) -> Result<String>`** — encrypts any UTF-8 string and returns it in
-  `"ENC:v1:<hex>"` format (empty AAD). For new code, prefer `encrypt_str_with_aad`.
-- **`pub fn decrypt_str(stored: &str) -> Result<String>`** — decrypts an `"ENC:v1:<hex>"` string.
-- **`pub fn encrypt_str_with_aad(plaintext: &str, aad: &str) -> Result<String>`** — encrypts with a
-  caller-supplied AAD and returns `"ENC:v2:<hex>"` format. Use a unique, stable, descriptive string for
-  `aad` (e.g. `"uptrakit:settings:jwt_signing_key"`).
-- **`pub fn decrypt_str_with_aad(stored: &str, aad: &str) -> Result<String>`** — decrypts both formats:
-  `ENC:v2:` ciphertexts require the matching AAD; `ENC:v1:` ciphertexts are accepted with any AAD (backward
-  compat, empty AAD used internally).
+- **`pub fn encrypt_str(plaintext: &str, aad: &str) -> Result<String>`** — encrypts with a
+  caller-supplied AAD. Produces `ENC:v3:` when the data key ring is available, `ENC:v2:` otherwise.
+- **`pub fn decrypt_str(stored: &str, aad: &str) -> Result<String>`** — decrypts all three formats:
+  `ENC:v3:` ciphertexts look up the DEK by `key_id`; `ENC:v2:` uses the KEK directly;
+  `ENC:v1:` is read for backward compatibility during migration.
 
 These helpers are **not** a replacement for `EncryptedString`. Use `EncryptedString` for structured entity
-fields backed by SeaORM columns; use `encrypt_str_with_aad` / `decrypt_str_with_aad` only for ad-hoc string
-values (such as settings entries) that cannot use the SeaORM custom type.
+fields backed by SeaORM columns; use `encrypt_str` / `decrypt_str` only for ad-hoc string values (such as
+settings entries) that cannot use the SeaORM custom type.
 
-### Startup Re-encryption of Legacy Plaintext
+### Automatic re-encryption to v3
 
-When the controller starts with a master key configured, a re-encryption routine runs
-automatically after master key verification (Phase 4b). It scans all encrypted columns
-listed above (except `ssh_hosts.private_key`, which lives in the agent-ssh local DB) for
-values that are still stored as plaintext (i.e. they lack the `ENC:v1:` prefix). Such
-values are re-encrypted in place using the current master key.
+When the controller starts with a master key and a data key ring, a re-encryption routine runs
+automatically. It scans all encrypted columns listed above (except `ssh_hosts.private_key`, which
+lives in the agent-ssh local DB) and all encrypted settings entries for values that are not yet
+in `ENC:v3:` format. Source formats handled:
+
+- **Plaintext** (no `ENC:` prefix) — legacy values from before encryption was enabled.
+- **`ENC:v1:`** — oldest format (empty AAD, KEK-direct).
+- **`ENC:v2:`** — intermediate format (caller AAD, KEK-direct).
+
+All are upgraded to `ENC:v3:` (caller AAD, DEK envelope). Values already at `ENC:v3:` are skipped.
 
 The routine has these properties:
 
-- **Idempotent** -- already-encrypted values are skipped via `EncryptedString::is_db_value_encrypted()`.
-- **HA-safe** -- concurrent controllers may race on the same row; the last writer wins,
-  which is fine because the result is always a correctly encrypted value under the same
-  master key.
-- **Fault-tolerant** -- errors on individual rows are logged at `warn` level and skipped.
+- **Automatic** — runs on every startup, no CLI flag needed.
+- **Idempotent** — already-v3 values are skipped via `EncryptedString::needs_v3_upgrade()`.
+- **HA-safe** — concurrent controllers may race on the same row; the last writer wins,
+  which is fine because the result is always a correctly encrypted v3 value.
+- **Fault-tolerant** — errors on individual rows are logged at `warn` level and skipped.
   The controller still starts successfully.
-- **Observable** -- on completion, if any values were re-encrypted, an `info`-level log
+- **Observable** — on completion, if any values were re-encrypted, an `info`-level log
   line reports the total count and per-table breakdowns.
 
-Implementation: `crates/core/controller/src/reencrypt.rs`.
+The SSH agent performs the same automatic migration for `ssh_hosts.private_key` in its
+local SQLite database.
+
+Implementation: `crates/core/controller/src/reencrypt.rs` (controller columns and settings),
+`crates/core/agent-ssh/src/main.rs` (SSH agent column).
 
 See also: [Secure Development](secure-development.md) for coding standards related to
 encryption.
 
-### v1→v2 Migration
-
-All 7 `EncryptedString` DB columns support context-bound `ENC:v2:` ciphertexts with per-column AAD
-strings. The migration from `ENC:v1:` to `ENC:v2:` is **operator-triggered** via the
-`--upgrade-encryption` CLI flag, following an HA-safe two-phase deployment strategy.
-
-#### AAD naming convention
-
-Each column's AAD string follows the format `"uptrakit:<table_name>:<column_name>"`:
-
-| Table | Column | AAD string |
-| --- | --- | --- |
-| `ca_certificates` | `key_pem` | `uptrakit:ca_certificates:key_pem` |
-| `oidc_providers` | `client_secret` | `uptrakit:oidc_providers:client_secret` |
-| `mqtt_clients` | `password` | `uptrakit:mqtt_clients:password` |
-| `mqtt_clients` | `ca_cert_pem` | `uptrakit:mqtt_clients:ca_cert_pem` |
-| `pending_oidc_flows` | `pkce_verifier` | `uptrakit:pending_oidc_flows:pkce_verifier` |
-| `notification_channels` | `config` | `uptrakit:notification_channels:config` |
-| `ssh_hosts` | `private_key` | `uptrakit:ssh_hosts:private_key` |
-
-#### Two-phase HA deployment
-
-In a multi-controller HA deployment, a rolling upgrade creates a window where some controllers run
-old code (v1-only) and others run new code (v2-capable). The migration is therefore split into two
-phases:
-
-1. **Phase A (automatic)**: Deploy new code to all controllers. The code registers column→AAD
-   mappings at startup, enabling transparent v2 read support. No data changes occur. Old-code
-   controllers continue operating normally because no v2 ciphertexts exist yet.
-
-2. **Phase B (operator-triggered)**: Once all controllers run new code, the operator restarts
-   **one** controller with `--upgrade-encryption`. That instance re-encrypts all v1 rows to v2.
-   All other instances can already read v2 ciphertexts.
-
-For the SSH agent, the same `--upgrade-encryption` flag triggers migration of `ssh_hosts.private_key`
-in the agent-ssh local database.
-
-#### Properties
-
-- **Idempotent**: rows already at v2 are skipped. Running the migration twice is safe.
-- **HA-safe**: if two instances both run Phase B, last-writer-wins is fine (both produce valid v2
-  ciphertexts with the same AAD).
-- **Fault-tolerant**: errors on individual rows are logged at `warn` level and skipped. The
-  controller still starts successfully.
-- **Observable**: on completion, `info`-level log lines report per-table counts.
-
-#### Single-controller deployments
-
-In non-HA (single-controller) deployments, `--upgrade-encryption` can be enabled immediately on the
-first upgrade to the version that supports v2. There is no need for a two-phase rollout.
-
-Implementation: `crates/core/controller/src/reencrypt.rs` (controller columns),
-`crates/core/agent-ssh/src/main.rs` (SSH agent column).
-
 ## Master Key Management
 
-- A 256-bit master key is required in production via `UPTRAKIT_MASTER_KEY` (64 hex characters) or `--master-key-file`.
+- A 256-bit master key (KEK) is required in production via `UPTRAKIT_MASTER_KEY` (64 hex characters) or `--master-key-file`.
 - `init_master_key()` loads the key once at startup and caches it in a global `OnceLock`. It accepts
   `Zeroizing<[u8; 32]>` so the key bytes are scrubbed from memory when intermediate copies are dropped
   (defense-in-depth — the `OnceLock` static has `'static` lifetime). It returns `Report<CryptoError>` — see the
-  `CryptoError` enum in `crates/shared/db/src/crypto.rs` for the full set of typed error variants (e.g.
+  `CryptoError` enum in `crates/shared/crypto/src/lib.rs` for the full set of typed error variants (e.g.
   `AlreadyInitialized`, `NotInitialized`, `KeyCreation`, `Encryption`, `Decryption`, `MasterKeyMismatch`).
 - The key is never logged or exposed in API responses.
 - A missing or uninitialized master key is a **fatal startup error**. All components that call `EncryptedString::new()`,
   `encrypt_str()`, or `decrypt_str()` will receive `Err(CryptoError::NotInitialized)` and must propagate this
   failure — there is no plaintext fallback.
+
+### Master Key Rotation
+
+The `--rotate-master-key-file` CLI flag (available on both the controller and SSH agent) performs
+O(1) master key rotation by re-wrapping all DEKs with the new KEK. No data is re-encrypted —
+only the DEK wrappers change.
+
+See [Key Rotation](key-rotation.md) for the full procedure, including HA rolling restart
+instructions.
 
 | Method | Details |
 | --- | --- |
@@ -397,9 +367,10 @@ See [NATS Integration — Plugin Config Protection](../development/nats-integrat
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/crypto/src/lib.rs` | `EncryptedString` type, `init_master_key()`, AES-256-GCM encrypt/decrypt, key verification, `ENC:v1:`/`ENC:v2:` formats |
+| `crates/shared/crypto/src/lib.rs` | `EncryptedString` type, `init_master_key()`, `DataKeyRing`, AES-256-GCM encrypt/decrypt, key verification, `ENC:v1:`/`ENC:v2:`/`ENC:v3:` formats, DEK wrap/unwrap |
 | `crates/shared/types/src/secret_string.rs` | `SecretString` newtype with redacted Debug/Display |
-| `crates/ui/web-api/src/settings_store.rs` | JWT signing key storage with `ENC:v2:` and AAD `"uptrakit:settings:jwt_signing_key"` |
+| `crates/ui/web-api/src/settings_store.rs` | JWT signing key storage with AAD `"uptrakit:settings:jwt_signing_key"` |
 | `crates/ui/web-api/src/setting_key.rs` | `SettingKey::MasterKeyVerification` — stores the key verification token |
-| `crates/core/controller/src/startup.rs` | `verify_master_key()` — startup phase that validates the master key; env var warning |
-| `crates/core/controller/src/reencrypt.rs` | Startup re-encryption of legacy plaintext values across encrypted columns |
+| `crates/core/controller/src/startup.rs` | `verify_master_key()`, `init_data_key_ring()`, `rotate_master_key()` |
+| `crates/core/controller/src/reencrypt.rs` | Automatic v3 re-encryption of all encrypted columns and settings |
+| `crates/core/agent-ssh/src/main.rs` | SSH agent DEK ring init, v3 re-encryption, master key rotation |
