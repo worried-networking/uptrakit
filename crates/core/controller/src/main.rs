@@ -549,6 +549,12 @@ async fn run(args: cli::Args) -> Result<()> {
             ScheduledTaskType::CrlRenewal,
             Box::new(crl_renewal::CrlRenewalExecutor::new(Arc::clone(&notifier))),
         );
+        sched.register(
+            ScheduledTaskType::AuditLogCleanup,
+            Box::new(audit_log_cleanup::AuditLogCleanupExecutor::new(
+                app_state.db().clone(),
+            )),
+        );
 
         let h = tokio::spawn(sched.run(bg.child_token()));
         bg.track_with_timeout("scheduler", h, durations::SCHEDULER_SHUTDOWN_TIMEOUT);

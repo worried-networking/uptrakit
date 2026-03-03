@@ -1,3 +1,4 @@
+pub mod audit_log_cleanup;
 pub mod auth_cleanup;
 pub mod crl_renewal;
 pub mod detect_version;
