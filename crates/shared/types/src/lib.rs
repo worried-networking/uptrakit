@@ -1,4 +1,5 @@
 mod batch_status;
+pub mod command_validation;
 mod device_auth_status;
 mod discovered_software;
 mod discovery_target;

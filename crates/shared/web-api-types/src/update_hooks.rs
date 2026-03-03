@@ -234,6 +234,49 @@ pub struct UpdateHookConfig {
     pub shell: Option<HookShell>,
 }
 
+impl UpdateHookConfig {
+    /// Validate the hook phase configuration.
+    ///
+    /// Validates:
+    /// - Predefined hook parameters (service names, paths)
+    /// - Custom command count (max [`MAX_HOOK_COMMANDS_PER_PHASE`](uptrakit_shared_types::command_validation::MAX_HOOK_COMMANDS_PER_PHASE))
+    /// - Custom command length (max [`MAX_COMMAND_LENGTH`](uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH))
+    /// - No empty commands in the array
+    pub fn validate(&self, phase: &'static str) -> Result<(), HookValidationError> {
+        if let Some(ref predefined) = self.predefined {
+            predefined.validate()?;
+        }
+        if let Some(ref commands) = self.commands {
+            if commands.len()
+                > uptrakit_shared_types::command_validation::MAX_HOOK_COMMANDS_PER_PHASE
+            {
+                return Err(HookValidationError {
+                    field: phase,
+                    message: format!(
+                        "too many commands ({}, max {})",
+                        commands.len(),
+                        uptrakit_shared_types::command_validation::MAX_HOOK_COMMANDS_PER_PHASE,
+                    ),
+                });
+            }
+            for (i, cmd) in commands.iter().enumerate() {
+                if let Err(msg) =
+                    uptrakit_shared_types::command_validation::validate_command_length(
+                        cmd,
+                        &format!("{phase}.commands[{i}]"),
+                    )
+                {
+                    return Err(HookValidationError {
+                        field: phase,
+                        message: msg,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Full hooks configuration for a software item.
 ///
 /// Stored in plugin_config or software item's config_override.
@@ -249,17 +292,13 @@ pub struct HooksConfig {
 }
 
 impl HooksConfig {
-    /// Validate all predefined hooks in this config.
+    /// Validate all hooks in this config (predefined + custom commands).
     pub fn validate(&self) -> Result<(), HookValidationError> {
-        if let Some(ref pre) = self.pre_update
-            && let Some(ref predefined) = pre.predefined
-        {
-            predefined.validate()?;
+        if let Some(ref pre) = self.pre_update {
+            pre.validate("pre_update")?;
         }
-        if let Some(ref post) = self.post_update
-            && let Some(ref predefined) = post.predefined
-        {
-            predefined.validate()?;
+        if let Some(ref post) = self.post_update {
+            post.validate("post_update")?;
         }
         Ok(())
     }
@@ -722,6 +761,90 @@ mod tests {
             post_update: None,
         };
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_hooks_config_custom_command_over_limit_rejected() {
+        let long_cmd = "x".repeat(
+            uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1,
+        );
+        let config = HooksConfig {
+            pre_update: Some(UpdateHookConfig {
+                predefined: None,
+                commands: Some(vec![long_cmd]),
+                shell: None,
+            }),
+            post_update: None,
+        };
+        let err = config.validate().unwrap_err();
+        assert_eq!(err.field, "pre_update");
+        assert!(err.message.contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn validate_hooks_config_too_many_commands_rejected() {
+        let commands = (0..=uptrakit_shared_types::command_validation::MAX_HOOK_COMMANDS_PER_PHASE)
+            .map(|i| format!("echo {i}"))
+            .collect();
+        let config = HooksConfig {
+            pre_update: Some(UpdateHookConfig {
+                predefined: None,
+                commands: Some(commands),
+                shell: None,
+            }),
+            post_update: None,
+        };
+        let err = config.validate().unwrap_err();
+        assert_eq!(err.field, "pre_update");
+        assert!(err.message.contains("too many commands"));
+    }
+
+    #[test]
+    fn validate_hooks_config_empty_command_rejected() {
+        let config = HooksConfig {
+            post_update: Some(UpdateHookConfig {
+                predefined: None,
+                commands: Some(vec!["".to_string()]),
+                shell: None,
+            }),
+            pre_update: None,
+        };
+        let err = config.validate().unwrap_err();
+        assert_eq!(err.field, "post_update");
+        assert!(err.message.contains("must not be empty"));
+    }
+
+    #[test]
+    fn validate_hooks_config_commands_at_limit_ok() {
+        let commands = (0..uptrakit_shared_types::command_validation::MAX_HOOK_COMMANDS_PER_PHASE)
+            .map(|i| format!("echo {i}"))
+            .collect();
+        let config = HooksConfig {
+            pre_update: Some(UpdateHookConfig {
+                predefined: None,
+                commands: Some(commands),
+                shell: None,
+            }),
+            post_update: None,
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_hooks_config_post_update_validated_too() {
+        let long_cmd = "x".repeat(
+            uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1,
+        );
+        let config = HooksConfig {
+            pre_update: None,
+            post_update: Some(UpdateHookConfig {
+                predefined: None,
+                commands: Some(vec![long_cmd]),
+                shell: None,
+            }),
+        };
+        let err = config.validate().unwrap_err();
+        assert_eq!(err.field, "post_update");
     }
 
     #[test]

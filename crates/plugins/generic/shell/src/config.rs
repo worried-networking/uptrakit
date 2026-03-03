@@ -55,11 +55,32 @@ impl ShellConfig {
     ///
     /// Fails when **both** `version_command` and `update_command` are `None`
     /// — a no-op config is invalid. Either field set alone is valid.
+    /// Also validates that command strings do not exceed the maximum length.
     pub fn validate(&self) -> Result<()> {
         if self.version_command.is_none() && self.update_command.is_none() {
             rootcause::bail!(ShellError::Configuration(
                 "at least one of version_command or update_command must be set".to_string()
             ));
+        }
+        if let Some(ref cmd) = self.version_command {
+            if let Err(e) =
+                uptrakit_shared_types::command_validation::validate_command_length(
+                    cmd,
+                    "version_command",
+                )
+            {
+                rootcause::bail!(ShellError::Configuration(e));
+            }
+        }
+        if let Some(ref cmd) = self.update_command {
+            if let Err(e) =
+                uptrakit_shared_types::command_validation::validate_command_length(
+                    cmd,
+                    "update_command",
+                )
+            {
+                rootcause::bail!(ShellError::Configuration(e));
+            }
         }
         Ok(())
     }
@@ -139,6 +160,39 @@ mod tests {
         let deserialized: ShellConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.version_command, config.version_command);
         assert_eq!(deserialized.update_command, config.update_command);
+    }
+
+    #[test]
+    fn validate_version_command_at_limit_passes() {
+        let cmd = "x".repeat(uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH);
+        let config = ShellConfig {
+            version_command: Some(cmd),
+            update_command: None,
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_version_command_over_limit_rejected() {
+        let cmd = "x".repeat(uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1);
+        let config = ShellConfig {
+            version_command: Some(cmd),
+            update_command: None,
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("version_command"));
+        assert!(err.to_string().contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn validate_update_command_over_limit_rejected() {
+        let cmd = "x".repeat(uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1);
+        let config = ShellConfig {
+            version_command: Some("echo ok".to_string()),
+            update_command: Some(cmd),
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("update_command"));
     }
 
     #[test]

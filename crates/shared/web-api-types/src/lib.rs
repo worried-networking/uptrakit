@@ -9,6 +9,7 @@ pub use uptrakit_shared_types::PluginRole;
 pub mod agents;
 pub mod api_tokens;
 pub mod auth;
+pub mod command_validation;
 pub mod autodiscovery;
 pub mod discovery_allowlist;
 pub mod device_auth;

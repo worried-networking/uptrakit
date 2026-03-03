@@ -104,12 +104,15 @@ impl DockerConfig {
     /// An empty (all-defaults) config is valid — discovery can proceed
     /// without any fields set.
     pub fn validate(&self) -> Result<()> {
-        if let Some(ref cmd) = self.post_pull_command
-            && cmd.is_empty()
-        {
-            bail!(DockerError::Configuration(
-                "post_pull_command must not be an empty string when set".to_string()
-            ));
+        if let Some(ref cmd) = self.post_pull_command {
+            if let Err(e) =
+                uptrakit_shared_types::command_validation::validate_command_length(
+                    cmd,
+                    "post_pull_command",
+                )
+            {
+                bail!(DockerError::Configuration(e));
+            }
         }
 
         if let Some(ref cr) = self.compose_restart
@@ -297,6 +300,28 @@ mod tests {
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("post_pull_command"));
+    }
+
+    #[test]
+    fn validation_fails_post_pull_command_over_limit() {
+        let cmd = "x".repeat(uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1);
+        let config = DockerConfig {
+            post_pull_command: Some(cmd),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("post_pull_command"));
+        assert!(err.to_string().contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn validation_passes_post_pull_command_at_limit() {
+        let cmd = "x".repeat(uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH);
+        let config = DockerConfig {
+            post_pull_command: Some(cmd),
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
     }
 
     #[test]
