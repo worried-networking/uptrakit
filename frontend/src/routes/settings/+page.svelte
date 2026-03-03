@@ -12,7 +12,6 @@
 		OidcProviderResponse
 	} from '$lib/types';
 	import { Permission } from '$lib/types';
-	import SystemServicesSettings from './SystemServicesSettings.svelte';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 
 	import RegistrationSettings from './RegistrationSettings.svelte';
@@ -45,7 +44,6 @@
 	const maxMqttPollDelay = 5 * 60 * 1000; // 5 minutes
 
 	const canManageSettings = $derived(getUser()?.permissions.includes(Permission.ManageSettings) ?? false);
-	const canManageSystemServices = $derived(getUser()?.permissions.includes(Permission.ManageSystemServices) ?? false);
 
 	$effect(() => {
 		if (getUser() && !canManageSettings) {
@@ -200,9 +198,6 @@
 				<p>{enrollmentTokenError}</p>
 				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
 			</aside>
-		{/if}
-		{#if canManageSystemServices}
-			<SystemServicesSettings onSuccess={showSuccess} onError={showError} />
 		{/if}
 	</div>
 {/if}

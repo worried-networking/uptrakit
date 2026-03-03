@@ -13,6 +13,7 @@
 	import { Permission, type SystemAlert } from '$lib/types';
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import SystemServicesSettings from '../SystemServicesSettings.svelte';
 
 	// --- Network Settings ---
 	let trustedProxiesText: string = $state('');
@@ -39,6 +40,7 @@
 	let loading: boolean = $state(true);
 
 	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
+	const canManageSystemServices = $derived(getUser()?.permissions.includes(Permission.ManageSystemServices) ?? false);
 
 	$effect(() => {
 		if (getUser() && !canManageGlobalSettings) {
@@ -291,7 +293,12 @@
 			</button>
 		</div>
 
-		<!-- Section 5: CA Certificate -->
+		<!-- Section 5: System Services -->
+		{#if canManageSystemServices}
+			<SystemServicesSettings onSuccess={showSuccess} onError={showError} />
+		{/if}
+
+		<!-- Section 6: CA Certificate -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">CA Certificate</h2>
 			<p class="mb-4 text-surface-600 dark:text-surface-400">

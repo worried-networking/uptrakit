@@ -71,8 +71,8 @@
 <div class="card mb-6 p-6">
 	<h2 class="h3 mb-4">System Services</h2>
 	<p class="mb-4 text-surface-600 dark:text-surface-400">
-		Configure the shared enrollment token used by system services (e.g. dedicated tenant services) to authenticate with
-		the controller.
+		Set the enrollment token required for infrastructure services — such as the external scheduler and MQTT bridge — to
+		enroll with the controller. Services that present this token are automatically approved on enrollment.
 	</p>
 
 	{#if loading}
