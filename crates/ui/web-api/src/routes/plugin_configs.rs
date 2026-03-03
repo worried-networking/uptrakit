@@ -81,15 +81,41 @@ pub async fn list_plugin_types(
 pub async fn create_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageCommands(_user): CanManageCommands,
+    CanManageCommands(user): CanManageCommands,
     Json(req): Json<CreatePluginConfigRequest>,
 ) -> Response {
     if let Err(e) = req.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
+    let plugin_type_str = req.plugin_type.to_string();
+    let config_name = req.name.clone();
+    let command_fields = detect_command_fields(&req.config);
+
     match pc_queries::create_plugin_config(state.plugin_ops.as_ref(), &tenant_db, req).await {
-        Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
+        Ok(resp) => {
+            if command_fields.is_empty() {
+                tracing::warn!(
+                    user_id = %user.user_id,
+                    tenant_id = %tenant_db.tenant_id,
+                    plugin_config_id = %resp.id,
+                    plugin_type = %plugin_type_str,
+                    config_name = %config_name,
+                    "security_audit: plugin config created"
+                );
+            } else {
+                tracing::warn!(
+                    user_id = %user.user_id,
+                    tenant_id = %tenant_db.tenant_id,
+                    plugin_config_id = %resp.id,
+                    plugin_type = %plugin_type_str,
+                    config_name = %config_name,
+                    command_fields = %command_fields.join(", "),
+                    "security_audit: plugin config created with command-bearing fields"
+                );
+            }
+            (StatusCode::CREATED, Json(resp)).into_response()
+        }
         Err(report) => match report.current_context() {
             PluginConfigError::DuplicateName => error_response(
                 StatusCode::CONFLICT,
@@ -187,13 +213,42 @@ pub async fn update_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
-    CanManageCommands(_user): CanManageCommands,
+    CanManageCommands(user): CanManageCommands,
     Json(req): Json<UpdatePluginConfigRequest>,
 ) -> Response {
+    // Capture command fields from the incoming request config for audit logging.
+    let new_command_fields = req
+        .config
+        .as_ref()
+        .map(|c| detect_command_fields(c))
+        .unwrap_or_default();
+
     match pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)
         .await
     {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(resp) => {
+            if new_command_fields.is_empty() {
+                tracing::warn!(
+                    user_id = %user.user_id,
+                    tenant_id = %tenant_db.tenant_id,
+                    plugin_config_id = %config_id,
+                    plugin_type = %resp.plugin_type,
+                    config_name = %resp.name,
+                    "security_audit: plugin config updated"
+                );
+            } else {
+                tracing::warn!(
+                    user_id = %user.user_id,
+                    tenant_id = %tenant_db.tenant_id,
+                    plugin_config_id = %config_id,
+                    plugin_type = %resp.plugin_type,
+                    config_name = %resp.name,
+                    command_fields = %new_command_fields.join(", "),
+                    "security_audit: plugin config updated with command-bearing fields"
+                );
+            }
+            (StatusCode::OK, Json(resp)).into_response()
+        }
         Err(report) => match report.current_context() {
             PluginConfigError::NotFound => {
                 error_response(StatusCode::NOT_FOUND, "Plugin config not found")
@@ -235,10 +290,18 @@ pub async fn update_plugin_config(
 pub async fn delete_plugin_config(
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
-    CanManageSoftware(_user): CanManageSoftware,
+    CanManageSoftware(user): CanManageSoftware,
 ) -> Response {
     match pc_queries::delete_plugin_config(&tenant_db, config_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => {
+            tracing::warn!(
+                user_id = %user.user_id,
+                tenant_id = %tenant_db.tenant_id,
+                plugin_config_id = %config_id,
+                "security_audit: plugin config deleted"
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Plugin config not found"),
         Err(e) => {
             tracing::error!("Failed to delete plugin config: {e}");
@@ -430,6 +493,59 @@ pub async fn discard_plugin_config_discovered(
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
+}
+
+// ── Security audit helpers ────────────────────────────────────────────────────
+
+/// Known field names that carry executable commands in plugin configs.
+const COMMAND_FIELD_NAMES: &[&str] = &[
+    "version_command",
+    "update_command",
+    "post_pull_command",
+    "pre_update_commands",
+    "post_update_commands",
+];
+
+/// Detect command-bearing field names present in a plugin config value.
+///
+/// Returns a list of field names that carry executable commands (e.g.
+/// `version_command`, `update_command`, `post_pull_command`, hook `commands`).
+/// Used for security audit logging to highlight configs that grant effective RCE
+/// on managed hosts.
+fn detect_command_fields(config: &serde_json::Value) -> Vec<&'static str> {
+    let obj = match config.as_object() {
+        Some(o) => o,
+        None => return Vec::new(),
+    };
+
+    let mut fields = Vec::new();
+
+    for &name in COMMAND_FIELD_NAMES {
+        if let Some(val) = obj.get(name) {
+            // Skip null/empty values.
+            if !val.is_null() {
+                fields.push(name);
+            }
+        }
+    }
+
+    // Structured hooks: hooks.pre_update.commands, hooks.post_update.commands
+    if let Some(hooks) = obj.get("hooks").and_then(|v| v.as_object()) {
+        for phase in ["pre_update", "post_update"] {
+            if let Some(hook) = hooks.get(phase).and_then(|v| v.as_object())
+                && let Some(arr) = hook.get("commands").and_then(|v| v.as_array())
+                && !arr.is_empty()
+            {
+                if phase == "pre_update" {
+                    fields.push("hooks.pre_update.commands");
+                } else {
+                    fields.push("hooks.post_update.commands");
+                }
+            }
+        }
+    }
+
+    fields
 }
 
 #[cfg(test)]
@@ -692,5 +808,100 @@ mod tests {
             PluginRegistry::validate_config_str("releases_docker", &config).is_ok(),
             "old semver fields should be silently ignored"
         );
+    }
+
+    // ── detect_command_fields tests ──────────────────────────────────────
+
+    use super::detect_command_fields;
+
+    #[test]
+    fn detect_shell_config_command_fields() {
+        let config = serde_json::json!({
+            "version_command": "dpkg -l | grep foo",
+            "update_command": "apt-get install -y foo"
+        });
+        let fields = detect_command_fields(&config);
+        assert!(fields.contains(&"version_command"));
+        assert!(fields.contains(&"update_command"));
+        assert_eq!(fields.len(), 2);
+    }
+
+    #[test]
+    fn detect_docker_post_pull_command() {
+        let config = serde_json::json!({
+            "post_pull_command": "docker-compose up -d"
+        });
+        let fields = detect_command_fields(&config);
+        assert_eq!(fields, vec!["post_pull_command"]);
+    }
+
+    #[test]
+    fn detect_structured_hooks() {
+        let config = serde_json::json!({
+            "hooks": {
+                "pre_update": {
+                    "commands": ["systemctl stop myapp"]
+                },
+                "post_update": {
+                    "commands": ["systemctl start myapp"]
+                }
+            }
+        });
+        let fields = detect_command_fields(&config);
+        assert!(fields.contains(&"hooks.pre_update.commands"));
+        assert!(fields.contains(&"hooks.post_update.commands"));
+        assert_eq!(fields.len(), 2);
+    }
+
+    #[test]
+    fn detect_legacy_hook_commands() {
+        let config = serde_json::json!({
+            "pre_update_commands": ["stop-service"],
+            "post_update_commands": ["start-service"]
+        });
+        let fields = detect_command_fields(&config);
+        assert!(fields.contains(&"pre_update_commands"));
+        assert!(fields.contains(&"post_update_commands"));
+        assert_eq!(fields.len(), 2);
+    }
+
+    #[test]
+    fn detect_no_command_fields() {
+        let config = serde_json::json!({
+            "tracked_tag": "latest",
+            "auth": { "type": "bearer", "token": "tok" }
+        });
+        let fields = detect_command_fields(&config);
+        assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn detect_null_command_fields_excluded() {
+        let config = serde_json::json!({
+            "version_command": null,
+            "update_command": "apt-get update"
+        });
+        let fields = detect_command_fields(&config);
+        assert_eq!(fields, vec!["update_command"]);
+    }
+
+    #[test]
+    fn detect_non_object_config_returns_empty() {
+        let config = serde_json::json!("not an object");
+        let fields = detect_command_fields(&config);
+        assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn detect_empty_hooks_commands_excluded() {
+        let config = serde_json::json!({
+            "hooks": {
+                "pre_update": {
+                    "commands": []
+                }
+            }
+        });
+        let fields = detect_command_fields(&config);
+        assert!(fields.is_empty(), "empty commands array should be excluded");
     }
 }
