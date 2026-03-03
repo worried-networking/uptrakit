@@ -150,7 +150,9 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Recreate indexes on update_history
+        // Recreate indexes on update_history.
+        // Note: idx_update_history_created_at was added by m20260302_000001_add_missing_indexes
+        // and must be recreated here since update_history is dropped and recreated.
         for (name, cols) in [
             ("idx_update_history_host_id", vec![UpdateHistory::HostId]),
             (
@@ -163,6 +165,10 @@ impl MigrationTrait for Migration {
                 vec![UpdateHistory::HostId, UpdateHistory::SoftwareItemId],
             ),
             ("idx_uh_batch_id", vec![UpdateHistory::BatchId]),
+            (
+                "idx_update_history_created_at",
+                vec![UpdateHistory::CreatedAt],
+            ),
         ] {
             let mut idx = Index::create();
             idx.name(name).table(UpdateHistory::Table);
@@ -311,6 +317,8 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // When rolling back this migration, m20260302_000001_add_missing_indexes is still
+        // applied, so idx_update_history_created_at must be present on the recreated table.
         for (name, cols) in [
             ("idx_update_history_host_id", vec![UpdateHistory::HostId]),
             (
@@ -321,6 +329,10 @@ impl MigrationTrait for Migration {
             (
                 "idx_update_history_host_software_item",
                 vec![UpdateHistory::HostId, UpdateHistory::SoftwareItemId],
+            ),
+            (
+                "idx_update_history_created_at",
+                vec![UpdateHistory::CreatedAt],
             ),
         ] {
             let mut idx = Index::create();
