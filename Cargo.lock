@@ -6508,6 +6508,7 @@ dependencies = [
  "rustls",
  "sea-orm",
  "sea-orm-migration",
+ "sha2 0.10.9",
  "ssh-key",
  "ssh2-config",
  "strum",

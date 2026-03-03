@@ -25,13 +25,13 @@ pub struct Args {
     #[arg(long)]
     pub allow_plaintext_secrets: bool,
 
-    /// Re-encrypt all ENC:v1 database values to context-bound ENC:v2 format.
+    /// Path to a new master key file for key rotation.
     ///
-    /// Upgrades the `ssh_hosts.private_key` column from ENC:v1 (empty AAD) to
-    /// ENC:v2 (context-bound AAD). The operation is idempotent: rows already at
-    /// v2 are skipped.
+    /// Re-wraps all data encryption keys from the old master key to the new one.
+    /// O(1) cost regardless of data volume. After rotation, restart all agents
+    /// with the new master key file only.
     #[arg(long)]
-    pub upgrade_encryption: bool,
+    pub rotate_master_key_file: Option<std::path::PathBuf>,
 
     #[command(subcommand)]
     pub command: Option<Commands>,

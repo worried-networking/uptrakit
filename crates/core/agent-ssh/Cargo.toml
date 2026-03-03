@@ -38,6 +38,7 @@ sea-orm-migration = { workspace = true, features = ["sqlx-sqlite"] }
 uuid = { workspace = true, features = ["v7", "serde"] }
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
+sha2 = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]

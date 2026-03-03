@@ -568,15 +568,140 @@ fn register_ssh_column_aad() {
     }
 }
 
-/// Re-encrypt all `ENC:v1:` `ssh_hosts.private_key` values to `ENC:v2:`.
-async fn reencrypt_ssh_v1_to_v2(db: &sea_orm::DatabaseConnection) {
+/// Initialize the data key ring from the local DB (same pattern as controller).
+async fn init_ssh_data_key_ring(db: &sea_orm::DatabaseConnection) {
+    use sea_orm::{ActiveModelTrait, EntityTrait};
+
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
+
+    let kek_fp = match uptrakit_crypto::master_key_fingerprint() {
+        Ok(fp) => fp,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to compute KEK fingerprint");
+            return;
+        }
+    };
+
+    let rows = match db::entity::data_encryption_key::Entity::find().all(db).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to query data_encryption_keys");
+            return;
+        }
+    };
+
+    if rows.is_empty() {
+        // Generate the first DEK.
+        let dek = match uptrakit_crypto::generate_data_key() {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to generate initial DEK");
+                return;
+            }
+        };
+        let wrapped = match uptrakit_crypto::wrap_data_key(&dek) {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to wrap initial DEK");
+                return;
+            }
+        };
+
+        let am = db::entity::data_encryption_key::ActiveModel {
+            id: sea_orm::Set(uuid::Uuid::now_v7()),
+            key_id: sea_orm::Set(dek.key_id.clone()),
+            wrapped_key: sea_orm::Set(wrapped),
+            kek_fingerprint: sea_orm::Set(kek_fp.clone()),
+            status: sea_orm::Set("active".to_string()),
+            created_at: sea_orm::Set(time::OffsetDateTime::now_utc()),
+            retired_at: sea_orm::Set(None),
+        };
+
+        if let Err(e) = am.insert(db).await {
+            tracing::debug!(error = %e, "initial DEK insert failed (may be race), will load existing");
+        } else {
+            tracing::info!(key_id = %dek.key_id, "generated initial data encryption key");
+        }
+
+        // Re-read in case of race.
+        let rows = match db::entity::data_encryption_key::Entity::find().all(db).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to re-read data_encryption_keys");
+                return;
+            }
+        };
+        build_and_init_ssh_ring(&rows, &kek_fp);
+        return;
+    }
+
+    build_and_init_ssh_ring(&rows, &kek_fp);
+}
+
+/// Build and init the data key ring from loaded DEK rows.
+fn build_and_init_ssh_ring(
+    rows: &[db::entity::data_encryption_key::Model],
+    kek_fp: &str,
+) {
+    let mut keys = std::collections::HashMap::new();
+    let mut active_key_id: Option<String> = None;
+
+    for row in rows {
+        if row.kek_fingerprint != kek_fp {
+            tracing::error!(
+                key_id = %row.key_id,
+                stored_fp = %row.kek_fingerprint,
+                current_fp = %kek_fp,
+                "DEK was wrapped with a different KEK — master key mismatch"
+            );
+            return;
+        }
+
+        let dek = match uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!(key_id = %row.key_id, error = %e, "failed to unwrap DEK");
+                return;
+            }
+        };
+        keys.insert(dek.key_id.clone(), dek.key);
+
+        if row.status == "active" {
+            active_key_id = Some(row.key_id.clone());
+        }
+    }
+
+    let active = match active_key_id {
+        Some(id) => id,
+        None => {
+            tracing::error!("no active DEK found in data_encryption_keys table");
+            return;
+        }
+    };
+
+    let ring = uptrakit_crypto::DataKeyRing::new(keys, active.clone());
+    if let Err(e) = uptrakit_crypto::init_data_key_ring(ring) {
+        tracing::warn!(error = %e, "data key ring already initialized (harmless)");
+    } else {
+        tracing::info!(active_key_id = %active, count = rows.len(), "data key ring initialized");
+    }
+}
+
+/// Re-encrypt all non-v3 `ssh_hosts.private_key` values to `ENC:v3:`.
+async fn reencrypt_ssh_to_v3(db: &sea_orm::DatabaseConnection) {
     use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel};
     use uptrakit_crypto::EncryptedString;
+
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
 
     let rows = match db::entity::ssh_host::Entity::find().all(db).await {
         Ok(r) => r,
         Err(e) => {
-            tracing::warn!(error = %e, "failed to query ssh_hosts for v2 upgrade");
+            tracing::warn!(error = %e, "failed to query ssh_hosts for v3 upgrade");
             return;
         }
     };
@@ -593,13 +718,13 @@ async fn reencrypt_ssh_v1_to_v2(db: &sea_orm::DatabaseConnection) {
                 let mut am = row.into_active_model();
                 am.private_key = sea_orm::Set(encrypted);
                 if let Err(e) = am.update(db).await {
-                    tracing::warn!(id = %id, error = %e, "v2 upgrade failed: ssh_hosts.private_key");
+                    tracing::warn!(id = %id, error = %e, "v3 upgrade failed: ssh_hosts.private_key");
                 } else {
                     count += 1;
                 }
             }
             Err(e) => {
-                tracing::warn!(id = %id, error = %e, "v2 encrypt failed: ssh_hosts.private_key");
+                tracing::warn!(id = %id, error = %e, "v3 encrypt failed: ssh_hosts.private_key");
             }
         }
     }
@@ -608,11 +733,115 @@ async fn reencrypt_ssh_v1_to_v2(db: &sea_orm::DatabaseConnection) {
             table = "ssh_hosts",
             column = "private_key",
             count,
-            "upgraded to ENC:v2"
+            "upgraded to ENC:v3"
         );
-    } else {
-        tracing::info!("no ENC:v1 ssh_hosts.private_key values found");
     }
+}
+
+/// Rotate DEKs from the current KEK to a new KEK (same pattern as controller).
+async fn rotate_ssh_master_key(
+    db: &sea_orm::DatabaseConnection,
+    new_key_path: &std::path::Path,
+) {
+    use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, TransactionTrait};
+
+    let new_key_hex = match std::fs::read_to_string(new_key_path) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(path = %new_key_path.display(), error = %e, "failed to read new master key file");
+            return;
+        }
+    };
+
+    let new_key_bytes = match uptrakit_shared_types::hex::decode(new_key_hex.trim()) {
+        Ok(bytes) => {
+            let arr: [u8; 32] = match bytes.try_into() {
+                Ok(a) => a,
+                Err(_) => {
+                    tracing::error!("new master key must be exactly 32 bytes (64 hex chars)");
+                    return;
+                }
+            };
+            arr
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "failed to decode new master key hex");
+            return;
+        }
+    };
+    let new_kek = zeroize::Zeroizing::new(new_key_bytes);
+
+    let new_kek_fp = {
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(new_kek.as_slice());
+        uptrakit_shared_types::hex::encode(&hash[..8])
+    };
+
+    let current_kek_fp = match uptrakit_crypto::master_key_fingerprint() {
+        Ok(fp) => fp,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to compute KEK fingerprint");
+            return;
+        }
+    };
+
+    if new_kek_fp == current_kek_fp {
+        tracing::warn!("new master key has same fingerprint as current — no rotation needed");
+        return;
+    }
+
+    tracing::info!(current_kek_fp, new_kek_fp, "starting SSH agent master key rotation");
+
+    let txn = match db.begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to begin transaction for key rotation");
+            return;
+        }
+    };
+
+    let rows = match db::entity::data_encryption_key::Entity::find().all(&txn).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to query DEKs for rotation");
+            return;
+        }
+    };
+
+    for row in &rows {
+        let dek = match uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!(key_id = %row.key_id, error = %e, "failed to unwrap DEK");
+                return;
+            }
+        };
+        let new_wrapped = match uptrakit_crypto::wrap_data_key_with(&new_kek, &dek) {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::error!(key_id = %row.key_id, error = %e, "failed to re-wrap DEK");
+                return;
+            }
+        };
+        let mut am: db::entity::data_encryption_key::ActiveModel = row.clone().into_active_model();
+        am.wrapped_key = sea_orm::Set(new_wrapped);
+        am.kek_fingerprint = sea_orm::Set(new_kek_fp.clone());
+        if let Err(e) = am.update(&txn).await {
+            tracing::error!(key_id = %row.key_id, error = %e, "failed to update DEK row");
+            return;
+        }
+    }
+
+    if let Err(e) = txn.commit().await {
+        tracing::error!(error = %e, "failed to commit key rotation transaction");
+        return;
+    }
+
+    tracing::info!(
+        dek_count = rows.len(),
+        new_kek_fp,
+        "SSH agent master key rotation complete — restart with the new key file"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -649,6 +878,17 @@ async fn main() {
                 std::process::exit(1);
             }
         };
+
+        // Initialise DEK ring for host subcommands that read/write encrypted keys.
+        match db::init_db(&state_dir).await {
+            Ok(host_db) => {
+                init_ssh_data_key_ring(&host_db).await;
+                host_db.close().await.ok();
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "could not init DEK ring for host subcommand");
+            }
+        }
 
         if let Err(e) = commands::host::run(&state_dir, command).await {
             eprintln!("error: {e}");
@@ -698,9 +938,15 @@ async fn main() {
         }
     };
 
-    // Gated v1→v2 re-encryption of ssh_hosts.private_key.
-    if args.upgrade_encryption {
-        reencrypt_ssh_v1_to_v2(&local_db).await;
+    // Initialise the data-encryption-key ring (generates first DEK if needed).
+    init_ssh_data_key_ring(&local_db).await;
+
+    // Auto-upgrade any non-v3 encrypted values to ENC:v3:.
+    reencrypt_ssh_to_v3(&local_db).await;
+
+    // Master key rotation (re-wraps DEKs with the new KEK).
+    if let Some(ref new_key_path) = args.rotate_master_key_file {
+        rotate_ssh_master_key(&local_db, new_key_path).await;
     }
 
     let (aggregate_tx, aggregate_rx) =
