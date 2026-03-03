@@ -589,6 +589,7 @@ mod tests {
             batch_progress_broadcaster:
                 crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
             shutdown_token: Default::default(),
+            external_scheduler_connected: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
 
