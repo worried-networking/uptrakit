@@ -293,8 +293,9 @@ pub(crate) async fn verify_master_key(
 /// ## HA safety
 ///
 /// On first start two controllers may race to insert the initial DEK.  The
-/// INSERT uses `ON CONFLICT DO NOTHING`, so the loser simply re-reads all
-/// rows and uses whatever was committed.
+/// `key_id` column has a UNIQUE constraint, so the loser's insert fails
+/// with a DB error that is caught gracefully.  It then re-reads all rows
+/// and uses whatever was committed.
 pub(crate) async fn init_data_key_ring(
     db: &sea_orm::DatabaseConnection,
 ) -> crate::Result<()> {
