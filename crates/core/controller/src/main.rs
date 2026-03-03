@@ -167,13 +167,16 @@ async fn run(args: cli::Args) -> Result<()> {
     // Phase 4: Master key verification (HA safety)
     startup::verify_master_key(&db_conn).await?;
 
-    // Phase 4b: Register column AAD mappings (enables ENC:v2 read support)
+    // Phase 4b: Register column AAD mappings (enables ENC:v2/v3 read support)
     reencrypt::register_column_aad_mappings();
 
-    // Phase 4c: Re-encrypt legacy plaintext secrets
+    // Phase 4c: Initialize data key ring (envelope encryption)
+    startup::init_data_key_ring(&db_conn).await?;
+
+    // Phase 4d: Re-encrypt legacy plaintext secrets
     reencrypt::reencrypt_legacy_plaintext(&db_conn).await;
 
-    // Phase 4d: Upgrade ENC:v1 → ENC:v2 (operator-triggered, HA-safe)
+    // Phase 4e: Upgrade ENC:v1 → ENC:v2 (operator-triggered, HA-safe)
     if args.upgrade_encryption {
         reencrypt::reencrypt_v1_to_v2(&db_conn).await;
     }

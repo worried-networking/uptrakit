@@ -281,6 +281,129 @@ pub(crate) async fn verify_master_key(
 }
 
 // ---------------------------------------------------------------------------
+// Phase 4c: Data key ring initialization (envelope encryption)
+// ---------------------------------------------------------------------------
+
+/// Initialize the global [`DataKeyRing`] for envelope encryption.
+///
+/// Loads existing DEKs from the `data_encryption_keys` table, or generates the
+/// first DEK if the table is empty.  The ring enables `ENC:v3:` format which
+/// encrypts data with a DEK rather than the KEK directly.
+///
+/// ## HA safety
+///
+/// On first start two controllers may race to insert the initial DEK.  The
+/// INSERT uses `ON CONFLICT DO NOTHING`, so the loser simply re-reads all
+/// rows and uses whatever was committed.
+pub(crate) async fn init_data_key_ring(
+    db: &sea_orm::DatabaseConnection,
+) -> crate::Result<()> {
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+    use uptrakit_shared_db::entity::data_encryption_key;
+
+    if !uptrakit_crypto::master_key_available() {
+        return Ok(());
+    }
+
+    let kek_fp = uptrakit_crypto::master_key_fingerprint().context_to()?;
+
+    let rows = data_encryption_key::Entity::find()
+        .all(db)
+        .await
+        .context(AppError::Database)?;
+
+    if rows.is_empty() {
+        // First start — generate the initial DEK.
+        let dek = uptrakit_crypto::generate_data_key().context_to()?;
+        let wrapped = uptrakit_crypto::wrap_data_key(&dek).context_to()?;
+
+        let am = data_encryption_key::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            key_id: Set(dek.key_id.clone()),
+            wrapped_key: Set(wrapped),
+            kek_fingerprint: Set(kek_fp.clone()),
+            status: Set("active".to_string()),
+            created_at: Set(time::OffsetDateTime::now_utc()),
+            retired_at: Set(None),
+        };
+
+        match am.insert(db).await {
+            Ok(_) => {
+                tracing::info!(key_id = %dek.key_id, "generated initial data encryption key");
+            }
+            Err(e) => {
+                // HA race: another controller inserted first.  This is harmless —
+                // fall through to load all rows below.
+                tracing::debug!(
+                    error = %e,
+                    "initial DEK insert failed (likely HA race), will load existing keys"
+                );
+            }
+        }
+
+        // Re-read in case of HA race.
+        let rows = data_encryption_key::Entity::find()
+            .all(db)
+            .await
+            .context(AppError::Database)?;
+        return build_and_init_ring(&rows, &kek_fp);
+    }
+
+    build_and_init_ring(&rows, &kek_fp)?;
+    Ok(())
+}
+
+/// Unwrap all DEKs and initialize the global data key ring.
+fn build_and_init_ring(
+    rows: &[uptrakit_shared_db::entity::data_encryption_key::Model],
+    kek_fp: &str,
+) -> crate::Result<()> {
+    use std::collections::HashMap;
+
+    let mut keys = HashMap::new();
+    let mut active_key_id: Option<String> = None;
+
+    for row in rows {
+        if row.kek_fingerprint != kek_fp {
+            return Err(report!(AppError::Config(format!(
+                "DEK '{}' was wrapped with KEK fingerprint '{}', but current KEK \
+                 fingerprint is '{kek_fp}'. This indicates a master key mismatch. \
+                 Use --rotate-master-key-file to rotate to a new master key.",
+                row.key_id, row.kek_fingerprint,
+            ))));
+        }
+
+        let dek = uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id)
+            .map_err(|e| {
+                report!(AppError::Config(format!(
+                    "failed to unwrap DEK '{}': {e}",
+                    row.key_id
+                )))
+            })?;
+        keys.insert(dek.key_id.clone(), dek.key);
+
+        if row.status == "active" {
+            active_key_id = Some(row.key_id.clone());
+        }
+    }
+
+    let active = active_key_id.ok_or_else(|| {
+        report!(AppError::Config(
+            "no active DEK found in data_encryption_keys table".into()
+        ))
+    })?;
+
+    let ring = uptrakit_crypto::DataKeyRing::new(keys, active.clone());
+    uptrakit_crypto::init_data_key_ring(ring).context_to()?;
+    tracing::info!(
+        active_key_id = %active,
+        count = rows.len(),
+        "data key ring initialized"
+    );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Phase 6: Settings reconciliation
 // ---------------------------------------------------------------------------
 
