@@ -114,6 +114,13 @@ code execution on managed hosts via plugin configuration manipulation.
 - **Plugin config encryption at rest.** Plugin configs are stored encrypted in the
   database via `EncryptedString`, preventing direct database reads from exposing
   command content.
+- **Security audit logging.** *(Implemented)* All plugin config create, update,
+  and delete operations emit a `tracing::warn!` event with the `security_audit:`
+  prefix. When the config contains command-bearing fields (`version_command`,
+  `update_command`, `post_pull_command`, hook commands), the log entry includes
+  `command_fields` listing which fields carry executable commands. For updates,
+  the log entry includes which command-bearing fields were added, modified, or
+  removed compared to the previous config.
 
 ## Residual risk
 
@@ -141,9 +148,11 @@ code execution on managed hosts via plugin configuration manipulation.
 - Implement a "command change review" workflow where modifications to command-bearing
   plugin config fields require approval from a second administrator before taking
   effect.
-- Implement an immutable audit log for all plugin config changes, with special
-  attention to command-bearing fields, including the full before/after diff and the
-  acting user's identity.
+- ~~Implement an immutable audit log for all plugin config changes~~ —
+  **Partially implemented.** Structured `security_audit:` tracing emits
+  create/update/delete events with user identity and command field detection.
+  Full immutable log storage depends on log aggregation infrastructure (Loki,
+  journald).
 - Add a "dry run" mode that shows what commands would execute on which hosts before
   committing a plugin config change.
 - Consider an optional command allowlist or blocklist per tenant that restricts the

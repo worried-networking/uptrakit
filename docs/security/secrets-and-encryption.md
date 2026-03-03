@@ -382,6 +382,17 @@ For the controller, set `UPTRAKIT_NATS_URL=nats-tls://nats-host:4222` (or the co
 flag). See [NATS Deployment](../end-user/deployment/nats.md) and
 [NATS Integration](../development/nats-integration.md#connection-url-and-tls) for details.
 
+### Plugin config encryption in NATS messages
+
+Plugin config fields in `CheckVersions`, `ExecuteUpdate`,
+`ExecuteBatchHostPackageUpdate`, and `DiscoverSoftware` messages are encrypted
+with AES-256-GCM before NATS publication. This is separate from TLS transport
+encryption — even with `nats-tls://`, configs are encrypted at the application
+layer so they are unreadable at rest in JetStream storage and to any NATS
+subscriber without the master key.
+
+See [NATS Integration — Plugin Config Protection](../development/nats-integration.md#plugin-config-protection).
+
 ## Key Files
 
 | File | Purpose |

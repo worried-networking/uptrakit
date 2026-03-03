@@ -215,6 +215,14 @@ When adding instrumentation, consult the level guidelines above. Lifecycle event
 diagnostics at `debug`, and per-message events at `trace`. Avoid demoting `info` events to `debug` or promoting
 `debug` events to `info` without a clear reason.
 
+### Security audit events
+
+Operations that modify security-sensitive state use a `security_audit:` message
+prefix at `warn` level. This prefix enables log aggregation filters and alerts
+without text parsing. See
+[Coding Standards — Security Audit Logging](coding-standards.md#security-audit-logging)
+for the full convention, required fields, and examples.
+
 ### Cross-references
 
 - [Security — Secrets Handling and Encryption](../security/secrets-and-encryption.md)

@@ -70,13 +70,18 @@ Alternatively, the attacker targets the credential delivery path:
   use `SecretString`, which provides `ZeroizeOnDrop` and redacted `Debug` output.
 - **NATS transport security.** The controller warns when NATS is configured with
   plaintext transport and recommends `nats-tls://` for production.
+- **NATS config encryption.** *(Implemented)* Plugin config fields in
+  `CheckVersions`, `ExecuteUpdate`, `ExecuteBatchHostPackageUpdate`, and
+  `DiscoverSoftware` messages are encrypted with AES-256-GCM (via the shared
+  master key) before NATS publication. Receiving controllers decrypt the configs
+  before delivering to agents. Configs are unreadable to NATS subscribers that
+  do not possess the master key.
 
 ## Residual risk
 
-- **`CheckVersions` not blocked from NATS.** `ControllerMessage::CheckVersions` is
-  not in the `is_nats_publishable()` blocklist. Plugin configs containing API tokens
-  and registry passwords are published to NATS JetStream when NATS is configured.
-  Any NATS subscriber can capture these credentials.
+- ~~`CheckVersions` not blocked from NATS.~~ **Mitigated.** Plugin config fields
+  are now AES-256-GCM encrypted before NATS publication. NATS subscribers without
+  the master key cannot read plugin credentials.
 - **Single-service credential concentration.** The external scheduler receives the
   master key, database URL, and NATS URL — the three most sensitive credentials in
   the system — in a single message. Compromise of the scheduler is equivalent to
@@ -93,9 +98,10 @@ Alternatively, the attacker targets the credential delivery path:
 
 ## Recommended improvements
 
-- Add `CheckVersions` to the `is_nats_publishable()` blocklist to prevent plugin
-  credentials from being published to NATS. Instead, deliver version check
-  assignments only over the direct mTLS WebSocket to the target agent.
+- ~~Add `CheckVersions` to the `is_nats_publishable()` blocklist~~ —
+  **Replaced.** Plugin configs in all credential-bearing message types are now
+  encrypted before NATS publication rather than blocked, preserving external
+  scheduler functionality.
 - Implement credential rotation for the external scheduler: periodically issue new
   database credentials and master key tokens, invalidating previous ones.
 - Add a secondary confirmation step (e.g., email or TOTP verification) for approving

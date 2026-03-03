@@ -1417,3 +1417,56 @@ async fn process_one_discovery(
 
 Name the struct after its semantic role (`ProcessDiscoveryArgs`, `CreateServiceArgs`), not a generic label like
 `Params`. The struct should be private to the module unless it is part of a public API.
+
+## Security Audit Logging
+
+Operations that modify security-sensitive state must emit structured
+`tracing::warn!` events prefixed with `security_audit:`. This convention
+enables log aggregation systems (Loki, journald, Datadog) to filter and alert
+on security-relevant changes without parsing message text.
+
+### When to use
+
+Apply `security_audit:` logging to any operation that:
+
+- Creates, modifies, or deletes plugin configs containing command-bearing fields
+  (`version_command`, `update_command`, `post_pull_command`, hook `commands`)
+- Modifies RBAC permissions or role assignments
+- Changes credential-bearing settings (SMTP passwords, OIDC secrets, NATS URLs)
+- Approves or revokes services with credential capabilities
+
+### Required structured fields
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `user_id` | `Uuid` | Authenticated user performing the action |
+| `tenant_id` | `Uuid` | Tenant scope of the operation |
+| Operation-specific ID | `Uuid` | e.g., `plugin_config_id`, `service_id` |
+| `command_fields` | `String` | Comma-separated list of command-bearing field names (only when applicable) |
+
+### Example
+
+```rust
+tracing::warn!(
+    user_id = %user.user_id,
+    tenant_id = %tenant_db.tenant_id,
+    plugin_config_id = %id,
+    plugin_type = %req.plugin_type,
+    config_name = %req.name,
+    command_fields = %fields.join(", "),
+    "security_audit: plugin config created with command-bearing fields"
+);
+```
+
+### Log level rationale
+
+`warn` level is used (not `info`) because:
+
+1. These events must be visible at the default service log level (`info` +
+   `warn` + `error`), ensuring operators see them without enabling debug
+   logging.
+2. They represent actions that warrant operator awareness — a legitimate
+   admin creating a shell command config is expected but should be
+   observable.
+3. The `warn` level matches the existing convention for security-relevant
+   conditions (see [Logging — Log Level Guidelines](logging.md)).

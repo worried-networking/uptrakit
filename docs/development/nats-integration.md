@@ -86,11 +86,12 @@ controller's `NatsTransport` and the external scheduler's `NatsSchedulerNotifier
 
 ```text
 crates/shared/nats/src/
-├── lib.rs          # Re-exports
-├── envelope.rs     # NatsEventEnvelope
-├── subjects.rs     # determine_subject(), STREAM_NAME, SUBJECT_PREFIX, STREAM_MAX_AGE
-├── connection.rs   # NatsConnection: connect(), ensure_stream(), publish(), publish_envelope()
-└── error.rs        # NatsError enum
+├── lib.rs               # Re-exports
+├── config_protection.rs # Encrypt/decrypt plugin configs for NATS transit
+├── envelope.rs          # NatsEventEnvelope
+├── subjects.rs          # determine_subject(), STREAM_NAME, SUBJECT_PREFIX, STREAM_MAX_AGE
+├── connection.rs        # NatsConnection: connect(), ensure_stream(), publish(), publish_envelope()
+└── error.rs             # NatsError enum
 ```
 
 ### Controller NATS modules
@@ -232,6 +233,57 @@ Set `NATS_URL` to override the default `nats://localhost:4222`:
 NATS_URL=nats://custom-host:4222 cargo test -p uptrakit-web-api --features nats nats -- --ignored
 ```
 
+## Plugin Config Protection
+
+Plugin configs (`PluginAssignment.config`, `DiscoveryPluginAssignment.config`)
+may contain sensitive credentials (API tokens, registry passwords). These
+configs are encrypted before NATS publication and decrypted on receipt.
+
+### Mechanism
+
+The `uptrakit_nats::config_protection` module provides two functions:
+
+- `encrypt_message_configs(msg)` — Called in `NatsConnection::publish()` before
+  serialization. Serializes each `serde_json::Value` config to a JSON string,
+  encrypts it with `uptrakit_crypto::encrypt_str()` (AES-256-GCM using the
+  shared master key), and replaces the config with `Value::String("ENC:v1:...")`.
+- `decrypt_message_configs(msg)` — Called in `NatsTransport::run_consumer()`
+  after deserialization. Detects encrypted config strings via
+  `uptrakit_crypto::is_encrypted()`, decrypts with `decrypt_str()`, and
+  restores the original `serde_json::Value`.
+
+### Affected message types
+
+| Variant | Encrypted fields |
+| :--- | :--- |
+| `CheckVersions` | `assignments[].detect_version.config`, `assignments[].fetch_releases.config` |
+| `ExecuteUpdate` | `detect_version_plugin.config`, `execute_update_plugin.config` |
+| `ExecuteBatchHostPackageUpdate` | `plugin_config` |
+| `DiscoverSoftware` | `plugins[].config` |
+
+All other `ControllerMessage` variants pass through unchanged.
+
+### Error handling
+
+Encryption or decryption failures are logged at `warn` level and the config is
+left unchanged (graceful degradation). The agent will receive an encrypted
+string instead of a JSON object and fail the plugin operation, but no crash or
+data loss occurs.
+
+### Backward compatibility
+
+`decrypt_message_configs()` checks each config field: if it is already a
+`Value::Object` (not encrypted), it is returned unchanged. This ensures
+compatibility during rolling upgrades where one controller publishes
+unencrypted messages while another has the new code.
+
+### Prerequisites
+
+Both the publishing controller (or external scheduler) and the consuming
+controller must have initialized the master key via
+`uptrakit_crypto::init_master_key()`. The external scheduler receives the
+master key via `ServiceCredentials` at connection time.
+
 ## Edge cases
 
 - **Stream creation race**: `get_or_create_stream` is idempotent — safe for multiple controllers starting
@@ -246,6 +298,8 @@ NATS_URL=nats://custom-host:4222 cargo test -p uptrakit-web-api --features nats 
   `ServiceCredentials` from reaching NATS. Credentials are delivered exclusively via WebSocket.
 - **`RequestCaRotation`**: Published by the external scheduler to `uptrakit.events.controller`. The
   controller's NATS consumer handles it by triggering `ca_rotation_trigger.notify_one()`.
+- **Plugin config encryption**: NATS-published messages have AES-256-GCM
+  encrypted plugin config fields. See [Plugin Config Protection](#plugin-config-protection).
 
 ## Related documentation
 

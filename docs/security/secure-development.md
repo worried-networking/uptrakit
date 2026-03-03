@@ -61,3 +61,41 @@ See [Coding Standards — Atomic Ordering Requirements](../development/coding-st
 
 Build metadata exposed by `--version` is intentionally non-secret (crate version, enabled build features, target/cfg/profile). Never include
 credentials, tokens, private keys, or runtime secret material in any version/build output.
+
+## Freeze File Guard for Update Execution
+
+Both `uptrakit-agent` and `uptrakit-agent-ssh` check for a freeze file at
+`<state-dir>/update-freeze` before processing `ExecuteUpdate` or
+`ExecuteBatchHostPackageUpdate` messages. When the file exists, the message is
+silently dropped and a `tracing::warn!` is emitted. This is an emergency stop
+mechanism — not a per-command review gate.
+
+Any new `ControllerMessage` variant that triggers command execution on agents
+**must** include the freeze file check in its handler. See:
+
+- `crates/core/agent/src/main.rs` — local agent freeze check
+- `crates/core/agent-ssh/src/main.rs` — SSH agent freeze check
+
+## Security Audit Logging for Privileged Operations
+
+All mutations to command-bearing plugin configs are logged via structured
+`tracing::warn!` events with the `security_audit:` prefix. This creates an
+observable trail for operations that grant effective RCE on managed hosts.
+
+See [Coding Standards — Security Audit Logging](../development/coding-standards.md#security-audit-logging)
+for the implementation pattern and required fields.
+
+## NATS Plugin Config Protection
+
+Plugin configs published to NATS JetStream are encrypted with AES-256-GCM
+using the shared master key before publication. This prevents NATS subscribers
+(including compromised infrastructure) from reading API tokens, registry
+passwords, and other credentials embedded in plugin configurations.
+
+Any new `ControllerMessage` variant that carries plugin config fields with
+credentials **must** be added to the `encrypt_message_configs()` /
+`decrypt_message_configs()` match arms in
+`crates/shared/nats/src/config_protection.rs`.
+
+See [NATS Integration — Plugin Config Protection](../development/nats-integration.md#plugin-config-protection)
+for the full mechanism.

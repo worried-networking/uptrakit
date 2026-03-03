@@ -868,6 +868,10 @@ components:
       name: check_versions
       title: Check Versions Message
       summary: Controller requests version checks for software items
+      description: |
+        Plugin config fields are AES-256-GCM encrypted before NATS publication.
+        Receiving controllers decrypt configs before agent delivery.
+        See docs/development/nats-integration.md#plugin-config-protection.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/checkVersionsPayload"
@@ -884,6 +888,10 @@ components:
       name: execute_update
       title: Execute Update Message
       summary: Controller triggers a software update on the agent (agent-only)
+      description: |
+        Plugin config fields are AES-256-GCM encrypted before NATS publication.
+        Receiving controllers decrypt configs before agent delivery.
+        See docs/development/nats-integration.md#plugin-config-protection.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/executeUpdatePayload"
@@ -1052,6 +1060,10 @@ components:
       name: discover_software
       title: Discover Software Message
       summary: Controller requests software discovery on a host (agent-only)
+      description: |
+        Plugin config fields are AES-256-GCM encrypted before NATS publication.
+        Receiving controllers decrypt configs before agent delivery.
+        See docs/development/nats-integration.md#plugin-config-protection.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/discoverSoftwarePayload"
@@ -1068,6 +1080,10 @@ components:
       name: execute_batch_host_package_update
       title: Execute Batch Host Package Update Message
       summary: Controller sends a batch of host packages to update in a single operation (agent-only)
+      description: |
+        Plugin config fields are AES-256-GCM encrypted before NATS publication.
+        Receiving controllers decrypt configs before agent delivery.
+        See docs/development/nats-integration.md#plugin-config-protection.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/executeBatchHostPackageUpdatePayload"

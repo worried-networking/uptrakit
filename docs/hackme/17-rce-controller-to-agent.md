@@ -87,6 +87,10 @@ The same attack applies via:
   agent side, independently of and without modifying the controller, while the
   WebSocket connection and all other agent functionality remain active. The freeze
   applies immediately with no restart required.
+- **SSH agent batch update handler.** *(Implemented)* The SSH agent now explicitly
+  handles `ExecuteBatchHostPackageUpdate` messages with the same freeze file check
+  as `ExecuteUpdate`. Previously, batch update messages were silently dropped by the
+  wildcard `_ =>` arm.
 
 ## Residual risk
 

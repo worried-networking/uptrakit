@@ -101,6 +101,11 @@ The `host_machine_id` field in each payload determines which host the operation 
 
 #### `check_versions` payload
 
+> **Security note:** When published to NATS JetStream, plugin config fields in
+> this message are AES-256-GCM encrypted using the shared master key. Receiving
+> controllers decrypt the configs before delivering to agents. See
+> [NATS Integration — Plugin Config Protection](../development/nats-integration.md#plugin-config-protection).
+
 Each `VersionCheckAssignment` carries role-based `PluginAssignment` entries instead of flat plugin fields.
 The `detect_version` and `fetch_releases` fields are optional -- absent when no plugin is configured for
 that role on this host-software pair.
@@ -154,6 +159,11 @@ and is not sent to the agent.
 
 #### `execute_update` payload
 
+> **Security note:** When published to NATS JetStream, plugin config fields in
+> this message are AES-256-GCM encrypted using the shared master key. Receiving
+> controllers decrypt the configs before delivering to agents. See
+> [NATS Integration — Plugin Config Protection](../development/nats-integration.md#plugin-config-protection).
+
 ```json
 {
   "protocol_version": 1,
@@ -193,6 +203,11 @@ and is not sent to the agent.
 | `timeout_seconds` | `u32` | Maximum execution time for the entire update (including hooks). Defaults to 7200 (2 hours) when omitted. |
 
 #### `discover_software` payload
+
+> **Security note:** When published to NATS JetStream, plugin config fields in
+> this message are AES-256-GCM encrypted using the shared master key. Receiving
+> controllers decrypt the configs before delivering to agents. See
+> [NATS Integration — Plugin Config Protection](../development/nats-integration.md#plugin-config-protection).
 
 ```json
 {
@@ -811,6 +826,11 @@ Consumed by controllers to trigger `ca_rotation_trigger.notify_one()`.
 ## Batch host package update messages
 
 ### `execute_batch_host_package_update` (controller -> agent)
+
+> **Security note:** When published to NATS JetStream, plugin config fields in
+> this message are AES-256-GCM encrypted using the shared master key. Receiving
+> controllers decrypt the configs before delivering to agents. See
+> [NATS Integration — Plugin Config Protection](../development/nats-integration.md#plugin-config-protection).
 
 Triggers a batch update for host packages grouped by plugin type. The agent calls
 `plugin.execute_batch_update()` to execute a single bulk command (e.g., `apt-get upgrade`).
