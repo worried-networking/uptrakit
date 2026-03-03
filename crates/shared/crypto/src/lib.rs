@@ -446,7 +446,7 @@ pub fn create_key_verification_token() -> Result<String> {
 /// sentinel. Returns `Err(MasterKeyMismatch)` if decryption succeeds but
 /// the plaintext differs, or if decryption itself fails (wrong key).
 pub fn verify_key_verification_token(stored: &str) -> Result<()> {
-    match decrypt_str_with_aad(stored, KEY_VERIFICATION_AAD) {
+    match decrypt_str(stored, KEY_VERIFICATION_AAD) {
         Ok(plaintext) if plaintext == KEY_VERIFICATION_SENTINEL => Ok(()),
         Ok(_) => bail!(CryptoError::MasterKeyMismatch),
         Err(e) => {
@@ -491,36 +491,10 @@ pub fn create_verification_token_with_key(kek: &Zeroizing<[u8; 32]>) -> Result<S
 
 // ── Public encryption API ────────────────────────────────────────────
 
-/// Encrypt a plaintext string without AAD (produces `ENC:v1:` ciphertext).
+/// Encrypt a plaintext string with caller-supplied AAD.
 ///
-/// Returns `"ENC:v1:<hex(nonce || ciphertext || tag)>"`.
-///
-/// Requires the master key to be initialized via [`init_master_key`]; returns
-/// `Err(CryptoError::NotInitialized)` otherwise.
-///
-/// # Nonce collision safety
-///
-/// AES-256-GCM uses a random 96-bit nonce generated via `rand::rng()`. The
-/// birthday-bound probability of a nonce collision under a single key is
-/// approximately 2^-32 after 2^48 encryptions (per NIST SP 800-38D,
-/// Section 8.3). This is well within safety margins for the application's
-/// use case (database field encryption with infrequent writes). Key rotation
-/// via the `ENC:v1:` version prefix provides a migration path if usage
-/// patterns ever approach this bound.
-pub fn encrypt_str(plaintext: &str) -> Result<String> {
-    encrypt_value(plaintext)
-}
-
-/// Decrypt a stored `ENC:v1:` encrypted string.
-///
-/// Strips the `"ENC:v1:"` prefix, hex-decodes, extracts the nonce, and
-/// decrypts the ciphertext. Requires the master key to be initialized via
-/// [`init_master_key`]; returns `Err(CryptoError::NotInitialized)` otherwise.
-pub fn decrypt_str(stored: &str) -> Result<String> {
-    decrypt_value(stored)
-}
-
-/// Encrypt a plaintext string with caller-supplied AAD (produces `ENC:v2:` ciphertext).
+/// Produces `ENC:v3:` (envelope encryption with DEK) when the data key ring
+/// is initialized, or `ENC:v2:` (KEK-direct) as fallback.
 ///
 /// The `aad` string is mixed into the GCM authentication tag. A ciphertext
 /// encrypted with a given `aad` can only be decrypted with the same `aad`,
@@ -529,44 +503,53 @@ pub fn decrypt_str(stored: &str) -> Result<String> {
 /// Use a unique, stable, descriptive string for `aad`; for example:
 /// `"uptrakit:settings:jwt_signing_key"`.
 ///
-/// Returns `"ENC:v2:<hex(nonce || ciphertext || tag)>"`.
-///
-/// Requires the master key to be initialized via [`init_master_key`]; returns
-/// `Err(CryptoError::NotInitialized)` otherwise.
-pub fn encrypt_str_with_aad(plaintext: &str, aad: &str) -> Result<String> {
-    encrypt_value_v2(plaintext, aad)
+/// In plaintext mode, returns the plaintext unchanged (no encryption).
+pub fn encrypt_str(plaintext: &str, aad: &str) -> Result<String> {
+    if PLAINTEXT_MODE.load(Ordering::Acquire) {
+        return Ok(plaintext.to_string());
+    }
+    if data_key_ring_available() {
+        encrypt_value_v3(plaintext, aad)
+    } else {
+        encrypt_value_v2(plaintext, aad)
+    }
 }
 
-/// Decrypt a stored encrypted string, accepting `ENC:v1:`, `ENC:v2:`, and `ENC:v3:`.
+/// Decrypt a stored encrypted string, accepting `ENC:v3:`, `ENC:v2:`, and
+/// `ENC:v1:` formats.
 ///
 /// - For `ENC:v3:` ciphertexts: uses the DEK identified by the embedded key_id;
 ///   the provided `aad` must match the AAD used during encryption.
 /// - For `ENC:v2:` ciphertexts: the provided `aad` must match the AAD used
 ///   during encryption. Decryption fails if the AAD does not match.
 /// - For `ENC:v1:` ciphertexts: the `aad` argument is ignored and decryption
-///   proceeds with empty AAD (backward compatibility for existing data).
-///
-/// Requires the master key to be initialized via [`init_master_key`]; returns
-/// `Err(CryptoError::NotInitialized)` otherwise (except for `ENC:v3:` which
-/// requires the data key ring instead).
-pub fn decrypt_str_with_aad(stored: &str, aad: &str) -> Result<String> {
+///   proceeds with empty AAD (backward compatibility during migration).
+/// - Plaintext values: returned as-is when plaintext mode is enabled or when
+///   the value has no `ENC:` prefix.
+pub fn decrypt_str(stored: &str, aad: &str) -> Result<String> {
     if stored.starts_with(ENC_V3_PREFIX) {
         decrypt_value_v3(stored, aad)
     } else if stored.starts_with(ENC_V2_PREFIX) {
         decrypt_value_v2(stored, aad)
-    } else {
+    } else if stored.starts_with(ENC_V1_PREFIX) {
         // Backward compat: ENC:v1: ciphertexts were produced with empty AAD.
-        decrypt_value(stored)
+        // Needed during v1→v3 migration.
+        decrypt_value_v1_legacy(stored)
+    } else if is_plaintext_mode() || !is_encrypted(stored) {
+        Ok(stored.to_string())
+    } else {
+        bail!(CryptoError::Decryption("unrecognised prefix".into()))
     }
 }
 
-// ── Internal v1 implementation (empty AAD) ──────────────────────────
+// ── Internal v1 legacy implementation (empty AAD, read-only) ─────────
+//
+// The v1 encrypt function is only used in tests. The v1 decrypt function is
+// needed by the migration path (decrypt_str handles v1 → delegate here) and
+// by the `verify_key_verification_token` backward-compat branch.
 
-fn encrypt_value(plaintext: &str) -> Result<String> {
-    if PLAINTEXT_MODE.load(Ordering::Acquire) {
-        return Ok(plaintext.to_string());
-    }
-
+#[cfg(test)]
+fn encrypt_value_v1(plaintext: &str) -> Result<String> {
     let key_bytes = MASTER_KEY
         .get()
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
@@ -575,18 +558,15 @@ fn encrypt_value(plaintext: &str) -> Result<String> {
         .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
     let key = LessSafeKey::new(unbound);
 
-    // Generate random 12-byte nonce
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
 
-    // Encrypt in-place: plaintext bytes + space for tag
     let mut in_out = plaintext.as_bytes().to_vec();
     let tag = key
         .seal_in_place_separate_tag(nonce, Aad::empty(), &mut in_out)
         .map_err(|e| report!(CryptoError::Encryption(e.to_string())))?;
 
-    // Build output: nonce || ciphertext || tag
     let mut output = Vec::with_capacity(12 + in_out.len() + tag.as_ref().len());
     output.extend_from_slice(&nonce_bytes);
     output.extend_from_slice(&in_out);
@@ -598,7 +578,7 @@ fn encrypt_value(plaintext: &str) -> Result<String> {
     ))
 }
 
-fn decrypt_value(stored: &str) -> Result<String> {
+fn decrypt_value_v1_legacy(stored: &str) -> Result<String> {
     let key_bytes = MASTER_KEY
         .get()
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
@@ -801,20 +781,19 @@ fn decrypt_value_v3(stored: &str, aad: &str) -> Result<String> {
 /// The pre-computed database representation is stored alongside the plaintext
 /// so that `From<EncryptedString> for sea_orm::Value` is infallible.
 ///
-/// Construction **requires** the master key to be initialized via
-/// [`init_master_key`]. If the key is absent, [`EncryptedString::new`] returns
-/// `Err(CryptoError::NotInitialized)`. There is no plaintext fallback — a
-/// missing key is always treated as a hard error to prevent silent secret
-/// exposure in misconfigured deployments.
+/// Construction **requires** the master key (and ideally the data key ring)
+/// to be initialized. If neither is available, [`EncryptedString::new`]
+/// returns `Err(CryptoError::NotInitialized)`. There is no plaintext
+/// fallback — a missing key is always treated as a hard error to prevent
+/// silent secret exposure in misconfigured deployments.
 ///
 /// ## Ciphertext format
 ///
-/// - [`EncryptedString::new`] produces `ENC:v1:` (empty AAD) for backward
-///   compatibility with existing data.
-/// - [`EncryptedString::new_with_aad`] produces context-bound `ENC:v2:`.
-/// - Both formats are transparently handled on the read path by the
-///   `TryGetable` implementation, which looks up the column AAD from the
-///   global [`register_column_aad`] registry for `ENC:v2:` decryption.
+/// - [`EncryptedString::new`] produces `ENC:v3:` (envelope encryption with
+///   DEK + caller-supplied AAD) when the data key ring is initialized, or
+///   `ENC:v2:` (KEK-direct with AAD) as fallback.
+/// - All three formats (`ENC:v1:`, `ENC:v2:`, `ENC:v3:`) are transparently
+///   handled on the read path by the `TryGetable` implementation.
 pub struct EncryptedString {
     /// Plaintext value (for `expose_secret`).
     plaintext: SecretString,
@@ -840,18 +819,22 @@ impl PartialEq for EncryptedString {
 }
 
 impl EncryptedString {
-    /// Create a new `EncryptedString` from a plaintext value.
+    /// Create a new `EncryptedString` from a plaintext value with
+    /// context-bound AAD.
     ///
-    /// Encrypts the value immediately using the initialized master key.
+    /// Produces `ENC:v3:` ciphertext (envelope encryption with DEK) when the
+    /// data key ring is initialized, or `ENC:v2:` as fallback (KEK-direct).
+    ///
+    /// The `aad` string is mixed into the GCM authentication tag, binding
+    /// the ciphertext to a specific column/purpose.  Use the
+    /// `"uptrakit:<table>:<column>"` convention.
     ///
     /// # Errors
     ///
     /// Returns `Err(CryptoError::NotInitialized)` if the master key has not
-    /// been initialized via [`init_master_key`]. Returns `Err` on any other
-    /// encryption failure. There is no plaintext fallback — a missing key is
-    /// always a hard error.
-    pub fn new(plaintext: String) -> Result<Self> {
-        let db_value = encrypt_value(&plaintext)?;
+    /// been initialized, or `Err` on any other encryption failure.
+    pub fn new(plaintext: String, aad: &str) -> Result<Self> {
+        let db_value = encrypt_str(&plaintext, aad)?;
         Ok(Self {
             plaintext: SecretString::new(plaintext),
             db_value,
@@ -875,38 +858,12 @@ impl EncryptedString {
         self.plaintext.expose_secret()
     }
 
-    /// Create a new `EncryptedString` from a plaintext value with
-    /// context-bound AAD.
+    /// Returns `true` if the stored DB value is not v3 format.
     ///
-    /// Produces `ENC:v3:` ciphertext (envelope encryption with DEK) when the
-    /// data key ring is initialized, or `ENC:v2:` as fallback (KEK-direct).
-    ///
-    /// The `aad` string is mixed into the GCM authentication tag, binding
-    /// the ciphertext to a specific column/purpose.  Use the
-    /// `"uptrakit:<table>:<column>"` convention.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err(CryptoError::NotInitialized)` if the master key has not
-    /// been initialized, or `Err` on any other encryption failure.
-    pub fn new_with_aad(plaintext: String, aad: &str) -> Result<Self> {
-        let db_value = if data_key_ring_available() {
-            encrypt_value_v3(&plaintext, aad)?
-        } else {
-            encrypt_value_v2(&plaintext, aad)?
-        };
-        Ok(Self {
-            plaintext: SecretString::new(plaintext),
-            db_value,
-        })
-    }
-
-    /// Returns `true` if the stored DB representation uses `ENC:v1:` format.
-    ///
-    /// Used by the re-encryption routine to identify v1 values that should be
-    /// upgraded to context-bound `ENC:v2:` format.
-    pub fn is_v1(&self) -> bool {
-        self.db_value.starts_with(ENC_V1_PREFIX)
+    /// Used by the re-encryption routine to identify v1/v2/plaintext values
+    /// that should be upgraded to `ENC:v3:` format.
+    pub fn needs_v3_upgrade(&self) -> bool {
+        !self.db_value.starts_with(ENC_V3_PREFIX)
     }
 
     /// Construct an `EncryptedString` whose database representation is the
@@ -962,7 +919,7 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
                     Ok(EncryptedString::from_db(plaintext, s))
                 } else if s.starts_with(ENC_V1_PREFIX) {
                     let plaintext =
-                        decrypt_value(&s).map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
+                        decrypt_value_v1_legacy(&s).map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
                     Ok(EncryptedString::from_db(plaintext, s))
                 } else if s.starts_with(ENC_V2_PREFIX) {
                     // ValueType has no column name — use empty AAD as fallback.
@@ -1042,7 +999,7 @@ impl sea_orm::TryGetable for EncryptedString {
             })?;
             Ok(EncryptedString::from_db(plaintext, s))
         } else if s.starts_with(ENC_V1_PREFIX) {
-            let plaintext = decrypt_value(&s).map_err(|e| {
+            let plaintext = decrypt_value_v1_legacy(&s).map_err(|e| {
                 sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
                     "EncryptedString decryption failed: {e}"
                 )))
@@ -1074,7 +1031,7 @@ mod tests {
     }
 
     #[test]
-    fn test_round_trip() {
+    fn test_v1_round_trip() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
@@ -1084,20 +1041,21 @@ mod tests {
             "\u{1f980} Rust",
             "a".repeat(10_000).as_str(),
         ] {
-            let encrypted = encrypt_value(plaintext).expect("encryption should succeed");
+            let encrypted = encrypt_value_v1(plaintext).expect("encryption should succeed");
             assert!(encrypted.starts_with(ENC_V1_PREFIX));
-            let decrypted = decrypt_value(&encrypted).expect("decryption should succeed");
+            let decrypted =
+                decrypt_value_v1_legacy(&encrypted).expect("decryption should succeed");
             assert_eq!(decrypted, plaintext);
         }
     }
 
     #[test]
-    fn test_nonce_uniqueness() {
+    fn test_v1_nonce_uniqueness() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let enc1 = encrypt_value("same input").expect("encryption should succeed");
-        let enc2 = encrypt_value("same input").expect("encryption should succeed");
+        let enc1 = encrypt_value_v1("same input").expect("encryption should succeed");
+        let enc2 = encrypt_value_v1("same input").expect("encryption should succeed");
         assert_ne!(
             enc1, enc2,
             "two encryptions of the same value should produce different ciphertext"
@@ -1105,11 +1063,11 @@ mod tests {
 
         // Both should still decrypt to the same value
         assert_eq!(
-            decrypt_value(&enc1).expect("decryption should succeed"),
+            decrypt_value_v1_legacy(&enc1).expect("decryption should succeed"),
             "same input"
         );
         assert_eq!(
-            decrypt_value(&enc2).expect("decryption should succeed"),
+            decrypt_value_v1_legacy(&enc2).expect("decryption should succeed"),
             "same input"
         );
     }
@@ -1129,7 +1087,7 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let s = EncryptedString::new("my secret".to_string()).expect("test key set");
+        let s = EncryptedString::new("my secret".to_string(), "test-aad").expect("test key set");
         let debug = format!("{s:?}");
         let display = format!("{s}");
         assert!(
@@ -1145,11 +1103,11 @@ mod tests {
     }
 
     #[test]
-    fn test_tampered_ciphertext_fails() {
+    fn test_v1_tampered_ciphertext_fails() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let encrypted = encrypt_value("sensitive data").expect("encryption should succeed");
+        let encrypted = encrypt_value_v1("sensitive data").expect("encryption should succeed");
         // Tamper with one byte in the hex payload
         let hex_part = encrypted
             .strip_prefix(ENC_V1_PREFIX)
@@ -1159,7 +1117,7 @@ mod tests {
             *byte ^= 0xFF;
         }
         let tampered = format!("{ENC_V1_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
-        assert!(decrypt_value(&tampered).is_err());
+        assert!(decrypt_value_v1_legacy(&tampered).is_err());
     }
 
     #[cfg(feature = "sea-orm")]
@@ -1168,7 +1126,10 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let original = EncryptedString::new("database secret".to_string()).expect("test key set");
+        // ValueType::try_from uses best-effort empty AAD for v3 ciphertexts,
+        // so encrypt with empty AAD to make the round-trip work.
+        let original =
+            EncryptedString::new("database secret".to_string(), "").expect("test key set");
         let value: sea_orm::Value = original.clone().into();
 
         // The Value should contain an encrypted string
@@ -1189,7 +1150,7 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let es = EncryptedString::new("secret".to_string()).expect("test key set");
+        let es = EncryptedString::new("secret".to_string(), "test-aad").expect("test key set");
         assert!(
             is_encrypted(&es.db_value),
             "db_value should be encrypted when master key is available"
@@ -1203,7 +1164,7 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let es = EncryptedString::new("precomputed".to_string()).expect("test key set");
+        let es = EncryptedString::new("precomputed".to_string(), "test-aad").expect("test key set");
         let precomputed = es.db_value.clone();
         let value: sea_orm::Value = es.into();
 
@@ -1253,7 +1214,7 @@ mod tests {
 
         // Simulate a legacy ENC:v1: token (from an installation before this change).
         // ENC:v1: tokens are decrypted with empty AAD — the sentinel must match.
-        let legacy_token = encrypt_value(KEY_VERIFICATION_SENTINEL)
+        let legacy_token = encrypt_value_v1(KEY_VERIFICATION_SENTINEL)
             .expect("should encrypt sentinel with v1");
         assert!(legacy_token.starts_with(ENC_V1_PREFIX));
         assert!(
@@ -1302,7 +1263,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decrypt_ciphertext_too_short() {
+    fn test_decrypt_v1_ciphertext_too_short() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
@@ -1310,7 +1271,7 @@ mod tests {
         let short_bytes = [0u8; 10];
         let short_hex = uptrakit_shared_types::hex::encode(short_bytes);
         let stored = format!("{ENC_V1_PREFIX}{short_hex}");
-        let result = decrypt_value(&stored);
+        let result = decrypt_value_v1_legacy(&stored);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err().current_context(),
@@ -1319,12 +1280,12 @@ mod tests {
     }
 
     #[test]
-    fn test_decrypt_missing_prefix() {
+    fn test_decrypt_v1_missing_prefix() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
         // Attempt to decrypt a string without the ENC:v1: prefix.
-        let result = decrypt_value("not-encrypted-data");
+        let result = decrypt_value_v1_legacy("not-encrypted-data");
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err().current_context(),
@@ -1333,11 +1294,11 @@ mod tests {
     }
 
     #[test]
-    fn test_decrypt_invalid_hex() {
+    fn test_decrypt_v1_invalid_hex() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let result = decrypt_value(&format!("{ENC_V1_PREFIX}not-valid-hex!@#$"));
+        let result = decrypt_value_v1_legacy(&format!("{ENC_V1_PREFIX}not-valid-hex!@#$"));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err().current_context(),
@@ -1366,7 +1327,7 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let es1 = EncryptedString::new("test value".to_string()).expect("should encrypt");
+        let es1 = EncryptedString::new("test value".to_string(), "test-aad").expect("should encrypt");
         let es2 = es1.clone();
 
         // Clone should produce equal values (PartialEq compares plaintext only).
@@ -1379,8 +1340,10 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let es1 = EncryptedString::new("value_a".to_string()).expect("should encrypt");
-        let es2 = EncryptedString::new("value_b".to_string()).expect("should encrypt");
+        let es1 =
+            EncryptedString::new("value_a".to_string(), "test-aad").expect("should encrypt");
+        let es2 =
+            EncryptedString::new("value_b".to_string(), "test-aad").expect("should encrypt");
 
         assert_ne!(es1, es2);
     }
@@ -1393,17 +1356,17 @@ mod tests {
         let was_plaintext = PLAINTEXT_MODE.load(Ordering::Acquire);
         PLAINTEXT_MODE.store(true, Ordering::Release);
 
-        let result = encrypt_value("dev secret");
+        let result = encrypt_str("dev secret", "test-aad");
         PLAINTEXT_MODE.store(was_plaintext, Ordering::Release);
 
         let encrypted = result.expect("plaintext mode encrypt should succeed");
         assert_eq!(
             encrypted, "dev secret",
-            "in plaintext mode, encrypt_value should return the value unchanged"
+            "in plaintext mode, encrypt_str should return the value unchanged"
         );
         assert!(
             !is_encrypted(&encrypted),
-            "plaintext mode output must not carry the ENC:v1: prefix"
+            "plaintext mode output must not carry an ENC: prefix"
         );
     }
 
@@ -1414,7 +1377,7 @@ mod tests {
         let was_plaintext = PLAINTEXT_MODE.load(Ordering::Acquire);
         PLAINTEXT_MODE.store(true, Ordering::Release);
 
-        let es = EncryptedString::new("plain dev value".to_string());
+        let es = EncryptedString::new("plain dev value".to_string(), "test-aad");
         PLAINTEXT_MODE.store(was_plaintext, Ordering::Release);
 
         let es = es.expect("EncryptedString::new should succeed in plaintext mode");
@@ -1425,36 +1388,32 @@ mod tests {
         );
     }
 
-    // ── ENC:v2: (AAD) tests ─────────────────────────────────────────
+    // ── encrypt_str / decrypt_str (AAD-based) tests ──────────────────
 
     #[test]
-    fn test_v2_round_trip() {
+    fn test_encrypt_decrypt_str_round_trip() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
         let aad = "uptrakit:test:context";
         for plaintext in ["hello", "", "multi\nline\nvalue", "a".repeat(1_000).as_str()] {
             let encrypted =
-                encrypt_str_with_aad(plaintext, aad).expect("v2 encryption should succeed");
-            assert!(
-                encrypted.starts_with(ENC_V2_PREFIX),
-                "v2 ciphertext must carry ENC:v2: prefix"
-            );
+                encrypt_str(plaintext, aad).expect("encryption should succeed");
             assert!(is_encrypted(&encrypted));
             let decrypted =
-                decrypt_str_with_aad(&encrypted, aad).expect("v2 decryption should succeed");
+                decrypt_str(&encrypted, aad).expect("decryption should succeed");
             assert_eq!(decrypted, plaintext);
         }
     }
 
     #[test]
-    fn test_v2_wrong_aad_fails() {
+    fn test_encrypt_decrypt_str_wrong_aad_fails() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
         let encrypted =
-            encrypt_str_with_aad("secret", "correct-aad").expect("v2 encryption should succeed");
-        let result = decrypt_str_with_aad(&encrypted, "wrong-aad");
+            encrypt_str("secret", "correct-aad").expect("encryption should succeed");
+        let result = decrypt_str(&encrypted, "wrong-aad");
         assert!(
             result.is_err(),
             "decrypting with wrong AAD must fail"
@@ -1466,83 +1425,63 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_nonce_uniqueness() {
+    fn test_encrypt_str_nonce_uniqueness() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
         let aad = "uptrakit:test:nonce";
-        let enc1 = encrypt_str_with_aad("same", aad).expect("should encrypt");
-        let enc2 = encrypt_str_with_aad("same", aad).expect("should encrypt");
-        assert_ne!(enc1, enc2, "v2 encryptions of the same value must differ (random nonces)");
+        let enc1 = encrypt_str("same", aad).expect("should encrypt");
+        let enc2 = encrypt_str("same", aad).expect("should encrypt");
+        assert_ne!(enc1, enc2, "encryptions of the same value must differ (random nonces)");
     }
 
     #[test]
-    fn test_v2_tampered_ciphertext_fails() {
+    fn test_decrypt_str_accepts_v1_fallback() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let aad = "uptrakit:test:tamper";
-        let encrypted = encrypt_str_with_aad("data", aad).expect("v2 encryption should succeed");
-        let hex_part = encrypted.strip_prefix(ENC_V2_PREFIX).expect("has v2 prefix");
-        let mut raw = uptrakit_shared_types::hex::decode(hex_part).expect("valid hex");
-        if let Some(byte) = raw.last_mut() {
-            *byte ^= 0xFF;
-        }
-        let tampered = format!("{ENC_V2_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
-        assert!(decrypt_str_with_aad(&tampered, aad).is_err());
-    }
-
-    #[test]
-    fn test_decrypt_with_aad_accepts_v1_fallback() {
-        let _lock = TEST_LOCK.lock().unwrap();
-        ensure_test_key();
-
-        // An ENC:v1: ciphertext should be accepted by decrypt_str_with_aad
+        // An ENC:v1: ciphertext should be accepted by decrypt_str
         // regardless of the provided aad (backward compat).
-        let v1_encrypted = encrypt_str("legacy_value").expect("v1 encryption should succeed");
+        let v1_encrypted = encrypt_value_v1("legacy_value").expect("v1 encryption should succeed");
         assert!(v1_encrypted.starts_with(ENC_V1_PREFIX));
-        let result = decrypt_str_with_aad(&v1_encrypted, "any-aad-is-ignored-for-v1");
+        let result = decrypt_str(&v1_encrypted, "any-aad-is-ignored-for-v1");
         assert!(
             result.is_ok(),
-            "decrypt_str_with_aad must accept ENC:v1: tokens for backward compatibility"
+            "decrypt_str must accept ENC:v1: tokens for backward compatibility"
         );
         assert_eq!(result.unwrap(), "legacy_value");
     }
 
     #[test]
-    fn test_new_with_aad_round_trip() {
+    fn test_encrypted_string_new_round_trip() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
         let aad = "uptrakit:test_table:test_column";
-        let es = EncryptedString::new_with_aad("aad secret".to_string(), aad)
-            .expect("new_with_aad should succeed");
+        let es = EncryptedString::new("aad secret".to_string(), aad)
+            .expect("new should succeed");
         // Produces v3 when ring is available, v2 otherwise
         assert!(
             es.db_value.starts_with(ENC_V2_PREFIX) || es.db_value.starts_with(ENC_V3_PREFIX),
-            "new_with_aad must produce ENC:v2: or ENC:v3: ciphertext"
+            "new must produce ENC:v2: or ENC:v3: ciphertext"
         );
         assert_eq!(es.expose_secret(), "aad secret");
 
-        // Must decrypt with the same AAD (decrypt_str_with_aad handles both v2 and v3)
+        // Must decrypt with the same AAD (decrypt_str handles both v2 and v3)
         let decrypted =
-            decrypt_str_with_aad(&es.db_value, aad).expect("decryption with correct AAD");
+            decrypt_str(&es.db_value, aad).expect("decryption with correct AAD");
         assert_eq!(decrypted, "aad secret");
     }
 
     #[test]
-    fn test_new_with_aad_wrong_aad_fails() {
+    fn test_encrypted_string_new_wrong_aad_fails() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let es = EncryptedString::new_with_aad("secret".to_string(), "correct:aad")
+        let es = EncryptedString::new("secret".to_string(), "correct:aad")
             .expect("should encrypt");
         // Try decrypting with wrong AAD — should fail regardless of v2/v3 format
-        let result = if es.db_value.starts_with(ENC_V3_PREFIX) {
-            decrypt_value_v3(&es.db_value, "wrong:aad")
-        } else {
-            decrypt_str_with_aad(&es.db_value, "wrong:aad")
-        };
+        let result = decrypt_str(&es.db_value, "wrong:aad");
         assert!(
             result.is_err(),
             "decrypting ciphertext with wrong AAD must fail"
@@ -1550,30 +1489,54 @@ mod tests {
     }
 
     #[test]
-    fn test_is_v1_returns_true_for_v1() {
+    fn test_needs_v3_upgrade_for_v1() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let es = EncryptedString::new("v1 value".to_string()).expect("should encrypt");
-        assert!(es.is_v1(), "EncryptedString::new produces v1, is_v1 must be true");
+        // Create a v1 ciphertext and wrap it in EncryptedString via plaintext_for_test
+        // (which stores the value directly as db_value — works for any format).
+        let v1_ciphertext = encrypt_value_v1("v1 value").expect("should encrypt");
+        let es = EncryptedString::plaintext_for_test(v1_ciphertext);
+        assert!(
+            es.needs_v3_upgrade(),
+            "v1 ciphertext needs v3 upgrade"
+        );
     }
 
     #[test]
-    fn test_is_v1_returns_false_for_v2() {
+    fn test_needs_v3_upgrade_for_v2() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let es = EncryptedString::new_with_aad("v2 value".to_string(), "test:aad")
-            .expect("should encrypt");
-        assert!(!es.is_v1(), "new_with_aad produces v2, is_v1 must be false");
+        let v2_ciphertext =
+            encrypt_value_v2("v2 value", "test:aad").expect("should encrypt");
+        let es = EncryptedString::plaintext_for_test(v2_ciphertext);
+        assert!(
+            es.needs_v3_upgrade(),
+            "v2 ciphertext needs v3 upgrade"
+        );
     }
 
     #[test]
-    fn test_is_v1_returns_false_for_plaintext() {
+    fn test_needs_v3_upgrade_false_for_v3() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_ring();
+
+        let v3_ciphertext =
+            encrypt_value_v3("v3 value", "test:aad").expect("should encrypt");
+        let es = EncryptedString::plaintext_for_test(v3_ciphertext);
+        assert!(
+            !es.needs_v3_upgrade(),
+            "v3 ciphertext does not need upgrade"
+        );
+    }
+
+    #[test]
+    fn test_needs_v3_upgrade_true_for_plaintext() {
         let es = EncryptedString::plaintext_for_test("plain".to_string());
         assert!(
-            !es.is_v1(),
-            "plaintext db_value does not start with ENC:v1:, is_v1 must be false"
+            es.needs_v3_upgrade(),
+            "plaintext db_value needs v3 upgrade (encryption)"
         );
     }
 
@@ -1583,17 +1546,17 @@ mod tests {
         ensure_test_key();
 
         // Encrypt with one AAD context (simulating column A)
-        let es = EncryptedString::new_with_aad(
+        let es = EncryptedString::new(
             "sensitive".to_string(),
             "uptrakit:table_a:column_a",
         )
         .expect("should encrypt");
 
         // Attempt to decrypt with a different AAD (simulating column B) — must fail
-        let result = decrypt_str_with_aad(&es.db_value, "uptrakit:table_b:column_b");
+        let result = decrypt_str(&es.db_value, "uptrakit:table_b:column_b");
         assert!(
             result.is_err(),
-            "v2 ciphertext decrypted with wrong AAD (different column) must fail"
+            "ciphertext decrypted with wrong AAD (different column) must fail"
         );
     }
 
@@ -1615,13 +1578,13 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_plaintext_mode_returns_plaintext() {
+    fn test_encrypt_str_plaintext_mode_returns_plaintext() {
         let _lock = TEST_LOCK.lock().unwrap();
 
         let was_plaintext = PLAINTEXT_MODE.load(Ordering::Acquire);
         PLAINTEXT_MODE.store(true, Ordering::Release);
 
-        let result = encrypt_str_with_aad("dev secret", "some-aad");
+        let result = encrypt_str("dev secret", "some-aad");
         PLAINTEXT_MODE.store(was_plaintext, Ordering::Release);
 
         let value = result.expect("plaintext mode should succeed");
@@ -1861,15 +1824,15 @@ mod tests {
     }
 
     #[test]
-    fn test_new_with_aad_produces_v3_when_ring_available() {
+    fn test_new_produces_v3_when_ring_available() {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_ring();
 
-        let es = EncryptedString::new_with_aad("v3 secret".to_string(), "test:aad")
+        let es = EncryptedString::new("v3 secret".to_string(), "test:aad")
             .expect("should encrypt");
         assert!(
             es.db_value.starts_with(ENC_V3_PREFIX),
-            "new_with_aad must produce ENC:v3: when ring is available"
+            "new must produce ENC:v3: when ring is available"
         );
         assert_eq!(es.expose_secret(), "v3 secret");
     }

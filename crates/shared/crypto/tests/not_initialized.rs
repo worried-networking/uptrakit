@@ -9,7 +9,7 @@ use uptrakit_crypto::{CryptoError, EncryptedString, encrypt_str};
 
 #[test]
 fn encrypted_string_new_without_key_returns_not_initialized() {
-    let result = EncryptedString::new("secret".to_string());
+    let result = EncryptedString::new("secret".to_string(), "test-aad");
     assert!(result.is_err(), "expected Err when master key is absent");
     assert!(
         matches!(
@@ -22,7 +22,7 @@ fn encrypted_string_new_without_key_returns_not_initialized() {
 
 #[test]
 fn encrypt_str_without_key_returns_not_initialized() {
-    let result = encrypt_str("secret");
+    let result = encrypt_str("secret", "test-aad");
     assert!(result.is_err(), "expected Err when master key is absent");
     assert!(
         matches!(
