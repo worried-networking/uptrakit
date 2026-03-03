@@ -255,9 +255,40 @@ API must use the **sea_query typed builder API** instead of `execute_unprepared(
 - sea_query builders adapt automatically to the active database dialect (SQLite / PostgreSQL /
   MySQL).
 
+### UUID values must be bound as BLOB — never interpolated as strings
+
+This is the single most important rule for SQLite migrations.
+
+SeaORM/sqlx reads `uuid`-typed columns via `sqlite3_column_blob()`. When a UUID is stored as a
+36-character TEXT string (e.g. the result of `format!("'{uuid}'")`), the read fails at runtime
+with `ParseByteLength { len: 36 }`.
+
+**Always** pass UUID values through `uuid.into()` inside `values_panic([…])`. sea-query then
+binds it as `Value::Uuid` which SQLite stores as a 16-byte BLOB — the same encoding the entity
+reader expects.
+
+```rust
+// ✓ Correct — Uuid bound as 16-byte BLOB
+manager.exec_stmt(
+    Query::insert()
+        .into_table(Alias::new("permissions"))
+        .columns([Alias::new("id"), Alias::new("name")])
+        .values_panic([Uuid::now_v7().into(), "my_perm".into()])
+        .to_owned(),
+)
+.await?;
+
+// ✗ WRONG — UUID embedded as TEXT literal; breaks SeaORM reads
+db.execute_unprepared(&format!(
+    "INSERT INTO permissions (id, name) VALUES ('{uuid}', 'my_perm')"
+))
+.await?;
+```
+
 ### INSERT via sea_query
 
-Use `DeriveIden` enums to reference tables and columns by name, then `Query::insert()`:
+In a `MigrationTrait` impl use `manager.exec_stmt(stmt)`, which takes ownership of the built
+statement:
 
 ```rust
 use sea_orm_migration::prelude::*;
@@ -270,122 +301,243 @@ enum MyTable {
     CreatedAt,
 }
 
-let insert = Query::insert()
-    .into_table(MyTable::Table)
-    .columns([MyTable::Id, MyTable::Name, MyTable::CreatedAt])
-    .values_panic([
-        Uuid::now_v7().into(),
-        "example".into(),
-        now.into(),
-    ])
-    .to_owned();
-
-manager.get_connection().execute(&insert).await?;
+manager
+    .exec_stmt(
+        Query::insert()
+            .into_table(MyTable::Table)
+            .columns([MyTable::Id, MyTable::Name, MyTable::CreatedAt])
+            .values_panic([Uuid::now_v7().into(), "example".into(), now.into()])
+            .to_owned(),
+    )
+    .await?;
 ```
 
-> **Note:** `execute()` accepts `&impl StatementBuilder` (i.e., pass `&insert`, not a
-> pre-built `Statement`). Do not call `.build(...)` yourself.
+In tests (where there is no `manager`), use `db.execute(&stmt)` on a
+`DatabaseConnection`:
+
+```rust
+use sea_orm::ConnectionTrait as _;
+
+db.execute(
+    &Query::insert()
+        .into_table(Alias::new("my_table"))
+        .columns([Alias::new("id"), Alias::new("name")])
+        .values_panic([Uuid::now_v7().into(), "example".into()])
+        .to_owned(),
+)
+.await?;
+```
+
+> `SchemaManager::exec_stmt` takes ownership (`stmt: impl StatementBuilder`).
+> `ConnectionTrait::execute` takes a reference (`stmt: &impl StatementBuilder`).
+> Never call `.build(DbBackend::…)` yourself; the framework picks the backend.
+
+### INSERT with ON CONFLICT DO NOTHING (idempotent seeds)
+
+For seed data that must be safe to re-run, add `on_conflict`:
+
+```rust
+manager
+    .exec_stmt(
+        Query::insert()
+            .into_table(Alias::new("permissions"))
+            .columns([Alias::new("id"), Alias::new("name"), Alias::new("created_at")])
+            .values_panic([Uuid::now_v7().into(), "my_perm".into(), now.into()])
+            .on_conflict(
+                OnConflict::column(Alias::new("name")).do_nothing().to_owned(),
+            )
+            .to_owned(),
+    )
+    .await?;
+```
+
+For a composite-PK join table use `OnConflict::columns([…])`:
+
+```rust
+OnConflict::columns([Alias::new("role_id"), Alias::new("permission_id")])
+    .do_nothing()
+    .to_owned()
+```
 
 ### INSERT … SELECT
 
-To copy rows between tables (e.g. moving keys out of a per-tenant table into a global one):
+To populate a table from another (e.g. granting a permission to a role by name without
+hardcoding UUIDs):
 
 ```rust
-let select = Query::select()
-    .from(SourceTable::Table)
-    .columns([SourceTable::Key, SourceTable::Value, SourceTable::UpdatedAt])
-    .and_where(Expr::col(SourceTable::TenantId).in_subquery(
-        Query::select()
-            .from(Tenants::Table)
-            .column(Tenants::Id)
-            .and_where(Expr::col(Tenants::IsDefault).eq(1))
-            .to_owned(),
-    ))
-    .to_owned();
-
+// `select_from` returns Result<&mut Self, String>; map the error, then call
+// .to_owned() to get an owned InsertStatement for exec_stmt.
 let insert = Query::insert()
-    .into_table(DestTable::Table)
-    .columns([DestTable::Key, DestTable::Value, DestTable::UpdatedAt])
-    .select_from(select)
+    .into_table(Alias::new("role_permissions"))
+    .columns([Alias::new("role_id"), Alias::new("permission_id")])
+    .select_from(
+        Query::select()
+            .from_as(Alias::new("roles"), Alias::new("r"))
+            .from_as(Alias::new("permissions"), Alias::new("p"))
+            .column((Alias::new("r"), Alias::new("id")))
+            .column((Alias::new("p"), Alias::new("id")))
+            .and_where(Expr::col((Alias::new("r"), Alias::new("name"))).eq("owner"))
+            .and_where(Expr::col((Alias::new("p"), Alias::new("name"))).eq("my_perm"))
+            .to_owned(),
+    )
     .map_err(|e| DbErr::Migration(e.to_string()))?
+    .on_conflict(
+        OnConflict::columns([Alias::new("role_id"), Alias::new("permission_id")])
+            .do_nothing()
+            .to_owned(),
+    )
     .to_owned();
 
-manager.get_connection().execute(&insert).await?;
+manager.exec_stmt(insert).await?;
+```
+
+For repeated grants (e.g. multiple roles or multiple permissions), extract a helper:
+
+```rust
+async fn grant_permission(
+    manager: &SchemaManager<'_>,
+    role_name: &str,
+    perm_name: &str,
+) -> Result<(), DbErr> {
+    let insert = Query::insert()
+        .into_table(Alias::new("role_permissions"))
+        // … same as above …
+        .to_owned();
+    manager.exec_stmt(insert).await
+}
+```
+
+### UPDATE via sea_query
+
+```rust
+manager
+    .exec_stmt(
+        Query::update()
+            .table(Alias::new("scheduled_tasks"))
+            .value(Alias::new("enabled"), false)
+            .and_where(Expr::col(Alias::new("task_type")).eq("legacy_task"))
+            .to_owned(),
+    )
+    .await?;
+```
+
+To set a binary (BLOB) value — needed when migrating UUID storage format:
+
+```rust
+txn.execute(
+    &Query::update()
+        .table(Alias::new("permissions"))
+        .value(Alias::new("id"), Value::Bytes(Some(bytes)))
+        .and_where(Expr::col(Alias::new("name")).eq("my_perm"))
+        .to_owned(),
+)
+.await?;
 ```
 
 ### DELETE via sea_query
 
 ```rust
-let delete = Query::delete()
-    .from_table(ScheduledTasks::Table)
-    .and_where(Expr::col(ScheduledTasks::TaskType).eq("event_cleanup"))
-    .to_owned();
-
-manager.get_connection().execute(&delete).await?;
+manager
+    .exec_stmt(
+        Query::delete()
+            .from_table(Alias::new("scheduled_tasks"))
+            .and_where(Expr::col(Alias::new("task_type")).eq("event_cleanup"))
+            .to_owned(),
+    )
+    .await?;
 ```
 
-### Test-only INSERT with arbitrary column values
+To delete by a subquery (e.g. delete role assignments by permission name):
 
-Tests sometimes need to insert rows with values that don't fit the entity's type system (e.g.,
-an unknown enum variant to verify forward-compatibility filtering). Use sea_query with
-`Expr::value()` wrappers:
+```rust
+manager
+    .exec_stmt(
+        Query::delete()
+            .from_table(Alias::new("role_permissions"))
+            .and_where(
+                Expr::col(Alias::new("permission_id")).in_subquery(
+                    Query::select()
+                        .from(Alias::new("permissions"))
+                        .column(Alias::new("id"))
+                        .and_where(Expr::col(Alias::new("name")).eq("my_perm"))
+                        .to_owned(),
+                ),
+            )
+            .to_owned(),
+    )
+    .await?;
+```
+
+### Test-only INSERT with out-of-band values
+
+Tests sometimes need to inject rows that simulate broken or future states (e.g. a TEXT-stored
+UUID to test a repair migration, or an unknown enum variant for forward-compatibility tests).
+Pass the value directly; sea-query will bind it with the Rust type's `Into<Value>` conversion:
+
+```rust
+use sea_orm::ConnectionTrait as _;
+
+// String → Value::String → SQLite stores as TEXT (used to simulate a broken UUID row)
+db.execute(
+    &Query::insert()
+        .into_table(Alias::new("permissions"))
+        .columns([Alias::new("id"), Alias::new("name")])
+        .values_panic(["018f1234-0000-7000-8000-000000000001".to_owned().into(), "broken".into()])
+        .to_owned(),
+)
+.await?;
+```
+
+For an unknown enum string, wrap with `Expr::value(...)`:
 
 ```rust
 use sea_orm::sea_query::{Expr as SqExpr, Query};
 
 let insert = Query::insert()
     .into_table(scheduled_task::Entity)
-    .columns([scheduled_task::Column::Id, scheduled_task::Column::TaskType, /* … */])
+    .columns([scheduled_task::Column::Id, scheduled_task::Column::TaskType])
     .values_panic([
         SqExpr::value(Uuid::now_v7()),
-        SqExpr::value("future_unknown_task_type"),  // not a known enum variant
-        // …
+        SqExpr::value("future_unknown_task_type"),
     ])
     .to_owned();
-
-use sea_orm::ConnectionTrait as _;
 db.execute(&insert).await.expect("insert");
 ```
 
-> `values_panic` expects `IntoIterator<Item = Expr>`, not raw `Value`s.  Always wrap
-> with `SqExpr::value(...)`.
-
 ### DROP TABLE in tests
 
-Use the sea_query builder instead of `execute_unprepared("DROP TABLE …")`:
-
 ```rust
-let drop = Table::drop()
-    .table(Alias::new("my_table"))
-    .to_owned();
+let drop = Table::drop().table(Alias::new("my_table")).to_owned();
 db.execute(&drop).await?;
 ```
 
-### When `execute_unprepared()` is still allowed
+### When `execute_unprepared()` or raw statements are still allowed
 
-Raw SQL via `execute_unprepared()` is accepted **only** for operations that have no sea_query
-equivalent:
+Raw SQL is accepted **only** for constructs that have no sea_query equivalent.  Every such call
+**must** include an inline comment naming the specific limitation.
 
-| Acceptable | Why sea_query cannot express it |
+| Construct | Reason sea_query cannot express it |
 | --- | --- |
 | `CREATE TABLE new AS SELECT * FROM old` | SQLite-specific shorthand; no builder equivalent |
-| `CREATE UNIQUE INDEX … WHERE col IS NULL` | Partial/filtered index; builder lacks `WHERE` clause |
+| `CREATE UNIQUE INDEX … WHERE col IS NULL` | Partial/filtered index; builder has no `WHERE` |
 | `INSERT INTO … SELECT strftime(…)` | `strftime` is a SQLite-specific function |
+| `PRAGMA foreign_keys = OFF / ON` | PRAGMA has no sea_query equivalent |
+| `SELECT typeof(col) FROM …` | `typeof()` is SQLite-specific; use `query_all_raw` / `query_one_raw` |
 
-Every `execute_unprepared()` call **must** include a comment that names the limitation:
+**Inline comment requirement:**
 
 ```rust
-// `CREATE TABLE … AS SELECT *` is a SQLite-specific shorthand that snapshots
-// the live schema at runtime. sea_query has no equivalent builder for this
-// construct; execute_unprepared is the only option here.
-db.execute_unprepared(
-    "CREATE TABLE host_packages_new AS SELECT * FROM host_packages",
-)
+// `typeof()` is a SQLite-specific function with no sea_query equivalent;
+// query_one_raw with a raw Statement is the approved exception for this pattern.
+db.query_one_raw(Statement::from_string(
+    DatabaseBackend::Sqlite,
+    "SELECT typeof(id) FROM permissions WHERE name = 'x'",
+))
 .await?;
 ```
 
-If you find yourself reaching for `execute_unprepared()` for a `DELETE`, `INSERT`, or
-plain `SELECT`, use a sea_query builder instead.
+If you find yourself reaching for `execute_unprepared()` for a plain `DELETE`, `INSERT`,
+`UPDATE`, or `SELECT` that does not fall into the table above, use a sea_query builder instead.
 
 ---
 
@@ -458,13 +610,13 @@ This guarantees that tests run against the exact same schema as production.
 `sea-orm-migration` v2 enables `PRAGMA foreign_keys = ON` after migrating, so tests must
 create parent rows rather than disabling FK checks.
 
-### Never use `PRAGMA foreign_keys = OFF`
+### Never use `PRAGMA foreign_keys = OFF` in tests or normal migrations
 
-Disabling FK enforcement with `execute_unprepared("PRAGMA foreign_keys = OFF")` is
-**forbidden**. Create the required parent rows instead:
+Disabling FK enforcement to avoid inserting parent rows is **forbidden**.
+Create the required parent rows instead:
 
 ```rust
-// ✗ Wrong
+// ✗ Wrong — disabling FKs to work around missing parent data
 db.execute_unprepared("PRAGMA foreign_keys = OFF").await?;
 
 // ✓ Correct — insert the required parent row first
@@ -476,6 +628,31 @@ tenant::ActiveModel {
 .insert(&db)
 .await
 .expect("insert test tenant");
+```
+
+**Approved exception — repair migrations that atomically fix FK-violating data**
+
+A repair migration may temporarily disable FK enforcement when it must update both sides of a
+FK relationship as an atomic unit and the intermediate state is necessarily inconsistent.
+All three conditions must hold:
+
+1. The migration fixes existing broken data (not a normal schema or seed change).
+2. The PRAGMA is set immediately before `begin()`, re-enabled immediately after `commit()`.
+3. An inline comment explains why the intermediate state violates FK constraints.
+
+```rust
+// Both `role_permissions.permission_id → permissions.id` and the reverse
+// parent-key-update check fire during the TEXT→BLOB conversion.  The
+// intermediate state is FK-inconsistent; turning enforcement off for the
+// duration of the transaction is the only safe option.
+//
+// PRAGMA foreign_keys has no sea_query equivalent; execute_unprepared is
+// the approved exception for PRAGMA statements.
+db.execute_unprepared("PRAGMA foreign_keys = OFF").await?;
+let txn = db.begin().await?;
+// … updates …
+txn.commit().await?;
+db.execute_unprepared("PRAGMA foreign_keys = ON").await?;
 ```
 
 ### Avoid the migration-seeded default tenant for tests with unique-per-tenant constraints
