@@ -30,8 +30,6 @@ pub struct SchedulerConfig {
     pub poll_interval: Duration,
     /// The controller ID used for claim ownership.
     pub controller_id: Uuid,
-    /// The default tenant ID for task queries.
-    pub tenant_id: Uuid,
     /// Maximum wall-clock time allowed for a single task execution before it
     /// is considered hung and its claim is released with a timeout error.
     /// Defaults to [`TASK_EXECUTION_TIMEOUT`] (2 hours).
@@ -39,11 +37,10 @@ pub struct SchedulerConfig {
 }
 
 impl SchedulerConfig {
-    pub fn new(controller_id: Uuid, tenant_id: Uuid) -> Self {
+    pub fn new(controller_id: Uuid) -> Self {
         Self {
             poll_interval: Duration::from_secs(DEFAULT_POLL_INTERVAL_SECS),
             controller_id,
-            tenant_id,
             task_execution_timeout: TASK_EXECUTION_TIMEOUT,
         }
     }
@@ -152,8 +149,8 @@ impl Scheduler {
             _ => {}
         }
 
-        // Find tasks that are due for execution
-        let due_tasks = match claim::find_due_tasks(&self.db, self.config.tenant_id).await {
+        // Find tasks that are due for execution (across all tenants)
+        let due_tasks = match claim::find_due_tasks(&self.db).await {
             Ok(tasks) => tasks,
             Err(e) => {
                 tracing::warn!(error = %e, "failed to find due tasks");
@@ -343,18 +340,16 @@ mod tests {
     #[test]
     fn scheduler_config_new_sets_default_poll_interval() {
         let controller_id = Uuid::now_v7();
-        let tenant_id = Uuid::now_v7();
-        let config = SchedulerConfig::new(controller_id, tenant_id);
+        let config = SchedulerConfig::new(controller_id);
         assert_eq!(config.poll_interval, Duration::from_secs(15));
         assert_eq!(config.controller_id, controller_id);
-        assert_eq!(config.tenant_id, tenant_id);
         assert_eq!(config.task_execution_timeout, TASK_EXECUTION_TIMEOUT);
     }
 
     #[tokio::test]
     async fn scheduler_poll_cycle_empty_db_leaves_no_locked_tasks() {
         let db = setup_test_db().await;
-        let config = SchedulerConfig::new(Uuid::now_v7(), Uuid::now_v7());
+        let config = SchedulerConfig::new(Uuid::now_v7());
         let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
         let token = CancellationToken::new();
 
@@ -371,12 +366,10 @@ mod tests {
     #[tokio::test]
     async fn scheduler_run_exits_on_cancellation() {
         let db = setup_test_db().await;
-        let tenant = seed_tenant(&db).await;
         let controller_id = Uuid::now_v7();
         let config = SchedulerConfig {
             poll_interval: Duration::from_millis(50),
             controller_id,
-            tenant_id: tenant.id,
             task_execution_timeout: TASK_EXECUTION_TIMEOUT,
         };
         let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
@@ -437,7 +430,7 @@ mod tests {
         .await
         .expect("insert task");
 
-        let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
+        let config = SchedulerConfig::new(Uuid::now_v7());
         let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
 
         let token = CancellationToken::new();
@@ -487,7 +480,7 @@ mod tests {
         .await
         .expect("insert task");
 
-        let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
+        let config = SchedulerConfig::new(Uuid::now_v7());
         let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
         let token = CancellationToken::new();
 
@@ -567,7 +560,6 @@ mod tests {
         let config = SchedulerConfig {
             poll_interval: Duration::from_millis(50),
             controller_id,
-            tenant_id: tenant.id,
             task_execution_timeout: TASK_EXECUTION_TIMEOUT,
         };
         let mut scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
@@ -642,7 +634,7 @@ mod tests {
                 sea_orm::Database::connect("sqlite::memory:").await.unwrap()
             })
         };
-        let config = SchedulerConfig::new(Uuid::now_v7(), Uuid::now_v7());
+        let config = SchedulerConfig::new(Uuid::now_v7());
         let mut scheduler = Scheduler::new(db, config, Arc::new(AtomicBool::new(false)));
 
         struct NoopExecutor;
@@ -699,7 +691,7 @@ mod tests {
             }
         }
 
-        let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
+        let config = SchedulerConfig::new(Uuid::now_v7());
         let mut scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
         scheduler.register(
             ScheduledTaskType::StaleLeaseCleanup,
@@ -762,7 +754,7 @@ mod tests {
         }
 
         let flag = Arc::new(AtomicBool::new(true)); // external scheduler connected
-        let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
+        let config = SchedulerConfig::new(Uuid::now_v7());
         let mut scheduler = Scheduler::new(db.clone(), config, flag);
         scheduler.register(
             ScheduledTaskType::AuthCleanup,
@@ -828,7 +820,7 @@ mod tests {
         }
 
         let flag = Arc::new(AtomicBool::new(true)); // external scheduler connected
-        let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
+        let config = SchedulerConfig::new(Uuid::now_v7());
         let mut scheduler = Scheduler::new(db.clone(), config, flag);
         scheduler.register(
             ScheduledTaskType::CrlRenewal,

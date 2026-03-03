@@ -151,13 +151,15 @@ pub async fn release_all_claims(
 
 /// Find tasks that are due for execution (enabled, unlocked, next_run_at <= now).
 ///
+/// Returns due tasks across **all tenants**. Each returned row carries its own
+/// `tenant_id`; executors that need it read it directly from the task model.
+///
 /// Only tasks with a known [`ScheduledTaskType`] variant are returned. Rows in the
 /// database with an unrecognised `task_type` string (added during a rolling upgrade
 /// where a newer controller instance created a task this instance doesn't know about)
 /// are silently skipped rather than causing a deserialization failure.
 pub async fn find_due_tasks(
     db: &DatabaseConnection,
-    tenant_id: Uuid,
 ) -> error::Result<Vec<scheduled_task::Model>> {
     let now = OffsetDateTime::now_utc();
     let known_types: Vec<String> = ScheduledTaskType::iter()
@@ -165,7 +167,6 @@ pub async fn find_due_tasks(
         .collect();
 
     scheduled_task::Entity::find()
-        .filter(scheduled_task::Column::TenantId.eq(tenant_id))
         .filter(scheduled_task::Column::TaskType.is_in(known_types))
         .filter(scheduled_task::Column::Enabled.eq(true))
         .filter(scheduled_task::Column::LockedBy.is_null())
@@ -338,10 +339,15 @@ mod tests {
     async fn find_due_tasks_returns_eligible() {
         let db = setup_test_db().await;
         let tenant = seed_tenant(&db).await;
-        let _task = seed_task(&db, tenant.id).await;
+        let task = seed_task(&db, tenant.id).await;
 
-        let due = find_due_tasks(&db, tenant.id).await.unwrap();
-        assert_eq!(due.len(), 1);
+        // find_due_tasks is tenant-agnostic; it may return tasks from other tenants
+        // (seeded by migrations). Assert our specific task is present.
+        let due = find_due_tasks(&db).await.unwrap();
+        assert!(
+            due.iter().any(|t| t.id == task.id),
+            "seeded due task must be returned"
+        );
     }
 
     #[tokio::test]
@@ -352,8 +358,35 @@ mod tests {
 
         try_claim(&db, task.id, Uuid::now_v7()).await.unwrap();
 
-        let due = find_due_tasks(&db, tenant.id).await.unwrap();
-        assert!(due.is_empty());
+        // The locked task must not appear; other seeded tasks may still be present.
+        let due = find_due_tasks(&db).await.unwrap();
+        assert!(
+            !due.iter().any(|t| t.id == task.id),
+            "locked task must be excluded from due tasks"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_due_tasks_spans_all_tenants() {
+        let db = setup_test_db().await;
+
+        // Seed two independent tenants, each with a due task.
+        let tenant_a = seed_tenant(&db).await;
+        let tenant_b = seed_tenant(&db).await;
+        seed_task(&db, tenant_a.id).await;
+        seed_task(&db, tenant_b.id).await;
+
+        let due = find_due_tasks(&db).await.unwrap();
+        let tenant_ids: std::collections::HashSet<Uuid> =
+            due.iter().map(|t| t.tenant_id).collect();
+        assert!(
+            tenant_ids.contains(&tenant_a.id),
+            "tenant A task should be returned"
+        );
+        assert!(
+            tenant_ids.contains(&tenant_b.id),
+            "tenant B task should be returned"
+        );
     }
 
     #[tokio::test]
@@ -419,23 +452,22 @@ mod tests {
     /// silently excluded rather than causing a deserialization failure.
     #[tokio::test]
     async fn find_due_tasks_excludes_unknown_task_type() {
+        use sea_orm::sea_query::{Expr as SqExpr, Query};
+
         let db = setup_test_db().await;
         let tenant = seed_tenant(&db).await;
 
         // Insert a known task that is due.
-        seed_task(&db, tenant.id).await;
+        let known_task = seed_task(&db, tenant.id).await;
 
-        // Insert an unknown task type via a sea_query builder INSERT — simulates
-        // a row created by a newer controller version during a rolling upgrade.
-        // The tenant FK is satisfied because seed_tenant() already inserted the row.
+        // Insert an unknown task type — simulates a row created by a newer controller
+        // version during a rolling upgrade. Hoisted outside the block so it's visible
+        // in the assertions below.
+        let unknown_id = Uuid::now_v7();
         {
-            use sea_orm::sea_query::Query;
-
-            let unknown_id = Uuid::now_v7();
             let now = OffsetDateTime::now_utc();
             let past = now - time::Duration::minutes(1);
 
-            use sea_orm::sea_query::Expr as SqExpr;
             let insert = Query::insert()
                 .into_table(scheduled_task::Entity)
                 .columns([
@@ -478,12 +510,16 @@ mod tests {
                 .expect("insert unknown task type");
         }
 
-        // Only the known task should be returned; no deserialization error.
-        let due = find_due_tasks(&db, tenant.id).await.unwrap();
-        assert_eq!(due.len(), 1, "unknown task type should be excluded");
-        assert_eq!(
-            due[0].task_type,
-            scheduled_task::ScheduledTaskType::AuthCleanup
+        // find_due_tasks is tenant-agnostic; it may also return migration-seeded tasks.
+        // Key invariants: the known task must be present, the unknown-type row must not.
+        let due = find_due_tasks(&db).await.unwrap();
+        assert!(
+            due.iter().any(|t| t.id == known_task.id),
+            "known due task must be returned"
+        );
+        assert!(
+            !due.iter().any(|t| t.id == unknown_id),
+            "row with unknown task type must be excluded"
         );
     }
 }
