@@ -272,13 +272,6 @@ when a user acts on a notification email link) can change after delivery without
 trail of when the action was recorded. An `updated_at` column would provide a complete
 write history.
 
-**[MEDIUM]** `src/migration/m20260306_000002_update_batches.rs` -- Drop-and-recreate approach
-for the `update_history` table loses the `idx_update_history_created_at` index added by an
-earlier migration. The migration drops the original table and recreates it with the new
-`batch_id` column, but does not re-add indexes that were added in subsequent migrations
-after the initial table creation. This silently regresses query performance for any query
-plan that relied on the dropped index.
-
 **[LOW]** `src/entity/update_batch.rs:11-12` -- `batch_type`, `actor_type`, and `actor_id`
 are all `String` columns with no CHECK constraint or enum backing. Any string value can be
 inserted, and invalid values are only caught at application-level parsing. Unlike

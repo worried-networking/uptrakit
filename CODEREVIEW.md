@@ -77,8 +77,16 @@ NATS startup retry being absent (already implemented with exponential backoff in
 constant-time `ct_eq` (no timing side-channel), the non-atomic batch completion
 (`maybe_complete_batch`) is now wrapped in a DB transaction with a terminal-state guard,
 the SSE batch progress and update output streams integrate `CancellationToken` for clean
-shutdown, and the discovery allowlist TOCTOU has been resolved via unique DB constraints
-with `ON CONFLICT DO NOTHING`. The `UpdateResult` message from agents now uses
+shutdown, and the discovery allowlist TOCTOU has been fully resolved: unique DB constraints prevent
+duplicate storage, and the application code now handles unique constraint violations from
+concurrent inserts via a follow-up SELECT, achieving true idempotency. The missing tenant
+filter in `trigger_scheduled_task`'s `update_many()` call has been fixed. The hidden
+`.expect()` panic in `create_enrollment_token` has been replaced with proper `map_err`/`?`
+error propagation. The `m20260306_000002_update_batches` migration now correctly restores
+the `idx_update_history_created_at` index after dropping and recreating `update_history`.
+The anonymous tuple `FetchGroupValue` in `scheduler-engine/src/executors/version_check.rs`
+has been replaced with named structs. The `find_log_by_action_token` function now carries a
+cross-tenant design rationale doc comment. The `UpdateResult` message from agents now uses
 `conn.send()` (error-propagating) instead of `conn.send_best_effort()`, preventing
 permanent in-progress state on send failure. `BatchStatus` and `UpdateCategory` now carry
 an `Other(String)` catch-all for forward-compatible deserialization. All ten `Validate`

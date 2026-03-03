@@ -49,6 +49,16 @@ with a regression test (`load_host_agents_filters_by_tenant`). The same bypass i
 `validate_update_preconditions` and `trigger_all_host_package_updates_for_host` (service lookup
 missing `.filter(service::Column::TenantId.eq(tenant_id))`) has been fixed. The
 `AuthCleanupExecutor` now wraps all DELETE statements in a single transaction.
+The missing tenant filter in `trigger_scheduled_task`'s `update_many()` call has been fixed
+(`.filter(scheduled_task::Column::TenantId.eq(tenant_db.tenant_id))` now applied to the write).
+The hidden `.expect()` panic in `create_enrollment_token` has been replaced with proper
+`map_err` / `?` error propagation. The discovery allowlist TOCTOU race is fully fixed: unique
+DB constraints already prevented duplicate storage, and the application code now handles unique
+constraint violations from concurrent inserts by fetching the winning entry via a follow-up
+SELECT. `find_log_by_action_token` has been documented with a cross-tenant design rationale
+explaining why a raw `DatabaseConnection` is required for Telegram webhook callbacks (no tenant
+auth context available; `action_token` is a globally unique random UUID enforced by a unique
+index).
 
 ## Architecture
 
@@ -566,18 +576,6 @@ pagination, bare `Json(resp)` without explicit `StatusCode::OK`.
 
 ### Issues
 
-**[MEDIUM]** `src/queries/scheduled_tasks.rs:155-162` -- `trigger_scheduled_task` performs a
-read-then-write in two separate statements without a transaction. The initial
-`find_by_id::<scheduled_task::Entity, _>(id).one(tenant_db.db())` existence check at line
-145-152 confirms tenant ownership. But the subsequent `scheduled_task::Entity::update_many()`
-at line 156 filters only by `Column::Id.eq(id)` — it has no `tenant_id` guard. If the task is
-deleted between the check and the update (TOCTOU), `rows_affected` will be 0 and the function
-returns `Ok(false)`. More critically, the `update_many` does not re-apply the tenant filter,
-so a race where a different tenant's task ID collides (unlikely with UUID v7 but theoretically
-possible) would update an out-of-scope row. Adding
-`.filter(scheduled_task::Column::TenantId.eq(tenant_db.tenant_id))` to the `update_many`
-call would make the update self-contained and correct under all concurrent conditions.
-
 **[MEDIUM]** `src/queries/notifications.rs:247-283` -- `update_rule` cannot clear the
 `host_id`, `software_item_id`, or `plugin_type` scope filters once set. Lines 271-278 only
 apply updates when `req.host_id.is_some()` / `req.software_item_id.is_some()` /
@@ -587,17 +585,6 @@ documented pattern for nullable update fields is `Option<serde_json::Value>` whe
 `Value::Null` signals "clear this field" and `None` signals "leave unchanged". The current
 `Option<Uuid>` / `Option<String>` types cannot express this three-way distinction.
 
-**[MEDIUM]** `src/queries/discovery_allowlist.rs:97-127` and lines 216-250 --
-`add_tenant_allowlist_entry` and `add_host_allowlist_entry` perform a read-then-insert without
-a transaction (select existing, early return, then insert). Two concurrent requests to add the
-same `plugin_type` to the same allowlist can both pass the existence check and both proceed to
-insert, creating a duplicate entry. Neither the entity definition nor the migration creates a
-unique constraint on `(tenant_id, plugin_type)` / `(tenant_id, host_id, plugin_type)`, so the
-DB cannot prevent the race. The result is duplicate entries visible in `list_*_allowlist`
-responses. The idempotency comment in the function doc is incorrect: the function is only
-idempotent if calls are serialized. Fix: wrap in a transaction and handle the unique constraint
-violation, or (if a unique constraint is added) use `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING`.
-
 **[LOW]** `src/queries/update_history.rs:213-255` -- `get_update_history` performs three
 sequential awaited queries: `UpdateHistory::find_by_id`, `tenant_db.find_by_id::<host::Entity>`,
 and `SoftwareItem::find_by_id`. The first two are necessary (the second enforces tenant scope),
@@ -606,25 +593,11 @@ software item name directly on the `update_history` record at creation time, or 
 host and software item tables in a single query. As written, a single detail-view request
 issues three sequential round-trips to the DB.
 
-**[LOW]** `src/queries/enrollment_tokens.rs:44-68` -- `create_enrollment_token` uses
-`expect("capability list should serialize to JSON")` on the `serde_json::to_string` result
-at line 50. While the comment is accurate (a `Vec<String>` is always JSON-serializable), this
-is a hidden panic in a production query path. Use `map_err` / `?` to propagate this as a
-`DbErr::Custom`, consistent with all other serialization error handling in the query layer.
-
 **[MEDIUM]** Missing index on `update_history(host_id, software_item_id, status)` for
 `validate_update_preconditions`.
 
 **[LOW]** `src/queries/update_batches.rs:617-651` -- Host/software item lookups in
 `get_batch_with_items` lack tenant filter (defense-in-depth).
-
-**[LOW]** `src/queries/notifications.rs:323-332` -- `find_log_by_action_token` takes a raw
-`&sea_orm::DatabaseConnection` rather than a `TenantDb`. The `notification_log` table has a
-`tenant_id` column and is `TenantScoped`. This function bypasses the tenant filter entirely,
-meaning the action-token lookup during notification acknowledgment is not scoped to the
-requesting tenant. A malicious user who guesses a valid `action_token` UUID from another
-tenant's notification log would be able to retrieve and act on it. Pass `&TenantDb` and use
-`tenant_db.find()` to enforce scoping.
 
 ## Maintainability
 

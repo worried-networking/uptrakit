@@ -11,8 +11,11 @@ scheduler used by both `uptrakit-controller` (embedded) and `uptrakit-scheduler`
 binary). The core claim/release cycle uses TOCTOU-free optimistic locking and stale-claim recovery,
 which are strong correctness properties. The `SchedulerNotifier` ORM coupling has been fixed
 (callers now load and pass a `MqttSoftwareStatesPayload`), and the sequential execution model
-now uses a `JoinSet` for parallel task execution within each poll cycle. Three of five executors
-(`AuthCleanupExecutor`, `ServiceCertCheckExecutor`, `StaleLeaseCleanupExecutor`) have no tests.
+now uses a `JoinSet` for parallel task execution within each poll cycle. The anonymous tuple
+`FetchGroupValue` accumulator in `version_check.rs` has been refactored to named structs
+(`AgentAssignmentRow`, `HostPackageAssignmentRow`), eliminating index-fragility. Three of five
+executors (`AuthCleanupExecutor`, `ServiceCertCheckExecutor`, `StaleLeaseCleanupExecutor`) have
+no tests.
 
 ## Architecture
 
@@ -203,24 +206,6 @@ to infer from the trait definition alone.
   The claim-and-release pattern is explained in the struct-level doc.
 
 ### Issues
-
-**[HIGH]** `src/executors/version_check.rs:159-165` -- An anonymous tuple type alias is used
-for the group accumulator:
-
-```text
-type FetchGroupValue = (
-    String,            // plugin_type
-    serde_json::Value, // merged config
-    String,            // execution_site
-    Vec<(Uuid, Uuid)>, // (host_id, software_item_id) targets
-);
-```
-
-The fields are accessed by numeric index (`entry.3.push(...)` at line 182), making the code
-fragile: swapping two `String` fields would compile without error but produce wrong results.
-Replacing the anonymous tuple with a named struct (`struct FetchGroup { plugin_type: String,
-config: serde_json::Value, execution_site: String, targets: Vec<(Uuid, Uuid)> }`) would
-eliminate the index-fragility and make `entry.targets.push(...)` self-documenting.
 
 **[MEDIUM]** `src/scheduler.rs:17` -- `DEFAULT_POLL_INTERVAL_SECS: u64 = 15` is a bare numeric
 constant with no doc comment explaining its relationship to task latency or the STALE_CLAIM
