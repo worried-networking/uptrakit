@@ -62,25 +62,23 @@ impl ShellConfig {
                 "at least one of version_command or update_command must be set".to_string()
             ));
         }
-        if let Some(ref cmd) = self.version_command {
-            if let Err(e) =
+        if let Some(ref cmd) = self.version_command
+            && let Err(e) =
                 uptrakit_shared_types::command_validation::validate_command_length(
                     cmd,
                     "version_command",
                 )
-            {
-                rootcause::bail!(ShellError::Configuration(e));
-            }
+        {
+            rootcause::bail!(ShellError::Configuration(e));
         }
-        if let Some(ref cmd) = self.update_command {
-            if let Err(e) =
+        if let Some(ref cmd) = self.update_command
+            && let Err(e) =
                 uptrakit_shared_types::command_validation::validate_command_length(
                     cmd,
                     "update_command",
                 )
-            {
-                rootcause::bail!(ShellError::Configuration(e));
-            }
+        {
+            rootcause::bail!(ShellError::Configuration(e));
         }
         Ok(())
     }

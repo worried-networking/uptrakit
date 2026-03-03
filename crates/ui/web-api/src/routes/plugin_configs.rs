@@ -91,6 +91,21 @@ pub async fn create_plugin_config(
     let plugin_type_str = req.plugin_type.to_string();
     let config_name = req.name.clone();
     let command_fields = detect_command_fields(&req.config);
+    // Clone for audit logging (req is consumed by create_plugin_config).
+    let config_for_audit = req.config.clone();
+
+    // Validate plugin-specific config (matches the update path).
+    if let Err(e) = state
+        .plugin_ops
+        .validate_config_str(&plugin_type_str, &req.config)
+    {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    // Validate hooks (command-injection prevention).
+    if let Err(e) = pc_queries::validate_hooks_internal(&req.config) {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
 
     match pc_queries::create_plugin_config(state.plugin_ops.as_ref(), &tenant_db, req).await {
         Ok(resp) => {
@@ -113,6 +128,7 @@ pub async fn create_plugin_config(
                     command_fields = %command_fields.join(", "),
                     "security_audit: plugin config created with command-bearing fields"
                 );
+                audit_dangerous_patterns(&config_for_audit, AUDIT_COMMAND_FIELDS);
             }
             (StatusCode::CREATED, Json(resp)).into_response()
         }
@@ -222,6 +238,8 @@ pub async fn update_plugin_config(
         .as_ref()
         .map(|c| detect_command_fields(c))
         .unwrap_or_default();
+    // Clone for audit logging (req is consumed by update_plugin_config).
+    let config_for_audit = req.config.clone();
 
     match pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)
         .await
@@ -246,6 +264,9 @@ pub async fn update_plugin_config(
                     command_fields = %new_command_fields.join(", "),
                     "security_audit: plugin config updated with command-bearing fields"
                 );
+                if let Some(ref config) = config_for_audit {
+                    audit_dangerous_patterns(config, AUDIT_COMMAND_FIELDS);
+                }
             }
             (StatusCode::OK, Json(resp)).into_response()
         }
@@ -496,6 +517,69 @@ pub async fn discard_plugin_config_discovered(
 }
 
 // ── Security audit helpers ────────────────────────────────────────────────────
+
+/// Emit `security_audit:` warnings for any dangerous patterns found in
+/// command-bearing fields of a plugin configuration.
+///
+/// This is advisory only — the `manage_commands` permission is already
+/// documented as equivalent to RCE on managed hosts.
+fn audit_dangerous_patterns(
+    config: &serde_json::Value,
+    context_fields: &[(&str, &str, &str)],
+) {
+    let obj = match config.as_object() {
+        Some(o) => o,
+        None => return,
+    };
+
+    // Check top-level command string fields.
+    for &(field_name, display_name, _) in context_fields {
+        if let Some(val) = obj.get(field_name).and_then(|v| v.as_str()) {
+            let patterns =
+                uptrakit_web_api_types::command_validation::detect_dangerous_patterns(val);
+            for (pattern, desc) in patterns {
+                tracing::warn!(
+                    field = display_name,
+                    pattern = pattern,
+                    "security_audit: dangerous command pattern detected — {desc}"
+                );
+            }
+        }
+    }
+
+    // Check structured hook commands.
+    if let Some(hooks) = obj.get("hooks").and_then(|v| v.as_object()) {
+        for phase in ["pre_update", "post_update"] {
+            if let Some(hook) = hooks.get(phase).and_then(|v| v.as_object())
+                && let Some(arr) = hook.get("commands").and_then(|v| v.as_array())
+            {
+                for (i, cmd) in arr.iter().enumerate() {
+                    if let Some(cmd_str) = cmd.as_str() {
+                        let patterns =
+                            uptrakit_web_api_types::command_validation::detect_dangerous_patterns(
+                                cmd_str,
+                            );
+                        for (pattern, desc) in patterns {
+                            tracing::warn!(
+                                field = %format!("hooks.{phase}.commands[{i}]"),
+                                pattern = pattern,
+                                "security_audit: dangerous command pattern detected — {desc}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Fields in plugin configs that contain single command strings, with their
+/// display name and a marker for the audit helper.
+const AUDIT_COMMAND_FIELDS: &[(&str, &str, &str)] = &[
+    ("version_command", "version_command", "single"),
+    ("update_command", "update_command", "single"),
+    ("post_pull_command", "post_pull_command", "single"),
+];
 
 /// Known field names that carry executable commands in plugin configs.
 const COMMAND_FIELD_NAMES: &[&str] = &[
