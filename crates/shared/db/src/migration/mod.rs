@@ -20,6 +20,7 @@ mod m20260302_000005_system_services;
 mod m20260307_000002_manage_commands_permission;
 mod m20260308_000001_system_services_permissions;
 mod m20260308_000002_fix_permission_uuid_storage;
+mod m20260303_000003_audit_logs;
 mod m20260309_000001_fix_permission_created_at_format;
 
 pub struct Migrator;
@@ -48,6 +49,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260308_000001_system_services_permissions::Migration),
             Box::new(m20260308_000002_fix_permission_uuid_storage::Migration),
             Box::new(m20260309_000001_fix_permission_created_at_format::Migration),
+            Box::new(m20260303_000003_audit_logs::Migration),
         ]
     }
 }
@@ -66,10 +68,11 @@ mod tests {
     };
 
     use crate::entity::{
-        crl_cache, global_setting, host_discovery_allowlist, host_package, host_package_ignore,
-        host_package_update_history, host_software_item, notification_channel, notification_log,
-        notification_rule, plugin_config, revoked_token_jti, revoked_token_user, role,
-        role_permission, service, software_item, system_service, system_service_certificate,
+        audit_log, crl_cache, global_setting, host_discovery_allowlist, host_package,
+        host_package_ignore, host_package_update_history, host_software_item,
+        notification_channel, notification_log, notification_rule, plugin_config,
+        revoked_token_jti, revoked_token_user, role, role_permission, service, software_item,
+        system_audit_log, system_service, system_service_certificate,
         tenant_discovery_allowlist, update_batch, update_history,
     };
 
@@ -211,6 +214,10 @@ mod tests {
             .await
             .unwrap();
 
+
+        // Verify audit_logs and system_audit_logs tables exist.
+        audit_log::Entity::find().count(&db).await.unwrap();
+        system_audit_log::Entity::find().count(&db).await.unwrap();
 
         // Verify split_version_check migration: detect_version task row exists.
         let count_stmt = Query::select()

@@ -1,10 +1,10 @@
 use sea_orm::EntityTrait;
 
 use super::{
-    enrollment_token, host, host_discovery_allowlist, host_package, host_package_ignore,
-    host_package_update_history, mqtt_client, notification_channel, notification_log,
-    notification_rule, oidc_provider, plugin_config, scheduled_task, service, setting,
-    settings_version, software_item, tenant_discovery_allowlist, update_batch, user_role,
+    audit_log, enrollment_token, host, host_discovery_allowlist, host_package,
+    host_package_ignore, host_package_update_history, mqtt_client, notification_channel,
+    notification_log, notification_rule, oidc_provider, plugin_config, scheduled_task, service,
+    setting, settings_version, software_item, tenant_discovery_allowlist, update_batch, user_role,
 };
 
 /// Marker trait for SeaORM entities that are scoped to a tenant via a `tenant_id` column.
@@ -14,6 +14,12 @@ use super::{
 /// `.filter(Column::TenantId.eq(...))` call sites throughout the codebase.
 pub trait TenantScoped: EntityTrait {
     fn tenant_id_column() -> Self::Column;
+}
+
+impl TenantScoped for audit_log::Entity {
+    fn tenant_id_column() -> Self::Column {
+        audit_log::Column::TenantId
+    }
 }
 
 impl TenantScoped for host::Entity {

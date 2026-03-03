@@ -1,4 +1,6 @@
 pub use super::api_rate_limit::{Entity as ApiRateLimit, Model as ApiRateLimitModel};
+pub use super::audit_log::{Entity as AuditLog, Model as AuditLogModel};
+pub use super::system_audit_log::{Entity as SystemAuditLog, Model as SystemAuditLogModel};
 pub use super::crl_cache::{Entity as CrlCache, Model as CrlCacheModel};
 pub use super::revoked_token_jti::{Entity as RevokedTokenJti, Model as RevokedTokenJtiModel};
 pub use super::revoked_token_user::{Entity as RevokedTokenUser, Model as RevokedTokenUserModel};
