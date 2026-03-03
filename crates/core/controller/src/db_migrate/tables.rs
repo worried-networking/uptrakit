@@ -23,6 +23,7 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "roles",
     "permissions",
     "global_settings",
+    "data_encryption_keys",
     "role_permissions",
     "oidc_providers",
     "user_roles",
@@ -83,6 +84,7 @@ pub async fn copy_all(
     copy!(Role, "roles");
     copy!(Permission, "permissions");
     copy!(GlobalSetting, "global_settings");
+    copy!(DataEncryptionKey, "data_encryption_keys");
     copy!(RolePermission, "role_permissions");
     copy!(OidcProvider, "oidc_providers");
     copy!(UserRole, "user_roles");
@@ -171,6 +173,7 @@ pub async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
     clean!(OidcProvider, "oidc_providers");
     clean!(UserRole, "user_roles");
     clean!(RolePermission, "role_permissions");
+    clean!(DataEncryptionKey, "data_encryption_keys");
     clean!(GlobalSetting, "global_settings");
     clean!(Permission, "permissions");
     clean!(Role, "roles");
@@ -200,6 +203,7 @@ pub async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnection) -> R
     verify!(Role, "roles");
     verify!(Permission, "permissions");
     verify!(GlobalSetting, "global_settings");
+    verify!(DataEncryptionKey, "data_encryption_keys");
     verify!(RolePermission, "role_permissions");
     verify!(OidcProvider, "oidc_providers");
     verify!(UserRole, "user_roles");
@@ -365,11 +369,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copy_order_has_all_42_tables() {
+    fn copy_order_has_all_43_tables() {
         assert_eq!(
             COPY_ORDER.len(),
-            42,
-            "COPY_ORDER must list all 42 app tables"
+            43,
+            "COPY_ORDER must list all 43 app tables"
         );
     }
 }

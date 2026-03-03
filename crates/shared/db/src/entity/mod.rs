@@ -2,6 +2,7 @@ pub mod api_rate_limit;
 pub mod audit_log;
 pub mod system_audit_log;
 pub mod crl_cache;
+pub mod data_encryption_key;
 pub mod revoked_token_jti;
 pub mod revoked_token_user;
 pub mod api_token;

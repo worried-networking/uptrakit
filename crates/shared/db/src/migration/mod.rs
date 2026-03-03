@@ -22,6 +22,7 @@ mod m20260308_000001_system_services_permissions;
 mod m20260308_000002_fix_permission_uuid_storage;
 mod m20260303_000003_audit_logs;
 mod m20260309_000001_fix_permission_created_at_format;
+mod m20260310_000001_data_encryption_keys;
 
 pub struct Migrator;
 
@@ -50,6 +51,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260308_000002_fix_permission_uuid_storage::Migration),
             Box::new(m20260309_000001_fix_permission_created_at_format::Migration),
             Box::new(m20260303_000003_audit_logs::Migration),
+            Box::new(m20260310_000001_data_encryption_keys::Migration),
         ]
     }
 }
@@ -68,8 +70,8 @@ mod tests {
     };
 
     use crate::entity::{
-        audit_log, crl_cache, global_setting, host_discovery_allowlist, host_package,
-        host_package_ignore, host_package_update_history, host_software_item,
+        audit_log, crl_cache, data_encryption_key, global_setting, host_discovery_allowlist,
+        host_package, host_package_ignore, host_package_update_history, host_software_item,
         notification_channel, notification_log, notification_rule, plugin_config,
         revoked_token_jti, revoked_token_user, role, role_permission, service, software_item,
         system_audit_log, system_service, system_service_certificate,
@@ -213,7 +215,10 @@ mod tests {
             .count(&db)
             .await
             .unwrap();
-
+        data_encryption_key::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
 
         // Verify audit_logs and system_audit_logs tables exist.
         audit_log::Entity::find().count(&db).await.unwrap();
