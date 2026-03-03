@@ -120,6 +120,10 @@ permission_extractor! {
     CanViewSystemServices => Permission::ViewSystemServices,
     /// Extractor that requires [`Permission::ManageSystemServices`].
     CanManageSystemServices => Permission::ManageSystemServices,
+    /// Extractor that requires [`Permission::ViewAuditLogs`].
+    CanViewAuditLogs => Permission::ViewAuditLogs,
+    /// Extractor that requires [`Permission::ViewSystemAuditLogs`].
+    CanViewSystemAuditLogs => Permission::ViewSystemAuditLogs,
 }
 
 // ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ mod m20260303_000003_audit_logs;
 mod m20260309_000001_fix_permission_created_at_format;
 mod m20260310_000001_data_encryption_keys;
 mod m20260311_000001_update_history_status_index;
+mod m20260311_000002_audit_log_permissions;
 
 pub struct Migrator;
 
@@ -54,6 +55,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260303_000003_audit_logs::Migration),
             Box::new(m20260310_000001_data_encryption_keys::Migration),
             Box::new(m20260311_000001_update_history_status_index::Migration),
+            Box::new(m20260311_000002_audit_log_permissions::Migration),
         ]
     }
 }

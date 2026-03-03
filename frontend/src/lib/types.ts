@@ -14,7 +14,9 @@ export enum Permission {
 	ViewHosts = 'view_hosts',
 	ManageHosts = 'manage_hosts',
 	ViewSystemServices = 'view_system_services',
-	ManageSystemServices = 'manage_system_services'
+	ManageSystemServices = 'manage_system_services',
+	ViewAuditLogs = 'view_audit_logs',
+	ViewSystemAuditLogs = 'view_system_audit_logs'
 }
 
 export interface User {

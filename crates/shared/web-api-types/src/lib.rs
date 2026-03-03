@@ -8,6 +8,7 @@ pub use uptrakit_shared_types::PluginRole;
 
 pub mod agents;
 pub mod api_tokens;
+pub mod audit_logs;
 pub mod auth;
 pub mod command_validation;
 pub mod autodiscovery;
@@ -138,7 +139,7 @@ mod tests {
 
     #[test]
     fn permission_iter_covers_all_variants() {
-        assert_eq!(Permission::iter().count(), 14);
+        assert_eq!(Permission::iter().count(), 16);
     }
 
     #[test]

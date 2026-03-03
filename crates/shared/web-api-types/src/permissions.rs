@@ -32,8 +32,20 @@ pub enum Permission {
     /// Manage system services (approve, reject, deactivate, update settings).
     ///
     /// Controls write access to the `/api/v1/system-services` endpoints and
-    /// the `/api/v1/settings/system-services` enrollment token endpoint.
+    /// the `/api/v1/global-settings/system-services` enrollment token endpoint.
     ManageSystemServices,
+    /// View tenant-scoped audit log entries.
+    ///
+    /// Grants read access to `GET /api/v1/audit-logs`. Granted to the `owner`
+    /// and `admin` roles by default. The `user` role does not receive this
+    /// permission.
+    ViewAuditLogs,
+    /// View system-level audit log entries.
+    ///
+    /// Grants read access to `GET /api/v1/system-audit-logs`, which includes
+    /// entries for CA rotation, global settings changes, and other
+    /// infrastructure-scoped operations. Granted to the `owner` role only.
+    ViewSystemAuditLogs,
 }
 
 impl Permission {
@@ -53,6 +65,8 @@ impl Permission {
             Permission::ManageNotifications => "manage_notifications",
             Permission::ViewSystemServices => "view_system_services",
             Permission::ManageSystemServices => "manage_system_services",
+            Permission::ViewAuditLogs => "view_audit_logs",
+            Permission::ViewSystemAuditLogs => "view_system_audit_logs",
         }
     }
 }
@@ -81,6 +95,8 @@ impl FromStr for Permission {
             "manage_notifications" => Ok(Self::ManageNotifications),
             "view_system_services" => Ok(Self::ViewSystemServices),
             "manage_system_services" => Ok(Self::ManageSystemServices),
+            "view_audit_logs" => Ok(Self::ViewAuditLogs),
+            "view_system_audit_logs" => Ok(Self::ViewSystemAuditLogs),
             _ => Err(ParsePermissionError),
         }
     }
