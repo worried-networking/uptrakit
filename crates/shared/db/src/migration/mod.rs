@@ -20,6 +20,7 @@ mod m20260302_000005_system_services;
 mod m20260307_000002_manage_commands_permission;
 mod m20260308_000001_system_services_permissions;
 mod m20260308_000002_fix_permission_uuid_storage;
+mod m20260309_000001_fix_permission_created_at_format;
 
 pub struct Migrator;
 
@@ -46,6 +47,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260307_000002_manage_commands_permission::Migration),
             Box::new(m20260308_000001_system_services_permissions::Migration),
             Box::new(m20260308_000002_fix_permission_uuid_storage::Migration),
+            Box::new(m20260309_000001_fix_permission_created_at_format::Migration),
         ]
     }
 }
@@ -464,6 +466,68 @@ mod tests {
             .all(&db)
             .await
             .expect("role_permissions entity query must succeed after repair migration");
+    }
+
+    /// Verify that the datetime repair migration converts `+00:00:00`-formatted
+    /// `created_at` values to RFC 3339, making the row decodable by SeaORM.
+    ///
+    /// Steps:
+    /// 1. Apply migrations 1–19 (all except the datetime repair).
+    /// 2. Inject a permission with `created_at = '2026-03-02 22:33:15.239039 +00:00:00'`.
+    /// 3. Apply migration 20 (the datetime repair).
+    /// 4. Load the permission via the entity API — this decodes `OffsetDateTime`
+    ///    and fails if the format is still broken.
+    #[tokio::test]
+    async fn repair_migration_fixes_created_at_format() {
+        use crate::entity::permission;
+
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+
+        // Apply all migrations except the datetime repair (index 20).
+        Migrator::up(&db, Some(19))
+            .await
+            .expect("first 19 migrations should succeed");
+
+        // Inject a permission row with the broken created_at format.
+        //
+        // The id must be a BLOB (uuid.into()) because migration 19 (UUID repair)
+        // has already run and FK checks expect BLOB ids in role_permissions.
+        let perm_id = uuid::Uuid::now_v7();
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("permissions"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("name"),
+                    Alias::new("description"),
+                    Alias::new("created_at"),
+                ])
+                .values_panic([
+                    perm_id.into(),
+                    "test_broken_datetime".into(),
+                    "datetime repair test".into(),
+                    // The exact format produced by time::OffsetDateTime::Display for UTC.
+                    "2026-03-02 22:33:15.239039 +00:00:00".into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .expect("injecting broken-datetime permission must succeed");
+
+        // Apply the datetime repair migration.
+        Migrator::up(&db, None)
+            .await
+            .expect("datetime repair migration must succeed");
+
+        // Loading the permission via the entity API decodes OffsetDateTime.
+        // This fails with ColumnDecode if the format is still broken.
+        permission::Entity::find()
+            .filter(permission::Column::Name.eq("test_broken_datetime"))
+            .one(&db)
+            .await
+            .expect("permission entity query must succeed after datetime repair")
+            .expect("injected permission must still exist after repair");
     }
 
     /// The user role must NOT have manage_commands.
