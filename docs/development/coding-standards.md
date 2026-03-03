@@ -314,7 +314,7 @@ impl<'de> serde::Deserialize<'de> for MyStatus {
 - The enum **loses `Copy`** (because `String` is not `Copy`). Any call-site that relied on
   copy semantics must be updated to `.clone()`.
 - `strum::EnumIter` cannot be derived. See the
-  [test coverage section above](#strum-enumiter-incompatibility-with-otherstring-variants).
+  [test coverage section above](#strumenumiter-incompatibility-with-otherstring-variants).
 
 ## `#[non_exhaustive]` on Public Structs
 
