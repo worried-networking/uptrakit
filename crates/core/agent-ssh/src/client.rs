@@ -7,9 +7,10 @@ use uptrakit_agent_core::ConnectionContext;
 use uptrakit_command::{CommandExecutor, CommandSpec, SudoAwareCommandExecutor};
 
 use uptrakit_internal_wire::{
-    Capability, CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryPluginResult,
-    DiscoveryResultsPayload, ExecuteUpdatePayload, HostInfo, ReportHostsPayload, ServiceMessage,
-    UpdateCategory, UpdateFinalStatus, UpdateResultPayload, VersionCheckResult,
+    BatchHostPackageUpdateResult, BatchHostPackageUpdateResultPayload, Capability,
+    CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryPluginResult, DiscoveryResultsPayload,
+    ExecuteBatchHostPackageUpdatePayload, ExecuteUpdatePayload, HostInfo, ReportHostsPayload,
+    ServiceMessage, UpdateCategory, UpdateFinalStatus, UpdateResultPayload, VersionCheckResult,
     VersionCheckResultsPayload,
 };
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
@@ -611,6 +612,133 @@ pub(crate) async fn handle_execute_update_ssh(
             forwarder,
         },
     );
+}
+
+// ── ExecuteBatchHostPackageUpdate ─────────────────────────────────────────────
+
+/// Handle an `ExecuteBatchHostPackageUpdate` message for the SSH agent.
+///
+/// Looks up the SSH host by `host_machine_id`, acquires a pooled session, and
+/// delegates to the shared
+/// `uptrakit_agent_core::handle_execute_batch_host_package_update()`.
+///
+/// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
+pub(crate) async fn handle_execute_batch_host_package_update_ssh(
+    payload: ExecuteBatchHostPackageUpdatePayload,
+    db: &sea_orm::DatabaseConnection,
+    conn: &mut ControllerConnection,
+    pool: &SshConnectionPool,
+) -> Option<LoopOutcome> {
+    let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
+        Ok(Some(h)) => h,
+        Ok(None) => {
+            tracing::warn!(
+                host_machine_id = %payload.host_machine_id,
+                batch_id = %payload.batch_id,
+                "no SSH host found for ExecuteBatchHostPackageUpdate host_machine_id"
+            );
+            let results: Vec<BatchHostPackageUpdateResult> = payload
+                .updates
+                .iter()
+                .map(|u| BatchHostPackageUpdateResult {
+                    host_package_id: u.host_package_id,
+                    update_history_id: u.update_history_id,
+                    status: UpdateFinalStatus::Failed,
+                    output: String::new(),
+                    installed_version: None,
+                    error: Some(format!(
+                        "SSH host with machine_id '{}' not found",
+                        payload.host_machine_id
+                    )),
+                })
+                .collect();
+            conn.send_best_effort(ServiceMessage::BatchHostPackageUpdateResult(
+                BatchHostPackageUpdateResultPayload {
+                    batch_id: payload.batch_id,
+                    results,
+                },
+            ))
+            .await;
+            return None;
+        }
+        Err(e) => {
+            tracing::error!(
+                host_machine_id = %payload.host_machine_id,
+                batch_id = %payload.batch_id,
+                error = %e,
+                "DB error looking up SSH host for ExecuteBatchHostPackageUpdate"
+            );
+            let results: Vec<BatchHostPackageUpdateResult> = payload
+                .updates
+                .iter()
+                .map(|u| BatchHostPackageUpdateResult {
+                    host_package_id: u.host_package_id,
+                    update_history_id: u.update_history_id,
+                    status: UpdateFinalStatus::Failed,
+                    output: String::new(),
+                    installed_version: None,
+                    error: Some(format!("DB error: {e}")),
+                })
+                .collect();
+            conn.send_best_effort(ServiceMessage::BatchHostPackageUpdateResult(
+                BatchHostPackageUpdateResultPayload {
+                    batch_id: payload.batch_id,
+                    results,
+                },
+            ))
+            .await;
+            return None;
+        }
+    };
+
+    let session = match pool.acquire(&host).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(
+                host_name = %host.name,
+                batch_id = %payload.batch_id,
+                error = %e,
+                "failed to acquire SSH session for ExecuteBatchHostPackageUpdate"
+            );
+            pool.evict(&host.id).await;
+            let results: Vec<BatchHostPackageUpdateResult> = payload
+                .updates
+                .iter()
+                .map(|u| BatchHostPackageUpdateResult {
+                    host_package_id: u.host_package_id,
+                    update_history_id: u.update_history_id,
+                    status: UpdateFinalStatus::Failed,
+                    output: String::new(),
+                    installed_version: None,
+                    error: Some(format!("SSH connection failed: {e}")),
+                })
+                .collect();
+            conn.send_best_effort(ServiceMessage::BatchHostPackageUpdateResult(
+                BatchHostPackageUpdateResultPayload {
+                    batch_id: payload.batch_id,
+                    results,
+                },
+            ))
+            .await;
+            return None;
+        }
+    };
+
+    let ctx = build_connection_context();
+    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+    let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
+        raw,
+        host.resolved_sudo_context(),
+    ));
+
+    tracing::debug!(
+        host_name = %host.name,
+        hostname = %host.hostname,
+        batch_id = %payload.batch_id,
+        "running batch host package update on SSH host"
+    );
+    uptrakit_agent_core::handle_execute_batch_host_package_update(payload, executor, conn, &ctx)
+        .await
 }
 
 // ── DiscoverSoftware ──────────────────────────────────────────────────────────

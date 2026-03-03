@@ -78,10 +78,10 @@ struct SshAgentHandler {
     local_db: Option<sea_orm::DatabaseConnection>,
     /// Path to the operator-controlled freeze file.
     ///
-    /// When this file exists, the agent rejects all `ExecuteUpdate` messages
-    /// without executing them. Operators can create the file with
-    /// `touch <path>` to halt update execution from the agent side,
-    /// independent of the controller.
+    /// When this file exists, the agent rejects all `ExecuteUpdate` and
+    /// `ExecuteBatchHostPackageUpdate` messages without executing them.
+    /// Operators can create the file with `touch <path>` to halt update
+    /// execution from the agent side, independent of the controller.
     ///
     /// Default path: `<state-dir>/update-freeze`.
     freeze_file_path: std::path::PathBuf,
@@ -234,6 +234,26 @@ impl ServiceHandler for SshAgentHandler {
                 )
                 .await;
                 Ok(None)
+            }
+            ControllerMessage::ExecuteBatchHostPackageUpdate(payload) => {
+                if tokio::fs::try_exists(&self.freeze_file_path)
+                    .await
+                    .unwrap_or(false)
+                {
+                    tracing::warn!(
+                        freeze_file = %self.freeze_file_path.display(),
+                        "update execution is frozen; ignoring ExecuteBatchHostPackageUpdate message. \
+                         Remove the freeze file to re-enable update execution."
+                    );
+                    return Ok(None);
+                }
+                Ok(client::handle_execute_batch_host_package_update_ssh(
+                    *payload,
+                    db,
+                    conn,
+                    &self.pool,
+                )
+                .await)
             }
             ControllerMessage::DiscoverSoftware(payload) => {
                 Ok(client::handle_discover_software_ssh(payload, db, conn, &self.pool).await)
