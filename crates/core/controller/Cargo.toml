@@ -20,6 +20,7 @@ notifications-telegram = ["uptrakit-web-api/notifications-telegram"]
 notifications-email = ["uptrakit-web-api/notifications-email"]
 notifications-all = ["uptrakit-web-api/notifications-all"]
 embed-frontend = ["dep:rust-embed"]
+journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
 
 [dependencies]
 uptrakit-internal-wire = { workspace = true }
@@ -60,7 +61,9 @@ nix = { workspace = true, features = ["signal", "process"] }
 tokio-util = { workspace = true }
 zeroize = { workspace = true }
 uptrakit-build-info = { workspace = true }
+uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-scheduler-engine = { workspace = true, optional = true }
+tracing-journald = { workspace = true, optional = true }
 rust-embed = { workspace = true, optional = true, features = ["mime-guess"] }
 
 [dev-dependencies]

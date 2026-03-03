@@ -170,6 +170,37 @@ pub(crate) async fn init_database(
     })
 }
 
+/// Initialize a separate database connection for audit log storage.
+///
+/// Connects to the provided URL, runs the standard migrations (extra
+/// empty application tables in the audit database are harmless), and
+/// returns the connection for use by the audit log backend.
+pub(crate) async fn init_audit_database(
+    url: &str,
+    max_connections: u32,
+) -> crate::Result<sea_orm::DatabaseConnection> {
+    let db_config = crate::db::DbConfig {
+        url: url.to_string(),
+        max_connections,
+    };
+    tracing::info!(
+        max_connections,
+        "connecting to audit log database: {}",
+        crate::db::sanitize_url(url)
+    );
+    let conn = crate::db::connect(&db_config)
+        .await
+        .context(AppError::Database)?;
+
+    tracing::info!("running audit log database migrations");
+    crate::migration::run_migrations(&conn)
+        .await
+        .context(AppError::Database)?;
+    tracing::info!("audit log database initialized");
+
+    Ok(conn)
+}
+
 // ---------------------------------------------------------------------------
 // Phase 4: Master key verification (HA safety check)
 // ---------------------------------------------------------------------------

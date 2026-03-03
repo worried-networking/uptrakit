@@ -83,7 +83,34 @@ async fn main() -> std::process::ExitCode {
     } else {
         filter
     };
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+
+    // When the journald audit backend is selected, add a dedicated journald
+    // tracing layer filtered to the `uptrakit_audit` target so that structured
+    // audit events reach the system journal alongside normal stdout logging.
+    #[cfg(feature = "journald")]
+    let wants_journald = args
+        .audit_log_backend
+        .contains(&cli::AuditLogBackendArg::Journald);
+    #[cfg(not(feature = "journald"))]
+    let wants_journald = false;
+
+    if wants_journald {
+        #[cfg(feature = "journald")]
+        {
+            use tracing_subscriber::prelude::*;
+            let journald_filter = EnvFilter::new("uptrakit_audit=info");
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::fmt::layer().with_filter(filter))
+                .with(
+                    tracing_journald::layer()
+                        .expect("failed to connect to journald")
+                        .with_filter(journald_filter),
+                )
+                .init();
+        }
+    } else {
+        tracing_subscriber::fmt().with_env_filter(filter).init();
+    }
 
     // Dispatch optional subcommands before entering the normal server path.
     if let Some(cli::ControllerCommand::DbMigrate(ref db_args)) = args.command {
@@ -300,6 +327,85 @@ async fn run(args: cli::Args) -> Result<()> {
     // also signals open SSE streams in the web API to terminate cleanly.
     let shutdown_token = CancellationToken::new();
 
+    // Audit log backend and filter wiring.
+    let (audit_filter, audit_dispatcher) = {
+        use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher, FilterMode, NoopBackend};
+
+        let filter_mode = match args.audit_log_filter {
+            cli::AuditLogFilterArg::All => FilterMode::All,
+            cli::AuditLogFilterArg::Mutations => FilterMode::Mutations,
+            cli::AuditLogFilterArg::None => FilterMode::None,
+        };
+
+        // Validate mutual exclusivity: `none` cannot be combined with other backends.
+        let has_none = args
+            .audit_log_backend
+            .contains(&cli::AuditLogBackendArg::None);
+        if has_none && args.audit_log_backend.len() > 1 {
+            tracing::warn!(
+                "--audit-log-backend=none is mutually exclusive with other backends; \
+                 disabling all audit logging"
+            );
+        }
+
+        if has_none || filter_mode == FilterMode::None {
+            let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> =
+                std::sync::Arc::new(NoopBackend);
+            (
+                AuditFilter::new(FilterMode::None),
+                AuditLogDispatcher::new(backend),
+            )
+        } else {
+            // Build the database connection for the audit log backend.
+            // Use the separate audit DB URL if provided, otherwise the main DB.
+            let audit_db = if let Some(ref url) = args.audit_log_db_url {
+                startup::init_audit_database(url, args.db_max_connections).await?
+            } else {
+                db_conn.clone()
+            };
+
+            let mut backends: Vec<std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend>> =
+                Vec::new();
+
+            for backend_arg in &args.audit_log_backend {
+                match backend_arg {
+                    cli::AuditLogBackendArg::Db => {
+                        backends.push(std::sync::Arc::new(
+                            uptrakit_audit_log::DatabaseBackend::new(audit_db.clone()),
+                        ));
+                    }
+                    #[cfg(feature = "journald")]
+                    cli::AuditLogBackendArg::Journald => {
+                        backends.push(std::sync::Arc::new(
+                            uptrakit_audit_log::JournaldBackend,
+                        ));
+                    }
+                    cli::AuditLogBackendArg::None => {
+                        // Already handled above (has_none guard).
+                    }
+                }
+            }
+
+            let backend: std::sync::Arc<dyn uptrakit_audit_log::AuditLogBackend> =
+                match backends.len() {
+                    0 => std::sync::Arc::new(NoopBackend),
+                    1 => backends.into_iter().next().expect("one backend"),
+                    _ => std::sync::Arc::new(uptrakit_audit_log::MultiplexBackend::new(backends)),
+                };
+
+            tracing::info!(
+                filter = %filter_mode,
+                backends = args.audit_log_backend.len(),
+                "audit logging configured"
+            );
+
+            (
+                AuditFilter::new(filter_mode),
+                AuditLogDispatcher::new(backend),
+            )
+        }
+    };
+
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)
         .ca_key_store(ca_key_store)
@@ -322,7 +428,9 @@ async fn run(args: cli::Args) -> Result<()> {
         .channel_registry(channel_registry)
         .token_denylist(token_denylist)
         .credential_sources(credential_sources)
-        .shutdown_token(shutdown_token.clone());
+        .shutdown_token(shutdown_token.clone())
+        .audit_log_filter(audit_filter)
+        .audit_log_dispatcher(audit_dispatcher);
 
     #[cfg(feature = "oidc")]
     let builder = builder

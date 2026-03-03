@@ -239,6 +239,24 @@ pub struct Args {
     #[arg(long, default_value = "30")]
     pub shutdown_timeout_secs: u64,
 
+    /// Audit log backend(s). Can be specified multiple times for concurrent
+    /// fan-out (e.g. `--audit-log-backend db --audit-log-backend journald`).
+    /// Use `none` to disable all audit logging (mutually exclusive with
+    /// other backends). Default: `db`.
+    #[arg(long = "audit-log-backend", value_enum, default_value = "db")]
+    pub audit_log_backend: Vec<AuditLogBackendArg>,
+
+    /// Separate database URL for audit log storage. When not provided,
+    /// audit logs are stored in the main application database.
+    /// Supported schemes depend on enabled database features.
+    #[arg(long)]
+    pub audit_log_db_url: Option<String>,
+
+    /// Audit log filter mode. Controls which authenticated HTTP requests
+    /// are recorded.
+    #[arg(long, value_enum, default_value = "all")]
+    pub audit_log_filter: AuditLogFilterArg,
+
     /// NATS server URL for cross-controller messaging.
     /// When set, NATS JetStream is used for inter-controller event delivery.
     /// Without this, the controller runs in single-instance mode.
@@ -289,6 +307,35 @@ pub struct OidcBootstrapArgs {
     /// Space-separated OIDC scopes.
     #[arg(long, default_value = "openid email profile groups")]
     pub oidc_scopes: Option<String>,
+}
+
+/// Audit log backend storage.
+///
+/// Multiple backends can be selected simultaneously for concurrent fan-out
+/// (e.g. `--audit-log-backend db --audit-log-backend journald`).
+/// `None` disables all audit logging and is mutually exclusive with other values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum AuditLogBackendArg {
+    /// Store audit logs in the database.
+    Db,
+    /// Emit audit logs to journald via structured tracing events.
+    #[cfg(feature = "journald")]
+    Journald,
+    /// Disable audit logging.
+    None,
+}
+
+/// Audit log filter mode.
+///
+/// Controls which authenticated HTTP requests are recorded.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum AuditLogFilterArg {
+    /// Log all authenticated HTTP requests (default).
+    All,
+    /// Log only mutation requests (POST, PUT, PATCH, DELETE).
+    Mutations,
+    /// Disable audit logging (overrides backend selection).
+    None,
 }
 
 /// How to serve PKI endpoints over plain HTTP.
@@ -587,6 +634,73 @@ mod tests {
         assert!(args.oidc_bootstrap.oidc_issuer_url.is_some());
         assert!(args.oidc_bootstrap.oidc_client_id.is_none());
         assert!(args.oidc_bootstrap.oidc_client_secret.is_none());
+    }
+
+    #[test]
+    fn audit_log_defaults() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        assert_eq!(args.audit_log_backend, vec![super::AuditLogBackendArg::Db]);
+        assert!(matches!(
+            args.audit_log_filter,
+            super::AuditLogFilterArg::All
+        ));
+        assert!(args.audit_log_db_url.is_none());
+    }
+
+    #[test]
+    fn audit_log_backend_none() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--audit-log-backend",
+            "none",
+        ])
+        .expect("should parse none backend");
+        assert_eq!(
+            args.audit_log_backend,
+            vec![super::AuditLogBackendArg::None]
+        );
+    }
+
+    #[test]
+    fn audit_log_filter_mutations() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--audit-log-filter",
+            "mutations",
+        ])
+        .expect("should parse mutations filter");
+        assert!(matches!(
+            args.audit_log_filter,
+            super::AuditLogFilterArg::Mutations
+        ));
+    }
+
+    #[test]
+    fn audit_log_separate_db_url() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--audit-log-db-url",
+            "postgresql://user:pass@host:5432/audit",
+        ])
+        .expect("should parse separate DB URL");
+        assert_eq!(
+            args.audit_log_db_url.as_deref(),
+            Some("postgresql://user:pass@host:5432/audit")
+        );
+    }
+
+    #[test]
+    fn audit_log_multiple_backends() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--audit-log-backend",
+            "db",
+            "--audit-log-backend",
+            "db",
+        ])
+        .expect("should parse multiple backends");
+        assert_eq!(args.audit_log_backend.len(), 2);
     }
 
     #[test]
