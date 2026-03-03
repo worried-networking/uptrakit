@@ -7172,6 +7172,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
+ "uptrakit-audit-log",
  "uptrakit-command",
  "uptrakit-crypto",
  "uptrakit-directories",

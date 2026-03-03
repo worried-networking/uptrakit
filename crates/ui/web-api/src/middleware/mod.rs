@@ -1,3 +1,4 @@
+pub mod audit_log;
 pub mod permission;
 pub mod rate_limit;
 pub mod request_log;

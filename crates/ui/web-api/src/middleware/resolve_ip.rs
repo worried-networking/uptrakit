@@ -269,6 +269,10 @@ mod tests {
                 crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
             shutdown_token: Default::default(),
             external_scheduler_connected: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
+            audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(
+                Arc::new(uptrakit_audit_log::NoopBackend),
+            ),
         })
     }
 

@@ -79,6 +79,7 @@ tokio-util = { workspace = true }
 zeroize = { workspace = true }
 async-nats = { workspace = true, optional = true }
 uptrakit-nats = { workspace = true, optional = true }
+uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-notification-channels = { workspace = true, features = ["webhook"] }
 
 [dev-dependencies]

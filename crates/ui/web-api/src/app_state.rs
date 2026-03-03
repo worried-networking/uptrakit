@@ -111,6 +111,10 @@ pub struct AppState {
     /// Set to `true` when an external scheduler service is connected. The embedded
     /// scheduler reads this flag to defer non-internal tasks.
     pub external_scheduler_connected: Arc<AtomicBool>,
+    /// Audit log filter (global mode, per-tenant overrides checked at log time).
+    pub audit_log_filter: uptrakit_audit_log::AuditFilter,
+    /// Audit log dispatcher for fire-and-forget entry persistence.
+    pub audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -165,6 +169,8 @@ pub struct AppStateBuilder {
         Option<crate::batch_progress_broadcaster::BatchProgressBroadcaster>,
     shutdown_token: Option<CancellationToken>,
     external_scheduler_connected: Option<Arc<AtomicBool>>,
+    audit_log_filter: Option<uptrakit_audit_log::AuditFilter>,
+    audit_log_dispatcher: Option<uptrakit_audit_log::AuditLogDispatcher>,
 }
 
 impl AppStateBuilder {
@@ -204,6 +210,8 @@ impl AppStateBuilder {
             batch_progress_broadcaster: None,
             shutdown_token: None,
             external_scheduler_connected: None,
+            audit_log_filter: None,
+            audit_log_dispatcher: None,
         }
     }
 
@@ -369,6 +377,22 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the audit log filter mode.
+    ///
+    /// Optional — defaults to `AuditFilter::default()` (mode = All).
+    pub fn audit_log_filter(mut self, v: uptrakit_audit_log::AuditFilter) -> Self {
+        self.audit_log_filter = Some(v);
+        self
+    }
+
+    /// Set the audit log dispatcher.
+    ///
+    /// Optional — defaults to a dispatcher backed by `NoopBackend`.
+    pub fn audit_log_dispatcher(mut self, v: uptrakit_audit_log::AuditLogDispatcher) -> Self {
+        self.audit_log_dispatcher = Some(v);
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -452,6 +476,12 @@ impl AppStateBuilder {
             external_scheduler_connected: self
                 .external_scheduler_connected
                 .unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
+            audit_log_filter: self.audit_log_filter.unwrap_or_default(),
+            audit_log_dispatcher: self.audit_log_dispatcher.unwrap_or_else(|| {
+                uptrakit_audit_log::AuditLogDispatcher::new(std::sync::Arc::new(
+                    uptrakit_audit_log::NoopBackend,
+                ))
+            }),
         })
     }
 }
