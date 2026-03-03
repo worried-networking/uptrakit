@@ -675,7 +675,15 @@ pub async fn oidc_complete_registration(
     State(state): State<Arc<AppState>>,
     Json(req): Json<OidcCompleteRegistrationRequest>,
 ) -> Response {
-    // 1. Atomically consume the pending registration so the code is one-time use
+    // 1. Validate the registration token first (pure check, no side effects).
+    // This must happen before consuming the one-time-use code so that a wrong
+    // token does not permanently burn a valid registration_code.
+    let reg_settings = state.settings.registration();
+    if let Err(e) = reg_settings.validate(Some(req.registration_token.expose_secret())) {
+        return e.into_response();
+    }
+
+    // 2. Atomically consume the pending registration so the code is one-time use.
     let pending = match state
         .oidc_registration_store
         .take(req.registration_code.expose_secret())
@@ -693,12 +701,6 @@ pub async fn oidc_complete_registration(
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
-
-    // 2. Validate the registration token after consuming the entry
-    let reg_settings = state.settings.registration();
-    if let Err(e) = reg_settings.validate(Some(req.registration_token.expose_secret())) {
-        return e.into_response();
-    }
 
     // 3. Wrap user creation + first-user check + role assignment in a transaction
     // to prevent the race where two concurrent registrations both see count == 0.
