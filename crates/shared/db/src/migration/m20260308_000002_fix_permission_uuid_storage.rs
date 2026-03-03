@@ -22,11 +22,19 @@ use uuid::Uuid;
 /// For each `permissions` row whose `id` column has `typeof(id) = 'text'`:
 ///
 /// 1. Parse the stored 36-char UUID string into its 16-byte binary form.
-/// 2. Update `role_permissions.permission_id` TEXT→BLOB for that permission.
-/// 3. Update `permissions.id` TEXT→BLOB for that permission.
+/// 2. Collect the `role_id` values from any `role_permissions` rows that
+///    reference the TEXT `permission_id`.
+/// 3. Delete those `role_permissions` rows (the TEXT FK value will no longer
+///    exist after step 4).
+/// 4. Update `permissions.id` TEXT→BLOB.
+/// 5. Re-insert the `role_permissions` rows with the corrected BLOB
+///    `permission_id`.
 ///
-/// All changes run inside a single transaction with FK enforcement temporarily
-/// disabled (the updates break and then restore FK integrity atomically).
+/// This delete-fix-reinsert sequence never violates FK constraints at any
+/// intermediate step, so it is safe to run inside the transaction that
+/// sea-orm-migration implicitly wraps around every `up()` call.
+/// (`PRAGMA foreign_keys = OFF` is silently ignored inside an active
+/// transaction and must NOT be used here.)
 ///
 /// ## Scope
 ///
@@ -80,17 +88,6 @@ impl MigrationTrait for Migration {
             to_fix.push((id_str, name));
         }
 
-        // Disable FK enforcement before the transaction.
-        //
-        // Both `role_permissions.permission_id → permissions.id` and the
-        // reverse parent-key-update check would fire mid-conversion.  We turn
-        // FKs off, atomically fix all rows, then re-enable.  SQLite requires
-        // the PRAGMA to be changed outside an active transaction.
-        //
-        // `PRAGMA foreign_keys` has no sea_query equivalent;
-        // execute_unprepared is the approved exception for PRAGMA statements.
-        db.execute_unprepared("PRAGMA foreign_keys = OFF").await?;
-
         let txn = db.begin().await?;
 
         for (id_str, name) in to_fix {
@@ -99,13 +96,37 @@ impl MigrationTrait for Migration {
                     "repair migration: invalid UUID text '{id_str}' for permission '{name}': {e}"
                 ))
             })?;
-            let bytes: Vec<u8> = uuid.as_bytes().to_vec();
+            let blob = Value::Bytes(Some(uuid.as_bytes().to_vec()));
 
-            // Fix any role_permissions rows that reference the TEXT uuid.
+            // 1. Collect the role_ids that reference the TEXT permission_id so
+            //    we can re-insert them after fixing the parent row.
+            let role_rows = txn
+                .query_all(
+                    &Query::select()
+                        .from(Alias::new("role_permissions"))
+                        .column(Alias::new("role_id"))
+                        .and_where(
+                            Expr::col(Alias::new("permission_id"))
+                                .eq(Value::String(Some(id_str.clone()))),
+                        )
+                        .to_owned(),
+                )
+                .await?;
+
+            let mut role_ids: Vec<Vec<u8>> = Vec::with_capacity(role_rows.len());
+            for row in &role_rows {
+                use sea_orm::TryGetable as _;
+                let role_id: Vec<u8> = Vec::<u8>::try_get_by_index(row, 0).map_err(|e| {
+                    DbErr::Custom(format!("failed to read role_id as bytes: {e:?}"))
+                })?;
+                role_ids.push(role_id);
+            }
+
+            // 2. Delete child rows referencing the TEXT permission_id.
+            //    After this the TEXT value is no longer referenced by any FK.
             txn.execute(
-                &Query::update()
-                    .table(Alias::new("role_permissions"))
-                    .value(Alias::new("permission_id"), Value::Bytes(Some(bytes.clone())))
+                &Query::delete()
+                    .from_table(Alias::new("role_permissions"))
                     .and_where(
                         Expr::col(Alias::new("permission_id"))
                             .eq(Value::String(Some(id_str.clone()))),
@@ -114,21 +135,41 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-            // Fix the permissions row itself.
+            // 3. Fix the parent row: TEXT id → BLOB id.
             txn.execute(
                 &Query::update()
                     .table(Alias::new("permissions"))
-                    .value(Alias::new("id"), Value::Bytes(Some(bytes)))
+                    .value(Alias::new("id"), blob.clone())
                     .and_where(Expr::col(Alias::new("name")).eq(name.as_str()))
                     .to_owned(),
             )
             .await?;
+
+            // 4. Re-insert the child rows with the corrected BLOB permission_id.
+            for role_id_bytes in role_ids {
+                txn.execute(
+                    &Query::insert()
+                        .into_table(Alias::new("role_permissions"))
+                        .columns([Alias::new("role_id"), Alias::new("permission_id")])
+                        .values_panic([
+                            Expr::val(Value::Bytes(Some(role_id_bytes))),
+                            Expr::val(blob.clone()),
+                        ])
+                        .on_conflict(
+                            OnConflict::columns([
+                                Alias::new("role_id"),
+                                Alias::new("permission_id"),
+                            ])
+                            .do_nothing()
+                            .to_owned(),
+                        )
+                        .to_owned(),
+                )
+                .await?;
+            }
         }
 
         txn.commit().await?;
-
-        // Re-enable FK enforcement now that all rows are consistent.
-        db.execute_unprepared("PRAGMA foreign_keys = ON").await?;
 
         Ok(())
     }

@@ -521,7 +521,6 @@ Raw SQL is accepted **only** for constructs that have no sea_query equivalent.  
 | `CREATE TABLE new AS SELECT * FROM old` | SQLite-specific shorthand; no builder equivalent |
 | `CREATE UNIQUE INDEX … WHERE col IS NULL` | Partial/filtered index; builder has no `WHERE` |
 | `INSERT INTO … SELECT strftime(…)` | `strftime` is a SQLite-specific function |
-| `PRAGMA foreign_keys = OFF / ON` | PRAGMA has no sea_query equivalent |
 | `SELECT typeof(col) FROM …` | `typeof()` is SQLite-specific; use `query_all_raw` / `query_one_raw` |
 
 **Inline comment requirement:**
@@ -630,29 +629,63 @@ tenant::ActiveModel {
 .expect("insert test tenant");
 ```
 
-**Approved exception — repair migrations that atomically fix FK-violating data**
+**Repair migrations that touch both sides of a FK relationship**
 
-A repair migration may temporarily disable FK enforcement when it must update both sides of a
-FK relationship as an atomic unit and the intermediate state is necessarily inconsistent.
-All three conditions must hold:
+`PRAGMA foreign_keys = OFF` is **silently ignored inside an active transaction** (SQLite
+requirement: the pragma can only be changed outside a transaction).  sea-orm-migration v2
+wraps every `up()` call in a transaction, so setting the PRAGMA inside `up()` is a no-op
+and FK enforcement remains ON.
 
-1. The migration fixes existing broken data (not a normal schema or seed change).
-2. The PRAGMA is set immediately before `begin()`, re-enabled immediately after `commit()`.
-3. An inline comment explains why the intermediate state violates FK constraints.
+Instead use a **delete-fix-reinsert** sequence that never has an FK-violating intermediate
+state:
+
+1. SELECT the child-side rows that reference the soon-to-be-changed parent key.
+2. DELETE those child rows (the old key still exists in the parent, so no FK error).
+3. UPDATE the parent row to the new key value.
+4. Re-INSERT the child rows with the corrected key (`ON CONFLICT DO NOTHING` for idempotency).
 
 ```rust
-// Both `role_permissions.permission_id → permissions.id` and the reverse
-// parent-key-update check fire during the TEXT→BLOB conversion.  The
-// intermediate state is FK-inconsistent; turning enforcement off for the
-// duration of the transaction is the only safe option.
-//
-// PRAGMA foreign_keys has no sea_query equivalent; execute_unprepared is
-// the approved exception for PRAGMA statements.
-db.execute_unprepared("PRAGMA foreign_keys = OFF").await?;
-let txn = db.begin().await?;
-// … updates …
-txn.commit().await?;
-db.execute_unprepared("PRAGMA foreign_keys = ON").await?;
+// 1. Collect which roles reference the TEXT permission_id.
+let role_rows = txn
+    .query_all(&Query::select()
+        .from(Alias::new("role_permissions"))
+        .column(Alias::new("role_id"))
+        .and_where(Expr::col(Alias::new("permission_id")).eq(text_id.clone()))
+        .to_owned())
+    .await?;
+
+// 2. Delete child rows — old TEXT key still exists in permissions, no FK error.
+txn.execute(&Query::delete()
+    .from_table(Alias::new("role_permissions"))
+    .and_where(Expr::col(Alias::new("permission_id")).eq(text_id.clone()))
+    .to_owned())
+    .await?;
+
+// 3. Fix the parent row TEXT id → BLOB id.
+txn.execute(&Query::update()
+    .table(Alias::new("permissions"))
+    .value(Alias::new("id"), blob.clone())
+    .and_where(Expr::col(Alias::new("name")).eq(name.as_str()))
+    .to_owned())
+    .await?;
+
+// 4. Re-insert child rows with the corrected BLOB permission_id.
+for role_id_bytes in role_ids {
+    txn.execute(&Query::insert()
+        .into_table(Alias::new("role_permissions"))
+        .columns([Alias::new("role_id"), Alias::new("permission_id")])
+        .values_panic([
+            Expr::val(Value::Bytes(Some(role_id_bytes))),
+            Expr::val(blob.clone()),
+        ])
+        .on_conflict(
+            OnConflict::columns([Alias::new("role_id"), Alias::new("permission_id")])
+                .do_nothing()
+                .to_owned(),
+        )
+        .to_owned())
+        .await?;
+}
 ```
 
 ### Avoid the migration-seeded default tenant for tests with unique-per-tenant constraints
