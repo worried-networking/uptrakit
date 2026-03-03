@@ -1,4 +1,5 @@
 use sea_orm_migration::prelude::*;
+use sea_orm_migration::schema::*;
 
 /// Guarantee that `ssh_hosts.machine_id` is a nullable column.
 ///
@@ -12,84 +13,152 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
+/// Recreate `ssh_hosts` with the correct schema, copying all data.
+///
+/// Used by both `up()` and `down()` since the schema is identical in both
+/// directions (nullable `machine_id`).
+async fn recreate_ssh_hosts(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    manager
+        .create_table(
+            Table::create()
+                .table(SshHostsNew::Table)
+                .col(
+                    ColumnDef::new(SshHostsNew::Id)
+                        .string()
+                        .not_null()
+                        .primary_key(),
+                )
+                .col(string_uniq(SshHostsNew::Name))
+                .col(string(SshHostsNew::Hostname))
+                .col(
+                    ColumnDef::new(SshHostsNew::Port)
+                        .integer()
+                        .not_null()
+                        .default(22),
+                )
+                .col(string(SshHostsNew::Username))
+                .col(string(SshHostsNew::PrivateKey))
+                .col(string(SshHostsNew::KeyType))
+                .col(string_null(SshHostsNew::HostKeyFingerprint))
+                .col(string_null(SshHostsNew::MachineId))
+                .col(timestamp(SshHostsNew::CreatedAt))
+                .col(timestamp(SshHostsNew::UpdatedAt))
+                .col(ColumnDef::new(SshHostsNew::SudoAvailable).integer())
+                .col(ColumnDef::new(SshHostsNew::IsRoot).integer())
+                .col(
+                    ColumnDef::new(SshHostsNew::SudoPolicy)
+                        .string()
+                        .not_null()
+                        .default("auto"),
+                )
+                .to_owned(),
+        )
+        .await?;
+
+    let insert = Query::insert()
+        .into_table(SshHostsNew::Table)
+        .columns([
+            SshHostsNew::Id,
+            SshHostsNew::Name,
+            SshHostsNew::Hostname,
+            SshHostsNew::Port,
+            SshHostsNew::Username,
+            SshHostsNew::PrivateKey,
+            SshHostsNew::KeyType,
+            SshHostsNew::HostKeyFingerprint,
+            SshHostsNew::MachineId,
+            SshHostsNew::CreatedAt,
+            SshHostsNew::UpdatedAt,
+            SshHostsNew::SudoAvailable,
+            SshHostsNew::IsRoot,
+            SshHostsNew::SudoPolicy,
+        ])
+        .select_from(
+            Query::select()
+                .column(SshHosts::Id)
+                .column(SshHosts::Name)
+                .column(SshHosts::Hostname)
+                .column(SshHosts::Port)
+                .column(SshHosts::Username)
+                .column(SshHosts::PrivateKey)
+                .column(SshHosts::KeyType)
+                .column(SshHosts::HostKeyFingerprint)
+                .column(SshHosts::MachineId)
+                .column(SshHosts::CreatedAt)
+                .column(SshHosts::UpdatedAt)
+                .column(SshHosts::SudoAvailable)
+                .column(SshHosts::IsRoot)
+                .column(SshHosts::SudoPolicy)
+                .from(SshHosts::Table)
+                .to_owned(),
+        )
+        .map_err(|e| DbErr::Migration(e.to_string()))?
+        .to_owned();
+    manager.exec_stmt(insert).await?;
+
+    manager
+        .drop_table(Table::drop().table(SshHosts::Table).to_owned())
+        .await?;
+
+    manager
+        .rename_table(
+            Table::rename()
+                .table(SshHostsNew::Table, SshHosts::Table)
+                .to_owned(),
+        )
+        .await?;
+
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let conn = manager.get_connection();
-
-        conn.execute_unprepared(
-            "CREATE TABLE ssh_hosts_new (
-                id                   TEXT    NOT NULL PRIMARY KEY,
-                name                 TEXT    NOT NULL UNIQUE,
-                hostname             TEXT    NOT NULL,
-                port                 INTEGER NOT NULL DEFAULT 22,
-                username             TEXT    NOT NULL,
-                private_key          TEXT    NOT NULL,
-                key_type             TEXT    NOT NULL,
-                host_key_fingerprint TEXT,
-                machine_id           TEXT,
-                created_at           TEXT    NOT NULL,
-                updated_at           TEXT    NOT NULL,
-                sudo_available       INTEGER,
-                is_root              INTEGER,
-                sudo_policy          TEXT    NOT NULL DEFAULT 'auto'
-            )",
-        )
-        .await?;
-
-        conn.execute_unprepared(
-            "INSERT INTO ssh_hosts_new
-             SELECT id, name, hostname, port, username, private_key, key_type,
-                    host_key_fingerprint, machine_id, created_at, updated_at,
-                    sudo_available, is_root, sudo_policy
-             FROM ssh_hosts",
-        )
-        .await?;
-
-        conn.execute_unprepared("DROP TABLE ssh_hosts").await?;
-        conn.execute_unprepared("ALTER TABLE ssh_hosts_new RENAME TO ssh_hosts").await?;
-
-        Ok(())
+        recreate_ssh_hosts(manager).await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // The only change made by `up` is ensuring machine_id is nullable;
         // rolling back to a NOT NULL column would re-introduce the bug.
         // Recreate with the same correct schema so down is safe and idempotent.
-        let conn = manager.get_connection();
-
-        conn.execute_unprepared(
-            "CREATE TABLE ssh_hosts_new (
-                id                   TEXT    NOT NULL PRIMARY KEY,
-                name                 TEXT    NOT NULL UNIQUE,
-                hostname             TEXT    NOT NULL,
-                port                 INTEGER NOT NULL DEFAULT 22,
-                username             TEXT    NOT NULL,
-                private_key          TEXT    NOT NULL,
-                key_type             TEXT    NOT NULL,
-                host_key_fingerprint TEXT,
-                machine_id           TEXT,
-                created_at           TEXT    NOT NULL,
-                updated_at           TEXT    NOT NULL,
-                sudo_available       INTEGER,
-                is_root              INTEGER,
-                sudo_policy          TEXT    NOT NULL DEFAULT 'auto'
-            )",
-        )
-        .await?;
-
-        conn.execute_unprepared(
-            "INSERT INTO ssh_hosts_new
-             SELECT id, name, hostname, port, username, private_key, key_type,
-                    host_key_fingerprint, machine_id, created_at, updated_at,
-                    sudo_available, is_root, sudo_policy
-             FROM ssh_hosts",
-        )
-        .await?;
-
-        conn.execute_unprepared("DROP TABLE ssh_hosts").await?;
-        conn.execute_unprepared("ALTER TABLE ssh_hosts_new RENAME TO ssh_hosts").await?;
-
-        Ok(())
+        recreate_ssh_hosts(manager).await
     }
+}
+
+#[derive(DeriveIden)]
+enum SshHosts {
+    Table,
+    Id,
+    Name,
+    Hostname,
+    Port,
+    Username,
+    PrivateKey,
+    KeyType,
+    HostKeyFingerprint,
+    MachineId,
+    CreatedAt,
+    UpdatedAt,
+    SudoAvailable,
+    IsRoot,
+    SudoPolicy,
+}
+
+#[derive(DeriveIden)]
+enum SshHostsNew {
+    Table,
+    Id,
+    Name,
+    Hostname,
+    Port,
+    Username,
+    PrivateKey,
+    KeyType,
+    HostKeyFingerprint,
+    MachineId,
+    CreatedAt,
+    UpdatedAt,
+    SudoAvailable,
+    IsRoot,
+    SudoPolicy,
 }
