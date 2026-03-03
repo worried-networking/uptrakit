@@ -157,6 +157,7 @@ pub async fn trigger_scheduled_task(tenant_db: &TenantDb, id: Uuid) -> Result<bo
         .col_expr(scheduled_task::Column::NextRunAt, Expr::value(now))
         .col_expr(scheduled_task::Column::UpdatedAt, Expr::value(now))
         .filter(scheduled_task::Column::Id.eq(id))
+        .filter(scheduled_task::Column::TenantId.eq(tenant_db.tenant_id))
         .exec(tenant_db.db())
         .await
         .context_to()?;
