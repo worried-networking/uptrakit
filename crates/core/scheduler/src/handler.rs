@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rootcause::prelude::*;
-use sea_orm::{ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter};
+use sea_orm::{ConnectOptions, Database};
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectingPayload, ServiceMessage};
 use uptrakit_scheduler_engine::executors::{
@@ -40,6 +40,9 @@ const STOP_SCHEDULER_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct SchedulerHandler {
     pub poll_interval_secs: u64,
     runtime: Option<SchedulerRuntime>,
+    /// Stable service ID captured on connect; used as the claim identity so that
+    /// a scheduler that reconnects to a different controller reuses the same UUID.
+    service_id: Option<Uuid>,
 }
 
 impl SchedulerHandler {
@@ -47,6 +50,7 @@ impl SchedulerHandler {
         Self {
             poll_interval_secs,
             runtime: None,
+            service_id: None,
         }
     }
 
@@ -87,8 +91,9 @@ impl ServiceHandler for SchedulerHandler {
     async fn on_connected(
         &mut self,
         _conn: &mut ControllerConnection,
-        _identity: &uptrakit_service_sdk::ServiceIdentityState,
+        identity: &uptrakit_service_sdk::ServiceIdentityState,
     ) -> LoopResult<()> {
+        self.service_id = identity.service_id();
         tracing::info!("connected to controller, waiting for ServiceCredentials");
         Ok(())
     }
@@ -167,38 +172,21 @@ impl ServiceHandler for SchedulerHandler {
                 tracing::info!("NATS connection established");
 
                 // 4. Resolve scheduler identity.
-                // Use the service ID from the connection (available as part of the
-                // enrollment state). For NATS publishing, we use a V7 UUID that
-                // identifies this scheduler instance uniquely.
-                let scheduler_id = Uuid::now_v7();
+                // Use the stable enrolled service ID so the claim identity persists
+                // across reconnects (even to a different controller).
+                let scheduler_id = self.service_id.ok_or_else(|| {
+                    report!(LoopError::Other(
+                        "service_id not available; on_connected must be called first".to_string()
+                    ))
+                })?;
 
-                // 5. Resolve default tenant.
-                let default_tenant = {
-                    use uptrakit_shared_db::entity::{prelude::Tenant, tenant};
-                    Tenant::find()
-                        .filter(tenant::Column::IsDefault.eq(true))
-                        .one(&db)
-                        .await
-                        .map_err(|e| {
-                            report!(LoopError::Other(format!(
-                                "failed to find default tenant: {e}"
-                            )))
-                        })?
-                        .ok_or_else(|| {
-                            report!(LoopError::Other(
-                                "no default tenant found in database".to_string()
-                            ))
-                        })?
-                };
-
-                // 6. Build notifier and scheduler.
+                // 5. Build notifier and scheduler.
                 let notifier: Arc<dyn SchedulerNotifier> =
                     Arc::new(NatsSchedulerNotifier::new(nats_conn, scheduler_id));
 
                 let config = SchedulerConfig {
                     poll_interval: Duration::from_secs(self.poll_interval_secs),
                     controller_id: scheduler_id,
-                    tenant_id: default_tenant.id,
                     task_execution_timeout: uptrakit_scheduler_engine::TASK_EXECUTION_TIMEOUT,
                 };
 
@@ -228,7 +216,7 @@ impl ServiceHandler for SchedulerHandler {
                     Box::new(DetectVersionExecutor::new(db, notifier)),
                 );
 
-                // 7. Spawn the scheduler loop.
+                // 6. Spawn the scheduler loop.
                 let cancel = CancellationToken::new();
                 let cancel_clone = cancel.clone();
                 let handle = tokio::spawn(async move {
@@ -252,6 +240,7 @@ impl ServiceHandler for SchedulerHandler {
 
     fn capabilities(&self) -> BTreeSet<Capability> {
         [
+            Capability::SystemService,
             Capability::Scheduler,
             Capability::DatabaseAccess,
             Capability::NatsAccess,
@@ -305,12 +294,13 @@ mod tests {
     fn scheduler_handler_capabilities() {
         let handler = SchedulerHandler::new(15);
         let caps = handler.capabilities();
+        assert!(caps.contains(&Capability::SystemService));
         assert!(caps.contains(&Capability::Scheduler));
         assert!(caps.contains(&Capability::DatabaseAccess));
         assert!(caps.contains(&Capability::NatsAccess));
         assert!(caps.contains(&Capability::MasterKeyAccess));
         assert!(caps.contains(&Capability::GracefulShutdown));
         assert!(!caps.contains(&Capability::CaManagement), "CaManagement is internal-only");
-        assert_eq!(caps.len(), 5);
+        assert_eq!(caps.len(), 6);
     }
 }
