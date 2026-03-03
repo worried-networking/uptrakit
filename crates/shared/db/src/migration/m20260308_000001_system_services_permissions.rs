@@ -12,8 +12,9 @@ use uuid::Uuid;
 ///
 /// ## Idempotency
 ///
-/// All statements use `INSERT OR IGNORE` semantics, making the migration safe
-/// to re-run.
+/// Permission INSERTs use `ON CONFLICT DO NOTHING` on the `name` column.
+/// The `role_permissions` INSERTs use `INSERT OR IGNORE`.  Both make the
+/// migration safe to re-run.
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -26,22 +27,62 @@ impl MigrationTrait for Migration {
         let manage_perm_id = Uuid::now_v7();
 
         // 1. Insert view_system_services permission.
-        db.execute_unprepared(&format!(
-            "INSERT OR IGNORE INTO permissions (id, name, description, created_at) \
-             VALUES ('{view_perm_id}', 'view_system_services', \
-                     'View system services (MQTT bridge, external scheduler).', \
-                     '{now}')"
-        ))
-        .await?;
+        //
+        //    IMPORTANT: use Query::insert() so that sea-query binds the Uuid as a
+        //    16-byte BLOB on SQLite (the same encoding used by the initial migration).
+        //    execute_unprepared(&format!("… VALUES ('{id}', …)")) would embed the UUID
+        //    as a 36-character TEXT literal which causes SeaORM/sqlx to fail with
+        //    `ParseByteLength { len: 36 }` when reading the row back.
+        manager
+            .exec_stmt(
+                Query::insert()
+                    .into_table(Alias::new("permissions"))
+                    .columns([
+                        Alias::new("id"),
+                        Alias::new("name"),
+                        Alias::new("description"),
+                        Alias::new("created_at"),
+                    ])
+                    .values_panic([
+                        view_perm_id.into(),
+                        "view_system_services".into(),
+                        "View system services (MQTT bridge, external scheduler).".into(),
+                        now.into(),
+                    ])
+                    .on_conflict(
+                        OnConflict::column(Alias::new("name"))
+                            .do_nothing()
+                            .to_owned(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
 
         // 2. Insert manage_system_services permission.
-        db.execute_unprepared(&format!(
-            "INSERT OR IGNORE INTO permissions (id, name, description, created_at) \
-             VALUES ('{manage_perm_id}', 'manage_system_services', \
-                     'Manage system services: approve, reject, deactivate, configure enrollment token.', \
-                     '{now}')"
-        ))
-        .await?;
+        manager
+            .exec_stmt(
+                Query::insert()
+                    .into_table(Alias::new("permissions"))
+                    .columns([
+                        Alias::new("id"),
+                        Alias::new("name"),
+                        Alias::new("description"),
+                        Alias::new("created_at"),
+                    ])
+                    .values_panic([
+                        manage_perm_id.into(),
+                        "manage_system_services".into(),
+                        "Manage system services: approve, reject, deactivate, configure enrollment token.".into(),
+                        now.into(),
+                    ])
+                    .on_conflict(
+                        OnConflict::column(Alias::new("name"))
+                            .do_nothing()
+                            .to_owned(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
 
         // 3. Grant both to owner.
         for perm_name in ["view_system_services", "manage_system_services"] {

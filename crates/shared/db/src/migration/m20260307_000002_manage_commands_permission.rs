@@ -25,9 +25,9 @@ use uuid::Uuid;
 ///
 /// ## Idempotency
 ///
-/// All statements use `INSERT OR IGNORE` (SQLite) / `INSERT IGNORE` (MySQL)
-/// / `ON CONFLICT DO NOTHING` (PostgreSQL) semantics, making the migration
-/// safe to re-run.
+/// The permission INSERT uses `ON CONFLICT DO NOTHING` on the `name` column.
+/// The `role_permissions` INSERTs use `INSERT OR IGNORE`.  Both make the
+/// migration safe to re-run.
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -40,14 +40,38 @@ impl MigrationTrait for Migration {
 
         // 1. Insert the new permission (idempotent: ignore if already exists).
         //    The permission name must match `Permission::ManageCommands::as_str()`.
-        db.execute_unprepared(&format!(
-            "INSERT OR IGNORE INTO permissions (id, name, description, created_at) \
-             VALUES ('{perm_id}', 'manage_commands', \
-                     'Modify command-bearing plugin config fields (shell commands, hooks). \
-                      Grants effective code-execution authority on managed hosts.', \
-                     '{now}')"
-        ))
-        .await?;
+        //
+        //    IMPORTANT: use Query::insert() so that sea-query binds the Uuid as a
+        //    16-byte BLOB on SQLite (the same encoding used by the initial migration).
+        //    execute_unprepared(&format!("… VALUES ('{perm_id}', …)")) would embed the
+        //    UUID as a 36-character TEXT literal which causes SeaORM/sqlx to fail with
+        //    `ParseByteLength { len: 36 }` when reading the row back.
+        manager
+            .exec_stmt(
+                Query::insert()
+                    .into_table(Alias::new("permissions"))
+                    .columns([
+                        Alias::new("id"),
+                        Alias::new("name"),
+                        Alias::new("description"),
+                        Alias::new("created_at"),
+                    ])
+                    .values_panic([
+                        perm_id.into(),
+                        "manage_commands".into(),
+                        "Modify command-bearing plugin config fields (shell commands, hooks). \
+                         Grants effective code-execution authority on managed hosts."
+                            .into(),
+                        now.into(),
+                    ])
+                    .on_conflict(
+                        OnConflict::column(Alias::new("name"))
+                            .do_nothing()
+                            .to_owned(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
 
         // 2. Grant to owner — join roles and permissions by name to avoid
         //    hardcoding UUIDs.  INSERT OR IGNORE makes this idempotent.

@@ -19,6 +19,7 @@ mod m20260302_000004_service_cert_lifetime;
 mod m20260302_000005_system_services;
 mod m20260307_000002_manage_commands_permission;
 mod m20260308_000001_system_services_permissions;
+mod m20260308_000002_fix_permission_uuid_storage;
 
 pub struct Migrator;
 
@@ -44,6 +45,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260302_000005_system_services::Migration),
             Box::new(m20260307_000002_manage_commands_permission::Migration),
             Box::new(m20260308_000001_system_services_permissions::Migration),
+            Box::new(m20260308_000002_fix_permission_uuid_storage::Migration),
         ]
     }
 }
@@ -61,9 +63,9 @@ mod tests {
     use crate::entity::{
         crl_cache, global_setting, host_discovery_allowlist, host_package, host_package_ignore,
         host_package_update_history, host_software_item, notification_channel, notification_log,
-        notification_rule, plugin_config, revoked_token_jti, revoked_token_user, service,
-        software_item, system_service, system_service_certificate, tenant_discovery_allowlist,
-        update_batch, update_history,
+        notification_rule, plugin_config, revoked_token_jti, revoked_token_user, role_permission,
+        service, software_item, system_service, system_service_certificate,
+        tenant_discovery_allowlist, update_batch, update_history,
     };
 
     /// Verify that the `has_update` generated column exists in `host_packages`.
@@ -328,6 +330,119 @@ mod tests {
                 "{role_name} role must have manage_commands permission after all migrations"
             );
         }
+    }
+
+    /// After all migrations, the `role_permissions` entity query must succeed.
+    ///
+    /// This catches the TEXT/BLOB UUID mismatch: if any `permission_id` in
+    /// `role_permissions` is stored as a 36-char TEXT string, SeaORM fails
+    /// with `ParseByteLength { len: 36 }` when loading `role_permission::Model`.
+    #[tokio::test]
+    async fn role_permissions_entity_query_succeeds() {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+        run_migrations(&db).await.unwrap();
+
+        role_permission::Entity::find()
+            .all(&db)
+            .await
+            .expect("role_permissions entity query must succeed after all migrations");
+    }
+
+    /// Verify that the repair migration converts TEXT-stored UUIDs to BLOBs.
+    ///
+    /// Steps:
+    /// 1. Apply migrations 1–18 (all except the repair migration).
+    /// 2. Manually inject a permission row with a TEXT-stored UUID and a
+    ///    matching `role_permissions` row.
+    /// 3. Apply migration 19 (the repair).
+    /// 4. Assert `typeof(id) = 'blob'` for the injected permission.
+    /// 5. Assert the entity query still succeeds.
+    #[tokio::test]
+    async fn repair_migration_fixes_text_uuid_storage() {
+        use sea_orm::{ConnectionTrait as _, Statement, TryGetable as _};
+
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+
+        // Apply migrations 1–18 (skip the repair migration at index 19).
+        Migrator::up(&db, Some(18))
+            .await
+            .expect("first 18 migrations should succeed");
+
+        // Pick a real role id from the database to use as the owner role_id.
+        let role_row = db
+            .query_one_raw(Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT id FROM roles WHERE name = 'owner' LIMIT 1",
+            ))
+            .await
+            .unwrap()
+            .expect("owner role must exist");
+        // The role id is stored as BLOB; read it back as bytes.
+        let role_id_bytes: Vec<u8> =
+            Vec::<u8>::try_get_by_index(&role_row, 0).expect("role id must be readable as bytes");
+
+        // Inject a TEXT-stored permission — simulating the pre-fix behaviour.
+        let broken_uuid = "018f1234-0000-7000-8000-000000000001";
+        db.execute_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            "INSERT INTO permissions (id, name, description, created_at) \
+             VALUES (?, 'test_broken_perm', 'repair test', '2026-01-01T00:00:00Z')",
+            [Value::String(Some(broken_uuid.to_owned()))],
+        ))
+        .await
+        .expect("injecting TEXT-uuid permission must succeed");
+
+        // Inject a role_permissions row that references the TEXT uuid.
+        db.execute_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+            [
+                Value::Bytes(Some(role_id_bytes)),
+                Value::String(Some(broken_uuid.to_owned())),
+            ],
+        ))
+        .await
+        .expect("injecting TEXT-uuid role_permission must succeed");
+
+        // Confirm the injection was TEXT before the repair.
+        let typeof_before = db
+            .query_one_raw(Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT typeof(id) FROM permissions WHERE name = 'test_broken_perm'",
+            ))
+            .await
+            .unwrap()
+            .expect("injected row must exist");
+        let type_str_before: String = String::try_get_by_index(&typeof_before, 0).unwrap();
+        assert_eq!(type_str_before, "text", "pre-condition: id should be TEXT");
+
+        // Apply the remaining migration (the repair, index 19).
+        Migrator::up(&db, None)
+            .await
+            .expect("repair migration must succeed");
+
+        // After the repair, typeof(id) must be 'blob'.
+        let typeof_after = db
+            .query_one_raw(Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT typeof(id) FROM permissions WHERE name = 'test_broken_perm'",
+            ))
+            .await
+            .unwrap()
+            .expect("repaired row must still exist");
+        let type_str_after: String = String::try_get_by_index(&typeof_after, 0).unwrap();
+        assert_eq!(
+            type_str_after, "blob",
+            "after repair: permission id must be BLOB"
+        );
+
+        // The entity query must now succeed without ParseByteLength errors.
+        role_permission::Entity::find()
+            .all(&db)
+            .await
+            .expect("role_permissions entity query must succeed after repair migration");
     }
 
     /// The user role must NOT have manage_commands.
