@@ -32,6 +32,13 @@ const AAD_SSH_PRIVATE_KEY: &str = "uptrakit:ssh_hosts:private_key";
 /// How often the daemon polls the local `ssh_hosts` table for changes.
 const HOST_RELOAD_INTERVAL: Duration = Duration::from_secs(10);
 
+/// Minimum interval between consecutive update executions per host.
+///
+/// Rapid-fire update messages from a compromised controller are rejected
+/// with a `security_audit:` warning. Legitimate orchestration always waits
+/// for the previous update to finish before sending the next one.
+const UPDATE_COOLDOWN: Duration = Duration::from_secs(5);
+
 // ---------------------------------------------------------------------------
 // Typed error for initialization helpers
 // ---------------------------------------------------------------------------
@@ -112,6 +119,9 @@ struct SshAgentHandler {
     /// load on every tick.  Populated in `on_connected` after
     /// `report_enrolled_hosts` completes.
     host_snapshot: Vec<host_ops::HostSnapshot>,
+    /// Per-host timestamp of the last accepted update execution, for rate
+    /// limiting. Keyed by `host_machine_id`.
+    last_update_per_host: HashMap<String, std::time::Instant>,
 }
 
 impl SshAgentHandler {
@@ -224,6 +234,19 @@ impl ServiceHandler for SshAgentHandler {
                     );
                     return Ok(None);
                 }
+                if let Some(last) = self.last_update_per_host.get(&payload.host_machine_id)
+                    && last.elapsed() < UPDATE_COOLDOWN
+                {
+                    tracing::warn!(
+                        host = %payload.host_machine_id,
+                        cooldown_secs = UPDATE_COOLDOWN.as_secs(),
+                        elapsed_ms = last.elapsed().as_millis() as u64,
+                        "security_audit: update rate limit exceeded; ignoring ExecuteUpdate"
+                    );
+                    return Ok(None);
+                }
+                self.last_update_per_host
+                    .insert(payload.host_machine_id.clone(), std::time::Instant::now());
                 client::handle_execute_update_ssh(
                     *payload,
                     db,
@@ -247,6 +270,19 @@ impl ServiceHandler for SshAgentHandler {
                     );
                     return Ok(None);
                 }
+                if let Some(last) = self.last_update_per_host.get(&payload.host_machine_id)
+                    && last.elapsed() < UPDATE_COOLDOWN
+                {
+                    tracing::warn!(
+                        host = %payload.host_machine_id,
+                        cooldown_secs = UPDATE_COOLDOWN.as_secs(),
+                        elapsed_ms = last.elapsed().as_millis() as u64,
+                        "security_audit: update rate limit exceeded; ignoring ExecuteBatchHostPackageUpdate"
+                    );
+                    return Ok(None);
+                }
+                self.last_update_per_host
+                    .insert(payload.host_machine_id.clone(), std::time::Instant::now());
                 Ok(client::handle_execute_batch_host_package_update_ssh(
                     *payload,
                     db,
@@ -963,6 +999,7 @@ async fn main() {
         pool: ssh_pool::SshConnectionPool::new(),
         reload_ticker: None,
         host_snapshot: Vec::new(),
+        last_update_per_host: HashMap::new(),
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent-ssh",

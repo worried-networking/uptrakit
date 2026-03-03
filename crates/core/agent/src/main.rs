@@ -15,6 +15,13 @@ use uptrakit_service_sdk::{
 
 use cli::Args;
 
+/// Minimum interval between consecutive update executions on this agent.
+///
+/// Rapid-fire update messages from a compromised controller are rejected
+/// with a `security_audit:` warning. Legitimate orchestration always waits
+/// for the previous update to finish before sending the next one.
+const UPDATE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5);
+
 struct AgentHandler {
     /// Local machine ID, collected once on connect and used to validate
     /// incoming `host_machine_id` fields as a defensive sanity check.
@@ -29,6 +36,8 @@ struct AgentHandler {
     ///
     /// Default path: `<state-dir>/update-freeze`.
     freeze_file_path: PathBuf,
+    /// Timestamp of the last accepted update execution, for rate limiting.
+    last_update_accepted: Option<std::time::Instant>,
 }
 
 #[async_trait::async_trait]
@@ -94,6 +103,17 @@ impl ServiceHandler for AgentHandler {
                     );
                     return Ok(None);
                 }
+                if let Some(last) = self.last_update_accepted
+                    && last.elapsed() < UPDATE_COOLDOWN
+                {
+                    tracing::warn!(
+                        cooldown_secs = UPDATE_COOLDOWN.as_secs(),
+                        elapsed_ms = last.elapsed().as_millis() as u64,
+                        "security_audit: update rate limit exceeded; ignoring ExecuteUpdate"
+                    );
+                    return Ok(None);
+                }
+                self.last_update_accepted = Some(std::time::Instant::now());
                 client::handle_execute_update(*payload, &mut self.in_flight_update, conn).await;
                 Ok(None)
             }
@@ -125,6 +145,17 @@ impl ServiceHandler for AgentHandler {
                     );
                     return Ok(None);
                 }
+                if let Some(last) = self.last_update_accepted
+                    && last.elapsed() < UPDATE_COOLDOWN
+                {
+                    tracing::warn!(
+                        cooldown_secs = UPDATE_COOLDOWN.as_secs(),
+                        elapsed_ms = last.elapsed().as_millis() as u64,
+                        "security_audit: update rate limit exceeded; ignoring ExecuteBatchHostPackageUpdate"
+                    );
+                    return Ok(None);
+                }
+                self.last_update_accepted = Some(std::time::Instant::now());
                 Ok(client::handle_execute_batch_host_package_update(*payload, conn).await)
             }
             _ => {
@@ -251,6 +282,7 @@ async fn main() {
         machine_id: String::new(),
         in_flight_update: None,
         freeze_file_path,
+        last_update_accepted: None,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent",
