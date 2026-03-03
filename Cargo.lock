@@ -6963,11 +6963,9 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "clap",
- "rcgen",
  "rootcause",
  "rustls",
  "sea-orm",
- "time",
  "tokio",
  "tokio-rustls",
  "tokio-util",

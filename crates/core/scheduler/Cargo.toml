@@ -20,7 +20,6 @@ clap = { workspace = true }
 rootcause = { workspace = true }
 rustls = { workspace = true }
 sea-orm = { workspace = true }
-time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
@@ -36,9 +35,7 @@ uuid = { workspace = true, features = ["v7"] }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-rcgen = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
-uptrakit-shared-db = { workspace = true, features = ["db-sqlite"] }
 
 [build-dependencies]
 uptrakit-build-info = { workspace = true }

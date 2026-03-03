@@ -5,6 +5,7 @@
 //! encryption key, then spawns the scheduler engine loop.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,10 +14,8 @@ use sea_orm::{ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter};
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectingPayload, ServiceMessage};
 use uptrakit_scheduler_engine::executors::{
-    auth_cleanup::AuthCleanupExecutor, crl_renewal::CrlRenewalExecutor,
-    detect_version::DetectVersionExecutor, fetch_releases::FetchReleasesExecutor,
-    service_cert_check::ServiceCertCheckExecutor,
-    stale_lease_cleanup::StaleLeaseCleanupExecutor,
+    auth_cleanup::AuthCleanupExecutor, detect_version::DetectVersionExecutor,
+    fetch_releases::FetchReleasesExecutor, stale_lease_cleanup::StaleLeaseCleanupExecutor,
 };
 use uptrakit_scheduler_engine::{Scheduler, SchedulerConfig, SchedulerNotifier};
 use uptrakit_service_sdk::{
@@ -26,7 +25,6 @@ use uptrakit_service_sdk::{
 use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 use uuid::Uuid;
 
-use crate::ca_rotation::ExternalCaRotationCheckExecutor;
 use crate::nats_notifier::NatsSchedulerNotifier;
 
 /// Active scheduler runtime spawned after credential delivery.
@@ -204,9 +202,15 @@ impl ServiceHandler for SchedulerHandler {
                     task_execution_timeout: uptrakit_scheduler_engine::TASK_EXECUTION_TIMEOUT,
                 };
 
-                let mut scheduler = Scheduler::new(db.clone(), config);
+                let mut scheduler = Scheduler::new(
+                    db.clone(),
+                    config,
+                    Arc::new(AtomicBool::new(false)),
+                );
 
-                // Register all 5 executors.
+                // Register all 4 external executors.
+                // Internal tasks (CrlRenewal, CaRotationCheck, ServiceCertCheck)
+                // run only on the controller's embedded scheduler.
                 scheduler.register(
                     ScheduledTaskType::AuthCleanup,
                     Box::new(AuthCleanupExecutor::new(db.clone())),
@@ -221,19 +225,7 @@ impl ServiceHandler for SchedulerHandler {
                 );
                 scheduler.register(
                     ScheduledTaskType::DetectVersion,
-                    Box::new(DetectVersionExecutor::new(db.clone(), notifier.clone())),
-                );
-                scheduler.register(
-                    ScheduledTaskType::ServiceCertCheck,
-                    Box::new(ServiceCertCheckExecutor::new(db.clone(), notifier.clone())),
-                );
-                scheduler.register(
-                    ScheduledTaskType::CaRotationCheck,
-                    Box::new(ExternalCaRotationCheckExecutor::new(db, notifier.clone())),
-                );
-                scheduler.register(
-                    ScheduledTaskType::CrlRenewal,
-                    Box::new(CrlRenewalExecutor::new(notifier)),
+                    Box::new(DetectVersionExecutor::new(db, notifier)),
                 );
 
                 // 7. Spawn the scheduler loop.
@@ -264,7 +256,6 @@ impl ServiceHandler for SchedulerHandler {
             Capability::DatabaseAccess,
             Capability::NatsAccess,
             Capability::MasterKeyAccess,
-            Capability::CaManagement,
             Capability::GracefulShutdown,
         ]
         .into_iter()
@@ -318,8 +309,8 @@ mod tests {
         assert!(caps.contains(&Capability::DatabaseAccess));
         assert!(caps.contains(&Capability::NatsAccess));
         assert!(caps.contains(&Capability::MasterKeyAccess));
-        assert!(caps.contains(&Capability::CaManagement));
         assert!(caps.contains(&Capability::GracefulShutdown));
-        assert_eq!(caps.len(), 6);
+        assert!(!caps.contains(&Capability::CaManagement), "CaManagement is internal-only");
+        assert_eq!(caps.len(), 5);
     }
 }

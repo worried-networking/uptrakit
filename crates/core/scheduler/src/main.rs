@@ -1,4 +1,3 @@
-mod ca_rotation;
 mod cli;
 mod handler;
 mod nats_notifier;
