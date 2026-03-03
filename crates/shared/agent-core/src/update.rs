@@ -34,6 +34,13 @@ use crate::error::AgentCoreError;
 /// Maximum accumulated output size (10 MB) to prevent OOM from runaway commands.
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 
+/// Maximum execution time for a single hook command (5 minutes).
+///
+/// Prevents a single hook from consuming the entire update timeout budget.
+/// The child process is killed via `kill_on_drop(true)` when the timeout
+/// future is dropped.
+const HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Marker appended when output is truncated at the limit.
 const TRUNCATION_MARKER: &str = "\n... [output truncated at 10 MB] ...\n";
 
@@ -104,6 +111,11 @@ pub async fn execute_update(
     let execution_result = tokio::time::timeout(timeout_duration, async {
         // Run pre-update hooks
         if !payload.pre_update_hooks.is_empty() {
+            tracing::warn!(
+                hook_count = payload.pre_update_hooks.len(),
+                commands = %hook_summaries(&payload.pre_update_hooks),
+                "security_audit: executing pre-update hooks"
+            );
             send_output(
                 &output_tx,
                 "[pre-hook] Starting pre-update hooks...",
@@ -176,6 +188,11 @@ pub async fn execute_update(
 
         // Run post-update hooks
         if !payload.post_update_hooks.is_empty() {
+            tracing::warn!(
+                hook_count = payload.post_update_hooks.len(),
+                commands = %hook_summaries(&payload.post_update_hooks),
+                "security_audit: executing post-update hooks"
+            );
             send_output(
                 &output_tx,
                 "[post-hook] Starting post-update hooks...",
@@ -412,12 +429,40 @@ async fn execute_plugin_update(
 }
 
 /// Execute a `HookCommand`, dispatching to shell or direct exec as appropriate.
+///
+/// Each hook is wrapped in [`HOOK_TIMEOUT`] — if a single hook exceeds the
+/// limit, its child process is killed (`kill_on_drop(true)`) and a
+/// `HookFailed` error is returned.
 async fn run_hook_command(
     hook_cmd: &HookCommand,
     stream_type: OutputStreamType,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
 ) -> UpdateResult<(String, i32)> {
     tracing::debug!(hook = ?hook_cmd, "running update hook");
+
+    match tokio::time::timeout(HOOK_TIMEOUT, run_hook_command_inner(hook_cmd, stream_type, output_tx)).await {
+        Ok(result) => result,
+        Err(_) => {
+            let summary = hook_summary(hook_cmd);
+            tracing::warn!(
+                hook = summary,
+                timeout_secs = HOOK_TIMEOUT.as_secs(),
+                "security_audit: hook command timed out"
+            );
+            Err(report!(UpdateError::HookFailed(format!(
+                "hook timed out after {} seconds: {summary}",
+                HOOK_TIMEOUT.as_secs()
+            ))))
+        }
+    }
+}
+
+/// Inner implementation of hook execution (no timeout wrapper).
+async fn run_hook_command_inner(
+    hook_cmd: &HookCommand,
+    stream_type: OutputStreamType,
+    output_tx: &mpsc::Sender<UpdateOutputMessage>,
+) -> UpdateResult<(String, i32)> {
     // Bridge plugin output -> agent output
     let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
     let bridge_output_tx = output_tx.clone();
@@ -473,7 +518,28 @@ async fn run_hook_command(
 /// Unlike `run_hook_command` (which streams output into an update output
 /// channel), this variant is fire-and-forget: it runs the hook, checks the
 /// exit code, and returns an error if non-zero.
+///
+/// Each hook is wrapped in [`HOOK_TIMEOUT`].
 pub(crate) async fn run_hook_for_batch(hook_cmd: &HookCommand) -> UpdateResult<()> {
+    match tokio::time::timeout(HOOK_TIMEOUT, run_hook_for_batch_inner(hook_cmd)).await {
+        Ok(result) => result,
+        Err(_) => {
+            let summary = hook_summary(hook_cmd);
+            tracing::warn!(
+                hook = summary,
+                timeout_secs = HOOK_TIMEOUT.as_secs(),
+                "security_audit: batch hook command timed out"
+            );
+            Err(report!(UpdateError::HookFailed(format!(
+                "hook timed out after {} seconds: {summary}",
+                HOOK_TIMEOUT.as_secs()
+            ))))
+        }
+    }
+}
+
+/// Inner implementation of batch hook execution (no timeout wrapper).
+async fn run_hook_for_batch_inner(hook_cmd: &HookCommand) -> UpdateResult<()> {
     let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
     // Drain output in the background — we don't stream it for batch hooks.
     let drain_handle = tokio::spawn(async move {
@@ -506,6 +572,42 @@ pub(crate) async fn run_hook_for_batch(hook_cmd: &HookCommand) -> UpdateResult<(
     result
         .map(|(_, _)| ())
         .map_err(|e| report!(UpdateError::HookFailed(e.to_string())))
+}
+
+/// Produce a short summary of a hook command for audit logging.
+fn hook_summary(hook_cmd: &HookCommand) -> String {
+    match hook_cmd {
+        HookCommand::Shell { command, shell } => {
+            let truncated = if command.len() > 80 {
+                format!("{}…", &command[..80])
+            } else {
+                command.clone()
+            };
+            format!("{shell:?}: {truncated}")
+        }
+        HookCommand::Exec { program, args, .. } => {
+            let args_summary = if args.len() > 3 {
+                format!(
+                    "{} (+{} more)",
+                    args[..3].join(" "),
+                    args.len() - 3
+                )
+            } else {
+                args.join(" ")
+            };
+            format!("exec: {program} {args_summary}")
+        }
+        _ => "unknown".to_string(),
+    }
+}
+
+/// Produce a comma-separated summary of all hooks for audit logging.
+fn hook_summaries(hooks: &[HookCommand]) -> String {
+    hooks
+        .iter()
+        .map(hook_summary)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Send an output message.
@@ -659,5 +761,105 @@ mod tests {
             }
         }
         assert!(found_output);
+    }
+
+    // ── Per-hook timeout tests ────────────────────────────────────────────
+
+    #[tokio::test(start_paused = true)]
+    async fn run_hook_command_timeout() {
+        let (tx, _rx) = mpsc::channel(100);
+        let hook = HookCommand::Shell {
+            command: "sleep 600".to_string(),
+            shell: HookShell::Bash,
+        };
+        let result = run_hook_command(&hook, OutputStreamType::PreHook, &tx).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("timed out"),
+            "expected timeout error, got: {err_msg}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_hook_for_batch_timeout() {
+        let hook = HookCommand::Shell {
+            command: "sleep 600".to_string(),
+            shell: HookShell::Bash,
+        };
+        let result = run_hook_for_batch(&hook).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("timed out"),
+            "expected timeout error, got: {err_msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_hook_command_completes_within_timeout() {
+        let (tx, _rx) = mpsc::channel(100);
+        let hook = HookCommand::Shell {
+            command: "echo hello".to_string(),
+            shell: HookShell::Bash,
+        };
+        let result = run_hook_command(&hook, OutputStreamType::PreHook, &tx).await;
+        assert!(result.is_ok());
+        let (output, exit_code) = result.unwrap();
+        assert_eq!(exit_code, 0);
+        assert!(output.contains("hello"));
+    }
+
+    // ── Hook summary tests ───────────────────────────────────────────────
+
+    #[test]
+    fn hook_summary_shell() {
+        let hook = HookCommand::Shell {
+            command: "echo test".to_string(),
+            shell: HookShell::Bash,
+        };
+        let summary = hook_summary(&hook);
+        assert!(summary.contains("echo test"));
+    }
+
+    #[test]
+    fn hook_summary_long_command_truncated() {
+        let hook = HookCommand::Shell {
+            command: "a".repeat(200),
+            shell: HookShell::Bash,
+        };
+        let summary = hook_summary(&hook);
+        assert!(summary.len() < 200);
+        assert!(summary.contains('…'));
+    }
+
+    #[test]
+    fn hook_summary_exec() {
+        let hook = HookCommand::Exec {
+            program: "/usr/bin/test".to_string(),
+            args: vec!["--flag".to_string(), "value".to_string()],
+            working_dir: None,
+        };
+        let summary = hook_summary(&hook);
+        assert!(summary.contains("/usr/bin/test"));
+        assert!(summary.contains("--flag"));
+    }
+
+    #[test]
+    fn hook_summaries_multiple() {
+        let hooks = vec![
+            HookCommand::Shell {
+                command: "echo 1".to_string(),
+                shell: HookShell::Bash,
+            },
+            HookCommand::Shell {
+                command: "echo 2".to_string(),
+                shell: HookShell::Sh,
+            },
+        ];
+        let summaries = hook_summaries(&hooks);
+        assert!(summaries.contains("echo 1"));
+        assert!(summaries.contains("echo 2"));
+        assert!(summaries.contains(", "));
     }
 }
