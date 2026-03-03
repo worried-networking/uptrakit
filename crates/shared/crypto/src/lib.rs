@@ -1,25 +1,31 @@
 //! Encryption at rest for sensitive database fields.
 //!
-//! Uses AES-256-GCM with a global master key to encrypt/decrypt values
-//! transparently via the [`EncryptedString`] SeaORM custom type.
+//! Uses AES-256-GCM with envelope encryption: a master key (KEK) wraps
+//! data encryption keys (DEKs) stored in the database, and data is encrypted
+//! with DEKs — never directly with the KEK.  This enables O(1) master key
+//! rotation (re-wrap DEKs only, no data re-encryption).
+//!
+//! Values are encrypted/decrypted transparently via the [`EncryptedString`]
+//! SeaORM custom type.
 //!
 //! ## Ciphertext formats
 //!
-//! Two wire formats coexist for backward compatibility:
+//! Three wire formats coexist for backward compatibility:
 //!
-//! | Format | Prefix | AAD | Used by |
-//! |---|---|---|---|
-//! | v1 | `ENC:v1:` | empty | [`EncryptedString`] DB columns (legacy) |
-//! | v2 | `ENC:v2:` | caller-supplied context string | [`encrypt_str_with_aad`], key verification, JWT key |
+//! | Format | Prefix | AAD | Key | Used by |
+//! |---|---|---|---|---|
+//! | v1 | `ENC:v1:` | empty | KEK direct | Legacy (read-only) |
+//! | v2 | `ENC:v2:` | caller-supplied | KEK direct | Migration compat, key verification |
+//! | v3 | `ENC:v3:<key_id>:` | caller-supplied | DEK (envelope) | Current default |
 //!
-//! `ENC:v2:` ciphertexts are **context-bound**: the AAD string is mixed into
-//! the GCM authentication tag, so a ciphertext encrypted for one purpose
-//! (e.g. `"uptrakit:settings:jwt_signing_key"`) cannot be used as a valid
-//! ciphertext for a different purpose.  This prevents ciphertext relocation
-//! attacks where an attacker moves a ciphertext from one column to another.
+//! `ENC:v3:` ciphertexts embed the DEK's `key_id` (first 8 hex chars of
+//! SHA-256 of the DEK), enabling lookup in the [`DataKeyRing`].  When the
+//! ring is not yet initialized (e.g. fresh DB before first DEK is created),
+//! `ENC:v2:` is used as a fallback.
 //!
 //! See `docs/security/secrets-and-encryption.md` for operational details.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,6 +33,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use rand::RngCore;
 use rootcause::prelude::*;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::SecretString;
@@ -86,6 +93,230 @@ static MASTER_KEY: OnceLock<Zeroizing<[u8; 32]>> = OnceLock::new();
 /// `--allow-plaintext-secrets` is passed without a master key.
 /// Must never be set in production.
 static PLAINTEXT_MODE: AtomicBool = AtomicBool::new(false);
+
+// ── Data Key Ring (envelope encryption) ──────────────────────────────
+
+/// Global ring of data encryption keys (DEKs) used for envelope encryption.
+///
+/// When initialized, [`encrypt_str_with_aad`] produces `ENC:v3:` ciphertexts
+/// using the active DEK from this ring.  The KEK (master key) is only used to
+/// wrap/unwrap DEKs — never to encrypt data directly.
+static DATA_KEY_RING: OnceLock<DataKeyRing> = OnceLock::new();
+
+/// A data encryption key (DEK) with its key ID.
+///
+/// The `key_id` is the first 8 hex characters of the SHA-256 hash of the raw
+/// DEK bytes, providing a stable, non-secret identifier that can be embedded
+/// in ciphertext prefixes to select the correct DEK for decryption.
+pub struct DataKey {
+    /// First 8 hex chars of SHA-256(key).
+    pub key_id: String,
+    /// Raw 32-byte AES-256 key material.
+    pub key: Zeroizing<[u8; 32]>,
+}
+
+/// A ring of data encryption keys for envelope encryption.
+///
+/// Holds all known DEKs (indexed by `key_id`) and tracks which one is
+/// currently active for new encryptions.  Retired DEKs remain in the ring
+/// for decryption of existing ciphertext.
+pub struct DataKeyRing {
+    keys: HashMap<String, Zeroizing<[u8; 32]>>,
+    active_key_id: String,
+}
+
+impl DataKeyRing {
+    /// Construct a new key ring.
+    ///
+    /// # Arguments
+    ///
+    /// * `keys` — Map of key_id → raw DEK bytes.
+    /// * `active_key_id` — The key_id of the DEK to use for new encryptions.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `active_key_id` is not present in `keys`.
+    pub fn new(keys: HashMap<String, Zeroizing<[u8; 32]>>, active_key_id: String) -> Self {
+        assert!(
+            keys.contains_key(&active_key_id),
+            "active_key_id must be present in keys"
+        );
+        Self {
+            keys,
+            active_key_id,
+        }
+    }
+
+    /// Returns the key_id of the active DEK.
+    pub fn active_key_id(&self) -> &str {
+        &self.active_key_id
+    }
+
+    /// Returns the raw key bytes for the active DEK.
+    fn active_key(&self) -> &Zeroizing<[u8; 32]> {
+        self.keys
+            .get(&self.active_key_id)
+            .expect("active key must exist in ring")
+    }
+
+    /// Look up a DEK by its key_id.
+    fn get(&self, key_id: &str) -> Option<&Zeroizing<[u8; 32]>> {
+        self.keys.get(key_id)
+    }
+}
+
+/// Initialize the global data key ring.
+///
+/// Must be called once at startup after DEKs have been loaded and unwrapped
+/// from the database.  Returns `Err` if the ring has already been initialized.
+pub fn init_data_key_ring(ring: DataKeyRing) -> Result<()> {
+    DATA_KEY_RING
+        .set(ring)
+        .map_err(|_| report!(CryptoError::AlreadyInitialized))
+}
+
+/// Returns `true` if the data key ring has been initialized.
+pub fn data_key_ring_available() -> bool {
+    DATA_KEY_RING.get().is_some()
+}
+
+/// Compute the key_id for a raw DEK: first 8 hex chars of SHA-256(dek).
+pub fn compute_key_id(dek_bytes: &[u8; 32]) -> String {
+    let hash = Sha256::digest(dek_bytes);
+    uptrakit_shared_types::hex::encode(&hash[..4])
+}
+
+/// Compute the master key fingerprint: first 16 hex chars of SHA-256(KEK).
+///
+/// Used to tag DEK rows with the KEK that wrapped them, enabling detection
+/// of KEK mismatches during startup.
+pub fn master_key_fingerprint() -> Result<String> {
+    let key_bytes = MASTER_KEY
+        .get()
+        .ok_or_else(|| report!(CryptoError::NotInitialized))?;
+    let hash = Sha256::digest(key_bytes.as_slice());
+    Ok(uptrakit_shared_types::hex::encode(&hash[..8]))
+}
+
+/// Generate a new random 32-byte DEK, returning its key_id and key material.
+pub fn generate_data_key() -> Result<DataKey> {
+    let mut key_bytes = Zeroizing::new([0u8; 32]);
+    rand::rng().fill_bytes(key_bytes.as_mut_slice());
+    let key_id = compute_key_id(&key_bytes);
+    Ok(DataKey {
+        key_id,
+        key: key_bytes,
+    })
+}
+
+/// Wrap (encrypt) a DEK with the current master key (KEK).
+///
+/// Uses AES-256-GCM with AAD `"uptrakit:dek:<key_id>"` to bind the
+/// ciphertext to the specific DEK identity.  Returns the hex-encoded
+/// `nonce || ciphertext || tag`.
+pub fn wrap_data_key(dek: &DataKey) -> Result<String> {
+    let kek = MASTER_KEY
+        .get()
+        .ok_or_else(|| report!(CryptoError::NotInitialized))?;
+    wrap_data_key_with(kek, dek)
+}
+
+/// Wrap (encrypt) a DEK with an explicit KEK.
+///
+/// This variant is used during key rotation to wrap DEKs with the new KEK.
+pub fn wrap_data_key_with(kek: &Zeroizing<[u8; 32]>, dek: &DataKey) -> Result<String> {
+    let aad_str = format!("uptrakit:dek:{}", dek.key_id);
+
+    let unbound = UnboundKey::new(&AES_256_GCM, kek.as_slice())
+        .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
+    let key = LessSafeKey::new(unbound);
+
+    let mut nonce_bytes = [0u8; 12];
+    rand::rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+
+    let mut in_out = dek.key.as_slice().to_vec();
+    let tag = key
+        .seal_in_place_separate_tag(nonce, Aad::from(aad_str.as_bytes()), &mut in_out)
+        .map_err(|e| report!(CryptoError::Encryption(e.to_string())))?;
+
+    let mut output = Vec::with_capacity(12 + in_out.len() + tag.as_ref().len());
+    output.extend_from_slice(&nonce_bytes);
+    output.extend_from_slice(&in_out);
+    output.extend_from_slice(tag.as_ref());
+
+    Ok(uptrakit_shared_types::hex::encode(&output))
+}
+
+/// Unwrap (decrypt) a DEK using the current master key (KEK).
+///
+/// The `wrapped_hex` is the hex-encoded `nonce || ciphertext || tag` produced
+/// by [`wrap_data_key`].  The `key_id` is used to reconstruct the AAD.
+pub fn unwrap_data_key(wrapped_hex: &str, key_id: &str) -> Result<DataKey> {
+    let kek = MASTER_KEY
+        .get()
+        .ok_or_else(|| report!(CryptoError::NotInitialized))?;
+    unwrap_data_key_with(kek, wrapped_hex, key_id)
+}
+
+/// Unwrap (decrypt) a DEK using an explicit KEK.
+///
+/// This variant is used during key rotation to verify that DEKs can be
+/// unwrapped with both old and new KEKs.
+pub fn unwrap_data_key_with(
+    kek: &Zeroizing<[u8; 32]>,
+    wrapped_hex: &str,
+    key_id: &str,
+) -> Result<DataKey> {
+    let aad_str = format!("uptrakit:dek:{key_id}");
+
+    let raw = uptrakit_shared_types::hex::decode(wrapped_hex).context_to()?;
+
+    if raw.len() < 12 + 16 {
+        bail!(CryptoError::CiphertextTooShort);
+    }
+
+    let nonce_bytes: [u8; 12] = raw[..12]
+        .try_into()
+        .map_err(|_| report!(CryptoError::InvalidNonce))?;
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+
+    let unbound = UnboundKey::new(&AES_256_GCM, kek.as_slice())
+        .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
+    let key = LessSafeKey::new(unbound);
+
+    let mut ciphertext_and_tag = raw[12..].to_vec();
+    let plaintext = key
+        .open_in_place(nonce, Aad::from(aad_str.as_bytes()), &mut ciphertext_and_tag)
+        .map_err(|_| {
+            report!(CryptoError::Decryption(
+                "DEK unwrap failed: wrong KEK or tampered data".into()
+            ))
+        })?;
+
+    if plaintext.len() != 32 {
+        bail!(CryptoError::Decryption(format!(
+            "unwrapped DEK has invalid length: {} (expected 32)",
+            plaintext.len()
+        )));
+    }
+
+    let mut dek_bytes = Zeroizing::new([0u8; 32]);
+    dek_bytes.copy_from_slice(plaintext);
+
+    // Verify that the computed key_id matches the expected one.
+    let computed_id = compute_key_id(&dek_bytes);
+    if computed_id != key_id {
+        bail!(CryptoError::Decryption(format!(
+            "DEK key_id mismatch: expected {key_id}, computed {computed_id}"
+        )));
+    }
+
+    Ok(DataKey {
+        key_id: key_id.to_string(),
+        key: dek_bytes,
+    })
+}
 
 // ── Column AAD registry ──────────────────────────────────────────────
 
@@ -170,9 +401,16 @@ const ENC_V1_PREFIX: &str = "ENC:v1:";
 /// Prefix for v2 ciphertexts (caller-supplied AAD, context-bound).
 const ENC_V2_PREFIX: &str = "ENC:v2:";
 
-/// Check whether a stored string is already encrypted (`ENC:v1:` or `ENC:v2:` prefix).
+/// Prefix for v3 ciphertexts (envelope encryption with embedded key_id).
+///
+/// Full format: `ENC:v3:<key_id>:<hex(nonce || ciphertext || tag)>`
+/// where `<key_id>` is 8 hex chars identifying the DEK.
+const ENC_V3_PREFIX: &str = "ENC:v3:";
+
+/// Check whether a stored string is already encrypted (`ENC:v1:`, `ENC:v2:`,
+/// or `ENC:v3:` prefix).
 pub fn is_encrypted(s: &str) -> bool {
-    s.starts_with(ENC_V1_PREFIX) || s.starts_with(ENC_V2_PREFIX)
+    s.starts_with(ENC_V1_PREFIX) || s.starts_with(ENC_V2_PREFIX) || s.starts_with(ENC_V3_PREFIX)
 }
 
 // ── Master key verification ──────────────────────────────────────────
@@ -216,6 +454,39 @@ pub fn verify_key_verification_token(stored: &str) -> Result<()> {
             bail!(CryptoError::MasterKeyMismatch)
         }
     }
+}
+
+/// Create an encrypted verification token using an explicit KEK.
+///
+/// Used during master key rotation to produce a new verification token
+/// bound to the new KEK, without overwriting the global master key.
+pub fn create_verification_token_with_key(kek: &Zeroizing<[u8; 32]>) -> Result<String> {
+    let unbound = UnboundKey::new(&AES_256_GCM, kek.as_slice())
+        .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
+    let key = LessSafeKey::new(unbound);
+
+    let mut nonce_bytes = [0u8; 12];
+    rand::rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+
+    let mut in_out = KEY_VERIFICATION_SENTINEL.as_bytes().to_vec();
+    let tag = key
+        .seal_in_place_separate_tag(
+            nonce,
+            Aad::from(KEY_VERIFICATION_AAD.as_bytes()),
+            &mut in_out,
+        )
+        .map_err(|e| report!(CryptoError::Encryption(e.to_string())))?;
+
+    let mut output = Vec::with_capacity(12 + in_out.len() + tag.as_ref().len());
+    output.extend_from_slice(&nonce_bytes);
+    output.extend_from_slice(&in_out);
+    output.extend_from_slice(tag.as_ref());
+
+    Ok(format!(
+        "{ENC_V2_PREFIX}{}",
+        uptrakit_shared_types::hex::encode(&output)
+    ))
 }
 
 // ── Public encryption API ────────────────────────────────────────────
@@ -266,17 +537,22 @@ pub fn encrypt_str_with_aad(plaintext: &str, aad: &str) -> Result<String> {
     encrypt_value_v2(plaintext, aad)
 }
 
-/// Decrypt a stored encrypted string, accepting both `ENC:v1:` and `ENC:v2:`.
+/// Decrypt a stored encrypted string, accepting `ENC:v1:`, `ENC:v2:`, and `ENC:v3:`.
 ///
+/// - For `ENC:v3:` ciphertexts: uses the DEK identified by the embedded key_id;
+///   the provided `aad` must match the AAD used during encryption.
 /// - For `ENC:v2:` ciphertexts: the provided `aad` must match the AAD used
 ///   during encryption. Decryption fails if the AAD does not match.
 /// - For `ENC:v1:` ciphertexts: the `aad` argument is ignored and decryption
 ///   proceeds with empty AAD (backward compatibility for existing data).
 ///
 /// Requires the master key to be initialized via [`init_master_key`]; returns
-/// `Err(CryptoError::NotInitialized)` otherwise.
+/// `Err(CryptoError::NotInitialized)` otherwise (except for `ENC:v3:` which
+/// requires the data key ring instead).
 pub fn decrypt_str_with_aad(stored: &str, aad: &str) -> Result<String> {
-    if stored.starts_with(ENC_V2_PREFIX) {
+    if stored.starts_with(ENC_V3_PREFIX) {
+        decrypt_value_v3(stored, aad)
+    } else if stored.starts_with(ENC_V2_PREFIX) {
         decrypt_value_v2(stored, aad)
     } else {
         // Backward compat: ENC:v1: ciphertexts were produced with empty AAD.
@@ -430,6 +706,94 @@ fn decrypt_value_v2(stored: &str, aad: &str) -> Result<String> {
     String::from_utf8(plaintext.to_vec()).context_to()
 }
 
+// ── Internal v3 implementation (envelope encryption with DEK) ────────
+
+/// Encrypt with the active DEK from the data key ring.
+///
+/// Format: `ENC:v3:<key_id>:<hex(nonce || ciphertext || tag)>`
+fn encrypt_value_v3(plaintext: &str, aad: &str) -> Result<String> {
+    let ring = DATA_KEY_RING
+        .get()
+        .ok_or_else(|| report!(CryptoError::NotInitialized))?;
+
+    let dek = ring.active_key();
+    let key_id = ring.active_key_id();
+
+    let unbound = UnboundKey::new(&AES_256_GCM, dek.as_slice())
+        .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
+    let key = LessSafeKey::new(unbound);
+
+    let mut nonce_bytes = [0u8; 12];
+    rand::rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+
+    let mut in_out = plaintext.as_bytes().to_vec();
+    let tag = key
+        .seal_in_place_separate_tag(nonce, Aad::from(aad.as_bytes()), &mut in_out)
+        .map_err(|e| report!(CryptoError::Encryption(e.to_string())))?;
+
+    let mut output = Vec::with_capacity(12 + in_out.len() + tag.as_ref().len());
+    output.extend_from_slice(&nonce_bytes);
+    output.extend_from_slice(&in_out);
+    output.extend_from_slice(tag.as_ref());
+
+    Ok(format!(
+        "{ENC_V3_PREFIX}{key_id}:{}",
+        uptrakit_shared_types::hex::encode(&output)
+    ))
+}
+
+/// Decrypt a `ENC:v3:<key_id>:<hex>` ciphertext using the data key ring.
+fn decrypt_value_v3(stored: &str, aad: &str) -> Result<String> {
+    let ring = DATA_KEY_RING
+        .get()
+        .ok_or_else(|| report!(CryptoError::NotInitialized))?;
+
+    let after_prefix = stored
+        .strip_prefix(ENC_V3_PREFIX)
+        .ok_or_else(|| report!(CryptoError::Decryption("missing ENC:v3: prefix".into())))?;
+
+    // Parse key_id (8 hex chars) and hex payload separated by ':'
+    let colon_pos = after_prefix
+        .find(':')
+        .ok_or_else(|| report!(CryptoError::Decryption("missing key_id separator in ENC:v3".into())))?;
+
+    let key_id = &after_prefix[..colon_pos];
+    let hex_part = &after_prefix[colon_pos + 1..];
+
+    let dek = ring.get(key_id).ok_or_else(|| {
+        report!(CryptoError::Decryption(format!(
+            "unknown DEK key_id: {key_id}"
+        )))
+    })?;
+
+    let raw = uptrakit_shared_types::hex::decode(hex_part).context_to()?;
+
+    if raw.len() < 12 + 16 {
+        bail!(CryptoError::CiphertextTooShort);
+    }
+
+    let nonce_bytes: [u8; 12] = raw[..12]
+        .try_into()
+        .map_err(|_| report!(CryptoError::InvalidNonce))?;
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+
+    let unbound = UnboundKey::new(&AES_256_GCM, dek.as_slice())
+        .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
+    let key = LessSafeKey::new(unbound);
+
+    let mut ciphertext_and_tag = raw[12..].to_vec();
+    let plaintext = key
+        .open_in_place(nonce, Aad::from(aad.as_bytes()), &mut ciphertext_and_tag)
+        .map_err(|_| {
+            report!(CryptoError::Decryption(
+                "wrong DEK, wrong AAD, or tampered data".into()
+            ))
+        })?;
+
+    String::from_utf8(plaintext.to_vec()).context_to()
+}
+
 /// A string that is transparently encrypted when written to the database
 /// and decrypted when read back.
 ///
@@ -512,7 +876,10 @@ impl EncryptedString {
     }
 
     /// Create a new `EncryptedString` from a plaintext value with
-    /// context-bound AAD (produces `ENC:v2:` ciphertext).
+    /// context-bound AAD.
+    ///
+    /// Produces `ENC:v3:` ciphertext (envelope encryption with DEK) when the
+    /// data key ring is initialized, or `ENC:v2:` as fallback (KEK-direct).
     ///
     /// The `aad` string is mixed into the GCM authentication tag, binding
     /// the ciphertext to a specific column/purpose.  Use the
@@ -523,7 +890,11 @@ impl EncryptedString {
     /// Returns `Err(CryptoError::NotInitialized)` if the master key has not
     /// been initialized, or `Err` on any other encryption failure.
     pub fn new_with_aad(plaintext: String, aad: &str) -> Result<Self> {
-        let db_value = encrypt_value_v2(&plaintext, aad)?;
+        let db_value = if data_key_ring_available() {
+            encrypt_value_v3(&plaintext, aad)?
+        } else {
+            encrypt_value_v2(&plaintext, aad)?
+        };
         Ok(Self {
             plaintext: SecretString::new(plaintext),
             db_value,
@@ -582,15 +953,19 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
     fn try_from(v: sea_orm::Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
         match v {
             sea_orm::Value::String(Some(s)) => {
-                if s.starts_with(ENC_V1_PREFIX) {
+                if s.starts_with(ENC_V3_PREFIX) {
+                    // ValueType has no column name — best-effort with empty AAD.
+                    // Normal SeaORM entity queries go through TryGetable which has
+                    // the column name and can look up the correct AAD.
+                    let plaintext =
+                        decrypt_value_v3(&s, "").map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
+                    Ok(EncryptedString::from_db(plaintext, s))
+                } else if s.starts_with(ENC_V1_PREFIX) {
                     let plaintext =
                         decrypt_value(&s).map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
                     Ok(EncryptedString::from_db(plaintext, s))
                 } else if s.starts_with(ENC_V2_PREFIX) {
                     // ValueType has no column name — use empty AAD as fallback.
-                    // Real v2 ciphertexts will fail here, surfacing an explicit error.
-                    // Normal SeaORM entity queries go through TryGetable which has
-                    // the column name and can look up the correct AAD.
                     let plaintext =
                         decrypt_value_v2(&s, "").map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
                     Ok(EncryptedString::from_db(plaintext, s))
@@ -648,7 +1023,16 @@ impl sea_orm::TryGetable for EncryptedString {
             }
         };
 
-        if s.starts_with(ENC_V2_PREFIX) {
+        if s.starts_with(ENC_V3_PREFIX) {
+            let col_name = index.as_str().unwrap_or("unknown");
+            let aad = column_aad(col_name).unwrap_or("");
+            let plaintext = decrypt_value_v3(&s, aad).map_err(|e| {
+                sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
+                    "ENC:v3 decryption failed for column '{col_name}': {e}"
+                )))
+            })?;
+            Ok(EncryptedString::from_db(plaintext, s))
+        } else if s.starts_with(ENC_V2_PREFIX) {
             let col_name = index.as_str().unwrap_or("unknown");
             let aad = column_aad(col_name).unwrap_or("");
             let plaintext = decrypt_value_v2(&s, aad).map_err(|e| {
@@ -734,8 +1118,9 @@ mod tests {
     fn test_is_encrypted_detection() {
         assert!(is_encrypted("ENC:v1:aabbcc"));
         assert!(is_encrypted("ENC:v2:aabbcc"));
+        assert!(is_encrypted("ENC:v3:aabbcc"));
         assert!(!is_encrypted("plaintext"));
-        assert!(!is_encrypted("ENC:v3:aabbcc"));
+        assert!(!is_encrypted("ENC:v4:aabbcc"));
         assert!(!is_encrypted(""));
     }
 
@@ -1132,13 +1517,14 @@ mod tests {
         let aad = "uptrakit:test_table:test_column";
         let es = EncryptedString::new_with_aad("aad secret".to_string(), aad)
             .expect("new_with_aad should succeed");
+        // Produces v3 when ring is available, v2 otherwise
         assert!(
-            es.db_value.starts_with(ENC_V2_PREFIX),
-            "new_with_aad must produce ENC:v2: ciphertext"
+            es.db_value.starts_with(ENC_V2_PREFIX) || es.db_value.starts_with(ENC_V3_PREFIX),
+            "new_with_aad must produce ENC:v2: or ENC:v3: ciphertext"
         );
         assert_eq!(es.expose_secret(), "aad secret");
 
-        // Must decrypt with the same AAD
+        // Must decrypt with the same AAD (decrypt_str_with_aad handles both v2 and v3)
         let decrypted =
             decrypt_str_with_aad(&es.db_value, aad).expect("decryption with correct AAD");
         assert_eq!(decrypted, "aad secret");
@@ -1151,10 +1537,15 @@ mod tests {
 
         let es = EncryptedString::new_with_aad("secret".to_string(), "correct:aad")
             .expect("should encrypt");
-        let result = decrypt_str_with_aad(&es.db_value, "wrong:aad");
+        // Try decrypting with wrong AAD — should fail regardless of v2/v3 format
+        let result = if es.db_value.starts_with(ENC_V3_PREFIX) {
+            decrypt_value_v3(&es.db_value, "wrong:aad")
+        } else {
+            decrypt_str_with_aad(&es.db_value, "wrong:aad")
+        };
         assert!(
             result.is_err(),
-            "decrypting v2 ciphertext with wrong AAD must fail"
+            "decrypting ciphertext with wrong AAD must fail"
         );
     }
 
@@ -1236,5 +1627,266 @@ mod tests {
         let value = result.expect("plaintext mode should succeed");
         assert_eq!(value, "dev secret");
         assert!(!is_encrypted(&value));
+    }
+
+    // ── DEK / envelope encryption tests ─────────────────────────────
+
+    #[test]
+    fn test_compute_key_id_deterministic() {
+        let dek = [0x42u8; 32];
+        let id1 = compute_key_id(&dek);
+        let id2 = compute_key_id(&dek);
+        assert_eq!(id1, id2, "compute_key_id must be deterministic");
+        assert_eq!(id1.len(), 8, "key_id must be 8 hex chars");
+    }
+
+    #[test]
+    fn test_compute_key_id_different_keys() {
+        let dek1 = [0x42u8; 32];
+        let dek2 = [0x43u8; 32];
+        assert_ne!(
+            compute_key_id(&dek1),
+            compute_key_id(&dek2),
+            "different DEKs must produce different key_ids"
+        );
+    }
+
+    #[test]
+    fn test_dek_wrap_unwrap_round_trip() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let dek = generate_data_key().expect("should generate DEK");
+        assert_eq!(dek.key_id.len(), 8);
+
+        let wrapped = wrap_data_key(&dek).expect("should wrap DEK");
+        let unwrapped = unwrap_data_key(&wrapped, &dek.key_id).expect("should unwrap DEK");
+
+        assert_eq!(unwrapped.key_id, dek.key_id);
+        assert_eq!(unwrapped.key.as_slice(), dek.key.as_slice());
+    }
+
+    #[test]
+    fn test_dek_wrap_uniqueness() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let dek = generate_data_key().expect("should generate DEK");
+        let w1 = wrap_data_key(&dek).expect("should wrap");
+        let w2 = wrap_data_key(&dek).expect("should wrap");
+        assert_ne!(
+            w1, w2,
+            "two wrappings of the same DEK must differ (random nonces)"
+        );
+    }
+
+    #[test]
+    fn test_dek_unwrap_wrong_key_id_fails() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let dek = generate_data_key().expect("should generate DEK");
+        let wrapped = wrap_data_key(&dek).expect("should wrap DEK");
+
+        let result = unwrap_data_key(&wrapped, "deadbeef");
+        assert!(
+            result.is_err(),
+            "unwrapping with wrong key_id must fail (AAD mismatch)"
+        );
+    }
+
+    #[test]
+    fn test_dek_unwrap_tampered_data_fails() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let dek = generate_data_key().expect("should generate DEK");
+        let wrapped = wrap_data_key(&dek).expect("should wrap DEK");
+
+        let mut raw = uptrakit_shared_types::hex::decode(&wrapped).expect("valid hex");
+        if let Some(byte) = raw.last_mut() {
+            *byte ^= 0xFF;
+        }
+        let tampered = uptrakit_shared_types::hex::encode(&raw);
+
+        let result = unwrap_data_key(&tampered, &dek.key_id);
+        assert!(result.is_err(), "tampered wrapped DEK must fail");
+    }
+
+    #[test]
+    fn test_wrap_data_key_with_explicit_kek() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let new_kek = Zeroizing::new([0xABu8; 32]);
+        let dek = generate_data_key().expect("should generate DEK");
+
+        let wrapped = wrap_data_key_with(&new_kek, &dek).expect("should wrap with explicit KEK");
+        let unwrapped =
+            unwrap_data_key_with(&new_kek, &wrapped, &dek.key_id).expect("should unwrap");
+
+        assert_eq!(unwrapped.key.as_slice(), dek.key.as_slice());
+
+        // Should fail with the original KEK
+        let result = unwrap_data_key(&wrapped, &dek.key_id);
+        assert!(
+            result.is_err(),
+            "unwrapping with wrong KEK must fail"
+        );
+    }
+
+    #[test]
+    fn test_master_key_fingerprint() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let fp = master_key_fingerprint().expect("should compute fingerprint");
+        assert_eq!(fp.len(), 16, "fingerprint must be 16 hex chars");
+
+        // Must be deterministic
+        let fp2 = master_key_fingerprint().expect("should compute fingerprint");
+        assert_eq!(fp, fp2);
+    }
+
+    // ── v3 encryption tests ─────────────────────────────────────────
+
+    /// Helper to initialize the data key ring for tests.
+    /// Since DATA_KEY_RING is a OnceLock, subsequent calls are no-ops.
+    fn ensure_test_ring() {
+        ensure_test_key();
+        let dek = generate_data_key().expect("should generate DEK");
+        let mut keys = HashMap::new();
+        let active_id = dek.key_id.clone();
+        keys.insert(dek.key_id, dek.key);
+        let ring = DataKeyRing::new(keys, active_id);
+        let _ = init_data_key_ring(ring);
+    }
+
+    #[test]
+    fn test_v3_round_trip() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_ring();
+
+        let aad = "uptrakit:test:v3_context";
+        for plaintext in ["hello", "", "multi\nline\nvalue", "a".repeat(1_000).as_str()] {
+            let encrypted =
+                encrypt_value_v3(plaintext, aad).expect("v3 encryption should succeed");
+            assert!(
+                encrypted.starts_with(ENC_V3_PREFIX),
+                "v3 ciphertext must carry ENC:v3: prefix"
+            );
+            assert!(is_encrypted(&encrypted));
+            let decrypted =
+                decrypt_value_v3(&encrypted, aad).expect("v3 decryption should succeed");
+            assert_eq!(decrypted, plaintext);
+        }
+    }
+
+    #[test]
+    fn test_v3_key_id_embedded() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_ring();
+
+        let encrypted =
+            encrypt_value_v3("test", "aad").expect("v3 encryption should succeed");
+        // Format: ENC:v3:<key_id>:<hex>
+        let after_prefix = encrypted.strip_prefix(ENC_V3_PREFIX).unwrap();
+        let colon_pos = after_prefix.find(':').unwrap();
+        let key_id = &after_prefix[..colon_pos];
+        assert_eq!(key_id.len(), 8, "embedded key_id must be 8 hex chars");
+    }
+
+    #[test]
+    fn test_v3_wrong_aad_fails() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_ring();
+
+        let encrypted =
+            encrypt_value_v3("secret", "correct-aad").expect("v3 encryption should succeed");
+        let result = decrypt_value_v3(&encrypted, "wrong-aad");
+        assert!(result.is_err(), "decrypting v3 with wrong AAD must fail");
+    }
+
+    #[test]
+    fn test_v3_nonce_uniqueness() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_ring();
+
+        let aad = "uptrakit:test:v3_nonce";
+        let enc1 = encrypt_value_v3("same", aad).expect("should encrypt");
+        let enc2 = encrypt_value_v3("same", aad).expect("should encrypt");
+        assert_ne!(enc1, enc2, "v3 encryptions of the same value must differ");
+    }
+
+    #[test]
+    fn test_v3_tampered_ciphertext_fails() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_ring();
+
+        let aad = "uptrakit:test:v3_tamper";
+        let encrypted = encrypt_value_v3("data", aad).expect("v3 encryption should succeed");
+
+        // Parse the format to tamper with the hex payload
+        let after_prefix = encrypted.strip_prefix(ENC_V3_PREFIX).unwrap();
+        let colon_pos = after_prefix.find(':').unwrap();
+        let key_id = &after_prefix[..colon_pos];
+        let hex_part = &after_prefix[colon_pos + 1..];
+
+        let mut raw = uptrakit_shared_types::hex::decode(hex_part).expect("valid hex");
+        if let Some(byte) = raw.last_mut() {
+            *byte ^= 0xFF;
+        }
+        let tampered = format!(
+            "{ENC_V3_PREFIX}{key_id}:{}",
+            uptrakit_shared_types::hex::encode(&raw)
+        );
+        assert!(decrypt_value_v3(&tampered, aad).is_err());
+    }
+
+    #[test]
+    fn test_v3_unknown_key_id_fails() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_ring();
+
+        // Craft a v3 ciphertext with a non-existent key_id
+        let encrypted =
+            encrypt_value_v3("test", "aad").expect("v3 encryption should succeed");
+        let after_prefix = encrypted.strip_prefix(ENC_V3_PREFIX).unwrap();
+        let colon_pos = after_prefix.find(':').unwrap();
+        let hex_part = &after_prefix[colon_pos + 1..];
+
+        let fake = format!("{ENC_V3_PREFIX}deadbeef:{hex_part}");
+        let result = decrypt_value_v3(&fake, "aad");
+        assert!(result.is_err(), "unknown key_id must fail");
+    }
+
+    #[test]
+    fn test_new_with_aad_produces_v3_when_ring_available() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_ring();
+
+        let es = EncryptedString::new_with_aad("v3 secret".to_string(), "test:aad")
+            .expect("should encrypt");
+        assert!(
+            es.db_value.starts_with(ENC_V3_PREFIX),
+            "new_with_aad must produce ENC:v3: when ring is available"
+        );
+        assert_eq!(es.expose_secret(), "v3 secret");
+    }
+
+    #[test]
+    fn test_create_verification_token_with_explicit_key() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let explicit_kek = Zeroizing::new([0xCDu8; 32]);
+        let token = create_verification_token_with_key(&explicit_kek)
+            .expect("should create token with explicit key");
+        assert!(token.starts_with(ENC_V2_PREFIX));
+
+        // Verify the token cannot be verified with the global key
+        // (it was encrypted with a different key)
+        let result = verify_key_verification_token(&token);
+        assert!(result.is_err());
     }
 }
