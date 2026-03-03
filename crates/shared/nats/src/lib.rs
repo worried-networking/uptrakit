@@ -20,6 +20,7 @@
 //! - Max age: 24 hours
 //! - Storage: File
 
+pub mod config_protection;
 pub mod connection;
 pub mod envelope;
 pub mod error;

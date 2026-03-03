@@ -17,6 +17,7 @@ time = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }
 uptrakit-backoff = { workspace = true }
+uptrakit-crypto = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
@@ -24,6 +25,7 @@ uuid = { workspace = true, features = ["serde"] }
 [dev-dependencies]
 futures-util = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+zeroize = { workspace = true }
 
 [lints]
 workspace = true

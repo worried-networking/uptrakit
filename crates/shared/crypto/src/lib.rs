@@ -122,6 +122,7 @@ pub fn register_column_aad(
 ///
 /// Returns `None` if the column is not registered (e.g. the registry was not
 /// initialized, or the column was not included in the mappings).
+#[cfg(any(feature = "sea-orm", test))]
 fn column_aad(column_name: &str) -> Option<&str> {
     COLUMN_AAD_REGISTRY
         .get()

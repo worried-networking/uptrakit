@@ -147,6 +147,10 @@ impl NatsConnection {
             return;
         }
 
+        // Encrypt plugin config fields before NATS publication so credentials
+        // are unreadable in JetStream storage and to unauthorized subscribers.
+        let msg = crate::config_protection::encrypt_message_configs(msg);
+
         let envelope = NatsEventEnvelope {
             source_controller_id,
             target_service_id,

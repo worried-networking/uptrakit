@@ -6711,9 +6711,11 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-backoff",
+ "uptrakit-crypto",
  "uptrakit-internal-wire",
  "uptrakit-shared-macros",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

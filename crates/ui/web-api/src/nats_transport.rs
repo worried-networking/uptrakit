@@ -194,6 +194,10 @@ impl NatsTransport {
                     continue;
                 }
 
+                // Decrypt plugin config fields that were encrypted before NATS publication.
+                let message =
+                    uptrakit_nats::config_protection::decrypt_message_configs(envelope.message);
+
                 let resources = crate::event_delivery::ControllerResources {
                     ca_rotation_trigger: ca_rotation_trigger.as_ref(),
                     revocation_notify: revocation_notify.as_ref(),
@@ -205,7 +209,7 @@ impl NatsTransport {
                     &resources,
                     envelope.target_service_id,
                     envelope.target_capability.as_deref(),
-                    envelope.message,
+                    message,
                 )
                 .await;
 
