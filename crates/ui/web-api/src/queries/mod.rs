@@ -3,6 +3,7 @@
 //! Each sub-module encapsulates SeaORM entity access and returns typed API
 //! response types, so that route handlers deal only with HTTP concerns.
 
+pub mod audit_logs;
 pub mod autodiscovery;
 pub mod discovery_allowlist;
 pub mod enrollment_tokens;

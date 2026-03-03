@@ -1,5 +1,6 @@
 pub(crate) mod agents;
 pub mod api_tokens;
+pub mod audit_logs;
 pub mod auth;
 pub mod autodiscovery;
 pub mod discovery_allowlist;

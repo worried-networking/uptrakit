@@ -31,7 +31,8 @@ use crate::AppState;
         (name = "Update Batches", description = "Batch update operations"),
         (name = "Host Packages", description = "Host-level package tracking and ignore rules"),
         (name = "Notifications", description = "Notification channel, rule, and log management"),
-        (name = "Global Settings", description = "Infrastructure-scoped settings requiring global administrator access")
+        (name = "Global Settings", description = "Infrastructure-scoped settings requiring global administrator access"),
+        (name = "Audit Logs", description = "Tenant and system-level audit log access")
     ),
     paths(
         crate::routes::auth::register,
@@ -153,6 +154,9 @@ use crate::AppState;
         crate::routes::settings_smtp::update_smtp_settings,
         crate::routes::settings_system_services::get_system_services_settings,
         crate::routes::settings_system_services::update_system_services_settings,
+        // Audit logs
+        crate::routes::audit_logs::list_audit_logs,
+        crate::routes::audit_logs::list_system_audit_logs,
     ),
     components(
         schemas(
@@ -268,6 +272,11 @@ use crate::AppState;
             crate::routes::settings_system_services::SystemServicesSettingsResponse,
             crate::routes::settings_system_services::UpdateSystemServicesSettingsRequest,
             uptrakit_web_api_types::settings_combined::GlobalSettingsCombinedResponse,
+            // Audit logs
+            crate::routes::audit_logs::AuditLogResponse,
+            crate::routes::audit_logs::SystemAuditLogResponse,
+            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::audit_logs::AuditLogResponse>,
+            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::audit_logs::SystemAuditLogResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationChannelResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationRuleResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::notifications::NotificationLogResponse>,
@@ -577,7 +586,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(
             crate::routes::settings_system_services::get_system_services_settings,
             crate::routes::settings_system_services::update_system_services_settings
-        ));
+        ))
+        // Audit logs
+        .routes(routes!(crate::routes::audit_logs::list_audit_logs))
+        .routes(routes!(crate::routes::audit_logs::list_system_audit_logs));
 
     // NATS settings
     #[cfg(feature = "nats")]

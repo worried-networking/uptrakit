@@ -8,7 +8,6 @@ use uuid::Uuid;
 
 /// A single tenant-scoped audit log entry, returned by
 /// `GET /api/v1/audit-logs`.
-#[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AuditLogResponse {
@@ -46,7 +45,6 @@ pub struct AuditLogResponse {
 /// Contains the same fields as [`AuditLogResponse`] but represents
 /// infrastructure-scoped operations (global settings changes, CA rotation,
 /// etc.) that are not associated with any tenant.
-#[non_exhaustive]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SystemAuditLogResponse {

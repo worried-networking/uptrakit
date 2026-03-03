@@ -57,10 +57,26 @@ pub async fn audit_log(
         // For now, we always use the global filter since per-tenant
         // override requires a DB read which is deferred to a future iteration.
         if state.audit_log_filter.should_log(&method, None) {
+            // Routes under `/api/v1/global-settings/` and `/api/v1/system-services`
+            // represent infrastructure-scoped operations and are written to
+            // `system_audit_logs` (tenant_id = None).  All other authenticated
+            // routes are written to the per-tenant `audit_logs` table.
+            let is_system_route = route_pattern.as_deref().is_some_and(|p| {
+                p.starts_with("/api/v1/global-settings/")
+                    || p == "/api/v1/global-settings"
+                    || p.starts_with("/api/v1/system-services/")
+                    || p == "/api/v1/system-services"
+            });
+            let tenant_id = if is_system_route {
+                None
+            } else {
+                Some(state.default_tenant_id)
+            };
+
             let duration_ms = start.elapsed().as_millis() as u64;
             let entry = AuditEntry {
                 id: uuid::Uuid::now_v7(),
-                tenant_id: Some(state.default_tenant_id),
+                tenant_id,
                 actor_id: user.user_id,
                 actor_type,
                 auth_method,
