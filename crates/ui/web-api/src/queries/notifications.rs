@@ -320,6 +320,19 @@ pub async fn list_log(
     Ok(PaginatedResponse::new(items, total, resolved))
 }
 
+/// Look up a notification log entry by its action token.
+///
+/// # Cross-tenant design
+///
+/// This function intentionally takes a raw `DatabaseConnection` rather than
+/// `TenantDb`. Telegram webhook callbacks arrive without any tenant
+/// authentication context; the only identifier available is the `action_token`
+/// embedded in the `callback_query.data` field. Because `action_token` is a
+/// randomly generated UUID assigned to a single notification event (enforced
+/// by the unique index `idx_notification_log_action_token`), knowledge of it
+/// is sufficient proof of legitimacy. The tenant can be derived from the
+/// returned `notification_log::Model::tenant_id` field if needed for
+/// subsequent operations.
 pub async fn find_log_by_action_token(
     db: &sea_orm::DatabaseConnection,
     action_token: Uuid,
