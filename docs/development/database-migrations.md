@@ -201,12 +201,27 @@ manager.create_index(
 ```
 
 The only case where an explicit index alongside a unique constraint is justified is a
-**partial (filtered) unique index**, which requires raw SQL via `execute_unprepared()`:
+**partial (filtered) unique index**. Use `Index::create()` with `.and_where()` from the
+`ConditionalStatement` trait (re-exported via `sea_orm_migration::prelude::*`):
 
-```sql
-CREATE UNIQUE INDEX uq_plugin_configs_active_name
-    ON plugin_configs (name) WHERE deactivated_at IS NULL;
+```rust
+manager
+    .create_index(
+        Index::create()
+            .name("uq_plugin_configs_active_name")
+            .table(PluginConfigs::Table)
+            .col(PluginConfigs::TenantId)
+            .col(PluginConfigs::Name)
+            .unique()
+            .and_where(Expr::col(PluginConfigs::DeactivatedAt).is_null())
+            .to_owned(),
+    )
+    .await?;
 ```
+
+> **MySQL note:** MySQL does not support partial indexes. The `WHERE` clause is silently
+> ignored by the sea_query MySQL backend, producing a regular unique index. This is acceptable
+> since MySQL has no partial index support anyway.
 
 ### Composite indexes for multi-column queries
 
@@ -238,6 +253,41 @@ For each new table, verify:
 - `tenant_id` column — included in composite PK or has a standalone index
 - Every FK column referenced in `SELECT … WHERE fk = ?` or `JOIN … ON a.fk = b.id`
 - Any column used in `ORDER BY` in API list endpoints (e.g. `created_at`)
+
+---
+
+## Composite foreign keys
+
+When a table references another table via a composite primary key (e.g. `(host_id, software_item_id)`),
+use `from_tbl`/`from_col`/`to_tbl`/`to_col` chaining on `ForeignKey::create()`:
+
+```rust
+manager
+    .create_table(
+        Table::create()
+            .table(HostSoftwareItemPlugins::Table)
+            .if_not_exists()
+            // ... columns ...
+            .foreign_key(
+                &mut ForeignKey::create()
+                    .name("fk_hsip_host_software_item")
+                    .from_tbl(HostSoftwareItemPlugins::Table)
+                    .from_col(HostSoftwareItemPlugins::HostId)
+                    .from_col(HostSoftwareItemPlugins::SoftwareItemId)
+                    .to_tbl(HostSoftwareItems::Table)
+                    .to_col(HostSoftwareItems::HostId)
+                    .to_col(HostSoftwareItems::SoftwareItemId)
+                    .on_delete(ForeignKeyAction::Cascade)
+                    .to_owned(),
+            )
+            .to_owned(),
+    )
+    .await?;
+```
+
+The single-column `.from(table, col)` / `.to(table, col)` shorthand only supports one column.
+For composite keys, chain multiple `.from_col()` / `.to_col()` calls after `.from_tbl()` /
+`.to_tbl()`.
 
 ---
 
@@ -407,6 +457,39 @@ async fn grant_permission(
 }
 ```
 
+### INSERT … SELECT with literal values and CURRENT_TIMESTAMP
+
+To seed a table from another while injecting literal values (e.g. initializing counters to 0
+and timestamps to `CURRENT_TIMESTAMP`):
+
+```rust
+let insert = Query::insert()
+    .into_table(SettingsVersion::Table)
+    .columns([
+        SettingsVersion::TenantId,
+        SettingsVersion::Version,
+        SettingsVersion::GlobalVersion,
+        SettingsVersion::RevocationVersion,
+        SettingsVersion::UpdatedAt,
+    ])
+    .select_from(
+        Query::select()
+            .column(Tenants::Id)
+            .expr(Expr::val(0i32))
+            .expr(Expr::val(0i32))
+            .expr(Expr::val(0i32))
+            .expr(Expr::current_timestamp())
+            .from(Tenants::Table)
+            .to_owned(),
+    )
+    .map_err(|e| DbErr::Migration(e.to_string()))?
+    .to_owned();
+manager.exec_stmt(insert).await?;
+```
+
+The number of `.columns()` entries must match the number of `SELECT` expressions exactly,
+otherwise `select_from` returns an error.
+
 ### UPDATE via sea_query
 
 ```rust
@@ -504,6 +587,57 @@ let insert = Query::insert()
 db.execute(&insert).await.expect("insert");
 ```
 
+### Table recreation (SQLite ALTER COLUMN workaround)
+
+SQLite has no `ALTER COLUMN` statement. To change a column type or nullability, recreate the
+table: create a new table with the correct schema, copy data, drop the old table, and rename:
+
+```rust
+// 1. Create the replacement table.
+manager
+    .create_table(
+        Table::create()
+            .table(SshHostsNew::Table)
+            // ... columns with corrected schema ...
+            .to_owned(),
+    )
+    .await?;
+
+// 2. Copy data from the old table.
+let insert = Query::insert()
+    .into_table(SshHostsNew::Table)
+    .columns([SshHostsNew::Id, SshHostsNew::Name, /* ... */])
+    .select_from(
+        Query::select()
+            .column(SshHosts::Id)
+            .column(SshHosts::Name)
+            // ... all columns in the same order ...
+            .from(SshHosts::Table)
+            .to_owned(),
+    )
+    .map_err(|e| DbErr::Migration(e.to_string()))?
+    .to_owned();
+manager.exec_stmt(insert).await?;
+
+// 3. Drop the old table.
+manager
+    .drop_table(Table::drop().table(SshHosts::Table).to_owned())
+    .await?;
+
+// 4. Rename the new table to the original name.
+manager
+    .rename_table(
+        Table::rename()
+            .table(SshHostsNew::Table, SshHosts::Table)
+            .to_owned(),
+    )
+    .await?;
+```
+
+If the data copy requires SQLite-specific functions (e.g. `strftime`), the `INSERT...SELECT`
+step must use `execute_unprepared()` with a justification comment. The table creation, drop,
+and rename steps should still use sea_query builders.
+
 ### DROP TABLE in tests
 
 ```rust
@@ -519,9 +653,11 @@ Raw SQL is accepted **only** for constructs that have no sea_query equivalent.  
 | Construct | Reason sea_query cannot express it |
 | --- | --- |
 | `CREATE TABLE new AS SELECT * FROM old` | SQLite-specific shorthand; no builder equivalent |
-| `CREATE UNIQUE INDEX … WHERE col IS NULL` | Partial/filtered index; builder has no `WHERE` |
 | `INSERT INTO … SELECT strftime(…)` | `strftime` is a SQLite-specific function |
 | `SELECT typeof(col) FROM …` | `typeof()` is SQLite-specific; use `query_all_raw` / `query_one_raw` |
+| `PRAGMA foreign_keys` | SQLite-specific pragma; no sea_query equivalent |
+| `SELECT … WHERE col LIKE pattern` in `query_all_raw` | Read-only SQLite-specific pattern matching |
+| `CASE WHEN` in `ON CONFLICT DO UPDATE` | SeaORM's `on_conflict` builder limitation |
 
 **Inline comment requirement:**
 
@@ -629,7 +765,7 @@ tenant::ActiveModel {
 .expect("insert test tenant");
 ```
 
-#### Repair migrations that touch both sides of a FK relationship
+### Repair migrations that touch both sides of a FK relationship
 
 `PRAGMA foreign_keys = OFF` is **silently ignored inside an active transaction** (SQLite
 requirement: the pragma can only be changed outside a transaction).  sea-orm-migration v2

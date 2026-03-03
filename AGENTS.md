@@ -233,10 +233,16 @@ These are non-negotiable design constraints. Do not violate them.
    only high-level summaries are retained for display.
 1. **No overlapping update actions per host.** The scheduler must ensure that two update operations for the same host
    never run concurrently.
-1. **No raw SQL.** Use the structures and methods provided by Sea ORM everywhere. **Approved exception:** The rate
-   limiter (`crates/ui/web-api/src/auth/rate_limit.rs`) uses `sea_orm::Statement::from_sql_and_values()` for an atomic
-   `INSERT ... ON CONFLICT DO UPDATE SET ... CASE WHEN` upsert, because SeaORM's `on_conflict` builder doesn't support
-   conditional expressions. The statement is fully parameterized (no injection risk).
+1. **No raw SQL.** Use the structures and methods provided by Sea ORM and sea_query builders everywhere, including
+   migrations. Partial unique indexes use `Index::create().and_where()`, composite foreign keys use
+   `ForeignKey::create().from_tbl().from_col().to_col()`, and `INSERT...SELECT` uses `Query::insert().select_from()`.
+   **Approved exceptions** (each must have an inline comment naming the limitation):
+   - Rate limiter (`crates/ui/web-api/src/auth/rate_limit.rs`): `CASE WHEN` in `ON CONFLICT DO UPDATE` — SeaORM's
+     `on_conflict` builder doesn't support conditional expressions. Fully parameterized (no injection risk).
+   - SQLite-specific functions (`strftime`, `typeof`) in migrations — no sea_query equivalent.
+   - `PRAGMA foreign_keys` in migrations — SQLite-specific pragma with no sea_query equivalent.
+   - `CREATE TABLE new AS SELECT * FROM old` in tests — SQLite-specific shorthand for crash simulation.
+   See [database-migrations.md](docs/development/database-migrations.md) for the full exceptions table.
 1. **Cover new logic with tests.** Cover success and failure paths.
 1. **Document everything.** Any code change must be properly documented either in the code, or in the separate
    documentation. Any changes to the agent-controller wire protocol must be documented in
