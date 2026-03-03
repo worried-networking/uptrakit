@@ -50,6 +50,10 @@ impl MigrationTrait for Migration {
         }
 
         // Find all permissions whose id is stored as TEXT.
+        //
+        // `typeof()` is a SQLite-specific function with no sea_query equivalent;
+        // using query_all_raw with a Statement is the approved exception for this
+        // pattern.  See docs/development/database-migrations.md.
         let broken_rows = db
             .query_all_raw(Statement::from_string(
                 DatabaseBackend::Sqlite,
@@ -79,14 +83,12 @@ impl MigrationTrait for Migration {
         // Disable FK enforcement before the transaction.
         //
         // Both `role_permissions.permission_id → permissions.id` and the
-        // reverse parent-key-update check would fire during the TEXT→BLOB
-        // conversion.  We turn FKs off, atomically fix all rows, then
-        // re-enable.  SQLite requires the PRAGMA to be changed outside an
-        // active transaction, so we do it here, before calling `begin()`.
+        // reverse parent-key-update check would fire mid-conversion.  We turn
+        // FKs off, atomically fix all rows, then re-enable.  SQLite requires
+        // the PRAGMA to be changed outside an active transaction.
         //
-        // This is an approved exception to the execute_unprepared guideline:
-        // PRAGMA statements have no parameterised form and PRAGMA
-        // foreign_keys has no sea-query equivalent.
+        // `PRAGMA foreign_keys` has no sea_query equivalent;
+        // execute_unprepared is the approved exception for PRAGMA statements.
         db.execute_unprepared("PRAGMA foreign_keys = OFF").await?;
 
         let txn = db.begin().await?;
@@ -100,26 +102,26 @@ impl MigrationTrait for Migration {
             let bytes: Vec<u8> = uuid.as_bytes().to_vec();
 
             // Fix any role_permissions rows that reference the TEXT uuid.
-            txn.execute_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "UPDATE role_permissions SET permission_id = ? WHERE permission_id = ?",
-                [
-                    Value::Bytes(Some(bytes.clone())),
-                    Value::String(Some(id_str.clone())),
-                ],
-            ))
+            txn.execute(
+                &Query::update()
+                    .table(Alias::new("role_permissions"))
+                    .value(Alias::new("permission_id"), Value::Bytes(Some(bytes.clone())))
+                    .and_where(
+                        Expr::col(Alias::new("permission_id"))
+                            .eq(Value::String(Some(id_str.clone()))),
+                    )
+                    .to_owned(),
+            )
             .await?;
 
-            // Fix the permissions row itself, scoping by name + typeof to
-            // avoid accidentally touching a correctly-stored row.
-            txn.execute_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "UPDATE permissions SET id = ? WHERE name = ? AND typeof(id) = 'text'",
-                [
-                    Value::Bytes(Some(bytes)),
-                    Value::String(Some(name)),
-                ],
-            ))
+            // Fix the permissions row itself.
+            txn.execute(
+                &Query::update()
+                    .table(Alias::new("permissions"))
+                    .value(Alias::new("id"), Value::Bytes(Some(bytes)))
+                    .and_where(Expr::col(Alias::new("name")).eq(name.as_str()))
+                    .to_owned(),
+            )
             .await?;
         }
 

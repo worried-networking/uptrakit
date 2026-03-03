@@ -58,13 +58,16 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), sea_orm::DbEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectOptions, Database, EntityTrait as _, PaginatorTrait as _};
+    use sea_orm::{
+        ColumnTrait as _, ConnectOptions, Database, EntityTrait as _, PaginatorTrait as _,
+        QueryFilter as _,
+    };
 
     use crate::entity::{
         crl_cache, global_setting, host_discovery_allowlist, host_package, host_package_ignore,
         host_package_update_history, host_software_item, notification_channel, notification_log,
-        notification_rule, plugin_config, revoked_token_jti, revoked_token_user, role_permission,
-        service, software_item, system_service, system_service_certificate,
+        notification_rule, plugin_config, revoked_token_jti, revoked_token_user, role,
+        role_permission, service, software_item, system_service, system_service_certificate,
         tenant_discovery_allowlist, update_batch, update_history,
     };
 
@@ -370,43 +373,61 @@ mod tests {
             .await
             .expect("first 18 migrations should succeed");
 
-        // Pick a real role id from the database to use as the owner role_id.
-        let role_row = db
-            .query_one_raw(Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT id FROM roles WHERE name = 'owner' LIMIT 1",
-            ))
+        // Resolve the owner role via the entity API — no raw SQL needed.
+        let owner_role = role::Entity::find()
+            .filter(role::Column::Name.eq("owner"))
+            .one(&db)
             .await
             .unwrap()
-            .expect("owner role must exist");
-        // The role id is stored as BLOB; read it back as bytes.
-        let role_id_bytes: Vec<u8> =
-            Vec::<u8>::try_get_by_index(&role_row, 0).expect("role id must be readable as bytes");
+            .expect("owner role must exist after migrations");
 
         // Inject a TEXT-stored permission — simulating the pre-fix behaviour.
+        //
+        // Passing a String value causes sea-query to bind it as Value::String,
+        // which SQLite stores as TEXT in the id column (a UUID/BLOB column).
+        // This replicates what the buggy execute_unprepared migrations did.
         let broken_uuid = "018f1234-0000-7000-8000-000000000001";
-        db.execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Sqlite,
-            "INSERT INTO permissions (id, name, description, created_at) \
-             VALUES (?, 'test_broken_perm', 'repair test', '2026-01-01T00:00:00Z')",
-            [Value::String(Some(broken_uuid.to_owned()))],
-        ))
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("permissions"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("name"),
+                    Alias::new("description"),
+                    Alias::new("created_at"),
+                ])
+                .values_panic([
+                    broken_uuid.to_owned().into(), // String → VALUE::String → SQLite TEXT
+                    "test_broken_perm".into(),
+                    "repair test".into(),
+                    "2026-01-01T00:00:00Z".into(),
+                ])
+                .to_owned(),
+        )
         .await
         .expect("injecting TEXT-uuid permission must succeed");
 
-        // Inject a role_permissions row that references the TEXT uuid.
-        db.execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Sqlite,
-            "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
-            [
-                Value::Bytes(Some(role_id_bytes)),
-                Value::String(Some(broken_uuid.to_owned())),
-            ],
-        ))
+        // Inject a role_permissions row referencing the TEXT uuid.
+        //
+        // role_id is Uuid → Value::Uuid → BLOB (correct storage).
+        // permission_id is String → Value::String → TEXT (the broken state).
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("role_permissions"))
+                .columns([Alias::new("role_id"), Alias::new("permission_id")])
+                .values_panic([
+                    owner_role.id.into(),          // Uuid → BLOB
+                    broken_uuid.to_owned().into(), // String → TEXT
+                ])
+                .to_owned(),
+        )
         .await
         .expect("injecting TEXT-uuid role_permission must succeed");
 
         // Confirm the injection was TEXT before the repair.
+        //
+        // `typeof()` is a SQLite-specific function with no sea_query equivalent;
+        // query_one_raw with a Statement is the approved exception for this.
         let typeof_before = db
             .query_one_raw(Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,

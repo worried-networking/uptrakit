@@ -25,27 +25,57 @@ use uuid::Uuid;
 ///
 /// ## Idempotency
 ///
-/// The permission INSERT uses `ON CONFLICT DO NOTHING` on the `name` column.
-/// The `role_permissions` INSERTs use `INSERT OR IGNORE`.  Both make the
-/// migration safe to re-run.
+/// Permission INSERT uses `ON CONFLICT DO NOTHING` on the `name` column.
+/// Role-permission INSERTs use `ON CONFLICT DO NOTHING` on the composite
+/// `(role_id, permission_id)` PK.  Both make the migration safe to re-run.
 #[derive(DeriveMigrationName)]
 pub struct Migration;
+
+/// Helper: insert a row into `role_permissions` by resolving role and
+/// permission by name via a subquery.  Idempotent (`ON CONFLICT DO NOTHING`
+/// on the composite PK).
+async fn grant_permission(
+    manager: &SchemaManager<'_>,
+    role_name: &str,
+    perm_name: &str,
+) -> Result<(), DbErr> {
+    let insert = Query::insert()
+        .into_table(Alias::new("role_permissions"))
+        .columns([Alias::new("role_id"), Alias::new("permission_id")])
+        .select_from(
+            Query::select()
+                .from_as(Alias::new("roles"), Alias::new("r"))
+                .from_as(Alias::new("permissions"), Alias::new("p"))
+                .column((Alias::new("r"), Alias::new("id")))
+                .column((Alias::new("p"), Alias::new("id")))
+                .and_where(Expr::col((Alias::new("r"), Alias::new("name"))).eq(role_name))
+                .and_where(Expr::col((Alias::new("p"), Alias::new("name"))).eq(perm_name))
+                .to_owned(),
+        )
+        .map_err(|e| DbErr::Migration(e.to_string()))?
+        .on_conflict(
+            OnConflict::columns([Alias::new("role_id"), Alias::new("permission_id")])
+                .do_nothing()
+                .to_owned(),
+        )
+        .to_owned();
+
+    manager.exec_stmt(insert).await
+}
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let db = manager.get_connection();
         let now = time::OffsetDateTime::now_utc();
         let perm_id = Uuid::now_v7();
 
         // 1. Insert the new permission (idempotent: ignore if already exists).
         //    The permission name must match `Permission::ManageCommands::as_str()`.
         //
-        //    IMPORTANT: use Query::insert() so that sea-query binds the Uuid as a
-        //    16-byte BLOB on SQLite (the same encoding used by the initial migration).
-        //    execute_unprepared(&format!("… VALUES ('{perm_id}', …)")) would embed the
-        //    UUID as a 36-character TEXT literal which causes SeaORM/sqlx to fail with
-        //    `ParseByteLength { len: 36 }` when reading the row back.
+        //    Use Query::insert() so that sea-query binds the Uuid as a 16-byte
+        //    BLOB on SQLite.  execute_unprepared(&format!("VALUES ('{id}', …)"))
+        //    would embed the UUID as a 36-char TEXT literal, causing SeaORM to
+        //    fail with `ParseByteLength { len: 36 }` when reading it back.
         manager
             .exec_stmt(
                 Query::insert()
@@ -73,39 +103,41 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // 2. Grant to owner — join roles and permissions by name to avoid
-        //    hardcoding UUIDs.  INSERT OR IGNORE makes this idempotent.
-        db.execute_unprepared(
-            "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) \
-             SELECT r.id, p.id \
-             FROM roles r, permissions p \
-             WHERE r.name = 'owner' AND p.name = 'manage_commands'",
-        )
-        .await?;
-
-        // 3. Grant to admin.
-        db.execute_unprepared(
-            "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) \
-             SELECT r.id, p.id \
-             FROM roles r, permissions p \
-             WHERE r.name = 'admin' AND p.name = 'manage_commands'",
-        )
-        .await?;
+        // 2. Grant to owner and admin (join by name to avoid hardcoding UUIDs).
+        grant_permission(manager, "owner", "manage_commands").await?;
+        grant_permission(manager, "admin", "manage_commands").await?;
 
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let db = manager.get_connection();
-
         // Remove role-permission assignments then the permission itself.
-        db.execute_unprepared(
-            "DELETE FROM role_permissions WHERE permission_id = \
-             (SELECT id FROM permissions WHERE name = 'manage_commands')",
-        )
-        .await?;
+        manager
+            .exec_stmt(
+                Query::delete()
+                    .from_table(Alias::new("role_permissions"))
+                    .and_where(
+                        Expr::col(Alias::new("permission_id")).in_subquery(
+                            Query::select()
+                                .from(Alias::new("permissions"))
+                                .column(Alias::new("id"))
+                                .and_where(
+                                    Expr::col(Alias::new("name")).eq("manage_commands"),
+                                )
+                                .to_owned(),
+                        ),
+                    )
+                    .to_owned(),
+            )
+            .await?;
 
-        db.execute_unprepared("DELETE FROM permissions WHERE name = 'manage_commands'")
+        manager
+            .exec_stmt(
+                Query::delete()
+                    .from_table(Alias::new("permissions"))
+                    .and_where(Expr::col(Alias::new("name")).eq("manage_commands"))
+                    .to_owned(),
+            )
             .await?;
 
         Ok(())
