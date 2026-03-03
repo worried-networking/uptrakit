@@ -1003,3 +1003,346 @@ pub async fn trigger_all_host_package_updates_for_host(
 
     Ok(Some(batch_id))
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, EntityTrait, Set};
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, host_software_item_plugin, plugin_config, service,
+        service_host, software_item, tenant,
+    };
+    use uptrakit_shared_types::ServiceStatus;
+    use uuid::Uuid;
+
+    async fn setup_db() -> DatabaseConnection {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db).await.unwrap();
+        db
+    }
+
+    struct Fixture {
+        tenant_id: Uuid,
+        item_id: Uuid,
+        host_id: Uuid,
+    }
+
+    /// Insert a minimal valid fixture: tenant, one software item, one host, one agent
+    /// (Approved), service_host link, host_software_item (installed="1.0.0",
+    /// latest="1.1.0"), plugin_config, and an execute_update plugin assignment.
+    async fn insert_base_fixture(db: &DatabaseConnection) -> Fixture {
+        let now = OffsetDateTime::now_utc();
+        let tenant_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let service_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+
+        tenant::ActiveModel {
+            id: Set(tenant_id),
+            name: Set("test-tenant".to_string()),
+            slug: Set(format!("test-{tenant_id}")),
+            is_default: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(tenant_id),
+            name: Set("test-app".to_string()),
+            enabled: Set(true),
+            discovery_state: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set("machine-001".to_string()),
+            hostname: Set("host-001".to_string()),
+            friendly_name: Set("Host 001".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set("agent-host".to_string()),
+            friendly_name: Set("Agent 001".to_string()),
+            ip_address: Set(None),
+            status: Set(ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("hash-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        service_host::ActiveModel {
+            service_id: Set(service_id),
+            host_id: Set(host_id),
+            linked_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host_software_item::ActiveModel {
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            latest_version: Set(Some("1.1.0".to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("security".to_string()),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        plugin_config::ActiveModel {
+            id: Set(plugin_config_id),
+            tenant_id: Set(tenant_id),
+            name: Set("test-plugin".to_string()),
+            plugin_type: Set("releases_github".to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            plugin_config_id: Set(plugin_config_id),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("org/repo".to_string()),
+            config_override: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        let _ = plugin_config_id; // used in DB only; not needed by callers
+        Fixture { tenant_id, item_id, host_id }
+    }
+
+    // ── find_outdated_items_for_host ────────────────────────────────────
+
+    #[tokio::test]
+    async fn find_outdated_items_empty_when_versions_match() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let hsi = HostSoftwareItem::find_by_id((f.host_id, f.item_id))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: host_software_item::ActiveModel = hsi.into();
+        active.installed_version = Set(Some("1.1.0".to_string())); // same as latest
+        active.update(&db).await.unwrap();
+
+        let candidates =
+            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None)
+                .await
+                .unwrap();
+        assert!(candidates.is_empty(), "expected empty; got {}", candidates.len());
+    }
+
+    #[tokio::test]
+    async fn find_outdated_items_returns_candidate_when_outdated() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+
+        let candidates =
+            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None)
+                .await
+                .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].software_item_id, f.item_id);
+        assert_eq!(candidates[0].installed_version, "1.0.0");
+        assert_eq!(candidates[0].latest_version, "1.1.0");
+    }
+
+    #[tokio::test]
+    async fn find_outdated_items_filters_by_category() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await; // item_id has category "security"
+        let now = OffsetDateTime::now_utc();
+
+        // Add a second software item and link it to the same host with category "feature".
+        let item2_id = Uuid::now_v7();
+        let pc2_id = Uuid::now_v7();
+        software_item::ActiveModel {
+            id: Set(item2_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set("test-app-2".to_string()),
+            enabled: Set(true),
+            discovery_state: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        host_software_item::ActiveModel {
+            host_id: Set(f.host_id),
+            software_item_id: Set(item2_id),
+            installed_version: Set(Some("2.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            latest_version: Set(Some("2.1.0".to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("feature".to_string()),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        plugin_config::ActiveModel {
+            id: Set(pc2_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set("test-plugin-2".to_string()),
+            plugin_type: Set("releases_github".to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(f.host_id),
+            software_item_id: Set(item2_id),
+            plugin_config_id: Set(pc2_id),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("org/repo2".to_string()),
+            config_override: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Filter by "security" — should return only the first item.
+        let candidates =
+            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, Some("security"), None)
+                .await
+                .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].software_item_id, f.item_id);
+
+        // Filter by "feature" — should return only the second item.
+        let candidates_feature =
+            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, Some("feature"), None)
+                .await
+                .unwrap();
+        assert_eq!(candidates_feature.len(), 1);
+        assert_eq!(candidates_feature[0].software_item_id, item2_id);
+    }
+
+    #[tokio::test]
+    async fn find_outdated_items_excludes_specified_ids() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+
+        let candidates =
+            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, Some(&[f.item_id]))
+                .await
+                .unwrap();
+        assert!(candidates.is_empty(), "excluded item must not appear in results");
+    }
+
+    // ── find_outdated_hosts_for_item ────────────────────────────────────
+
+    #[tokio::test]
+    async fn find_outdated_hosts_empty_when_up_to_date() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let hsi = HostSoftwareItem::find_by_id((f.host_id, f.item_id))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: host_software_item::ActiveModel = hsi.into();
+        active.installed_version = Set(Some("1.1.0".to_string())); // same as latest
+        active.update(&db).await.unwrap();
+
+        let candidates =
+            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None)
+                .await
+                .unwrap();
+        assert!(candidates.is_empty(), "expected empty; got {}", candidates.len());
+    }
+
+    #[tokio::test]
+    async fn find_outdated_hosts_returns_candidate_when_outdated() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+
+        let candidates =
+            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None)
+                .await
+                .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].host_id, f.host_id);
+        assert_eq!(candidates[0].software_item_id, f.item_id);
+        assert_eq!(candidates[0].installed_version, "1.0.0");
+        assert_eq!(candidates[0].latest_version, "1.1.0");
+    }
+}

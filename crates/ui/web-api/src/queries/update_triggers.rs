@@ -105,6 +105,7 @@ pub struct TriggerUpdateParams<'a> {
 ///
 /// Carries everything needed for record creation and dispatch so that
 /// callers do not need to repeat any DB lookups.
+#[derive(Debug)]
 pub struct ValidatedUpdateTarget {
     pub item: software_item::Model,
     pub host: host::Model,
@@ -442,4 +443,380 @@ pub async fn trigger_update_for_host(
         update_history_id,
         agent_connected,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait,
+        ModelTrait, QueryFilter, Set};
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, host_software_item_plugin, plugin_config, service,
+        service_host, software_item, tenant, update_history,
+    };
+    use uptrakit_shared_types::ServiceStatus;
+    use uuid::Uuid;
+
+    async fn setup_db() -> DatabaseConnection {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db).await.unwrap();
+        db
+    }
+
+    struct Fixture {
+        tenant_id: Uuid,
+        item_id: Uuid,
+        host_id: Uuid,
+        service_id: Uuid,
+        plugin_config_id: Uuid,
+    }
+
+    async fn insert_base_fixture(db: &DatabaseConnection) -> Fixture {
+        let now = OffsetDateTime::now_utc();
+        let tenant_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let service_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+
+        tenant::ActiveModel {
+            id: Set(tenant_id),
+            name: Set("test-tenant".to_string()),
+            slug: Set(format!("test-{tenant_id}")),
+            is_default: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(tenant_id),
+            name: Set("test-app".to_string()),
+            enabled: Set(true),
+            discovery_state: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set("machine-001".to_string()),
+            hostname: Set("host-001".to_string()),
+            friendly_name: Set("Host 001".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set("agent-host".to_string()),
+            friendly_name: Set("Agent 001".to_string()),
+            ip_address: Set(None),
+            status: Set(ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("hash-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        service_host::ActiveModel {
+            service_id: Set(service_id),
+            host_id: Set(host_id),
+            linked_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host_software_item::ActiveModel {
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            latest_version: Set(Some("1.1.0".to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("feature".to_string()),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        plugin_config::ActiveModel {
+            id: Set(plugin_config_id),
+            tenant_id: Set(tenant_id),
+            name: Set("test-plugin".to_string()),
+            plugin_type: Set("releases_github".to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            plugin_config_id: Set(plugin_config_id),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("org/repo".to_string()),
+            config_override: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        Fixture { tenant_id, item_id, host_id, service_id, plugin_config_id }
+    }
+
+    // ── validate_update_preconditions ───────────────────────────────────
+
+    #[tokio::test]
+    async fn validate_preconditions_success() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        assert!(result.is_ok(), "expected Ok, got: {result:?}");
+        let target = result.unwrap();
+        assert_eq!(target.item.id, f.item_id);
+        assert_eq!(target.host.id, f.host_id);
+        assert_eq!(target.agent.id, f.service_id);
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_item_not_found() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let missing_id = Uuid::now_v7();
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, missing_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::SoftwareItemNotFound
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_item_deactivated() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let item = SoftwareItem::find_by_id(f.item_id).one(&db).await.unwrap().unwrap();
+        let mut active: software_item::ActiveModel = item.into();
+        active.deactivated_at = Set(Some(OffsetDateTime::now_utc()));
+        active.update(&db).await.unwrap();
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::SoftwareItemNotFound
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_host_wrong_tenant() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+        // Create a second tenant and a host belonging to it.
+        let other_tenant_id = Uuid::now_v7();
+        tenant::ActiveModel {
+            id: Set(other_tenant_id),
+            name: Set("other-tenant".to_string()),
+            slug: Set(format!("other-{other_tenant_id}")),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let other_host_id = Uuid::now_v7();
+        host::ActiveModel {
+            id: Set(other_host_id),
+            tenant_id: Set(other_tenant_id),
+            machine_id: Set("machine-other".to_string()),
+            hostname: Set("host-other".to_string()),
+            friendly_name: Set("Other Host".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        // Query with f.tenant_id — the other host belongs to other_tenant_id, so it
+        // passes the software item check but fails the host tenant check.
+        let result =
+            validate_update_preconditions(&db, f.tenant_id, other_host_id, f.item_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::HostNotFound
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_host_not_assigned() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let hsi = HostSoftwareItem::find_by_id((f.host_id, f.item_id))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        hsi.delete(&db).await.unwrap();
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::HostNotAssigned
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_no_service_host() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let sh = ServiceHost::find()
+            .filter(service_host::Column::HostId.eq(f.host_id))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        sh.delete(&db).await.unwrap();
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::NoAgent
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_agent_not_approved() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let svc = Service::find_by_id(f.service_id).one(&db).await.unwrap().unwrap();
+        let mut active: service::ActiveModel = svc.into();
+        active.status = Set(ServiceStatus::Pending);
+        active.update(&db).await.unwrap();
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::AgentNotApproved
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_update_already_active() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            from_version: Set(None),
+            to_version: Set("1.1.0".to_string()),
+            status: Set(update_history::UpdateStatus::Pending),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            started_at: Set(now),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("feature".to_string()),
+            batch_id: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::UpdateAlreadyActive
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_no_execute_plugin() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        HostSoftwareItemPlugin::delete_many()
+            .filter(host_software_item_plugin::Column::HostId.eq(f.host_id))
+            .filter(host_software_item_plugin::Column::Role.eq("execute_update"))
+            .exec(&db)
+            .await
+            .unwrap();
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::NoExecuteUpdatePlugin
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_plugin_config_deactivated() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let pc = PluginConfig::find_by_id(f.plugin_config_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: plugin_config::ActiveModel = pc.into();
+        active.deactivated_at = Set(Some(OffsetDateTime::now_utc()));
+        active.update(&db).await.unwrap();
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::PluginConfigNotFound
+        ));
+    }
 }
