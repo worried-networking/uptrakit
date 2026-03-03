@@ -599,12 +599,28 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Seed settings_version for all existing tenants
-        let db = manager.get_connection();
-        db.execute_unprepared(
-            "INSERT INTO settings_version (tenant_id, version, global_version, revocation_version, updated_at) \
-             SELECT id, 0, 0, 0, CURRENT_TIMESTAMP FROM tenants",
-        )
-        .await?;
+        let insert = Query::insert()
+            .into_table(SettingsVersion::Table)
+            .columns([
+                SettingsVersion::TenantId,
+                SettingsVersion::Version,
+                SettingsVersion::GlobalVersion,
+                SettingsVersion::RevocationVersion,
+                SettingsVersion::UpdatedAt,
+            ])
+            .select_from(
+                Query::select()
+                    .column(Tenants::Id)
+                    .expr(Expr::val(0i32))
+                    .expr(Expr::val(0i32))
+                    .expr(Expr::val(0i32))
+                    .expr(Expr::current_timestamp())
+                    .from(Tenants::Table)
+                    .to_owned(),
+            )
+            .map_err(|e| DbErr::Migration(e.to_string()))?
+            .to_owned();
+        manager.exec_stmt(insert).await?;
 
         // ============================================================
         // 6. Enrollment tokens & services
@@ -998,12 +1014,17 @@ impl MigrationTrait for Migration {
 
         // Unique active plugin config name per tenant (partial: only non-deactivated rows).
         // Prevents duplicate names for active configs and makes find-or-create idempotent.
+        // Note: MySQL does not support partial indexes; the WHERE clause is silently ignored.
         manager
-            .get_connection()
-            .execute_unprepared(
-                "CREATE UNIQUE INDEX uq_plugin_configs_active_name \
-                 ON plugin_configs(tenant_id, name) \
-                 WHERE deactivated_at IS NULL",
+            .create_index(
+                Index::create()
+                    .name("uq_plugin_configs_active_name")
+                    .table(PluginConfigs::Table)
+                    .col(PluginConfigs::TenantId)
+                    .col(PluginConfigs::Name)
+                    .unique()
+                    .and_where(Expr::col(PluginConfigs::DeactivatedAt).is_null())
+                    .to_owned(),
             )
             .await?;
 
@@ -1042,12 +1063,17 @@ impl MigrationTrait for Migration {
 
         // Partial unique index: enforce unique names per tenant among active items.
         // Soft-deleted items are excluded, enabling re-creation with the same name.
+        // Note: MySQL does not support partial indexes; the WHERE clause is silently ignored.
         manager
-            .get_connection()
-            .execute_unprepared(
-                "CREATE UNIQUE INDEX uq_software_items_active_name \
-                 ON software_items(tenant_id, name) \
-                 WHERE deactivated_at IS NULL",
+            .create_index(
+                Index::create()
+                    .name("uq_software_items_active_name")
+                    .table(SoftwareItems::Table)
+                    .col(SoftwareItems::TenantId)
+                    .col(SoftwareItems::Name)
+                    .unique()
+                    .and_where(Expr::col(SoftwareItems::DeactivatedAt).is_null())
+                    .to_owned(),
             )
             .await?;
 
@@ -1122,33 +1148,72 @@ impl MigrationTrait for Migration {
         // Role-based plugin assignments: each (host, software_item) pair can have
         // one plugin per role (detect_version, fetch_releases, execute_update).
         // The ordinal column enables future multi-instance roles (e.g. hooks).
-        //
-        // Created via raw SQL because sea-orm-migration's `Table::create()` does
-        // not support composite foreign keys referencing a composite primary key.
-        // Using raw SQL also ensures SQLite compatibility (SQLite does not support
-        // ALTER TABLE ... ADD CONSTRAINT).
         manager
-            .get_connection()
-            .execute_unprepared(
-                "CREATE TABLE IF NOT EXISTS host_software_item_plugins (
-                    id TEXT NOT NULL PRIMARY KEY,
-                    host_id TEXT NOT NULL,
-                    software_item_id TEXT NOT NULL,
-                    plugin_config_id TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    ordinal INTEGER NOT NULL DEFAULT 0,
-                    package_identifier TEXT NOT NULL,
-                    config_override JSON,
-                    execution_site TEXT NOT NULL DEFAULT 'auto',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    FOREIGN KEY (plugin_config_id)
-                        REFERENCES plugin_configs(id)
-                        ON DELETE RESTRICT,
-                    FOREIGN KEY (host_id, software_item_id)
-                        REFERENCES host_software_items(host_id, software_item_id)
-                        ON DELETE CASCADE
-                )",
+            .create_table(
+                Table::create()
+                    .table(HostSoftwareItemPlugins::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::HostId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::SoftwareItemId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::PluginConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(string(HostSoftwareItemPlugins::Role))
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::Ordinal)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .col(string(HostSoftwareItemPlugins::PackageIdentifier))
+                    .col(ColumnDef::new(HostSoftwareItemPlugins::ConfigOverride).json())
+                    .col(
+                        ColumnDef::new(HostSoftwareItemPlugins::ExecutionSite)
+                            .string()
+                            .not_null()
+                            .default("auto"),
+                    )
+                    .col(timestamp(HostSoftwareItemPlugins::CreatedAt))
+                    .col(timestamp(HostSoftwareItemPlugins::UpdatedAt))
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_hsip_plugin_config")
+                            .from(
+                                HostSoftwareItemPlugins::Table,
+                                HostSoftwareItemPlugins::PluginConfigId,
+                            )
+                            .to(PluginConfigs::Table, PluginConfigs::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("fk_hsip_host_software_item")
+                            .from_tbl(HostSoftwareItemPlugins::Table)
+                            .from_col(HostSoftwareItemPlugins::HostId)
+                            .from_col(HostSoftwareItemPlugins::SoftwareItemId)
+                            .to_tbl(HostSoftwareItems::Table)
+                            .to_col(HostSoftwareItems::HostId)
+                            .to_col(HostSoftwareItems::SoftwareItemId)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .to_owned(),
             )
             .await?;
 
@@ -2016,6 +2081,7 @@ impl MigrationTrait for Migration {
             ("service_cert_check", "0 */12 * * *"),
         ];
 
+        let db = manager.get_connection();
         let tenant_id_select = Query::select()
             .column(Tenants::Id)
             .from(Tenants::Table)
@@ -2555,12 +2621,17 @@ enum HostSoftwareItems {
 #[derive(DeriveIden)]
 enum HostSoftwareItemPlugins {
     Table,
+    Id,
     HostId,
     SoftwareItemId,
     PluginConfigId,
     Role,
     Ordinal,
+    PackageIdentifier,
+    ConfigOverride,
     ExecutionSite,
+    CreatedAt,
+    UpdatedAt,
 }
 
 #[derive(DeriveIden)]
