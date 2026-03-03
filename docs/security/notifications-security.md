@@ -93,6 +93,47 @@ See [Auth and Authorization](auth-and-authorization.md) for the full permission 
 | `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot` with masked `Debug` impl |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | `merge_smtp_into_config` — in-memory merge before delivery |
 
+## Webhook URL Validation and Header Blocklist
+
+Webhook notification channels validate URLs and custom headers at config creation/update time
+to mitigate SSRF and header injection attacks.
+
+### Private host validation
+
+When `allow_private_urls` is `false` (the default), `validate_config()` rejects webhook URLs
+pointing to private, loopback, link-local, CGNAT, and reserved addresses. The validation uses
+the shared `is_private_host()` function from `uptrakit_shared_types::network`, which blocks:
+
+- IPv4: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`,
+  `100.64.0.0/10` (CGNAT), `0.0.0.0`
+- IPv6: `::1` (loopback), `::` (unspecified), `fc00::/7` (ULA), `fe80::/10` (link-local)
+- Hostnames: `localhost`, `*.local`, `*.internal`, `*.localhost`
+
+Self-hosted / single-tenant deployments can opt out via the `--allow-private-notification-urls`
+controller CLI flag. When set, the private-host check is skipped, allowing webhooks to reach
+internal services (e.g. internal Mattermost, local Docker registries).
+
+### Header blocklist
+
+Custom webhook headers (`config["headers"]`) are validated against a case-insensitive blocklist.
+The following header names are always rejected, regardless of the `allow_private_urls` setting:
+
+- `authorization`, `cookie`, `host`, `proxy-authorization`
+- `x-forwarded-for`, `x-forwarded-host`, `x-real-ip`
+
+This prevents an attacker from injecting authentication or proxy-related headers into outbound
+webhook requests.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/types/src/network.rs` | Shared `is_private_host()` function |
+| `crates/shared/notification-channels/src/webhook.rs` | `validate_config()` with URL and header validation |
+| `crates/core/controller/src/cli.rs` | `--allow-private-notification-urls` CLI flag |
+
+See also: [ATK-12: Webhook Notification SSRF](../hackme/12-webhook-notification-ssrf.md).
+
 ## Webhook HMAC Signing
 
 When a webhook channel has a `secret` field configured, outbound HTTP requests include an

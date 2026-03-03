@@ -80,9 +80,13 @@ With the JWT signing key, the attacker can:
 - **Static key with no rotation.** The master key is a single static value with no
   built-in rotation mechanism. Compromise is permanent until the key is manually
   changed and all encrypted values are re-encrypted.
-- **`EncryptedString` DB columns still use `ENC:v1:` (empty AAD).** CA private keys,
-  OIDC client secrets, MQTT passwords, webhook secrets, etc. are not yet bound to a
-  column context. Migration to `ENC:v2:` per-column AAD is tracked in `TODO.md`.
+- **`EncryptedString` DB columns default to `ENC:v1:` until operator-triggered
+  migration.** The `--upgrade-encryption` CLI flag (controller and agent-ssh) performs
+  a one-time v1→v2 re-encryption pass, binding each column's ciphertext to a unique
+  AAD string (e.g. `"uptrakit:ca_certificates:key_pem"`). Until the operator runs this
+  migration, existing rows remain at v1 (empty AAD) and are vulnerable to ciphertext
+  relocation within the same database. New rows continue using v1 for HA backward
+  compatibility until the migration is triggered.
 - **Process memory exposure.** The `OnceLock` static has `'static` lifetime, so the
   key material is present in process memory for the entire lifetime of the
   controller. A memory dump, core dump, or `/proc/pid/mem` read exposes the key.
@@ -95,8 +99,9 @@ With the JWT signing key, the attacker can:
 
 ## Recommended improvements
 
-- Complete the `ENC:v2:` migration for all `EncryptedString` columns, binding each
-  ciphertext to its table and column via a dedicated AAD string.
+- ~~Complete the `ENC:v2:` migration for all `EncryptedString` columns~~ — **Done.**
+  The `--upgrade-encryption` CLI flag triggers the v1→v2 re-encryption pass. Operators
+  should run this once all controllers/agents support v2 reads.
 - Add a master key rotation workflow that re-encrypts all stored values under a new
   key, with a migration period where both old and new keys are accepted.
 - Support external key management systems (KMS) such as AWS KMS, HashiCorp Vault, or
@@ -115,3 +120,4 @@ With the JWT signing key, the attacker can:
   `decrypt_value()`
 - `crates/core/controller/src/startup.rs` — `verify_master_key()`
 - `crates/core/controller/src/reencrypt.rs` — startup re-encryption of legacy values
+  and gated v1→v2 upgrade (`--upgrade-encryption`)

@@ -186,7 +186,9 @@ Key requirements:
 
 ### 3. Register in the `ChannelRegistry`
 
-In `crates/shared/notification-channels/src/registry.rs`, add inside `ChannelRegistry::new()`:
+`ChannelRegistry::new()` accepts a `ChannelRegistryConfig` parameter that carries deployment-level
+settings (e.g. `allow_private_urls`). In `crates/shared/notification-channels/src/registry.rs`, add
+inside `ChannelRegistry::new()`:
 
 ```rust
 #[cfg(feature = "slack")]
@@ -303,9 +305,16 @@ The builder generates:
 
 - `title` -- one-line summary (e.g. "Update Available: nginx")
 - `body` -- multi-line plain text
-- `body_html` -- HTML-formatted version for rich-text channels
+- `body_html` -- HTML-formatted version for rich-text channels (user-controlled values are
+  HTML-escaped via `uptrakit_notification_channels::escape_html()`)
 - `event_payload` -- serialized `NotificationEventDetails` as JSON
 - `actions` -- "Install {version}" button for `UpdateAvailable` events only
+
+**HTML escaping requirement**: all user-controlled values (software names, host names, version
+strings, error messages, etc.) **must** be escaped with `escape_html()` before interpolation into
+`body_html`. The `body` (plain text) and `title` do not need escaping. The shared `escape_html()`
+function (`crates/shared/notification-channels/src/lib.rs`) escapes `& < > " '` and is also used by
+the Telegram and email channel implementations for consistency.
 
 ## Emitting events
 
@@ -398,7 +407,10 @@ header against the channel's `webhook_secret` config field.
 - When `secret` is present, the request body is signed with HMAC-SHA256 and the signature is included as
   `X-Uptrakit-Signature: sha256=<hex>`.
 - Custom headers from `config.headers` are added to the request.
-- `validate_config` requires `url` to start with `http://` or `https://` and `headers` to be an object if present.
+- `validate_config` requires `url` to start with `http://` or `https://`, validates the URL host against
+  `is_private_host()` (unless `allow_private_urls` is set), validates custom headers against a blocklist of
+  security-sensitive names (`authorization`, `cookie`, `host`, etc.), and requires `headers` to be an object
+  if present.
 - `mask_config_secrets` replaces the `secret` field with `"***"`.
 
 ## Email channel details

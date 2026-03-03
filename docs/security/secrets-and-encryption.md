@@ -102,8 +102,8 @@ Two wire formats coexist for backward compatibility:
 
 | Format | Prefix | AAD | Used by |
 | --- | --- | --- | --- |
-| v1 | `ENC:v1:` | empty | `EncryptedString` DB columns (legacy) |
-| v2 | `ENC:v2:` | caller-supplied context string | JWT signing key, master-key verification token |
+| v1 | `ENC:v1:` | empty | `EncryptedString` DB columns (pre-migration) |
+| v2 | `ENC:v2:` | caller-supplied context string | JWT signing key, master-key verification token, and all `EncryptedString` DB columns after `--upgrade-encryption` migration |
 
 The `is_encrypted()` helper returns `true` for both prefixes, so code that checks whether a value is
 encrypted before deciding whether to decrypt works correctly with both formats.
@@ -115,9 +115,9 @@ moves an encrypted value from one column to another.
 
 Legacy plaintext detection allows old values to remain readable until rewritten.
 
-> **Note:** `EncryptedString` DB columns still use `ENC:v1:` (empty AAD). Migrating them to
-> context-bound `ENC:v2:` is tracked in `TODO.md` and requires a startup re-encryption pass with
-> per-column AAD strings.
+> **Note:** `EncryptedString` DB columns default to `ENC:v1:` (empty AAD) until the operator
+> triggers the v1→v2 migration via `--upgrade-encryption`. See [v1→v2 Migration](#v1v2-migration)
+> below.
 
 ### Low-level helpers: `encrypt_str`, `decrypt_str`, `encrypt_str_with_aad`, `decrypt_str_with_aad`
 
@@ -161,6 +161,60 @@ Implementation: `crates/core/controller/src/reencrypt.rs`.
 
 See also: [Secure Development](secure-development.md) for coding standards related to
 encryption.
+
+### v1→v2 Migration
+
+All 7 `EncryptedString` DB columns support context-bound `ENC:v2:` ciphertexts with per-column AAD
+strings. The migration from `ENC:v1:` to `ENC:v2:` is **operator-triggered** via the
+`--upgrade-encryption` CLI flag, following an HA-safe two-phase deployment strategy.
+
+#### AAD naming convention
+
+Each column's AAD string follows the format `"uptrakit:<table_name>:<column_name>"`:
+
+| Table | Column | AAD string |
+| --- | --- | --- |
+| `ca_certificates` | `key_pem` | `uptrakit:ca_certificates:key_pem` |
+| `oidc_providers` | `client_secret` | `uptrakit:oidc_providers:client_secret` |
+| `mqtt_clients` | `password` | `uptrakit:mqtt_clients:password` |
+| `mqtt_clients` | `ca_cert_pem` | `uptrakit:mqtt_clients:ca_cert_pem` |
+| `pending_oidc_flows` | `pkce_verifier` | `uptrakit:pending_oidc_flows:pkce_verifier` |
+| `notification_channels` | `config` | `uptrakit:notification_channels:config` |
+| `ssh_hosts` | `private_key` | `uptrakit:ssh_hosts:private_key` |
+
+#### Two-phase HA deployment
+
+In a multi-controller HA deployment, a rolling upgrade creates a window where some controllers run
+old code (v1-only) and others run new code (v2-capable). The migration is therefore split into two
+phases:
+
+1. **Phase A (automatic)**: Deploy new code to all controllers. The code registers column→AAD
+   mappings at startup, enabling transparent v2 read support. No data changes occur. Old-code
+   controllers continue operating normally because no v2 ciphertexts exist yet.
+
+2. **Phase B (operator-triggered)**: Once all controllers run new code, the operator restarts
+   **one** controller with `--upgrade-encryption`. That instance re-encrypts all v1 rows to v2.
+   All other instances can already read v2 ciphertexts.
+
+For the SSH agent, the same `--upgrade-encryption` flag triggers migration of `ssh_hosts.private_key`
+in the agent-ssh local database.
+
+#### Properties
+
+- **Idempotent**: rows already at v2 are skipped. Running the migration twice is safe.
+- **HA-safe**: if two instances both run Phase B, last-writer-wins is fine (both produce valid v2
+  ciphertexts with the same AAD).
+- **Fault-tolerant**: errors on individual rows are logged at `warn` level and skipped. The
+  controller still starts successfully.
+- **Observable**: on completion, `info`-level log lines report per-table counts.
+
+#### Single-controller deployments
+
+In non-HA (single-controller) deployments, `--upgrade-encryption` can be enabled immediately on the
+first upgrade to the version that supports v2. There is no need for a two-phase rollout.
+
+Implementation: `crates/core/controller/src/reencrypt.rs` (controller columns),
+`crates/core/agent-ssh/src/main.rs` (SSH agent column).
 
 ## Master Key Management
 

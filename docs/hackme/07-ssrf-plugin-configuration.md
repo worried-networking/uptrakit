@@ -39,11 +39,13 @@ requests to cloud metadata endpoints.
 ## Current mitigations
 
 - **Private host validation for release plugins.** GitHub, GitLab, and Forgejo configs
-  validate `api_base_url` via `is_private_host()` which blocks:
+  validate `api_base_url` via a shared `is_private_host()` function
+  (`uptrakit_shared_types::network`) which blocks:
   - `localhost`, `*.local`, `*.internal`, `*.localhost` hostnames.
   - IPv4 private ranges (`10.x`, `172.16-31.x`, `192.168.x`), loopback (`127.x`),
-    and link-local (`169.254.x`).
-  - IPv6 loopback (`::1`) and unspecified (`::`).
+    link-local (`169.254.x`), and CGNAT (`100.64-127.x`).
+  - IPv6 loopback (`::1`), unspecified (`::`), ULA (`fc00::/7`), and
+    link-local (`fe80::/10`).
 - **HTTPS-only enforcement.** All three release plugins require `api_base_url` to use
   the `https://` scheme. `http://`, `file://`, and other schemes are rejected.
 - **HTTP client timeouts.** All plugin HTTP clients are configured with
@@ -58,12 +60,10 @@ requests to cloud metadata endpoints.
 - **DNS rebinding.** `is_private_host()` checks the hostname string at validation
   time, not at connection time. A hostname like `evil.com` could resolve to `127.0.0.1`
   when the HTTP request is actually made, bypassing the static hostname check.
-- **IPv6 private ranges not fully blocked.** `is_private_host()` checks IPv6 loopback
-  and unspecified addresses but does not block IPv6 ULA (`fc00::/7`) or link-local
-  (`fe80::/10`) addresses.
-- **CGNAT range not blocked.** The `100.64.0.0/10` (Carrier-Grade NAT) range is not
-  checked by `is_private_host()`. In some environments, this range is used for
-  internal services.
+- ~~IPv6 private ranges not fully blocked.~~ **Fixed.** `is_private_host()` now blocks
+  IPv6 ULA (`fc00::/7`) and link-local (`fe80::/10`) addresses.
+- ~~CGNAT range not blocked.~~ **Fixed.** `is_private_host()` now blocks the
+  `100.64.0.0/10` (Carrier-Grade NAT) range.
 - **Docker registry has no private-host check.** The Docker plugin's
   `validate_identifier()` only checks for non-empty, no whitespace/control characters.
   The registry hostname extracted from the Docker image reference is not validated
@@ -81,8 +81,8 @@ requests to cloud metadata endpoints.
   validation time) by using a custom `reqwest` DNS resolver that rejects private IP
   addresses. This prevents DNS rebinding attacks.
 - Add `is_private_host()` validation to the Docker plugin's registry hostname.
-- Block IPv6 ULA (`fc00::/7`), link-local (`fe80::/10`), and CGNAT (`100.64.0.0/10`)
-  ranges in `is_private_host()`.
+- ~~Block IPv6 ULA, link-local, and CGNAT ranges~~ — **Done.** Consolidated shared
+  `is_private_host()` in `uptrakit_shared_types::network` covers all ranges.
 - Disable HTTP redirect following in plugin HTTP clients, or validate redirect targets
   against the same private-host rules.
 - Sanitize error messages from failed SSRF attempts to avoid leaking internal network
@@ -94,8 +94,8 @@ requests to cloud metadata endpoints.
 
 - [Secure Development — Plugin Input Validation](../security/secure-development.md#plugin-input-validation)
 - [Plugin Guidelines](../development/plugin-guidelines.md)
-- `crates/plugins/releases/github/src/config.rs` — `is_private_host()`,
-  `GitHubConfig::validate()`
+- `crates/shared/types/src/network.rs` — shared `is_private_host()` (IPv4/IPv6/hostname)
+- `crates/plugins/releases/github/src/config.rs` — `GitHubConfig::validate()`
 - `crates/plugins/releases/gitlab/src/config.rs` — `GitLabConfig::validate()`
 - `crates/plugins/releases/forgejo/src/config.rs` — `ForgejoConfig::validate()`
 - `crates/plugins/releases/docker/src/registry.rs` — `get_manifest_digest()`

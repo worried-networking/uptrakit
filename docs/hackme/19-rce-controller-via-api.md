@@ -71,20 +71,12 @@ agent identity via forwarded certificate headers.
 ### Path 6: Notification HTML injection
 
 User-controlled values (software names, version strings) are interpolated into HTML
-notification bodies via `format!()` without HTML escaping:
+notification bodies via `format!()`. All user-controlled values are now HTML-escaped
+before interpolation using the shared `uptrakit_notification_channels::escape_html()`
+function, which escapes `&`, `<`, `>`, `"`, and `'`.
 
-```rust
-let body_html = format!(
-    "A new version of <b>{software_label}</b> is available...",
-);
-```
-
-If an attacker controls a software item name or version string containing HTML/
-JavaScript, the injected content appears in email notifications. This is an XSS
-vector in email clients that render HTML, but not a controller-side RCE.
-
-**Verdict: XSS in email clients, not controller RCE.** Plain text bodies use
-`escape_html()` for `<`, `>`, `&`, `"`.
+**Verdict: Mitigated.** HTML escaping prevents XSS injection in email/Telegram HTML
+bodies. Plain text bodies do not require escaping.
 
 ### Path 7: Reverse proxy header spoofing
 
@@ -106,8 +98,8 @@ The most impactful indirect attacks are:
 
 - **Proxy header spoofing** (misconfiguration-dependent): agent identity impersonation
   leading to state manipulation.
-- **HTML injection in notifications**: XSS in downstream email clients, not controller
-  compromise.
+- ~~HTML injection in notifications~~: **Mitigated** by HTML escaping of all
+  user-controlled values in notification `body_html`.
 - **API-driven RCE on agents**: via plugin config manipulation
   ([ATK-16](16-rce-plugin-config-manipulation.md)), which executes on agents, not the
   controller.
@@ -138,8 +130,8 @@ The most impactful indirect attacks are:
   continued avoidance of template engines, dynamic code evaluation, external process
   execution, and raw SQL in the controller. Future changes that introduce any of
   these patterns must be reviewed carefully.
-- **Notification HTML injection.** While not controller RCE, unescaped HTML in
-  notification bodies is a security concern for downstream email clients.
+- ~~Notification HTML injection.~~ **Mitigated.** All user-controlled values in
+  `body_html` are HTML-escaped via `uptrakit_notification_channels::escape_html()`.
 - **Plugin execution on controller.** Controller-side `fetch_releases` plugins
   (GitHub, Docker, GitLab, Forgejo) make outbound HTTP requests with user-configured
   URLs and credentials. While these do not execute processes, they do create SSRF
@@ -150,8 +142,9 @@ The most impactful indirect attacks are:
 
 ## Recommended improvements
 
-- Add HTML escaping for user-controlled values in notification `body_html` templates
-  to prevent XSS in email clients.
+- ~~Add HTML escaping for user-controlled values in notification `body_html`~~ —
+  **Done.** Shared `escape_html()` applied to all user-controlled values in
+  `message_builder.rs`.
 - Add a CI lint or architectural test that ensures no `std::process::Command` or
   `tokio::process::Command` is used in controller crates (only in agent/shared/plugin
   crates).

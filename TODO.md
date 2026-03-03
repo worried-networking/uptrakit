@@ -736,11 +736,11 @@ Comprehensive security hardening.
   - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory in production; dev-only `--allow-plaintext-secrets`
     available)
   - [x] Context-bound `ENC:v2:` ciphertext format for JWT signing key and master-key verification token (AAD prevents ciphertext relocation attacks)
-  - [ ] **Migrate `EncryptedString` DB columns to `ENC:v2:`** — all `EncryptedString`-typed columns (CA private keys, OIDC client secrets, MQTT
-    passwords, webhook secrets, etc.) currently use `ENC:v1:` (empty AAD). A future migration should re-encrypt them with context-bound `ENC:v2:`
-    using per-column AAD strings (e.g. `"uptrakit:ca_certificates:key_pem"`). This requires a startup re-encryption pass or a dedicated migration that
-    reads and re-writes each affected column. The `EncryptedString` SeaORM integration would also need to be updated to accept and produce `ENC:v2:`
-    values. Tracked separately because it requires a schema-level re-encryption pass across all tenants.
+  - [x] **Migrate `EncryptedString` DB columns to `ENC:v2:`** — all 7 `EncryptedString`-typed columns now support context-bound `ENC:v2:` with
+    per-column AAD strings (e.g. `"uptrakit:ca_certificates:key_pem"`). The migration is operator-triggered via `--upgrade-encryption` CLI flag on
+    the controller and agent-ssh binaries. HA-safe two-phase deployment: Phase A (always active) adds v2 read support; Phase B (gated behind the flag)
+    performs the v1→v2 re-encryption pass. The pass is idempotent — rows already at v2 are skipped. See
+    [Secrets and Encryption](docs/security/secrets-and-encryption.md) for details.
   - [ ] Credential rotation
   - [ ] Vault integration
 - [ ] Add security scanning to CI/CD

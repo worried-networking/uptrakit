@@ -85,17 +85,17 @@ uptrakit/
 │   ├── shared/
 │   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch host package updates, handle_check_versions/execute_update/handle_execute_batch_host_package_update/graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (PluginType, effective_config), calls batch_detect_installed_version in parallel, refreshes package index once per fetch group, then calls batch_fetch_releases in parallel
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag; StdioTunnel trait (bidirectional byte-stream tunnel for remote command I/O)
-│   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption (EncryptedString, init_master_key)
+│   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption (EncryptedString, init_master_key); ENC:v1/v2 formats; column AAD registry (register_column_aad); --upgrade-encryption v1→v2 migration support
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, software_items, host_packages, host_package_ignores, host_package_update_history, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
-│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, TrackingSystem, etc.); feature-gated: sea-orm, openapi
+│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, TrackingSystem, etc.); network::is_private_host() for SSRF validation; feature-gated: sea-orm, openapi
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, cron utils, TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); FetchReleasesExecutor Phase B sends fetch assignments for both host_software_items and host_packages so that latest_version is populated in both tables
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers; default_resolve_shutdown(), init_tracing()
-│   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry; webhook (default) + telegram + email (feature-gated) channel impls
+│   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry(ChannelRegistryConfig); shared escape_html(); webhook (default, SSRF validation + header blocklist) + telegram + email (feature-gated) channel impls
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
@@ -993,11 +993,13 @@ and `settings_ca.rs`.
 
 1. Add feature in `crates/shared/notification-channels/Cargo.toml`
 2. Implement `NotificationChannel` trait in a new module
-3. Register in `ChannelRegistry::new()` behind `#[cfg(feature = "...")]`
+3. Register in `ChannelRegistry::new(config)` behind `#[cfg(feature = "...")]` (`config` is
+   `ChannelRegistryConfig` carrying deployment flags like `allow_private_urls`)
 4. Add variant to `NotificationChannelType` enum
 5. Propagate feature: `web-api/Cargo.toml` → `controller/Cargo.toml`
 6. If the channel requires global shared settings (like email + SMTP), add a merge step in
    `NotificationDispatcher::dispatch_loop` and in the `test_channel` route handler before calling `deliver()`
+7. HTML-escape all user-controlled values in `body_html` via `uptrakit_notification_channels::escape_html()`
 
 See [Notifications Development](docs/development/notifications.md) for full details.
 
