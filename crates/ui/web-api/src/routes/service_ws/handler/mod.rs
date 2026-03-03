@@ -63,6 +63,13 @@ const MAX_UPDATE_OUTPUT_BYTES: usize = 1_048_576;
 /// Interval between approval-status DB polls in enrolled loops.
 const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Maximum consecutive unknown messages before closing the connection.
+///
+/// Prevents a misbehaving or fuzzing client from keeping a connection alive
+/// indefinitely by sending only garbage message types. Resets on any known
+/// message.
+const MAX_CONSECUTIVE_UNKNOWN_MESSAGES: u32 = 10;
+
 // ---------------------------------------------------------------------------
 // LoopAction
 // ---------------------------------------------------------------------------
@@ -146,6 +153,7 @@ pub(crate) async fn handle_authenticated_loop(
     let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
 
     let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
+    let mut consecutive_unknown: u32 = 0;
 
     // ------------------------------------------------------------------
     // Credential delivery for services with credential capabilities
@@ -515,11 +523,27 @@ pub(crate) async fn handle_authenticated_loop(
                             // Unknown: forward-compatibility catch-all
                             // -------------------------------------------------
                             ServiceMessage::Unknown => {
+                                consecutive_unknown += 1;
                                 tracing::warn!(
                                     %service_id,
+                                    consecutive_unknown,
                                     "received unknown service message type; \
                                      ignoring for forward compatibility"
                                 );
+                                if consecutive_unknown >= MAX_CONSECUTIVE_UNKNOWN_MESSAGES {
+                                    tracing::warn!(
+                                        %service_id,
+                                        "closing connection: {MAX_CONSECUTIVE_UNKNOWN_MESSAGES} \
+                                         consecutive unknown messages"
+                                    );
+                                    let _ = close_with_reason(
+                                        sink,
+                                        CloseReason::RateLimitExceeded,
+                                    )
+                                    .await;
+                                    break;
+                                }
+                                continue;
                             }
 
                             // -------------------------------------------------
@@ -541,6 +565,10 @@ pub(crate) async fn handle_authenticated_loop(
                                 break;
                             }
                         }
+                        // Reset unknown counter — any known message (even
+                        // unsupported-for-capability) breaks the streak.
+                        // The Unknown arm uses `continue` and never reaches here.
+                        consecutive_unknown = 0;
                     }
                     Message::Close(_) => break,
                     _ => {}

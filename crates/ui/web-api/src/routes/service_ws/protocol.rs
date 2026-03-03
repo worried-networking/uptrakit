@@ -15,6 +15,7 @@ use thiserror::Error;
 use uptrakit_internal_wire::{
     Capability, CloseReason, ControllerMessage, CURRENT_PROTOCOL_VERSION, IncomingSeq, OutgoingSeq,
     PongPayload, ServiceEnvelope, ServiceMessage, now_millis,
+    limits::WireValidate,
 };
 use uptrakit_shared_db::entity::service as service_entity;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -28,12 +29,24 @@ pub(crate) const WS_MESSAGE_RATE_LIMIT: u32 = 50;
 /// Window for WebSocket message rate limiting.
 pub(crate) const WS_MESSAGE_RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Fixed-window rate limiter for WebSocket message processing.
+/// Sliding-window-counter rate limiter for WebSocket message processing.
+///
+/// Uses two half-windows to smooth the transition between periods, preventing
+/// boundary burst attacks where a fixed-window limiter allows 2× the limit
+/// (N at the end of one window + N at the start of the next).
+///
+/// The effective estimate is: `prev_count * (1 - elapsed_fraction) + curr_count`.
 pub(crate) struct MessageRateLimiter {
+    /// Start of the current half-window.
     window_start: std::time::Instant,
+    /// Duration of each half-window.
     window: std::time::Duration,
+    /// Maximum messages per window.
     max_per_window: u32,
-    count: u32,
+    /// Message count in the previous half-window.
+    prev_count: u32,
+    /// Message count in the current half-window.
+    curr_count: u32,
 }
 
 impl MessageRateLimiter {
@@ -42,19 +55,38 @@ impl MessageRateLimiter {
             window_start: std::time::Instant::now(),
             window,
             max_per_window,
-            count: 0,
+            prev_count: 0,
+            curr_count: 0,
         }
     }
 
     pub(crate) fn allow(&mut self) -> bool {
         let now = std::time::Instant::now();
-        if now.duration_since(self.window_start) >= self.window {
+        let elapsed = now.duration_since(self.window_start);
+
+        if elapsed >= self.window {
+            if elapsed >= self.window * 2 {
+                // Two or more windows elapsed — both counts are stale.
+                self.prev_count = 0;
+            } else {
+                // Single window rotation: current becomes previous.
+                self.prev_count = self.curr_count;
+            }
+            self.curr_count = 0;
             self.window_start = now;
-            self.count = 0;
         }
 
-        if self.count < self.max_per_window {
-            self.count = self.count.saturating_add(1);
+        // Weighted estimate: fraction of the previous window still relevant.
+        let elapsed_frac = now
+            .duration_since(self.window_start)
+            .as_secs_f64()
+            / self.window.as_secs_f64();
+        let weight = 1.0 - elapsed_frac;
+        let estimate =
+            (f64::from(self.prev_count) * weight) + f64::from(self.curr_count);
+
+        if estimate < f64::from(self.max_per_window) {
+            self.curr_count = self.curr_count.saturating_add(1);
             true
         } else {
             false
@@ -169,7 +201,13 @@ pub(crate) fn deserialize_service_msg(
 
     // Step 4: Full parse — soft fail for unknown types from newer service builds.
     match serde_json::from_str::<ServiceEnvelope>(text) {
-        Ok(envelope) => Ok(Some(envelope.message)),
+        Ok(envelope) => {
+            // Step 5: Validate payload field sizes (defense against processing DoS).
+            if let Err(e) = envelope.message.wire_validate() {
+                return Err(report!(ServiceWsError::Deserialize(e.to_string())));
+            }
+            Ok(Some(envelope.message))
+        }
         Err(e) => {
             tracing::debug!("ignoring unrecognized service message: {e}");
             Ok(None)

@@ -293,11 +293,56 @@ mod tests {
         let mut limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, 2);
         assert!(limiter.allow());
         assert!(limiter.allow());
+        assert!(!limiter.allow(), "should reject when at capacity");
+
+        // After TWO full windows have elapsed, the previous window's count
+        // has been fully flushed (prev_count was already rotated once, then
+        // the second rotation zeros it out).
+        let two_windows_ago = std::time::Instant::now() - WS_MESSAGE_RATE_WINDOW * 2;
+        limiter.set_window_start(two_windows_ago);
+        assert!(limiter.allow(), "should allow after two full windows");
+    }
+
+    #[test]
+    fn sliding_window_prevents_boundary_burst() {
+        // With a fixed-window limiter and max=50, an attacker could send 50
+        // at the end of one window and 50 at the start of the next (100 in
+        // rapid succession). The sliding window weights previous-window count
+        // to prevent this.
+        let window = std::time::Duration::from_secs(1);
+        let mut limiter = MessageRateLimiter::new(window, 50);
+
+        // Fill the current window to capacity.
+        for _ in 0..50 {
+            assert!(limiter.allow());
+        }
         assert!(!limiter.allow());
 
-        let reset_time = std::time::Instant::now() - WS_MESSAGE_RATE_WINDOW;
-        limiter.set_window_start(reset_time);
-        assert!(limiter.allow());
+        // Simulate window boundary: rotate current → previous, but use a
+        // window_start that's just barely past the boundary so the previous
+        // window still has high weight.
+        let just_past_boundary = std::time::Instant::now();
+        limiter.set_window_start(just_past_boundary);
+        // prev_count is still 0 here because set_window_start only changes
+        // the timestamp. Call allow() which triggers the rotation check.
+
+        // Manually build a scenario: create a fresh limiter, fill it, then
+        // rotate by pushing the window start backward.
+        let mut limiter2 = MessageRateLimiter::new(window, 50);
+        for _ in 0..50 {
+            assert!(limiter2.allow());
+        }
+        // Rotate: push window_start back so elapsed >= window, triggering
+        // the rotation on next allow() call.
+        limiter2.set_window_start(std::time::Instant::now() - window);
+
+        // First call triggers rotation (prev=50, curr=0). The weighted
+        // estimate is ~50*(1.0) + 0 = ~50, which is >= max, so it should
+        // reject immediately.
+        assert!(
+            !limiter2.allow(),
+            "sliding window should reject burst at boundary"
+        );
     }
 
     async fn setup_test_db() -> DatabaseConnection {
