@@ -95,7 +95,7 @@ async fn main() -> std::process::ExitCode {
     }
 
     if let Err(report) = run(args).await {
-        eprintln!("Error: {report:?}");
+        eprintln!("Error:\n{report}");
         std::process::ExitCode::FAILURE
     } else {
         std::process::ExitCode::SUCCESS
