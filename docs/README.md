@@ -58,6 +58,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Secure Development](security/secure-development.md) | Security requirements for contributors. See also: [Coding Standards](development/coding-standards.md), [Testing](development/testing.md). |
 | [SSH Agent Secrets](security/ssh-agent-secrets.md) | SSH agent secret storage, master key management, and threat model. See also: [SSH Agent Architecture](architecture/ssh-agent.md), [Secrets and Encryption](security/secrets-and-encryption.md). |
 | [Notifications Security](security/notifications-security.md) | Notification secret storage, callback verification, action token lifecycle, and tenant isolation. See also: [Notifications API](api/notifications.md), [Notifications Development](development/notifications.md). |
+| [Audit Logs Security](security/audit-logs.md) | Audit log data scope, tenant isolation (two-table design, no FK on tenant_id), retention/GDPR, backend security properties. See also: [Audit Logs Development](development/audit-logs.md). |
 
 ## Architecture
 
@@ -96,6 +97,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [OpenAPI Client](development/openapi-client.md) | Typed HTTP client for the web API (`uptrakit-openapi-client`). See also: [HTTP Web API](api/http-web-api.md), [CLI Usage](end-user/cli-usage.md). |
 | [Scheduler Engine](development/scheduler-engine.md) | Scheduler engine crate internals: `TaskExecutor`, `SchedulerNotifier`, executor details. See also: [Scheduler](architecture/scheduler.md), [External Scheduler Deployment](end-user/deployment/external-scheduler.md). |
 | [Notifications](development/notifications.md) | Notification subsystem architecture: dispatcher, channel trait, adding new channels, feature flags, event hooks. See also: [Notifications API](api/notifications.md), [Notifications Security](security/notifications-security.md). |
+| [Audit Logs](development/audit-logs.md) | Audit log subsystem: crate structure, backend selection, filter config, separate DB, retention, testing. See also: [Audit Logs Security](security/audit-logs.md). |
 | [Embedded Frontend](development/embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). See also: [Setup](development/setup.md), [Deployment Guides](end-user/deployment/README.md). |
 
 ## Deployment Guides

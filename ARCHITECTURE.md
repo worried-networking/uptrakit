@@ -220,6 +220,27 @@ are masked in API responses. Delivery history is recorded in the `notification_l
 See [Notifications Development](docs/development/notifications.md), [Notifications API](docs/api/notifications.md),
 and [Notifications Security](docs/security/notifications-security.md).
 
+## Audit log subsystem
+
+The controller records all authenticated HTTP requests through a pluggable audit log subsystem. A fire-and-forget
+`AuditLogDispatcher` (same `mpsc::UnboundedSender` pattern as `NotificationDispatcher`) enqueues `AuditEntry` values
+from the `audit_log` middleware (runs inside `require_auth`) and persists them through one or more backends.
+
+Two tables store entries: `audit_logs` (tenant-scoped, no FK on `tenant_id` for compliance) and `system_audit_logs`
+(global, no tenant column). The `DatabaseBackend` routes entries based on `AuditEntry.tenant_id`. An optional
+separate database (`--audit-log-db-url`) provides physical isolation of audit data.
+
+Backends are selected via the repeatable `--audit-log-backend` CLI flag (`db`, `journald`, `none`). Multiple
+backends fan out concurrently via `MultiplexBackend`. The `journald` backend is feature-gated and emits structured
+tracing events with target `uptrakit_audit`.
+
+A global filter (`--audit-log-filter`: `all` | `mutations` | `none`) controls which requests are logged, with
+per-tenant overrides via the `audit_log.filter` setting key. Retention cleanup runs as a scheduled task
+(`AuditLogCleanup`, default 90 days).
+
+The `uptrakit-audit-log` crate (`crates/shared/audit-log/`) houses core types, backends, and the dispatcher.
+See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md).
+
 ## Batch updates
 
 The controller supports batch updates — triggering multiple updates in a single request with sequential per-host

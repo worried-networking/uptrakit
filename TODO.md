@@ -80,7 +80,7 @@ Essential infrastructure needed before feature development.
 - [x] Full RBAC permission checking in middleware
 - [x] OIDC integration
 - [x] Rate limiting on login endpoint
-- [ ] Audit logging for security events
+- [x] Audit logging for security events
 - [x] Use JWT token
 
 ### Agent Authentication & Security
@@ -710,8 +710,15 @@ Comprehensive security hardening.
 
 ### Audit Logging
 
-- [ ] Security event logging
-  - [ ] Authentication attempts (success/failure)
+- [x] Security event logging
+  - [x] Authenticated HTTP request logging (method, path, status, actor, IP, duration)
+  - [x] Pluggable backends: database, journald (feature-gated), noop
+  - [x] Multiple concurrent backends via `MultiplexBackend`
+  - [x] Fire-and-forget dispatcher (zero handler latency)
+  - [x] Global filter mode: `all` / `mutations` / `none`
+  - [x] Per-tenant filter override via `audit_log.filter` setting key
+  - [x] Separate audit database support (`--audit-log-db-url`)
+  - [ ] Authentication attempts (success/failure) — failed logins not yet captured
   - [ ] Authorization decisions
   - [ ] Certificate operations (issuance, revocation, renewal)
   - [ ] CA operations (rotation, backup)
@@ -719,10 +726,10 @@ Comprehensive security hardening.
 - [ ] Tamper-evident log storage
   - [ ] Log signing
   - [ ] Log integrity verification
-  - [ ] Immutable log storage
-- [ ] Log management
-  - [ ] Log rotation policies
-  - [ ] Log retention policies
+  - [x] Immutable log storage (write-once, no FK on `tenant_id` for compliance)
+- [x] Log management
+  - [x] Log retention policies (90-day default via `AuditLogCleanupExecutor`)
+  - [ ] Per-tenant retention overrides (`audit_log.retention_days` — key defined, executor pending)
   - [ ] Log archival
   - [ ] Log search and analysis
 
@@ -868,7 +875,7 @@ Making the system usable and maintainable.
   - [x] Secure deployment recommendations
   - [x] Network security
   - [x] Secret management
-  - [ ] Audit logging configuration
+  - [x] Audit logging configuration
 
 ### Deployment Documentation
 

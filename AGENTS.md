@@ -60,7 +60,7 @@ uptrakit/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
 │   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; parallel per-host version checks and updates over SSH (per-host concurrency guard + forwarder task + aggregate mpsc channel); host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts; SshStdioTunnel (bidirectional byte-stream over russh channel for Docker proxy); ExecuteBatchHostPackageUpdate handler with freeze check
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server; migration runner delegates to `uptrakit_shared_db::migration`
-│   │   │   ├── src/db_migrate/         #   `db-migrate` subcommand: copies all data between DB backends; error.rs (DbMigrateError + Report<> Result), tables.rs (migrate_table<E>, copy_all, clean_all, verify_all for all 34 app tables), mod.rs (run() orchestrator)
+│   │   │   ├── src/db_migrate/         #   `db-migrate` subcommand: copies all data between DB backends; error.rs (DbMigrateError + Report<> Result), tables.rs (migrate_table<E>, copy_all, clean_all, verify_all for all 42 app tables), mod.rs (run() orchestrator)
 │   │   │   ├── src/scheduler/          #   (cfg: embedded-scheduler) Embedded scheduler using uptrakit-scheduler-engine
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
 │   │   ├── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
@@ -95,6 +95,7 @@ uptrakit/
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, cron utils, TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `external_scheduler_connected: Arc<AtomicBool>` flag skips external tasks when set; FetchReleasesExecutor Phase B sends fetch assignments for both host_software_items and host_packages so that latest_version is populated in both tables
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers; default_resolve_shutdown(), init_tracing()
+│   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
 │   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry(ChannelRegistryConfig); shared escape_html(); webhook (default, SSRF validation + header blocklist) + telegram + email (feature-gated) channel impls
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields
@@ -1060,6 +1061,67 @@ and `settings_ca.rs`.
 
 See [Notifications Development](docs/development/notifications.md) for full details.
 
+## Audit log subsystem
+
+The controller records all authenticated HTTP requests through a pluggable audit log subsystem. It follows the same
+fire-and-forget `mpsc::UnboundedSender` dispatcher pattern as notifications.
+
+### Key crates and modules
+
+| Crate/module | Purpose |
+| --- | --- |
+| `crates/shared/audit-log/` | `AuditLogBackend` trait, `AuditEntry`, `AuditFilter`, `AuditLogDispatcher`, `NoopBackend`, `DatabaseBackend`, `JournaldBackend`, `MultiplexBackend` |
+| `crates/shared/db/src/entity/audit_log.rs` | SeaORM entity for `audit_logs` table (tenant-scoped, no FK on `tenant_id`) |
+| `crates/shared/db/src/entity/system_audit_log.rs` | SeaORM entity for `system_audit_logs` table (global) |
+| `crates/ui/web-api/src/middleware/audit_log.rs` | Axum middleware (runs inside `require_auth`, captures method/path/user/IP/status/duration) |
+| `crates/ui/web-api/src/setting_key.rs` | `AuditLogFilter` + `AuditLogRetentionDays` setting keys |
+| `crates/ui/web-api/src/app_state.rs` | `audit_log_filter` + `audit_log_dispatcher` fields |
+| `crates/core/controller/src/cli.rs` | `AuditLogBackendArg`, `AuditLogFilterArg` enums + CLI flags |
+| `crates/core/controller/src/main.rs` | Backend construction + AppState wiring |
+| `crates/core/controller/src/startup.rs` | `init_audit_database()` for separate audit DB |
+| `crates/shared/scheduler-engine/src/executors/audit_log_cleanup.rs` | Retention cleanup (90-day default) |
+
+### Feature flags
+
+| Feature | Crate | Default | Notes |
+| --- | --- | --- | --- |
+| `db` | audit-log | no | Enables `DatabaseBackend` (sea-orm + shared-db) |
+| `journald` | audit-log | no | Enables `JournaldBackend` (tracing-journald) |
+| `journald` | controller | no | Propagated; adds `tracing-journald` dep |
+
+### Middleware placement
+
+The `audit_log` middleware is an **inner** route_layer on `auth_routes`, declared before `require_auth`. This means
+it runs **after** auth (inner layers execute after outer layers in Axum):
+
+```rust
+let auth_routes = auth_routes
+    .route_layer(audit_log_layer)    // inner: runs AFTER require_auth
+    .route_layer(require_auth_layer); // outer: runs FIRST
+```
+
+### Setting keys
+
+`AuditLogFilter` (`audit_log.filter`) — per-tenant override of the global `--audit-log-filter` CLI flag.
+`AuditLogRetentionDays` (`audit_log.retention_days`) — per-tenant retention period (future use).
+
+### Default `NoopBackend` in tests
+
+`AppState` uses `unwrap_or_else` defaults: `AuditFilter::default()` and
+`AuditLogDispatcher::new(Arc::new(NoopBackend))`. Existing tests require zero changes.
+
+### Design decisions
+
+- **No FK on `audit_logs.tenant_id`** — audit records are immutable and must survive tenant deletion for compliance.
+- **`AuditActorType` is internal-only** — follows `ActorType`/`BatchType` pattern: `Copy`, `as_str()` + `Display`,
+  not `#[non_exhaustive]`, no `Other(String)`.
+- **Multiple backends via repeatable CLI flag** — `--audit-log-backend db --audit-log-backend journald` fans out
+  concurrently via `MultiplexBackend`.
+- **No request/response body logging** — only metadata (method, path, status, actor, IP, duration).
+
+See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md)
+for full details.
+
 ## Detailed Documentation References
 
 For more in-depth information on specific topics, refer to the following documents:
@@ -1077,6 +1139,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [SSH Agent Secrets](docs/security/ssh-agent-secrets.md)
 - [Sudoers Management](docs/security/sudoers-management.md)
 - [Notifications Security](docs/security/notifications-security.md)
+- [Audit Logs Security](docs/security/audit-logs.md)
 
 ### End-user Guides
 
@@ -1108,6 +1171,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Embedded Frontend](docs/development/embedded-frontend.md)
 - [Logging](docs/development/logging.md)
 - [Notifications](docs/development/notifications.md)
+- [Audit Logs](docs/development/audit-logs.md)
 
 ### Architecture
 

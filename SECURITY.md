@@ -29,6 +29,7 @@ a week.
 - Filesystem/dependency hardening: [docs/security/filesystem-dependency-security.md](docs/security/filesystem-dependency-security.md)
 - Secure development practices: [docs/security/secure-development.md](docs/security/secure-development.md)
 - Notification security (secret storage, callback verification, action tokens): [docs/security/notifications-security.md](docs/security/notifications-security.md)
+- Audit log security (data scope, tenant isolation, retention, GDPR): [docs/security/audit-logs.md](docs/security/audit-logs.md)
 
 ## Disclosure policy
 
