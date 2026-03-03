@@ -710,7 +710,7 @@ Comprehensive security hardening.
 
 ### Audit Logging
 
-- [x] Security event logging
+- [x] Infrastructure
   - [x] Authenticated HTTP request logging (method, path, status, actor, IP, duration)
   - [x] Pluggable backends: database, journald (feature-gated), noop
   - [x] Multiple concurrent backends via `MultiplexBackend`
@@ -718,20 +718,83 @@ Comprehensive security hardening.
   - [x] Global filter mode: `all` / `mutations` / `none`
   - [x] Per-tenant filter override via `audit_log.filter` setting key
   - [x] Separate audit database support (`--audit-log-db-url`)
-  - [ ] Authentication attempts (success/failure) — failed logins not yet captured
-  - [ ] Authorization decisions
-  - [ ] Certificate operations (issuance, revocation, renewal)
-  - [ ] CA operations (rotation, backup)
-  - [ ] Configuration changes
+  - [x] Immutable log storage (write-once, no FK on `tenant_id` for compliance)
+  - [x] Log retention policies (90-day default via `AuditLogCleanupExecutor`)
+- [ ] Authentication events (unauthenticated — outside `require_auth` middleware)
+  - [ ] Failed login attempts (invalid credentials, deactivated user, missing password hash) — `routes/auth.rs`
+  - [ ] Failed API token attempts (invalid token, revoked token) — `middleware/require_auth.rs`
+  - [ ] Failed JWT validation (malformed, expired, revoked, invalid subject) — `middleware/require_auth.rs`
+  - [ ] Token refresh failures (expired refresh token, deactivated user) — `routes/auth.rs`
+  - [ ] Registration attempts (success/failure, token validation) — `routes/auth.rs`
+- [ ] OIDC auth flow (unauthenticated — public routes)
+  - [ ] OIDC authorize initiation (provider, PKCE flow) — `routes/oidc_auth.rs`
+  - [ ] OIDC callback completion (success/failure, token exchange) — `routes/oidc_auth.rs`
+  - [ ] OIDC account linking (link flow completion) — `routes/oidc_auth.rs`
+  - [ ] OIDC token exchange (API token issuance) — `routes/oidc_auth.rs`
+  - [ ] OIDC registration completion — `routes/oidc_auth.rs`
+  - [ ] OIDC auth failures (provider not found, inactive, discovery failure) — `routes/oidc_auth.rs`
+- [ ] Device auth flow (unauthenticated — public routes)
+  - [ ] Device auth initiation (device code creation) — `routes/device_auth.rs`
+  - [ ] Device auth polling (status checks) — `routes/device_auth.rs`
+  - [ ] Device auth approval/denial — `routes/device_auth.rs`
+  - [ ] Device flow expiration and consumption — `routes/device_auth.rs`
+- [ ] WebSocket service operations (outside HTTP audit middleware)
+  - [ ] Service WebSocket connection (anonymous, bearer secret, mTLS) — `routes/service_ws/mod.rs`
+  - [ ] Service enrollment (pending, approved, completed) — `routes/service_ws/handler/mod.rs`
+  - [ ] Service certificate operations (CSR submission, certificate delivery) — `routes/service_ws/handler/mod.rs`
+  - [ ] Service discovery reporting (ReportHosts, DiscoveryResults) — `routes/service_ws/handler/messages.rs`
+  - [ ] Version check result processing — `routes/service_ws/handler/messages.rs`
+  - [ ] Update lifecycle (started, output, completed, failed) — `routes/service_ws/handler/updates.rs`
+  - [ ] Batch host package update completion — `routes/service_ws/handler/updates.rs`
+  - [ ] Certificate renewal requests — `routes/service_ws/handler/renewal.rs`
+- [ ] MQTT operations (WebSocket-based, outside HTTP audit middleware)
+  - [ ] MQTT registration handshake — `routes/service_ws/handler/mqtt.rs`
+  - [ ] MQTT tenant assignment/release — `routes/service_ws/handler/mqtt.rs`
+  - [ ] MQTT client status heartbeats — `routes/service_ws/handler/mqtt.rs`
+  - [ ] MQTT-triggered software updates — `routes/service_ws/handler/mqtt.rs`
+  - [ ] MQTT-triggered host package updates — `routes/service_ws/handler/mqtt.rs`
+- [ ] System service operations (WebSocket-based, outside HTTP audit middleware)
+  - [ ] System service enrollment completion — `routes/service_ws/handler/mod.rs`
+  - [ ] Credential delivery to system services (DB URL, NATS URL, master key) — `routes/service_ws/handler/mod.rs`
+- [ ] CA and PKI operations
+  - [ ] CA rotation triggering and broadcast — `routes/settings_ca.rs`
+  - [ ] Certificate issuance (during service enrollment) — `routes/service_ws/handler/mod.rs`
+  - [ ] Certificate revocation — CA management
+  - [ ] CRL generation and renewal — `executors/crl_renewal.rs`
+  - [ ] Public PKI endpoint access (CA cert download, CRL access, OCSP queries) — `routes/ca.rs`, `routes/ocsp.rs`
+- [ ] Scheduler background tasks (automatic, no HTTP request)
+  - [ ] Auth cleanup execution (expired OIDC flows, device flows, rate limits) — `executors/auth_cleanup.rs`
+  - [ ] Service certificate check and renewal broadcast — `executors/service_cert_check.rs`
+  - [ ] CRL renewal trigger and broadcast — `executors/crl_renewal.rs`
+  - [ ] Stale MQTT lease cleanup — `executors/stale_lease_cleanup.rs`
+  - [ ] Audit log retention cleanup execution — `executors/audit_log_cleanup.rs`
+  - [ ] Version detection execution — `executors/detect_version.rs`
+  - [ ] Release fetch execution — `executors/fetch_releases.rs`
+- [ ] Semantic operation logging (authenticated routes — HTTP request logged, but not the operation meaning)
+  - [ ] Settings changes with old/new values (network, SMTP, registration mode, etc.)
+  - [ ] User creation, deactivation, role assignment changes
+  - [ ] OIDC provider creation, update, activation, deactivation, deletion
+  - [ ] Enrollment token creation and revocation
+  - [ ] Notification channel creation, update, deletion, test delivery
+  - [ ] Notification rule creation, update, deletion
+  - [ ] Service approval, rejection, deactivation
+  - [ ] System service approval, rejection, deactivation
+  - [ ] Software item creation, update, deletion
+  - [ ] Plugin config creation, update, deletion
+  - [ ] Host package ignore/unignore
+  - [ ] Autodiscovery ignore creation and deletion
+  - [ ] MQTT client creation, update, deletion
+  - [ ] Batch update initiation
+- [ ] Public callback endpoints (unauthenticated — outside `require_auth` middleware)
+  - [ ] Telegram webhook callback execution (action token, secret verification) — `routes/notifications.rs`
 - [ ] Tamper-evident log storage
   - [ ] Log signing
   - [ ] Log integrity verification
-  - [x] Immutable log storage (write-once, no FK on `tenant_id` for compliance)
-- [x] Log management
-  - [x] Log retention policies (90-day default via `AuditLogCleanupExecutor`)
+- [ ] Log management enhancements
   - [ ] Per-tenant retention overrides (`audit_log.retention_days` — key defined, executor pending)
   - [ ] Log archival
   - [ ] Log search and analysis
+  - [ ] Audit log read API (REST endpoints for querying audit logs)
 
 ### Additional Security
 
