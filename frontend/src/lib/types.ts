@@ -12,7 +12,9 @@ export enum Permission {
 	ViewSoftware = 'view_software',
 	ManageSoftware = 'manage_software',
 	ViewHosts = 'view_hosts',
-	ManageHosts = 'manage_hosts'
+	ManageHosts = 'manage_hosts',
+	ViewSystemServices = 'view_system_services',
+	ManageSystemServices = 'manage_system_services'
 }
 
 export interface User {
@@ -602,6 +604,39 @@ export interface NatsSettingsResponse {
 
 export interface UpdateNatsSettingsRequest {
 	url?: string | null;
+}
+
+// System services
+
+export type SystemServiceStatus = 'pending' | 'approved' | 'rejected' | 'deactivated';
+
+export interface SystemServiceResponse {
+	id: string;
+	capabilities: string[];
+	hostname: string;
+	friendly_name: string;
+	ip_address: string | null;
+	status: SystemServiceStatus;
+	client_version: string | null;
+	last_seen_at: string | null;
+	created_at: string;
+	updated_at: string;
+	ping_interval_seconds?: number | null;
+	cert_lifetime_hours?: number | null;
+}
+
+export interface UpdateSystemServiceRequest {
+	ping_interval_seconds?: number;
+	cert_lifetime_hours?: number;
+}
+
+export interface SystemServicesSettingsResponse {
+	enrollment_token?: string;
+	has_token: boolean;
+}
+
+export interface UpdateSystemServicesSettingsRequest {
+	enrollment_token?: string | null;
 }
 
 // Host packages

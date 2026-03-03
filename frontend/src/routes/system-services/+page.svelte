@@ -3,8 +3,14 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import { getServices, approveService, rejectService, deleteService, mergeService, updateService } from '$lib/api';
-	import type { ServiceResponse } from '$lib/types';
+	import {
+		getSystemServices,
+		approveSystemService,
+		rejectSystemService,
+		deleteSystemService,
+		updateSystemService
+	} from '$lib/api';
+	import type { SystemServiceResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
@@ -12,10 +18,10 @@
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 
-	const CAPABILITY_FILTER_VALUES = ['all', 'software_discovery', 'ssh_remote'] as const;
-	type CapabilityFilter = (typeof CAPABILITY_FILTER_VALUES)[number];
+	const STATUS_FILTER_VALUES = ['all', 'pending', 'approved', 'rejected', 'deactivated'] as const;
+	type StatusFilter = (typeof STATUS_FILTER_VALUES)[number];
 
-	let services: ServiceResponse[] = $state([]);
+	let services: SystemServiceResponse[] = $state([]);
 	let error: string | null = $state(null);
 	let openMenuId: string | null = $state(null);
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
@@ -25,23 +31,20 @@
 		name: string;
 		capabilities: string[];
 	} | null = $state(null);
-	let mergeSource: { id: string; name: string; capabilities: string[] } | null = $state(null);
-	let mergeTargetId: string | null = $state(null);
 	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
-	let capabilityFilter: CapabilityFilter = $state(
-		parseUrlParam(page.url, 'capability', CAPABILITY_FILTER_VALUES, 'all')
-	);
+	let statusFilter: StatusFilter = $state(parseUrlParam(page.url, 'status', STATUS_FILTER_VALUES, 'all'));
 
-	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageAgents) ?? false);
+	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSystemServices) ?? false);
+	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSystemServices) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	$effect(() => {
 		const parts: string[] = [];
-		if (capabilityFilter !== 'all') parts.push(`capability=${capabilityFilter}`);
+		if (statusFilter !== 'all') parts.push(`status=${statusFilter}`);
 		if (currentPage > 1) parts.push(`page=${currentPage}`);
 		const search = parts.join('&');
 		goto(search ? `${location.pathname}?${search}` : location.pathname, {
@@ -52,7 +55,7 @@
 	});
 
 	$effect(() => {
-		const _filter = capabilityFilter; // explicit dependency tracking
+		const _filter = statusFilter; // explicit dependency tracking
 		loadServices(untrack(() => currentPage));
 
 		refreshInterval = setInterval(() => {
@@ -68,12 +71,12 @@
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
-	async function loadServices(page: number, background = false) {
+	async function loadServices(p: number, background = false) {
 		try {
 			if (!background) error = null;
-			const result = await getServices({
-				capability: capabilityFilter === 'all' ? undefined : capabilityFilter,
-				page
+			const result = await getSystemServices({
+				status: statusFilter === 'all' ? undefined : statusFilter,
+				page: p
 			});
 			services = result.items;
 			currentPage = result.page;
@@ -81,7 +84,7 @@
 			if (background) error = null;
 		} catch (e) {
 			if (!background) {
-				error = e instanceof Error ? e.message : 'Failed to load services';
+				error = e instanceof Error ? e.message : 'Failed to load system services';
 			}
 		}
 	}
@@ -100,9 +103,9 @@
 		openMenuId = null;
 	}
 
-	function setFilter(filter: CapabilityFilter) {
+	function setFilter(filter: StatusFilter) {
 		currentPage = 1;
-		capabilityFilter = filter;
+		statusFilter = filter;
 		closeMenu();
 	}
 
@@ -137,34 +140,6 @@
 		confirmAction = null;
 	}
 
-	function openMergeDialog(service: ServiceResponse) {
-		closeMenu();
-		mergeSource = { id: service.id, name: service.friendly_name, capabilities: service.capabilities };
-		mergeTargetId = null;
-	}
-
-	function cancelMerge() {
-		mergeSource = null;
-		mergeTargetId = null;
-	}
-
-	async function executeMerge() {
-		if (!mergeSource || !mergeTargetId || submitting) return;
-		const sourceId = mergeSource.id;
-		submitting = true;
-		try {
-			error = null;
-			await mergeService(mergeTargetId, sourceId);
-			services = services.filter((service) => service.id !== sourceId);
-			mergeSource = null;
-			mergeTargetId = null;
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to merge service';
-		} finally {
-			submitting = false;
-		}
-	}
-
 	async function executeConfirmed() {
 		if (!confirmAction || submitting) return;
 		const { serviceId, action } = confirmAction;
@@ -174,23 +149,23 @@
 		try {
 			error = null;
 			if (action === 'approve') {
-				const updated = await approveService(serviceId);
-				services = services.map((service) => (service.id === serviceId ? updated : service));
+				const updated = await approveSystemService(serviceId);
+				services = services.map((s) => (s.id === serviceId ? updated : s));
 			} else if (action === 'reject') {
-				await rejectService(serviceId);
-				services = services.filter((service) => service.id !== serviceId);
+				await rejectSystemService(serviceId);
+				services = services.filter((s) => s.id !== serviceId);
 			} else if (action === 'delete') {
-				await deleteService(serviceId);
-				services = services.filter((service) => service.id !== serviceId);
+				await deleteSystemService(serviceId);
+				services = services.filter((s) => s.id !== serviceId);
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : `Failed to ${action} service`;
+			error = e instanceof Error ? e.message : `Failed to ${action} system service`;
 		} finally {
 			submitting = false;
 		}
 	}
 
-	function openPingDialog(service: ServiceResponse) {
+	function openPingDialog(service: SystemServiceResponse) {
 		closeMenu();
 		editPingService = {
 			id: service.id,
@@ -214,7 +189,7 @@
 		submitting = true;
 		try {
 			error = null;
-			const updated = await updateService(editPingService.id, {
+			const updated = await updateSystemService(editPingService.id, {
 				ping_interval_seconds: val === '' ? 0 : seconds
 			});
 			services = services.map((s) => (s.id === updated.id ? updated : s));
@@ -233,9 +208,9 @@
 	}
 
 	const confirmLabels = {
-		approve: { title: 'Approve Service', verb: 'approve', btnClass: 'preset-filled-success-500' },
-		reject: { title: 'Reject Service', verb: 'reject', btnClass: 'preset-filled-error-500' },
-		delete: { title: 'Delete Service', verb: 'permanently delete', btnClass: 'preset-filled-error-500' }
+		approve: { title: 'Approve System Service', verb: 'approve', btnClass: 'preset-filled-success-500' },
+		reject: { title: 'Reject System Service', verb: 'reject', btnClass: 'preset-filled-error-500' },
+		delete: { title: 'Delete System Service', verb: 'permanently delete', btnClass: 'preset-filled-error-500' }
 	} as const;
 </script>
 
@@ -244,33 +219,44 @@
 	onkeydown={(e) => {
 		if (e.key === 'Escape') {
 			if (confirmAction) cancelConfirm();
-			else if (mergeSource) cancelMerge();
 			else if (editPingService) cancelPingEdit();
 		}
 	}}
 />
 
-{#if getUser()}
-	<h1 class="h1 mb-4">Services</h1>
+{#if canView}
+	<h1 class="h1 mb-4">System Services</h1>
 
 	<div class="mb-6 flex flex-wrap gap-2">
 		<button
-			class="btn btn-sm {capabilityFilter === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			class="btn btn-sm {statusFilter === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
 			onclick={() => setFilter('all')}
 		>
-			All Services
+			All
 		</button>
 		<button
-			class="btn btn-sm {capabilityFilter === 'software_discovery' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-			onclick={() => setFilter('software_discovery')}
+			class="btn btn-sm {statusFilter === 'pending' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('pending')}
 		>
-			Agents
+			Pending
 		</button>
 		<button
-			class="btn btn-sm {capabilityFilter === 'ssh_remote' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-			onclick={() => setFilter('ssh_remote')}
+			class="btn btn-sm {statusFilter === 'approved' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('approved')}
 		>
-			SSH Agents
+			Approved
+		</button>
+		<button
+			class="btn btn-sm {statusFilter === 'rejected' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('rejected')}
+		>
+			Rejected
+		</button>
+		<button
+			class="btn btn-sm {statusFilter === 'deactivated' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('deactivated')}
+		>
+			Deactivated
 		</button>
 	</div>
 
@@ -286,7 +272,6 @@
 			<thead>
 				<tr>
 					<th>Name</th>
-					<th>Label</th>
 					<th>Hostname</th>
 					<th>IP</th>
 					<th>Status</th>
@@ -300,9 +285,6 @@
 				{#each services as service (service.id)}
 					<tr>
 						<td>{service.friendly_name}</td>
-						<td>
-							<span class="badge preset-tonal">{service.service_label}</span>
-						</td>
 						<td>{service.hostname}</td>
 						<td>{service.ip_address ?? '\u2014'}</td>
 						<td>
@@ -336,10 +318,10 @@
 					</tr>
 				{:else}
 					<tr>
-						<td colspan={canManage ? 7 : 6} class="text-center py-8">
-							<p class="text-lg font-medium">No services registered yet</p>
+						<td colspan={canManage ? 6 : 5} class="text-center py-8">
+							<p class="text-lg font-medium">No system services registered yet</p>
 							<p class="mt-1 text-sm text-surface-500">
-								Agents, MQTT services, SSH agents, and schedulers appear here when they enroll with the controller.
+								System services appear here when they enroll with the controller.
 							</p>
 						</td>
 					</tr>
@@ -355,16 +337,6 @@
 		{#if service}
 			<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 				{#if service.status === 'pending'}
-					<li>
-						<button
-							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-							role="menuitem"
-							tabindex="-1"
-							onclick={() => openMergeDialog(service)}
-						>
-							Merge Into&hellip;
-						</button>
-					</li>
 					<li>
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm text-success-500 hover:bg-surface-200 dark:hover:bg-surface-800"
@@ -385,7 +357,7 @@
 							Reject
 						</button>
 					</li>
-				{:else}
+				{:else if service.status === 'approved'}
 					<li>
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
@@ -396,6 +368,17 @@
 							Edit Ping Interval
 						</button>
 					</li>
+					<li>
+						<button
+							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+							role="menuitem"
+							tabindex="-1"
+							onclick={() => requestConfirm(service.id, 'delete', service.friendly_name)}
+						>
+							Delete
+						</button>
+					</li>
+				{:else if service.status !== 'deactivated'}
 					<li>
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
@@ -424,37 +407,6 @@
 			onconfirm={executeConfirmed}
 			oncancel={cancelConfirm}
 		/>
-	{/if}
-
-	{#if mergeSource}
-		<ModalBackdrop onclose={cancelMerge}>
-			<div
-				class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-				role="dialog"
-				aria-modal="true"
-			>
-				<h3 class="h3">Merge Service</h3>
-				<p>
-					Merge <strong>{mergeSource.name}</strong> into an existing service. The source service's enrollment will be transferred
-					to the target, preserving the target's history.
-				</p>
-				<label class="label">
-					<span>Select target service</span>
-					<select class="select" bind:value={mergeTargetId}>
-						<option value={null}>-- Select a service --</option>
-						{#each services.filter((s) => s.status === 'approved' && s.capabilities.includes('software_discovery') && s.id !== mergeSource?.id) as target (target.id)}
-							<option value={target.id}>{target.friendly_name} ({target.hostname})</option>
-						{/each}
-					</select>
-				</label>
-				<div class="flex justify-end gap-2">
-					<button class="btn preset-tonal-surface" onclick={cancelMerge}>Cancel</button>
-					<button class="btn preset-filled-primary-500" disabled={!mergeTargetId || submitting} onclick={executeMerge}>
-						{submitting ? 'Merging...' : 'Merge'}
-					</button>
-				</div>
-			</div>
-		</ModalBackdrop>
 	{/if}
 
 	{#if editPingService}

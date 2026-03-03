@@ -74,6 +74,7 @@
 	const allNavItems = [
 		{ href: '/', label: 'Home' },
 		{ href: '/services', label: 'Services' },
+		{ href: '/system-services', label: 'System Services', permission: Permission.ViewSystemServices },
 		{ href: '/software', label: 'Software', permission: Permission.ViewSoftware },
 		{ href: '/history', label: 'History', permission: Permission.ViewSoftware },
 		{ href: '/scheduler', label: 'Scheduler', permission: Permission.ManageSoftware },

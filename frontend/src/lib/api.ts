@@ -64,6 +64,10 @@ import type {
 	CreateDiscoveryAllowlistEntryRequest,
 	NatsSettingsResponse,
 	UpdateNatsSettingsRequest,
+	SystemServiceResponse,
+	SystemServicesSettingsResponse,
+	UpdateSystemServicesSettingsRequest,
+	UpdateSystemServiceRequest,
 	PluginTypeInfo,
 	HostPackageResponse,
 	HostPackageDetailResponse,
@@ -590,6 +594,52 @@ export function getNatsSettings(): Promise<NatsSettingsResponse> {
 
 export function updateNatsSettings(data: UpdateNatsSettingsRequest): Promise<NatsSettingsResponse> {
 	return request('/settings/nats', { method: 'PUT', body: JSON.stringify(data) });
+}
+
+// --- System Services APIs ---
+
+export function getSystemServices(options?: {
+	capability?: string;
+	status?: string;
+	page?: number;
+	perPage?: number;
+}): Promise<PaginatedResponse<SystemServiceResponse>> {
+	const params = new URLSearchParams();
+	if (options?.capability) params.set('capability', options.capability);
+	if (options?.status) params.set('status', options.status);
+	if (options?.page != null) params.set('page', String(options.page));
+	if (options?.perPage != null) params.set('per_page', String(options.perPage));
+	const query = params.toString();
+	return request(`/system-services${query ? `?${query}` : ''}`);
+}
+
+export function approveSystemService(id: string): Promise<SystemServiceResponse> {
+	return request(`/system-services/${encodeURIComponent(id)}/approve`, { method: 'POST' });
+}
+
+export function rejectSystemService(id: string): Promise<SystemServiceResponse> {
+	return request(`/system-services/${encodeURIComponent(id)}/reject`, { method: 'POST' });
+}
+
+export function deleteSystemService(id: string): Promise<void> {
+	return requestVoid(`/system-services/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function updateSystemService(id: string, data: UpdateSystemServiceRequest): Promise<SystemServiceResponse> {
+	return request(`/system-services/${encodeURIComponent(id)}`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
+}
+
+export function getSystemServicesSettings(): Promise<SystemServicesSettingsResponse> {
+	return request('/settings/system-services');
+}
+
+export function updateSystemServicesSettings(
+	data: UpdateSystemServicesSettingsRequest
+): Promise<SystemServicesSettingsResponse> {
+	return request('/settings/system-services', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- Plugin Types & Configs ---
