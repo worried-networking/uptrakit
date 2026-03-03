@@ -54,6 +54,14 @@ fn is_valid_discovery_plugin(ops: &dyn PluginOps, plugin_type: &PluginType) -> b
         .contains(&PluginCapability::DiscoverLocalSoftware)
 }
 
+/// Returns `true` if the database error represents a unique constraint violation.
+fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
+    matches!(
+        e.sql_err(),
+        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+    )
+}
+
 // ── Tenant-wide allowlist ─────────────────────────────────────────────────────
 
 /// List all tenant-wide discovery allowlist entries.
@@ -79,7 +87,9 @@ pub async fn list_tenant_allowlist(
 
 /// Add a plugin type to the tenant-wide discovery allowlist.
 ///
-/// Idempotent: if the entry already exists, returns the existing entry.
+/// Idempotent: if the entry already exists (including via a concurrent insert),
+/// returns the existing entry. Unique constraint violations from concurrent
+/// inserts are handled gracefully via a follow-up SELECT.
 /// Rejects `Other`/unknown plugin types and types without `DiscoverLocalSoftware`.
 pub async fn add_tenant_allowlist_entry(
     ops: &dyn PluginOps,
@@ -93,7 +103,7 @@ pub async fn add_tenant_allowlist_entry(
 
     let type_str = plugin_type.to_string();
 
-    // Check for existing entry (idempotent).
+    // Fast path: check for an existing entry before attempting the insert.
     if let Some(existing) = tenant_discovery_allowlist::Entity::find()
         .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_id))
         .filter(tenant_discovery_allowlist::Column::PluginType.eq(&type_str))
@@ -117,13 +127,35 @@ pub async fn add_tenant_allowlist_entry(
         plugin_type: Set(type_str.clone()),
         created_at: Set(now),
     };
-    model.insert(db).await.context_to()?;
 
-    Ok(TenantDiscoveryAllowlistEntry {
-        id,
-        plugin_type: type_str,
-        created_at: now,
-    })
+    match model.insert(db).await {
+        Ok(_) => Ok(TenantDiscoveryAllowlistEntry {
+            id,
+            plugin_type: type_str,
+            created_at: now,
+        }),
+        Err(e) if is_unique_violation(&e) => {
+            // Lost a concurrent race — the DB constraint prevented a duplicate.
+            // Fetch and return the winner's entry.
+            tenant_discovery_allowlist::Entity::find()
+                .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_id))
+                .filter(tenant_discovery_allowlist::Column::PluginType.eq(&type_str))
+                .one(db)
+                .await
+                .context_to()?
+                .map(|existing| TenantDiscoveryAllowlistEntry {
+                    id: existing.id,
+                    plugin_type: existing.plugin_type,
+                    created_at: existing.created_at,
+                })
+                .ok_or_else(|| {
+                    report!(AllowlistError::Db(sea_orm::DbErr::Custom(
+                        "concurrent insert race: entry vanished after unique violation".to_string()
+                    )))
+                })
+        }
+        Err(e) => Err(e).context_to(),
+    }
 }
 
 /// Remove a tenant-wide discovery allowlist entry by ID.
@@ -197,7 +229,9 @@ pub async fn list_host_allowlist(
 
 /// Add a plugin type to a host's discovery allowlist.
 ///
-/// Idempotent: if the entry already exists, returns the existing entry.
+/// Idempotent: if the entry already exists (including via a concurrent insert),
+/// returns the existing entry. Unique constraint violations from concurrent
+/// inserts are handled gracefully via a follow-up SELECT.
 /// Rejects `Other`/unknown plugin types and types without `DiscoverLocalSoftware`.
 pub async fn add_host_allowlist_entry(
     ops: &dyn PluginOps,
@@ -212,7 +246,7 @@ pub async fn add_host_allowlist_entry(
 
     let type_str = plugin_type.to_string();
 
-    // Check for existing entry (idempotent).
+    // Fast path: check for an existing entry before attempting the insert.
     if let Some(existing) = host_discovery_allowlist::Entity::find()
         .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_id))
         .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
@@ -239,14 +273,38 @@ pub async fn add_host_allowlist_entry(
         plugin_type: Set(type_str.clone()),
         created_at: Set(now),
     };
-    model.insert(db).await.context_to()?;
 
-    Ok(HostDiscoveryAllowlistEntry {
-        id,
-        host_id,
-        plugin_type: type_str,
-        created_at: now,
-    })
+    match model.insert(db).await {
+        Ok(_) => Ok(HostDiscoveryAllowlistEntry {
+            id,
+            host_id,
+            plugin_type: type_str,
+            created_at: now,
+        }),
+        Err(e) if is_unique_violation(&e) => {
+            // Lost a concurrent race — the DB constraint prevented a duplicate.
+            // Fetch and return the winner's entry.
+            host_discovery_allowlist::Entity::find()
+                .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_id))
+                .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
+                .filter(host_discovery_allowlist::Column::PluginType.eq(&type_str))
+                .one(db)
+                .await
+                .context_to()?
+                .map(|existing| HostDiscoveryAllowlistEntry {
+                    id: existing.id,
+                    host_id: existing.host_id,
+                    plugin_type: existing.plugin_type,
+                    created_at: existing.created_at,
+                })
+                .ok_or_else(|| {
+                    report!(AllowlistError::Db(sea_orm::DbErr::Custom(
+                        "concurrent insert race: entry vanished after unique violation".to_string()
+                    )))
+                })
+        }
+        Err(e) => Err(e).context_to(),
+    }
 }
 
 /// Remove a host-specific discovery allowlist entry by ID.
