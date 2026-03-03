@@ -57,6 +57,8 @@ pub(crate) const COPY_ORDER: &[&str] = &[
     "notification_channels",
     "notification_rules",
     "notification_log",
+    "audit_logs",
+    "system_audit_logs",
 ];
 
 /// Batch-copy all rows from `src` to `dst` in FK-safe order.
@@ -115,6 +117,8 @@ pub async fn copy_all(
     copy!(NotificationChannel, "notification_channels");
     copy!(NotificationRule, "notification_rules");
     copy!(NotificationLog, "notification_log");
+    copy!(AuditLog, "audit_logs");
+    copy!(SystemAuditLog, "system_audit_logs");
 
     Ok(total)
 }
@@ -131,6 +135,8 @@ pub async fn clean_all(dst: &DatabaseConnection) -> Result<()> {
         };
     }
 
+    clean!(SystemAuditLog, "system_audit_logs");
+    clean!(AuditLog, "audit_logs");
     clean!(NotificationLog, "notification_log");
     clean!(NotificationRule, "notification_rules");
     clean!(NotificationChannel, "notification_channels");
@@ -228,6 +234,8 @@ pub async fn verify_all(src: &DatabaseConnection, dst: &DatabaseConnection) -> R
     verify!(NotificationChannel, "notification_channels");
     verify!(NotificationRule, "notification_rules");
     verify!(NotificationLog, "notification_log");
+    verify!(AuditLog, "audit_logs");
+    verify!(SystemAuditLog, "system_audit_logs");
 
     Ok(total)
 }
@@ -357,11 +365,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copy_order_has_all_40_tables() {
+    fn copy_order_has_all_42_tables() {
         assert_eq!(
             COPY_ORDER.len(),
-            40,
-            "COPY_ORDER must list all 40 app tables"
+            42,
+            "COPY_ORDER must list all 42 app tables"
         );
     }
 }
