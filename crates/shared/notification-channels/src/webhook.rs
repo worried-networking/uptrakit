@@ -30,6 +30,20 @@ const BLOCKED_HEADERS: &[&str] = &[
     "x-real-ip",
 ];
 
+/// Returns an error if `key` matches any entry in [`BLOCKED_HEADERS`].
+///
+/// Called from both [`WebhookChannel::deliver`] (defence-in-depth) and
+/// [`WebhookChannel::validate_config`] (pre-save validation).
+fn check_header_allowed(key: &str) -> crate::error::Result<()> {
+    let lower = key.to_lowercase();
+    if BLOCKED_HEADERS.contains(&lower.as_str()) {
+        bail!(ChannelError::InvalidConfig(format!(
+            "header '{key}' is not allowed in webhook custom headers"
+        )));
+    }
+    Ok(())
+}
+
 /// Webhook notification channel.
 ///
 /// Sends a JSON POST request to the URL specified in the channel config.
@@ -99,9 +113,12 @@ impl NotificationChannel for WebhookChannel {
             .post(url)
             .header("Content-Type", "application/json");
 
-        // Add custom headers from config.
+        // Add custom headers from config.  Defence-in-depth: enforce the
+        // blocked-header list at delivery time even if validation was skipped
+        // (e.g. config written directly to the DB before the blocklist existed).
         if let Some(headers) = config.get("headers").and_then(|h| h.as_object()) {
             for (key, value) in headers {
+                check_header_allowed(key)?;
                 if let Some(v) = value.as_str() {
                     req = req.header(key.as_str(), v);
                 }
@@ -172,12 +189,7 @@ impl NotificationChannel for WebhookChannel {
             }
             if let Some(obj) = headers.as_object() {
                 for key in obj.keys() {
-                    let lower = key.to_lowercase();
-                    if BLOCKED_HEADERS.contains(&lower.as_str()) {
-                        bail!(ChannelError::InvalidConfig(format!(
-                            "header '{key}' is not allowed in webhook custom headers"
-                        )));
-                    }
+                    check_header_allowed(key)?;
                 }
             }
         }
@@ -343,6 +355,32 @@ mod tests {
         });
         let result = channel_allow_private().validate_config(&config);
         assert!(result.is_err());
+    }
+
+    // ── check_header_allowed unit tests ──────────────────────────────────
+
+    #[test]
+    fn check_header_allowed_rejects_blocked_headers() {
+        for blocked in BLOCKED_HEADERS {
+            let result = check_header_allowed(blocked);
+            assert!(result.is_err(), "should reject '{blocked}'");
+            let msg = result.unwrap_err().current_context().to_string();
+            assert!(msg.contains(blocked), "error should mention header name; got: {msg}");
+        }
+    }
+
+    #[test]
+    fn check_header_allowed_case_insensitive() {
+        assert!(check_header_allowed("Authorization").is_err());
+        assert!(check_header_allowed("AUTHORIZATION").is_err());
+        assert!(check_header_allowed("AuThOrIzAtIoN").is_err());
+    }
+
+    #[test]
+    fn check_header_allowed_permits_custom_headers() {
+        assert!(check_header_allowed("X-Custom-Header").is_ok());
+        assert!(check_header_allowed("X-Api-Key").is_ok());
+        assert!(check_header_allowed("Accept").is_ok());
     }
 
     #[test]

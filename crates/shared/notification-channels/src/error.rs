@@ -4,6 +4,7 @@ use rootcause::prelude::*;
 use thiserror::Error;
 
 /// Errors originating from notification channel operations.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum ChannelError {
     /// The channel-specific configuration is invalid.
