@@ -1,8 +1,9 @@
 //! `ServiceHandler` implementation for the external scheduler binary.
 //!
 //! On connect, the scheduler waits for `ServiceCredentials` to arrive. Once
-//! received, it initialises the database connection, NATS transport, and
-//! encryption key, then spawns the scheduler engine loop.
+//! received, it initialises the master encryption key, column AAD mappings,
+//! database connection, data key ring (DEKs loaded from the controller's DB),
+//! and NATS transport, then spawns the scheduler engine loop.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::AtomicBool;
@@ -135,7 +136,10 @@ impl ServiceHandler for SchedulerHandler {
                     tracing::info!("master encryption key initialized");
                 }
 
-                // 2. Connect to database.
+                // 2. Register column AAD mappings (must happen after master key init).
+                register_column_aad_mappings();
+
+                // 3. Connect to database.
                 let db_url = creds
                     .db_url
                     .as_ref()
@@ -153,7 +157,11 @@ impl ServiceHandler for SchedulerHandler {
                 })?;
                 tracing::info!("database connection established");
 
-                // 3. Connect to NATS.
+                // 4. Initialize data encryption key ring (read-only — the
+                //    controller is responsible for generating DEKs).
+                init_data_key_ring(&db).await;
+
+                // 5. Connect to NATS.
                 let nats_url = creds.nats_url.as_ref().ok_or_else(|| {
                     report!(LoopError::Other(
                         "ServiceCredentials missing nats_url (nats_access capability required)"
@@ -171,7 +179,7 @@ impl ServiceHandler for SchedulerHandler {
                 })?;
                 tracing::info!("NATS connection established");
 
-                // 4. Resolve scheduler identity.
+                // 6. Resolve scheduler identity.
                 // Use the stable enrolled service ID so the claim identity persists
                 // across reconnects (even to a different controller).
                 let scheduler_id = self.service_id.ok_or_else(|| {
@@ -180,7 +188,7 @@ impl ServiceHandler for SchedulerHandler {
                     ))
                 })?;
 
-                // 5. Build notifier and scheduler.
+                // 7. Build notifier and scheduler.
                 let notifier: Arc<dyn SchedulerNotifier> =
                     Arc::new(NatsSchedulerNotifier::new(nats_conn, scheduler_id));
 
@@ -216,7 +224,7 @@ impl ServiceHandler for SchedulerHandler {
                     Box::new(DetectVersionExecutor::new(db, notifier)),
                 );
 
-                // 6. Spawn the scheduler loop.
+                // 8. Spawn the scheduler loop.
                 let cancel = CancellationToken::new();
                 let cancel_clone = cancel.clone();
                 let handle = tokio::spawn(async move {
@@ -283,6 +291,136 @@ impl ServiceHandler for SchedulerHandler {
             .await;
 
         outcome
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Encryption helpers
+// ---------------------------------------------------------------------------
+
+/// Register column-level AAD mappings so that `EncryptedString`'s `TryGetable`
+/// implementation can transparently decrypt DB columns.
+///
+/// This mirrors the controller's `register_column_aad_mappings` in
+/// `reencrypt.rs`.  The scheduler shares the same database and therefore needs
+/// the same mappings.
+fn register_column_aad_mappings() {
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
+
+    let mut mappings = std::collections::HashMap::new();
+    mappings.insert(
+        "key_pem".to_string(),
+        "uptrakit:ca_certificates:key_pem".to_string(),
+    );
+    mappings.insert(
+        "client_secret".to_string(),
+        "uptrakit:oidc_providers:client_secret".to_string(),
+    );
+    mappings.insert(
+        "password".to_string(),
+        "uptrakit:mqtt_clients:password".to_string(),
+    );
+    mappings.insert(
+        "ca_cert_pem".to_string(),
+        "uptrakit:mqtt_clients:ca_cert_pem".to_string(),
+    );
+    mappings.insert(
+        "pkce_verifier".to_string(),
+        "uptrakit:pending_oidc_flows:pkce_verifier".to_string(),
+    );
+    mappings.insert(
+        "config".to_string(),
+        "uptrakit:notification_channels:config".to_string(),
+    );
+
+    if let Err(e) = uptrakit_crypto::register_column_aad(mappings) {
+        tracing::warn!(error = %e, "column AAD registry already initialized (harmless)");
+    }
+}
+
+/// Load DEKs from the shared database and initialise the global data key ring.
+///
+/// The scheduler is read-only with respect to DEKs — the controller is
+/// responsible for generating and managing them.  If no DEKs are found (e.g.
+/// the controller has not started yet), the ring is not initialized and
+/// encryption falls back to KEK-direct v2 format.
+async fn init_data_key_ring(db: &sea_orm::DatabaseConnection) {
+    use sea_orm::EntityTrait;
+    use uptrakit_shared_db::entity::data_encryption_key;
+
+    if !uptrakit_crypto::master_key_available() {
+        return;
+    }
+
+    // Already initialised (possible on re-sent credentials).
+    if uptrakit_crypto::data_key_ring_available() {
+        return;
+    }
+
+    let kek_fp = match uptrakit_crypto::master_key_fingerprint() {
+        Ok(fp) => fp,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to compute KEK fingerprint");
+            return;
+        }
+    };
+
+    let rows = match data_encryption_key::Entity::find().all(db).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to query data_encryption_keys");
+            return;
+        }
+    };
+
+    if rows.is_empty() {
+        tracing::info!("no DEKs found in database — waiting for controller to generate them");
+        return;
+    }
+
+    let mut keys = std::collections::HashMap::new();
+    let mut active_key_id: Option<String> = None;
+
+    for row in &rows {
+        if row.kek_fingerprint != kek_fp {
+            tracing::error!(
+                key_id = %row.key_id,
+                stored_fp = %row.kek_fingerprint,
+                current_fp = %kek_fp,
+                "DEK was wrapped with a different KEK — master key mismatch"
+            );
+            return;
+        }
+
+        let dek = match uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!(key_id = %row.key_id, error = %e, "failed to unwrap DEK");
+                return;
+            }
+        };
+        keys.insert(dek.key_id.clone(), dek.key);
+
+        if row.status == "active" {
+            active_key_id = Some(row.key_id.clone());
+        }
+    }
+
+    let active = match active_key_id {
+        Some(id) => id,
+        None => {
+            tracing::error!("no active DEK found in data_encryption_keys table");
+            return;
+        }
+    };
+
+    let ring = uptrakit_crypto::DataKeyRing::new(keys, active.clone());
+    if let Err(e) = uptrakit_crypto::init_data_key_ring(ring) {
+        tracing::warn!(error = %e, "data key ring already initialized (harmless)");
+    } else {
+        tracing::info!(active_key_id = %active, count = rows.len(), "data key ring initialized");
     }
 }
 
