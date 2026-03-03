@@ -187,6 +187,8 @@ channels:
         $ref: "#/components/messages/executeBatchHostPackageUpdate"
       batchHostPackageUpdateResult:
         $ref: "#/components/messages/batchHostPackageUpdateResult"
+      setUpdateFreeze:
+        $ref: "#/components/messages/setUpdateFreeze"
 
   controllerEvents:
     address: uptrakit.events.controller
@@ -732,6 +734,24 @@ operations:
       controller uses these results to update individual `host_package_update_history`
       records and `host_packages.installed_version` fields.
 
+  receiveSetUpdateFreeze:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/setUpdateFreeze"
+    summary: Agent receives a remote update freeze toggle (agent-only)
+    description: |
+      The controller pushes this message to enable or disable the update freeze
+      on the agent. When `enabled` is `true`, the agent creates a local freeze
+      file that blocks all `ExecuteUpdate` and `ExecuteBatchHostPackageUpdate`
+      messages until the file is removed. When `enabled` is `false`, the freeze
+      file is deleted.
+
+      This piggybacks on the existing freeze-file mechanism: local `touch` still
+      works, and the freeze persists across agent restarts. The message is safe
+      for NATS publication — it contains no credential material.
+
 components:
   securitySchemes:
     mtls:
@@ -1095,6 +1115,21 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/batchHostPackageUpdateResultPayload"
+
+    setUpdateFreeze:
+      name: set_update_freeze
+      title: Set Update Freeze Message
+      summary: Controller toggles the update freeze on an agent
+      description: |
+        When `enabled` is `true`, the agent creates a local freeze file that
+        blocks all `ExecuteUpdate` and `ExecuteBatchHostPackageUpdate` messages.
+        When `enabled` is `false`, the freeze file is removed. An optional
+        `reason` field provides an audit trail.
+
+        This message is safe for NATS publication — it contains no credentials.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/setUpdateFreezePayload"
 
     serviceCredentials:
       name: service_credentials
@@ -3492,6 +3527,43 @@ components:
         error:
           type: string
           description: Error message if the update failed
+
+    setUpdateFreezePayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - enabled
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            Wire protocol version. Must equal `CURRENT_PROTOCOL_VERSION` (currently 1).
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: set_update_freeze
+          description: Message type discriminator
+        enabled:
+          type: boolean
+          description: |
+            Whether to enable (`true`) or disable (`false`) the update freeze.
+            When enabled, the agent creates a local freeze file that blocks all
+            `ExecuteUpdate` and `ExecuteBatchHostPackageUpdate` messages.
+        reason:
+          type: string
+          description: |
+            Optional human-readable reason for the freeze, logged for audit purposes.
+          examples:
+            - "emergency maintenance window"
+            - "investigating failed update"
 
     serviceCredentialsPayload:
       type: object

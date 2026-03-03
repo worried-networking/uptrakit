@@ -396,6 +396,7 @@ pub enum ControllerMessage {
     ExecuteUpdate(Box<ExecuteUpdatePayload>),
     ExecuteBatchHostPackageUpdate(Box<ExecuteBatchHostPackageUpdatePayload>),
     DiscoverSoftware(DiscoverSoftwarePayload),
+    SetUpdateFreeze(SetUpdateFreezePayload),
     // -- MQTT-specific --
     Registered(MqttRegisteredPayload),
     TenantAssignments(MqttTenantAssignmentsPayload),
@@ -1023,6 +1024,25 @@ pub struct BatchHostPackageUpdateResult {
     /// Error message if the update failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+// --- Remote update freeze ---
+
+/// Controller → Agent: enable or disable the update freeze.
+///
+/// When `enabled` is `true`, the agent creates its freeze file, which blocks
+/// `ExecuteUpdate` and `ExecuteBatchHostPackageUpdate` messages until the file
+/// is removed (either via a subsequent `SetUpdateFreeze { enabled: false }`
+/// message, or manually on the host via `rm <freeze-file>`).
+///
+/// This message is safe for NATS publication — it contains no credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetUpdateFreezePayload {
+    /// Whether to enable (`true`) or disable (`false`) the freeze.
+    pub enabled: bool,
+    /// Optional human-readable reason for the freeze (audit trail).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 // --- Graceful shutdown messages ---
@@ -4310,5 +4330,45 @@ mod tests {
             reason: "test".into(),
         })
         .is_nats_publishable());
+    }
+
+    // ── SetUpdateFreeze tests ────────────────────────────────────────────
+
+    #[test]
+    fn set_update_freeze_serialization_roundtrip() {
+        let msg = ControllerMessage::SetUpdateFreeze(SetUpdateFreezePayload {
+            enabled: true,
+            reason: Some("emergency maintenance".to_string()),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"set_update_freeze"#));
+        assert!(json.contains(r#""enabled":true"#));
+        assert!(json.contains(r#""reason":"emergency maintenance""#));
+        let roundtripped: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, roundtripped);
+    }
+
+    #[test]
+    fn set_update_freeze_disable_without_reason() {
+        let msg = ControllerMessage::SetUpdateFreeze(SetUpdateFreezePayload {
+            enabled: false,
+            reason: None,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("reason"));
+        let roundtripped: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(msg, roundtripped);
+    }
+
+    #[test]
+    fn set_update_freeze_is_nats_publishable() {
+        let msg = ControllerMessage::SetUpdateFreeze(SetUpdateFreezePayload {
+            enabled: true,
+            reason: None,
+        });
+        assert!(
+            msg.is_nats_publishable(),
+            "SetUpdateFreeze contains no credentials and should be NATS-publishable"
+        );
     }
 }

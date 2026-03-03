@@ -158,6 +158,10 @@ impl ServiceHandler for AgentHandler {
                 self.last_update_accepted = Some(std::time::Instant::now());
                 Ok(client::handle_execute_batch_host_package_update(*payload, conn).await)
             }
+            ControllerMessage::SetUpdateFreeze(payload) => {
+                handle_set_update_freeze(&self.freeze_file_path, payload).await;
+                Ok(None)
+            }
             _ => {
                 tracing::debug!("ignoring unrecognized message in authenticated loop");
                 Ok(None)
@@ -241,6 +245,59 @@ impl ServiceHandler for AgentHandler {
 /// filesystem error does not permanently halt the agent.
 async fn is_frozen(freeze_file_path: &std::path::Path) -> bool {
     tokio::fs::try_exists(freeze_file_path).await.unwrap_or(false)
+}
+
+/// Handle a remote `SetUpdateFreeze` message by creating or removing the
+/// freeze file on the local filesystem.
+///
+/// This piggybacks on the existing freeze-file mechanism: local `touch` still
+/// works, and the freeze persists across agent restarts.
+async fn handle_set_update_freeze(
+    freeze_file_path: &std::path::Path,
+    payload: uptrakit_internal_wire::SetUpdateFreezePayload,
+) {
+    let reason = payload.reason.as_deref().unwrap_or("(no reason given)");
+    if payload.enabled {
+        match tokio::fs::write(freeze_file_path, "").await {
+            Ok(()) => {
+                tracing::warn!(
+                    freeze_file = %freeze_file_path.display(),
+                    reason = reason,
+                    "security_audit: update freeze enabled via remote command"
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    freeze_file = %freeze_file_path.display(),
+                    error = %e,
+                    "failed to create freeze file"
+                );
+            }
+        }
+    } else {
+        match tokio::fs::remove_file(freeze_file_path).await {
+            Ok(()) => {
+                tracing::warn!(
+                    freeze_file = %freeze_file_path.display(),
+                    reason = reason,
+                    "security_audit: update freeze disabled via remote command"
+                );
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                tracing::debug!(
+                    freeze_file = %freeze_file_path.display(),
+                    "freeze file did not exist; no action taken"
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    freeze_file = %freeze_file_path.display(),
+                    error = %e,
+                    "failed to remove freeze file"
+                );
+            }
+        }
+    }
 }
 
 /// Capabilities advertised by the agent service.
