@@ -367,6 +367,13 @@ pub(crate) mod host_packages {
     }
 }
 
+pub(crate) mod audit_logs {
+    /// `GET /api/v1/audit-logs`
+    pub(crate) const BASE: &str = "/api/v1/audit-logs";
+    /// `GET /api/v1/system-audit-logs`
+    pub(crate) const SYSTEM: &str = "/api/v1/system-audit-logs";
+}
+
 pub(crate) mod update_history {
     use uuid::Uuid;
     /// `GET /api/v1/update-history`

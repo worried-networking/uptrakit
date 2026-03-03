@@ -4,6 +4,7 @@ pub mod mock;
 pub(crate) mod paths;
 
 pub mod api_tokens;
+pub mod audit_logs;
 pub mod auth;
 pub mod autodiscovery;
 pub mod batch_progress_stream;

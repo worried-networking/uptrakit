@@ -145,6 +145,11 @@ enum Commands {
         #[command(subcommand)]
         command: SystemServicesCommands,
     },
+    /// View audit logs (tenant and system)
+    AuditLogs {
+        #[command(subcommand)]
+        command: AuditLogsCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -626,6 +631,73 @@ enum SystemServicesCommands {
         /// Per-service certificate lifetime in hours (0 to clear override)
         #[arg(long)]
         cert_lifetime_hours: Option<u32>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AuditLogsCommands {
+    /// List tenant-scoped audit log entries
+    List {
+        /// Filter by actor type (user, api_token, oidc)
+        #[arg(long)]
+        actor_type: Option<String>,
+        /// Filter by HTTP method (GET, POST, PUT, DELETE, PATCH)
+        #[arg(long)]
+        method: Option<String>,
+        /// Filter by exact HTTP status code (e.g. 200, 403, 500)
+        #[arg(long)]
+        status: Option<u16>,
+        /// Lower bound timestamp (inclusive), RFC 3339 format
+        #[arg(long)]
+        from: Option<String>,
+        /// Upper bound timestamp (inclusive), RFC 3339 format
+        #[arg(long)]
+        to: Option<String>,
+        /// Filter entries by a specific actor UUID
+        #[arg(long)]
+        actor_id: Option<Uuid>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// View system-level audit log entries (global settings, CA rotation, etc.)
+    System {
+        #[command(subcommand)]
+        command: AuditLogsSystemCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AuditLogsSystemCommands {
+    /// List system-level audit log entries
+    List {
+        /// Filter by actor type (user, api_token, oidc)
+        #[arg(long)]
+        actor_type: Option<String>,
+        /// Filter by HTTP method (GET, POST, PUT, DELETE, PATCH)
+        #[arg(long)]
+        method: Option<String>,
+        /// Filter by exact HTTP status code (e.g. 200, 403, 500)
+        #[arg(long)]
+        status: Option<u16>,
+        /// Lower bound timestamp (inclusive), RFC 3339 format
+        #[arg(long)]
+        from: Option<String>,
+        /// Upper bound timestamp (inclusive), RFC 3339 format
+        #[arg(long)]
+        to: Option<String>,
+        /// Filter entries by a specific actor UUID
+        #[arg(long)]
+        actor_id: Option<Uuid>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
     },
 }
 
@@ -3328,6 +3400,65 @@ async fn run(cli: Cli) -> error::Result<()> {
                 .await?;
                 output::print_output(format, &resp)?;
             }
+        },
+        Commands::AuditLogs { command } => match command {
+            AuditLogsCommands::List {
+                actor_type,
+                method,
+                status,
+                from,
+                to,
+                actor_id,
+                page,
+                per_page,
+            } => {
+                let resp = commands::audit_logs::list(commands::audit_logs::ListParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                    actor_type: actor_type.as_deref(),
+                    method: method.as_deref(),
+                    status,
+                    from: from.as_deref(),
+                    to: to.as_deref(),
+                    actor_id,
+                    page,
+                    per_page,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            AuditLogsCommands::System { command } => match command {
+                AuditLogsSystemCommands::List {
+                    actor_type,
+                    method,
+                    status,
+                    from,
+                    to,
+                    actor_id,
+                    page,
+                    per_page,
+                } => {
+                    let resp =
+                        commands::audit_logs::list_system(commands::audit_logs::ListParams {
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                            actor_type: actor_type.as_deref(),
+                            method: method.as_deref(),
+                            status,
+                            from: from.as_deref(),
+                            to: to.as_deref(),
+                            actor_id,
+                            page,
+                            per_page,
+                        })
+                        .await?;
+                    output::print_output(format, &resp)?;
+                }
+            },
         },
     }
     Ok(())

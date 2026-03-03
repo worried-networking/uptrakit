@@ -1,4 +1,5 @@
 pub mod api;
+pub mod audit_logs;
 pub mod auth;
 pub mod autodiscovery;
 pub mod batch_update;
