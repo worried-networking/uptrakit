@@ -442,6 +442,17 @@ See [System Services Architecture](../architecture/system-services.md) for the f
 - `DELETE /api/v1/system-services/{id}`: deactivate (soft-delete) a system service, revoke its
   certificates, and bump the CRL (requires `manage_system_services`). Returns `204 No Content`.
 
+### Audit Log Endpoints
+
+Read-only access to the audit trail. Both endpoints use the same filter parameters
+(`actor_type`, `method`, `status`, `from`, `to`, `actor_id`, `page`, `per_page`).
+See [Audit Logs API Reference](audit-logs.md) for the full specification.
+
+- `GET /api/v1/audit-logs`: list tenant-scoped audit log entries
+  (requires `view_audit_logs`). Returns `PaginatedResponse<AuditLogResponse>`.
+- `GET /api/v1/system-audit-logs`: list system-level audit log entries
+  (requires `view_system_audit_logs`, `owner` only). Returns `PaginatedResponse<SystemAuditLogResponse>`.
+
 ### System Services Settings Endpoints
 
 - `GET /api/v1/settings/system-services`: get the global system services enrollment token

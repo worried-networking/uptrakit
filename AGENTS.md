@@ -1082,7 +1082,12 @@ fire-and-forget `mpsc::UnboundedSender` dispatcher pattern as notifications.
 | `crates/shared/audit-log/` | `AuditLogBackend` trait, `AuditEntry`, `AuditFilter`, `AuditLogDispatcher`, `NoopBackend`, `DatabaseBackend`, `JournaldBackend`, `MultiplexBackend` |
 | `crates/shared/db/src/entity/audit_log.rs` | SeaORM entity for `audit_logs` table (tenant-scoped, no FK on `tenant_id`) |
 | `crates/shared/db/src/entity/system_audit_log.rs` | SeaORM entity for `system_audit_logs` table (global) |
-| `crates/ui/web-api/src/middleware/audit_log.rs` | Axum middleware (runs inside `require_auth`, captures method/path/user/IP/status/duration) |
+| `crates/ui/web-api/src/middleware/audit_log.rs` | Axum middleware (runs inside `require_auth`); detects system routes by prefix (`/api/v1/global-settings/`, `/api/v1/system-services`) |
+| `crates/ui/web-api/src/queries/audit_logs.rs` | `list_tenant_audit_logs` + `list_system_audit_logs` with filter/pagination support |
+| `crates/ui/web-api/src/routes/audit_logs.rs` | `GET /api/v1/audit-logs` (`CanViewAuditLogs`) and `GET /api/v1/system-audit-logs` (`CanViewSystemAuditLogs`) |
+| `crates/shared/web-api-types/src/audit_logs.rs` | `AuditLogResponse`, `SystemAuditLogResponse`, `AuditLogListParams` |
+| `crates/shared/openapi-client/src/audit_logs.rs` | `list_audit_logs` + `list_system_audit_logs` client methods |
+| `crates/ui/cli/src/commands/audit_logs.rs` | `audit-logs list` (tenant) and `audit-logs system list` (system) CLI subcommands |
 | `crates/ui/web-api/src/setting_key.rs` | `AuditLogFilter` + `AuditLogRetentionDays` setting keys |
 | `crates/ui/web-api/src/app_state.rs` | `audit_log_filter` + `audit_log_dispatcher` fields |
 | `crates/core/controller/src/cli.rs` | `AuditLogBackendArg`, `AuditLogFilterArg` enums + CLI flags |
@@ -1097,6 +1102,18 @@ fire-and-forget `mpsc::UnboundedSender` dispatcher pattern as notifications.
 | `db` | audit-log | no | Enables `DatabaseBackend` (sea-orm + shared-db) |
 | `journald` | audit-log | no | Enables `JournaldBackend` (tracing-journald) |
 | `journald` | controller | no | Propagated; adds `tracing-journald` dep |
+
+### System-route detection
+
+The middleware detects global-infrastructure routes and sets `tenant_id = None` so entries go to
+`system_audit_logs` instead of `audit_logs`. Detection is by URL prefix:
+
+- `/api/v1/global-settings/` (or exactly `/api/v1/global-settings`) → `system_audit_logs`
+- `/api/v1/system-services/` (or exactly `/api/v1/system-services`) → `system_audit_logs`
+- All other authenticated routes → `audit_logs`
+
+When adding a new global-infrastructure endpoint group under a new prefix, update the detection
+logic in `crates/ui/web-api/src/middleware/audit_log.rs`.
 
 ### Middleware placement
 

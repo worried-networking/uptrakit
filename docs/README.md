@@ -27,6 +27,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Plugin Configurations](end-user/plugin-configs.md) | Plugin config management, supported plugin types, autodiscovery, and ignore rules. See also: [Autodiscovery](end-user/autodiscovery.md), [Software Item Entity](architecture/software-item-entity.md). |
 | [Host Packages](end-user/host-packages.md) | Host-level package tracking, batch updates, and system update management. See also: [Host Packages API](api/host-packages.md), [Host Packages Architecture](architecture/host-packages.md). |
 | [Update History](end-user/update-history.md) | Viewing update history, status reference, filters, and triggering updates. See also: [Update Workflow](end-user/update-workflow.md), [Update History Entity](architecture/update-history-entity.md). |
+| [Audit Logs](end-user/audit-logs.md) | Viewing audit logs (tenant and system), filter reference, permissions, and CLI usage. See also: [Audit Logs API](api/audit-logs.md), [Audit Logs Security](security/audit-logs.md). |
 | [Profile and API Tokens](end-user/profile-tokens.md) | Account info, API token lifecycle, security best practices. See also: [Auth Flows](api/auth-flows.md), [Auth and Authorization](security/auth-and-authorization.md). |
 | [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md) | Reverse proxy deployment choices, headers, and API snippets. See also: [PKI and Certificates](security/pki-certificates.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
 
@@ -42,6 +43,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Enrollment Tokens](api/enrollment-tokens.md) | Enrollment token CRUD, capability scoping, usage limits, TTL, and enrollment flow. See also: [Auth and Authorization](security/auth-and-authorization.md). |
 | [Host Packages API](api/host-packages.md) | Host package REST API reference (CRUD, updates, ignores). See also: [Host Packages Guide](end-user/host-packages.md), [Host Packages Architecture](architecture/host-packages.md). |
 | [Notifications](api/notifications.md) | Notification channel, rule, and delivery log REST API reference. See also: [Notifications Guide](end-user/notifications.md), [Notifications Security](security/notifications-security.md). |
+| [Audit Logs API](api/audit-logs.md) | Audit log REST API reference: endpoints, filter parameters, response schema, permissions. See also: [Audit Logs Guide](end-user/audit-logs.md), [Audit Logs Security](security/audit-logs.md). |
 
 ## Security
 
@@ -58,7 +60,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Secure Development](security/secure-development.md) | Security requirements for contributors. See also: [Coding Standards](development/coding-standards.md), [Testing](development/testing.md). |
 | [SSH Agent Secrets](security/ssh-agent-secrets.md) | SSH agent secret storage, master key management, and threat model. See also: [SSH Agent Architecture](architecture/ssh-agent.md), [Secrets and Encryption](security/secrets-and-encryption.md). |
 | [Notifications Security](security/notifications-security.md) | Notification secret storage, callback verification, action token lifecycle, and tenant isolation. See also: [Notifications API](api/notifications.md), [Notifications Development](development/notifications.md). |
-| [Audit Logs Security](security/audit-logs.md) | Audit log data scope, tenant isolation (two-table design, no FK on tenant_id), retention/GDPR, backend security properties. See also: [Audit Logs Development](development/audit-logs.md). |
+| [Audit Logs Security](security/audit-logs.md) | Audit log data scope, tenant isolation (two-table design, no FK on tenant_id), access permissions, retention/GDPR, backend security properties. See also: [Audit Logs Development](development/audit-logs.md), [Audit Logs API](api/audit-logs.md). |
 
 ## Architecture
 
@@ -97,7 +99,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [OpenAPI Client](development/openapi-client.md) | Typed HTTP client for the web API (`uptrakit-openapi-client`). See also: [HTTP Web API](api/http-web-api.md), [CLI Usage](end-user/cli-usage.md). |
 | [Scheduler Engine](development/scheduler-engine.md) | Scheduler engine crate internals: `TaskExecutor`, `SchedulerNotifier`, executor details. See also: [Scheduler](architecture/scheduler.md), [External Scheduler Deployment](end-user/deployment/external-scheduler.md). |
 | [Notifications](development/notifications.md) | Notification subsystem architecture: dispatcher, channel trait, adding new channels, feature flags, event hooks. See also: [Notifications API](api/notifications.md), [Notifications Security](security/notifications-security.md). |
-| [Audit Logs](development/audit-logs.md) | Audit log subsystem: crate structure, backend selection, filter config, separate DB, retention, testing. See also: [Audit Logs Security](security/audit-logs.md). |
+| [Audit Logs](development/audit-logs.md) | Audit log subsystem: crate structure, backend selection, filter config, separate DB, retention, testing, REST API (query module, route handlers, permissions). See also: [Audit Logs Security](security/audit-logs.md), [Audit Logs API](api/audit-logs.md). |
 | [Embedded Frontend](development/embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). See also: [Setup](development/setup.md), [Deployment Guides](end-user/deployment/README.md). |
 
 ## Deployment Guides

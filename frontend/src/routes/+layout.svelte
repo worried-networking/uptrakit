@@ -80,6 +80,7 @@
 		{ href: '/scheduler', label: 'Scheduler', permission: Permission.ManageSoftware },
 		{ href: '/plugin-configs', label: 'Plugin Configs', permission: Permission.ViewSoftware },
 		{ href: '/hosts', label: 'Hosts' },
+		{ href: '/audit-logs', label: 'Audit Logs', permission: Permission.ViewAuditLogs },
 		{ href: '/settings', label: 'Settings', permission: Permission.ViewSettings },
 		{ href: '/settings/global', label: 'Global Settings', permission: Permission.ManageGlobalSettings }
 	];

@@ -699,3 +699,29 @@ export interface ListHostPackagesParams {
 	category?: string;
 	search?: string;
 }
+
+export interface AuditLogEntry {
+	id: string;
+	actor_id: string;
+	actor_type: string;
+	auth_method: string;
+	http_method: string;
+	http_path: string;
+	route_pattern: string | null;
+	http_status: number;
+	client_ip: string | null;
+	user_agent: string | null;
+	duration_ms: number;
+	occurred_at: string;
+}
+
+export interface AuditLogListParams {
+	page?: number;
+	per_page?: number;
+	actor_type?: string;
+	method?: string;
+	status?: number;
+	from?: string;
+	to?: string;
+	actor_id?: string;
+}

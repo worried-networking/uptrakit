@@ -238,9 +238,21 @@ Indexes: `(occurred_at)`, `(actor_id)`.
 - `Some(tenant_id)` → `audit_logs`
 - `None` → `system_audit_logs`
 
-Currently, all authenticated API routes dispatch to `audit_logs` with
-`tenant_id = Some(default_tenant_id)`. System audit routing will be refined when multi-tenancy
-boundaries are clearer.
+The `audit_log` middleware detects system-scoped routes by their URL prefix and sets
+`tenant_id = None` for those entries:
+
+```rust
+let is_system_route = route_pattern.as_deref().is_some_and(|p| {
+    p.starts_with("/api/v1/global-settings/")
+        || p == "/api/v1/global-settings"
+        || p.starts_with("/api/v1/system-services/")
+        || p == "/api/v1/system-services"
+});
+let tenant_id = if is_system_route { None } else { Some(state.default_tenant_id) };
+```
+
+All other authenticated routes write to `audit_logs` with
+`tenant_id = Some(default_tenant_id)`.
 
 ## Middleware
 
@@ -309,6 +321,68 @@ Five CLI argument tests are included in `crates/core/controller/src/cli.rs`:
 - `--audit-log-db-url` accepts a separate database URL
 - Multiple `--audit-log-backend` values are accepted
 
+## REST API
+
+### Permissions
+
+Two permissions gate read access to audit log entries:
+
+| Permission | DB name | Granted to |
+| --- | --- | --- |
+| `ViewAuditLogs` | `view_audit_logs` | `owner`, `admin` |
+| `ViewSystemAuditLogs` | `view_system_audit_logs` | `owner` only |
+
+The permissions are seeded in migration `m20260311_000001_audit_log_permissions`.
+
+### Query module
+
+`crates/ui/web-api/src/queries/audit_logs.rs` provides:
+
+```rust
+pub async fn list_tenant_audit_logs(
+    tenant_db: &TenantDb,
+    params: &AuditLogListParams,
+) -> Result<PaginatedResponse<AuditLogResponse>>
+
+pub async fn list_system_audit_logs(
+    db: &DatabaseConnection,
+    params: &AuditLogListParams,
+) -> Result<PaginatedResponse<SystemAuditLogResponse>>
+```
+
+Supported filters: `actor_type`, `method`, `status` (exact), `from` / `to` (RFC 3339 bounds),
+`actor_id`. Results are ordered by `occurred_at DESC`.
+
+Error types: `AuditLogQueryError::Database` (500) and `AuditLogQueryError::InvalidFilter` (400).
+
+### Route handlers
+
+`crates/ui/web-api/src/routes/audit_logs.rs`:
+
+| Method | Path | Permission | Handler |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/audit-logs` | `CanViewAuditLogs` | `list_audit_logs` |
+| `GET` | `/api/v1/system-audit-logs` | `CanViewSystemAuditLogs` | `list_system_audit_logs` |
+
+### Web-API types
+
+`crates/shared/web-api-types/src/audit_logs.rs`:
+
+- `AuditLogResponse` — response for `GET /api/v1/audit-logs`
+- `SystemAuditLogResponse` — response for `GET /api/v1/system-audit-logs`
+- `AuditLogListParams` — shared query parameters for both endpoints
+
+### OpenAPI client
+
+`crates/shared/openapi-client/src/audit_logs.rs` adds `list_audit_logs` and
+`list_system_audit_logs` methods to `UptrakitClient`.
+
+### CLI
+
+`uptrakit audit-logs list [--actor-type ...] [--method ...] [--status ...] [--from ...] [--to ...] [--actor-id ...] [--page ...] [--per-page ...]`
+
+`uptrakit audit-logs system list [same filters]`
+
 ## Key files
 
 | File | Purpose |
@@ -321,7 +395,12 @@ Five CLI argument tests are included in `crates/core/controller/src/cli.rs`:
 | `crates/shared/audit-log/src/dispatcher.rs` | `AuditLogDispatcher` (fire-and-forget background loop) |
 | `crates/shared/db/src/entity/audit_log.rs` | SeaORM entity for `audit_logs` table |
 | `crates/shared/db/src/entity/system_audit_log.rs` | SeaORM entity for `system_audit_logs` table |
-| `crates/ui/web-api/src/middleware/audit_log.rs` | Axum middleware |
+| `crates/ui/web-api/src/middleware/audit_log.rs` | Axum middleware + system-route detection |
+| `crates/ui/web-api/src/queries/audit_logs.rs` | DB query functions for tenant + system logs |
+| `crates/ui/web-api/src/routes/audit_logs.rs` | REST route handlers |
+| `crates/shared/web-api-types/src/audit_logs.rs` | `AuditLogResponse`, `SystemAuditLogResponse`, `AuditLogListParams` |
+| `crates/shared/openapi-client/src/audit_logs.rs` | OpenAPI client methods |
+| `crates/ui/cli/src/commands/audit_logs.rs` | CLI `audit-logs` subcommand |
 | `crates/ui/web-api/src/setting_key.rs` | `AuditLogFilter` + `AuditLogRetentionDays` setting keys |
 | `crates/ui/web-api/src/app_state.rs` | `AppState` fields: `audit_log_filter`, `audit_log_dispatcher` |
 | `crates/core/controller/src/cli.rs` | `AuditLogBackendArg`, `AuditLogFilterArg` enums + CLI flags |
@@ -332,6 +411,8 @@ Five CLI argument tests are included in `crates/core/controller/src/cli.rs`:
 ## Cross-references
 
 - [Audit Logs Security](../security/audit-logs.md)
+- [Audit Logs API Reference](../api/audit-logs.md)
+- [Audit Logs End-User Guide](../end-user/audit-logs.md)
 - [Notifications Development](notifications.md) (similar dispatcher pattern)
 - [Scheduler Engine](scheduler-engine.md) (cleanup executor registration)
 - [Coding Standards](coding-standards.md)

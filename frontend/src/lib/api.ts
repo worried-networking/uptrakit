@@ -74,7 +74,9 @@ import type {
 	UpdateHostPackageRequest,
 	HostPackageIgnoreResponse,
 	CreateHostPackageIgnoreRequest,
-	ListHostPackagesParams
+	ListHostPackagesParams,
+	AuditLogEntry,
+	AuditLogListParams
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -908,4 +910,34 @@ export async function deleteHostDiscoveryAllowlistEntry(hostId: string, entryId:
 	return requestVoid(`/hosts/${encodeURIComponent(hostId)}/discovery-allowlist/${encodeURIComponent(entryId)}`, {
 		method: 'DELETE'
 	});
+}
+
+// Audit logs
+
+export async function listAuditLogs(params?: AuditLogListParams): Promise<PaginatedResponse<AuditLogEntry>> {
+	const p = new URLSearchParams();
+	if (params?.actor_type) p.set('actor_type', params.actor_type);
+	if (params?.method) p.set('method', params.method);
+	if (params?.status !== undefined) p.set('status', String(params.status));
+	if (params?.from) p.set('from', params.from);
+	if (params?.to) p.set('to', params.to);
+	if (params?.actor_id) p.set('actor_id', params.actor_id);
+	if (params?.page) p.set('page', String(params.page));
+	if (params?.per_page) p.set('per_page', String(params.per_page));
+	const qs = p.toString();
+	return request<PaginatedResponse<AuditLogEntry>>(`/audit-logs${qs ? '?' + qs : ''}`);
+}
+
+export async function listSystemAuditLogs(params?: AuditLogListParams): Promise<PaginatedResponse<AuditLogEntry>> {
+	const p = new URLSearchParams();
+	if (params?.actor_type) p.set('actor_type', params.actor_type);
+	if (params?.method) p.set('method', params.method);
+	if (params?.status !== undefined) p.set('status', String(params.status));
+	if (params?.from) p.set('from', params.from);
+	if (params?.to) p.set('to', params.to);
+	if (params?.actor_id) p.set('actor_id', params.actor_id);
+	if (params?.page) p.set('page', String(params.page));
+	if (params?.per_page) p.set('per_page', String(params.per_page));
+	const qs = p.toString();
+	return request<PaginatedResponse<AuditLogEntry>>(`/system-audit-logs${qs ? '?' + qs : ''}`);
 }

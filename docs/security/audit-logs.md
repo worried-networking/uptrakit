@@ -72,12 +72,37 @@ the `tenants` table. This design decision ensures:
 
 This mirrors the same rationale used for immutable log tables in compliance-oriented systems.
 
-### Current routing
+### Routing
 
-Currently, all authenticated API routes dispatch entries to `audit_logs` with
-`tenant_id = Some(default_tenant_id)`. System audit routing (entries to `system_audit_logs`)
-will be refined when multi-tenancy boundaries are clearer. The infrastructure supports both
-tables today.
+The `audit_log` middleware detects system-scoped routes by URL prefix:
+
+- Routes under `/api/v1/global-settings/` (global settings management, CA rotation) →
+  `system_audit_logs` (`tenant_id = None`)
+- Routes under `/api/v1/system-services/` (system service management) →
+  `system_audit_logs` (`tenant_id = None`)
+- All other authenticated routes → `audit_logs` (`tenant_id = Some(default_tenant_id)`)
+
+This ensures infrastructure-level operations are always recorded in the global log, regardless
+of which tenant is active.
+
+### Access permissions
+
+| Permission | DB name | Grants access to |
+| --- | --- | --- |
+| `ViewAuditLogs` | `view_audit_logs` | `GET /api/v1/audit-logs` (tenant log) |
+| `ViewSystemAuditLogs` | `view_system_audit_logs` | `GET /api/v1/system-audit-logs` (global log) |
+
+Default assignments:
+
+| Role | `view_audit_logs` | `view_system_audit_logs` |
+| --- | --- | --- |
+| `owner` | ✓ | ✓ |
+| `admin` | ✓ | ✗ |
+| `user` | ✗ | ✗ |
+
+The `user` role has no access to audit logs by default. Operators with `admin` role can view
+what happened in the tenant but cannot access system-level operations. Only `owner` can
+view the system audit log, limiting exposure of global infrastructure changes.
 
 ## Backend security properties
 
@@ -193,8 +218,11 @@ The `AuditLogDispatcher` uses an unbounded mpsc channel. Key security properties
 
 ## See also
 
-- [Audit Logs Development](../development/audit-logs.md) -- crate structure, backend selection,
-  testing
-- [Secrets and Encryption](secrets-and-encryption.md) -- encryption-at-rest, master key handling
-- [Auth and Authorization](auth-and-authorization.md) -- authentication methods, RBAC
-- [Secure Development](secure-development.md) -- secure coding expectations
+- [Audit Logs Development](../development/audit-logs.md) — crate structure, backend selection,
+  testing, REST API query module
+- [Audit Logs API Reference](../api/audit-logs.md) — endpoint reference, filter parameters,
+  response schema
+- [Audit Logs End-User Guide](../end-user/audit-logs.md) — UI walkthrough, filter usage
+- [Secrets and Encryption](secrets-and-encryption.md) — encryption-at-rest, master key handling
+- [Auth and Authorization](auth-and-authorization.md) — authentication methods, RBAC
+- [Secure Development](secure-development.md) — secure coding expectations
