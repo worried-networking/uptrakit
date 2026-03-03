@@ -22,6 +22,7 @@ use mqtt::{complete_mqtt_registration, handle_mqtt_register_handshake};
 use updates::{deliver_pending_updates, load_linked_host_ids};
 
 use std::collections::{BTreeSet, HashSet};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -235,6 +236,20 @@ pub(crate) async fn handle_authenticated_loop(
             .register(service_id, capabilities.clone(), None, None)
             .await
     };
+
+    // ------------------------------------------------------------------
+    // External scheduler detection
+    // ------------------------------------------------------------------
+    let is_external_scheduler = capabilities.contains(&Capability::Scheduler);
+    if is_external_scheduler {
+        state
+            .external_scheduler_connected
+            .store(true, Ordering::Relaxed);
+        tracing::info!(
+            %service_id,
+            "external scheduler connected; embedded scheduler deferring external tasks"
+        );
+    }
 
     // ------------------------------------------------------------------
     // MQTT post-registration: assign/reconcile leases now that the service
@@ -562,7 +577,25 @@ pub(crate) async fn handle_authenticated_loop(
         tracing::error!(error = %e, "failed to release leases on disconnect");
     }
 
-    state.service_connections.unregister(&service_id).await;
+    if is_external_scheduler {
+        // Unregister first so has_capability_connected excludes this service.
+        state.service_connections.unregister(&service_id).await;
+        if !state
+            .service_connections
+            .has_capability_connected(&Capability::Scheduler)
+            .await
+        {
+            state
+                .external_scheduler_connected
+                .store(false, Ordering::Relaxed);
+            tracing::info!(
+                %service_id,
+                "external scheduler disconnected; embedded scheduler resuming all tasks"
+            );
+        }
+    } else {
+        state.service_connections.unregister(&service_id).await;
+    }
     tracing::debug!(%service_id, "authenticated service disconnected");
 }
 
@@ -605,8 +638,20 @@ pub(crate) async fn handle_enrolled_loop(
     // Register in service_connections.
     let (mut push_rx, cancel_token) = state
         .service_connections
-        .register(service_id, capabilities, None, None)
+        .register(service_id, capabilities.clone(), None, None)
         .await;
+
+    // External scheduler detection.
+    let is_external_scheduler = capabilities.contains(&Capability::Scheduler);
+    if is_external_scheduler {
+        state
+            .external_scheduler_connected
+            .store(true, Ordering::Relaxed);
+        tracing::info!(
+            %service_id,
+            "external scheduler connected (enrolled); embedded scheduler deferring external tasks"
+        );
+    }
 
     // Check current status to set initial approved flag.
     let mut approved = false;
@@ -955,7 +1000,25 @@ pub(crate) async fn handle_enrolled_loop(
 
     // Cleanup: unregister unless superseded.
     if !cancel_token.is_cancelled() {
-        state.service_connections.unregister(&service_id).await;
+        if is_external_scheduler {
+            // Unregister first so has_capability_connected excludes this service.
+            state.service_connections.unregister(&service_id).await;
+            if !state
+                .service_connections
+                .has_capability_connected(&Capability::Scheduler)
+                .await
+            {
+                state
+                    .external_scheduler_connected
+                    .store(false, Ordering::Relaxed);
+                tracing::info!(
+                    %service_id,
+                    "external scheduler disconnected (enrolled); embedded scheduler resuming all tasks"
+                );
+            }
+        } else {
+            state.service_connections.unregister(&service_id).await;
+        }
     }
     tracing::debug!(%service_id, "enrolled service disconnected");
 }

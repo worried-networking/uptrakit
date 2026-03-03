@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use sea_orm::DatabaseConnection;
@@ -107,6 +108,9 @@ pub struct AppState {
     /// cleanly when axum initiates a graceful shutdown rather than blocking indefinitely
     /// on a broadcast channel that may never close.
     pub shutdown_token: CancellationToken,
+    /// Set to `true` when an external scheduler service is connected. The embedded
+    /// scheduler reads this flag to defer non-internal tasks.
+    pub external_scheduler_connected: Arc<AtomicBool>,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -160,6 +164,7 @@ pub struct AppStateBuilder {
     batch_progress_broadcaster:
         Option<crate::batch_progress_broadcaster::BatchProgressBroadcaster>,
     shutdown_token: Option<CancellationToken>,
+    external_scheduler_connected: Option<Arc<AtomicBool>>,
 }
 
 impl AppStateBuilder {
@@ -198,6 +203,7 @@ impl AppStateBuilder {
             update_output_broadcaster: None,
             batch_progress_broadcaster: None,
             shutdown_token: None,
+            external_scheduler_connected: None,
         }
     }
 
@@ -354,6 +360,15 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the external scheduler connected flag.
+    ///
+    /// Optional — defaults to `Arc::new(AtomicBool::new(false))`. The embedded
+    /// scheduler and WebSocket handler share this flag to coordinate task deferral.
+    pub fn external_scheduler_connected(mut self, v: Arc<AtomicBool>) -> Self {
+        self.external_scheduler_connected = Some(v);
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -434,6 +449,9 @@ impl AppStateBuilder {
             update_output_broadcaster: self.update_output_broadcaster.unwrap_or_default(),
             batch_progress_broadcaster: self.batch_progress_broadcaster.unwrap_or_default(),
             shutdown_token: self.shutdown_token.unwrap_or_default(),
+            external_scheduler_connected: self
+                .external_scheduler_connected
+                .unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
         })
     }
 }

@@ -379,6 +379,7 @@ async fn run(args: cli::Args) -> Result<()> {
         let mut sched = uptrakit_scheduler_engine::Scheduler::new(
             app_state.db().clone(),
             uptrakit_scheduler_engine::SchedulerConfig::new(controller_id, default_tenant_id),
+            Arc::clone(&app_state.external_scheduler_connected),
         );
 
         sched.register(
