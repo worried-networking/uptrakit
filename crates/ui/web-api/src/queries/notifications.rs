@@ -267,15 +267,42 @@ pub async fn update_rule(
     if let Some(enabled) = req.enabled {
         active.enabled = Set(enabled);
     }
-    // host_id, software_item_id, plugin_type can be set to None to clear scope
-    if req.host_id.is_some() {
-        active.host_id = Set(req.host_id);
+
+    // Scope filters use the Option<serde_json::Value> nullable-update pattern:
+    //   absent (None)          → keep current value
+    //   Some(Value::Null)      → clear to NULL
+    //   Some(Value::String(s)) → set to the parsed value
+    if let Some(val) = &req.host_id {
+        match val {
+            serde_json::Value::Null => active.host_id = Set(None),
+            serde_json::Value::String(s) => {
+                let id = Uuid::parse_str(s)
+                    .map_err(|_| report!(RuleQueryError::InvalidField("host_id".to_string())))?;
+                active.host_id = Set(Some(id));
+            }
+            _ => bail!(RuleQueryError::InvalidField("host_id".to_string())),
+        }
     }
-    if req.software_item_id.is_some() {
-        active.software_item_id = Set(req.software_item_id);
+    if let Some(val) = &req.software_item_id {
+        match val {
+            serde_json::Value::Null => active.software_item_id = Set(None),
+            serde_json::Value::String(s) => {
+                let id = Uuid::parse_str(s).map_err(|_| {
+                    report!(RuleQueryError::InvalidField("software_item_id".to_string()))
+                })?;
+                active.software_item_id = Set(Some(id));
+            }
+            _ => bail!(RuleQueryError::InvalidField(
+                "software_item_id".to_string()
+            )),
+        }
     }
-    if req.plugin_type.is_some() {
-        active.plugin_type = Set(req.plugin_type.clone());
+    if let Some(val) = &req.plugin_type {
+        match val {
+            serde_json::Value::Null => active.plugin_type = Set(None),
+            serde_json::Value::String(s) => active.plugin_type = Set(Some(s.clone())),
+            _ => bail!(RuleQueryError::InvalidField("plugin_type".to_string())),
+        }
     }
 
     let result = active.update(tenant_db.db()).await.context_to()?;
@@ -365,6 +392,8 @@ pub enum RuleQueryError {
     Db(sea_orm::DbErr),
     #[error("channel not found")]
     ChannelNotFound,
+    #[error("invalid value for field '{0}'")]
+    InvalidField(String),
 }
 
 pub type RuleResult<T> = std::result::Result<T, rootcause::Report<RuleQueryError>>;

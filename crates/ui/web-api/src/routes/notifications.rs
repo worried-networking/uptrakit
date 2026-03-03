@@ -374,6 +374,9 @@ pub async fn create_rule(
                 tracing::error!("Failed to create notification rule: {}", report);
                 error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
+            RuleQueryError::InvalidField(field) => {
+                error_response(StatusCode::BAD_REQUEST, format!("Invalid value for field '{field}'"))
+            }
         },
     }
 }

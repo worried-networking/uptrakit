@@ -6,6 +6,24 @@ use uuid::Uuid;
 
 use crate::validation::{Validate, ValidationError};
 
+/// Deserializes a field that participates in the nullable-update pattern.
+///
+/// - Field **absent** from JSON → serde `#[default]` kicks in → `None` (leave unchanged)
+/// - Field present as JSON **`null`** → `Some(Value::Null)` (clear to NULL)
+/// - Field present as any other JSON value → `Some(value)` (set to that value)
+///
+/// Must be paired with `#[serde(default)]` on the field so that absent fields
+/// bypass this function entirely and produce `None` via `Default`.
+fn deserialize_nullable_value<'de, D>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let val = serde_json::Value::deserialize(deserializer)?;
+    Ok(Some(val))
+}
+
 // ── Enums ────────────────────────────────────────────────────────────────
 
 /// The type of event that triggers a notification.
@@ -244,14 +262,89 @@ impl Validate for CreateNotificationRuleRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateNotificationRuleRequest {
     pub event_type: Option<NotificationEventType>,
-    pub host_id: Option<Uuid>,
-    pub software_item_id: Option<Uuid>,
-    pub plugin_type: Option<String>,
+    /// Scope filter: absent = keep current value, `null` = clear, `"uuid"` = set.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_nullable_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub host_id: Option<serde_json::Value>,
+    /// Scope filter: absent = keep current value, `null` = clear, `"uuid"` = set.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_nullable_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub software_item_id: Option<serde_json::Value>,
+    /// Scope filter: absent = keep current value, `null` = clear, `"string"` = set.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_nullable_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub plugin_type: Option<serde_json::Value>,
     pub enabled: Option<bool>,
 }
 
 impl Validate for UpdateNotificationRuleRequest {
     fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(val) = &self.host_id {
+            match val {
+                serde_json::Value::Null => {}
+                serde_json::Value::String(s) => {
+                    if Uuid::parse_str(s).is_err() {
+                        return Err(ValidationError {
+                            field: "host_id",
+                            message: "must be a valid UUID string or null".to_string(),
+                        });
+                    }
+                }
+                _ => {
+                    return Err(ValidationError {
+                        field: "host_id",
+                        message: "must be a UUID string or null".to_string(),
+                    });
+                }
+            }
+        }
+        if let Some(val) = &self.software_item_id {
+            match val {
+                serde_json::Value::Null => {}
+                serde_json::Value::String(s) => {
+                    if Uuid::parse_str(s).is_err() {
+                        return Err(ValidationError {
+                            field: "software_item_id",
+                            message: "must be a valid UUID string or null".to_string(),
+                        });
+                    }
+                }
+                _ => {
+                    return Err(ValidationError {
+                        field: "software_item_id",
+                        message: "must be a UUID string or null".to_string(),
+                    });
+                }
+            }
+        }
+        if let Some(val) = &self.plugin_type {
+            match val {
+                serde_json::Value::Null => {}
+                serde_json::Value::String(s) => {
+                    if s.trim().is_empty() {
+                        return Err(ValidationError {
+                            field: "plugin_type",
+                            message: "must not be empty".to_string(),
+                        });
+                    }
+                }
+                _ => {
+                    return Err(ValidationError {
+                        field: "plugin_type",
+                        message: "must be a string or null".to_string(),
+                    });
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -773,6 +866,8 @@ mod tests {
             enabled: Some(false),
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
+        // None scope fields are skipped in serialization (skip_serializing_if)
+        assert!(!json.contains("host_id"), "None host_id must not be serialized: {json}");
         let deserialized: UpdateNotificationRuleRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(
@@ -780,6 +875,7 @@ mod tests {
             Some(NotificationEventType::CaRotated)
         );
         assert_eq!(deserialized.enabled, Some(false));
+        assert!(deserialized.host_id.is_none(), "absent host_id must deserialize to None");
     }
 
     #[test]
@@ -792,6 +888,105 @@ mod tests {
             enabled: None,
         };
         assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn update_rule_scope_null_deserializes_to_some_null() {
+        let json = r#"{"host_id": null, "software_item_id": null, "plugin_type": null}"#;
+        let req: UpdateNotificationRuleRequest =
+            serde_json::from_str(json).expect("deserialization should succeed");
+        assert_eq!(req.host_id, Some(serde_json::Value::Null));
+        assert_eq!(req.software_item_id, Some(serde_json::Value::Null));
+        assert_eq!(req.plugin_type, Some(serde_json::Value::Null));
+    }
+
+    #[test]
+    fn update_rule_scope_uuid_string_deserializes_to_some_string() {
+        let uuid_str = "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6";
+        let json = format!(r#"{{"host_id": "{uuid_str}"}}"#);
+        let req: UpdateNotificationRuleRequest =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(
+            req.host_id,
+            Some(serde_json::Value::String(uuid_str.to_string()))
+        );
+    }
+
+    #[test]
+    fn validate_update_rule_null_scope_fields_ok() {
+        let req = UpdateNotificationRuleRequest {
+            event_type: None,
+            host_id: Some(serde_json::Value::Null),
+            software_item_id: Some(serde_json::Value::Null),
+            plugin_type: Some(serde_json::Value::Null),
+            enabled: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_update_rule_valid_uuid_string_ok() {
+        let uuid_str = "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6".to_string();
+        let req = UpdateNotificationRuleRequest {
+            event_type: None,
+            host_id: Some(serde_json::Value::String(uuid_str.clone())),
+            software_item_id: Some(serde_json::Value::String(uuid_str)),
+            plugin_type: Some(serde_json::Value::String("releases_github".to_string())),
+            enabled: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_update_rule_invalid_uuid_host_id_rejected() {
+        let req = UpdateNotificationRuleRequest {
+            event_type: None,
+            host_id: Some(serde_json::Value::String("not-a-uuid".to_string())),
+            software_item_id: None,
+            plugin_type: None,
+            enabled: None,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "host_id");
+    }
+
+    #[test]
+    fn validate_update_rule_invalid_uuid_software_item_id_rejected() {
+        let req = UpdateNotificationRuleRequest {
+            event_type: None,
+            host_id: None,
+            software_item_id: Some(serde_json::Value::String("not-a-uuid".to_string())),
+            plugin_type: None,
+            enabled: None,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "software_item_id");
+    }
+
+    #[test]
+    fn validate_update_rule_empty_plugin_type_rejected() {
+        let req = UpdateNotificationRuleRequest {
+            event_type: None,
+            host_id: None,
+            software_item_id: None,
+            plugin_type: Some(serde_json::Value::String("   ".to_string())),
+            enabled: None,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "plugin_type");
+    }
+
+    #[test]
+    fn validate_update_rule_non_string_host_id_rejected() {
+        let req = UpdateNotificationRuleRequest {
+            event_type: None,
+            host_id: Some(serde_json::Value::Number(serde_json::Number::from(42))),
+            software_item_id: None,
+            plugin_type: None,
+            enabled: None,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "host_id");
     }
 
     // ── NotificationChannelResponse ────────────────────────────────────
