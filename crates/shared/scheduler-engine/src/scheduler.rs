@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -60,14 +61,23 @@ pub struct Scheduler {
     db: DatabaseConnection,
     config: SchedulerConfig,
     executors: HashMap<ScheduledTaskType, Arc<dyn TaskExecutor>>,
+    /// When `true`, the embedded scheduler defers non-internal tasks to the
+    /// external scheduler. Internal tasks (CRL renewal, CA rotation check,
+    /// service cert check) always run regardless of this flag.
+    external_scheduler_connected: Arc<AtomicBool>,
 }
 
 impl Scheduler {
-    pub fn new(db: DatabaseConnection, config: SchedulerConfig) -> Self {
+    pub fn new(
+        db: DatabaseConnection,
+        config: SchedulerConfig,
+        external_scheduler_connected: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             db,
             config,
             executors: HashMap::new(),
+            external_scheduler_connected,
         }
     }
 
@@ -96,6 +106,7 @@ impl Scheduler {
             controller_id = %self.config.controller_id,
             poll_interval_secs = self.config.poll_interval.as_secs(),
             registered_executors = self.executors.len(),
+            external_scheduler_connected = self.external_scheduler_connected.load(Ordering::Relaxed),
             "scheduler started"
         );
 
@@ -156,6 +167,17 @@ impl Scheduler {
             // Stop claiming new tasks if shutdown was requested
             if token.is_cancelled() {
                 break;
+            }
+
+            // Defer non-internal tasks to the external scheduler when one is connected.
+            if self.external_scheduler_connected.load(Ordering::Relaxed)
+                && !task.task_type.is_internal()
+            {
+                tracing::debug!(
+                    task_type = ?task.task_type,
+                    "skipping external task (external scheduler connected)"
+                );
+                continue;
             }
 
             let Some(executor) = self.executors.get(&task.task_type) else {
@@ -333,7 +355,7 @@ mod tests {
     async fn scheduler_poll_cycle_empty_db_leaves_no_locked_tasks() {
         let db = setup_test_db().await;
         let config = SchedulerConfig::new(Uuid::now_v7(), Uuid::now_v7());
-        let scheduler = Scheduler::new(db.clone(), config);
+        let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
         let token = CancellationToken::new();
 
         scheduler.poll_cycle(&token).await;
@@ -357,7 +379,7 @@ mod tests {
             tenant_id: tenant.id,
             task_execution_timeout: TASK_EXECUTION_TIMEOUT,
         };
-        let scheduler = Scheduler::new(db.clone(), config);
+        let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
 
         let token = CancellationToken::new();
 
@@ -416,7 +438,7 @@ mod tests {
         .expect("insert task");
 
         let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
-        let scheduler = Scheduler::new(db.clone(), config);
+        let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
 
         let token = CancellationToken::new();
         scheduler.poll_cycle(&token).await;
@@ -466,7 +488,7 @@ mod tests {
         .expect("insert task");
 
         let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
-        let scheduler = Scheduler::new(db.clone(), config);
+        let scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
         let token = CancellationToken::new();
 
         scheduler.poll_cycle(&token).await;
@@ -548,7 +570,7 @@ mod tests {
             tenant_id: tenant.id,
             task_execution_timeout: TASK_EXECUTION_TIMEOUT,
         };
-        let mut scheduler = Scheduler::new(db.clone(), config);
+        let mut scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
         scheduler.register(
             ScheduledTaskType::StaleLeaseCleanup,
             Box::new(BlockingExecutor {
@@ -621,7 +643,7 @@ mod tests {
             })
         };
         let config = SchedulerConfig::new(Uuid::now_v7(), Uuid::now_v7());
-        let mut scheduler = Scheduler::new(db, config);
+        let mut scheduler = Scheduler::new(db, config, Arc::new(AtomicBool::new(false)));
 
         struct NoopExecutor;
         #[async_trait::async_trait]
@@ -678,7 +700,7 @@ mod tests {
         }
 
         let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
-        let mut scheduler = Scheduler::new(db.clone(), config);
+        let mut scheduler = Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
         scheduler.register(
             ScheduledTaskType::StaleLeaseCleanup,
             Box::new(TrackingExecutor(executed_clone)),
@@ -697,5 +719,137 @@ mod tests {
             .expect("task exists");
         assert!(updated.locked_by.is_none());
         assert_eq!(updated.run_count, 1);
+    }
+
+    #[tokio::test]
+    async fn poll_cycle_skips_external_tasks_when_flag_set() {
+        let db = setup_test_db().await;
+        let tenant = seed_tenant(&db).await;
+
+        // Seed a due external task (AuthCleanup).
+        let now = time::OffsetDateTime::now_utc();
+        let task_id = Uuid::now_v7();
+        scheduled_task::ActiveModel {
+            id: ActiveValue::Set(task_id),
+            tenant_id: ActiveValue::Set(tenant.id),
+            task_type: ActiveValue::Set(ScheduledTaskType::AuthCleanup),
+            cron_expression: ActiveValue::Set("*/5 * * * *".to_string()),
+            enabled: ActiveValue::Set(true),
+            task_config: ActiveValue::Set(None),
+            last_run_at: ActiveValue::Set(None),
+            next_run_at: ActiveValue::Set(now - time::Duration::minutes(1)),
+            locked_by: ActiveValue::Set(None),
+            locked_at: ActiveValue::Set(None),
+            last_error: ActiveValue::Set(None),
+            run_count: ActiveValue::Set(0),
+            created_at: ActiveValue::Set(now),
+            updated_at: ActiveValue::Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert task");
+
+        let executed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let executed_clone = executed.clone();
+
+        struct TrackingExecutor(std::sync::Arc<std::sync::atomic::AtomicBool>);
+        #[async_trait::async_trait]
+        impl TaskExecutor for TrackingExecutor {
+            async fn execute(&self, _task: &scheduled_task::Model) -> crate::error::Result<()> {
+                self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let flag = Arc::new(AtomicBool::new(true)); // external scheduler connected
+        let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
+        let mut scheduler = Scheduler::new(db.clone(), config, flag);
+        scheduler.register(
+            ScheduledTaskType::AuthCleanup,
+            Box::new(TrackingExecutor(executed_clone)),
+        );
+        let token = CancellationToken::new();
+
+        scheduler.poll_cycle(&token).await;
+
+        assert!(
+            !executed.load(std::sync::atomic::Ordering::SeqCst),
+            "external task should be skipped when external scheduler is connected"
+        );
+
+        // Task should remain unclaimed.
+        let task = scheduled_task::Entity::find_by_id(task_id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("task exists");
+        assert!(task.locked_by.is_none());
+        assert_eq!(task.run_count, 0);
+    }
+
+    #[tokio::test]
+    async fn poll_cycle_runs_internal_tasks_when_flag_set() {
+        let db = setup_test_db().await;
+        let tenant = seed_tenant(&db).await;
+
+        // Seed a due internal task (CrlRenewal).
+        let now = time::OffsetDateTime::now_utc();
+        let task_id = Uuid::now_v7();
+        scheduled_task::ActiveModel {
+            id: ActiveValue::Set(task_id),
+            tenant_id: ActiveValue::Set(tenant.id),
+            task_type: ActiveValue::Set(ScheduledTaskType::CrlRenewal),
+            cron_expression: ActiveValue::Set("0 */4 * * *".to_string()),
+            enabled: ActiveValue::Set(true),
+            task_config: ActiveValue::Set(None),
+            last_run_at: ActiveValue::Set(None),
+            next_run_at: ActiveValue::Set(now - time::Duration::minutes(1)),
+            locked_by: ActiveValue::Set(None),
+            locked_at: ActiveValue::Set(None),
+            last_error: ActiveValue::Set(None),
+            run_count: ActiveValue::Set(0),
+            created_at: ActiveValue::Set(now),
+            updated_at: ActiveValue::Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert task");
+
+        let executed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let executed_clone = executed.clone();
+
+        struct TrackingExecutor(std::sync::Arc<std::sync::atomic::AtomicBool>);
+        #[async_trait::async_trait]
+        impl TaskExecutor for TrackingExecutor {
+            async fn execute(&self, _task: &scheduled_task::Model) -> crate::error::Result<()> {
+                self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let flag = Arc::new(AtomicBool::new(true)); // external scheduler connected
+        let config = SchedulerConfig::new(Uuid::now_v7(), tenant.id);
+        let mut scheduler = Scheduler::new(db.clone(), config, flag);
+        scheduler.register(
+            ScheduledTaskType::CrlRenewal,
+            Box::new(TrackingExecutor(executed_clone)),
+        );
+        let token = CancellationToken::new();
+
+        scheduler.poll_cycle(&token).await;
+
+        assert!(
+            executed.load(std::sync::atomic::Ordering::SeqCst),
+            "internal task should still execute when external scheduler is connected"
+        );
+
+        // Task should be released and run_count incremented.
+        let task = scheduled_task::Entity::find_by_id(task_id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("task exists");
+        assert!(task.locked_by.is_none());
+        assert_eq!(task.run_count, 1);
     }
 }

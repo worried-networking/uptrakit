@@ -38,6 +38,18 @@ impl ScheduledTaskType {
             Self::CrlRenewal => "CRL Renewal",
         }
     }
+
+    /// Whether this task type must run on the controller's embedded scheduler.
+    ///
+    /// Internal tasks require direct in-process access to controller resources
+    /// (revocation notify, CA rotation trigger, service connections) and must
+    /// not be delegated to the external scheduler.
+    pub fn is_internal(&self) -> bool {
+        matches!(
+            self,
+            Self::CrlRenewal | Self::CaRotationCheck | Self::ServiceCertCheck
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
@@ -77,3 +89,23 @@ impl Related<super::tenant::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_internal_returns_true_for_internal_tasks() {
+        assert!(ScheduledTaskType::CrlRenewal.is_internal());
+        assert!(ScheduledTaskType::CaRotationCheck.is_internal());
+        assert!(ScheduledTaskType::ServiceCertCheck.is_internal());
+    }
+
+    #[test]
+    fn is_internal_returns_false_for_external_tasks() {
+        assert!(!ScheduledTaskType::AuthCleanup.is_internal());
+        assert!(!ScheduledTaskType::StaleLeaseCleanup.is_internal());
+        assert!(!ScheduledTaskType::FetchReleases.is_internal());
+        assert!(!ScheduledTaskType::DetectVersion.is_internal());
+    }
+}
