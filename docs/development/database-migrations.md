@@ -629,7 +629,7 @@ tenant::ActiveModel {
 .expect("insert test tenant");
 ```
 
-**Repair migrations that touch both sides of a FK relationship**
+#### Repair migrations that touch both sides of a FK relationship
 
 `PRAGMA foreign_keys = OFF` is **silently ignored inside an active transaction** (SQLite
 requirement: the pragma can only be changed outside a transaction).  sea-orm-migration v2

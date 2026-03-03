@@ -36,10 +36,16 @@ disconnects, the embedded scheduler resumes all tasks. This provides seamless fa
 
 ### External scheduler
 
-The `uptrakit-scheduler` binary enrolls as a service with capabilities `scheduler`, `database_access`,
-`nats_access`, `master_key_access`, and `graceful_shutdown`. After mTLS authentication,
-the controller sends `ServiceCredentials` containing the database URL, NATS URL, and master encryption
-key. The scheduler uses these to connect directly to the database and publish notifications via NATS.
+The `uptrakit-scheduler` binary enrolls as a **system service** with capabilities `system_service`,
+`scheduler`, `database_access`, `nats_access`, `master_key_access`, and `graceful_shutdown`. The
+`system_service` capability causes the controller to route enrollment through the system-service
+path, which grants the scheduler infrastructure credentials (database URL, NATS URL, master
+encryption key) without any tenant-scoped restrictions.
+
+The external scheduler is **tenant-agnostic**: it polls the `scheduled_tasks` table across **all
+tenants** on every cycle. No tenant filter is applied in `find_due_tasks()`; each returned row
+carries its own `tenant_id` and executors that require it (e.g. `FetchReleasesExecutor`,
+`DetectVersionExecutor`) read it directly from the task model.
 
 The external scheduler registers only the 4 external task types. Internal tasks are not registered
 because they require in-process controller resources.
@@ -70,18 +76,30 @@ and [Scheduler Engine (Development)](../development/scheduler-engine.md) for eng
 
 ### `scheduled_tasks` table
 
-| Column | Type | Description | | --- | --- | --- | | `id` | UUID (PK, v7) | Task identifier | | `tenant_id` | UUID FK | References `tenants.id` | |
-`task_type` | TEXT | Enum discriminant (see below) | | `cron_expression` | TEXT | Standard 5-field cron expression | | `enabled` | BOOLEAN | Whether
-the task is active | | `task_config` | JSON (nullable) | Per-task configuration | | `last_run_at` | TIMESTAMP (nullable) | Last successful execution |
-| `next_run_at` | TIMESTAMP | Next scheduled execution | | `locked_by` | UUID (nullable) | Controller ID holding the claim | | `locked_at` | TIMESTAMP
-(nullable) | When the claim was acquired | | `last_error` | TEXT (nullable) | Error message from last failed run | | `run_count` | BIGINT | Total
-successful executions | | `created_at` | TIMESTAMP | Row creation time | | `updated_at` | TIMESTAMP | Last modification time |
+| Column | Type | Description |
+| --- | --- | --- |
+| `id` | UUID (PK, v7) | Task identifier |
+| `tenant_id` | UUID FK | References `tenants.id` — scopes the *configuration* (cron schedule, enabled flag, task config) to a specific tenant. Does **not** restrict which scheduler instance processes the task; the external scheduler queries across all tenants. |
+| `task_type` | TEXT | Enum discriminant (see below) |
+| `cron_expression` | TEXT | Standard 5-field cron expression |
+| `enabled` | BOOLEAN | Whether the task is active |
+| `task_config` | JSON (nullable) | Per-task configuration |
+| `last_run_at` | TIMESTAMP (nullable) | Last successful execution |
+| `next_run_at` | TIMESTAMP | Next scheduled execution |
+| `locked_by` | UUID (nullable) | Controller ID holding the claim |
+| `locked_at` | TIMESTAMP (nullable) | When the claim was acquired |
+| `last_error` | TEXT (nullable) | Error message from last failed run |
+| `run_count` | BIGINT | Total successful executions |
+| `created_at` | TIMESTAMP | Row creation time |
+| `updated_at` | TIMESTAMP | Last modification time |
 
 ### Indexes
 
-| Name | Columns | Purpose | | --- | --- | --- | | `idx_scheduled_tasks_next_run` | `next_run_at` | Efficient due-task lookup | |
-`idx_scheduled_tasks_tenant_id` | `tenant_id` | Tenant-scoped queries | | `uq_scheduled_tasks_tenant_task_type` | `tenant_id, task_type` (UNIQUE) |
-One task per type per tenant |
+| Name | Columns | Purpose |
+| --- | --- | --- |
+| `idx_scheduled_tasks_next_run` | `next_run_at` | Efficient due-task lookup |
+| `idx_scheduled_tasks_tenant_id` | `tenant_id` | Tenant-scoped queries |
+| `uq_scheduled_tasks_tenant_task_type` | `tenant_id, task_type` (UNIQUE) | One task per type per tenant |
 
 ### Task types
 
@@ -281,9 +299,12 @@ messages to the owning services via `NotificationService`.
 
 See [HTTP Web API](../api/http-web-api.md#scheduler-endpoints) for endpoint details.
 
-| Method | Path | Description | | --- | --- | --- | | GET | `/api/v1/scheduler/tasks` | List all tasks for the tenant | | GET |
-`/api/v1/scheduler/tasks/{id}` | Get task details | | PUT | `/api/v1/scheduler/tasks/{id}` | Update cron/enabled/config | | POST |
-`/api/v1/scheduler/tasks/{id}/trigger` | Trigger immediate execution |
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/v1/scheduler/tasks` | List all tasks for the tenant |
+| GET | `/api/v1/scheduler/tasks/{id}` | Get task details |
+| PUT | `/api/v1/scheduler/tasks/{id}` | Update cron/enabled/config |
+| POST | `/api/v1/scheduler/tasks/{id}/trigger` | Trigger immediate execution |
 
 All endpoints require the `ManageSoftware` permission.
 

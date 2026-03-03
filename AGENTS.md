@@ -12,8 +12,8 @@ auto-updater.
 Key components:
 
 - **Controller** (server): API, Web UI, optional embedded scheduler, upstream version checking.
-- **External Scheduler** (standalone binary): enrolls as a service, receives DB/NATS/master-key credentials via
-  WebSocket, runs scheduled tasks independently.
+- **External Scheduler** (standalone binary): enrolls as a system service, receives DB/NATS/master-key credentials via
+  WebSocket, runs scheduled tasks across all tenants independently.
 - **MQTT Service** (standalone binary): MQTT/Home Assistant integration with lease-based multi-instance tenant
   distribution.
 - **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version
@@ -64,7 +64,7 @@ uptrakit/
 │   │   │   ├── src/scheduler/          #   (cfg: embedded-scheduler) Embedded scheduler using uptrakit-scheduler-engine
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
 │   │   ├── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
-│   │   └── scheduler/                  # uptrakit-scheduler                     (bin)  — external scheduler binary; enrolls as a service, receives credentials, runs scheduled tasks via direct DB + NATS
+│   │   └── scheduler/                  # uptrakit-scheduler                     (bin)  — external scheduler binary; enrolls as a system service (system_service + scheduler + database_access + nats_access + master_key_access + graceful_shutdown), receives credentials, runs scheduled tasks across all tenants via direct DB + NATS
 │   ├── plugins/
 │   │   ├── infrastructure/
 │   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult; batch types: BatchDetectItem/Result, BatchFetchItem/Result, BatchUpdateItem/Result
@@ -673,6 +673,7 @@ Each service declares a `BTreeSet<Capability>` at enrollment time. The set is pe
 | `GracefulShutdown` | `graceful_shutdown` | yes | yes | yes | yes | yes |
 | `MqttBridge` | `mqtt_bridge` | -- | -- | yes | -- | yes |
 | `SshRemote` | `ssh_remote` | -- | yes | -- | -- | yes |
+| `SystemService` | `system_service` | -- | -- | yes | yes | yes |
 | `Scheduler` | `scheduler` | -- | -- | -- | yes | yes |
 | `DatabaseAccess` | `database_access` | -- | -- | -- | yes | yes |
 | `NatsAccess` | `nats_access` | -- | -- | -- | yes | yes |
