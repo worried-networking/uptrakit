@@ -47,10 +47,10 @@ All binaries accept a `-v` / `--verbose` flag that can be repeated. Each additio
 The baseline level is `info` for the service's own crate; all other crates — including third-party dependencies like
 `tokio`, `h2`, `rustls`, and `reqwest` — are silent unless `RUST_LOG` enables them explicitly.
 
-| Flags | Directive | Effect |
+| Flags | Directives | Effect |
 | --- | --- | --- |
-| (none) | `{own_module}=info` | Only the binary's own crate at info |
-| `-v` | `{own_module}=debug` | Own crate at debug; everything else quiet |
+| (none) | `{own_module}=info` (+`uptrakit_web_api=info` for controller) | Own crate at info; controller also enables web-api request logging |
+| `-v` | `{own_module}=debug` (+`uptrakit_web_api=debug` for controller) | Own crate at debug; controller also enables web-api debug |
 | `-vv` | `uptrakit=debug` | All uptrakit crates at debug |
 | `-vvv` | `uptrakit=trace` | All uptrakit crates at trace |
 | `-vvvv`+ | Same as `-vvv`; a warning is printed | |
