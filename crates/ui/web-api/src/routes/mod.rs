@@ -26,6 +26,7 @@ pub mod settings_agent_certs;
 pub mod settings_auth;
 pub mod settings_ca;
 pub mod settings_combined;
+pub mod settings_global_combined;
 pub mod settings_mqtt;
 pub mod settings_network;
 #[cfg(feature = "nats")]

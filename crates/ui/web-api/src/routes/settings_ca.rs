@@ -19,13 +19,13 @@ pub use uptrakit_web_api_types::settings_ca::RotateCaResponse;
 /// Requires authentication (handled by the `require_auth` layer).
 #[utoipa::path(
     post,
-    path = "/api/v1/settings/rotate-ca",
+    path = "/api/v1/global-settings/ca/rotate",
     responses(
         (status = 200, description = "CA rotation triggered", body = RotateCaResponse),
         (status = 400, description = "CA rotation not available"),
         (status = 403, description = "Not authorized"),
     ),
-    tag = "Settings",
+    tag = "Global Settings",
     extensions(("x-required-permission" = json!("manage_global_settings")))
 )]
 pub async fn rotate_ca(

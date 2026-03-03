@@ -503,11 +503,11 @@ export function revokeEnrollmentToken(id: string): Promise<MessageResponse> {
 // --- Network Settings APIs ---
 
 export function getNetworkSettings(): Promise<NetworkSettings> {
-	return request('/settings/network');
+	return request('/global-settings/network');
 }
 
 export function updateNetworkSettings(data: UpdateNetworkSettings): Promise<NetworkSettings> {
-	return request('/settings/network', { method: 'PUT', body: JSON.stringify(data) });
+	return request('/global-settings/network', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- MQTT Client APIs ---
@@ -529,11 +529,11 @@ export function deleteMqttClient(id: string): Promise<void> {
 }
 
 export function getMqttLimit(): Promise<MqttLimitResponse> {
-	return request('/settings/mqtt/limit');
+	return request('/global-settings/mqtt-limit');
 }
 
 export function updateMqttLimit(data: UpdateMqttLimitRequest): Promise<MqttLimitResponse> {
-	return request('/settings/mqtt/limit', { method: 'PUT', body: JSON.stringify(data) });
+	return request('/global-settings/mqtt-limit', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- OIDC Provider APIs ---
@@ -589,11 +589,11 @@ export function renewServerCertificate(): Promise<RenewServerCertResponse> {
 // --- NATS Settings ---
 
 export function getNatsSettings(): Promise<NatsSettingsResponse> {
-	return request('/settings/nats');
+	return request('/global-settings/nats');
 }
 
 export function updateNatsSettings(data: UpdateNatsSettingsRequest): Promise<NatsSettingsResponse> {
-	return request('/settings/nats', { method: 'PUT', body: JSON.stringify(data) });
+	return request('/global-settings/nats', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- System Services APIs ---
@@ -633,13 +633,13 @@ export function updateSystemService(id: string, data: UpdateSystemServiceRequest
 }
 
 export function getSystemServicesSettings(): Promise<SystemServicesSettingsResponse> {
-	return request('/settings/system-services');
+	return request('/global-settings/system-services');
 }
 
 export function updateSystemServicesSettings(
 	data: UpdateSystemServicesSettingsRequest
 ): Promise<SystemServicesSettingsResponse> {
-	return request('/settings/system-services', { method: 'PUT', body: JSON.stringify(data) });
+	return request('/global-settings/system-services', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- Plugin Types & Configs ---
@@ -866,7 +866,7 @@ export async function revokeApiToken(id: string): Promise<void> {
 
 // CA rotation
 export async function rotateCA(): Promise<RotateCaResponse> {
-	return request<RotateCaResponse>('/settings/ca/rotate', { method: 'POST' });
+	return request<RotateCaResponse>('/global-settings/ca/rotate', { method: 'POST' });
 }
 
 // Discovery allowlist — tenant-wide

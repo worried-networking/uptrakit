@@ -1,4 +1,4 @@
-//! HTTP handlers for `GET /api/v1/settings/nats` and `PUT /api/v1/settings/nats`.
+//! HTTP handlers for `GET /api/v1/global-settings/nats` and `PUT /api/v1/global-settings/nats`.
 //!
 //! The NATS URL is stored as a global setting (encrypted at rest). It is used to
 //! connect to NATS at startup; **hot-reload is not supported** — changes take
@@ -38,13 +38,13 @@ fn snapshot_to_response(nats_url: Option<MaskedUrl>) -> NatsSettingsResponse {
 /// controller is restarted.
 #[utoipa::path(
     get,
-    path = "/api/v1/settings/nats",
+    path = "/api/v1/global-settings/nats",
     responses(
         (status = 200, description = "NATS settings", body = NatsSettingsResponse),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
-    tag = "Settings",
+    tag = "Global Settings",
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
@@ -66,7 +66,7 @@ pub async fn get_nats_settings(
 /// the next restart).
 #[utoipa::path(
     put,
-    path = "/api/v1/settings/nats",
+    path = "/api/v1/global-settings/nats",
     request_body = UpdateNatsSettingsRequest,
     responses(
         (status = 200, description = "NATS settings updated", body = NatsSettingsResponse),
@@ -74,7 +74,7 @@ pub async fn get_nats_settings(
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
-    tag = "Settings",
+    tag = "Global Settings",
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]

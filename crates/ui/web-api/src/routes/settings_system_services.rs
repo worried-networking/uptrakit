@@ -1,5 +1,5 @@
-//! HTTP handlers for `GET /api/v1/settings/system-services` and
-//! `PUT /api/v1/settings/system-services`.
+//! HTTP handlers for `GET /api/v1/global-settings/system-services` and
+//! `PUT /api/v1/global-settings/system-services`.
 //!
 //! The system services enrollment token is stored encrypted at rest with the
 //! master key. Unlike SMTP passwords, the token **is** returned in plaintext in
@@ -45,13 +45,13 @@ fn snapshot_to_response(token: Option<String>) -> SystemServicesSettingsResponse
 /// permission.
 #[utoipa::path(
     get,
-    path = "/api/v1/settings/system-services",
+    path = "/api/v1/global-settings/system-services",
     responses(
         (status = 200, description = "System services settings", body = SystemServicesSettingsResponse),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
-    tag = "Settings",
+    tag = "Global Settings",
     extensions(("x-required-permission" = json!("manage_system_services"))),
     security(("bearer_token" = []))
 )]
@@ -73,7 +73,7 @@ pub async fn get_system_services_settings(
 /// The token is encrypted at rest. Send `"enrollment_token": null` to clear it.
 #[utoipa::path(
     put,
-    path = "/api/v1/settings/system-services",
+    path = "/api/v1/global-settings/system-services",
     request_body = UpdateSystemServicesSettingsRequest,
     responses(
         (status = 200, description = "System services settings updated", body = SystemServicesSettingsResponse),
@@ -81,7 +81,7 @@ pub async fn get_system_services_settings(
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
-    tag = "Settings",
+    tag = "Global Settings",
     extensions(("x-required-permission" = json!("manage_system_services"))),
     security(("bearer_token" = []))
 )]

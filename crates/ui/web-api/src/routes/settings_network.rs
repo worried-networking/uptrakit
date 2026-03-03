@@ -21,13 +21,13 @@ use uptrakit_web_api_types::validation::Validate;
 /// Get network settings
 #[utoipa::path(
     get,
-    path = "/api/v1/settings/network",
+    path = "/api/v1/global-settings/network",
     responses(
         (status = 200, description = "Network settings", body = NetworkSettingsResponse),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
-    tag = "Settings",
+    tag = "Global Settings",
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
@@ -56,7 +56,7 @@ pub async fn get_network_settings(
 /// Update network settings
 #[utoipa::path(
     put,
-    path = "/api/v1/settings/network",
+    path = "/api/v1/global-settings/network",
     request_body = UpdateNetworkSettingsRequest,
     responses(
         (status = 200, description = "Settings updated", body = NetworkSettingsResponse),
@@ -64,7 +64,7 @@ pub async fn get_network_settings(
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
-    tag = "Settings",
+    tag = "Global Settings",
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
@@ -275,7 +275,7 @@ pub async fn update_network_settings(
     let warning = if pki_addr_changed {
         Some(
             "Changing the PKI address requires CA rotation. All agent certificates will need \
-             to be renewed. Call POST /api/v1/settings/rotate-ca to apply the change."
+             to be renewed. Call POST /api/v1/global-settings/ca/rotate to apply the change."
                 .to_string(),
         )
     } else {

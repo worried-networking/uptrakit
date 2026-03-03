@@ -238,8 +238,13 @@ pub(crate) mod system_services {
 }
 
 pub(crate) mod settings_system_services {
-    /// `GET /api/v1/settings/system-services` · `PUT …`
-    pub(crate) const BASE: &str = "/api/v1/settings/system-services";
+    /// `GET /api/v1/global-settings/system-services` · `PUT …`
+    pub(crate) const BASE: &str = "/api/v1/global-settings/system-services";
+}
+
+pub(crate) mod global_settings {
+    /// `GET /api/v1/global-settings`
+    pub(crate) const COMBINED: &str = "/api/v1/global-settings";
 }
 
 pub(crate) mod settings {
@@ -251,10 +256,10 @@ pub(crate) mod settings {
     pub(crate) const AUTHENTICATION: &str = "/api/v1/settings/authentication";
     /// `GET /api/v1/settings/agent-certificates` · `PUT …`
     pub(crate) const AGENT_CERTIFICATES: &str = "/api/v1/settings/agent-certificates";
-    /// `GET /api/v1/settings/network` · `PUT …`
-    pub(crate) const NETWORK: &str = "/api/v1/settings/network";
-    /// `POST /api/v1/settings/rotate-ca`
-    pub(crate) const ROTATE_CA: &str = "/api/v1/settings/rotate-ca";
+    /// `GET /api/v1/global-settings/network` · `PUT …`
+    pub(crate) const NETWORK: &str = "/api/v1/global-settings/network";
+    /// `POST /api/v1/global-settings/ca/rotate`
+    pub(crate) const ROTATE_CA: &str = "/api/v1/global-settings/ca/rotate";
     /// `POST /api/v1/settings/renew-server-certificate`
     pub(crate) const RENEW_SERVER_CERT: &str = "/api/v1/settings/renew-server-certificate";
 }
@@ -265,16 +270,16 @@ pub(crate) mod settings_smtp {
 }
 
 pub(crate) mod settings_nats {
-    /// `GET /api/v1/settings/nats` · `PUT /api/v1/settings/nats`
-    pub(crate) const BASE: &str = "/api/v1/settings/nats";
+    /// `GET /api/v1/global-settings/nats` · `PUT /api/v1/global-settings/nats`
+    pub(crate) const BASE: &str = "/api/v1/global-settings/nats";
 }
 
 pub(crate) mod settings_mqtt {
     use uuid::Uuid;
     /// `GET /api/v1/settings/mqtt` · `POST …`
     pub(crate) const BASE: &str = "/api/v1/settings/mqtt";
-    /// `GET /api/v1/settings/mqtt/limit` · `PUT …`
-    pub(crate) const LIMIT: &str = "/api/v1/settings/mqtt/limit";
+    /// `GET /api/v1/global-settings/mqtt-limit` · `PUT …`
+    pub(crate) const LIMIT: &str = "/api/v1/global-settings/mqtt-limit";
     /// `GET /api/v1/settings/mqtt/{id}` · `PUT …` · `DELETE …`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/settings/mqtt/{id}")

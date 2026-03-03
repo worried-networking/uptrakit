@@ -284,14 +284,14 @@ pub async fn create_mqtt_settings(
 /// Get MQTT client limit
 #[utoipa::path(
     get,
-    path = "/api/v1/settings/mqtt/limit",
+    path = "/api/v1/global-settings/mqtt-limit",
     extensions(("x-required-permission" = json!("view_settings"))),
     responses(
         (status = 200, description = "MQTT client limit", body = MqttLimitResponse),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
-    tag = "Settings",
+    tag = "Global Settings",
     security(("bearer_token" = []))
 )]
 pub async fn get_mqtt_limit(
@@ -311,7 +311,7 @@ pub async fn get_mqtt_limit(
 /// Update MQTT client limit
 #[utoipa::path(
     put,
-    path = "/api/v1/settings/mqtt/limit",
+    path = "/api/v1/global-settings/mqtt-limit",
     request_body = UpdateMqttLimitRequest,
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
@@ -320,7 +320,7 @@ pub async fn get_mqtt_limit(
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
-    tag = "Settings",
+    tag = "Global Settings",
     security(("bearer_token" = []))
 )]
 pub async fn update_mqtt_limit(
