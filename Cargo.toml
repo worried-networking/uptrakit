@@ -23,6 +23,7 @@ rootcause = "0.12"
 thiserror = "2"
 ipnet = { version = "2", features = ["serde"] }
 tracing = "0.1"
+tracing-journald = "0.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs"] }
@@ -89,6 +90,7 @@ uptrakit-notification-channels = { path = "crates/shared/notification-channels",
 uptrakit-update-hooks = { path = "crates/shared/update-hooks" }
 uptrakit-internal-wire = { path = "crates/shared/wire" }
 uptrakit-web-api = { path = "crates/ui/web-api", default-features = false }
+uptrakit-audit-log = { path = "crates/shared/audit-log", default-features = false }
 uptrakit-build-info = { path = "crates/shared/build-info" }
 uptrakit-cli = { path = "crates/ui/cli" }
 uptrakit-plugin-releases-docker = { path = "crates/plugins/releases/docker", default-features = false }

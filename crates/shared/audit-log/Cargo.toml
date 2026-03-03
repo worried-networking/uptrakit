@@ -1,0 +1,33 @@
+[package]
+name = "uptrakit-audit-log"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[features]
+default = []
+db = ["dep:sea-orm", "dep:uptrakit-shared-db"]
+journald = ["dep:tracing-journald"]
+
+[dependencies]
+async-trait = { workspace = true }
+rootcause = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+sea-orm = { workspace = true, optional = true }
+uptrakit-shared-db = { workspace = true, optional = true }
+futures-util = { workspace = true, features = ["alloc"] }
+tracing-journald = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
