@@ -42,6 +42,18 @@ pub enum SettingKey {
     ///
     /// DB key: `system_services.enrollment_token`
     SystemServicesEnrollmentToken,
+    /// Per-tenant audit log filter mode (`all`, `mutations`, `none`).
+    ///
+    /// Overrides the global `--audit-log-filter` CLI flag for this tenant.
+    ///
+    /// DB key: `audit_log.filter`
+    AuditLogFilter,
+    /// Per-tenant audit log retention period in days.
+    ///
+    /// Default: 90 days. Set to 0 to disable retention cleanup for this tenant.
+    ///
+    /// DB key: `audit_log.retention_days`
+    AuditLogRetentionDays,
 }
 
 impl SettingKey {
@@ -76,6 +88,8 @@ impl SettingKey {
             Self::SmtpTlsMode => "smtp.tls_mode",
             Self::NatsUrl => "nats.url",
             Self::SystemServicesEnrollmentToken => "system_services.enrollment_token",
+            Self::AuditLogFilter => "audit_log.filter",
+            Self::AuditLogRetentionDays => "audit_log.retention_days",
         }
     }
 
@@ -112,6 +126,8 @@ impl SettingKey {
             "smtp.tls_mode" => Some(Self::SmtpTlsMode),
             "nats.url" => Some(Self::NatsUrl),
             "system_services.enrollment_token" => Some(Self::SystemServicesEnrollmentToken),
+            "audit_log.filter" => Some(Self::AuditLogFilter),
+            "audit_log.retention_days" => Some(Self::AuditLogRetentionDays),
             _ => None,
         }
     }
@@ -189,6 +205,8 @@ mod tests {
         assert!(SettingKey::JwtSigningKey.is_global());
         // Per-tenant keys
         assert!(!SettingKey::RegistrationMode.is_global());
+        assert!(!SettingKey::AuditLogFilter.is_global());
+        assert!(!SettingKey::AuditLogRetentionDays.is_global());
         assert!(SettingKey::SystemServicesEnrollmentToken.is_global());
     }
 }
