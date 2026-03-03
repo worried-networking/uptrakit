@@ -176,6 +176,11 @@ async fn run(args: cli::Args) -> Result<()> {
     // Phase 4d: Migrate all encrypted values to ENC:v3 (automatic)
     reencrypt::reencrypt_to_v3(&db_conn).await;
 
+    // Phase 4e: Master key rotation (operator-triggered)
+    if let Some(ref new_key_path) = args.rotate_master_key_file {
+        startup::rotate_master_key(&db_conn, new_key_path).await?;
+    }
+
     // Phase 5: Load settings
     let (settings, global_raw, _tenant_raw, reg_token) =
         Settings::load(&db_conn, default_tenant_id)

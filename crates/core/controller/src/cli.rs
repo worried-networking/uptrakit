@@ -219,6 +219,17 @@ pub struct Args {
     #[arg(long)]
     pub allow_private_notification_urls: bool,
 
+    /// Path to a new master key file for key rotation.
+    ///
+    /// Re-wraps all data encryption keys from the old master key to the new one.
+    /// O(1) cost regardless of data volume — only the DEK wrappers are updated,
+    /// not the encrypted data itself.
+    ///
+    /// After rotation, restart all controllers with --master-key-file pointing
+    /// to the new key file only.
+    #[arg(long)]
+    pub rotate_master_key_file: Option<std::path::PathBuf>,
+
     /// PID of old controller process to take over from.
     /// Sends SIGUSR1 to the old process to initiate graceful shutdown.
     /// Should be used together with --reuseport.
