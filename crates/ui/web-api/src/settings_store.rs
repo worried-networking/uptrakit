@@ -10,7 +10,7 @@ use sea_orm::{
     sea_query::{Expr, OnConflict},
 };
 use time::OffsetDateTime;
-use uptrakit_crypto::{decrypt_str_with_aad, encrypt_str_with_aad, is_encrypted};
+use uptrakit_crypto::{decrypt_str, encrypt_str, is_encrypted};
 use uptrakit_shared_db::entity::{global_setting, prelude::*, setting, settings_version};
 use uuid::Uuid;
 
@@ -463,10 +463,10 @@ pub async fn load_or_generate_jwt_key(db: &DatabaseConnection) -> Result<Vec<u8>
         && let Some(stored) = value.as_str()
     {
         let b64 = if is_encrypted(stored) {
-            // Encrypted path (current): use decrypt_str_with_aad so ENC:v2: tokens
+            // Encrypted path (current): use decrypt_str so ENC:v2: tokens
             // are verified against the correct context; ENC:v1: tokens are accepted
             // with empty AAD for backward compatibility with existing installations.
-            decrypt_str_with_aad(stored, JWT_KEY_AAD).map_err(|e| {
+            decrypt_str(stored, JWT_KEY_AAD).map_err(|e| {
                 report!(AuthError::Internal(format!(
                     "failed to decrypt JWT signing key from database: {e}"
                 )))
@@ -474,7 +474,7 @@ pub async fn load_or_generate_jwt_key(db: &DatabaseConnection) -> Result<Vec<u8>
         } else {
             // Legacy plaintext base64 — re-encrypt with context-bound ENC:v2: format
             tracing::info!("migrating JWT signing key to encrypted storage");
-            let encrypted = encrypt_str_with_aad(stored, JWT_KEY_AAD).map_err(|e| {
+            let encrypted = encrypt_str(stored, JWT_KEY_AAD).map_err(|e| {
                 report!(AuthError::Internal(format!(
                     "failed to encrypt legacy JWT signing key: {e}"
                 )))
@@ -500,7 +500,7 @@ pub async fn load_or_generate_jwt_key(db: &DatabaseConnection) -> Result<Vec<u8>
     let b64 = b64_engine.encode(&bytes);
 
     // Encrypt before storing (context-bound ENC:v2: format)
-    let encrypted = encrypt_str_with_aad(&b64, JWT_KEY_AAD).map_err(|e| {
+    let encrypted = encrypt_str(&b64, JWT_KEY_AAD).map_err(|e| {
         report!(AuthError::Internal(format!(
             "failed to encrypt new JWT signing key: {e}"
         )))
@@ -519,7 +519,7 @@ pub async fn load_or_generate_jwt_key(db: &DatabaseConnection) -> Result<Vec<u8>
         && let Some(stored) = value.as_str()
     {
         let b64 = if is_encrypted(stored) {
-            decrypt_str_with_aad(stored, JWT_KEY_AAD).map_err(|e| {
+            decrypt_str(stored, JWT_KEY_AAD).map_err(|e| {
                 report!(AuthError::Internal(format!(
                     "failed to decrypt JWT signing key after store: {e}"
                 )))
@@ -567,7 +567,7 @@ pub async fn migrate_file_jwt_key(
     })?;
 
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    let encrypted = encrypt_str_with_aad(&b64, JWT_KEY_AAD).map_err(|e| {
+    let encrypted = encrypt_str(&b64, JWT_KEY_AAD).map_err(|e| {
         report!(AuthError::Internal(format!(
             "failed to encrypt JWT signing key during file migration: {e}"
         )))

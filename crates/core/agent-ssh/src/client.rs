@@ -893,7 +893,7 @@ mod tests {
             hostname: hostname.to_string(),
             port: 22,
             username: "uptrakit".to_string(),
-            private_key: EncryptedString::new("key".to_string())
+            private_key: EncryptedString::new("key".to_string(), "uptrakit:ssh_hosts:private_key")
                 .expect("master key initialized above"),
             key_type: SshKeyType::Ed25519,
             host_key_fingerprint: None,

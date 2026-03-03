@@ -9,8 +9,8 @@
 //!
 //! - [`encrypt_message_configs`] — called before NATS publication. Serializes
 //!   each `serde_json::Value` config to JSON, encrypts with
-//!   [`uptrakit_crypto::encrypt_str`] (AES-256-GCM), and replaces the config
-//!   with `Value::String("ENC:v1:...")`.
+//!   [`uptrakit_crypto::encrypt_str`] (AES-256-GCM + AAD), and replaces the config
+//!   with `Value::String("ENC:v3:...")`.
 //! - [`decrypt_message_configs`] — called after NATS deserialization. Detects
 //!   encrypted config strings via [`uptrakit_crypto::is_encrypted`], decrypts
 //!   with [`decrypt_str`](uptrakit_crypto::decrypt_str), and restores the
@@ -119,7 +119,7 @@ fn encrypt_config(config: &Value) -> Value {
             return config.clone();
         }
     };
-    match uptrakit_crypto::encrypt_str(&json_str) {
+    match uptrakit_crypto::encrypt_str(&json_str, "uptrakit:nats:config_transit") {
         Ok(encrypted) => Value::String(encrypted),
         Err(e) => {
             tracing::warn!(error = %e, "failed to encrypt config; leaving unchanged");
@@ -141,7 +141,7 @@ fn decrypt_config(config: &Value) -> Value {
             return config.clone();
         }
     };
-    match uptrakit_crypto::decrypt_str(encrypted_str) {
+    match uptrakit_crypto::decrypt_str(encrypted_str, "uptrakit:nats:config_transit") {
         Ok(plaintext) => match serde_json::from_str(&plaintext) {
             Ok(val) => val,
             Err(e) => {

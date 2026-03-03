@@ -689,7 +689,7 @@ impl Settings {
             .filter(|s| !s.is_empty())?;
 
         let raw_url = if uptrakit_crypto::is_encrypted(stored) {
-            uptrakit_crypto::decrypt_str(stored)
+            uptrakit_crypto::decrypt_str(stored, "uptrakit:settings:nats_url")
                 .map_err(|e| {
                     tracing::warn!("failed to decrypt nats.url: {e}");
                 })
@@ -737,7 +737,7 @@ impl Settings {
             .filter(|s| !s.is_empty())?;
 
         if uptrakit_crypto::is_encrypted(stored) {
-            uptrakit_crypto::decrypt_str(stored)
+            uptrakit_crypto::decrypt_str(stored, "uptrakit:settings:system_services_enrollment_token")
                 .map_err(|e| {
                     tracing::warn!("failed to decrypt system_services.enrollment_token: {e}");
                 })
@@ -776,7 +776,7 @@ impl Settings {
             .filter(|s| !s.is_empty())
             .and_then(|stored| {
                 if uptrakit_crypto::is_encrypted(stored) {
-                    uptrakit_crypto::decrypt_str(stored)
+                    uptrakit_crypto::decrypt_str(stored, "uptrakit:settings:smtp_password")
                         .map_err(|e| {
                             tracing::warn!("failed to decrypt SMTP password: {e}");
                         })

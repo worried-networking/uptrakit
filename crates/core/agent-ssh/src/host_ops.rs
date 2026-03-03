@@ -305,7 +305,14 @@ mod tests {
     fn test_encrypted_key() -> uptrakit_crypto::EncryptedString {
         // Ensure a test master key is set (no-op if already initialized).
         let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
-        uptrakit_crypto::EncryptedString::new("test-key-content".to_string())
+        // Register SSH column AAD so TryGetable can decrypt on read-back.
+        let mut mappings = std::collections::HashMap::new();
+        mappings.insert(
+            "private_key".to_string(),
+            "uptrakit:ssh_hosts:private_key".to_string(),
+        );
+        let _ = uptrakit_crypto::register_column_aad(mappings);
+        uptrakit_crypto::EncryptedString::new("test-key-content".to_string(), "uptrakit:ssh_hosts:private_key")
             .expect("master key initialized above")
     }
 

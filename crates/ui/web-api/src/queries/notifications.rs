@@ -39,7 +39,7 @@ pub async fn create_channel(
     let now = OffsetDateTime::now_utc();
     let id = Uuid::now_v7();
 
-    let encrypted_config = uptrakit_crypto::EncryptedString::new(config_str)
+    let encrypted_config = uptrakit_crypto::EncryptedString::new(config_str, "uptrakit:notification_channels:config")
         .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
 
     let model = notification_channel::ActiveModel {
@@ -140,7 +140,7 @@ pub async fn update_channel(
         }
         let config_str = serde_json::to_string(config)
             .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
-        let encrypted_config = uptrakit_crypto::EncryptedString::new(config_str)
+        let encrypted_config = uptrakit_crypto::EncryptedString::new(config_str, "uptrakit:notification_channels:config")
             .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
         active.config = Set(encrypted_config);
     }

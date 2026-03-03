@@ -591,7 +591,7 @@ async fn save_host(
     fingerprint: &str,
     host_id: uuid::Uuid,
 ) -> Result<()> {
-    let encrypted_key = EncryptedString::new(private_pem.to_string())
+    let encrypted_key = EncryptedString::new(private_pem.to_string(), "uptrakit:ssh_hosts:private_key")
         .map_err(|e| report!(Error::Crypto(format!("failed to encrypt private key: {e}"))))?;
 
     host_ops::add_host(

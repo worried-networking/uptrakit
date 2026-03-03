@@ -119,11 +119,11 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
         client_id: Set(client_id.to_string()),
         username: Set(username.map(String::from)),
         password: Set(password
-            .map(|p| uptrakit_crypto::EncryptedString::new(p.to_string()))
+            .map(|p| uptrakit_crypto::EncryptedString::new(p.to_string(), "uptrakit:mqtt_clients:password"))
             .transpose()
             .context_to()?),
         ca_cert_pem: Set(ca_cert_pem
-            .map(|c| uptrakit_crypto::EncryptedString::new(c.to_string()))
+            .map(|c| uptrakit_crypto::EncryptedString::new(c.to_string(), "uptrakit:mqtt_clients:ca_cert_pem"))
             .transpose()
             .context_to()?),
         topic_prefix: Set(topic_prefix.to_string()),
@@ -195,13 +195,13 @@ pub async fn update_mqtt_client(params: UpdateMqttClientParams<'_>) -> Result<mq
     }
     if let Some(v) = password {
         model.password = Set(v
-            .map(|p| uptrakit_crypto::EncryptedString::new(p.to_string()))
+            .map(|p| uptrakit_crypto::EncryptedString::new(p.to_string(), "uptrakit:mqtt_clients:password"))
             .transpose()
             .context_to()?);
     }
     if let Some(v) = ca_cert_pem {
         model.ca_cert_pem = Set(v
-            .map(|c| uptrakit_crypto::EncryptedString::new(c.to_string()))
+            .map(|c| uptrakit_crypto::EncryptedString::new(c.to_string(), "uptrakit:mqtt_clients:ca_cert_pem"))
             .transpose()
             .context_to()?);
     }

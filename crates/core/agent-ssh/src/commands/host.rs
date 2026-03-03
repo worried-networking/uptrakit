@@ -176,7 +176,7 @@ async fn run_add(db: &sea_orm::DatabaseConnection, p: AddCliParams) -> Result<()
 
     let pem = ssh_key::read_private_key(&p.private_key_file)?;
     let key_type = ssh_key::detect_key_type(&pem)?;
-    let encrypted_key = EncryptedString::new(pem)
+    let encrypted_key = EncryptedString::new(pem, "uptrakit:ssh_hosts:private_key")
         .map_err(|e| report!(Error::Crypto(format!("failed to encrypt private key: {e}"))))?;
 
     let host = host_ops::add_host(
@@ -297,7 +297,7 @@ async fn run_update(db: &sea_orm::DatabaseConnection, params: UpdateParams<'_>) 
         Some(path) => {
             let pem = ssh_key::read_private_key(path)?;
             let kt = ssh_key::detect_key_type(&pem)?;
-            let ek = EncryptedString::new(pem).map_err(|e| {
+            let ek = EncryptedString::new(pem, "uptrakit:ssh_hosts:private_key").map_err(|e| {
                 report!(Error::Crypto(format!("failed to encrypt private key: {e}")))
             })?;
             (Some(ek), Some(kt))

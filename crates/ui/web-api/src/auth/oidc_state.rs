@@ -68,7 +68,7 @@ impl OidcFlowStore {
         let model = pending_oidc_flow::ActiveModel {
             csrf_state: Set(state),
             provider_id: Set(provider_id),
-            pkce_verifier: Set(EncryptedString::new(pkce_verifier.secret().clone()).context_to()?),
+            pkce_verifier: Set(EncryptedString::new(pkce_verifier.secret().clone(), "uptrakit:pending_oidc_flows:pkce_verifier").context_to()?),
             nonce: Set(nonce.secret().clone()),
             created_at: Set(now),
             expires_at: Set(expires_at),
@@ -480,6 +480,13 @@ mod tests {
 
     async fn test_db() -> DatabaseConnection {
         let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
+        // Register column AAD so TryGetable can decrypt ENC:v2 pkce_verifier values.
+        let mut mappings = std::collections::HashMap::new();
+        mappings.insert(
+            "pkce_verifier".to_string(),
+            "uptrakit:pending_oidc_flows:pkce_verifier".to_string(),
+        );
+        let _ = uptrakit_crypto::register_column_aad(mappings);
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.expect("test db");
         uptrakit_shared_db::migration::run_migrations(&db)

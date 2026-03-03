@@ -583,12 +583,12 @@ async fn reencrypt_ssh_v1_to_v2(db: &sea_orm::DatabaseConnection) {
 
     let mut count = 0u64;
     for row in rows {
-        if !row.private_key.is_v1() {
+        if !row.private_key.needs_v3_upgrade() {
             continue;
         }
         let plaintext = row.private_key.expose_secret().to_string();
         let id = row.id.clone();
-        match EncryptedString::new_with_aad(plaintext, AAD_SSH_PRIVATE_KEY) {
+        match EncryptedString::new(plaintext, AAD_SSH_PRIVATE_KEY) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.private_key = sea_orm::Set(encrypted);

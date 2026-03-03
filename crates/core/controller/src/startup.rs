@@ -510,14 +510,14 @@ pub(crate) async fn reconcile_all_settings(
                     if v.is_empty() {
                         return serde_json::Value::Null;
                     }
-                    uptrakit_crypto::encrypt_str(v)
+                    uptrakit_crypto::encrypt_str(v, "uptrakit:settings:nats_url")
                         .map(|e| serde_json::json!(e))
                         .unwrap_or_else(|_| serde_json::json!(v))
                 },
                 from_json: |v| {
                     let s = v.as_str().filter(|s| !s.is_empty())?;
                     if uptrakit_crypto::is_encrypted(s) {
-                        uptrakit_crypto::decrypt_str(s)
+                        uptrakit_crypto::decrypt_str(s, "uptrakit:settings:nats_url")
                             .map_err(|e| {
                                 tracing::warn!("failed to decrypt nats.url: {e}");
                             })
@@ -611,7 +611,7 @@ pub(crate) async fn bootstrap_oidc(
 
             let now = OffsetDateTime::now_utc();
             let encrypted_secret =
-                uptrakit_crypto::EncryptedString::new(client_secret.to_string()).context_to()?;
+                uptrakit_crypto::EncryptedString::new(client_secret.to_string(), "uptrakit:oidc_providers:client_secret").context_to()?;
             let provider = oidc_provider::ActiveModel {
                 id: Set(uuid::Uuid::now_v7()),
                 tenant_id: Set(tenant_id),
@@ -641,7 +641,7 @@ pub(crate) async fn bootstrap_oidc(
             use time::OffsetDateTime;
 
             let encrypted_secret =
-                uptrakit_crypto::EncryptedString::new(client_secret.to_string()).context_to()?;
+                uptrakit_crypto::EncryptedString::new(client_secret.to_string(), "uptrakit:oidc_providers:client_secret").context_to()?;
             let mut model = existing_provider.into_active_model();
             model.issuer_url = Set(issuer_url.to_string());
             model.client_id = Set(client_id.to_string());

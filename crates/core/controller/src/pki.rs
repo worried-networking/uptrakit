@@ -299,7 +299,7 @@ pub async fn load_or_init_managed_ca(
     }
 
     let encrypted_key =
-        uptrakit_crypto::EncryptedString::new(bundle.key_pem.clone()).context_to()?;
+        uptrakit_crypto::EncryptedString::new(bundle.key_pem.clone(), "uptrakit:ca_certificates:key_pem").context_to()?;
     let cert_model = ca_certificate::ActiveModel {
         fingerprint: Set(fingerprint.clone()),
         cert_pem: Set(bundle.cert_pem.clone()),
@@ -428,7 +428,7 @@ pub async fn rotate_managed_ca(
     let not_after = cert_not_after(&new_ca.cert_pem)?;
 
     let encrypted_key =
-        uptrakit_crypto::EncryptedString::new(new_ca.key_pem.clone()).context_to()?;
+        uptrakit_crypto::EncryptedString::new(new_ca.key_pem.clone(), "uptrakit:ca_certificates:key_pem").context_to()?;
     let cert_model = ca_certificate::ActiveModel {
         fingerprint: Set(new_fp.clone()),
         cert_pem: Set(new_ca.cert_pem.clone()),

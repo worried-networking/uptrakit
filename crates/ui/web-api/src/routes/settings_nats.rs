@@ -100,7 +100,7 @@ pub async fn update_nats_settings(
             }
             nats_url = None;
         } else if let Some(s) = val.as_str() {
-            let stored_value = match uptrakit_crypto::encrypt_str(s) {
+            let stored_value = match uptrakit_crypto::encrypt_str(s, "uptrakit:settings:nats_url") {
                 Ok(encrypted) => serde_json::json!(encrypted),
                 Err(e) => {
                     tracing::error!("Failed to encrypt NATS URL: {e:?}");

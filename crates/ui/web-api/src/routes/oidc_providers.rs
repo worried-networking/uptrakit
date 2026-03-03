@@ -76,6 +76,7 @@ pub async fn create_provider(
 
     let encrypted_secret = match uptrakit_crypto::EncryptedString::new(
         req.client_secret.expose_secret().to_string(),
+        "uptrakit:oidc_providers:client_secret",
     ) {
         Ok(s) => s,
         Err(e) => {
@@ -241,6 +242,7 @@ pub async fn update_provider(
     if let Some(client_secret) = req.client_secret {
         let encrypted_secret = match uptrakit_crypto::EncryptedString::new(
             client_secret.expose_secret().to_string(),
+            "uptrakit:oidc_providers:client_secret",
         ) {
             Ok(s) => s,
             Err(e) => {

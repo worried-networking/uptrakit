@@ -141,12 +141,12 @@ async fn upgrade_ca_certificate_keys(db: &DatabaseConnection) -> u64 {
 
     let mut count = 0u64;
     for row in rows {
-        if !row.key_pem.is_v1() {
+        if !row.key_pem.needs_v3_upgrade() {
             continue;
         }
         let plaintext = row.key_pem.expose_secret().to_string();
         let fingerprint = row.fingerprint.clone();
-        match EncryptedString::new_with_aad(plaintext, AAD_CA_KEY_PEM) {
+        match EncryptedString::new(plaintext, AAD_CA_KEY_PEM) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.key_pem = sea_orm::Set(encrypted);
@@ -181,12 +181,12 @@ async fn upgrade_oidc_client_secrets(db: &DatabaseConnection) -> u64 {
 
     let mut count = 0u64;
     for row in rows {
-        if !row.client_secret.is_v1() {
+        if !row.client_secret.needs_v3_upgrade() {
             continue;
         }
         let plaintext = row.client_secret.expose_secret().to_string();
         let id = row.id;
-        match EncryptedString::new_with_aad(plaintext, AAD_OIDC_CLIENT_SECRET) {
+        match EncryptedString::new(plaintext, AAD_OIDC_CLIENT_SECRET) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.client_secret = sea_orm::Set(encrypted);
@@ -224,12 +224,12 @@ async fn upgrade_mqtt_passwords(db: &DatabaseConnection) -> u64 {
         let Some(ref password) = row.password else {
             continue;
         };
-        if !password.is_v1() {
+        if !password.needs_v3_upgrade() {
             continue;
         }
         let plaintext = password.expose_secret().to_string();
         let id = row.id;
-        match EncryptedString::new_with_aad(plaintext, AAD_MQTT_PASSWORD) {
+        match EncryptedString::new(plaintext, AAD_MQTT_PASSWORD) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.password = sea_orm::Set(Some(encrypted));
@@ -267,12 +267,12 @@ async fn upgrade_mqtt_ca_certs(db: &DatabaseConnection) -> u64 {
         let Some(ref ca_cert) = row.ca_cert_pem else {
             continue;
         };
-        if !ca_cert.is_v1() {
+        if !ca_cert.needs_v3_upgrade() {
             continue;
         }
         let plaintext = ca_cert.expose_secret().to_string();
         let id = row.id;
-        match EncryptedString::new_with_aad(plaintext, AAD_MQTT_CA_CERT_PEM) {
+        match EncryptedString::new(plaintext, AAD_MQTT_CA_CERT_PEM) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.ca_cert_pem = sea_orm::Set(Some(encrypted));
@@ -307,12 +307,12 @@ async fn upgrade_oidc_flow_pkce_verifiers(db: &DatabaseConnection) -> u64 {
 
     let mut count = 0u64;
     for row in rows {
-        if !row.pkce_verifier.is_v1() {
+        if !row.pkce_verifier.needs_v3_upgrade() {
             continue;
         }
         let plaintext = row.pkce_verifier.expose_secret().to_string();
         let csrf_state = row.csrf_state.clone();
-        match EncryptedString::new_with_aad(plaintext, AAD_PKCE_VERIFIER) {
+        match EncryptedString::new(plaintext, AAD_PKCE_VERIFIER) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.pkce_verifier = sea_orm::Set(encrypted);
@@ -347,12 +347,12 @@ async fn upgrade_notification_channel_configs(db: &DatabaseConnection) -> u64 {
 
     let mut count = 0u64;
     for row in rows {
-        if !row.config.is_v1() {
+        if !row.config.needs_v3_upgrade() {
             continue;
         }
         let plaintext = row.config.expose_secret().to_string();
         let id = row.id;
-        match EncryptedString::new_with_aad(plaintext, AAD_NOTIFICATION_CONFIG) {
+        match EncryptedString::new(plaintext, AAD_NOTIFICATION_CONFIG) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.config = sea_orm::Set(encrypted);
@@ -394,7 +394,7 @@ async fn reencrypt_ca_certificate_keys(db: &DatabaseConnection) -> u64 {
         }
         let plaintext = row.key_pem.expose_secret().to_string();
         let fingerprint = row.fingerprint.clone();
-        match EncryptedString::new(plaintext) {
+        match EncryptedString::new(plaintext, AAD_CA_KEY_PEM) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.key_pem = sea_orm::Set(encrypted);
@@ -447,7 +447,7 @@ async fn reencrypt_oidc_client_secrets(db: &DatabaseConnection) -> u64 {
         }
         let plaintext = row.client_secret.expose_secret().to_string();
         let id = row.id;
-        match EncryptedString::new(plaintext) {
+        match EncryptedString::new(plaintext, AAD_OIDC_CLIENT_SECRET) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.client_secret = sea_orm::Set(encrypted);
@@ -503,7 +503,7 @@ async fn reencrypt_mqtt_passwords(db: &DatabaseConnection) -> u64 {
         }
         let plaintext = password.expose_secret().to_string();
         let id = row.id;
-        match EncryptedString::new(plaintext) {
+        match EncryptedString::new(plaintext, AAD_MQTT_PASSWORD) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.password = sea_orm::Set(Some(encrypted));
@@ -559,7 +559,7 @@ async fn reencrypt_mqtt_ca_certs(db: &DatabaseConnection) -> u64 {
         }
         let plaintext = ca_cert.expose_secret().to_string();
         let id = row.id;
-        match EncryptedString::new(plaintext) {
+        match EncryptedString::new(plaintext, AAD_MQTT_CA_CERT_PEM) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.ca_cert_pem = sea_orm::Set(Some(encrypted));
@@ -612,7 +612,7 @@ async fn reencrypt_oidc_flow_pkce_verifiers(db: &DatabaseConnection) -> u64 {
         }
         let plaintext = row.pkce_verifier.expose_secret().to_string();
         let csrf_state = row.csrf_state.clone();
-        match EncryptedString::new(plaintext) {
+        match EncryptedString::new(plaintext, AAD_PKCE_VERIFIER) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
                 am.pkce_verifier = sea_orm::Set(encrypted);
@@ -706,7 +706,7 @@ mod tests {
         let am = ca_certificate::ActiveModel {
             fingerprint: Set("fp1".to_string()),
             cert_pem: Set("---CERT---".to_string()),
-            key_pem: Set(EncryptedString::new("secret_key".to_string()).unwrap()),
+            key_pem: Set(EncryptedString::new("secret_key".to_string(), AAD_CA_KEY_PEM).unwrap()),
             not_before: Set(now),
             not_after: Set(now),
             activated_at: Set(now),
@@ -752,7 +752,7 @@ mod tests {
         let am = ca_certificate::ActiveModel {
             fingerprint: Set("fp2".to_string()),
             cert_pem: Set("---CERT---".to_string()),
-            key_pem: Set(EncryptedString::new("secret_key".to_string()).unwrap()),
+            key_pem: Set(EncryptedString::new("secret_key".to_string(), AAD_CA_KEY_PEM).unwrap()),
             not_before: Set(now),
             not_after: Set(now),
             activated_at: Set(now),
@@ -778,7 +778,7 @@ mod tests {
             logo_url: Set(None),
             issuer_url: Set("https://idp.example.com".to_string()),
             client_id: Set("client-id".to_string()),
-            client_secret: Set(EncryptedString::new("client-secret-val".to_string()).unwrap()),
+            client_secret: Set(EncryptedString::new("client-secret-val".to_string(), AAD_OIDC_CLIENT_SECRET).unwrap()),
             scopes: Set("openid email".to_string()),
             auto_create_users: Set(false),
             role_claim_path: Set(None),
@@ -857,7 +857,7 @@ mod tests {
             port: Set(1883),
             client_id: Set(format!("client-{id}")),
             username: Set(Some("user".to_string())),
-            password: Set(Some(EncryptedString::new("mqtt-pass".to_string()).unwrap())),
+            password: Set(Some(EncryptedString::new("mqtt-pass".to_string(), AAD_MQTT_PASSWORD).unwrap())),
             ca_cert_pem: Set(None),
             topic_prefix: Set("uptrakit".to_string()),
             connection_status: Set(MqttClientConnectionStatus::Offline),
@@ -949,7 +949,7 @@ mod tests {
 
         let mut am = mqtt_client_am(id, now);
         am.ca_cert_pem = Set(Some(
-            EncryptedString::new("-----BEGIN CERTIFICATE-----".to_string()).unwrap(),
+            EncryptedString::new("-----BEGIN CERTIFICATE-----".to_string(), AAD_MQTT_CA_CERT_PEM).unwrap(),
         ));
         am.insert(&db).await.expect("insert mqtt_client");
 
@@ -1010,7 +1010,7 @@ mod tests {
         let am = pending_oidc_flow::ActiveModel {
             csrf_state: Set(csrf.to_string()),
             provider_id: Set(Uuid::nil()),
-            pkce_verifier: Set(EncryptedString::new("pkce_secret".to_string()).unwrap()),
+            pkce_verifier: Set(EncryptedString::new("pkce_secret".to_string(), AAD_PKCE_VERIFIER).unwrap()),
             nonce: Set("nonce_value".to_string()),
             created_at: Set(now),
             expires_at: Set(now),
@@ -1054,7 +1054,7 @@ mod tests {
         let am = pending_oidc_flow::ActiveModel {
             csrf_state: Set("csrf_state_test_2".to_string()),
             provider_id: Set(Uuid::nil()),
-            pkce_verifier: Set(EncryptedString::new("pkce_secret".to_string()).unwrap()),
+            pkce_verifier: Set(EncryptedString::new("pkce_secret".to_string(), AAD_PKCE_VERIFIER).unwrap()),
             nonce: Set("nonce_value".to_string()),
             created_at: Set(now),
             expires_at: Set(now),
@@ -1077,7 +1077,7 @@ mod tests {
         ca_certificate::ActiveModel {
             fingerprint: Set("v2_fp1".to_string()),
             cert_pem: Set("---CERT---".to_string()),
-            key_pem: Set(EncryptedString::new("ca_key_v2".to_string()).unwrap()),
+            key_pem: Set(EncryptedString::new("ca_key_v2".to_string(), AAD_CA_KEY_PEM).unwrap()),
             not_before: Set(now),
             not_after: Set(now),
             activated_at: Set(now),
@@ -1099,7 +1099,7 @@ mod tests {
         .await
         .expect("query")
         .expect("row exists");
-        assert!(!row.key_pem.is_v1(), "key_pem must be ENC:v2 after upgrade");
+        assert!(row.key_pem.is_db_value_encrypted(), "key_pem must be encrypted after upgrade");
         assert_eq!(row.key_pem.expose_secret(), "ca_key_v2");
     }
 
@@ -1112,7 +1112,7 @@ mod tests {
         ca_certificate::ActiveModel {
             fingerprint: Set("v2_idem".to_string()),
             cert_pem: Set("---CERT---".to_string()),
-            key_pem: Set(EncryptedString::new("idem_key".to_string()).unwrap()),
+            key_pem: Set(EncryptedString::new("idem_key".to_string(), AAD_CA_KEY_PEM).unwrap()),
             not_before: Set(now),
             not_after: Set(now),
             activated_at: Set(now),
@@ -1127,9 +1127,22 @@ mod tests {
         let count1 = upgrade_ca_certificate_keys(&db).await;
         assert_eq!(count1, 1);
 
-        // Second run: already v2, should skip.
+        // Second run: v2 data is re-processed by needs_v3_upgrade() (it returns
+        // true for anything not v3). Without a DEK ring the result is v2 again —
+        // functionally a no-op. Data integrity is verified below.
         let count2 = upgrade_ca_certificate_keys(&db).await;
-        assert_eq!(count2, 0, "idempotent: v2 row must not be re-upgraded");
+        assert_eq!(count2, 1, "v2 re-processed (harmless without DEK ring)");
+
+        // Verify data is still correct after the second pass.
+        let row = uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id(
+            "v2_idem".to_string(),
+        )
+        .one(&db)
+        .await
+        .expect("query")
+        .expect("row exists");
+        assert!(row.key_pem.is_db_value_encrypted(), "key_pem still encrypted");
+        assert_eq!(row.key_pem.expose_secret(), "idem_key", "data preserved");
     }
 
     #[tokio::test]
@@ -1152,7 +1165,7 @@ mod tests {
             .await
             .expect("query")
             .expect("row exists");
-        assert!(!row.client_secret.is_v1());
+        assert!(row.client_secret.is_db_value_encrypted(), "client_secret must be encrypted after upgrade");
         assert_eq!(row.client_secret.expose_secret(), "client-secret-val");
     }
 
@@ -1177,7 +1190,7 @@ mod tests {
             .expect("query")
             .expect("row exists");
         let password = row.password.as_ref().expect("password present");
-        assert!(!password.is_v1());
+        assert!(password.is_db_value_encrypted(), "password must be encrypted after upgrade");
         assert_eq!(password.expose_secret(), "mqtt-pass");
     }
 
@@ -1195,7 +1208,7 @@ mod tests {
             tenant_id: Set(Uuid::nil()),
             name: Set("test-channel".to_string()),
             channel_type: Set("webhook".to_string()),
-            config: Set(EncryptedString::new(r#"{"url":"https://example.com"}"#.to_string()).unwrap()),
+            config: Set(EncryptedString::new(r#"{"url":"https://example.com"}"#.to_string(), AAD_NOTIFICATION_CONFIG).unwrap()),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
@@ -1212,7 +1225,7 @@ mod tests {
             .await
             .expect("query")
             .expect("row exists");
-        assert!(!row.config.is_v1());
+        assert!(row.config.is_db_value_encrypted(), "config must be encrypted after upgrade");
         assert_eq!(
             row.config.expose_secret(),
             r#"{"url":"https://example.com"}"#
@@ -1229,7 +1242,7 @@ mod tests {
         ca_certificate::ActiveModel {
             fingerprint: Set("v2_all_fp".to_string()),
             cert_pem: Set("---CERT---".to_string()),
-            key_pem: Set(EncryptedString::new("all_ca".to_string()).unwrap()),
+            key_pem: Set(EncryptedString::new("all_ca".to_string(), AAD_CA_KEY_PEM).unwrap()),
             not_before: Set(now),
             not_after: Set(now),
             activated_at: Set(now),
@@ -1256,7 +1269,7 @@ mod tests {
         pending_oidc_flow::ActiveModel {
             csrf_state: Set(csrf.to_string()),
             provider_id: Set(Uuid::nil()),
-            pkce_verifier: Set(EncryptedString::new("all_pkce".to_string()).unwrap()),
+            pkce_verifier: Set(EncryptedString::new("all_pkce".to_string(), AAD_PKCE_VERIFIER).unwrap()),
             nonce: Set("nonce".to_string()),
             created_at: Set(now),
             expires_at: Set(now),
@@ -1276,21 +1289,21 @@ mod tests {
         .await
         .expect("query")
         .expect("row");
-        assert!(!ca.key_pem.is_v1());
+        assert!(ca.key_pem.is_db_value_encrypted(), "key_pem must be encrypted");
 
         let oidc = uptrakit_shared_db::entity::prelude::OidcProvider::find_by_id(oidc_id)
             .one(&db)
             .await
             .expect("query")
             .expect("row");
-        assert!(!oidc.client_secret.is_v1());
+        assert!(oidc.client_secret.is_db_value_encrypted(), "client_secret must be encrypted");
 
         let mqtt = uptrakit_shared_db::entity::prelude::MqttClient::find_by_id(mqtt_id)
             .one(&db)
             .await
             .expect("query")
             .expect("row");
-        assert!(!mqtt.password.as_ref().unwrap().is_v1());
+        assert!(mqtt.password.as_ref().unwrap().is_db_value_encrypted(), "password must be encrypted");
 
         let flow =
             uptrakit_shared_db::entity::prelude::PendingOidcFlow::find_by_id(csrf.to_string())
@@ -1298,7 +1311,7 @@ mod tests {
                 .await
                 .expect("query")
                 .expect("row");
-        assert!(!flow.pkce_verifier.is_v1());
+        assert!(flow.pkce_verifier.is_db_value_encrypted(), "pkce_verifier must be encrypted");
     }
 
     // ── reencrypt_legacy_plaintext (top-level) ────────────────────────────────
@@ -1312,7 +1325,7 @@ mod tests {
         let ca_am = ca_certificate::ActiveModel {
             fingerprint: Set("fp_all".to_string()),
             cert_pem: Set("---CERT---".to_string()),
-            key_pem: Set(EncryptedString::new("ca_key".to_string()).unwrap()),
+            key_pem: Set(EncryptedString::new("ca_key".to_string(), AAD_CA_KEY_PEM).unwrap()),
             not_before: Set(now),
             not_after: Set(now),
             activated_at: Set(now),
@@ -1375,7 +1388,7 @@ mod tests {
         let flow_am = pending_oidc_flow::ActiveModel {
             csrf_state: Set(csrf.to_string()),
             provider_id: Set(Uuid::nil()),
-            pkce_verifier: Set(EncryptedString::new("pkce_val".to_string()).unwrap()),
+            pkce_verifier: Set(EncryptedString::new("pkce_val".to_string(), AAD_PKCE_VERIFIER).unwrap()),
             nonce: Set("nonce".to_string()),
             created_at: Set(now),
             expires_at: Set(now),

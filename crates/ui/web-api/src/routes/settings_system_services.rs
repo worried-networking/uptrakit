@@ -110,7 +110,7 @@ pub async fn update_system_services_settings(
             }
             token = None;
         } else if let Some(s) = val.as_str() {
-            let stored_value = match uptrakit_crypto::encrypt_str(s) {
+            let stored_value = match uptrakit_crypto::encrypt_str(s, "uptrakit:settings:system_services_enrollment_token") {
                 Ok(encrypted) => serde_json::json!(encrypted),
                 Err(e) => {
                     tracing::error!(

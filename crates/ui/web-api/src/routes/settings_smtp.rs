@@ -137,7 +137,7 @@ pub async fn update_smtp_settings(
             val.as_str().map(String::from)
         };
         let stored_value = if let Some(ref pw) = new_password {
-            match uptrakit_crypto::encrypt_str(pw) {
+            match uptrakit_crypto::encrypt_str(pw, "uptrakit:settings:smtp_password") {
                 Ok(encrypted) => serde_json::json!(encrypted),
                 Err(e) => {
                     tracing::error!("Failed to encrypt SMTP password: {e:?}");
