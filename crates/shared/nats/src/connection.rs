@@ -92,7 +92,7 @@ impl NatsConnection {
                 ..Default::default()
             })
             .await
-            .context_transform(|_| NatsError::JetStream)?;
+            .context_transform(|e| NatsError::JetStream(e.to_string()))?;
 
         tracing::info!("NATS JetStream stream ready: {}", subjects::STREAM_NAME);
         Ok(())

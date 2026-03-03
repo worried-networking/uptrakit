@@ -241,7 +241,20 @@ async fn run(args: cli::Args) -> Result<()> {
     let nats_transport = if let Some(ref url) = reconciled.nats_url {
         let nats = uptrakit_web_api::nats_transport::NatsTransport::connect(url, controller_id)
             .await
-            .context_transform(|_| AppError::Config("NATS connection failed".to_string()))?;
+            .context_transform(|e| {
+                use uptrakit_web_api::nats_transport::NatsTransportError;
+                match e {
+                    NatsTransportError::Connection(msg) => {
+                        AppError::Config(format!("NATS connection failed: {msg}"))
+                    }
+                    NatsTransportError::JetStream(msg) => AppError::Config(format!(
+                        "NATS JetStream setup failed: {msg}\n\
+                         Ensure JetStream is enabled on the NATS server: start with the \
+                         -js flag, or add `jetstream: {{enabled: true}}` to nats-server.conf"
+                    )),
+                    _ => AppError::Config("NATS initialization failed".to_string()),
+                }
+            })?;
         notification_service = notification_service.with_nats(nats.clone());
         Some(nats)
     } else {

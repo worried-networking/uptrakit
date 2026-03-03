@@ -49,10 +49,10 @@ const PULL_EXPIRES: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Error)]
 pub enum NatsTransportError {
-    #[error("NATS connection failed")]
-    Connection,
-    #[error("JetStream setup failed")]
-    JetStream,
+    #[error("NATS connection failed: {0}")]
+    Connection(String),
+    #[error("NATS JetStream setup failed: {0}")]
+    JetStream(String),
     #[error("publish failed")]
     Publish,
     #[error("consumer error")]
@@ -60,7 +60,7 @@ pub enum NatsTransportError {
 }
 
 impl_report_conversion!(async_nats::ConnectError => NatsTransportError,
-    |_e| NatsTransportError::Connection
+    |e| NatsTransportError::Connection(e.to_string())
 );
 
 /// NATS transport handle used by
@@ -85,13 +85,13 @@ impl NatsTransport {
         let conn = NatsConnection::connect(url)
             .await
             .context_transform(|e| match e {
-                uptrakit_nats::NatsError::Connection => NatsTransportError::Connection,
-                _ => NatsTransportError::JetStream,
+                uptrakit_nats::NatsError::Connection(msg) => NatsTransportError::Connection(msg),
+                uptrakit_nats::NatsError::JetStream(msg) => NatsTransportError::JetStream(msg),
             })?;
 
         conn.ensure_stream()
             .await
-            .context_transform(|_| NatsTransportError::JetStream)?;
+            .context_transform(|e| NatsTransportError::JetStream(e.to_string()))?;
 
         Ok(Self {
             conn,
