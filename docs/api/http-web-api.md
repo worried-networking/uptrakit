@@ -422,6 +422,75 @@ examples.
 | `crates/ui/web-api/src/queries/host_package_triggers.rs` | Update trigger pipeline |
 | `crates/shared/web-api-types/src/host_packages.rs` | Request/response types |
 
+## System Services Endpoints
+
+System services are tenant-agnostic infrastructure components (MQTT bridge, external scheduler).
+They are stored in the `system_services` table and managed independently of tenant services.
+See [System Services Architecture](../architecture/system-services.md) for the full design.
+
+- `GET /api/v1/system-services`: list system services (requires `view_system_services`).
+  Filterable by `?capability=mqtt_bridge` or `?status=pending`. Paginated.
+- `GET /api/v1/system-services/{id}`: get a single system service by UUID
+  (requires `view_system_services`).
+- `PUT /api/v1/system-services/{id}`: update configurable settings — `ping_interval_seconds` and
+  `cert_lifetime_hours` (requires `manage_system_services`). Same field semantics as
+  `PUT /api/v1/services/{id}`: `0` clears the override, positive value sets it, omit to keep current.
+- `POST /api/v1/system-services/{id}/approve`: approve a pending system service
+  (requires `manage_system_services`).
+- `POST /api/v1/system-services/{id}/reject`: reject a pending system service
+  (requires `manage_system_services`).
+- `DELETE /api/v1/system-services/{id}`: deactivate (soft-delete) a system service, revoke its
+  certificates, and bump the CRL (requires `manage_system_services`). Returns `204 No Content`.
+
+### System Services Settings Endpoints
+
+- `GET /api/v1/settings/system-services`: get the global system services enrollment token
+  (requires `manage_system_services`). The plaintext token is included in the response so operators
+  can copy it into service deployment configurations.
+- `PUT /api/v1/settings/system-services`: set or clear the enrollment token
+  (requires `manage_system_services`). Send `"enrollment_token": null` to clear it (all future
+  enrollments will require manual approval). The token is stored AES-256-GCM encrypted at rest.
+
+**Response** (`200`): `SystemServicesSettingsResponse`
+
+```json
+{
+  "enrollment_token": "my-secret-token",
+  "has_token": true
+}
+```
+
+When no token is configured, `enrollment_token` is `null` and `has_token` is `false`.
+
+### `SystemServiceResponse` fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | UUID | System service identifier |
+| `capabilities` | `string[]` | Snake-case capability strings (e.g. `["mqtt_bridge","graceful_shutdown"]`) |
+| `hostname` | string | Hostname reported at enrollment |
+| `friendly_name` | string | Human-readable display name |
+| `ip_address` | `string?` | Client IP address |
+| `status` | string | `pending`, `approved`, `rejected`, or `deactivated` |
+| `client_version` | `string?` | Client software version |
+| `last_seen_at` | `datetime?` | Last connect or heartbeat time |
+| `created_at` | datetime | Row creation time |
+| `updated_at` | datetime | Last modification time |
+| `ping_interval_seconds` | `u32?` | Per-service ping interval override (omitted when using the default) |
+| `cert_lifetime_hours` | `u32?` | Per-service certificate lifetime override in hours (omitted when using the default) |
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/system_services.rs` | Route handlers |
+| `crates/ui/web-api/src/routes/settings_system_services.rs` | Settings route handlers |
+| `crates/ui/web-api/src/queries/system_services.rs` | DB query helpers |
+| `crates/shared/web-api-types/src/system_services.rs` | Request/response types |
+| `crates/shared/db/src/entity/system_service.rs` | SeaORM entity for `system_services` |
+| `crates/shared/db/src/entity/system_service_certificate.rs` | SeaORM entity for `system_service_certificates` |
+| `crates/shared/openapi-client/src/system_services.rs` | Typed HTTP client methods |
+
 ## Service Operations
 
 - `/api/v1/agents/{id}/version-check`: trigger a version check (requires `ManageSoftware`).
@@ -767,6 +836,7 @@ All paginated endpoints return a `PaginatedResponse<T>`:
 | Endpoint | Query struct | Notes |
 | --- | --- | --- |
 | `GET /api/v1/services` | `ListServicesQuery` (includes `page`/`per_page`) | Filterable by `capability`, `status` |
+| `GET /api/v1/system-services` | `ListSystemServicesQuery` (includes `page`/`per_page`) | Filterable by `capability`, `status` |
 | `GET /api/v1/hosts` | `PaginationParams` | |
 | `GET /api/v1/software-items` | `PaginationParams` | |
 | `GET /api/v1/update-history` | `UpdateHistoryQuery` (includes `page`/`per_page`) | Filterable by `host_id`, `software_item_id`, `status` |

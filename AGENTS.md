@@ -747,6 +747,56 @@ serialized/logged output. See `crates/ui/web-api/src/setting_key.rs` (`NatsUrl` 
 `ServiceResponse` contains `capabilities: Vec<String>` and `service_label: String` instead of the former
 `service_type: ServiceType`. The list endpoint filter parameter is `?capability=` instead of `?type=`.
 
+### Two-tier service model
+
+The controller manages two independent service tiers:
+
+| Tier | Table | Scoped to | REST path |
+| --- | --- | --- | --- |
+| Tenant services | `services` | `tenant_id` | `/api/v1/services` |
+| System services | `system_services` | Global | `/api/v1/system-services` |
+
+Enrollment is routed by the presence of `Capability::SystemService` (`"system_service"`) in
+`EnrollPayload.capabilities`. When present, `enroll_service()` calls `do_enroll_system_service()`
+and writes to `system_services`; otherwise it calls `do_enroll()` and writes to `services`.
+
+The `is_system: bool` flag derived at enrollment threads through every subsequent WebSocket
+operation: certificate lookup (tries `service_certificates` then `system_service_certificates`),
+activity recording, status checks, credential delivery, and registered-connection management.
+
+The MQTT bridge now enrolls as a system service (`system_service + mqtt_bridge + graceful_shutdown`)
+and appears in `/api/v1/system-services`, not `/api/v1/services`.
+
+#### System services key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/db/src/entity/system_service.rs` | SeaORM entity for `system_services` table |
+| `crates/shared/db/src/entity/system_service_certificate.rs` | SeaORM entity for `system_service_certificates` table |
+| `crates/ui/web-api/src/queries/system_services.rs` | DB query helpers (list, get, approve, reject, deactivate, update) |
+| `crates/ui/web-api/src/routes/system_services.rs` | Route handlers for `/api/v1/system-services` |
+| `crates/ui/web-api/src/routes/settings_system_services.rs` | Route handlers for `/api/v1/settings/system-services` |
+| `crates/shared/web-api-types/src/system_services.rs` | `SystemServiceResponse`, `UpdateSystemServiceRequest`, `ListSystemServicesQuery` |
+| `crates/shared/openapi-client/src/system_services.rs` | Typed HTTP client methods for system service endpoints |
+| `crates/ui/cli/src/commands/system_services.rs` | CLI `system-services` subcommand |
+| `docs/architecture/system-services.md` | Full architecture documentation |
+
+#### Credential guard
+
+Four capabilities (`database_access`, `nats_access`, `master_key_access`, `ca_management`) require
+`system_service` to be present in the same capability set. The guard runs in `do_enroll()` before
+any DB write and rejects with `AgentRouteError::Forbidden` if a service requests system credentials
+without `system_service`. This prevents tenant services from receiving infrastructure secrets.
+
+#### System enrollment token
+
+A single global plaintext token is stored AES-256-GCM encrypted in `settings` under
+`SettingKey::SystemServicesEnrollmentToken`. At enrollment, the provided token is compared via
+direct string equality (not Argon2id). A match produces `Approved` status; a mismatch produces
+`Forbidden`. No token configured produces `Pending` status. The token is returned in plaintext by
+`GET /api/v1/settings/system-services` (requires `manage_system_services`) so operators can copy
+it into service deployment configs.
+
 #### Frontend
 
 The frontend filters services by capability instead of type and displays `service_label` instead of `service_type`.

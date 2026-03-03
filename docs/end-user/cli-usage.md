@@ -95,6 +95,53 @@ uptrakit services merge <TARGET_ID> <SOURCE_ID>
 See also: [Service Operations](../api/services-operations.md),
 [HTTP Web API](../api/http-web-api.md).
 
+## System Services
+
+List, inspect, and manage system services (MQTT bridge, external scheduler). System services are
+tenant-agnostic infrastructure components managed separately from regular tenant services.
+
+```sh
+# List all system services (paginated)
+uptrakit system-services list
+uptrakit system-services list --page 2 --per-page 10
+
+# Filter by capability or status
+uptrakit system-services list --capability mqtt_bridge
+uptrakit system-services list --status pending
+uptrakit system-services list --capability scheduler --status approved
+
+# Show system service details
+uptrakit system-services show <SERVICE_ID>
+
+# Approve a pending system service
+uptrakit system-services approve <SERVICE_ID>
+
+# Reject a pending system service
+uptrakit system-services reject <SERVICE_ID>
+
+# Remove (deactivate) a system service
+uptrakit system-services remove <SERVICE_ID>
+
+# Update a system service's settings
+uptrakit system-services update <SERVICE_ID> --ping-interval 30
+uptrakit system-services update <SERVICE_ID> --cert-lifetime-hours 48
+
+# Clear overrides (revert to global defaults)
+uptrakit system-services update <SERVICE_ID> --ping-interval 0
+uptrakit system-services update <SERVICE_ID> --cert-lifetime-hours 0
+```
+
+`--capability` accepts any capability string, e.g. `mqtt_bridge` or `scheduler`.
+
+`--ping-interval` sets the ping interval in seconds. `0` clears the override and reverts to the
+service-profile default. The minimum positive value is `5`.
+
+`--cert-lifetime-hours` sets the certificate lifetime in hours. `0` clears the override and reverts
+to the global default. Valid positive range is `1`–`17520` (up to two years).
+
+See also: [System Services Architecture](../architecture/system-services.md),
+[HTTP Web API](../api/http-web-api.md#system-services-endpoints).
+
 ## Hosts
 
 List, inspect, and manage hosts registered with the controller.

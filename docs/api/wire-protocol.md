@@ -462,16 +462,23 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | `GracefulShutdown` | `graceful_shutdown` | Service sends `disconnecting` before clean exit and honours `shutdown_timeout_seconds`. |
 | `MqttBridge` | `mqtt_bridge` | Service is an MQTT bridge: handles `register`, `tenant_assignments`, `release_tenants`, `mqtt_client_status`, etc. Maps to `ServiceProfile::MqttBridge`. |
 | `SshRemote` | `ssh_remote` | Service manages remote hosts over SSH. Combined with `SoftwareDiscovery`, maps to `ServiceProfile::Agent` with SSH label. |
+| `SystemService` | `system_service` | Routes enrollment to the `system_services` table instead of `services`. Required for any service that requests system credentials. The MQTT bridge declares this alongside `mqtt_bridge`. See [System Services Architecture](../architecture/system-services.md). |
+| `Scheduler` | `scheduler` | Marker: service is an external task scheduler. Maps to `ServiceProfile::Scheduler`. |
+| `DatabaseAccess` | `database_access` | Service requires direct database access credentials. Requires `system_service`. |
+| `NatsAccess` | `nats_access` | Service requires NATS connection details. Requires `system_service`. |
+| `MasterKeyAccess` | `master_key_access` | Service requires the master encryption key. Requires `system_service`. |
+| `CaManagement` | `ca_management` | Service can request CA certificate rotation. Requires `system_service`. |
 | `Other(String)` | *(any unknown string)* | Forward-compatible catch-all. Never participates in intersection. |
 
 ### Advertised Sets per Component
 
-| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `mqtt_bridge` | `ssh_remote` |
-| --- | :---: | :---: | :---: | :---: | :---: |
-| Controller | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Agent | ✓ | ✓ | ✓ | — | — |
-| SSH Agent | ✓ | ✓ | ✓ | — | ✓ |
-| MQTT Service | — | — | ✓ | ✓ | — |
+| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `mqtt_bridge` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — |
+| SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — |
+| MQTT Bridge | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — |
+| External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 The controller advertises all known capabilities so every service can compute its agreed set regardless of its type.
 
@@ -490,7 +497,8 @@ stored -- it is always computed from capabilities.
 
 `EnrollPayload.capabilities` is a required `BTreeSet<Capability>` field. The controller persists the
 capabilities in the `services.capabilities` column (JSON array of snake_case strings) and derives
-the `ServiceProfile` at read time.
+the `ServiceProfile` at read time. When `system_service` is present in the capability set, the
+enrollment is routed to `system_services` instead (see [System Services Architecture](../architecture/system-services.md)).
 
 ## Forward Compatibility
 

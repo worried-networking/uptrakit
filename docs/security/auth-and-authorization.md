@@ -159,6 +159,8 @@ from `crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name stri
 | `ManageCommands` | `manage_commands` | Create and modify plugin configs containing command-bearing fields (shell commands, `post_pull_command`, custom hook `commands` arrays). **Treat as equivalent to root access on all managed hosts.** |
 | `ViewHosts` | `view_hosts` | View hosts |
 | `ManageHosts` | `manage_hosts` | Manage hosts (update, deactivate) |
+| `ViewSystemServices` | `view_system_services` | List and inspect system services (MQTT bridge, external scheduler) |
+| `ManageSystemServices` | `manage_system_services` | Approve, reject, deactivate, and update system services; read and set the global enrollment token |
 
 > **Security note:** `ManageCommands` grants effective code-execution authority on all managed hosts
 > assigned to the affected software items. Users with this permission can configure arbitrary shell
@@ -169,7 +171,7 @@ from `crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name stri
 | Role | Permissions |
 | --- | --- |
 | `owner` | All permissions (including `manage_commands`) |
-| `admin` | All except `manage_global_settings` (including `manage_commands`) |
+| `admin` | All except `manage_global_settings` (including `manage_commands`, `view_system_services`, `manage_system_services`) |
 | `user` | `view_settings`, `view_agents`, `view_software`, `view_hosts` |
 
 The first registered user gets the `owner` role — whether registered via password or OIDC. Subsequent users (password or
@@ -222,6 +224,8 @@ RBAC permission. Tools must treat `"self"` as "any authenticated user is authori
 | `CanManageCommands` | `Permission::ManageCommands` |
 | `CanViewHosts` | `Permission::ViewHosts` |
 | `CanManageHosts` | `Permission::ManageHosts` |
+| `CanViewSystemServices` | `Permission::ViewSystemServices` |
+| `CanManageSystemServices` | `Permission::ManageSystemServices` |
 
 All extractors derive `Debug`, expose `pub AuthenticatedUser` as field 0 for handler use, and provide a
 `::new(user)` constructor for use in unit tests that call handlers directly (bypassing the HTTP layer).
@@ -240,6 +244,40 @@ See also: [`docs/development/coding-standards.md`](../development/coding-standar
 1. Use `CanXxx(_user): CanXxx` (or `CanXxx(user): CanXxx` if you need the user) in the relevant route handler(s),
    and add `extensions(("x-required-permission" = json!("xxx")))` to the corresponding `#[utoipa::path]` annotation.
 1. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.
+
+## System Service Credential Guard
+
+Four capabilities grant access to sensitive infrastructure secrets:
+
+| Capability | Secret delivered |
+| --- | --- |
+| `database_access` | Database connection URL |
+| `nats_access` | NATS server URL |
+| `master_key_access` | Master AES-256 encryption key (hex) |
+| `ca_management` | Permission to request CA rotation |
+
+These credentials are delivered via `ServiceCredentials` after mTLS authentication and are never
+published to NATS. Because they provide privileged access to the entire infrastructure, a service
+must declare the `system_service` capability to request any of them.
+
+The guard runs at enrollment time, before any database write, in `do_enroll()`:
+
+```rust
+if requests_system_creds && !has_system_service {
+    bail!(AgentRouteError::Forbidden(
+        "system credentials (database_access, nats_access, master_key_access, \
+         ca_management) require the system_service capability"
+    ));
+}
+```
+
+A service that includes any of the four credential capabilities without `system_service` receives an
+`ErrorCode::EnrollmentFailed` response with a descriptive message. The guard does not apply to the
+system enrollment path (`do_enroll_system_service`), which is only reached when `system_service` is
+already present.
+
+See [System Services Architecture](../architecture/system-services.md) for the full enrollment flow
+and two-tier service model.
 
 ## WebSocket Enrollment Secret Lookup
 

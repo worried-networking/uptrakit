@@ -9,11 +9,13 @@ only by the capabilities they advertise during enrollment (see [Capability-Based
 A centralised [DB-backed scheduler](docs/architecture/scheduler.md) coordinates periodic tasks (version checks, cleanup, CA rotation checks,
 certificate renewal) using optimistic locking for HA-safe exactly-once execution. The scheduler can run as an **embedded feature** inside the
 controller (`--features embedded-scheduler`) or as a standalone **external binary** (`uptrakit-scheduler`) that enrolls as a service and receives
-infrastructure credentials (database, NATS, master key) via the wire protocol. See [External Scheduler Deployment](docs/end-user/deployment/external-scheduler.md).
+infrastructure credentials (database, NATS, master key) via the wire protocol.
+See [External Scheduler Deployment](docs/end-user/deployment/external-scheduler.md).
 
 ## Key references
 
-- Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items, update history, scheduler, autodiscovery)
+- Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items,
+  update history, scheduler, autodiscovery)
 
 - System architecture and operations: [docs/end-user/system-overview.md](docs/end-user/system-overview.md)
 
@@ -128,7 +130,8 @@ Multiple named enrollment tokens are stored in a dedicated `enrollment_tokens` t
 - **Capability scoping**: restrict which service types the token can approve (intersection matching).
 - **Usage limits**: optional `max_uses` with atomic `current_uses` increment.
 - **TTL**: optional `expires_at` for automatic expiration.
-- **Audit trail**: `created_by_user_id` tracks who created the token; `enrollment_token_id` on the `services` table tracks which token enrolled each service.
+- **Audit trail**: `created_by_user_id` tracks who created the token; `enrollment_token_id` on the `services` table
+  tracks which token enrolled each service.
 
 Tokens are managed via the `/api/v1/enrollment-tokens` REST API (create, list, get, revoke). A wildcard token (no capability restriction)
 matches any service. During enrollment, the controller iterates active tokens and verifies the provided secret against each Argon2id hash.
@@ -142,7 +145,8 @@ former per-type registration and broadcast paths.
 
 ### Database schema
 
-- `services.capabilities` -- JSON text column holding a serialized `Vec<Capability>` (e.g. `["software_discovery","update_hooks","graceful_shutdown"]`).
+- `services.capabilities` -- JSON text column holding a serialized `Vec<Capability>`
+  (e.g. `["software_discovery","update_hooks","graceful_shutdown"]`).
 - Cross-controller event routing uses capability strings (`"software_discovery"`, `"mqtt_bridge"`, etc.) via NATS
   JetStream subjects when NATS is configured. See [Cross-Controller Communication](docs/development/cross-controller-comm.md).
 
@@ -165,6 +169,26 @@ WebSocket connection. See [Secrets and Encryption](docs/security/secrets-and-enc
 
 `ServiceResponse` returns `capabilities` (list of snake_case strings) and `service_label` (human-readable, derived from `ServiceProfile`).
 Filtering uses `?capability=software_discovery` on the list endpoint. There is no `service_type` field in any request or response.
+
+## Two-tier service model
+
+The controller manages two independent service tiers. Enrollment routing happens at the WebSocket
+level based on the presence of `Capability::SystemService` in `EnrollPayload.capabilities`.
+
+| Tier | Table | Scoped to | REST path | Examples |
+| --- | --- | --- | --- | --- |
+| Tenant services | `services` | `tenant_id` | `/api/v1/services` | Agents, SSH agents |
+| System services | `system_services` | Global | `/api/v1/system-services` | MQTT bridge, external scheduler |
+
+System services have no `tenant_id` and no `enrollment_token_id`. They authenticate using a single
+global token stored AES-256-GCM encrypted in the `settings` table. Certificates are stored in a
+separate `system_service_certificates` table (FK to `system_services`, not `services`).
+
+A credential guard in the tenant enrollment path rejects any service that requests
+`database_access`, `nats_access`, `master_key_access`, or `ca_management` without the
+`system_service` capability, preventing tenant services from receiving infrastructure secrets.
+
+See [System Services Architecture](docs/architecture/system-services.md) for the full design.
 
 ## Wire protocol
 

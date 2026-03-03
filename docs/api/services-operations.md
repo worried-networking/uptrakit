@@ -2,7 +2,8 @@
 
 ## Agents
 
-- `/api/v1/services` lists all agents and MQTT services.
+- `/api/v1/services` lists all tenant services (agents, SSH agents). The MQTT bridge is now a system service
+  and is listed at `/api/v1/system-services` instead.
 - `/api/v1/services/{id}` retrieves a single service by UUID.
 - `/api/v1/services/{id}/approve`, `/api/v1/services/{id}/reject`,
   `DELETE /api/v1/services/{id}`, and `/api/v1/services/{target_id}/merge`
@@ -48,11 +49,14 @@ the per-service override section.
 
 ## MQTT Service
 
+> **Note:** The MQTT bridge binary (`uptrakit-mqtt`) now enrolls as a **system service** and is
+> managed via `/api/v1/system-services`, not `/api/v1/services`. It no longer appears in the
+> `/api/v1/services` listing. See [System Services](#system-services) below for details.
+
 - `/api/v1/enrollment-tokens` manages multiple named enrollment tokens with optional capability scoping,
   usage limits, and TTL. See [Enrollment Tokens API](enrollment-tokens.md) for full details.
 - MQTT clients receive `tenant_assignments`, `tenant_config_updated`, and `tenant_revoked` commands after assignment.
-- MQTT services share the same enrollment, certificate, and PKI flows as agents.
-- Agent and MQTT services use the same activity tracking fields in `services`: `ip_address` is refreshed on each WebSocket connect, and `last_seen_at`
+- Agent services use the activity tracking fields in `services`: `ip_address` is refreshed on each WebSocket connect, and `last_seen_at`
   is refreshed on connect and heartbeat (`ping`).
 
 ## Shared Service Startup Flow
@@ -82,6 +86,55 @@ For development details on the `ServiceHandler` trait, see [Service Lifecycle](.
   include the tenant column.
 - Tables without tenant scope include `users`, `roles`, `permissions`, `api_tokens`, and `pending_*` entities.
 - `TenantContext` reads `X-Tenant-Id` or defaults to `AppState.default_tenant_id`. API handlers use it to filter data.
+
+## System Services
+
+System services are tenant-agnostic infrastructure components that serve all tenants simultaneously.
+The MQTT bridge and external scheduler are the two current system services. They enroll through the
+same WebSocket endpoint as tenant services but are routed to the `system_services` table when the
+`system_service` capability is present in the enrollment payload.
+
+See [System Services Architecture](../architecture/system-services.md) for the full design including
+the credential guard, enrollment token mechanics, and the two-tier service model diagram.
+
+### Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/v1/system-services` | List system services (requires `view_system_services`). Filterable by `capability` and `status`. Paginated. |
+| GET | `/api/v1/system-services/{id}` | Get a single system service by UUID (requires `view_system_services`). |
+| PUT | `/api/v1/system-services/{id}` | Update configurable settings: `ping_interval_seconds`, `cert_lifetime_hours` (requires `manage_system_services`). |
+| POST | `/api/v1/system-services/{id}/approve` | Approve a pending system service (requires `manage_system_services`). |
+| POST | `/api/v1/system-services/{id}/reject` | Reject a pending system service (requires `manage_system_services`). |
+| DELETE | `/api/v1/system-services/{id}` | Deactivate a system service (requires `manage_system_services`). |
+| GET | `/api/v1/settings/system-services` | Get the global enrollment token (requires `manage_system_services`). |
+| PUT | `/api/v1/settings/system-services` | Set or clear the global enrollment token (requires `manage_system_services`). |
+
+### Deactivation
+
+Deactivation follows the same transactional pattern as tenant service deactivation:
+
+1. Soft-delete the `system_services` row.
+2. Revoke all associated `system_service_certificates` rows.
+3. Bump the CRL revocation version so the updated list is published without delay.
+
+If any step fails, the entire transaction is rolled back and the service remains active.
+
+### No merge support
+
+System services cannot be merged. The `POST /api/v1/system-services/{target_id}/merge` endpoint
+does not exist. The two revocation reasons in `system_service_certificates` are
+`certificate_renewed` and `service_deactivated` only.
+
+### Contrasting with tenant services
+
+| Property | Tenant services (`/api/v1/services`) | System services (`/api/v1/system-services`) |
+| --- | --- | --- |
+| Scoped to tenant | Yes | No |
+| Enrollment token | Per-tenant, Argon2id | Single global, plaintext (encrypted at rest) |
+| Certificate table | `service_certificates` | `system_service_certificates` |
+| Merge | Supported | Not supported |
+| Typical members | Agents, SSH agents | MQTT bridge, external scheduler |
 
 ## Update Hooks
 
