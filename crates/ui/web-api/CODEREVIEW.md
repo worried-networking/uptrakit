@@ -383,12 +383,6 @@ changes.
 **[CRITICAL]** `src/routes/update_batches.rs` (532 lines) -- Zero test coverage. All 5 batch
 route handlers untested.
 
-**[CRITICAL]** `src/queries/update_batches.rs` (699 lines) -- Zero test coverage. Entire
-batch query layer untested.
-
-**[CRITICAL]** `src/queries/update_triggers.rs` (436 lines) -- Zero test coverage. Refactored
-update trigger pipeline untested.
-
 **[CRITICAL]** `src/routes/oidc_auth.rs:221-625` -- `oidc_callback` is 404 lines with at
 least 10 distinct code paths (provider-error redirect, missing-params redirect, state-expired,
 state-DB-error, provider-gone, base-URL-missing, PKCE-build-failure, code-exchange-failure,
@@ -576,15 +570,6 @@ pagination, bare `Json(resp)` without explicit `StatusCode::OK`.
 
 ### Issues
 
-**[MEDIUM]** `src/queries/notifications.rs:247-283` -- `update_rule` cannot clear the
-`host_id`, `software_item_id`, or `plugin_type` scope filters once set. Lines 271-278 only
-apply updates when `req.host_id.is_some()` / `req.software_item_id.is_some()` /
-`req.plugin_type.is_some()`. This means a user who scoped a rule to a specific host cannot
-un-scope it to apply to all hosts without deleting and recreating the rule. The project's
-documented pattern for nullable update fields is `Option<serde_json::Value>` where
-`Value::Null` signals "clear this field" and `None` signals "leave unchanged". The current
-`Option<Uuid>` / `Option<String>` types cannot express this three-way distinction.
-
 **[LOW]** `src/queries/update_history.rs:213-255` -- `get_update_history` performs three
 sequential awaited queries: `UpdateHistory::find_by_id`, `tenant_db.find_by_id::<host::Entity>`,
 and `SoftwareItem::find_by_id`. The first two are necessary (the second enforces tenant scope),
@@ -592,9 +577,6 @@ but the third (`SoftwareItem::find_by_id` for the name) could be eliminated by s
 software item name directly on the `update_history` record at creation time, or by joining the
 host and software item tables in a single query. As written, a single detail-view request
 issues three sequential round-trips to the DB.
-
-**[MEDIUM]** Missing index on `update_history(host_id, software_item_id, status)` for
-`validate_update_preconditions`.
 
 **[LOW]** `src/queries/update_batches.rs:617-651` -- Host/software item lookups in
 `get_batch_with_items` lack tenant filter (defense-in-depth).
@@ -643,7 +625,9 @@ several large private helpers (`find_or_create_software_items`, `process_discove
 `assign_plugin_configs`) that could be extracted into a `src/queries/autodiscovery/` submodule.
 The mixed concerns make it harder to audit changes to either concern in isolation.
 
-**[MEDIUM]** `src/queries/update_batches.rs` -- 699 lines with zero unit tests.
+**[MEDIUM]** `src/queries/update_batches.rs` -- 699 lines; `find_outdated_*` and
+`validate_update_preconditions` now have unit tests; route handlers and `create_batch` remain
+untested.
 
 **[MEDIUM]** `src/router.rs` -- 684 lines. OpenAPI path registration extremely verbose.
 

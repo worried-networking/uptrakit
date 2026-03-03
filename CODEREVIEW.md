@@ -96,7 +96,20 @@ multi-byte UTF-8 boundaries. `reencrypt_legacy_plaintext` and its five per-table
 now have 12 integration tests. The duplicated `NoopCommandExecutor` (inline in
 `web-api/src/routes/software_items.rs` and `scheduler-engine/src/executors/fetch_releases.rs`)
 has been extracted to `uptrakit_command::NoopCommandExecutor` and re-exported from `lib.rs`;
-both consumers now import it from the canonical location.
+both consumers now import it from the canonical location. The OIDC `oidc_complete_registration`
+function now validates the `registration_token` before consuming the one-time-use code — an
+invalid token no longer permanently burns the code. The webhook `deliver()` method now enforces
+`BLOCKED_HEADERS` as a defence-in-depth check (previously only `validate_config()` checked
+them), using a shared `check_header_allowed()` helper that eliminates the duplicated blocklist.
+`ChannelError` now carries `#[non_exhaustive]`. The
+`UpdateNotificationRuleRequest` `host_id`, `software_item_id`, and `plugin_type` fields now use
+the `Option<serde_json::Value>` nullable-update pattern so clients can clear scope filters to
+NULL. A composite index `idx_update_history_host_item_status` on
+`(host_id, software_item_id, status)` has been added via
+`m20260311_000001_update_history_status_index` to eliminate the full table scan in
+`validate_update_preconditions`. `validate_update_preconditions` (10 scenarios) and the
+`find_outdated_*` helpers (6 scenarios) now have comprehensive unit tests using in-memory
+SQLite.
 
 ## Per-Crate Review Files
 
@@ -240,10 +253,6 @@ issued.
 
 ### Issues
 
-**[MEDIUM]** `crates/ui/web-api/src/routes/oidc_auth.rs` -- In `oidc_complete_registration`,
-pending registration code consumed via `take()` before validating the registration token.
-Invalid token permanently consumes the code.
-
 **[MEDIUM]** `crates/shared/service-sdk/src/tls.rs` -- TOFU TLS verifier accepts any server
 certificate during initial CA fetch. MITM window during initial enrollment.
 
@@ -292,8 +301,9 @@ inline unit tests. `hosts.rs`, `agents.rs`, `settings_ca.rs`, `settings_mqtt.rs`
 `software_items` namespaces covered by integration tests.
 
 **[HIGH]** `crates/ui/web-api/src/queries/update_batches.rs` (699 lines) and
-`src/queries/update_triggers.rs` (436 lines) -- Zero test coverage on the batch query layer
-and the refactored update trigger pipeline.
+`src/queries/update_triggers.rs` (436 lines) -- `validate_update_preconditions` and the
+`find_outdated_*` helpers now have unit tests; `routes/update_batches.rs` and `create_batch`
+remain untested.
 
 **[MEDIUM]** `crates/shared/openapi-client/src/lib.rs:687-885` -- Retry-backoff tests do not
 verify delay durations. Eight tests assert only eventual success, not backoff timing.

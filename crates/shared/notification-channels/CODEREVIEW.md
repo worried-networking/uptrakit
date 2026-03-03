@@ -19,9 +19,11 @@ while global SMTP settings (`smtp_host`, `smtp_port`, `smtp_username`, `smtp_pas
 `from_address`) are merged by the dispatcher before delivery. The webhook channel correctly
 implements HMAC-SHA256 payload signing. Test coverage is strong with 38 tests across all modules.
 
-Key concerns include a duplicated `escape_html` function across email and Telegram modules, the
-`ChannelError` enum missing `#[non_exhaustive]`, and the absence of delivery integration tests
-that verify actual message rendering (not just error paths).
+Key concerns include a duplicated `escape_html` function across email and Telegram modules and
+the absence of delivery integration tests that verify actual message rendering (not just error
+paths). The `ChannelError` enum now carries `#[non_exhaustive]`. The `deliver()` method now
+enforces `BLOCKED_HEADERS` as a defence-in-depth layer (previously only `validate_config()`
+checked headers).
 
 ## Architecture
 
@@ -74,12 +76,7 @@ No architecture issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/webhook.rs:77-83` -- Custom headers from channel config
-(`config["headers"]`) are applied to the outgoing webhook request without any header name
-validation. A malicious or misconfigured channel config could inject headers like `Host`,
-`Authorization`, or `Content-Length` that override the request's intended behavior. Consider
-rejecting or warning on restricted header names (e.g., `Host`, `Content-Length`,
-`Transfer-Encoding`).
+No security issues remain open.
 
 **[LOW]** `src/telegram.rs:89` -- The Telegram Bot API token is embedded directly in the URL
 path (`format!("https://api.telegram.org/bot{bot_token}/sendMessage")`). If request logging
@@ -154,10 +151,7 @@ should create one channel per recipient for independent delivery.
 
 ### Issues
 
-**[MEDIUM]** `src/error.rs:7-32` -- `ChannelError` enum does not carry `#[non_exhaustive]`.
-Per the project's coding standards (`coding-standards.md`), all extensible public enums should
-carry `#[non_exhaustive]`. Adding new error variants (e.g., for rate limiting, authentication
-failure) would be a breaking change for any external consumers matching on `ChannelError`.
+No coding-standards issues found.
 
 ## Extensibility
 
