@@ -90,19 +90,28 @@ and data integrity.
 - **`Unknown` variant handling.** Unrecognized message types are deserialized to
   `Unknown` (no payload materialized), logged at `warn` level, and the event loop
   continues without processing.
+- **Per-field and per-collection size limits (`WireValidate`).** *(Implemented)*
+  All `Vec<T>` and `String` fields in wire protocol payloads are validated after
+  deserialization via the `WireValidate` trait. Collection limits (e.g.,
+  `MAX_REPORT_HOSTS = 500`, `MAX_VERSION_CHECK_ASSIGNMENTS = 2,000`) and string
+  length limits (e.g., `MAX_SHORT_STRING_LEN = 1,024`,
+  `MAX_OUTPUT_STRING_LEN = 1,048,576`) are enforced. Payloads exceeding any limit
+  are rejected as deserialization failures (hard fail, connection close). See
+  `crates/shared/wire/src/limits.rs` and `crates/shared/wire/src/wire_validate_impls.rs`.
+- **Sliding-window rate limiter.** *(Implemented)* The message rate limiter uses a
+  sliding-window-counter algorithm instead of a fixed window. The effective estimate
+  is `prev_count * (1 - elapsed_fraction) + curr_count`, preventing boundary burst
+  attacks where 2× the limit could be processed in rapid succession. See
+  `crates/ui/web-api/src/routes/service_ws/protocol.rs`.
+- **Consecutive unknown message counter.** *(Implemented)* The authenticated
+  message loop tracks consecutive `Unknown` messages and closes the connection
+  after `MAX_CONSECUTIVE_UNKNOWN_MESSAGES` (10) consecutive unknowns. The counter
+  resets on any known message. Prevents fuzzing or probing clients from keeping
+  connections alive indefinitely. See
+  `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`.
 
 ## Residual risk
 
-- **No per-field size limits.** Individual string fields (e.g., `UpdateOutput.output`,
-  `HostInfo.hostname`) can be up to nearly 1 MB each within the overall message
-  budget. The controller allocates these fully before applying any application-level
-  checks.
-- **No collection size limits.** `Vec` fields (`hosts`, `assignments`, `discoveries`,
-  `results`) have no maximum element count. A message with 10,000 small host entries
-  is valid within the 1 MB budget and triggers proportional processing.
-- **Fixed-window rate limiter.** The message rate limiter uses a fixed-window
-  algorithm. An attacker can send 50 messages at the end of one window and 50 at the
-  start of the next, processing 100 messages in rapid succession.
 - **`serde_json::Value` in plugin configs.** `PluginAssignment.config` is
   `serde_json::Value`, allowing arbitrary JSON structure within the message. While
   this is intentional for plugin flexibility, it means plugin config payloads are
@@ -113,20 +122,13 @@ and data integrity.
 
 ## Recommended improvements
 
-- Add per-collection size limits to `Vec` fields in message payloads (e.g., max 1000
-  hosts in `ReportHostsPayload`, max 500 assignments in `CheckVersionsPayload`) to
-  prevent excessive allocation from a single message.
-- Consider switching from a fixed-window to a sliding-window or token-bucket rate
-  limiter for WebSocket messages to prevent boundary burst attacks.
-- Add per-field string length limits for critical fields (e.g., `hostname` max 253
-  characters per DNS spec, `output` max 1 MB matching the DB cap).
+- ~~Add per-collection size limits~~ — **Implemented** via `WireValidate` trait.
+- ~~Switch to sliding-window rate limiter~~ — **Implemented.**
+- ~~Add per-field string length limits~~ — **Implemented** via `WireValidate` trait.
+- ~~Monitor anonymous connections sending Unknown messages~~ — **Implemented** via
+  consecutive unknown message counter (closes after 10).
 - Consider adding `#[serde(deny_unknown_fields)]` to critical message payloads (with
   a version-negotiated opt-in) to detect field confusion attacks.
-- Add monitoring for anonymous WebSocket connections that send high volumes of
-  `Unknown` messages, as this pattern indicates probing or resource exhaustion
-  attempts.
-- Document the fixed-window rate limiter behavior and consider upgrading to a
-  sliding-window algorithm for defense-in-depth.
 
 ## References
 
@@ -134,6 +136,12 @@ and data integrity.
 - [Wire Protocol — Connection Limits](../api/wire-protocol.md#connection-limits)
 - `crates/shared/wire/src/lib.rs` — `ServiceMessage`, `ControllerMessage`,
   `EnvelopeHeader`
+- `crates/shared/wire/src/limits.rs` — `WireValidate` trait, limit constants,
+  `WireValidationError`
+- `crates/shared/wire/src/wire_validate_impls.rs` — per-struct validation
+  implementations
 - `crates/ui/web-api/src/routes/service_ws/protocol.rs` —
-  `deserialize_service_msg()`, `MessageRateLimiter`
+  `deserialize_service_msg()`, sliding-window `MessageRateLimiter`
+- `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` —
+  `MAX_CONSECUTIVE_UNKNOWN_MESSAGES`, consecutive unknown counter
 - `crates/ui/web-api/src/routes/service_ws/connection.rs` — `MAX_WS_MESSAGE_SIZE`

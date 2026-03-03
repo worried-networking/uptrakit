@@ -92,7 +92,8 @@ entirely (`LoopOutcome::Shutdown`), while `server_restarting` causes it to recon
 
 ### Agent-specific (controller -> service)
 
-`check_versions`, `execute_update`, `discover_software`, `execute_batch_host_package_update`
+`check_versions`, `execute_update`, `discover_software`, `execute_batch_host_package_update`,
+`set_update_freeze`
 
 Both the regular agent and the SSH agent receive `check_versions`, `execute_update`, `discover_software`, and
 `execute_batch_host_package_update` messages.
@@ -304,6 +305,30 @@ processing rules and plugin-specific target patterns.
 
 See [docs/api/autodiscovery.md](autodiscovery.md) for the full autodiscovery workflow.
 
+#### `set_update_freeze` payload
+
+Remotely enables or disables the agent-side execution freeze file
+(`<state-dir>/update-freeze`). When `enabled` is `true`, the agent creates the
+freeze file and stops processing `ExecuteUpdate`/`ExecuteBatchHostPackageUpdate`
+messages. When `false`, the agent removes the file and resumes normal operation.
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 5,
+  "type": "set_update_freeze",
+  "enabled": true,
+  "reason": "Emergency freeze: investigating suspicious update activity"
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `enabled` | `bool` | Yes | `true` to create the freeze file, `false` to remove it. |
+| `reason` | `string` | No | Optional human-readable reason (logged by the agent). |
+
+This message is safe for NATS publication (no credentials in the payload).
+
 ### MQTT-specific (controller -> service)
 
 `registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`, `software_states`
@@ -359,12 +384,63 @@ message types do not cause sequence mismatches on subsequent messages.
 | Limit | Value | Description |
 | --- | --- | --- |
 | Maximum incoming message size | 1 MB (1,048,576 bytes) | Messages exceeding this limit are rejected and the connection is closed. |
+| Message rate limit | 50 messages/second | Sliding-window-counter algorithm prevents boundary burst attacks. |
+| Consecutive unknown messages | 10 | Connection is closed after 10 consecutive `Unknown` messages. |
 | Anonymous connection timeout | 30 seconds | An anonymous connection that does not send `Enroll` within 30 seconds is closed. |
 | Update output cap | 1 MB | The controller caps accumulated `update_history.output`. Further `UpdateOutput` messages are silently dropped. |
 | Approval polling interval | 5 seconds | The controller polls the database for approval status changes at a fixed 5-second interval. |
 | TCP connect timeout (client) | 30 seconds | The enrollment client aborts the TCP connection if it cannot be established within 30 seconds. |
 | Response timeout (client) | 60 seconds | The `Enroll` and `RequestCertificate` request-response exchanges time out after 60 seconds. |
 | Approval timeout (client) | 30 minutes | The `wait_for_approval` loop times out after 30 minutes. The caller retries the enrollment flow on timeout. |
+| Per-hook timeout (agent) | 5 minutes | Individual pre/post-update hooks are killed after 300 seconds. |
+| Update cooldown (agent) | 5 seconds | Agents reject consecutive updates within the cooldown period. |
+
+### Payload Size Limits
+
+After deserialization, all wire protocol payloads are validated via the
+`WireValidate` trait. Payloads exceeding any limit are rejected as
+deserialization failures (hard fail, connection close).
+
+#### Collection limits
+
+| Constant | Value | Applies to |
+| --- | --- | --- |
+| `MAX_REPORT_HOSTS` | 500 | `ReportHostsPayload.hosts` |
+| `MAX_VERSION_CHECK_ASSIGNMENTS` | 2,000 | `CheckVersionsPayload.assignments` |
+| `MAX_VERSION_CHECK_RESULTS` | 2,000 | `VersionCheckResultsPayload.results` |
+| `MAX_UPDATE_HOOKS` | 50 | `pre_update_hooks`, `post_update_hooks` |
+| `MAX_BATCH_UPDATES` | 500 | `ExecuteBatchHostPackageUpdatePayload.updates` |
+| `MAX_BATCH_UPDATE_RESULTS` | 500 | `BatchHostPackageUpdateResultPayload.results` |
+| `MAX_DISCOVERY_PLUGINS` | 50 | `DiscoverSoftwarePayload.plugins` |
+| `MAX_DISCOVERY_PLUGIN_RESULTS` | 50 | `DiscoveryResultsPayload.results` |
+| `MAX_DISCOVERIES_PER_PLUGIN` | 1,000 | `DiscoveryPluginResult.discoveries` |
+| `MAX_HOOK_ARGS` | 100 | `HookCommand::Exec.args` |
+
+#### String length limits
+
+| Constant | Value | Applies to |
+| --- | --- | --- |
+| `MAX_SHORT_STRING_LEN` | 1,024 | Identifiers, names, versions, hostnames |
+| `MAX_MEDIUM_STRING_LEN` | 4,096 | Error messages, URLs |
+| `MAX_LONG_STRING_LEN` | 65,536 | PEM certificates, CSRs, release notes |
+| `MAX_OUTPUT_STRING_LEN` | 1,048,576 | Command output (matches 1 MB frame limit) |
+
+All limits are defined in `crates/shared/wire/src/limits.rs`. Implementations
+are in `crates/shared/wire/src/wire_validate_impls.rs`.
+
+### Sliding-Window Rate Limiter
+
+The WebSocket message rate limiter uses a sliding-window-counter algorithm.
+Two half-windows track message counts. The effective rate estimate is:
+
+```text
+estimate = prev_count * (1 - elapsed_fraction) + curr_count
+```
+
+This prevents boundary burst attacks where a fixed-window limiter would allow
+2× the configured limit (N at the end of one window + N at the start of the
+next). When the estimate exceeds `WS_MESSAGE_RATE_LIMIT` (50), the connection
+is closed with `CloseReason::RateLimitExceeded`.
 
 ## Error Codes
 

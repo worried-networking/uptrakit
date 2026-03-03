@@ -70,11 +70,52 @@ Both `uptrakit-agent` and `uptrakit-agent-ssh` check for a freeze file at
 silently dropped and a `tracing::warn!` is emitted. This is an emergency stop
 mechanism — not a per-command review gate.
 
+The freeze file can be created in two ways:
+
+1. **Locally:** `touch <state-dir>/update-freeze` on the agent host.
+2. **Remotely:** The controller sends a `set_update_freeze` message (see
+   [Wire Protocol — `set_update_freeze`](../api/wire-protocol.md#set_update_freeze-payload)).
+
 Any new `ControllerMessage` variant that triggers command execution on agents
 **must** include the freeze file check in its handler. See:
 
 - `crates/core/agent/src/main.rs` — local agent freeze check
 - `crates/core/agent-ssh/src/main.rs` — SSH agent freeze check
+
+## Agent-Side Execution Hardening
+
+### Per-hook timeout
+
+Individual pre/post-update hooks have a 5-minute timeout (`HOOK_TIMEOUT =
+300s`). On timeout, the hook's child process is killed via `kill_on_drop(true)`
+and an `UpdateError::HookFailed` is returned. This prevents a single malicious
+or stuck hook from consuming the entire update timeout budget.
+
+### Update rate limiting
+
+Both agents enforce an `UPDATE_COOLDOWN` of 5 seconds between consecutive
+update executions. For the SSH agent, cooldown is tracked per-host. Updates
+arriving within the cooldown window are rejected with a `security_audit:`
+warning. This limits the damage rate from a compromised controller.
+
+### Hook audit logging
+
+Before executing pre/post-update hooks, agents emit a `security_audit:` warning
+listing the hook count and command summaries. This enables forensic analysis of
+all commands executed on managed hosts.
+
+## Wire Protocol Payload Validation
+
+All wire protocol payloads are validated after deserialization via the
+`WireValidate` trait (`crates/shared/wire/src/limits.rs`). Per-collection and
+per-string size limits prevent O(N) and O(N*M) processing attacks within the
+1 MB WebSocket frame limit.
+
+Any new wire protocol payload struct with `Vec<T>` or `String` fields **must**
+implement `WireValidate` in `crates/shared/wire/src/wire_validate_impls.rs`.
+
+See [Wire Protocol — Payload Size Limits](../api/wire-protocol.md#payload-size-limits)
+for the full limits table.
 
 ## Security Audit Logging for Privileged Operations
 

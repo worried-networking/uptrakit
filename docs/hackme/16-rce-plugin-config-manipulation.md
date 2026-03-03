@@ -121,6 +121,22 @@ code execution on managed hosts via plugin configuration manipulation.
   `command_fields` listing which fields carry executable commands. For updates,
   the log entry includes which command-bearing fields were added, modified, or
   removed compared to the previous config.
+- **Command length limits.** *(Implemented)* All command strings are validated
+  against `MAX_COMMAND_LENGTH` (8,192 bytes). `ShellConfig::validate()` checks
+  `version_command` and `update_command`; `DockerConfig::validate()` checks
+  `post_pull_command`; `HooksConfig::validate()` checks custom hook `commands`
+  arrays (both length per command and count per phase via
+  `MAX_HOOK_COMMANDS_PER_PHASE`). Validation constants live in
+  `uptrakit-shared-types::command_validation`.
+- **Dangerous pattern detection.** *(Implemented)* The controller emits advisory
+  `security_audit:` warnings when command-bearing fields contain patterns
+  associated with supply chain attacks (e.g., `curl|bash`, `wget|sh`, `rm -rf /`,
+  fork bombs). Detection runs on both the create and update paths. Patterns are
+  defined in `uptrakit-web-api-types::command_validation::detect_dangerous_patterns`.
+- **Create-path validation.** *(Implemented)* The `create_plugin_config` route
+  handler validates both plugin-specific config (via `validate_config_str()`) and
+  hooks (via `validate_hooks_internal()`), matching the existing update path. This
+  closes a gap where the create path previously skipped validation.
 
 ## Residual risk
 
@@ -128,9 +144,9 @@ code execution on managed hosts via plugin configuration manipulation.
   radius (fewer users can modify command-bearing fields), but users with
   `manage_commands` retain full effective RCE on all assigned hosts. Assigning this
   permission should be treated with the same care as granting `root` access.
-- **No command content validation.** Shell commands in `version_command`,
-  `update_command`, `post_pull_command`, and custom hook `commands` arrays are
-  accepted verbatim. There is no allowlist, blocklist, or pattern matching.
+- **No command content blocking.** Dangerous pattern detection is advisory only
+  (warnings, not rejections). Commands are length-limited but content is not
+  blocked. There is no allowlist or blocklist.
 - **No change approval workflow.** Plugin config modifications take effect immediately
   on the next scheduled check or triggered update. There is no second-admin approval,
   delay, or review step.

@@ -248,6 +248,15 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Document everything.** Any code change must be properly documented either in the code, or in the separate
    documentation. Any changes to the agent-controller wire protocol must be documented in
    `crates/shared/wire/asyncapi.yaml` and reflected in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
+1. **Wire protocol payloads must implement `WireValidate`.** Any new wire protocol payload struct with `Vec<T>` or
+   `String` fields must implement the `WireValidate` trait in `crates/shared/wire/src/wire_validate_impls.rs`. The
+   trait validates per-field and per-collection size limits after deserialization. Add limit constants in
+   `crates/shared/wire/src/limits.rs`. Use `check_vec_len()`, `check_string_len()`, and `check_opt_string_len()`
+   helpers. See [Wire Protocol — Payload Size Limits](docs/api/wire-protocol.md#payload-size-limits).
+1. **Command-bearing plugin config fields must be validated.** Plugin configs with command strings
+   (`version_command`, `update_command`, `post_pull_command`, hook `commands` arrays) must validate command length
+   via `validate_command_length()` from `uptrakit-shared-types::command_validation`. Hook command counts must be
+   checked against `MAX_HOOK_COMMANDS_PER_PHASE`.
 1. **Version/build metadata contract is unified.** All workspace binaries (`uptrakit-controller`, `uptrakit-agent`,
    `uptrakit-agent-ssh`, `uptrakit-mqtt`, `uptrakit-scheduler`, `uptrakit`) must expose consistent `--version`
    metadata output. Enabled features are derived at

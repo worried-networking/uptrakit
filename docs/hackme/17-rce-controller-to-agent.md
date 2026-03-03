@@ -91,6 +91,22 @@ The same attack applies via:
   handles `ExecuteBatchHostPackageUpdate` messages with the same freeze file check
   as `ExecuteUpdate`. Previously, batch update messages were silently dropped by the
   wildcard `_ =>` arm.
+- **Per-hook timeout.** *(Implemented)* Individual pre/post-update hooks have a
+  5-minute timeout (`HOOK_TIMEOUT = 300s`). A single hook cannot consume the entire
+  update timeout budget. On timeout, the hook is killed (via `kill_on_drop(true)`)
+  and `UpdateError::HookFailed` is returned. See `crates/shared/agent-core/src/update.rs`.
+- **Agent-side update rate limiting.** *(Implemented)* Both agents enforce an
+  `UPDATE_COOLDOWN` of 5 seconds between consecutive update executions. For the SSH
+  agent, cooldown is tracked per-host. Rapid-fire updates from a compromised
+  controller are rejected with a `security_audit:` warning.
+- **Remote freeze via `SetUpdateFreeze` wire message.** *(Implemented)* The
+  controller can remotely create or remove the freeze file on agents via the
+  `set_update_freeze` message. When `enabled: true`, the agent creates the freeze
+  file; when `false`, it removes it. The optional `reason` field is logged. This
+  removes the requirement for local shell access during an incident.
+- **Hook audit logging.** *(Implemented)* Before executing pre/post-update hooks,
+  agents emit a `security_audit:` warning listing the hook count and command
+  summaries, enabling forensic analysis of executed commands.
 
 ## Residual risk
 
@@ -110,23 +126,18 @@ The same attack applies via:
 - **Single trust domain.** The controller is the single root of trust for all agents.
   There is no separation between "command plane" and "data plane" — the same entity
   that manages the software inventory also has full code execution authority.
-- **No execution rate limiting on agents.** Agents do not rate-limit the number of
-  `execute_update` or `execute_batch_host_package_update` messages they process. A
-  compromised controller could flood agents with concurrent executions.
-- **Freeze file requires local access.** To create the freeze file, an operator
-  must have shell access to the agent host. In a fully automated or headless
-  environment this may not be readily available during an incident.
 
 ## Recommended improvements
 
 - Implement cryptographic command signing where `ExecuteUpdate` messages include a
   signature from the originating admin user's credential, allowing agents to verify
   command provenance independently of the controller's TLS identity.
-- Add agent-side execution rate limiting (e.g., maximum one concurrent update per
-  software item) to prevent flood attacks from a compromised controller.
-- Expose a remote freeze API on the controller that sets the freeze file on one or
-  more agents via the existing WebSocket connection, removing the requirement for
-  local shell access during an incident.
+- ~~Add agent-side execution rate limiting~~ — **Implemented.** Both agents enforce a
+  5-second cooldown (`UPDATE_COOLDOWN`) between consecutive updates.
+- ~~Expose a remote freeze API on the controller~~ — **Partially implemented.** The
+  agent-side `SetUpdateFreeze` handler is in place. The controller-side REST API
+  endpoint (`POST /api/v1/services/{id}/freeze`) to trigger it is out of scope for
+  this PR.
 - Add anomaly detection on agents for unusual command patterns (e.g., hooks that
   download and execute external scripts, commands targeting sensitive system files,
   or updates at unusual times).
@@ -146,6 +157,5 @@ The same attack applies via:
 - `crates/shared/wire/src/lib.rs` — `ExecuteUpdatePayload`, `HookCommand`
 - `crates/shared/agent-core/src/update.rs` — `run_hook_command()`
 - `crates/shared/command/src/command.rs` — `run_command_with_shell()`
-- `crates/core/agent/src/main.rs` — freeze file check in `AgentHandler::on_message()`
-- `crates/core/agent-ssh/src/main.rs` — freeze file check in `SshAgentHandler::on_message()`
-_with_shell()`
+- `crates/core/agent/src/main.rs` — freeze file check, rate limiting, and `SetUpdateFreeze` handler
+- `crates/core/agent-ssh/src/main.rs` — freeze file check, per-host rate limiting, and `SetUpdateFreeze` handler
