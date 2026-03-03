@@ -975,6 +975,10 @@ Items to consider for future versions but not currently prioritized:
   - [ ] Multi-tenant JWT (per-tenant permissions)
   - [x] Tenant-aware MQTT (separate `uptrakit-mqtt` binary with per-tenant lease-based distribution via unified `/api/v1/ws/service` WebSocket
     endpoint)
+  - [x] Tenant-agnostic system services (`system_services` table, no `tenant_id`): MQTT bridge and external
+    scheduler enroll via `system_service` capability; dedicated `/api/v1/system-services` REST surface;
+    `view_system_services` / `manage_system_services` permissions; enrollment token in settings; separate
+    `/system-services` UI page; CLI `system-services` command group
   - [ ] Tenant switching UI
   - [ ] API token scoping per tenant
 - [ ] Agent clustering
