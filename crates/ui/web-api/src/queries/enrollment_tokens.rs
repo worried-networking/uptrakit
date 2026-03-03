@@ -47,7 +47,11 @@ pub async fn create_enrollment_token(
 ) -> Result<enrollment_token::Model, sea_orm::DbErr> {
     let caps_json = params
         .allowed_capabilities
-        .map(|caps| serde_json::to_string(caps).expect("capability list should serialize to JSON"));
+        .map(|caps| {
+            serde_json::to_string(caps)
+                .map_err(|e| sea_orm::DbErr::Custom(format!("capability list serialization failed: {e}")))
+        })
+        .transpose()?;
 
     let now = OffsetDateTime::now_utc();
     let model = enrollment_token::ActiveModel {
