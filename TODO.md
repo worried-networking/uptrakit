@@ -258,7 +258,7 @@ Main functionality that delivers the core value proposition.
   - [x] Schedule conflict resolution
 - [x] Extract scheduler engine into shared crate (`uptrakit-scheduler-engine`)
 - [x] External scheduler binary (`uptrakit-scheduler`) with service enrollment
-- [x] Embedded scheduler feature (`embedded-scheduler`) with auto-disable on external connect
+- [x] Embedded scheduler feature (`embedded-scheduler`) with internal/external task deferral on external connect
 - [x] Credential delivery (`ServiceCredentials`) for services with `database_access`, `nats_access`, `master_key_access`
 - [x] Shared NATS crate (`uptrakit-nats`) for envelope, subjects, connection
 - [ ] Add per-software-item schedule configuration

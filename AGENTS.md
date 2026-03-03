@@ -93,7 +93,7 @@ uptrakit/
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API + SSE streaming coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing; sse.rs provides lightweight SSE parser; update_output_stream.rs provides typed stream_update_output() method
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
-│   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, cron utils, TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); FetchReleasesExecutor Phase B sends fetch assignments for both host_software_items and host_packages so that latest_version is populated in both tables
+│   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, cron utils, TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `external_scheduler_connected: Arc<AtomicBool>` flag skips external tasks when set; FetchReleasesExecutor Phase B sends fetch assignments for both host_software_items and host_packages so that latest_version is populated in both tables
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers; default_resolve_shutdown(), init_tracing()
 │   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry(ChannelRegistryConfig); shared escape_html(); webhook (default, SSRF validation + header blocklist) + telegram + email (feature-gated) channel impls
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
@@ -136,7 +136,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `db-mysql` | No | MySQL backend |
 | `db-all` | No | All database backends |
 | `oidc` | Yes | OpenID Connect authentication support. Disabling removes the `openidconnect` crate and all OIDC routes/stores, significantly reducing compile-time dependencies. Propagates to `uptrakit-web-api/oidc`. |
-| `embedded-scheduler` | No | Embeds the scheduler engine in the controller process. Auto-disables when an external scheduler connects. Adds `uptrakit-scheduler-engine` dependency. |
+| `embedded-scheduler` | No | Embeds the scheduler engine in the controller process. Defers external tasks when an external scheduler connects; internal tasks (CRL renewal, CA rotation, service cert check) always run. Adds `uptrakit-scheduler-engine` dependency. |
 | `nats` | No | Enables NATS JetStream transport for cross-controller messaging. Propagates to `uptrakit-web-api/nats`. |
 | `swagger-ui` | No | Swagger UI at `/swagger-ui` |
 | `embed-frontend` | No | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md). |
@@ -677,7 +677,7 @@ Each service declares a `BTreeSet<Capability>` at enrollment time. The set is pe
 | `DatabaseAccess` | `database_access` | -- | -- | -- | yes | yes |
 | `NatsAccess` | `nats_access` | -- | -- | -- | yes | yes |
 | `MasterKeyAccess` | `master_key_access` | -- | -- | -- | yes | yes |
-| `CaManagement` | `ca_management` | -- | -- | -- | yes | yes |
+| `CaManagement` | `ca_management` | -- | -- | -- | -- | yes |
 | `Other(String)` | *(unknown)* | -- | -- | -- | -- | -- |
 
 `Other(String)` is a forward-compat catch-all received from newer peers; it never participates in intersection

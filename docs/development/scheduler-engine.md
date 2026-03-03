@@ -16,16 +16,15 @@ The engine provides:
 - **Shared query helpers** — `load_software_states_for_tenant()`, `should_rotate_ca()`.
 - **Six built-in executors** — `AuthCleanupExecutor`, `StaleLeaseCleanupExecutor`,
   `FetchReleasesExecutor`, `DetectVersionExecutor`, `ServiceCertCheckExecutor`, `CrlRenewalExecutor`.
+  Of these, `CrlRenewalExecutor` and `ServiceCertCheckExecutor` are **internal** tasks registered
+  only by the embedded scheduler (they require in-process controller resources).
 - **Shared query helpers** — `queries.rs` contains `AgentAssignmentRow`, `HostPackageAssignmentRow`,
   `merge_config`, `query_agent_assignment_rows`, and `query_host_package_assignment_rows`, shared
   by `FetchReleasesExecutor` and `DetectVersionExecutor`.
 
-The CA rotation check executor is **not** in the engine — it is mode-specific:
-
-- **Embedded**: `EmbeddedCaRotationCheckExecutor` in `crates/core/controller/` uses
-  `watch::Receiver<CaSnapshot>` and `Arc<Notify>`.
-- **External**: `ExternalCaRotationCheckExecutor` in `crates/core/scheduler/` reads the CA cert from
-  the database and signals via `SchedulerNotifier::signal_ca_rotation()`.
+The CA rotation check executor (`EmbeddedCaRotationCheckExecutor`) is **not** in the engine — it
+lives in `crates/core/controller/src/scheduler/` and uses in-process `watch::Receiver<CaSnapshot>`
+and `Arc<Notify>`. It is an internal task registered only by the embedded scheduler.
 
 ## Module structure
 
@@ -101,6 +100,14 @@ pub struct SchedulerConfig {
 - `poll_interval`: how often the scheduler polls for due tasks (default: 15s).
 - `controller_id`: unique identifier for this scheduler instance (used for claim locking).
 - `tenant_id`: the tenant scope for task queries.
+
+## Scheduler fields
+
+The `Scheduler` struct accepts an `external_scheduler_connected: Arc<AtomicBool>` parameter in its
+constructor. When this flag is `true`, the poll cycle skips non-internal tasks (tasks where
+`ScheduledTaskType::is_internal()` returns `false`), deferring them to the external scheduler.
+Internal tasks (CRL renewal, CA rotation check, service cert check) always execute regardless of
+this flag.
 
 ## Feature flags
 

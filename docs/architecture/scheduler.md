@@ -28,16 +28,40 @@ The scheduler engine (`uptrakit-scheduler-engine`) is a shared library crate use
 ### Embedded scheduler
 
 When built with `--features embedded-scheduler`, the controller spawns the scheduler loop internally.
-If an external scheduler connects (detected via `ServiceConnectionRegistry`), the embedded scheduler
-auto-disables (cancels its `CancellationToken`, releases claims). It re-enables when the external
-scheduler disconnects. This provides automatic failover.
+Tasks are categorised as **internal** or **external** (see below). When an external scheduler connects
+(detected via `Capability::Scheduler` in `ServiceConnectionRegistry`), the embedded scheduler
+automatically defers external tasks (the external scheduler handles them) while continuing to execute
+internal tasks that require in-process controller resources. When the last external scheduler
+disconnects, the embedded scheduler resumes all tasks. This provides seamless failover.
 
 ### External scheduler
 
 The `uptrakit-scheduler` binary enrolls as a service with capabilities `scheduler`, `database_access`,
-`nats_access`, `master_key_access`, `ca_management`, and `graceful_shutdown`. After mTLS authentication,
+`nats_access`, `master_key_access`, and `graceful_shutdown`. After mTLS authentication,
 the controller sends `ServiceCredentials` containing the database URL, NATS URL, and master encryption
 key. The scheduler uses these to connect directly to the database and publish notifications via NATS.
+
+The external scheduler registers only the 4 external task types. Internal tasks are not registered
+because they require in-process controller resources.
+
+### Internal vs external task categorisation
+
+Tasks are categorised based on whether they require direct in-process access to controller resources:
+
+| Task | Category | Rationale |
+| --- | --- | --- |
+| `CrlRenewal` | Internal | Direct `revocation_notify` + NATS publish via `ControllerSchedulerNotifier` |
+| `CaRotationCheck` | Internal | In-process `watch::Receiver<CaSnapshot>` + `ca_rotation_trigger` |
+| `ServiceCertCheck` | Internal | `RequestCertRenewal` via `NotificationService` to connected services |
+| `AuthCleanup` | External | Pure DB cleanup |
+| `StaleLeaseCleanup` | External | Pure DB cleanup |
+| `FetchReleases` | External | HTTP + DB + agent dispatch |
+| `DetectVersion` | External | DB + agent dispatch |
+
+The `ScheduledTaskType::is_internal()` method encodes this categorisation. The `Scheduler` struct
+holds an `external_scheduler_connected: Arc<AtomicBool>` flag that is set/cleared by the WebSocket
+handler when an external scheduler connects/disconnects. During each poll cycle, the embedded
+scheduler skips non-internal tasks when the flag is `true`.
 
 See [External Scheduler Deployment](../end-user/deployment/external-scheduler.md) for production guidance
 and [Scheduler Engine (Development)](../development/scheduler-engine.md) for engine internals.
@@ -151,10 +175,11 @@ crates/shared/scheduler-engine/src/
         service_cert_check.rs
 ```
 
-The CA rotation check executor is mode-specific:
+The CA rotation check executor lives in the controller:
 
-- **Embedded**: `EmbeddedCaRotationCheckExecutor` in `crates/core/controller/src/scheduler/`
-- **External**: `ExternalCaRotationCheckExecutor` in `crates/core/scheduler/src/ca_rotation.rs`
+- `EmbeddedCaRotationCheckExecutor` in `crates/core/controller/src/scheduler/` — uses the in-process
+  CA watch channel and `ca_rotation_trigger` directly. It is an internal task and does not run on the
+  external scheduler.
 
 ### TaskExecutor trait
 
@@ -184,17 +209,12 @@ Calls `cleanup_expired()` on all DB-backed auth flow stores: `OidcFlowStore`, `A
 Creates a `MqttLeaseCoordinator` and calls `cleanup_stale_leases()` to release MQTT client leases that have been held without heartbeat for longer
 than the stale threshold.
 
-### CaRotationCheckExecutor
+### CaRotationCheckExecutor (internal)
 
-Mode-specific implementations:
-
-- **Embedded** (`EmbeddedCaRotationCheckExecutor`): Checks `should_rotate_ca()` against the in-process CA
-  snapshot (`watch::Receiver<CaSnapshot>`). If rotation is needed, fires the `ca_rotation_trigger`
-  (`Arc<Notify>`) directly.
-- **External** (`ExternalCaRotationCheckExecutor`): Reads the active CA certificate from the database,
-  calls `should_rotate_ca()` from the engine, and signals via `SchedulerNotifier::signal_ca_rotation()`
-  which publishes a `RequestCaRotation` message to the `uptrakit.events.controller` NATS subject.
-  Controllers consume this and trigger their local rotation logic.
+`EmbeddedCaRotationCheckExecutor` checks `should_rotate_ca()` against the in-process CA snapshot
+(`watch::Receiver<CaSnapshot>`). If rotation is needed, fires the `ca_rotation_trigger`
+(`Arc<Notify>`) directly. This is an internal task — it runs exclusively on the embedded scheduler
+because it requires in-process access to the CA watch channel.
 
 ### FetchReleasesExecutor
 

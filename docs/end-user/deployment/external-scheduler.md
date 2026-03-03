@@ -2,8 +2,11 @@
 
 The `uptrakit-scheduler` binary runs the scheduler as a standalone service, separate from the
 controller. It enrolls as a service via WebSocket, receives infrastructure credentials automatically,
-and executes scheduled tasks (version checks, cleanup, CA rotation checks, certificate renewal)
-using direct database access and NATS messaging.
+and executes the 4 external scheduled tasks (version checks, cleanup) using direct database access
+and NATS messaging.
+
+Internal tasks (CRL renewal, CA rotation check, service certificate check) run exclusively on the
+controller's embedded scheduler because they require in-process access to controller resources.
 
 ## When to use the external scheduler
 
@@ -12,7 +15,7 @@ using direct database access and NATS messaging.
 | Single controller, simple | Embedded (`--features embedded-scheduler`) | Everything runs in one process |
 | Single controller + NATS | External binary | Decoupled scheduling, independent scaling |
 | Multi-controller HA | External binary | Avoids duplicate scheduling across controllers |
-| Resilient single instance | Embedded + external | Embedded auto-disables when external connects; auto-re-enables on disconnect |
+| Resilient single instance | Embedded + external | Embedded defers external tasks when external connects; resumes on disconnect |
 
 ## Prerequisites
 
@@ -55,8 +58,7 @@ On first run:
 
 1. The scheduler connects to the controller via WebSocket.
 2. It sends an `Enroll` message with capabilities:
-   `scheduler`, `database_access`, `nats_access`, `master_key_access`, `ca_management`,
-   `graceful_shutdown`.
+   `scheduler`, `database_access`, `nats_access`, `master_key_access`, `graceful_shutdown`.
 3. An administrator approves the service (or provides an enrollment token for auto-approval).
 4. The scheduler requests and receives a client certificate.
 5. On the next connection (mTLS), the controller sends `ServiceCredentials` containing the
@@ -96,8 +98,9 @@ sends `ServiceCredentials` on each authenticated connection:
 | `nats_access` | `nats_url` | NATS server URL |
 | `master_key_access` | `master_key_hex` | 256-bit master encryption key (hex) |
 
-The `scheduler` and `ca_management` capabilities are markers — they do not grant credentials but
-identify the service type and permissions.
+The `scheduler` capability is a marker — it does not grant credentials but identifies the service
+type. When the controller detects a connected service with this capability, it defers external
+tasks from the embedded scheduler.
 
 ## Security considerations
 
@@ -119,7 +122,9 @@ rationale.
 
 - The scheduler's WebSocket connection to the controller serves as **presence detection**.
 - When the `embedded-scheduler` feature is enabled on the controller, the embedded scheduler
-  auto-disables when an external scheduler connects and auto-re-enables when it disconnects.
+  defers external tasks when an external scheduler connects and resumes them when it disconnects.
+  Internal tasks (CRL renewal, CA rotation check, service cert check) always run on the embedded
+  scheduler regardless of external scheduler presence.
 - The scheduler appears in the services list with the "Scheduler" label and can be managed via
   the REST API and admin UI.
 - Logs use the `uptrakit_scheduler` tracing target. Use `-v` for debug, `-vv` for all uptrakit
