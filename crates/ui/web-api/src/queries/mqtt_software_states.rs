@@ -407,7 +407,7 @@ mod tests {
     #[test]
     fn security_pending_count_only_security_outdated() {
         // 3 packages: one security-outdated, one regular-outdated, one up-to-date security
-        let pkgs = vec![
+        let pkgs = [
             make_pkg(Some("1.0"), Some("2.0"), "security"),
             make_pkg(Some("1.0"), Some("2.0"), "bugfix"),
             make_pkg(Some("3.0"), Some("3.0"), "security"),
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn security_pending_count_zero_when_no_security_packages() {
-        let pkgs = vec![
+        let pkgs = [
             make_pkg(Some("1.0"), Some("2.0"), "bugfix"),
             make_pkg(Some("1.0"), Some("1.0"), "regular"),
         ];
@@ -444,7 +444,7 @@ mod tests {
 
     #[test]
     fn security_pending_count_ignores_missing_versions() {
-        let pkgs = vec![
+        let pkgs = [
             make_pkg(None, Some("2.0"), "security"),
             make_pkg(Some("1.0"), None, "security"),
         ];
