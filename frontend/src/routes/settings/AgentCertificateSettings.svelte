@@ -20,8 +20,7 @@
 		if (settings) {
 			certLifetimeDays = settings.lifetime_days;
 			useAutoRenewal = settings.renewal_window_hours_override === null;
-			certRenewalWindowHours =
-				settings.renewal_window_hours_override ?? settings.effective_renewal_window_hours;
+			certRenewalWindowHours = settings.renewal_window_hours_override ?? settings.effective_renewal_window_hours;
 		}
 	});
 
@@ -35,8 +34,7 @@
 			});
 			certLifetimeDays = res.lifetime_days;
 			useAutoRenewal = res.renewal_window_hours_override === null;
-			certRenewalWindowHours =
-				res.renewal_window_hours_override ?? res.effective_renewal_window_hours;
+			certRenewalWindowHours = res.renewal_window_hours_override ?? res.effective_renewal_window_hours;
 			onSuccess('Agent certificate settings saved.');
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to save agent certificate settings');
@@ -50,8 +48,8 @@
 		<p class="text-surface-600 dark:text-surface-400">Loading...</p>
 	{:else}
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
-			Configure the lifetime and renewal window for agent mTLS certificates. Agents will request a
-			new certificate when the remaining validity falls below the renewal window.
+			Configure the lifetime and renewal window for agent mTLS certificates. Agents will request a new certificate when
+			the remaining validity falls below the renewal window.
 		</p>
 		<div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 			<label class="label">
@@ -70,12 +68,7 @@
 				{:else}
 					<label class="label">
 						<span>Renewal Window (hours)</span>
-						<input
-							class="input"
-							type="number"
-							min="1"
-							bind:value={certRenewalWindowHours}
-						/>
+						<input class="input" type="number" min="1" bind:value={certRenewalWindowHours} />
 					</label>
 				{/if}
 			</div>

@@ -107,19 +107,11 @@
 		</label>
 
 		<div class="flex gap-2">
-			<button
-				class="btn preset-filled-primary-500"
-				onclick={saveToken}
-				disabled={saving || !tokenInput.trim()}
-			>
+			<button class="btn preset-filled-primary-500" onclick={saveToken} disabled={saving || !tokenInput.trim()}>
 				{saving ? 'Saving...' : 'Save Token'}
 			</button>
 			{#if settings.has_token}
-				<button
-					class="btn preset-tonal-error"
-					onclick={() => (showClearConfirm = true)}
-					disabled={clearing}
-				>
+				<button class="btn preset-tonal-error" onclick={() => (showClearConfirm = true)} disabled={clearing}>
 					{clearing ? 'Clearing...' : 'Clear Token'}
 				</button>
 			{/if}
