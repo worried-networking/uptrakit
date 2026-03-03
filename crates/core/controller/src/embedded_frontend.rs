@@ -53,7 +53,9 @@ fn serve_asset(path: &str) -> Option<Response> {
 
     let content_type = asset.metadata.mimetype();
 
-    let mut response = Response::builder().header(header::CONTENT_TYPE, content_type);
+    let mut response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type);
 
     // SvelteKit puts fingerprinted assets under `_app/immutable/`.
     // These can be cached indefinitely.

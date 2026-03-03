@@ -709,9 +709,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             Arc::clone(&state),
             crate::middleware::resolve_ip::resolve_ip,
         ))
-        .layer(axum_mw::from_fn(
-            crate::middleware::request_log::request_log,
-        ))
         .with_state(state)
 }
 

@@ -71,18 +71,18 @@ async fn main() -> std::process::ExitCode {
             "warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)"
         );
     }
-    let directive = match args.verbose {
-        0 => "uptrakit_controller=info",
-        1 => "uptrakit_controller=debug",
-        2 => "uptrakit=debug",
-        _ => "uptrakit=trace",
+    let directives: &[&str] = match args.verbose {
+        0 => &["uptrakit_controller=info", "uptrakit_web_api=info"],
+        1 => &["uptrakit_controller=debug", "uptrakit_web_api=debug"],
+        2 => &["uptrakit=debug"],
+        _ => &["uptrakit=trace"],
     };
-    let filter = EnvFilter::from_default_env();
-    let filter = if let Ok(d) = directive.parse() {
-        filter.add_directive(d)
-    } else {
-        filter
-    };
+    let mut filter = EnvFilter::from_default_env();
+    for dir_str in directives {
+        if let Ok(d) = dir_str.parse() {
+            filter = filter.add_directive(d);
+        }
+    }
 
     // When the journald audit backend is selected, add a dedicated journald
     // tracing layer filtered to the `uptrakit_audit` target so that structured

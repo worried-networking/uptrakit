@@ -3,10 +3,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
+use axum::middleware as axum_mw;
+use axum::response::IntoResponse;
 use rootcause::prelude::*;
 use thiserror::Error;
 use tokio::net::TcpSocket;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::mtls_acceptor::MtlsAcceptor;
@@ -63,14 +65,14 @@ async fn create_listener(
 pub async fn run(cfg: ServerOptions) -> Result<()> {
     let mut router = uptrakit_web_api::build_router(cfg.app_state);
     if let Some(ref dir) = cfg.static_dir {
-        let index = dir.join("index.html");
+        let index_for_fallback = dir.join("index.html");
         let not_found = Router::new()
             .route(
                 "/api/{*path}",
                 axum::routing::any(uptrakit_web_api::api_not_found),
             )
             .route("/api", axum::routing::any(uptrakit_web_api::api_not_found))
-            .fallback_service(ServeFile::new(index));
+            .fallback(serve_spa_fallback(index_for_fallback));
         router = router.fallback_service(ServeDir::new(dir).not_found_service(not_found));
     } else {
         #[cfg(feature = "embed-frontend")]
@@ -79,6 +81,13 @@ pub async fn run(cfg: ServerOptions) -> Result<()> {
             router = router.fallback_service(crate::embedded_frontend::router());
         }
     }
+
+    // Apply request_log as the outermost layer so it wraps the entire Router
+    // including fallback services. This ensures all requests (API and SPA) are
+    // logged with method, path, status, and latency.
+    router = router.layer(axum_mw::from_fn(
+        uptrakit_web_api::middleware::request_log::request_log,
+    ));
 
     let rustls_acceptor = axum_server::tls_rustls::RustlsAcceptor::new(cfg.rustls_config);
     let mtls_acceptor = MtlsAcceptor::new(rustls_acceptor);
@@ -116,4 +125,25 @@ pub async fn run_pki_http(addr: SocketAddr, app_state: Arc<AppState>) -> Result<
     .await
     .context_to::<ServerError>()?;
     Ok(())
+}
+
+/// Return a handler that serves `index.html` from the filesystem with an
+/// explicit `200 OK` and `Content-Type: text/html`. Used as the SPA fallback
+/// for the static-dir frontend so that client-side routing paths always
+/// receive the entry page with a successful status code.
+fn serve_spa_fallback(index_path: PathBuf) -> axum::routing::MethodRouter {
+    axum::routing::get(move || {
+        let path = index_path.clone();
+        async move {
+            match tokio::fs::read(&path).await {
+                Ok(bytes) => (
+                    axum::http::StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                    bytes,
+                )
+                    .into_response(),
+                Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+    })
 }
