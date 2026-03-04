@@ -4,6 +4,9 @@ frontend/build
 frontend/.svelte-kit
 .aider*
 
+# Docker Compose
+.env
+
 # Claude Code
 .claude/settings.local.json
 .claude/CLAUDE.local.md

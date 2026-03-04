@@ -1,0 +1,183 @@
+# Uptrakit Docker Compose
+#
+# Usage:
+#   docker compose up                       — controller only (SQLite)
+#   docker compose --profile postgres up    — controller + PostgreSQL
+#   docker compose --profile mqtt up        — controller + MQTT service
+#   docker compose --profile ssh up         — controller + SSH agent
+#   docker compose --profile scheduler up   — controller + scheduler + NATS
+#   docker compose --profile full up        — all services
+#
+# Copy .env.example to .env and set at least UPTRAKIT_MASTER_KEY before starting.
+
+x-common-service: &common-service
+  restart: unless-stopped
+  networks:
+    - uptrakit
+
+services:
+  # ---------- Controller (always runs) ----------
+  controller:
+    <<: *common-service
+    image: ghcr.io/worried-networking/uptrakit-controller:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        PACKAGE: uptrakit-controller
+        BINARY: uptrakit-controller
+        FEATURES: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+    ports:
+      - "8443:8443"
+    volumes:
+      - controller-config:/data/config
+      - controller-state:/data/state
+    environment:
+      UPTRAKIT_MASTER_KEY: ${UPTRAKIT_MASTER_KEY:?Set UPTRAKIT_MASTER_KEY in .env}
+      UPTRAKIT_DB_URL: ${DB_URL:-}
+      UPTRAKIT_NATS_URL: ${NATS_URL:-}
+      UPTRAKIT_HTTPS_ADDR: "[::]:8443"
+      # OIDC bootstrap (optional)
+      UPTRAKIT_OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      UPTRAKIT_OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      UPTRAKIT_OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      # Enrollment token bootstrap (optional)
+      UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN: ${ENROLLMENT_TOKEN:-}
+      UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN_MAX_USES: ${ENROLLMENT_TOKEN_MAX_USES:-1}
+      UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN_TTL: ${ENROLLMENT_TOKEN_TTL:-300}
+      UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN: ${SYSTEM_ENROLLMENT_TOKEN:-}
+      UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN_MAX_USES: ${SYSTEM_ENROLLMENT_TOKEN_MAX_USES:-1}
+      UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN_TTL: ${SYSTEM_ENROLLMENT_TOKEN_TTL:-300}
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/8443' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ---------- PostgreSQL (profile: postgres, full) ----------
+  postgres:
+    <<: *common-service
+    image: postgres:17-bookworm
+    profiles: ["postgres", "full"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: uptrakit
+      POSTGRES_USER: uptrakit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uptrakit"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------- NATS JetStream (profile: scheduler, full) ----------
+  nats:
+    <<: *common-service
+    image: nats:2-alpine
+    profiles: ["scheduler", "full"]
+    command: ["--jetstream", "--store_dir", "/data"]
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------- External Scheduler (profile: scheduler, full) ----------
+  scheduler:
+    <<: *common-service
+    image: ghcr.io/worried-networking/uptrakit-scheduler:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        PACKAGE: uptrakit-scheduler
+        BINARY: uptrakit-scheduler
+        FEATURES: db-all,oidc
+    profiles: ["scheduler", "full"]
+    environment:
+      UPTRAKIT_ENROLLMENT_TOKEN: ${SYSTEM_ENROLLMENT_TOKEN:-}
+      UPTRAKIT_CONFIG_DIR: /data/config
+      UPTRAKIT_STATE_DIR: /data/state
+    command:
+      - --url
+      - https://controller:8443
+      - --tofu
+    volumes:
+      - scheduler-state:/data/state
+      - scheduler-config:/data/config
+    depends_on:
+      controller:
+        condition: service_healthy
+
+  # ---------- MQTT Service (profile: mqtt, full) ----------
+  mqtt:
+    <<: *common-service
+    image: ghcr.io/worried-networking/uptrakit-mqtt:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        PACKAGE: uptrakit-mqtt
+        BINARY: uptrakit-mqtt
+        FEATURES: ""
+    profiles: ["mqtt", "full"]
+    environment:
+      UPTRAKIT_ENROLLMENT_TOKEN: ${SYSTEM_ENROLLMENT_TOKEN:-}
+      UPTRAKIT_CONFIG_DIR: /data/config
+      UPTRAKIT_STATE_DIR: /data/state
+    command:
+      - --url
+      - https://controller:8443
+      - --tofu
+    volumes:
+      - mqtt-state:/data/state
+      - mqtt-config:/data/config
+    depends_on:
+      controller:
+        condition: service_healthy
+
+  # ---------- SSH Agent (profile: ssh, full) ----------
+  agent-ssh:
+    <<: *common-service
+    image: ghcr.io/worried-networking/uptrakit-agent-ssh:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        PACKAGE: uptrakit-agent-ssh
+        BINARY: uptrakit-agent-ssh
+        FEATURES: ""
+    profiles: ["ssh", "full"]
+    environment:
+      UPTRAKIT_ENROLLMENT_TOKEN: ${ENROLLMENT_TOKEN:-}
+      UPTRAKIT_CONFIG_DIR: /data/config
+      UPTRAKIT_STATE_DIR: /data/state
+    command:
+      - --url
+      - https://controller:8443
+      - --tofu
+    volumes:
+      - agent-ssh-state:/data/state
+      - agent-ssh-config:/data/config
+    depends_on:
+      controller:
+        condition: service_healthy
+
+volumes:
+  controller-config:
+  controller-state:
+  postgres-data:
+  nats-data:
+  scheduler-state:
+  scheduler-config:
+  mqtt-state:
+  mqtt-config:
+  agent-ssh-state:
+  agent-ssh-config:
+
+networks:
+  uptrakit:
