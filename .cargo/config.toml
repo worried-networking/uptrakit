@@ -1,0 +1,5 @@
+# Build speed optimizations for development.
+# These settings do not affect release builds or CI unless explicitly opted in.
+
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "split-debuginfo=unpacked"]

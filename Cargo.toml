@@ -29,7 +29,7 @@ rustls = { version = "0.23", default-features = false, features = ["std", "aws-l
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs"] }
 webpki-roots = "1"
 rcgen = { version = "0.14", default-features = false, features = ["pem", "x509-parser", "aws_lc_rs"] }
-x509-parser = { version = "0.18", default-features = false, features = ["verify-aws", "verify"] }
+x509-parser = { version = "0.18", default-features = false, features = ["verify-aws"] }
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -134,6 +134,18 @@ warnings = "deny"
 [workspace.lints.clippy]
 all = "deny"
 
+[profile.dev]
+# Reduce debug info to line tables only — backtraces still work,
+# but variables are not inspectable in a debugger.
+# Saves significant compile and link time.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# Compile all third-party dependencies at opt-level 1 in dev mode.
+# Minimal compile-time cost, but makes runtime (tests, local runs)
+# noticeably faster. Only applied to dependencies, not workspace crates.
+opt-level = 1
+
 [profile.dev.package."aws-lc-sys"]
 opt-level = 3
 
@@ -143,3 +155,10 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[profile.release-fast]
+inherits = "release"
+opt-level = 2
+lto = false
+codegen-units = 16
+strip = false
