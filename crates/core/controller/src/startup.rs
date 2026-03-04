@@ -900,6 +900,166 @@ pub(crate) async fn bootstrap_oidc(
 }
 
 // ---------------------------------------------------------------------------
+// Phase 7b: Enrollment token bootstrap
+// ---------------------------------------------------------------------------
+
+/// Bootstrap enrollment tokens from CLI flags / environment variables.
+///
+/// Creates pre-hashed enrollment tokens named "bootstrap" at startup so that
+/// services can auto-enroll using a shared secret (e.g. in docker-compose).
+/// Idempotent: skips creation if an active token named "bootstrap" already
+/// exists (not revoked, not expired, uses remaining).
+pub(crate) async fn bootstrap_enrollment_tokens(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: uuid::Uuid,
+    args: &crate::cli::Args,
+) -> crate::Result<()> {
+    let eb = &args.enrollment_bootstrap;
+
+    // Tenant enrollment token
+    if let Some(ref token_value) = eb.bootstrap_enrollment_token {
+        bootstrap_tenant_enrollment_token(db, tenant_id, token_value, eb).await?;
+    }
+
+    // System enrollment token
+    if let Some(ref token_value) = eb.bootstrap_system_enrollment_token {
+        bootstrap_system_enrollment_token(db, token_value, eb).await?;
+    }
+
+    Ok(())
+}
+
+/// Create a tenant enrollment token named "bootstrap" if none exists.
+async fn bootstrap_tenant_enrollment_token(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: uuid::Uuid,
+    token_value: &str,
+    eb: &crate::cli::EnrollmentBootstrapArgs,
+) -> crate::Result<()> {
+    use sea_orm::{ColumnTrait, EntityTrait, ExprTrait, QueryFilter, sea_query::Expr};
+    use uptrakit_shared_db::entity::enrollment_token;
+
+    let now = time::OffsetDateTime::now_utc();
+
+    // Check for an existing active token named "bootstrap"
+    let existing = enrollment_token::Entity::find()
+        .filter(enrollment_token::Column::TenantId.eq(tenant_id))
+        .filter(enrollment_token::Column::Name.eq("bootstrap"))
+        .filter(enrollment_token::Column::RevokedAt.is_null())
+        .filter(
+            enrollment_token::Column::ExpiresAt
+                .is_null()
+                .or(enrollment_token::Column::ExpiresAt.gt(now)),
+        )
+        .filter(
+            enrollment_token::Column::MaxUses
+                .is_null()
+                .or(Expr::col(enrollment_token::Column::CurrentUses)
+                    .lt(Expr::col(enrollment_token::Column::MaxUses))),
+        )
+        .one(db)
+        .await
+        .context(AppError::Database)?;
+
+    if existing.is_some() {
+        tracing::info!("bootstrap enrollment token already exists, skipping");
+        return Ok(());
+    }
+
+    let hash = uptrakit_web_api::auth::password::hash_password(token_value)
+        .map_err(|e| report!(AppError::Config(format!("failed to hash bootstrap enrollment token: {e}"))))?;
+
+    let expires_at = now + time::Duration::seconds(eb.bootstrap_enrollment_token_ttl as i64);
+
+    use sea_orm::{ActiveModelTrait, Set};
+
+    let model = enrollment_token::ActiveModel {
+        id: Set(uuid::Uuid::now_v7()),
+        tenant_id: Set(tenant_id),
+        name: Set("bootstrap".to_string()),
+        token_hash: Set(hash.expose_secret().to_string()),
+        allowed_capabilities: Set(None),
+        max_uses: Set(Some(eb.bootstrap_enrollment_token_max_uses as i32)),
+        current_uses: Set(0),
+        expires_at: Set(Some(expires_at)),
+        created_at: Set(now),
+        revoked_at: Set(None),
+        created_by_user_id: Set(None),
+    };
+    model.insert(db).await.context(AppError::Database)?;
+
+    tracing::info!(
+        max_uses = eb.bootstrap_enrollment_token_max_uses,
+        ttl_secs = eb.bootstrap_enrollment_token_ttl,
+        "bootstrapped tenant enrollment token"
+    );
+    Ok(())
+}
+
+/// Create a system enrollment token named "bootstrap" if none exists.
+async fn bootstrap_system_enrollment_token(
+    db: &sea_orm::DatabaseConnection,
+    token_value: &str,
+    eb: &crate::cli::EnrollmentBootstrapArgs,
+) -> crate::Result<()> {
+    use sea_orm::{ColumnTrait, EntityTrait, ExprTrait, QueryFilter, sea_query::Expr};
+    use uptrakit_shared_db::entity::system_enrollment_token;
+
+    let now = time::OffsetDateTime::now_utc();
+
+    // Check for an existing active token named "bootstrap"
+    let existing = system_enrollment_token::Entity::find()
+        .filter(system_enrollment_token::Column::Name.eq("bootstrap"))
+        .filter(system_enrollment_token::Column::RevokedAt.is_null())
+        .filter(
+            system_enrollment_token::Column::ExpiresAt
+                .is_null()
+                .or(system_enrollment_token::Column::ExpiresAt.gt(now)),
+        )
+        .filter(
+            system_enrollment_token::Column::MaxUses
+                .is_null()
+                .or(Expr::col(system_enrollment_token::Column::CurrentUses)
+                    .lt(Expr::col(system_enrollment_token::Column::MaxUses))),
+        )
+        .one(db)
+        .await
+        .context(AppError::Database)?;
+
+    if existing.is_some() {
+        tracing::info!("bootstrap system enrollment token already exists, skipping");
+        return Ok(());
+    }
+
+    let hash = uptrakit_web_api::auth::password::hash_password(token_value)
+        .map_err(|e| report!(AppError::Config(format!("failed to hash bootstrap system enrollment token: {e}"))))?;
+
+    let expires_at = now + time::Duration::seconds(eb.bootstrap_system_enrollment_token_ttl as i64);
+
+    use sea_orm::{ActiveModelTrait, Set};
+
+    let model = system_enrollment_token::ActiveModel {
+        id: Set(uuid::Uuid::now_v7()),
+        name: Set("bootstrap".to_string()),
+        token_hash: Set(hash.expose_secret().to_string()),
+        max_uses: Set(Some(eb.bootstrap_system_enrollment_token_max_uses as i32)),
+        current_uses: Set(0),
+        expires_at: Set(Some(expires_at)),
+        created_at: Set(now),
+        revoked_at: Set(None),
+        created_by_user_id: Set(None),
+    };
+    model.insert(db).await.context(AppError::Database)?;
+
+    tracing::info!(
+        max_uses = eb.bootstrap_system_enrollment_token_max_uses,
+        ttl_secs = eb.bootstrap_system_enrollment_token_ttl,
+        "bootstrapped system enrollment token"
+    );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Phase 8: Configuration validation
 // ---------------------------------------------------------------------------
 

@@ -70,13 +70,13 @@ pub struct Args {
     /// Config directory for persistent configuration (CA certificates, TLS certs).
     /// Supports `~` for home directory expansion.
     /// Default: platform-specific (e.g., ~/.config/controller on Linux).
-    #[arg(long)]
+    #[arg(long, env = "UPTRAKIT_CONFIG_DIR")]
     pub config_dir: Option<PathBuf>,
 
     /// State directory for runtime state (SQLite DB, JWT signing key).
     /// Supports `~` for home directory expansion.
     /// Default: platform-specific (e.g., ~/.local/state/controller on Linux).
-    #[arg(long)]
+    #[arg(long, env = "UPTRAKIT_STATE_DIR")]
     pub state_dir: Option<PathBuf>,
 
     /// Database URL. If not provided, defaults to SQLite in data directory.
@@ -84,7 +84,7 @@ pub struct Args {
     ///   SQLite (default): sqlite://path/to/db.sqlite
     ///   PostgreSQL: postgresql://user:pass@host:5432/dbname
     ///   MySQL: mysql://user:pass@host:3306/dbname
-    #[arg(long)]
+    #[arg(long, env = "UPTRAKIT_DB_URL")]
     pub db_url: Option<String>,
 
     /// Maximum number of connections in the database connection pool.
@@ -96,7 +96,7 @@ pub struct Args {
     /// HTTPS listen address (dual-stack by default).
     /// Stored in DB as `network.https_addr`. CLI value used only on first run
     /// or with `--force-settings-override`.
-    #[arg(long)]
+    #[arg(long, env = "UPTRAKIT_HTTPS_ADDR")]
     pub https_addr: Option<SocketAddr>,
 
     /// Override: path to PEM-encoded server certificate.
@@ -190,6 +190,9 @@ pub struct Args {
 
     #[command(flatten)]
     pub oidc_bootstrap: OidcBootstrapArgs,
+
+    #[command(flatten)]
+    pub enrollment_bootstrap: EnrollmentBootstrapArgs,
 
     /// Enable SO_REUSEPORT socket option for zero-downtime restarts.
     /// Required on both the first process and the takeover process.
@@ -287,28 +290,85 @@ pub struct Args {
 pub struct OidcBootstrapArgs {
     /// OIDC issuer URL. When set, bootstraps an OIDC provider at startup.
     /// Requires --oidc-client-id and --oidc-client-secret.
-    #[arg(long)]
+    #[arg(long, env = "UPTRAKIT_OIDC_ISSUER_URL")]
     pub oidc_issuer_url: Option<String>,
 
     /// OIDC client ID. Required when --oidc-issuer-url is set.
-    #[arg(long)]
+    #[arg(long, env = "UPTRAKIT_OIDC_CLIENT_ID")]
     pub oidc_client_id: Option<String>,
 
     /// OIDC client secret. Required when --oidc-issuer-url is set.
-    #[arg(long)]
+    #[arg(long, env = "UPTRAKIT_OIDC_CLIENT_SECRET")]
     pub oidc_client_secret: Option<String>,
 
     /// Display name for the bootstrapped OIDC provider.
-    #[arg(long, default_value = "SSO")]
+    #[arg(long, env = "UPTRAKIT_OIDC_PROVIDER_NAME", default_value = "SSO")]
     pub oidc_provider_name: Option<String>,
 
     /// URL-safe slug for the bootstrapped OIDC provider.
-    #[arg(long, default_value = "sso")]
+    #[arg(long, env = "UPTRAKIT_OIDC_PROVIDER_SLUG", default_value = "sso")]
     pub oidc_provider_slug: Option<String>,
 
     /// Space-separated OIDC scopes.
-    #[arg(long, default_value = "openid email profile groups")]
+    #[arg(long, env = "UPTRAKIT_OIDC_SCOPES", default_value = "openid email profile groups")]
     pub oidc_scopes: Option<String>,
+}
+
+/// Enrollment token bootstrap options.
+///
+/// When `--bootstrap-enrollment-token` is provided, the controller ensures
+/// a tenant enrollment token named "bootstrap" exists at startup. This
+/// enables zero-interaction docker-compose deployments where services
+/// auto-enroll using a shared secret.
+///
+/// Same pattern applies for `--bootstrap-system-enrollment-token` for
+/// system services (MQTT bridge, external scheduler).
+#[derive(Parser, Debug)]
+pub struct EnrollmentBootstrapArgs {
+    /// Pre-shared token for tenant service auto-enrollment.
+    /// Creates a token named "bootstrap" at startup if none with that name
+    /// exists (active, not revoked, not expired).
+    /// Services use the same value via --enrollment-token / UPTRAKIT_ENROLLMENT_TOKEN.
+    #[arg(long, env = "UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN")]
+    pub bootstrap_enrollment_token: Option<String>,
+
+    /// Maximum number of uses for the bootstrap enrollment token.
+    #[arg(
+        long,
+        env = "UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN_MAX_USES",
+        default_value = "1"
+    )]
+    pub bootstrap_enrollment_token_max_uses: u32,
+
+    /// TTL in seconds for the bootstrap enrollment token.
+    #[arg(
+        long,
+        env = "UPTRAKIT_BOOTSTRAP_ENROLLMENT_TOKEN_TTL",
+        default_value = "300"
+    )]
+    pub bootstrap_enrollment_token_ttl: u64,
+
+    /// Pre-shared token for system service auto-enrollment (MQTT, scheduler).
+    /// Creates a token named "bootstrap" at startup if none with that name
+    /// exists (active, not revoked, not expired).
+    #[arg(long, env = "UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN")]
+    pub bootstrap_system_enrollment_token: Option<String>,
+
+    /// Maximum number of uses for the bootstrap system enrollment token.
+    #[arg(
+        long,
+        env = "UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN_MAX_USES",
+        default_value = "1"
+    )]
+    pub bootstrap_system_enrollment_token_max_uses: u32,
+
+    /// TTL in seconds for the bootstrap system enrollment token.
+    #[arg(
+        long,
+        env = "UPTRAKIT_BOOTSTRAP_SYSTEM_ENROLLMENT_TOKEN_TTL",
+        default_value = "300"
+    )]
+    pub bootstrap_system_enrollment_token_ttl: u64,
 }
 
 /// Audit log backend storage.
@@ -739,5 +799,62 @@ mod tests {
         .expect("should parse custom timeout");
         assert!(args.reuseport);
         assert_eq!(args.shutdown_timeout_secs, 60);
+    }
+
+    #[test]
+    fn enrollment_bootstrap_not_set_by_default() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        assert!(args.enrollment_bootstrap.bootstrap_enrollment_token.is_none());
+        assert_eq!(args.enrollment_bootstrap.bootstrap_enrollment_token_max_uses, 1);
+        assert_eq!(args.enrollment_bootstrap.bootstrap_enrollment_token_ttl, 300);
+        assert!(args.enrollment_bootstrap.bootstrap_system_enrollment_token.is_none());
+        assert_eq!(args.enrollment_bootstrap.bootstrap_system_enrollment_token_max_uses, 1);
+        assert_eq!(args.enrollment_bootstrap.bootstrap_system_enrollment_token_ttl, 300);
+    }
+
+    #[test]
+    fn enrollment_bootstrap_custom_values() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--bootstrap-enrollment-token",
+            "my-secret-token",
+            "--bootstrap-enrollment-token-max-uses",
+            "5",
+            "--bootstrap-enrollment-token-ttl",
+            "600",
+            "--bootstrap-system-enrollment-token",
+            "system-secret",
+            "--bootstrap-system-enrollment-token-max-uses",
+            "3",
+            "--bootstrap-system-enrollment-token-ttl",
+            "120",
+        ])
+        .expect("should parse custom values");
+
+        assert_eq!(
+            args.enrollment_bootstrap.bootstrap_enrollment_token.as_deref(),
+            Some("my-secret-token")
+        );
+        assert_eq!(args.enrollment_bootstrap.bootstrap_enrollment_token_max_uses, 5);
+        assert_eq!(args.enrollment_bootstrap.bootstrap_enrollment_token_ttl, 600);
+        assert_eq!(
+            args.enrollment_bootstrap.bootstrap_system_enrollment_token.as_deref(),
+            Some("system-secret")
+        );
+        assert_eq!(args.enrollment_bootstrap.bootstrap_system_enrollment_token_max_uses, 3);
+        assert_eq!(args.enrollment_bootstrap.bootstrap_system_enrollment_token_ttl, 120);
+    }
+
+    #[test]
+    fn enrollment_bootstrap_tenant_only() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--bootstrap-enrollment-token",
+            "tenant-secret",
+        ])
+        .expect("should parse with tenant token only");
+        assert!(args.enrollment_bootstrap.bootstrap_enrollment_token.is_some());
+        assert!(args.enrollment_bootstrap.bootstrap_system_enrollment_token.is_none());
     }
 }

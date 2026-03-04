@@ -200,6 +200,9 @@ async fn run(args: cli::Args) -> Result<()> {
     // Phase 7: OIDC bootstrap
     startup::bootstrap_oidc(&db_conn, default_tenant_id, &args).await?;
 
+    // Phase 7b: Enrollment token bootstrap
+    startup::bootstrap_enrollment_tokens(&db_conn, default_tenant_id, &args).await?;
+
     // Phase 8: Validate configuration
     let validated = startup::validate_configuration(&args, &reconciled)?;
 
