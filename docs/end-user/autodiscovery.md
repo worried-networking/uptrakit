@@ -254,10 +254,43 @@ explicitly invoke a specific plugin config, that config always runs regardless o
 
 See [Discovery Allowlist API](../api/discovery-allowlist.md) for the full endpoint reference.
 
+## Periodic Host-Package Rediscovery
+
+In addition to running discovery when a host first registers, Uptrakit automatically rediscovers
+host packages on a recurring schedule via the `discover_host_packages` scheduled task (default:
+every 6 hours).
+
+Each cycle, the controller sends a fresh `DiscoverSoftware` message to every active agent-backed
+host. The agent runs all applicable discovery plugins and reports back the current state of
+installed packages.
+
+### Disappeared packages
+
+If a package that previously appeared in a discovery run is absent from a subsequent run, it is
+automatically soft-deleted (`deactivated_at` is set to the current time). Soft-deleted packages
+are no longer shown in the host packages list. If the package is reinstalled later, it will
+reappear in the next discovery run.
+
+Packages that have been explicitly ignored (via an ignore rule) are never deactivated by the
+rediscovery process, even if they are absent from the agent's report.
+
+### Configuring the schedule
+
+The `discover_host_packages` task uses a standard cron expression (default: `0 */6 * * *`). You
+can adjust the schedule or disable the task from the Web UI (**Settings → Scheduler**) or via the
+API.
+
+### Auto-updating packages excluded from discovery
+
+Homebrew casks that declare `"auto_updates": true` (such as Google Chrome or Slack) manage their
+own update mechanism and cannot be upgraded via `brew upgrade`. These casks are silently excluded
+from all discovery passes — both the initial registration discovery and the periodic rediscovery.
+They will not appear in the host packages list.
+
 ## Triggering Discovery Manually
 
-Autodiscovery runs automatically when an agent registers a new host. You can also trigger it on
-demand:
+Autodiscovery runs automatically when an agent registers a new host and periodically every 6 hours.
+You can also trigger it on demand:
 
 - **Web UI** — Go to **Hosts**, open the **⋯** context menu for any host, and select
   **Trigger Discovery**. A toast notification confirms how many plugins were queued.

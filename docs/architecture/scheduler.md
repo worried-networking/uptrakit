@@ -63,6 +63,7 @@ Tasks are categorised based on whether they require direct in-process access to 
 | `StaleLeaseCleanup` | External | Pure DB cleanup |
 | `FetchReleases` | External | HTTP + DB + agent dispatch |
 | `DetectVersion` | External | DB + agent dispatch |
+| `DiscoverHostPackages` | External | DB + agent dispatch (periodic host-package rediscovery) |
 
 The `ScheduledTaskType::is_internal()` method encodes this categorisation. The `Scheduler` struct
 holds an `external_scheduler_connected: Arc<AtomicBool>` flag that is set/cleared by the WebSocket
@@ -112,10 +113,12 @@ and [Scheduler Engine (Development)](../development/scheduler-engine.md) for eng
 | `detect_version` | `0 0 * * *` | Detect currently installed versions on all agent hosts. |
 | `service_cert_check` | `0 */12 * * *` | Proactive certificate renewal for services |
 | `crl_renewal` | `0 */4 * * *` | Trigger CRL rebuild on all controller instances |
+| `discover_host_packages` | `0 */6 * * *` | Periodically rediscover installed packages on all active hosts. Packages that disappear from the agent's report are automatically soft-deleted. |
 
-All seven rows are seeded during the migration with `next_run_at = now`. The `detect_version` row is
-seeded by migration `m20260307_000001_split_version_check` (one per tenant), which also renames any
-existing `version_check` rows to `fetch_releases`.
+All rows are seeded during migrations with `next_run_at = now`. The `detect_version` row is
+seeded by migration `m20260307_000001_split_version_check` (one per tenant), which also renames
+any existing `version_check` rows to `fetch_releases`. The `discover_host_packages` row is seeded
+by migration `m20260312_000002_discover_host_packages_task`.
 
 ## HA Claim Mechanism
 
@@ -187,9 +190,10 @@ crates/shared/scheduler-engine/src/
         mod.rs
         auth_cleanup.rs
         stale_lease_cleanup.rs
-        queries.rs         -- Shared agent-assignment query helpers (AgentAssignmentRow, merge_config, …)
-        fetch_releases.rs  -- FetchReleasesExecutor (was version_check.rs)
-        detect_version.rs  -- DetectVersionExecutor
+        queries.rs                  -- Shared agent-assignment query helpers (AgentAssignmentRow, merge_config, …)
+        fetch_releases.rs           -- FetchReleasesExecutor (was version_check.rs)
+        detect_version.rs           -- DetectVersionExecutor
+        discover_host_packages.rs   -- DiscoverHostPackagesExecutor
         service_cert_check.rs
 ```
 
@@ -268,6 +272,29 @@ releases every 6 hours but detect installed versions once daily.
 Queries `service_certificates` for non-revoked certificates approaching their renewal window (within 30 days of expiry) and sends `RequestCertRenewal`
 messages to the owning services via `NotificationService`.
 
+### DiscoverHostPackagesExecutor
+
+Handles the **discover\_host\_packages** scheduled task. On each cycle:
+
+1. Queries all active, non-deactivated hosts that have a connected agent service
+   (`host → service_host → service`, filtering enabled/non-deactivated rows).
+2. Loads per-tenant and per-host discovery allowlists, plus all enabled plugin configs for
+   discovery-capable plugin types, in a single `tokio::try_join!` call.
+3. For each host, applies the allowlist precedence rule (host-specific → tenant-wide → all
+   discovery types) to compute the effective set of plugin types.
+4. Builds a `Vec<DiscoveryPluginAssignment>` — one entry per plugin config for each effective
+   type (or one empty-config default if no config exists for a type).
+5. Sends `ControllerMessage::DiscoverSoftware` to the host's agent service via
+   `notifier.send_to_service()`.
+
+Agent responses arrive via the existing `DiscoverSoftwareResult` wire message handler, which
+routes each `DiscoveryPluginResult` through `process_plugin_result()`. For `HostManaged` items,
+that handler now also calls `deactivate_missing_host_packages()` to soft-delete packages absent
+from the latest discovery snapshot.
+
+Casks with `"auto_updates": true` are excluded by the Homebrew plugin before the result is
+sent, so they never appear in the host-packages list.
+
 ## What Moved to the Scheduler vs. What Stayed
 
 ### Moved to the scheduler (runs on exactly one controller at a time)
@@ -281,6 +308,7 @@ messages to the owning services via `NotificationService`.
 | Installed-version detection | Not implemented | `DetectVersionExecutor` |
 | Service cert renewal check | Not implemented | `ServiceCertCheckExecutor` |
 | CRL periodic renewal | 60-second poll loop in `CrlManager::run()` | `CrlRenewalExecutor` (default every 4 h) |
+| Periodic host-package rediscovery | Not implemented | `DiscoverHostPackagesExecutor` |
 
 ### Stays as per-controller intervals (must run on every controller)
 

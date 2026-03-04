@@ -403,8 +403,11 @@ These are non-negotiable design constraints. Do not violate them.
 Autodiscovery automatically detects software installed on agent hosts and surfaces them as **pending** software items
 for user review. Key invariants:
 
-1. **Discovery is event-driven, not periodic.** It triggers on new host registration and via explicit API calls.
-   There is no periodic discovery scheduler task.
+1. **Discovery is event-driven and periodic.** It triggers on new host registration, via explicit API calls
+   (`POST /api/v1/hosts/{id}/discover`, `POST /api/v1/plugin-configs/{id}/discover`), and automatically
+   every 6 hours via the `discover_host_packages` scheduled task (`DiscoverHostPackagesExecutor`).
+   The periodic task sends `DiscoverSoftware` to every active agent-backed host and soft-deletes
+   (`deactivated_at`) any host package absent from the latest discovery snapshot.
 
 2. **`discovery_state` lifecycle:** `null` (manual, full tracking) → `pending` (discovered, `enabled = false`,
    excluded from version checks) → `approved` (reviewed, `enabled = true`, included in version checks). Deleting a
