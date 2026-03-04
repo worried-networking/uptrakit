@@ -107,6 +107,12 @@ The same attack applies via:
 - **Hook audit logging.** *(Implemented)* Before executing pre/post-update hooks,
   agents emit a `security_audit:` warning listing the hook count and command
   summaries, enabling forensic analysis of executed commands.
+- **`NoopCommandExecutor` returns error instead of panic.** *(Implemented)* The
+  controller's `NoopCommandExecutor` (used for API-based plugins that should never
+  execute local commands) now returns `CommandError::UnsupportedOperation` instead of
+  calling `unreachable!()`. This prevents a controller crash if a code path
+  accidentally triggers local execution, converting a potential DoS into a handled
+  error.
 
 ## Residual risk
 

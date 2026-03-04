@@ -259,15 +259,16 @@ async fn apply_timeout(
     }
 }
 
-/// A [`CommandExecutor`] that panics on use.
+/// A [`CommandExecutor`] that returns an error on use.
 ///
 /// The controller process never executes local commands directly for
 /// API-based plugins (GitHub, Docker, npm registry). This struct satisfies
 /// the `Arc<dyn CommandExecutor>` requirement of plugin construction without
 /// pulling in a real executor.
 ///
-/// Calling either method is a bug in the calling code; the `unreachable!()`
-/// macro causes an immediate panic with a clear error message to aid diagnosis.
+/// Calling either method is a bug in the calling code; it returns
+/// [`CommandError::UnsupportedOperation`] with a diagnostic message instead
+/// of panicking.
 pub struct NoopCommandExecutor;
 
 #[async_trait]
@@ -277,11 +278,15 @@ impl CommandExecutor for NoopCommandExecutor {
         _spec: &CommandSpec,
         _output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> crate::Result<CommandOutput> {
-        unreachable!("NoopCommandExecutor::execute called on the controller — this is a bug")
+        bail!(CommandError::UnsupportedOperation(
+            "NoopCommandExecutor::execute called on the controller — this is a bug".into()
+        ))
     }
 
     async fn execute_quiet(&self, _spec: &CommandSpec) -> crate::Result<CommandOutput> {
-        unreachable!("NoopCommandExecutor::execute_quiet called on the controller — this is a bug")
+        bail!(CommandError::UnsupportedOperation(
+            "NoopCommandExecutor::execute_quiet called on the controller — this is a bug".into()
+        ))
     }
 }
 
@@ -533,5 +538,32 @@ mod tests {
         let result = executor.execute_quiet(&spec).await;
         assert!(result.is_ok());
         assert!(result.unwrap().output.contains("no timeout"));
+    }
+
+    // ── NoopCommandExecutor tests ────────────────────────────────────
+
+    #[tokio::test]
+    async fn noop_executor_returns_error_on_execute() {
+        let executor = NoopCommandExecutor;
+        let spec = CommandSpec::exec("echo", ["hello".to_string()]);
+        let (tx, _rx) = mpsc::channel(1);
+        let result = executor.execute(&spec, &tx).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            CommandError::UnsupportedOperation(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn noop_executor_returns_error_on_execute_quiet() {
+        let executor = NoopCommandExecutor;
+        let spec = CommandSpec::exec("echo", ["hello".to_string()]);
+        let result = executor.execute_quiet(&spec).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            CommandError::UnsupportedOperation(_)
+        ));
     }
 }
