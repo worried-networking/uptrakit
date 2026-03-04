@@ -145,6 +145,11 @@ enum Commands {
         #[command(subcommand)]
         command: SystemServicesCommands,
     },
+    /// Manage system enrollment tokens (for system service auto-approval)
+    SystemEnrollmentTokens {
+        #[command(subcommand)]
+        command: SystemEnrollmentTokensCommands,
+    },
     /// View audit logs (tenant and system)
     AuditLogs {
         #[command(subcommand)]
@@ -631,6 +636,41 @@ enum SystemServicesCommands {
         /// Per-service certificate lifetime in hours (0 to clear override)
         #[arg(long)]
         cert_lifetime_hours: Option<u32>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SystemEnrollmentTokensCommands {
+    /// List system enrollment tokens
+    List {
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Create a new system enrollment token
+    Create {
+        /// Human-readable token name
+        #[arg(long)]
+        name: String,
+        /// Maximum number of enrollments allowed
+        #[arg(long)]
+        max_uses: Option<u32>,
+        /// Token lifetime in seconds (e.g. 86400 for 24 hours)
+        #[arg(long)]
+        expires_in: Option<u64>,
+    },
+    /// Show system enrollment token details
+    Show {
+        /// System enrollment token UUID
+        id: Uuid,
+    },
+    /// Revoke a system enrollment token
+    Revoke {
+        /// System enrollment token UUID
+        id: Uuid,
     },
 }
 
@@ -3401,6 +3441,67 @@ async fn run(cli: Cli) -> error::Result<()> {
                 output::print_output(format, &resp)?;
             }
         },
+        Commands::SystemEnrollmentTokens { command } => match command {
+            SystemEnrollmentTokensCommands::List { page, per_page } => {
+                let resp = commands::system_enrollment_tokens::list(
+                    commands::system_enrollment_tokens::ListParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                        page,
+                        per_page,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SystemEnrollmentTokensCommands::Create {
+                name,
+                max_uses,
+                expires_in,
+            } => {
+                let resp = commands::system_enrollment_tokens::create(
+                    commands::system_enrollment_tokens::CreateParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                        name: &name,
+                        max_uses,
+                        expires_in_seconds: expires_in,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SystemEnrollmentTokensCommands::Show { id } => {
+                let resp = commands::system_enrollment_tokens::show(
+                    commands::system_enrollment_tokens::ShowParams {
+                        id: &id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SystemEnrollmentTokensCommands::Revoke { id } => {
+                let resp = commands::system_enrollment_tokens::revoke(
+                    commands::system_enrollment_tokens::RevokeParams {
+                        id: &id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+        },
         Commands::AuditLogs { command } => match command {
             AuditLogsCommands::List {
                 actor_type,
@@ -3492,6 +3593,7 @@ mod tests {
     const IGNORE_UUID: &str = "aa200000-bb00-cc00-dd00-ee0000000001";
     const ET_UUID: &str = "aa300000-bb00-cc00-dd00-ee0000000001";
     const PKG_UUID: &str = "aa400000-bb00-cc00-dd00-ee0000000001";
+    const SYS_ET_UUID: &str = "aa500000-bb00-cc00-dd00-ee0000000001";
 
     /// Parse a UUID constant (safe in tests).
     fn uuid(s: &str) -> Uuid {
@@ -5417,6 +5519,110 @@ mod tests {
                 assert_eq!(id, uuid(ET_UUID));
             }
             _ => panic!("expected EnrollmentTokens Revoke"),
+        }
+    }
+
+    #[test]
+    fn system_enrollment_tokens_list_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "system-enrollment-tokens", "list"])
+                .expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::SystemEnrollmentTokens {
+                command: SystemEnrollmentTokensCommands::List {
+                    page: None,
+                    per_page: None
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn system_enrollment_tokens_create_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "system-enrollment-tokens",
+            "create",
+            "--name",
+            "MQTT Bridge Token",
+            "--max-uses",
+            "5",
+            "--expires-in",
+            "86400",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::SystemEnrollmentTokens {
+                command:
+                    SystemEnrollmentTokensCommands::Create {
+                        name,
+                        max_uses,
+                        expires_in,
+                    },
+            }) => {
+                assert_eq!(name, "MQTT Bridge Token");
+                assert_eq!(max_uses, Some(5));
+                assert_eq!(expires_in, Some(86400));
+            }
+            _ => panic!("expected SystemEnrollmentTokens Create"),
+        }
+    }
+
+    #[test]
+    fn system_enrollment_tokens_create_minimal() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "system-enrollment-tokens",
+            "create",
+            "--name",
+            "Unlimited",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::SystemEnrollmentTokens {
+                command:
+                    SystemEnrollmentTokensCommands::Create {
+                        name,
+                        max_uses,
+                        expires_in,
+                    },
+            }) => {
+                assert_eq!(name, "Unlimited");
+                assert!(max_uses.is_none());
+                assert!(expires_in.is_none());
+            }
+            _ => panic!("expected SystemEnrollmentTokens Create"),
+        }
+    }
+
+    #[test]
+    fn system_enrollment_tokens_show_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "system-enrollment-tokens", "show", SYS_ET_UUID])
+                .expect("should parse");
+        match args.command {
+            Some(Commands::SystemEnrollmentTokens {
+                command: SystemEnrollmentTokensCommands::Show { id },
+            }) => {
+                assert_eq!(id, uuid(SYS_ET_UUID));
+            }
+            _ => panic!("expected SystemEnrollmentTokens Show"),
+        }
+    }
+
+    #[test]
+    fn system_enrollment_tokens_revoke_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "system-enrollment-tokens", "revoke", SYS_ET_UUID])
+                .expect("should parse");
+        match args.command {
+            Some(Commands::SystemEnrollmentTokens {
+                command: SystemEnrollmentTokensCommands::Revoke { id },
+            }) => {
+                assert_eq!(id, uuid(SYS_ET_UUID));
+            }
+            _ => panic!("expected SystemEnrollmentTokens Revoke"),
         }
     }
 
