@@ -55,10 +55,19 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
                 // reqwest defaults to system/built-in roots — nothing to configure
             }
             CaTlsMode::Tofu => {
-                // TOFU: use custom verifier that accepts any cert chain but
-                // validates TLS signatures. Fingerprint verification after
-                // download provides the primary security guarantee.
-                builder = builder.tls_danger_accept_invalid_certs(true);
+                // TOFU: use a TofuVerifier-based rustls ClientConfig that
+                // accepts any cert chain but validates TLS handshake
+                // signatures. This prevents trivial MITM that forge invalid
+                // signatures, unlike the blanket `danger_accept_invalid_certs`
+                // which disables all TLS verification at the reqwest level.
+                // Fingerprint verification after download provides the
+                // primary security guarantee.
+                let tofu_config = crate::tls::build_tofu_client_config().map_err(|e| {
+                    report!(EnrollmentError::Tls(TlsError::CertificateParse(format!(
+                        "failed to build TOFU TLS config: {e}"
+                    ))))
+                })?;
+                builder = builder.use_preconfigured_tls(tofu_config);
             }
             CaTlsMode::PinnedCa(ca_pem) => {
                 let cert = reqwest::Certificate::from_pem(ca_pem).map_err(|e| {

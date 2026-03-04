@@ -2,8 +2,17 @@
 
 ## TofuVerifier
 
-The controller uses `TofuVerifier` with SHA-256 fingerprint pinning during initial CA bootstrap. It always verifies the TLS signature and only skips
-CA chain validation.
+The `TofuVerifier` (`crates/shared/service-sdk/src/tls.rs`) accepts any server certificate chain but
+still delegates TLS handshake signature verification to the installed crypto provider. This prevents
+trivial MITM attacks where an attacker presents a certificate with an invalid signature.
+
+The CA fetch path in `bootstrap_ca()` (`crates/shared/service-sdk/src/ca.rs`) uses
+`build_tofu_client_config()` with `reqwest::ClientBuilder::use_preconfigured_tls()` to apply the
+`TofuVerifier` during TOFU mode. This replaces the previous `tls_danger_accept_invalid_certs(true)`
+which disabled all TLS verification at the reqwest level.
+
+After download, SHA-256 fingerprint pinning (`--tofu-fingerprint`) provides the primary security
+guarantee.
 
 ## Fingerprint Pinning
 

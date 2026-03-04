@@ -12,9 +12,8 @@
 1. A new agent (or SSH agent) starts for the first time with `--tofu` enabled and no
    `--tofu-fingerprint` specified.
 2. The agent calls `bootstrap_ca()` which fetches the controller's CA certificate over
-   HTTPS. The reqwest client is configured with
-   `tls_danger_accept_invalid_certs(true)`, fully disabling TLS certificate
-   verification.
+   HTTPS. The reqwest client is configured with a `TofuVerifier` that accepts any CA
+   chain but validates TLS handshake signatures.
 3. An attacker with a network man-in-the-middle position intercepts this HTTPS request
    and presents their own CA certificate.
 4. The agent accepts the attacker's CA, saves it to `ca.pem`, and uses it as the trust
@@ -67,10 +66,10 @@
 - **TOFU is the default.** When neither `--ca-cert` nor `--tofu-fingerprint` is
   provided, TOFU mode accepts any CA certificate presented during the first
   connection. Many operators may use the default without understanding the risk.
-- **`tls_danger_accept_invalid_certs(true)` on the fetch path.** The reqwest client
-  used for CA fetching completely disables TLS verification, not just CA chain
-  validation. This means the attacker does not even need a valid TLS certificate to
-  intercept the request.
+- ~~`tls_danger_accept_invalid_certs(true)` on the fetch path.~~ **Fixed.** The CA
+  fetch path now uses a `TofuVerifier`-based rustls `ClientConfig` via
+  `use_preconfigured_tls()`. TLS handshake signatures are verified, preventing
+  trivial MITM with invalid certificates. Only CA chain validation is skipped.
 - **Single point of failure.** The CA certificate is fetched once and cached forever.
   A successful MITM during this single request compromises the entire trust
   relationship permanently.
@@ -83,9 +82,9 @@
 - Make `--tofu-fingerprint` required when `--tofu` is used, or at minimum emit a
   prominent startup warning (not just a log line) when TOFU is used without
   fingerprint pinning.
-- Replace `tls_danger_accept_invalid_certs(true)` in the CA fetch path with the
-  `TofuVerifier` that at least validates TLS handshake signatures, preventing passive
-  interception.
+- ~~Replace `tls_danger_accept_invalid_certs(true)` in the CA fetch path with the
+  `TofuVerifier`~~ — **Done.** The CA fetch path now uses `build_tofu_client_config()`
+  with `use_preconfigured_tls()`, validating TLS signatures during TOFU.
 - Provide a CLI command to verify the locally cached CA against the controller's
   current CA fingerprint (e.g., `uptrakit-agent verify-ca`), enabling post-bootstrap
   trust verification.
