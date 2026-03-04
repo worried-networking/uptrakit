@@ -28,6 +28,9 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: cd frontend && npm ci && npm run build
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-all-features"
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
@@ -51,6 +54,10 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: cd frontend && npm ci && npm run build
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-all-features"
+          save-if: "false"
       - run: cargo test -p uptrakit-controller --all-features -- --ignored
 
   frontend:
