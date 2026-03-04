@@ -107,6 +107,12 @@ pub const MAX_LONG_STRING_LEN: usize = 65_536;
 /// in `agent-core/src/update.rs`.
 pub const MAX_OUTPUT_STRING_LEN: usize = 1_048_576;
 
+/// Maximum number of assets in a `ReleaseInfo` message.
+pub const MAX_RELEASE_ASSETS: usize = 500;
+
+/// Expected byte length of a SHA-256 hex digest string (64 hex characters).
+pub const SHA256_DIGEST_LEN: usize = 64;
+
 // ── Helper functions ──────────────────────────────────────────────────────────
 
 /// Check that a `Vec` does not exceed the given length limit.

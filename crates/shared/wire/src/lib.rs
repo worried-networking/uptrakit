@@ -17,9 +17,9 @@ use uuid::Uuid;
 
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{
-    DiscoveredSoftware, DiscoveryTarget, HookShell, MqttClientConnectionStatus, MqttTransport,
-    OutputStreamType, PluginRole, PluginType, ReleaseAsset, ReleaseInfo, TrackingSystem,
-    UpdateCategory,
+    AttestationStatus, DiscoveredSoftware, DiscoveryTarget, HookShell, MqttClientConnectionStatus,
+    MqttTransport, OutputStreamType, PluginRole, PluginType, ReleaseAsset, ReleaseInfo,
+    TrackingSystem, UpdateCategory,
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
@@ -2332,7 +2332,10 @@ mod tests {
                     download_url: "https://github.com/nodejs/node/releases/download/v20.10.0/node-v20.10.0-linux-x64.tar.gz".to_string(),
                     size: Some(25_000_000),
                     content_type: None,
+                    sha256_digest: None,
                 }],
+                attestation_status: None,
+                require_attestation: false,
             }),
             timeout_seconds: 600,
         }));
@@ -2885,9 +2888,12 @@ mod tests {
             tag: "v1.0.0".to_string(),
             release_url: "https://example.com/release".to_string(),
             assets: vec![],
+            attestation_status: None,
+            require_attestation: false,
         };
         let json = serde_json::to_string(&info).unwrap();
         assert!(!json.contains("assets"));
+        assert!(!json.contains("attestation_status"));
         let deserialized: ReleaseInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, info);
     }

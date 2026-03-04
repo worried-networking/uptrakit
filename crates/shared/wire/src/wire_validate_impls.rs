@@ -338,6 +338,42 @@ impl WireValidate for PluginAssignment {
     }
 }
 
+impl WireValidate for ReleaseAsset {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.name, MAX_SHORT_STRING_LEN, "asset.name")?;
+        check_string_len(
+            &self.download_url,
+            MAX_MEDIUM_STRING_LEN,
+            "asset.download_url",
+        )?;
+        if let Some(ref d) = self.sha256_digest
+            && (d.len() != SHA256_DIGEST_LEN || !d.chars().all(|c| c.is_ascii_hexdigit()))
+        {
+            return Err(WireValidationError {
+                field: "asset.sha256_digest",
+                message: format!("expected {SHA256_DIGEST_LEN} hex chars, got {}", d.len()),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for ReleaseInfo {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.tag, MAX_SHORT_STRING_LEN, "release_info.tag")?;
+        check_string_len(
+            &self.release_url,
+            MAX_MEDIUM_STRING_LEN,
+            "release_info.release_url",
+        )?;
+        check_vec_len(&self.assets, MAX_RELEASE_ASSETS, "release_info.assets")?;
+        for asset in &self.assets {
+            asset.wire_validate()?;
+        }
+        Ok(())
+    }
+}
+
 impl WireValidate for ExecuteUpdatePayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(
@@ -360,6 +396,9 @@ impl WireValidate for ExecuteUpdatePayload {
         self.execute_update_plugin.wire_validate()?;
         if let Some(ref detect) = self.detect_version_plugin {
             detect.wire_validate()?;
+        }
+        if let Some(ref ri) = self.release_info {
+            ri.wire_validate()?;
         }
         for hook in &self.pre_update_hooks {
             hook.wire_validate()?;
@@ -669,6 +708,78 @@ mod tests {
     }
 
     #[test]
+    fn release_asset_validates() {
+        let asset = ReleaseAsset {
+            name: "app.tar.gz".to_string(),
+            download_url: "https://example.com/app".to_string(),
+            size: None,
+            content_type: None,
+            sha256_digest: Some("a".repeat(64)),
+        };
+        assert!(asset.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn release_asset_invalid_digest_wrong_length() {
+        let asset = ReleaseAsset {
+            name: "app.tar.gz".to_string(),
+            download_url: "https://example.com/app".to_string(),
+            size: None,
+            content_type: None,
+            sha256_digest: Some("abc".to_string()),
+        };
+        let err = asset.wire_validate().unwrap_err();
+        assert_eq!(err.field, "asset.sha256_digest");
+    }
+
+    #[test]
+    fn release_asset_invalid_digest_non_hex() {
+        let asset = ReleaseAsset {
+            name: "app.tar.gz".to_string(),
+            download_url: "https://example.com/app".to_string(),
+            size: None,
+            content_type: None,
+            sha256_digest: Some("z".repeat(64)),
+        };
+        let err = asset.wire_validate().unwrap_err();
+        assert_eq!(err.field, "asset.sha256_digest");
+    }
+
+    #[test]
+    fn release_info_validates() {
+        let info = ReleaseInfo {
+            tag: "v1.0.0".to_string(),
+            release_url: "https://example.com/release".to_string(),
+            assets: vec![],
+            attestation_status: None,
+            require_attestation: false,
+        };
+        assert!(info.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn release_info_too_many_assets() {
+        let assets: Vec<ReleaseAsset> = (0..MAX_RELEASE_ASSETS + 1)
+            .map(|i| ReleaseAsset {
+                name: format!("asset-{i}"),
+                download_url: format!("https://example.com/{i}"),
+                size: None,
+                content_type: None,
+                sha256_digest: None,
+            })
+            .collect();
+        let info = ReleaseInfo {
+            tag: "v1.0.0".to_string(),
+            release_url: "https://example.com".to_string(),
+            assets,
+            attestation_status: None,
+            require_attestation: false,
+        };
+        let err = info.wire_validate().unwrap_err();
+        assert_eq!(err.field, "release_info.assets");
+    }
+
+    #[test]
     fn execute_update_validates() {
         let payload = ExecuteUpdatePayload {
             host_machine_id: "test".to_string(),
@@ -684,7 +795,13 @@ mod tests {
             },
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
-            release_info: None,
+            release_info: Some(ReleaseInfo {
+                tag: "v1.0".to_string(),
+                release_url: "https://example.com".to_string(),
+                assets: vec![],
+                attestation_status: None,
+                require_attestation: false,
+            }),
             timeout_seconds: 60,
         };
         assert!(payload.wire_validate().is_ok());
