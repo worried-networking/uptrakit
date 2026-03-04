@@ -75,6 +75,16 @@ With the JWT signing key, the attacker can:
   loaded from `UPTRAKIT_MASTER_KEY` env var (without `--master-key-file`), a `WARN`-
   level log message is emitted at startup, nudging operators toward the more secure
   file-based delivery method.
+- **Intermediate hex string zeroization.** *(Implemented)* The
+  `read_master_key_hex()` helper returns `Zeroizing<String>` so that the raw hex
+  representation of the master key is scrubbed from heap memory on drop. This closes
+  a gap where the hex string could survive on the heap after an error path between
+  reading the key and wrapping it in `SecretString`.
+- **Broad trusted-proxy CIDR warning.** *(Implemented)* On startup, if any
+  `--trusted-proxy` CIDR has an overly broad prefix length (IPv4 /8 or less, IPv6
+  /32 or less, or /0 for either family), a `WARN`-level log message is emitted.
+  Overly broad CIDRs undermine IP-based rate limiting and audit logging by trusting
+  a large portion of the internet to set forwarded headers.
 
 ## Residual risk
 

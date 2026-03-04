@@ -92,7 +92,12 @@ pub(crate) fn init_master_key(
             let key_bytes = parse_master_key_hex(&key_hex)?;
             uptrakit_crypto::init_master_key(zeroize::Zeroizing::new(key_bytes)).context_to()?;
             tracing::info!("master encryption key initialized");
-            Ok(Some(uptrakit_internal_wire::SecretString::new(key_hex)))
+            // Transfer the hex string into SecretString which also zeroizes on drop.
+            // We clone via Deref<Target=String> so the Zeroizing wrapper scrubs its copy.
+            let hex_for_secret = (*key_hex).clone();
+            Ok(Some(uptrakit_internal_wire::SecretString::new(
+                hex_for_secret,
+            )))
         }
         None => {
             if args.allow_plaintext_secrets {
@@ -544,6 +549,9 @@ pub(crate) async fn reconcile_all_settings(
     .await
     .context(AppError::Settings)?;
     settings.set_trusted_proxies(trusted_proxies.clone()).await;
+    for cidr in &trusted_proxies {
+        warn_broad_trusted_proxy(cidr);
+    }
 
     let real_ip_header = crate::reconcile::reconcile_setting(crate::reconcile::ReconcileParams {
         db,
@@ -1350,7 +1358,7 @@ pub(crate) async fn init_jwt(
 pub(crate) fn read_master_key_hex(
     master_key_file: Option<&std::path::Path>,
     env_val: Option<&str>,
-) -> crate::Result<Option<String>> {
+) -> crate::Result<Option<zeroize::Zeroizing<String>>> {
     if let Some(key_file) = master_key_file {
         let contents = std::fs::read_to_string(key_file).map_err(|e| {
             report!(AppError::Config(format!(
@@ -1358,11 +1366,11 @@ pub(crate) fn read_master_key_hex(
                 key_file.display()
             )))
         })?;
-        return Ok(Some(contents.trim().to_string()));
+        return Ok(Some(zeroize::Zeroizing::new(contents.trim().to_string())));
     }
 
     if let Some(env_val) = env_val {
-        return Ok(Some(env_val.trim().to_string()));
+        return Ok(Some(zeroize::Zeroizing::new(env_val.trim().to_string())));
     }
 
     Ok(None)
@@ -1413,6 +1421,38 @@ fn resolve_static_dir(explicit: Option<PathBuf>) -> crate::Result<Option<PathBuf
     }
 
     Ok(None)
+}
+
+/// Check whether a trusted proxy CIDR is overly broad and emit a warning.
+///
+/// Broad CIDRs in the trusted-proxy list effectively trust a large portion of the
+/// internet to set the `X-Forwarded-For` header, which undermines IP-based rate
+/// limiting and audit logging.
+fn warn_broad_trusted_proxy(cidr: &IpNet) {
+    let prefix = cidr.prefix_len();
+    if prefix == 0 {
+        tracing::warn!(
+            cidr = %cidr,
+            "trusted proxy CIDR has prefix length /0 — this trusts ALL IP addresses to set \
+             forwarded headers, effectively disabling IP-based security controls"
+        );
+    } else if is_broad_trusted_proxy(cidr) {
+        tracing::warn!(
+            cidr = %cidr,
+            "trusted proxy CIDR is very broad — consider narrowing to specific proxy subnets"
+        );
+    }
+}
+
+/// Returns `true` when the CIDR is broad enough to warrant a security warning.
+///
+/// Thresholds: IPv4 /8 or less, IPv6 /32 or less, or /0 for either family.
+fn is_broad_trusted_proxy(cidr: &IpNet) -> bool {
+    let prefix = cidr.prefix_len();
+    match cidr {
+        IpNet::V4(_) => prefix <= 8,
+        IpNet::V6(_) => prefix <= 32,
+    }
 }
 
 /// Wrapper for `&[T]` that implements Display for logging in reconciliation.
@@ -1551,7 +1591,7 @@ mod tests {
     #[test]
     fn env_key_is_trimmed() {
         let result = read_master_key_hex(None, Some("  deadbeef  "));
-        assert!(matches!(result, Ok(Some(ref value)) if value == "deadbeef"));
+        assert!(matches!(result, Ok(Some(ref value)) if value.as_str() == "deadbeef"));
     }
 
     #[test]
@@ -1564,7 +1604,13 @@ mod tests {
         };
         assert!(file.write_all(b"  0123  ").is_ok());
         let result = read_master_key_hex(Some(file.path()), None);
-        assert!(matches!(result, Ok(Some(ref value)) if value == "0123"));
+        assert!(matches!(result, Ok(Some(ref value)) if value.as_str() == "0123"));
+    }
+
+    #[test]
+    fn read_master_key_hex_returns_zeroizing() {
+        let result = read_master_key_hex(None, Some("abcdef")).unwrap().unwrap();
+        assert_eq!(result.as_str(), "abcdef");
     }
 
     #[test]
@@ -1584,5 +1630,49 @@ mod tests {
         let key_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let result = parse_master_key_hex(key_hex);
         assert!(matches!(result, Ok(bytes) if bytes.len() == 32));
+    }
+
+    // ── Broad trusted proxy detection ────────────────────────────────
+
+    #[test]
+    fn broad_proxy_ipv4_slash_zero() {
+        let cidr: ipnet::IpNet = "0.0.0.0/0".parse().unwrap();
+        assert!(super::is_broad_trusted_proxy(&cidr));
+    }
+
+    #[test]
+    fn broad_proxy_ipv6_slash_zero() {
+        let cidr: ipnet::IpNet = "::/0".parse().unwrap();
+        assert!(super::is_broad_trusted_proxy(&cidr));
+    }
+
+    #[test]
+    fn broad_proxy_ipv4_slash_eight() {
+        let cidr: ipnet::IpNet = "10.0.0.0/8".parse().unwrap();
+        assert!(super::is_broad_trusted_proxy(&cidr));
+    }
+
+    #[test]
+    fn narrow_proxy_ipv4_slash_sixteen() {
+        let cidr: ipnet::IpNet = "192.168.0.0/16".parse().unwrap();
+        assert!(!super::is_broad_trusted_proxy(&cidr));
+    }
+
+    #[test]
+    fn narrow_proxy_ipv4_slash_thirtytwo() {
+        let cidr: ipnet::IpNet = "127.0.0.1/32".parse().unwrap();
+        assert!(!super::is_broad_trusted_proxy(&cidr));
+    }
+
+    #[test]
+    fn broad_proxy_ipv6_slash_thirtytwo() {
+        let cidr: ipnet::IpNet = "2001:db8::/32".parse().unwrap();
+        assert!(super::is_broad_trusted_proxy(&cidr));
+    }
+
+    #[test]
+    fn narrow_proxy_ipv6_slash_fortyeight() {
+        let cidr: ipnet::IpNet = "2001:db8:abcd::/48".parse().unwrap();
+        assert!(!super::is_broad_trusted_proxy(&cidr));
     }
 }
