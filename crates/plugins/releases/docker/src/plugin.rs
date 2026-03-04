@@ -171,11 +171,22 @@ impl Plugin for DockerPlugin {
         // Ping the Docker daemon directly rather than checking for the CLI binary.
         // This validates that the daemon is actually running and reachable (including
         // over SSH tunnels for remote hosts), not just that the docker binary exists.
-        match self.docker_client.ping().await {
-            Ok(()) => Ok(HostCompatibility::Compatible),
-            Err(e) => Ok(HostCompatibility::Incompatible(format!(
+        //
+        // Apply a short timeout so that a frozen or unresponsive daemon (e.g.
+        // Docker Desktop restarting) does not block host-compatibility probing
+        // indefinitely. The bollard `connect_with_defaults()` path carries no
+        // explicit request timeout, so without this guard a single slow daemon
+        // stalls the entire sudoers-generation step for the duration of the OS
+        // socket/HTTP timeout (potentially minutes).
+        const COMPAT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+        match tokio::time::timeout(COMPAT_PROBE_TIMEOUT, self.docker_client.ping()).await {
+            Ok(Ok(())) => Ok(HostCompatibility::Compatible),
+            Ok(Err(e)) => Ok(HostCompatibility::Incompatible(format!(
                 "Docker daemon not accessible: {e}"
             ))),
+            Err(_) => Ok(HostCompatibility::Incompatible(
+                "Docker daemon ping timed out".to_string(),
+            )),
         }
     }
 
@@ -637,6 +648,32 @@ mod tests {
                 assert!(
                     msg.contains("Docker daemon"),
                     "reason should mention Docker daemon: {msg}"
+                );
+            }
+            HostCompatibility::Compatible => panic!("expected Incompatible"),
+            _ => panic!("unexpected HostCompatibility variant"),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn detect_host_compatibility_incompatible_when_daemon_times_out() {
+        let mock = Arc::new(MockDockerClient {
+            ping_should_hang: true,
+            ..Default::default()
+        });
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
+        // Spawn so we can advance virtual time while the probe is in flight.
+        let check = tokio::spawn(async move { plugin.detect_host_compatibility().await });
+        tokio::task::yield_now().await;
+        // Advance past the 5-second COMPAT_PROBE_TIMEOUT.
+        tokio::time::advance(std::time::Duration::from_secs(10)).await;
+        let result = check.await.expect("join").expect("ok");
+        match result {
+            HostCompatibility::Incompatible(msg) => {
+                assert!(
+                    msg.contains("timed out"),
+                    "reason should mention timeout: {msg}"
                 );
             }
             HostCompatibility::Compatible => panic!("expected Incompatible"),

@@ -545,6 +545,9 @@ pub(crate) struct MockDockerClient {
     pub pull_output: String,
     pub pull_should_fail: bool,
     pub ping_should_fail: bool,
+    /// When `true`, `ping()` sleeps indefinitely so that timeout tests can
+    /// advance virtual time and verify that the caller's timeout fires.
+    pub ping_should_hang: bool,
     pub inspect_result: Option<String>, // Some(digest) or None
     pub containers: Vec<LocalContainerInfo>,
     pub containers_for_image: Vec<ContainerForImage>,
@@ -555,6 +558,11 @@ pub(crate) struct MockDockerClient {
 #[async_trait]
 impl DockerClient for MockDockerClient {
     async fn ping(&self) -> Result<()> {
+        if self.ping_should_hang {
+            // Sleep "forever" under virtual time; the caller's timeout cancels
+            // this future before Duration::MAX is ever reached.
+            tokio::time::sleep(std::time::Duration::MAX).await;
+        }
         if self.ping_should_fail {
             bail!(DockerError::DaemonConnection(
                 "mock ping failure".to_string()

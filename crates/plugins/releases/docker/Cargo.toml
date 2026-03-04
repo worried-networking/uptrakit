@@ -27,10 +27,10 @@ rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["net", "io-util", "rt", "fs"], optional = true }
+tokio = { workspace = true, features = ["net", "io-util", "rt", "fs", "time"], optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "time", "test-util"] }
 uptrakit-command = { workspace = true }
 
 [lints]
