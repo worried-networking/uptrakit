@@ -1,0 +1,25 @@
+[package]
+name = "uptrakit-plugin-package-manager-mas"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true }
+rootcause = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+uptrakit-command = { workspace = true }
+
+[lints]
+workspace = true

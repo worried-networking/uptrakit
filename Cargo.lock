@@ -6882,6 +6882,7 @@ dependencies = [
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-package-manager-apt",
  "uptrakit-plugin-package-manager-homebrew",
+ "uptrakit-plugin-package-manager-mas",
  "uptrakit-plugin-package-manager-npm",
  "uptrakit-plugin-releases-docker",
  "uptrakit-plugin-releases-forgejo",
@@ -6909,6 +6910,22 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-homebrew"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-command",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-macros",
+]
+
+[[package]]
+name = "uptrakit-plugin-package-manager-mas"
 version = "0.0.1"
 dependencies = [
  "async-trait",

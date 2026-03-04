@@ -10,6 +10,7 @@ use uptrakit_plugin_generic_shell::{ShellConfig, ShellPlugin};
 use uptrakit_plugin_infrastructure_core::{Plugin, PluginType, SecretMasking, SudoCommandEntry};
 use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
 use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
+use uptrakit_plugin_package_manager_mas::{MasConfig, MasPlugin};
 use uptrakit_plugin_package_manager_npm::{NpmConfig, NpmPlugin};
 use uptrakit_plugin_releases_docker::{DockerConfig, DockerPlugin};
 use uptrakit_plugin_releases_forgejo::{ForgejoConfig, ForgejoPlugin};
@@ -423,6 +424,7 @@ register_plugins! {
     PackageManagerHomebrew        => { config: HomebrewConfig,                 plugin: HomebrewPlugin },
     PackageManagerApt             => { config: AptConfig,                      plugin: AptPlugin },
     PackageManagerNpm             => { config: NpmConfig,                      plugin: NpmPlugin },
+    PackageManagerMas             => { config: MasConfig,                      plugin: MasPlugin },
     GenericShell                  => { config: ShellConfig,                    plugin: ShellPlugin },
 }
 
