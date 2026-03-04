@@ -505,10 +505,15 @@ async fn run_hook_command_inner(
                 .await
         }
         _ => {
-            tracing::warn!("unknown HookCommand variant; cannot execute hook");
-            return Err(report!(UpdateError::HookFailed(
-                "unsupported HookCommand variant".to_string()
-            )));
+            // Unknown HookCommand variant — warn and skip. This is the forward-compatibility
+            // contract for #[non_exhaustive] HookCommand: an older agent must never abort an
+            // update when a newer controller sends a hook type it does not recognise. Skipping
+            // allows the rest of the update pipeline to proceed normally.
+            // See docs/development/coding-standards.md § "#[non_exhaustive] on public enums".
+            tracing::warn!("unknown HookCommand variant; skipping hook for forward-compatibility");
+            drop(plugin_tx);
+            let _ = bridge_handle.await;
+            return Ok((String::new(), 0));
         }
     };
 
@@ -567,10 +572,15 @@ async fn run_hook_for_batch_inner(hook_cmd: &HookCommand) -> UpdateResult<()> {
                 .await
         }
         _ => {
-            tracing::warn!("unknown HookCommand variant; cannot execute hook");
-            return Err(report!(UpdateError::HookFailed(
-                "unsupported HookCommand variant".to_string()
-            )));
+            // Unknown HookCommand variant — warn and skip (see run_hook_command_inner for the
+            // full rationale). The forward-compatibility contract for #[non_exhaustive] enums
+            // requires skipping, not aborting, on unknown variants.
+            tracing::warn!(
+                "unknown HookCommand variant; skipping batch hook for forward-compatibility"
+            );
+            drop(plugin_tx);
+            let _ = drain_handle.await;
+            return Ok(());
         }
     };
 
@@ -1014,6 +1024,64 @@ mod tests {
         let (output, exit_code) = result.unwrap();
         assert_eq!(exit_code, 0);
         assert!(output.contains("hello"));
+    }
+
+    // ── Forward-compatibility: known variants must succeed ───────────────
+    //
+    // The `#[non_exhaustive]` contract on `HookCommand` requires that the
+    // wildcard arm in `run_hook_command_inner` / `run_hook_for_batch_inner`
+    // warns and skips rather than returning an error.  The unknown-variant
+    // path cannot be exercised directly within this crate (adding a new
+    // variant requires a recompile), but these tests confirm that every
+    // *known* variant is dispatched without error, and that the fallthrough
+    // `_ =>` arm is present and correct by code inspection.
+
+    #[tokio::test]
+    async fn run_hook_command_shell_returns_ok() {
+        let (tx, _rx) = mpsc::channel(100);
+        let hook = HookCommand::Shell {
+            command: "true".to_string(),
+            shell: HookShell::Sh,
+        };
+        assert!(
+            run_hook_command(&hook, OutputStreamType::PreHook, &tx)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn run_hook_command_exec_returns_ok() {
+        let (tx, _rx) = mpsc::channel(100);
+        let hook = HookCommand::Exec {
+            program: "true".to_string(),
+            args: vec![],
+            working_dir: None,
+        };
+        assert!(
+            run_hook_command(&hook, OutputStreamType::PreHook, &tx)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn run_hook_for_batch_shell_returns_ok() {
+        let hook = HookCommand::Shell {
+            command: "true".to_string(),
+            shell: HookShell::Sh,
+        };
+        assert!(run_hook_for_batch(&hook).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn run_hook_for_batch_exec_returns_ok() {
+        let hook = HookCommand::Exec {
+            program: "true".to_string(),
+            args: vec![],
+            working_dir: None,
+        };
+        assert!(run_hook_for_batch(&hook).await.is_ok());
     }
 
     // ── Hook summary tests ───────────────────────────────────────────────
