@@ -58,6 +58,19 @@ export function parseUrlPage(url: URL): number {
 }
 
 /**
+ * Formats a version string for display.
+ * SHA-256 digests (sha256:...) are shortened to "sha256:<first 12 hex chars>…".
+ * Returns the fallback string for null/undefined values.
+ */
+export function formatVersion(version: string | null | undefined, fallback = '—'): string {
+	if (!version) return fallback;
+	if (version.startsWith('sha256:')) {
+		return `sha256:${version.slice(7, 19)}\u2026`;
+	}
+	return version;
+}
+
+/**
  * Copies text to the clipboard. Returns true on success, false on failure.
  */
 export async function copyToClipboard(text: string): Promise<boolean> {

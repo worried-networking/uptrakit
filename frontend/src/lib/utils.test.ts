@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { copyToClipboard, formatDate, isValidLogoUrl, parseUrlPage, parseUrlParam, safeRedirect } from './utils';
+import {
+	copyToClipboard,
+	formatDate,
+	formatVersion,
+	isValidLogoUrl,
+	parseUrlPage,
+	parseUrlParam,
+	safeRedirect
+} from './utils';
 
 // ── isValidLogoUrl ────────────────────────────────────────────────────────────
 
@@ -155,6 +163,38 @@ describe('parseUrlPage', () => {
 	it('returns 1 for a float string', () => {
 		const url = new URL('http://localhost/?page=2.5');
 		expect(parseUrlPage(url)).toBe(1);
+	});
+});
+
+// ── formatVersion ─────────────────────────────────────────────────────────────
+
+const SHA256_FULL = 'sha256:4d5a6206d4d5aaab00ba55dd8d519619dfdaecd4be3cf737799d9e709d91374a';
+
+describe('formatVersion', () => {
+	it('truncates a sha256 digest to short form', () => {
+		expect(formatVersion(SHA256_FULL)).toBe('sha256:4d5a6206d4d5\u2026');
+	});
+
+	it('returns a short semver unchanged', () => {
+		expect(formatVersion('1.2.3')).toBe('1.2.3');
+	});
+
+	it('returns em-dash for null', () => {
+		expect(formatVersion(null)).toBe('\u2014');
+	});
+
+	it('returns em-dash for undefined', () => {
+		expect(formatVersion(undefined)).toBe('\u2014');
+	});
+
+	it('accepts a custom fallback', () => {
+		expect(formatVersion(null, '?')).toBe('?');
+	});
+
+	it('truncates a sha256 string that is exactly 19 chars after prefix', () => {
+		// "sha256:" (7) + exactly 12 hex chars = boundary: no truncation needed
+		const short = 'sha256:123456789012';
+		expect(formatVersion(short)).toBe('sha256:123456789012\u2026');
 	});
 });
 
