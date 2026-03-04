@@ -18,7 +18,7 @@ use sea_orm::{
     Set,
 };
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{ControllerMessage, PluginAssignment, ReleaseInfo};
+use uptrakit_internal_wire::{AttestationStatus, ControllerMessage, PluginAssignment, ReleaseInfo};
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
     service_host, software_item, update_history,
@@ -113,6 +113,11 @@ pub struct ValidatedUpdateTarget {
     pub agent: service::Model,
     pub execute_update_data: (host_software_item_plugin::Model, plugin_config::Model),
     pub detect_version_data: Option<(host_software_item_plugin::Model, plugin_config::Model)>,
+    /// The merged config for the `fetch_releases` role plugin, if assigned.
+    ///
+    /// Used to extract `require_attestation` at dispatch time without a
+    /// hard dependency on any specific plugin crate.
+    pub fetch_releases_config: Option<serde_json::Value>,
 }
 
 /// Parameters for [`create_update_history_record`].
@@ -276,6 +281,14 @@ pub async fn validate_update_preconditions(
 
     let detect_version_data = load_role_plugin(db, host_id, item_id, "detect_version").await?;
 
+    // Load fetch_releases plugin config (optional). Used at dispatch time to
+    // extract `require_attestation` from the GitHub plugin config.
+    let fetch_releases_config = load_role_plugin(db, host_id, item_id, "fetch_releases")
+        .await?
+        .map(|(assignment, config)| {
+            uptrakit_update_hooks::merge_config(&config.config, assignment.config_override.as_ref())
+        });
+
     Ok(ValidatedUpdateTarget {
         item,
         host: host_record,
@@ -283,6 +296,7 @@ pub async fn validate_update_preconditions(
         agent,
         execute_update_data,
         detect_version_data,
+        fetch_releases_config,
     })
 }
 
@@ -353,6 +367,12 @@ pub async fn dispatch_update_to_agent(
         target.execute_update_data.0.config_override.as_ref(),
     );
 
+    let enriched_release_info = enrich_release_info_with_attestation(
+        params.release_info,
+        target.hsi_link.latest_release_metadata.as_ref(),
+        target.fetch_releases_config.as_ref(),
+    );
+
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
         host_machine_id: target.host.machine_id.clone(),
         update_history_id: params.update_history_id,
@@ -363,7 +383,7 @@ pub async fn dispatch_update_to_agent(
         execute_update_plugin,
         pre_update_hooks: resolved_hooks.pre_update_hooks,
         post_update_hooks: resolved_hooks.post_update_hooks,
-        release_info: params.release_info,
+        release_info: enriched_release_info,
         timeout_seconds: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT_SECS,
     };
 
@@ -443,6 +463,70 @@ pub async fn trigger_update_for_host(
         update_history_id,
         agent_connected,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Attestation enrichment
+// ---------------------------------------------------------------------------
+
+/// Minimal projection of `latest_release_metadata` used to extract attestation
+/// fields without depending on the full `UpstreamRelease` type.
+#[derive(serde::Deserialize)]
+struct MetadataAttestation {
+    #[serde(default)]
+    attestation_status: Option<AttestationStatus>,
+    #[serde(default)]
+    assets: Vec<MetadataAsset>,
+}
+
+#[derive(serde::Deserialize)]
+struct MetadataAsset {
+    name: String,
+    #[serde(default)]
+    sha256_digest: Option<String>,
+}
+
+/// Enrich a `ReleaseInfo` with attestation data sourced from the DB.
+///
+/// - `attestation_status` and per-asset `sha256_digest` are read from
+///   `latest_release_metadata` (the JSON blob stored after `fetch_releases`).
+/// - `require_attestation` is extracted from the `fetch_releases` plugin
+///   config as a generic `{require_attestation: bool}` field so that this
+///   crate does not need to depend on any specific plugin crate.
+///
+/// If `release_info` is `None`, returns `None` unchanged.
+fn enrich_release_info_with_attestation(
+    release_info: Option<ReleaseInfo>,
+    metadata: Option<&serde_json::Value>,
+    fetch_config: Option<&serde_json::Value>,
+) -> Option<ReleaseInfo> {
+    let mut ri = release_info?;
+
+    // Apply attestation_status and sha256_digest from the last fetch_releases run.
+    if let Some(meta) = metadata
+        && let Ok(meta_ri) = serde_json::from_value::<MetadataAttestation>(meta.clone())
+    {
+        ri.attestation_status = meta_ri.attestation_status;
+        for asset in &mut ri.assets {
+            if let Some(ma) = meta_ri.assets.iter().find(|a| a.name == asset.name) {
+                asset.sha256_digest = ma.sha256_digest.clone();
+            }
+        }
+    }
+
+    // Apply require_attestation from the fetch_releases plugin config.
+    if let Some(config) = fetch_config {
+        #[derive(serde::Deserialize, Default)]
+        struct RequireAttestation {
+            #[serde(default)]
+            require_attestation: bool,
+        }
+        if let Ok(parsed) = serde_json::from_value::<RequireAttestation>(config.clone()) {
+            ri.require_attestation = parsed.require_attestation;
+        }
+    }
+
+    Some(ri)
 }
 
 // ---------------------------------------------------------------------------
@@ -836,5 +920,82 @@ mod tests {
             result.unwrap_err().current_context(),
             TriggerUpdateError::PluginConfigNotFound
         ));
+    }
+
+    // ── enrich_release_info_with_attestation ────────────────────────────
+
+    fn make_release_info() -> ReleaseInfo {
+        ReleaseInfo {
+            tag: "v1.0.0".to_string(),
+            release_url: "https://github.com/owner/repo/releases/tag/v1.0.0".to_string(),
+            assets: vec![uptrakit_internal_wire::ReleaseAsset {
+                name: "app-amd64.tar.gz".to_string(),
+                download_url:
+                    "https://github.com/owner/repo/releases/download/v1.0.0/app-amd64.tar.gz"
+                        .to_string(),
+                size: Some(1024),
+                content_type: None,
+                sha256_digest: None,
+            }],
+            attestation_status: None,
+            require_attestation: false,
+        }
+    }
+
+    #[test]
+    fn enrich_release_info_none_returns_none() {
+        let result = enrich_release_info_with_attestation(None, None, None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn enrich_release_info_no_metadata_leaves_unchanged() {
+        let ri = make_release_info();
+        let result = enrich_release_info_with_attestation(Some(ri), None, None).unwrap();
+        assert!(result.attestation_status.is_none());
+        assert!(!result.require_attestation);
+        assert!(result.assets[0].sha256_digest.is_none());
+    }
+
+    #[test]
+    fn enrich_release_info_sets_attestation_status_and_digest() {
+        let ri = make_release_info();
+        let meta = serde_json::json!({
+            "attestation_status": "Verified",
+            "assets": [
+                { "name": "app-amd64.tar.gz", "sha256_digest": "a".repeat(64) }
+            ]
+        });
+        let result = enrich_release_info_with_attestation(Some(ri), Some(&meta), None).unwrap();
+        assert_eq!(
+            result.attestation_status,
+            Some(uptrakit_internal_wire::AttestationStatus::Verified)
+        );
+        assert_eq!(result.assets[0].sha256_digest, Some("a".repeat(64)));
+    }
+
+    #[test]
+    fn enrich_release_info_sets_require_attestation_from_config() {
+        let ri = make_release_info();
+        let config = serde_json::json!({ "require_attestation": true });
+        let result = enrich_release_info_with_attestation(Some(ri), None, Some(&config)).unwrap();
+        assert!(result.require_attestation);
+    }
+
+    #[test]
+    fn enrich_release_info_asset_name_mismatch_leaves_digest_none() {
+        let ri = make_release_info();
+        let meta = serde_json::json!({
+            "attestation_status": "NotFound",
+            "assets": [
+                { "name": "other-asset.tar.gz", "sha256_digest": "b".repeat(64) }
+            ]
+        });
+        let result = enrich_release_info_with_attestation(Some(ri), Some(&meta), None).unwrap();
+        assert_eq!(
+            result.attestation_status,
+            Some(uptrakit_internal_wire::AttestationStatus::NotFound)
+        );
+        assert!(result.assets[0].sha256_digest.is_none());
     }
 }
