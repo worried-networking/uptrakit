@@ -63,8 +63,22 @@ impl MigratorTrait for Migrator {
 }
 
 /// Run all pending migrations.
+///
+/// All migrations are executed inside a single database transaction so that
+/// every DDL statement runs on the same physical connection. Without this,
+/// a connection pool may dispatch successive DDL calls to different SQLite
+/// connections, where schema changes made on one connection (e.g. `DROP
+/// TABLE`) are not yet visible to the next connection (e.g. `ALTER TABLE …
+/// RENAME TO`), causing spurious *"table or index already exists"* errors on
+/// startup.
+///
+/// For PostgreSQL, `sea-orm-migration` wraps the run in a transaction
+/// internally; our outer `begin`/`commit` becomes a harmless extra savepoint.
 pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
-    Migrator::up(db, None).await
+    use sea_orm::TransactionTrait;
+    let txn = db.begin().await?;
+    Migrator::up(&txn, None).await?;
+    txn.commit().await
 }
 
 #[cfg(test)]
@@ -553,6 +567,38 @@ mod tests {
             .await
             .expect("permission entity query must succeed after datetime repair")
             .expect("injected permission must still exist after repair");
+    }
+
+    /// Regression test: `run_migrations` must succeed against a file-based
+    /// SQLite database even when the connection pool has multiple connections.
+    ///
+    /// The previous implementation called `Migrator::up(db, None)` directly,
+    /// which allowed `sea-orm-migration` to dispatch successive DDL statements
+    /// to different physical connections in the pool. On SQLite this caused
+    /// spurious *"table or index already exists"* errors because schema changes
+    /// made on one connection were not immediately visible to another connection
+    /// through the pool's stale schema cache.
+    ///
+    /// The fix wraps `Migrator::up` in a transaction so all DDL statements
+    /// share a single connection. This test pins the bug by using a real file
+    /// (not `:memory:`) and a pool of 10 connections (the production default).
+    #[tokio::test]
+    async fn run_migrations_file_sqlite_pool() {
+        let dir = tempfile::tempdir().expect("tmp dir");
+        let db_path = dir.path().join("test.db");
+        let url = format!("sqlite://{}?mode=rwc", db_path.display());
+
+        let mut opt = ConnectOptions::new(url);
+        opt.max_connections(10).min_connections(1);
+        let db = Database::connect(opt).await.unwrap();
+
+        run_migrations(&db)
+            .await
+            .expect("run_migrations must succeed on a file-based SQLite pool");
+
+        // Verify the schema is fully usable after all migrations.
+        host_package::Entity::find().count(&db).await.unwrap();
+        assert_has_update_column_exists(&db).await;
     }
 
     /// The user role must NOT have manage_commands.
