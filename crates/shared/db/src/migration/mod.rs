@@ -26,6 +26,7 @@ mod m20260310_000001_data_encryption_keys;
 mod m20260311_000001_update_history_status_index;
 mod m20260311_000002_audit_log_permissions;
 mod m20260312_000001_system_enrollment_tokens;
+mod m20260312_000002_discover_host_packages_task;
 
 pub struct Migrator;
 
@@ -58,6 +59,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260311_000001_update_history_status_index::Migration),
             Box::new(m20260311_000002_audit_log_permissions::Migration),
             Box::new(m20260312_000001_system_enrollment_tokens::Migration),
+            Box::new(m20260312_000002_discover_host_packages_task::Migration),
         ]
     }
 }
@@ -276,6 +278,25 @@ mod tests {
         assert!(
             detect_version_count >= 1,
             "expected at least one detect_version task after migration, found {detect_version_count}"
+        );
+
+        // Verify discover_host_packages_task migration: task row exists.
+        let dhp_stmt = Query::select()
+            .expr(Func::count(Expr::col(Alias::new("id"))))
+            .from(Alias::new("scheduled_tasks"))
+            .and_where(Expr::col(Alias::new("task_type")).eq("discover_host_packages"))
+            .to_owned();
+        let dhp_rows = db.query_all(&dhp_stmt).await.unwrap();
+        let dhp_count: i64 = {
+            use sea_orm::TryGetable;
+            dhp_rows
+                .first()
+                .map(|r| i64::try_get_by_index(r, 0).unwrap_or(0))
+                .unwrap_or(0)
+        };
+        assert!(
+            dhp_count >= 1,
+            "expected at least one discover_host_packages task after migration, found {dhp_count}"
         );
 
         // Verify manage_commands permission was created and assigned.
