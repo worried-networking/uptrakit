@@ -37,10 +37,28 @@ pub struct GitHubConfig {
     /// An empty list means all assets are included.
     #[serde(default)]
     pub asset_patterns: Vec<String>,
+    /// Check GitHub Actions attestations for the latest release.
+    ///
+    /// Downloads the release checksums file and queries the GitHub Attestations
+    /// API. Results are stored in `UpstreamRelease.attestation_status` and
+    /// `ReleaseAsset.sha256_digest`. Default: `true`.
+    #[serde(default = "default_verify_attestation")]
+    pub verify_attestation: bool,
+    /// Abort the update on the agent if no attestation is found.
+    ///
+    /// When `true`, `ExecuteUpdatePayload.release_info.require_attestation` is
+    /// set to `true`, and the agent refuses to install a release with
+    /// `attestation_status = NotFound`. Default: `false` (warn only).
+    #[serde(default)]
+    pub require_attestation: bool,
 }
 
 fn default_tag_strip_prefix() -> String {
     "v".to_string()
+}
+
+fn default_verify_attestation() -> bool {
+    true
 }
 
 impl Default for GitHubConfig {
@@ -51,6 +69,8 @@ impl Default for GitHubConfig {
             include_prereleases: false,
             tag_strip_prefix: default_tag_strip_prefix(),
             asset_patterns: vec![],
+            verify_attestation: default_verify_attestation(),
+            require_attestation: false,
         }
     }
 }
@@ -143,6 +163,14 @@ mod tests {
         assert!(!config.include_prereleases);
         assert_eq!(config.tag_strip_prefix, "v");
         assert!(config.asset_patterns.is_empty());
+        assert!(
+            config.verify_attestation,
+            "verify_attestation should default to true"
+        );
+        assert!(
+            !config.require_attestation,
+            "require_attestation should default to false"
+        );
     }
 
     #[test]
@@ -204,6 +232,8 @@ mod tests {
             include_prereleases: true,
             tag_strip_prefix: "release-".to_string(),
             asset_patterns: vec![r".*\.deb$".to_string()],
+            verify_attestation: false,
+            require_attestation: true,
         };
         let json = serde_json::to_string(&config).expect("serialize");
         let deserialized: GitHubConfig = serde_json::from_str(&json).expect("deserialize");
@@ -212,6 +242,8 @@ mod tests {
         assert_eq!(deserialized.include_prereleases, config.include_prereleases);
         assert_eq!(deserialized.tag_strip_prefix, config.tag_strip_prefix);
         assert_eq!(deserialized.asset_patterns, config.asset_patterns);
+        assert_eq!(deserialized.verify_attestation, config.verify_attestation);
+        assert_eq!(deserialized.require_attestation, config.require_attestation);
     }
 
     #[test]

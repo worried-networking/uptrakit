@@ -29,3 +29,14 @@ pub struct GitHubApiError {
     pub message: String,
     pub documentation_url: Option<String>,
 }
+
+/// GitHub Attestations API response.
+///
+/// Returned by `GET /repos/{owner}/{repo}/attestations/sha256:{digest}`.
+/// An empty `attestations` array means no attestation was found.
+/// Individual bundle objects are not inspected — only the array length matters.
+#[derive(Debug, Deserialize)]
+pub(crate) struct AttestationsApiResponse {
+    #[serde(default)]
+    pub attestations: Vec<serde_json::Value>,
+}

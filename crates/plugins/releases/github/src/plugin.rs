@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use regex::Regex;
 use rootcause::prelude::*;
@@ -5,10 +7,11 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use uptrakit_plugin_infrastructure_core::{
-    Plugin, PluginCapability, PluginError, PluginType, ReleaseAsset, UpstreamRelease, Version,
+    AttestationStatus, Plugin, PluginCapability, PluginError, PluginType, ReleaseAsset,
+    UpstreamRelease, Version,
 };
 
-use crate::api_types::{GitHubApiError, GitHubRelease};
+use crate::api_types::{AttestationsApiResponse, GitHubApiError, GitHubAsset, GitHubRelease};
 use crate::config::GitHubConfig;
 use crate::error::{GitHubError, Result};
 use crate::tag::strip_tag_prefix;
@@ -194,6 +197,7 @@ impl GitHubPlugin {
                 download_url: a.browser_download_url.clone(),
                 size: Some(a.size),
                 content_type: a.content_type.clone(),
+                sha256_digest: None,
             })
             .collect();
 
@@ -206,7 +210,167 @@ impl GitHubPlugin {
             published_at,
             assets,
             category: None,
+            attestation_status: None,
         })
+    }
+
+    /// Build the attestations API URL for the given owner/repo/digest.
+    ///
+    /// Produces `{api_base_url}/repos/{owner}/{repo}/attestations/sha256:{hex}`.
+    pub(crate) fn attestation_url(&self, owner: &str, repo: &str, digest_hex: &str) -> String {
+        format!(
+            "{}/repos/{}/{}/attestations/sha256:{}",
+            self.config.api_base_url(),
+            owner,
+            repo,
+            digest_hex,
+        )
+    }
+
+    /// Find the checksums asset in a list of raw GitHub assets.
+    ///
+    /// Returns the first asset whose name (case-insensitive) contains `"sha256"`
+    /// or `"checksum"`.
+    pub(crate) fn find_checksums_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
+        assets.iter().find(|a| {
+            let lower = a.name.to_lowercase();
+            lower.contains("sha256") || lower.contains("checksum")
+        })
+    }
+
+    /// Parse a checksums file into a `{filename → sha256_hex}` map.
+    ///
+    /// Accepts lines in both `<hex>  <filename>` (text mode) and
+    /// `<hex> *<filename>` (binary mode) formats.  Lines with an invalid
+    /// (non-64-hex-char) digest are silently skipped.
+    pub(crate) fn parse_checksums_content(content: &str) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            // Try "hex  filename" first (two spaces), then "hex *filename".
+            let (hex, filename) = if let Some((h, f)) = line.split_once("  ") {
+                (h, f.trim_start_matches('*'))
+            } else if let Some((h, f)) = line.split_once(" *") {
+                (h, f)
+            } else {
+                continue;
+            };
+            let hex = hex.trim();
+            let filename = filename.trim();
+            if hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                map.insert(filename.to_string(), hex.to_string());
+            }
+        }
+        map
+    }
+
+    /// Check the GitHub Attestations API for the first eligible release asset.
+    ///
+    /// 1. Finds the checksums file in `gh_assets` (raw, pre-filter GitHub assets).
+    /// 2. Downloads it and parses `{filename → sha256}`.
+    /// 3. Sets `sha256_digest` on each matching entry in `release_assets`.
+    /// 4. Queries the attestation API for the first asset with a known digest.
+    ///
+    /// Returns:
+    /// - `Verified` — API returned ≥1 attestation.
+    /// - `NotFound` — API returned 0 attestations (404 or empty array).
+    /// - `Unverified` — checksums file absent, download error, or HTTP error.
+    async fn check_release_attestation(
+        &self,
+        owner: &str,
+        repo: &str,
+        gh_assets: &[GitHubAsset],
+        release_assets: &mut [ReleaseAsset],
+    ) -> AttestationStatus {
+        // 1. Locate checksums file in raw GitHub assets.
+        let checksums_asset = match Self::find_checksums_asset(gh_assets) {
+            Some(a) => a,
+            None => {
+                tracing::debug!(owner, repo, "no checksums file found; skipping attestation");
+                return AttestationStatus::Unverified;
+            }
+        };
+
+        // 2. Download the checksums file.
+        let checksums_text = match self
+            .client
+            .get(&checksums_asset.browser_download_url)
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => match resp.text().await {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to read checksums file body");
+                    return AttestationStatus::Unverified;
+                }
+            },
+            Ok(resp) => {
+                tracing::warn!(
+                    status = %resp.status(),
+                    url = %checksums_asset.browser_download_url,
+                    "checksums file download returned non-success status"
+                );
+                return AttestationStatus::Unverified;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to download checksums file");
+                return AttestationStatus::Unverified;
+            }
+        };
+
+        // 3. Parse checksums and set sha256_digest on matching release_assets.
+        let digests = Self::parse_checksums_content(&checksums_text);
+        for asset in release_assets.iter_mut() {
+            if let Some(hex) = digests.get(&asset.name) {
+                asset.sha256_digest = Some(hex.clone());
+            }
+        }
+
+        // 4. Take first asset with a known digest and query the attestation API.
+        let Some(digest_hex) = release_assets
+            .iter()
+            .find_map(|a| a.sha256_digest.as_deref())
+        else {
+            tracing::debug!(
+                owner,
+                repo,
+                "no matching digest found in checksums; cannot verify"
+            );
+            return AttestationStatus::Unverified;
+        };
+
+        let url = self.attestation_url(owner, repo, digest_hex);
+        tracing::debug!(%url, "checking GitHub attestation");
+
+        let response = match self.client.get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "attestation API request failed");
+                return AttestationStatus::Unverified;
+            }
+        };
+
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return AttestationStatus::NotFound;
+        }
+        if !status.is_success() {
+            tracing::warn!(%status, "attestation API returned error");
+            return AttestationStatus::Unverified;
+        }
+
+        match response.json::<AttestationsApiResponse>().await {
+            Ok(body) if !body.attestations.is_empty() => AttestationStatus::Verified,
+            Ok(_) => AttestationStatus::NotFound,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to parse attestation API response");
+                AttestationStatus::Unverified
+            }
+        }
     }
 
     /// Check rate limit headers and log warnings.
@@ -304,7 +468,7 @@ impl Plugin for GitHubPlugin {
             )))
         })?;
 
-        let upstream_releases: Vec<UpstreamRelease> = releases
+        let mut upstream_releases: Vec<UpstreamRelease> = releases
             .iter()
             .filter_map(|r| self.convert_release(r))
             .collect();
@@ -314,6 +478,18 @@ impl Plugin for GitHubPlugin {
             total = releases.len(),
             "fetched GitHub releases"
         );
+
+        // Attestation check for the latest (first) release.
+        if self.config.verify_attestation
+            && let Some(latest) = upstream_releases.first_mut()
+            && let Some(gh_release) = releases.iter().find(|r| r.tag_name == latest.tag)
+        {
+            let status = self
+                .check_release_attestation(owner, repo, &gh_release.assets, &mut latest.assets)
+                .await;
+            tracing::debug!(tag = %latest.tag, ?status, "attestation check complete");
+            latest.attestation_status = Some(status);
+        }
 
         Ok(upstream_releases)
     }
@@ -599,5 +775,142 @@ mod tests {
     async fn plugin_creation_succeeds_with_empty_config() {
         let config = GitHubConfig::default();
         assert!(GitHubPlugin::new(config, test_executor()).await.is_ok());
+    }
+
+    // ── find_checksums_asset tests ────────────────────────────────────────
+
+    #[test]
+    fn find_checksums_asset_finds_sha256() {
+        let assets = vec![
+            GitHubAsset {
+                name: "app.tar.gz".to_string(),
+                browser_download_url: "https://example.com/app".to_string(),
+                size: 100,
+                content_type: None,
+            },
+            GitHubAsset {
+                name: "SHA256SUMS".to_string(),
+                browser_download_url: "https://example.com/sums".to_string(),
+                size: 128,
+                content_type: None,
+            },
+        ];
+        let found = GitHubPlugin::find_checksums_asset(&assets).expect("should find");
+        assert_eq!(found.name, "SHA256SUMS");
+    }
+
+    #[test]
+    fn find_checksums_asset_finds_checksum() {
+        let assets = vec![GitHubAsset {
+            name: "checksums.txt".to_string(),
+            browser_download_url: "https://example.com/checksums.txt".to_string(),
+            size: 64,
+            content_type: None,
+        }];
+        let found = GitHubPlugin::find_checksums_asset(&assets).expect("should find");
+        assert_eq!(found.name, "checksums.txt");
+    }
+
+    #[test]
+    fn find_checksums_asset_returns_none_when_absent() {
+        let assets = vec![GitHubAsset {
+            name: "app.tar.gz".to_string(),
+            browser_download_url: "https://example.com/app".to_string(),
+            size: 100,
+            content_type: None,
+        }];
+        assert!(GitHubPlugin::find_checksums_asset(&assets).is_none());
+    }
+
+    #[test]
+    fn find_checksums_asset_empty_list() {
+        assert!(GitHubPlugin::find_checksums_asset(&[]).is_none());
+    }
+
+    // ── parse_checksums_content tests ─────────────────────────────────────
+
+    #[test]
+    fn parse_checksums_two_space_format() {
+        let content = format!("{}  app.tar.gz\n", "a".repeat(64));
+        let map = GitHubPlugin::parse_checksums_content(&content);
+        assert_eq!(
+            map.get("app.tar.gz").map(String::as_str),
+            Some("a".repeat(64).as_str())
+        );
+    }
+
+    #[test]
+    fn parse_checksums_star_format() {
+        let content = format!("{} *app.tar.gz\n", "b".repeat(64));
+        let map = GitHubPlugin::parse_checksums_content(&content);
+        assert_eq!(
+            map.get("app.tar.gz").map(String::as_str),
+            Some("b".repeat(64).as_str())
+        );
+    }
+
+    #[test]
+    fn parse_checksums_multiple_entries() {
+        let hex1 = "a".repeat(64);
+        let hex2 = "b".repeat(64);
+        let content = format!("{hex1}  file1.tar.gz\n{hex2}  file2.deb\n");
+        let map = GitHubPlugin::parse_checksums_content(&content);
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get("file1.tar.gz").map(String::as_str),
+            Some(hex1.as_str())
+        );
+        assert_eq!(
+            map.get("file2.deb").map(String::as_str),
+            Some(hex2.as_str())
+        );
+    }
+
+    #[test]
+    fn parse_checksums_skips_short_hex() {
+        let content = "abc123  file.tar.gz\n";
+        let map = GitHubPlugin::parse_checksums_content(content);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn parse_checksums_skips_comments() {
+        let hex = "c".repeat(64);
+        let content = format!("# comment\n{hex}  file.tar.gz\n");
+        let map = GitHubPlugin::parse_checksums_content(&content);
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn parse_checksums_empty_returns_empty_map() {
+        assert!(GitHubPlugin::parse_checksums_content("").is_empty());
+    }
+
+    // ── attestation_url tests ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn attestation_url_default_base() {
+        let plugin = test_plugin().await;
+        let url = plugin.attestation_url("owner", "repo", "abc123");
+        assert_eq!(
+            url,
+            "https://api.github.com/repos/owner/repo/attestations/sha256:abc123"
+        );
+    }
+
+    #[tokio::test]
+    async fn attestation_url_custom_base() {
+        let config = GitHubConfig {
+            api_base_url: Some("https://ghe.corp.com/api/v3".to_string()),
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_executor())
+            .await
+            .expect("valid config");
+        let url = plugin.attestation_url("org", "project", "deadbeef");
+        assert_eq!(
+            url,
+            "https://ghe.corp.com/api/v3/repos/org/project/attestations/sha256:deadbeef"
+        );
     }
 }
