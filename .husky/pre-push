@@ -4,6 +4,12 @@
 
 set -e
 
+echo "[pre-push] Running cargo fmt check..."
+cargo fmt --all -- --check
+
+echo "[pre-push] Running markdownlint..."
+markdownlint --config .markdownlint.json '**/*.md'
+
 echo "[pre-push] Running cargo check (db-sqlite)..."
 cargo check --workspace --no-default-features --features db-sqlite
 
