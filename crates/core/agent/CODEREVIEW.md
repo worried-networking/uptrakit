@@ -56,11 +56,13 @@ No architectural issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/host_info.rs:77` -- Machine-ID falls back to the literal string `"unknown"`
+~~**[MEDIUM]** `src/host_info.rs:77` -- Machine-ID falls back to the literal string `"unknown"`
 without warning when neither `/etc/machine-id` (Linux) nor `ioreg` (macOS) succeeds. If any
 inbound message also carries `host_machine_id = "unknown"` (plausible if a second agent on a
 different host also failed), validation passes spuriously. The fallback should emit
-`tracing::warn!`; ideally return a `Result` to allow the lifecycle to abort enrollment.
+`tracing::warn!`; ideally return a `Result` to allow the lifecycle to abort enrollment.~~
+
+> **Fixed:** The fallback now emits `tracing::warn!` and uses a session-unique `"unknown-<uuidv7>"` suffix, preventing spurious validation matches between two agents that both fail machine-ID detection.
 
 ## Code Quality
 

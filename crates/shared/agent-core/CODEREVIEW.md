@@ -157,7 +157,7 @@ serialized config at spawn time will be missing during post-update version detec
 same plugin type. The two code paths treat context injection differently: one uses the live
 `ctx`, the other uses a static default.
 
-**[LOW]** `src/update.rs:440-458` (unknown `HookCommand` arm) -- The wildcard arm for
+**[FIXED - RESOLVED]** ~~`src/update.rs:440-458` (unknown `HookCommand` arm) -- The wildcard arm for
 unrecognized `HookCommand` variants (`_ =>`) logs at `tracing::warn!` and returns an error.
 This is the correct `#[non_exhaustive]` handling pattern per workspace standards. However,
 `handle_check_versions` in `client.rs` handles unknown `ControllerMessage` variants (via the
@@ -166,4 +166,6 @@ continuing — a non-fatal path. The unknown `HookCommand` arm is fatal (returns
 the workspace standard for `#[non_exhaustive]` enums in dispatch is to warn-and-skip. The
 difference is intentional (a hook command that cannot be executed must fail the hook), but a
 comment explaining why the fallback is fatal rather than skipped would clarify the deviation
-from the workspace pattern.
+from the workspace pattern.~~
+
+> **Fixed:** The wildcard arm in both `run_hook_command_inner` and `run_hook_for_batch_inner` now warns via `tracing::warn!` and skips (returns `Ok`) instead of returning `Err`, aligning with the `#[non_exhaustive]` forward-compatibility contract for unknown variants in dispatch.

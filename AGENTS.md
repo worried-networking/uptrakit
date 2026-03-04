@@ -536,6 +536,14 @@ for user review. Key invariants:
    These plugin-level hooks are distinct from the user-configured `hooks` in plugin config JSON
    (documented in [Update Hooks](docs/development/update-hooks.md)).
 
+   **`HookCommand` dispatch — skip-not-abort on unknown variants.** `HookCommand` is
+   `#[non_exhaustive]`. Both `run_hook_command_inner` and `run_hook_for_batch_inner` in
+   `crates/shared/agent-core/src/update.rs` contain a `_ =>` wildcard arm that **must** warn and
+   return `Ok` (skip the hook), never `Err`. An older agent that receives a hook variant added by a
+   newer controller must not abort the update — skipping the unrecognised hook preserves the ability
+   to roll out new hook types without requiring all agents to be updated first. Do not change these
+   arms to return errors.
+
    **Batch trait methods** (all have default sequential fallbacks; override for efficiency):
 
    - `batch_detect_installed_version(&[BatchDetectItem]) -> Result<Vec<BatchDetectResult>>` — detect
