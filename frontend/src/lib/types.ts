@@ -746,3 +746,5 @@ export interface AuditLogListParams {
 	to?: string;
 	actor_id?: string;
 }
+
+export type AttestationStatus = 'Verified' | 'NotFound' | 'Unverified';

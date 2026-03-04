@@ -15,7 +15,7 @@
 	import { connectOutputStream } from '$lib/sse';
 	import type { SseConnectionState } from '$lib/sse';
 	import { Permission } from '$lib/types';
-	import type { SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
+	import type { AttestationStatus, SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
 
 	const id = $derived($page.params.id as string);
 
@@ -35,6 +35,7 @@
 		release_notes?: string;
 		tag?: string;
 		published_at?: string;
+		attestation_status?: AttestationStatus;
 	}
 	let releaseNotesModal: {
 		softwareName: string;
@@ -180,11 +181,18 @@
 	function getReleaseMeta(host: SoftwareItemHostSummary): ReleaseMeta | null {
 		const meta = host.latest_release_metadata;
 		if (!meta) return null;
+		const knownStatuses: AttestationStatus[] = ['Verified', 'NotFound', 'Unverified'];
+		const rawStatus = meta.attestation_status;
+		const attestation_status: AttestationStatus | undefined =
+			typeof rawStatus === 'string' && knownStatuses.includes(rawStatus as AttestationStatus)
+				? (rawStatus as AttestationStatus)
+				: undefined;
 		return {
 			release_url: typeof meta.release_url === 'string' ? meta.release_url : undefined,
 			release_notes: typeof meta.release_notes === 'string' ? meta.release_notes : undefined,
 			tag: typeof meta.tag === 'string' ? meta.tag : undefined,
-			published_at: typeof meta.published_at === 'string' ? meta.published_at : undefined
+			published_at: typeof meta.published_at === 'string' ? meta.published_at : undefined,
+			attestation_status
 		};
 	}
 
@@ -317,6 +325,16 @@
 											onclick={() => openReleaseNotesModal(host)}>Notes</button
 										>
 									{/if}
+									{#if getReleaseMeta(host)?.attestation_status === 'Verified'}
+										<span
+											class="badge preset-filled-success-500 ml-1 text-xs"
+											title="GitHub Actions attestation verified">Attested</span
+										>
+									{:else if getReleaseMeta(host)?.attestation_status === 'NotFound'}
+										<span class="badge preset-filled-error-500 ml-1 text-xs" title="No GitHub Actions attestation found"
+											>Not attested</span
+										>
+									{/if}
 								</td>
 								<td>
 									<span class="badge {versionStatusClass(host)}">{versionStatusLabel(host)}</span>
@@ -387,6 +405,14 @@
 						<summary class="cursor-pointer text-surface-500 hover:text-surface-700">Release notes</summary>
 						<pre class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs">{meta.release_notes}</pre>
 					</details>
+				{/if}
+				{#if meta?.attestation_status === 'NotFound'}
+					<aside class="rounded-lg p-3 preset-filled-warning-500 text-sm" role="alert">
+						<strong>Warning:</strong> No GitHub Actions attestation was found for this release. The artifacts may not have
+						been produced by the official GitHub Actions workflow.
+					</aside>
+				{:else if meta?.attestation_status === 'Verified'}
+					<p class="text-sm text-success-600 dark:text-success-400">&#10003; GitHub Actions attestation verified</p>
 				{/if}
 			{/if}
 
