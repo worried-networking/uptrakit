@@ -65,9 +65,10 @@ import type {
 	NatsSettingsResponse,
 	UpdateNatsSettingsRequest,
 	SystemServiceResponse,
-	SystemServicesSettingsResponse,
-	UpdateSystemServicesSettingsRequest,
 	UpdateSystemServiceRequest,
+	CreateSystemEnrollmentTokenRequest,
+	SystemEnrollmentTokenCreatedResponse,
+	SystemEnrollmentTokenResponse,
 	PluginTypeInfo,
 	HostPackageResponse,
 	HostPackageDetailResponse,
@@ -634,14 +635,31 @@ export function updateSystemService(id: string, data: UpdateSystemServiceRequest
 	});
 }
 
-export function getSystemServicesSettings(): Promise<SystemServicesSettingsResponse> {
-	return request('/global-settings/system-services');
+// --- System Enrollment Tokens APIs ---
+
+export function listSystemEnrollmentTokens(options?: {
+	page?: number;
+	perPage?: number;
+}): Promise<PaginatedResponse<SystemEnrollmentTokenResponse>> {
+	const params = new URLSearchParams();
+	if (options?.page != null) params.set('page', String(options.page));
+	if (options?.perPage != null) params.set('per_page', String(options.perPage));
+	const query = params.toString();
+	return request(`/system-enrollment-tokens${query ? `?${query}` : ''}`);
 }
 
-export function updateSystemServicesSettings(
-	data: UpdateSystemServicesSettingsRequest
-): Promise<SystemServicesSettingsResponse> {
-	return request('/global-settings/system-services', { method: 'PUT', body: JSON.stringify(data) });
+export function createSystemEnrollmentToken(
+	data: CreateSystemEnrollmentTokenRequest
+): Promise<SystemEnrollmentTokenCreatedResponse> {
+	return request('/system-enrollment-tokens', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function getSystemEnrollmentToken(id: string): Promise<SystemEnrollmentTokenResponse> {
+	return request(`/system-enrollment-tokens/${encodeURIComponent(id)}`);
+}
+
+export function revokeSystemEnrollmentToken(id: string): Promise<void> {
+	return requestVoid(`/system-enrollment-tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // --- Plugin Types & Configs ---

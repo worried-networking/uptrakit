@@ -632,13 +632,34 @@ export interface UpdateSystemServiceRequest {
 	cert_lifetime_hours?: number;
 }
 
-export interface SystemServicesSettingsResponse {
-	enrollment_token?: string;
-	has_token: boolean;
+// System enrollment tokens
+
+export interface CreateSystemEnrollmentTokenRequest {
+	name: string;
+	max_uses?: number;
+	expires_in_seconds?: number;
 }
 
-export interface UpdateSystemServicesSettingsRequest {
-	enrollment_token?: string | null;
+export interface SystemEnrollmentTokenCreatedResponse {
+	id: string;
+	token: string;
+	name: string;
+	max_uses: number | null;
+	current_uses: number;
+	expires_at: string | null;
+	created_at: string;
+	created_by_user_id: string | null;
+}
+
+export interface SystemEnrollmentTokenResponse {
+	id: string;
+	name: string;
+	max_uses: number | null;
+	current_uses: number;
+	expires_at: string | null;
+	created_at: string;
+	revoked_at: string | null;
+	created_by_user_id: string | null;
 }
 
 // Host packages
