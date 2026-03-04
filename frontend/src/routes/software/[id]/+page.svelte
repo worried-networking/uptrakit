@@ -8,7 +8,7 @@
 		checkSoftwareItemVersionsHost,
 		triggerSoftwareUpdate
 	} from '$lib/api';
-	import { formatDate } from '$lib/utils';
+	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
@@ -267,8 +267,9 @@
 				<div class="mt-2 space-y-1 text-sm text-surface-500">
 					{#if item.latest_version}
 						<p>
-							Latest version: <span class="font-medium text-surface-700 dark:text-surface-300"
-								>{item.latest_version}</span
+							Latest version: <span
+								class="font-medium text-surface-700 dark:text-surface-300"
+								title={item.latest_version}>{formatVersion(item.latest_version)}</span
 							>
 						</p>
 					{/if}
@@ -315,9 +316,11 @@
 										<span class="block text-xs text-surface-500">{host.friendly_name}</span>
 									{/if}
 								</td>
-								<td>{host.installed_version ?? '—'}</td>
+								<td title={host.installed_version ?? undefined}>{formatVersion(host.installed_version)}</td>
 								<td>
-									{host.latest_version ?? item.latest_version ?? '—'}
+									<span title={host.latest_version ?? item.latest_version ?? undefined}
+										>{formatVersion(host.latest_version ?? item.latest_version)}</span
+									>
 									{#if getReleaseMeta(host)}
 										<button
 											class="btn btn-sm preset-tonal ml-1"
@@ -343,8 +346,13 @@
 								{#if canManage}
 									<td class="space-x-2 whitespace-nowrap">
 										{#if host.update_available || item.latest_version}
-											<button class="btn btn-sm preset-filled-warning-500" onclick={() => openUpdateModal(host)}>
-												Update to {host.latest_version ?? item?.latest_version}
+											{@const updateToVer = host.latest_version ?? item?.latest_version ?? null}
+											<button
+												class="btn btn-sm preset-filled-warning-500"
+												title={updateToVer ?? undefined}
+												onclick={() => openUpdateModal(host)}
+											>
+												Update to {formatVersion(updateToVer)}
 											</button>
 										{/if}
 										<button
@@ -380,11 +388,13 @@
 			<div class="grid grid-cols-2 gap-4 text-sm">
 				<div>
 					<p class="text-surface-500">From</p>
-					<p class="font-medium">{updateModal.host.installed_version ?? 'unknown'}</p>
+					<p class="font-medium" title={updateModal.host.installed_version ?? undefined}>
+						{formatVersion(updateModal.host.installed_version, 'unknown')}
+					</p>
 				</div>
 				<div>
 					<p class="text-surface-500">To</p>
-					<p class="font-medium">{updateModal.toVersion}</p>
+					<p class="font-medium" title={updateModal.toVersion}>{formatVersion(updateModal.toVersion)}</p>
 				</div>
 			</div>
 

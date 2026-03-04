@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import { getHost, listHostPackages, updateHostPackage, deleteHostPackage } from '$lib/api';
-	import { formatDate, parseUrlPage } from '$lib/utils';
+	import { formatDate, formatVersion, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { Permission } from '$lib/types';
 	import type { HostResponse, HostPackageResponse } from '$lib/types';
@@ -227,8 +227,8 @@
 					{#each packages as pkg (pkg.id)}
 						<tr>
 							<td class="font-medium">{pkg.name}</td>
-							<td>{pkg.installed_version ?? '—'}</td>
-							<td>{pkg.latest_version ?? '—'}</td>
+							<td title={pkg.installed_version ?? undefined}>{formatVersion(pkg.installed_version)}</td>
+							<td title={pkg.latest_version ?? undefined}>{formatVersion(pkg.latest_version)}</td>
 							<td>
 								<span class="badge {pkg.update_category === 'security' ? 'preset-filled-error-500' : 'preset-tonal'}">
 									{pkg.update_category}

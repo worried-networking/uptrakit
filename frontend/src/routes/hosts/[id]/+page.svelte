@@ -14,7 +14,7 @@
 		deleteHostDiscoveryAllowlistEntry,
 		listPluginTypes
 	} from '$lib/api';
-	import { formatDate } from '$lib/utils';
+	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
@@ -485,8 +485,8 @@
 											{entry.software_item_name}
 										</a>
 									</td>
-									<td>{entry.from_version ?? '—'}</td>
-									<td>{entry.to_version}</td>
+									<td title={entry.from_version ?? undefined}>{formatVersion(entry.from_version)}</td>
+									<td title={entry.to_version}>{formatVersion(entry.to_version)}</td>
 									<td>
 										<span class="badge {historyStatusClass(entry.status)}">
 											{historyStatusLabel(entry.status)}

@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import { listUpdateHistory, triggerSoftwareUpdate, getSoftwareItems, getUpdateHistoryEntry } from '$lib/api';
-	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
+	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
@@ -283,9 +283,11 @@
 								<td>{item.host_name}</td>
 								<td>{item.software_item_name}</td>
 								<td>
-									<span class="text-surface-500">{item.from_version ?? '?'}</span>
+									<span class="text-surface-500" title={item.from_version ?? undefined}
+										>{formatVersion(item.from_version, '?')}</span
+									>
 									→
-									<span class="font-medium">{item.to_version}</span>
+									<span class="font-medium" title={item.to_version}>{formatVersion(item.to_version)}</span>
 								</td>
 								<td>
 									<span class="badge {statusBadgeClass(item.status)}">

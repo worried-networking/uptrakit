@@ -10,7 +10,7 @@
 		checkSoftwareItemVersions,
 		updateSoftwareItem
 	} from '$lib/api';
-	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
+	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import AddSoftwareModal from '$lib/components/AddSoftwareModal.svelte';
@@ -310,7 +310,9 @@
 								<td>
 									{formatDate(item.last_checked_at)}
 									{#if item.latest_version}
-										<span class="block text-xs text-surface-500">{item.latest_version} available</span>
+										<span class="block text-xs text-surface-500" title={item.latest_version}
+											>{formatVersion(item.latest_version)} available</span
+										>
 									{/if}
 								</td>
 								{#if canManage}
