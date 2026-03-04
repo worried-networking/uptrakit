@@ -790,12 +790,17 @@ and appears in `/api/v1/system-services`, not `/api/v1/services`.
 | --- | --- |
 | `crates/shared/db/src/entity/system_service.rs` | SeaORM entity for `system_services` table |
 | `crates/shared/db/src/entity/system_service_certificate.rs` | SeaORM entity for `system_service_certificates` table |
+| `crates/shared/db/src/entity/system_enrollment_token.rs` | SeaORM entity for `system_enrollment_tokens` table |
 | `crates/ui/web-api/src/queries/system_services.rs` | DB query helpers (list, get, approve, reject, deactivate, update) |
+| `crates/ui/web-api/src/queries/system_enrollment_tokens.rs` | DB query helpers for system enrollment tokens |
 | `crates/ui/web-api/src/routes/system_services.rs` | Route handlers for `/api/v1/system-services` |
-| `crates/ui/web-api/src/routes/settings_system_services.rs` | Route handlers for `/api/v1/settings/system-services` |
+| `crates/ui/web-api/src/routes/system_enrollment_tokens.rs` | Route handlers for `/api/v1/system-enrollment-tokens` |
 | `crates/shared/web-api-types/src/system_services.rs` | `SystemServiceResponse`, `UpdateSystemServiceRequest`, `ListSystemServicesQuery` |
+| `crates/shared/web-api-types/src/system_enrollment_tokens.rs` | `CreateSystemEnrollmentTokenRequest`, `SystemEnrollmentTokenCreatedResponse`, `SystemEnrollmentTokenResponse` |
 | `crates/shared/openapi-client/src/system_services.rs` | Typed HTTP client methods for system service endpoints |
+| `crates/shared/openapi-client/src/system_enrollment_tokens.rs` | Typed HTTP client methods for system enrollment token endpoints |
 | `crates/ui/cli/src/commands/system_services.rs` | CLI `system-services` subcommand |
+| `crates/ui/cli/src/commands/system_enrollment_tokens.rs` | CLI `system-enrollment-tokens` subcommand |
 | `docs/architecture/system-services.md` | Full architecture documentation |
 
 #### Credential guard
@@ -805,14 +810,24 @@ Four capabilities (`database_access`, `nats_access`, `master_key_access`, `ca_ma
 any DB write and rejects with `AgentRouteError::Forbidden` if a service requests system credentials
 without `system_service`. This prevents tenant services from receiving infrastructure secrets.
 
-#### System enrollment token
+#### System enrollment tokens
 
-A single global plaintext token is stored AES-256-GCM encrypted in `settings` under
-`SettingKey::SystemServicesEnrollmentToken`. At enrollment, the provided token is compared via
-direct string equality (not Argon2id). A match produces `Approved` status; a mismatch produces
-`Forbidden`. No token configured produces `Pending` status. The token is returned in plaintext by
-`GET /api/v1/settings/system-services` (requires `manage_system_services`) so operators can copy
-it into service deployment configs.
+Multiple named system enrollment tokens are stored in the `system_enrollment_tokens` table
+(`crates/shared/db/src/entity/system_enrollment_token.rs`). Tokens are backend-generated random
+secrets, Argon2id-hashed at rest, and shown only once at creation. Each token supports optional
+usage limits (`max_uses`) and TTL (`expires_at`).
+
+At enrollment, if the service provides a token, `find_active_system_tokens()` retrieves all
+non-revoked, non-expired tokens with remaining uses, then `password::verify_password()` performs
+Argon2id verification. On match, `current_uses` is atomically incremented and
+`system_enrollment_token_id` is recorded on the `system_services` row (audit-only, no FK
+constraint — tokens can be revoked/deleted after the service has enrolled). A matching token
+produces `Approved` status; no match produces `Forbidden`; no token produces `Pending`.
+
+REST API: `POST/GET /api/v1/system-enrollment-tokens`, `GET/DELETE /api/v1/system-enrollment-tokens/{id}`
+(requires `manage_system_services`).
+OpenAPI client: `crates/shared/openapi-client/src/system_enrollment_tokens.rs`.
+CLI: `uptrakit system-enrollment-tokens list|create|show|revoke`.
 
 #### Frontend
 

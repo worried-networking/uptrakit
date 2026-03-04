@@ -11,6 +11,7 @@
 | mTLS client certs | Agent/MQTT connections | Issued after CSR approval and validated per connection. |
 | Forwarded cert headers | Reverse proxy | Trusted proxies forward cert info/PEM; issuer CN verified. |
 | Enrollment tokens | Service onboarding | Multiple named tokens stored in the `enrollment_tokens` table (Argon2id hashed). Each token supports capability scoping, usage limits, and TTL. See [Enrollment Tokens API](../api/enrollment-tokens.md). |
+| System enrollment tokens | System service onboarding | Global (non-tenant) named tokens stored in the `system_enrollment_tokens` table (Argon2id hashed). Supports usage limits and TTL. See [System Enrollment Tokens API](../api/http-web-api.md#system-enrollment-token-endpoints). |
 
 ## JWT Access Token Claims Contract
 
@@ -160,7 +161,7 @@ from `crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name stri
 | `ViewHosts` | `view_hosts` | View hosts |
 | `ManageHosts` | `manage_hosts` | Manage hosts (update, deactivate) |
 | `ViewSystemServices` | `view_system_services` | List and inspect system services (MQTT bridge, external scheduler) |
-| `ManageSystemServices` | `manage_system_services` | Approve, reject, deactivate, and update system services; read and set the global enrollment token |
+| `ManageSystemServices` | `manage_system_services` | Approve, reject, deactivate, and update system services; create, list, and revoke system enrollment tokens |
 
 > **Security note:** `ManageCommands` grants effective code-execution authority on all managed hosts
 > assigned to the affected software items. Users with this permission can configure arbitrary shell

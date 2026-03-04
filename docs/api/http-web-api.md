@@ -442,6 +442,70 @@ See [System Services Architecture](../architecture/system-services.md) for the f
 - `DELETE /api/v1/system-services/{id}`: deactivate (soft-delete) a system service, revoke its
   certificates, and bump the CRL (requires `manage_system_services`). Returns `204 No Content`.
 
+### System Enrollment Token Endpoints
+
+System enrollment tokens allow infrastructure services to enroll with automatic approval instead of
+waiting for manual operator review. They are global (not tenant-scoped), backend-generated,
+Argon2id-hashed, and shown only once at creation — matching the security model of tenant enrollment
+tokens. All endpoints require `manage_system_services`.
+
+- `POST /api/v1/system-enrollment-tokens`: create a new system enrollment token. Returns
+  `201 Created` with `SystemEnrollmentTokenCreatedResponse` (includes the plaintext `token` field —
+  store it immediately, it cannot be retrieved later).
+- `GET /api/v1/system-enrollment-tokens`: list tokens with pagination. Returns
+  `PaginatedResponse<SystemEnrollmentTokenResponse>` (no `token` field).
+- `GET /api/v1/system-enrollment-tokens/{id}`: get a single token's metadata by UUID.
+  Returns `SystemEnrollmentTokenResponse`.
+- `DELETE /api/v1/system-enrollment-tokens/{id}`: soft-revoke a token (sets `revoked_at`).
+  Returns `204 No Content`.
+
+**Create request body** (`CreateSystemEnrollmentTokenRequest`):
+
+```json
+{
+  "name": "MQTT Bridge Token",
+  "max_uses": 5,
+  "expires_in_seconds": 86400
+}
+```
+
+`max_uses` and `expires_in_seconds` are optional. Omit for an unlimited, non-expiring token.
+
+**Create response** (`201`): `SystemEnrollmentTokenCreatedResponse`
+
+```json
+{
+  "id": "...",
+  "token": "upt_xxxxxxxxxxxxxxxx",
+  "name": "MQTT Bridge Token",
+  "max_uses": 5,
+  "current_uses": 0,
+  "expires_at": "2026-03-05T00:00:00Z",
+  "created_at": "2026-03-04T12:00:00Z",
+  "created_by_user_id": "..."
+}
+```
+
+**List/show response**: same fields, without `token`, with `revoked_at` added.
+
+#### Enrollment behaviour
+
+| Scenario | Result |
+| --- | --- |
+| No token provided | `Pending` — requires manual approval |
+| Token matches an active (non-expired, non-revoked, uses remaining) system enrollment token | `Approved` — `current_uses` incremented, `system_enrollment_token_id` recorded |
+| Token provided but no match | `403 Forbidden` |
+
+#### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/system_enrollment_tokens.rs` | Route handlers |
+| `crates/ui/web-api/src/queries/system_enrollment_tokens.rs` | DB query helpers |
+| `crates/shared/web-api-types/src/system_enrollment_tokens.rs` | Request/response types |
+| `crates/shared/db/src/entity/system_enrollment_token.rs` | SeaORM entity |
+| `crates/shared/openapi-client/src/system_enrollment_tokens.rs` | Typed HTTP client methods |
+
 ### Audit Log Endpoints
 
 Read-only access to the audit trail. Both endpoints use the same filter parameters
@@ -452,26 +516,6 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
   (requires `view_audit_logs`). Returns `PaginatedResponse<AuditLogResponse>`.
 - `GET /api/v1/system-audit-logs`: list system-level audit log entries
   (requires `view_system_audit_logs`, `owner` only). Returns `PaginatedResponse<SystemAuditLogResponse>`.
-
-### System Services Settings Endpoints
-
-- `GET /api/v1/settings/system-services`: get the global system services enrollment token
-  (requires `manage_system_services`). The plaintext token is included in the response so operators
-  can copy it into service deployment configurations.
-- `PUT /api/v1/settings/system-services`: set or clear the enrollment token
-  (requires `manage_system_services`). Send `"enrollment_token": null` to clear it (all future
-  enrollments will require manual approval). The token is stored AES-256-GCM encrypted at rest.
-
-**Response** (`200`): `SystemServicesSettingsResponse`
-
-```json
-{
-  "enrollment_token": "my-secret-token",
-  "has_token": true
-}
-```
-
-When no token is configured, `enrollment_token` is `null` and `has_token` is `false`.
 
 ### `SystemServiceResponse` fields
 
@@ -495,7 +539,6 @@ When no token is configured, `enrollment_token` is `null` and `has_token` is `fa
 | File | Purpose |
 | --- | --- |
 | `crates/ui/web-api/src/routes/system_services.rs` | Route handlers |
-| `crates/ui/web-api/src/routes/settings_system_services.rs` | Settings route handlers |
 | `crates/ui/web-api/src/queries/system_services.rs` | DB query helpers |
 | `crates/shared/web-api-types/src/system_services.rs` | Request/response types |
 | `crates/shared/db/src/entity/system_service.rs` | SeaORM entity for `system_services` |

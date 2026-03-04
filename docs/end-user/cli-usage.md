@@ -142,6 +142,41 @@ to the global default. Valid positive range is `1`–`17520` (up to two years).
 See also: [System Services Architecture](../architecture/system-services.md),
 [HTTP Web API](../api/http-web-api.md#system-services-endpoints).
 
+## System Enrollment Tokens
+
+Manage backend-generated enrollment tokens for infrastructure services. A system service that
+presents a valid token at enrollment is automatically approved; without a token it is queued as
+`pending` for manual review. Tokens are Argon2id-hashed and shown only once at creation.
+
+All commands require the `manage_system_services` permission.
+
+```sh
+# List all system enrollment tokens (paginated)
+uptrakit system-enrollment-tokens list
+uptrakit system-enrollment-tokens list --page 2 --per-page 10
+
+# Create a new token (token value is shown once — copy it immediately)
+uptrakit system-enrollment-tokens create --name "MQTT Bridge Token"
+uptrakit system-enrollment-tokens create --name "Scheduler Token" \
+    --max-uses 3 \
+    --expires-in 604800
+
+# Show metadata for a specific token (no token value — shown only at creation)
+uptrakit system-enrollment-tokens show <TOKEN_ID>
+
+# Revoke a token (soft-delete; existing enrolled services are unaffected)
+uptrakit system-enrollment-tokens revoke <TOKEN_ID>
+```
+
+`--max-uses` limits the number of services that can use this token to auto-enroll. Omit for
+unlimited.
+
+`--expires-in` sets the token lifetime in seconds (e.g. `86400` = 24 hours, `604800` = 7 days).
+Omit for a non-expiring token.
+
+See also: [System Enrollment Tokens API](../api/http-web-api.md#system-enrollment-token-endpoints),
+[Auth and Authorization](../security/auth-and-authorization.md).
+
 ## Hosts
 
 List, inspect, and manage hosts registered with the controller.
