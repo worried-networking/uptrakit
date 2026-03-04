@@ -7216,6 +7216,7 @@ dependencies = [
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-update-hooks",
+ "uptrakit-web-api-queries",
  "uptrakit-web-api-types",
  "url",
  "utoipa",
@@ -7226,6 +7227,37 @@ dependencies = [
  "x509-ocsp",
  "x509-parser",
  "zeroize",
+]
+
+[[package]]
+name = "uptrakit-web-api-queries"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "cron",
+ "rootcause",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uptrakit-audit-log",
+ "uptrakit-command",
+ "uptrakit-crypto",
+ "uptrakit-internal-wire",
+ "uptrakit-notification-channels",
+ "uptrakit-plugin-infrastructure-registry",
+ "uptrakit-shared-db",
+ "uptrakit-shared-macros",
+ "uptrakit-shared-types",
+ "uptrakit-update-hooks",
+ "uptrakit-web-api-types",
+ "uuid",
 ]
 
 [[package]]

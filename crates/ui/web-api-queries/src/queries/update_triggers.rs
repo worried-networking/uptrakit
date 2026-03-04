@@ -26,10 +26,10 @@ use uptrakit_shared_db::entity::{
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
-use crate::auth::token::generate_uuid;
-use crate::notification_service::NotificationService;
+use crate::notifier::ServiceNotifier;
 use crate::queries::software_items::find_active_item;
 use crate::queries::update_types::ActorType;
+use crate::token_utils::generate_uuid;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -335,7 +335,7 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
 ///
 /// Returns `true` if the agent was locally connected at dispatch time.
 pub async fn dispatch_update_to_agent(
-    notifier: &NotificationService,
+    notifier: &dyn ServiceNotifier,
     target: &ValidatedUpdateTarget,
     params: DispatchUpdateParams,
 ) -> Result<bool> {
@@ -368,7 +368,7 @@ pub async fn dispatch_update_to_agent(
     };
 
     let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
-    let agent_connected = notifier.send(&target.agent.id, msg).await;
+    let agent_connected = notifier.send_to_service(&target.agent.id, msg).await;
 
     if agent_connected {
         tracing::info!(
@@ -408,7 +408,7 @@ pub async fn dispatch_update_to_agent(
 /// database error encountered.
 pub async fn trigger_update_for_host(
     db: &DatabaseConnection,
-    notifier: &NotificationService,
+    notifier: &dyn ServiceNotifier,
     params: TriggerUpdateParams<'_>,
 ) -> Result<TriggerUpdateResult> {
     let target =

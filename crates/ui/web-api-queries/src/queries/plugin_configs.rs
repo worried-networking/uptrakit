@@ -15,7 +15,7 @@ use uptrakit_web_api_types::plugin_configs::{
 };
 use uuid::Uuid;
 
-use crate::auth::token::generate_uuid;
+use crate::token_utils::generate_uuid;
 use crate::tenant_db::TenantDb;
 
 /// Error returned by plugin config query helpers.
@@ -92,7 +92,7 @@ fn plugin_config_to_response(
 /// Parses the `"hooks"` key and validates all predefined hook parameters
 /// to reject shell metacharacters. Exposed as `pub(crate)` so other query
 /// modules (e.g. `software_items`) can reuse the check.
-pub(crate) fn validate_hooks_internal(
+pub fn validate_hooks_internal(
     config: &serde_json::Value,
 ) -> std::result::Result<(), uptrakit_web_api_types::update_hooks::HookValidationError> {
     if let Some(hooks_val) = config.get("hooks")
@@ -109,7 +109,7 @@ pub(crate) fn validate_hooks_internal(
 
 /// Find a non-deactivated plugin config by ID, scoped to a tenant.
 /// Returns the raw model — intended for use when the secrets must remain unmasked.
-pub(crate) async fn find_raw_active_config(
+pub async fn find_raw_active_config(
     tenant_db: &TenantDb,
     id: Uuid,
 ) -> Result<Option<plugin_config::Model>> {

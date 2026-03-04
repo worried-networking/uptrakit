@@ -90,6 +90,7 @@ uptrakit-notification-channels = { path = "crates/shared/notification-channels",
 uptrakit-update-hooks = { path = "crates/shared/update-hooks" }
 uptrakit-internal-wire = { path = "crates/shared/wire" }
 uptrakit-web-api = { path = "crates/ui/web-api", default-features = false }
+uptrakit-web-api-queries = { path = "crates/ui/web-api-queries", default-features = false }
 uptrakit-audit-log = { path = "crates/shared/audit-log", default-features = false }
 uptrakit-build-info = { path = "crates/shared/build-info" }
 uptrakit-cli = { path = "crates/ui/cli" }

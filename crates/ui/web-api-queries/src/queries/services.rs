@@ -14,8 +14,8 @@ use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::services::{ListServicesQuery, ServiceResponse};
 use uuid::Uuid;
 
-use crate::auth::token;
 use crate::tenant_db::TenantDb;
+use crate::token_utils;
 use uptrakit_internal_wire::service_profile::{ServiceProfile, parse_capabilities};
 
 /// Errors returned by service mutation queries.
@@ -256,9 +256,9 @@ pub async fn deactivate_service(
         .await
         .context_to()?;
 
-    crate::settings_store::bump_revocation_version(&txn, default_tenant_id)
+    crate::settings_version::bump_revocation_version(&txn, default_tenant_id)
         .await
-        .map_err(|e| report!(ServiceQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+        .map_err(|e| report!(ServiceQueryError::Db(e)))?;
 
     txn.commit().await.context_to()?;
 
@@ -326,7 +326,7 @@ pub async fn merge_service(
     let source_ip_address = source.ip_address.clone();
 
     // Deactivate source — invalidate its hash to free the unique constraint.
-    let invalidated_hash = token::hash_token(&token::generate_uuid().to_string());
+    let invalidated_hash = token_utils::hash_token(&token_utils::generate_uuid().to_string());
     let mut source_active: service::ActiveModel = source.into();
     source_active.enrollment_secret_hash = Set(invalidated_hash);
     source_active.deactivated_at = Set(Some(now));
@@ -354,7 +354,7 @@ pub async fn merge_service(
         }
     }
 
-    if let Err(e) = crate::settings_store::bump_revocation_version(&txn, default_tenant_id).await {
+    if let Err(e) = crate::settings_version::bump_revocation_version(&txn, default_tenant_id).await {
         tracing::warn!(error = ?e, "failed to bump revocation version counter during merge");
     }
 

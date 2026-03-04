@@ -390,7 +390,7 @@ mod tests {
         };
         link_b.insert(&db).await.unwrap();
 
-        let tenant_db = TenantDb::new_for_test(db.clone(), tenant_a);
+        let tenant_db = TenantDb::new(db.clone(), tenant_a);
         let agents = load_host_agents(&tenant_db, host_id).await;
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].friendly_name, "Agent A");

@@ -30,13 +30,13 @@ use uptrakit_web_api_types::update_batches::{
 };
 use uuid::Uuid;
 
-use crate::auth::token::generate_uuid;
-use crate::notification_service::NotificationService;
+use crate::notifier::ServiceNotifier;
 use crate::queries::update_triggers::{
     CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, ValidatedUpdateTarget,
 };
 use crate::queries::update_types::{ActorType, BatchType};
 use crate::tenant_db::TenantDb;
+use crate::token_utils::generate_uuid;
 
 type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
 
@@ -278,7 +278,7 @@ pub struct CreateBatchParams<'a> {
 /// a response with `batch_id: None` and `total_created: 0`.
 pub async fn create_batch(
     db: &DatabaseConnection,
-    notifier: &NotificationService,
+    notifier: &dyn ServiceNotifier,
     params: &CreateBatchParams<'_>,
     candidates: Vec<BatchUpdateCandidate>,
 ) -> Result<BatchUpdateResponse> {
@@ -440,7 +440,7 @@ pub struct BatchCompletionInfo {
 /// terminal status, so the caller can dispatch a notification event.
 pub async fn dispatch_next_in_batch(
     db: &DatabaseConnection,
-    notifier: &NotificationService,
+    notifier: &dyn ServiceNotifier,
     batch_id: Uuid,
     host_id: Uuid,
     tenant_id: Uuid,
@@ -795,7 +795,7 @@ pub async fn get_batch_with_items(
 /// - A database error occurs.
 pub async fn trigger_all_host_package_updates_for_host(
     db: &DatabaseConnection,
-    notifier: &NotificationService,
+    notifier: &dyn ServiceNotifier,
     tenant_id: Uuid,
     host_id: Uuid,
     actor_type: ActorType,
@@ -1009,7 +1009,7 @@ pub async fn trigger_all_host_package_updates_for_host(
             },
         ));
 
-        notifier.send(&agent.id, msg).await;
+        notifier.send_to_service(&agent.id, msg).await;
     }
 
     Ok(Some(batch_id))

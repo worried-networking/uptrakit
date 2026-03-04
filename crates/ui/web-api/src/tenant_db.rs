@@ -3,85 +3,31 @@ use crate::middleware::tenant_context::TenantContext;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::response::IntoResponse;
-use sea_orm::{
-    ColumnTrait, DatabaseConnection, DeleteMany, JoinType, PrimaryKeyTrait, QueryFilter,
-    QuerySelect, RelationDef, Select, UpdateMany,
-};
 use std::sync::Arc;
-use uptrakit_shared_db::entity::TenantScoped;
-use uuid::Uuid;
+use uptrakit_web_api_queries::TenantDb as TenantDbInner;
 
-/// Combined database connection + tenant identity extractor.
+/// Axum extractor wrapping [`TenantDbInner`] with `FromRequestParts`.
 ///
-/// Route handlers that deal with tenant-scoped data should use this extractor
-/// instead of accessing `state.db` directly. Tenant-agnostic routes (e.g. PKI,
-/// system health) should continue to use `State(state)` and call `state.db()`.
-pub struct TenantDb {
-    db: DatabaseConnection,
-    pub tenant_id: Uuid,
-}
+/// Route handlers keep `tenant_db: TenantDb` in signatures — auto-deref
+/// handles method calls (`tenant_db.find::<E>()`), field access
+/// (`tenant_db.tenant_id`), and passing `&tenant_db` to query functions
+/// expecting `&TenantDbInner`.
+pub struct TenantDb(pub TenantDbInner);
 
 impl TenantDb {
-    /// Returns a reference to the underlying database connection.
-    pub fn db(&self) -> &DatabaseConnection {
-        &self.db
-    }
-
-    /// Return a `SELECT` query pre-filtered to the current tenant.
-    pub fn find<E: TenantScoped>(&self) -> Select<E> {
-        E::find().filter(E::tenant_id_column().eq(self.tenant_id))
-    }
-
-    /// Return a `SELECT … WHERE id = ? AND tenant_id = ?` query.
-    pub fn find_by_id<E, V>(&self, id: V) -> Select<E>
-    where
-        E: TenantScoped,
-        V: Into<<E::PrimaryKey as PrimaryKeyTrait>::ValueType>,
-    {
-        E::find_by_id(id).filter(E::tenant_id_column().eq(self.tenant_id))
-    }
-
-    /// Return an `UPDATE` query pre-filtered to the current tenant.
-    pub fn update_many<E: TenantScoped>(&self) -> UpdateMany<E> {
-        E::update_many().filter(E::tenant_id_column().eq(self.tenant_id))
-    }
-
-    /// Return a `DELETE` query pre-filtered to the current tenant.
-    pub fn delete_many<E: TenantScoped>(&self) -> DeleteMany<E> {
-        E::delete_many().filter(E::tenant_id_column().eq(self.tenant_id))
-    }
-
-    /// Return a `SELECT` on `Target` joined to (and tenant-filtered through) a
-    /// `TenantScoped` intermediate entity.
-    ///
-    /// Use for entities that have no `tenant_id` of their own but can be
-    /// tenant-scoped by joining to a related `TenantScoped` entity.
-    ///
-    /// Example: `service_host` → `service` (TenantScoped):
-    /// ```ignore
-    /// tenant_db
-    ///     .find_via_tenant_join::<service_host::Entity, service::Entity>(
-    ///         service_host::Relation::Service.def(),
-    ///     )
-    ///     .filter(service::Column::DeactivatedAt.is_null())
-    ///     .all(tenant_db.db())
-    ///     .await?
-    /// ```
-    pub fn find_via_tenant_join<Target, Scoped>(&self, relation: RelationDef) -> Select<Target>
-    where
-        Target: sea_orm::EntityTrait,
-        Scoped: TenantScoped,
-    {
-        Target::find()
-            .join(JoinType::InnerJoin, relation)
-            .filter(Scoped::tenant_id_column().eq(self.tenant_id))
-    }
-
     /// Construct a `TenantDb` directly from its components, for use in unit tests
     /// that cannot go through the Axum extractor machinery.
     #[cfg(test)]
-    pub fn new_for_test(db: DatabaseConnection, tenant_id: Uuid) -> Self {
-        Self { db, tenant_id }
+    pub fn new_for_test(db: sea_orm::DatabaseConnection, tenant_id: uuid::Uuid) -> Self {
+        Self(TenantDbInner::new(db, tenant_id))
+    }
+}
+
+impl std::ops::Deref for TenantDb {
+    type Target = TenantDbInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -95,9 +41,9 @@ impl FromRequestParts<Arc<AppState>> for TenantDb {
         let tenant = TenantContext::from_request_parts(parts, state)
             .await
             .map_err(IntoResponse::into_response)?;
-        Ok(Self {
-            db: state.db().clone(),
-            tenant_id: tenant.tenant_id,
-        })
+        Ok(Self(TenantDbInner::new(
+            state.db().clone(),
+            tenant.tenant_id,
+        )))
     }
 }

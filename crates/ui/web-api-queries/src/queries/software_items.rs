@@ -19,7 +19,7 @@ use uptrakit_web_api_types::software_items::{
 };
 use uuid::Uuid;
 
-use crate::auth::token::generate_uuid;
+use crate::token_utils::generate_uuid;
 use crate::queries::plugin_configs::{find_raw_active_config_txn, validate_hooks_internal};
 use crate::tenant_db::TenantDb;
 
@@ -348,7 +348,7 @@ async fn load_item_hosts(
 }
 
 /// Find a non-deactivated software item by ID, scoped to a tenant.
-pub(crate) async fn find_active_item(
+pub async fn find_active_item(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     id: Uuid,
@@ -1097,7 +1097,7 @@ pub async fn unassign_host(tenant_db: &TenantDb, id: Uuid, host_id: Uuid) -> Res
 
 /// Load the host_software_item link for a specific host assignment.
 /// Used by route handlers to verify the assignment exists.
-pub(crate) async fn load_host_assignment(
+pub async fn load_host_assignment(
     db: &sea_orm::DatabaseConnection,
     host_id: Uuid,
     software_item_id: Uuid,

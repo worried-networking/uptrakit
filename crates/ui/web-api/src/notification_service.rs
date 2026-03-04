@@ -192,6 +192,13 @@ impl NotificationService {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::ServiceNotifier for NotificationService {
+    async fn send_to_service(&self, service_id: &Uuid, msg: ControllerMessage) -> bool {
+        self.send(service_id, msg).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,49 @@
+[package]
+name = "uptrakit-web-api-queries"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[features]
+default = []
+db-all = ["db-sqlite", "db-postgres", "db-mysql"]
+db-sqlite = ["sea-orm/sqlx-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres"]
+db-mysql = ["sea-orm/sqlx-mysql"]
+
+[dependencies]
+async-trait = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+cron = { workspace = true }
+rootcause = { workspace = true }
+sea-orm = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+uptrakit-audit-log = { workspace = true, features = ["db"] }
+uptrakit-command = { workspace = true }
+uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
+uptrakit-internal-wire = { workspace = true }
+uptrakit-notification-channels = { workspace = true, features = ["webhook"] }
+uptrakit-plugin-infrastructure-registry = { workspace = true }
+uptrakit-shared-db = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+uptrakit-shared-types = { workspace = true, features = ["openapi"] }
+uptrakit-update-hooks = { workspace = true }
+uptrakit-web-api-types = { workspace = true, features = ["openapi"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
+
+[lints]
+workspace = true

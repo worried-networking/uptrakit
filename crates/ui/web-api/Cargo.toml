@@ -16,9 +16,9 @@ notifications-telegram = ["uptrakit-notification-channels/telegram"]
 notifications-email = ["uptrakit-notification-channels/email"]
 notifications-all = ["notifications-telegram", "notifications-email"]
 db-all = ["db-sqlite", "db-postgres", "db-mysql"]
-db-sqlite = ["sea-orm/sqlx-sqlite"]
-db-postgres = ["sea-orm/sqlx-postgres"]
-db-mysql = ["sea-orm/sqlx-mysql"]
+db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-web-api-queries/db-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-web-api-queries/db-postgres"]
+db-mysql = ["sea-orm/sqlx-mysql", "uptrakit-web-api-queries/db-mysql"]
 
 [dependencies]
 async-stream = { workspace = true }
@@ -81,6 +81,7 @@ async-nats = { workspace = true, optional = true }
 uptrakit-nats = { workspace = true, optional = true }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-notification-channels = { workspace = true, features = ["webhook"] }
+uptrakit-web-api-queries = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util", "net"] }

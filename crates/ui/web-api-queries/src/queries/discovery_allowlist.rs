@@ -179,7 +179,7 @@ pub async fn remove_tenant_allowlist_entry(
 /// Returns an empty set when no entries exist (unconfigured → all allowed).
 /// On database failure, logs a warning and falls back to an empty set so that
 /// discovery proceeds unfiltered rather than silently failing.
-pub(crate) async fn load_tenant_allowlist_set(
+pub async fn load_tenant_allowlist_set(
     db: &DatabaseConnection,
     tenant_id: Uuid,
 ) -> HashSet<String> {
@@ -331,7 +331,7 @@ pub async fn remove_host_allowlist_entry(
 /// Returns an empty set when no entries exist.
 /// On database failure, logs a warning and falls back to an empty set so that
 /// discovery proceeds unfiltered rather than silently failing.
-pub(crate) async fn load_host_allowlist_set(
+pub async fn load_host_allowlist_set(
     db: &DatabaseConnection,
     host_id: Uuid,
 ) -> HashSet<String> {
