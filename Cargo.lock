@@ -6702,6 +6702,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-integration-tests"
+version = "0.0.1"
+dependencies = [
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "testcontainers",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-internal-wire"
 version = "0.0.1"
 dependencies = [

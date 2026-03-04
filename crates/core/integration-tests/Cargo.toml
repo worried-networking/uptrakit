@@ -1,0 +1,24 @@
+[package]
+name = "uptrakit-integration-tests"
+edition = "2024"
+publish = false
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+# These are regular dependencies (not dev-only) because the lib module
+# provides test helpers consumed by the `tests/` integration test binaries.
+tokio = { workspace = true, features = ["time"] }
+testcontainers = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

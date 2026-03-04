@@ -95,6 +95,23 @@ jobs:
           save-if: "false"
       - run: cargo test -p uptrakit-controller --all-features -- --ignored
 
+  system-integration-tests:
+    runs-on:
+      - ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: cd frontend && npm ci && npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build test Docker image
+        run: docker build -f docker/Dockerfile.test -t uptrakit-test:latest .
+      - name: Run system integration tests
+        run: cargo test -p uptrakit-integration-tests -- --ignored
+
   frontend:
     runs-on:
       - ubuntu-latest
