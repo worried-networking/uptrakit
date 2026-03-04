@@ -550,4 +550,3 @@ fn log_resolved_defaults(
         tracing::info!(name = %name, "derived host name from target hostname");
     }
 }
-

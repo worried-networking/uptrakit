@@ -105,11 +105,10 @@ impl DockerConfig {
     /// without any fields set.
     pub fn validate(&self) -> Result<()> {
         if let Some(ref cmd) = self.post_pull_command
-            && let Err(e) =
-                uptrakit_shared_types::command_validation::validate_command_length(
-                    cmd,
-                    "post_pull_command",
-                )
+            && let Err(e) = uptrakit_shared_types::command_validation::validate_command_length(
+                cmd,
+                "post_pull_command",
+            )
         {
             bail!(DockerError::Configuration(e));
         }

@@ -233,10 +233,7 @@ pub trait CommandExecutor: Send + Sync {
     ///
     /// The default implementation returns
     /// [`CommandError::UnsupportedOperation`].
-    async fn open_stdio_tunnel(
-        &self,
-        _command: &str,
-    ) -> crate::Result<Box<dyn StdioTunnel>> {
+    async fn open_stdio_tunnel(&self, _command: &str) -> crate::Result<Box<dyn StdioTunnel>> {
         bail!(CommandError::UnsupportedOperation(
             "stdio tunnel not supported by this executor".into()
         ))
@@ -284,9 +281,7 @@ impl CommandExecutor for NoopCommandExecutor {
     }
 
     async fn execute_quiet(&self, _spec: &CommandSpec) -> crate::Result<CommandOutput> {
-        unreachable!(
-            "NoopCommandExecutor::execute_quiet called on the controller — this is a bug"
-        )
+        unreachable!("NoopCommandExecutor::execute_quiet called on the controller — this is a bug")
     }
 }
 
@@ -317,7 +312,13 @@ impl CommandExecutor for LocalCommandExecutor {
     async fn execute_quiet(&self, spec: &CommandSpec) -> crate::Result<CommandOutput> {
         tracing::debug!("executing command (quiet)");
         let (program, args) = spec.resolve()?;
-        let fut = run_command_exec_impl(&program, &args, spec.working_dir.as_deref(), &spec.envs, None);
+        let fut = run_command_exec_impl(
+            &program,
+            &args,
+            spec.working_dir.as_deref(),
+            &spec.envs,
+            None,
+        );
         let (output, exit_code) = apply_timeout(fut, spec.timeout).await?;
         tracing::debug!(exit_code, "command completed");
         Ok(CommandOutput { output, exit_code })
@@ -346,7 +347,10 @@ mod tests {
     fn with_env_builder_single() {
         let spec = CommandSpec::exec("apt-get", Vec::<String>::new())
             .with_env("DEBIAN_FRONTEND", "noninteractive");
-        assert_eq!(spec.envs, vec![("DEBIAN_FRONTEND".to_string(), "noninteractive".to_string())]);
+        assert_eq!(
+            spec.envs,
+            vec![("DEBIAN_FRONTEND".to_string(), "noninteractive".to_string())]
+        );
     }
 
     #[test]

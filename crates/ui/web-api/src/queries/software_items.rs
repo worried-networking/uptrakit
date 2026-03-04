@@ -132,10 +132,7 @@ fn host_update_available(installed_version: Option<&str>, latest_version: Option
     }
 }
 
-async fn count_linked_hosts(
-    db: &sea_orm::DatabaseConnection,
-    item_id: Uuid,
-) -> Result<u64> {
+async fn count_linked_hosts(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> Result<u64> {
     HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
         .count(db)
@@ -404,15 +401,19 @@ fn validate_execution_site(execution_site: &str, role: &PluginRole) -> Result<()
             if *role == PluginRole::FetchReleases {
                 Ok(())
             } else {
-                Err(report!(SoftwareItemQueryError::InvalidExecutionSite(format!(
-                    "execution_site \"controller\" is only valid for the \"fetch_releases\" role, got \"{}\"",
-                    role,
-                ))))
+                Err(report!(SoftwareItemQueryError::InvalidExecutionSite(
+                    format!(
+                        "execution_site \"controller\" is only valid for the \"fetch_releases\" role, got \"{}\"",
+                        role,
+                    )
+                )))
             }
         }
-        other => Err(report!(SoftwareItemQueryError::InvalidExecutionSite(format!(
-            "invalid execution_site value \"{other}\"; must be \"auto\", \"agent\", or \"controller\""
-        )))),
+        other => Err(report!(SoftwareItemQueryError::InvalidExecutionSite(
+            format!(
+                "invalid execution_site value \"{other}\"; must be \"auto\", \"agent\", or \"controller\""
+            )
+        ))),
     }
 }
 
@@ -445,10 +446,14 @@ async fn resolve_plugin_config_txn(
             if let Err(e) =
                 PluginRegistry::validate_config_str(inline.plugin_type.as_str(), &inline.config)
             {
-                bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(e.to_string()));
+                bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(
+                    e.to_string()
+                ));
             }
             if let Err(e) = validate_hooks_internal(&inline.config) {
-                bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(e.to_string()));
+                bail!(SoftwareItemQueryError::InvalidInlinePluginConfig(
+                    e.to_string()
+                ));
             }
             let now = OffsetDateTime::now_utc();
             let pcid = generate_uuid();
@@ -556,7 +561,11 @@ pub async fn list_software_items(
         base_query = base_query.filter(software_item::Column::DiscoveryState.eq(state.clone()));
     }
 
-    let total = base_query.clone().count(tenant_db.db()).await.context_to()?;
+    let total = base_query
+        .clone()
+        .count(tenant_db.db())
+        .await
+        .context_to()?;
 
     let items = base_query
         .offset(Some(pagination.offset()))
@@ -1064,11 +1073,7 @@ pub async fn update_host_assignment(
 /// Unassign a host from a software item.
 /// Returns `true` if removed, `false` if the software item or link was not found.
 /// Cascade deletes will remove the associated `host_software_item_plugins` rows.
-pub async fn unassign_host(
-    tenant_db: &TenantDb,
-    id: Uuid,
-    host_id: Uuid,
-) -> Result<bool> {
+pub async fn unassign_host(tenant_db: &TenantDb, id: Uuid, host_id: Uuid) -> Result<bool> {
     if find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
         .await
         .is_none()

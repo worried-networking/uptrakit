@@ -19,8 +19,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uuid::Uuid;
 
 use uptrakit_internal_wire::{
-    Capability, CertificatePayload, CURRENT_PROTOCOL_VERSION, ControllerEnvelope, ControllerMessage,
-    EnrollPayload, EnrolledPayload, EnrollmentStatus, IncomingSeq, OutgoingSeq,
+    CURRENT_PROTOCOL_VERSION, Capability, CertificatePayload, ControllerEnvelope,
+    ControllerMessage, EnrollPayload, EnrolledPayload, EnrollmentStatus, IncomingSeq, OutgoingSeq,
     RequestCertificatePayload, SecretString, ServiceMessage,
 };
 

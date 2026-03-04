@@ -51,8 +51,14 @@ mod tests {
     #[test]
     fn plugin_capability_all_variants_snake_case() {
         let cases = [
-            (PluginCapability::DiscoverLocalSoftware, "discover_local_software"),
-            (PluginCapability::RefreshPackageIndex, "refresh_package_index"),
+            (
+                PluginCapability::DiscoverLocalSoftware,
+                "discover_local_software",
+            ),
+            (
+                PluginCapability::RefreshPackageIndex,
+                "refresh_package_index",
+            ),
             (
                 PluginCapability::DetectHostCompatibility,
                 "detect_host_compatibility",

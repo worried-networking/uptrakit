@@ -83,10 +83,7 @@ fn validate_npm_name_part(part: &str, role: &str) -> std::result::Result<(), Str
     }
 
     for ch in part.chars() {
-        if !ch.is_ascii_lowercase()
-            && !ch.is_ascii_digit()
-            && !matches!(ch, '-' | '.' | '_')
-        {
+        if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && !matches!(ch, '-' | '.' | '_') {
             return Err(format!(
                 "package_identifier {role} contains invalid character: '{ch}'"
             ));
@@ -94,9 +91,7 @@ fn validate_npm_name_part(part: &str, role: &str) -> std::result::Result<(), Str
     }
 
     if part.contains("..") {
-        return Err(format!(
-            "package_identifier {role} must not contain '..'"
-        ));
+        return Err(format!("package_identifier {role} must not contain '..'"));
     }
 
     Ok(())
@@ -119,7 +114,9 @@ pub fn validate_version(version: &str) -> std::result::Result<(), String> {
     // Reject protocol prefixes that npm would interpret as non-registry sources.
     for prefix in &["file:", "git+", "http:", "https:"] {
         if version.starts_with(prefix) {
-            return Err(format!("version must not start with protocol prefix '{prefix}'"));
+            return Err(format!(
+                "version must not start with protocol prefix '{prefix}'"
+            ));
         }
     }
     for ch in version.chars() {
@@ -197,8 +194,7 @@ impl NpmPlugin {
     }
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
-        validate_identifier(package_identifier)
-            .map_err(|e| report!(PluginError::Configuration(e)))
+        validate_identifier(package_identifier).map_err(|e| report!(PluginError::Configuration(e)))
     }
 
     /// Parse installed version from `npm list -g <package> --depth=0 --json` output.
@@ -400,8 +396,7 @@ impl Plugin for NpmPlugin {
             }
         };
 
-        let version =
-            Self::parse_npm_list_version(&cmd_output.output, package_identifier);
+        let version = Self::parse_npm_list_version(&cmd_output.output, package_identifier);
         tracing::debug!(package = %package_identifier, version = ?version, "npm installed version");
         Ok(version.map(|v| Version::new(&v)))
     }
@@ -411,16 +406,11 @@ impl Plugin for NpmPlugin {
         tracing::debug!(package = %package_identifier, "fetching npm releases from registry");
 
         let url = npm_registry_url(package_identifier);
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "npm registry request failed: {e}"
-                )))
-            })?;
+        let response = self.client.get(&url).send().await.map_err(|e| {
+            report!(PluginError::PluginInternal(format!(
+                "npm registry request failed: {e}"
+            )))
+        })?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             tracing::debug!(package = %package_identifier, "package not found in npm registry");
@@ -457,8 +447,7 @@ impl Plugin for NpmPlugin {
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
-        validate_version(to_version)
-            .map_err(|e| report!(PluginError::Configuration(e)))?;
+        validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
 
         let pkg_version = format!("{package_identifier}@{to_version}");
         let args = vec!["install".to_string(), "-g".to_string(), pkg_version];
@@ -628,7 +617,10 @@ impl Plugin for NpmPlugin {
             self.require_package_identifier(&item.package_identifier)?;
         }
 
-        tracing::debug!(count = items.len(), "batch detecting npm installed versions");
+        tracing::debug!(
+            count = items.len(),
+            "batch detecting npm installed versions"
+        );
 
         // Run a single `npm list -g --depth=0 --json` without a package filter.
         // npm exits non-zero when there are peer-dep issues; treat any failure as
@@ -661,9 +653,7 @@ impl Plugin for NpmPlugin {
             .iter()
             .map(|item| BatchDetectResult {
                 package_identifier: item.package_identifier.clone(),
-                installed_version: all_packages
-                    .get(&item.package_identifier)
-                    .map(Version::new),
+                installed_version: all_packages.get(&item.package_identifier).map(Version::new),
                 error: None,
             })
             .collect();
@@ -720,7 +710,9 @@ mod tests {
                 })
             } else {
                 use rootcause::prelude::*;
-                bail!(uptrakit_command::CommandError::CommandFailed(self.exit_code))
+                bail!(uptrakit_command::CommandError::CommandFailed(
+                    self.exit_code
+                ))
             }
         }
     }
@@ -815,10 +807,7 @@ mod tests {
 
     #[test]
     fn registry_url_plain_package() {
-        assert_eq!(
-            npm_registry_url("n8n"),
-            "https://registry.npmjs.org/n8n"
-        );
+        assert_eq!(npm_registry_url("n8n"), "https://registry.npmjs.org/n8n");
     }
 
     #[test]
@@ -914,7 +903,9 @@ mod tests {
     #[tokio::test]
     async fn parse_registry_response_latest_only() {
         let config = NpmConfig::default();
-        let plugin = NpmPlugin::new(config, test_executor()).await.expect("create");
+        let plugin = NpmPlugin::new(config, test_executor())
+            .await
+            .expect("create");
         let json = serde_json::json!({
             "dist-tags": { "latest": "1.18.0" },
             "time": { "1.18.0": "2024-01-15T10:00:00.000Z" }
@@ -928,8 +919,12 @@ mod tests {
 
     #[tokio::test]
     async fn parse_registry_response_with_prereleases() {
-        let config = NpmConfig { include_prereleases: true };
-        let plugin = NpmPlugin::new(config, test_executor()).await.expect("create");
+        let config = NpmConfig {
+            include_prereleases: true,
+        };
+        let plugin = NpmPlugin::new(config, test_executor())
+            .await
+            .expect("create");
         let json = serde_json::json!({
             "dist-tags": {
                 "latest": "1.18.0",
@@ -941,14 +936,26 @@ mod tests {
         let releases = plugin.parse_registry_response(&json, "n8n");
         // latest + next (beta deduped against next's version)
         assert_eq!(releases.len(), 2);
-        assert!(releases.iter().any(|r| r.tag == "1.18.0" && !r.is_prerelease));
-        assert!(releases.iter().any(|r| r.tag == "1.19.0-beta.1" && r.is_prerelease));
+        assert!(
+            releases
+                .iter()
+                .any(|r| r.tag == "1.18.0" && !r.is_prerelease)
+        );
+        assert!(
+            releases
+                .iter()
+                .any(|r| r.tag == "1.19.0-beta.1" && r.is_prerelease)
+        );
     }
 
     #[tokio::test]
     async fn parse_registry_response_prerelease_same_as_latest_deduped() {
-        let config = NpmConfig { include_prereleases: true };
-        let plugin = NpmPlugin::new(config, test_executor()).await.expect("create");
+        let config = NpmConfig {
+            include_prereleases: true,
+        };
+        let plugin = NpmPlugin::new(config, test_executor())
+            .await
+            .expect("create");
         let json = serde_json::json!({
             "dist-tags": {
                 "latest": "1.18.0",
@@ -965,7 +972,9 @@ mod tests {
     #[tokio::test]
     async fn parse_registry_response_no_dist_tags() {
         let config = NpmConfig::default();
-        let plugin = NpmPlugin::new(config, test_executor()).await.expect("create");
+        let plugin = NpmPlugin::new(config, test_executor())
+            .await
+            .expect("create");
         let json = serde_json::json!({});
         let releases = plugin.parse_registry_response(&json, "n8n");
         assert!(releases.is_empty());
@@ -975,7 +984,9 @@ mod tests {
 
     #[tokio::test]
     async fn npm_plugin_capabilities() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).await.expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
+            .await
+            .expect("create");
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
         assert!(plugin.has_capability(PluginCapability::ControllerSideFetchReleases));
@@ -987,7 +998,9 @@ mod tests {
 
     #[tokio::test]
     async fn npm_plugin_required_sudo_commands() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).await.expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
+            .await
+            .expect("create");
         let entries = plugin.required_sudo_commands();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].command, "npm");
@@ -1032,8 +1045,12 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_found() {
         let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"}}}"#;
-        let plugin =
-            NpmPlugin::new(NpmConfig::default(), FixedOutputExecutor::with_output(json, 0)).await.expect("create");
+        let plugin = NpmPlugin::new(
+            NpmConfig::default(),
+            FixedOutputExecutor::with_output(json, 0),
+        )
+        .await
+        .expect("create");
         let result = plugin.detect_installed_version("n8n").await.expect("ok");
         assert_eq!(result, Some(Version::new("1.18.0")));
     }
@@ -1052,7 +1069,9 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_empty_identifier_fails() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).await.expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
+            .await
+            .expect("create");
         let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
@@ -1061,7 +1080,9 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_installed_version_empty_returns_empty() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).await.expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
+            .await
+            .expect("create");
         let result = plugin
             .batch_detect_installed_version(&[])
             .await
@@ -1071,8 +1092,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_installed_version_found() {
-        let json =
-            r#"{"dependencies":{"n8n":{"version":"1.18.0"},"pm2":{"version":"5.3.0"}}}"#;
+        let json = r#"{"dependencies":{"n8n":{"version":"1.18.0"},"pm2":{"version":"5.3.0"}}}"#;
         let plugin = NpmPlugin::new(
             NpmConfig::default(),
             FixedOutputExecutor::with_output(json, 0),
@@ -1080,18 +1100,28 @@ mod tests {
         .await
         .expect("create");
         let items = vec![
-            BatchDetectItem { package_identifier: "n8n".to_string() },
-            BatchDetectItem { package_identifier: "pm2".to_string() },
+            BatchDetectItem {
+                package_identifier: "n8n".to_string(),
+            },
+            BatchDetectItem {
+                package_identifier: "pm2".to_string(),
+            },
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
             .await
             .expect("ok");
         assert_eq!(results.len(), 2);
-        let n8n = results.iter().find(|r| r.package_identifier == "n8n").expect("n8n");
+        let n8n = results
+            .iter()
+            .find(|r| r.package_identifier == "n8n")
+            .expect("n8n");
         assert_eq!(n8n.installed_version, Some(Version::new("1.18.0")));
         assert!(n8n.error.is_none());
-        let pm2 = results.iter().find(|r| r.package_identifier == "pm2").expect("pm2");
+        let pm2 = results
+            .iter()
+            .find(|r| r.package_identifier == "pm2")
+            .expect("pm2");
         assert_eq!(pm2.installed_version, Some(Version::new("5.3.0")));
         assert!(pm2.error.is_none());
     }
@@ -1107,18 +1137,28 @@ mod tests {
         .await
         .expect("create");
         let items = vec![
-            BatchDetectItem { package_identifier: "n8n".to_string() },
-            BatchDetectItem { package_identifier: "missing".to_string() },
+            BatchDetectItem {
+                package_identifier: "n8n".to_string(),
+            },
+            BatchDetectItem {
+                package_identifier: "missing".to_string(),
+            },
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
             .await
             .expect("ok");
         assert_eq!(results.len(), 2);
-        let found = results.iter().find(|r| r.package_identifier == "n8n").expect("n8n");
+        let found = results
+            .iter()
+            .find(|r| r.package_identifier == "n8n")
+            .expect("n8n");
         assert_eq!(found.installed_version, Some(Version::new("1.18.0")));
         assert!(found.error.is_none());
-        let missing = results.iter().find(|r| r.package_identifier == "missing").expect("missing");
+        let missing = results
+            .iter()
+            .find(|r| r.package_identifier == "missing")
+            .expect("missing");
         assert_eq!(missing.installed_version, None);
         assert!(missing.error.is_none());
     }
@@ -1133,8 +1173,12 @@ mod tests {
         .await
         .expect("create");
         let items = vec![
-            BatchDetectItem { package_identifier: "n8n".to_string() },
-            BatchDetectItem { package_identifier: "pm2".to_string() },
+            BatchDetectItem {
+                package_identifier: "n8n".to_string(),
+            },
+            BatchDetectItem {
+                package_identifier: "pm2".to_string(),
+            },
         ];
         let results = plugin
             .batch_detect_installed_version(&items)
@@ -1149,10 +1193,16 @@ mod tests {
 
     #[tokio::test]
     async fn batch_detect_installed_version_invalid_identifier_fails() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).await.expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
+            .await
+            .expect("create");
         let items = vec![
-            BatchDetectItem { package_identifier: "valid".to_string() },
-            BatchDetectItem { package_identifier: "Invalid Package!".to_string() },
+            BatchDetectItem {
+                package_identifier: "valid".to_string(),
+            },
+            BatchDetectItem {
+                package_identifier: "Invalid Package!".to_string(),
+            },
         ];
         let result = plugin.batch_detect_installed_version(&items).await;
         assert!(result.is_err());
@@ -1162,7 +1212,9 @@ mod tests {
 
     #[tokio::test]
     async fn npm_plugin_type() {
-        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor()).await.expect("create");
+        let plugin = NpmPlugin::new(NpmConfig::default(), test_executor())
+            .await
+            .expect("create");
         assert_eq!(plugin.plugin_type(), PluginType::PackageManagerNpm);
     }
 

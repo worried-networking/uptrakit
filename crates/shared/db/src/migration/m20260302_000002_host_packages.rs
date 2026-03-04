@@ -135,11 +135,7 @@ impl MigrationTrait for Migration {
                             .uuid()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(HostPackageIgnores::HostId)
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(HostPackageIgnores::HostId).uuid().not_null())
                     .col(
                         ColumnDef::new(HostPackageIgnores::PluginConfigId)
                             .uuid()

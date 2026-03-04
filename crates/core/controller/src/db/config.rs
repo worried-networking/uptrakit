@@ -39,7 +39,10 @@ impl DbConfig {
             }
         };
 
-        Ok(Self { url, max_connections })
+        Ok(Self {
+            url,
+            max_connections,
+        })
     }
 
     /// Validate that the database URL scheme is supported by enabled features

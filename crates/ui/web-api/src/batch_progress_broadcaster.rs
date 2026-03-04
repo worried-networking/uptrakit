@@ -52,9 +52,7 @@ pub enum BatchProgressEvent {
         total: i32,
     },
     /// The batch has reached a terminal status.
-    BatchCompleted {
-        status: String,
-    },
+    BatchCompleted { status: String },
 }
 
 /// Registry of per-batch broadcast channels for real-time progress streaming.

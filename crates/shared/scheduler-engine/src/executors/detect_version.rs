@@ -47,10 +47,7 @@ impl TaskExecutor for DetectVersionExecutor {
 impl DetectVersionExecutor {
     /// Build and send `CheckVersions` messages that carry only `detect_version`
     /// assignments (no `fetch_releases`).
-    async fn send_detect_version_assignments(
-        &self,
-        tenant_id: Uuid,
-    ) -> crate::error::Result<()> {
+    async fn send_detect_version_assignments(&self, tenant_id: Uuid) -> crate::error::Result<()> {
         let rows = query_agent_assignment_rows(&self.db, tenant_id, &["detect_version"]).await?;
         let hp_rows = query_host_package_assignment_rows(&self.db, tenant_id).await?;
 
@@ -87,15 +84,16 @@ impl DetectVersionExecutor {
 
             let agent_key = (row.service_id, row.host_machine_id.clone());
             let items = by_agent_host.entry(agent_key).or_default();
-            let item = items
-                .entry(row.software_item_id)
-                .or_insert_with(|| VersionCheckAssignment {
-                    software_item_id: row.software_item_id,
-                    name: row.software_item_name.clone(),
-                    detect_version: None,
-                    fetch_releases: None,
-                    host_package_id: None,
-                });
+            let item =
+                items
+                    .entry(row.software_item_id)
+                    .or_insert_with(|| VersionCheckAssignment {
+                        software_item_id: row.software_item_id,
+                        name: row.software_item_name.clone(),
+                        detect_version: None,
+                        fetch_releases: None,
+                        host_package_id: None,
+                    });
 
             item.detect_version = Some(assignment);
         }

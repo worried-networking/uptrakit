@@ -13,9 +13,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
+use uptrakit_web_api_types::MaskedUrl;
 pub use uptrakit_web_api_types::settings_nats::{NatsSettingsResponse, UpdateNatsSettingsRequest};
 use uptrakit_web_api_types::validation::Validate;
-use uptrakit_web_api_types::MaskedUrl;
 
 use crate::AppState;
 use crate::SettingKey;

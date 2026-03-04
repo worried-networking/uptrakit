@@ -440,7 +440,12 @@ async fn run_hook_command(
 ) -> UpdateResult<(String, i32)> {
     tracing::debug!(hook = ?hook_cmd, "running update hook");
 
-    match tokio::time::timeout(HOOK_TIMEOUT, run_hook_command_inner(hook_cmd, stream_type, output_tx)).await {
+    match tokio::time::timeout(
+        HOOK_TIMEOUT,
+        run_hook_command_inner(hook_cmd, stream_type, output_tx),
+    )
+    .await
+    {
         Ok(result) => result,
         Err(_) => {
             let summary = hook_summary(hook_cmd);
@@ -542,9 +547,7 @@ pub(crate) async fn run_hook_for_batch(hook_cmd: &HookCommand) -> UpdateResult<(
 async fn run_hook_for_batch_inner(hook_cmd: &HookCommand) -> UpdateResult<()> {
     let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
     // Drain output in the background — we don't stream it for batch hooks.
-    let drain_handle = tokio::spawn(async move {
-        while plugin_rx.recv().await.is_some() {}
-    });
+    let drain_handle = tokio::spawn(async move { while plugin_rx.recv().await.is_some() {} });
 
     let result = match hook_cmd {
         HookCommand::Shell { command, shell } => {
@@ -587,11 +590,7 @@ fn hook_summary(hook_cmd: &HookCommand) -> String {
         }
         HookCommand::Exec { program, args, .. } => {
             let args_summary = if args.len() > 3 {
-                format!(
-                    "{} (+{} more)",
-                    args[..3].join(" "),
-                    args.len() - 3
-                )
+                format!("{} (+{} more)", args[..3].join(" "), args.len() - 3)
             } else {
                 args.join(" ")
             };

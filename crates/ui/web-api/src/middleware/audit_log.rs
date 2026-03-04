@@ -19,11 +19,7 @@ use crate::middleware::require_auth::AuthenticatedUser;
 /// Reads `MatchedPath`, `AuthenticatedUser`, `ClientIp`, and `User-Agent`
 /// from the request, calls `next.run()`, then dispatches an `AuditEntry`
 /// through the fire-and-forget dispatcher.
-pub async fn audit_log(
-    State(state): State<Arc<AppState>>,
-    req: Request,
-    next: Next,
-) -> Response {
+pub async fn audit_log(State(state): State<Arc<AppState>>, req: Request, next: Next) -> Response {
     let start = Instant::now();
 
     // Capture request metadata before passing to the handler.
@@ -33,10 +29,7 @@ pub async fn audit_log(
         .extensions()
         .get::<MatchedPath>()
         .map(|m| m.as_str().to_string());
-    let client_ip = req
-        .extensions()
-        .get::<ClientIp>()
-        .map(|c| c.0.to_string());
+    let client_ip = req.extensions().get::<ClientIp>().map(|c| c.0.to_string());
     let user_agent = req
         .headers()
         .get(axum::http::header::USER_AGENT)
@@ -98,18 +91,10 @@ pub async fn audit_log(
 }
 
 /// Map the web-api `AuthMethod` to the audit log's `AuditActorType` and auth method string.
-fn map_auth_method(
-    auth_method: &crate::auth::AuthMethod,
-) -> (AuditActorType, String) {
+fn map_auth_method(auth_method: &crate::auth::AuthMethod) -> (AuditActorType, String) {
     match auth_method {
-        crate::auth::AuthMethod::Password => {
-            (AuditActorType::User, "password".to_string())
-        }
-        crate::auth::AuthMethod::Oidc { .. } => {
-            (AuditActorType::Oidc, "oidc".to_string())
-        }
-        crate::auth::AuthMethod::ApiToken => {
-            (AuditActorType::ApiToken, "api_token".to_string())
-        }
+        crate::auth::AuthMethod::Password => (AuditActorType::User, "password".to_string()),
+        crate::auth::AuthMethod::Oidc { .. } => (AuditActorType::Oidc, "oidc".to_string()),
+        crate::auth::AuthMethod::ApiToken => (AuditActorType::ApiToken, "api_token".to_string()),
     }
 }

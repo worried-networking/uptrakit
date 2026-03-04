@@ -17,14 +17,14 @@ use axum::{
 };
 use uuid::Uuid;
 
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use uptrakit_shared_db::entity::{host, update_batch, update_history};
 use uptrakit_shared_types::BatchStatus;
 use uptrakit_web_api_types::update_batches::{
-    HostBatchUpdateRequest, ItemBatchUpdateRequest, UpdateBatchDetailResponse, UpdateBatchListQuery,
-    UpdateBatchSummaryResponse,
+    HostBatchUpdateRequest, ItemBatchUpdateRequest, UpdateBatchDetailResponse,
+    UpdateBatchListQuery, UpdateBatchSummaryResponse,
 };
 use uptrakit_web_api_types::validation::Validate;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use crate::AppState;
 use crate::batch_progress_broadcaster::BatchProgressEvent;
@@ -352,21 +352,20 @@ pub async fn stream_batch_progress(
         .into_iter()
         .collect();
 
-    let host_names: std::collections::HashMap<Uuid, String> =
-        match host::Entity::find()
-            .filter(host::Column::Id.is_in(host_ids))
-            .all(tenant_db.db())
-            .await
-        {
-            Ok(records) => records.into_iter().map(|h| (h.id, h.friendly_name)).collect(),
-            Err(e) => {
-                tracing::error!("Failed to load host names for SSE replay: {e}");
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                );
-            }
-        };
+    let host_names: std::collections::HashMap<Uuid, String> = match host::Entity::find()
+        .filter(host::Column::Id.is_in(host_ids))
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(records) => records
+            .into_iter()
+            .map(|h| (h.id, h.friendly_name))
+            .collect(),
+        Err(e) => {
+            tracing::error!("Failed to load host names for SSE replay: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     let si_names: std::collections::HashMap<Uuid, String> =
         match uptrakit_shared_db::entity::software_item::Entity::find()
@@ -377,10 +376,7 @@ pub async fn stream_batch_progress(
             Ok(records) => records.into_iter().map(|si| (si.id, si.name)).collect(),
             Err(e) => {
                 tracing::error!("Failed to load software item names for SSE replay: {e}");
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                );
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
 
@@ -531,9 +527,7 @@ fn trigger_error_to_response(report: rootcause::Report<TriggerUpdateError>) -> R
         TriggerUpdateError::SoftwareItemNotFound => {
             error_response(StatusCode::NOT_FOUND, "Software item not found")
         }
-        TriggerUpdateError::HostNotFound => {
-            error_response(StatusCode::NOT_FOUND, "Host not found")
-        }
+        TriggerUpdateError::HostNotFound => error_response(StatusCode::NOT_FOUND, "Host not found"),
         TriggerUpdateError::HostNotAssigned => error_response(
             StatusCode::BAD_REQUEST,
             "Host is not assigned to this software item",

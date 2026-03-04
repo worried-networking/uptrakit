@@ -121,9 +121,7 @@ impl MigrationTrait for Migration {
                             Query::select()
                                 .from(Alias::new("permissions"))
                                 .column(Alias::new("id"))
-                                .and_where(
-                                    Expr::col(Alias::new("name")).eq("manage_commands"),
-                                )
+                                .and_where(Expr::col(Alias::new("name")).eq("manage_commands"))
                                 .to_owned(),
                         ),
                     )

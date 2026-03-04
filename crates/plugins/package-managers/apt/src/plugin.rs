@@ -155,7 +155,10 @@ impl AptPlugin {
             if version.is_empty() {
                 return None;
             }
-            let source = parts.next().map(|s| s.trim().to_string()).unwrap_or_default();
+            let source = parts
+                .next()
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
             Some(MadisonEntry {
                 version: version.to_string(),
                 source,
@@ -201,7 +204,10 @@ impl AptPlugin {
             if version.is_empty() {
                 continue;
             }
-            let source = parts.next().map(|s| s.trim().to_string()).unwrap_or_default();
+            let source = parts
+                .next()
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
             // Only keep the first entry per package (highest priority).
             results.entry(pkg_name).or_insert_with(|| MadisonEntry {
                 version: version.to_string(),
@@ -233,7 +239,9 @@ impl Plugin for AptPlugin {
             .await
         {
             Ok(_) => Ok(HostCompatibility::Compatible),
-            Err(_) => Ok(HostCompatibility::Incompatible("apt-get not found".to_string())),
+            Err(_) => Ok(HostCompatibility::Incompatible(
+                "apt-get not found".to_string(),
+            )),
         }
     }
 
@@ -501,8 +509,7 @@ impl Plugin for AptPlugin {
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
-        validate_version(to_version)
-            .map_err(|e| report!(PluginError::Configuration(e)))?;
+        validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
 
         let pkg_version = format!("{package_identifier}={to_version}");
         let args = vec![
@@ -614,7 +621,10 @@ impl Plugin for AptPlugin {
             .collect::<Vec<_>>()
             .join(" ");
 
-        let pkg_list: Vec<&str> = items.iter().map(|i| i.package_identifier.as_str()).collect();
+        let pkg_list: Vec<&str> = items
+            .iter()
+            .map(|i| i.package_identifier.as_str())
+            .collect();
         send_output(
             output_tx,
             &format!(
@@ -698,7 +708,10 @@ impl Plugin for AptPlugin {
             args.push(item.package_identifier.clone());
         }
 
-        tracing::debug!(count = items.len(), "batch detecting APT installed versions");
+        tracing::debug!(
+            count = items.len(),
+            "batch detecting APT installed versions"
+        );
 
         // Non-zero exit is expected when any package is unknown; ignore it.
         let stdout = match self
@@ -728,9 +741,7 @@ impl Plugin for AptPlugin {
         let results = items
             .iter()
             .map(|item| {
-                let installed_version = dpkg_map
-                    .get(&item.package_identifier)
-                    .map(Version::new);
+                let installed_version = dpkg_map.get(&item.package_identifier).map(Version::new);
                 BatchDetectResult {
                     package_identifier: item.package_identifier.clone(),
                     installed_version,
@@ -771,7 +782,10 @@ impl Plugin for AptPlugin {
             args.push(item.package_identifier.clone());
         }
 
-        tracing::debug!(count = items.len(), "batch fetching APT releases via apt-cache madison");
+        tracing::debug!(
+            count = items.len(),
+            "batch fetching APT releases via apt-cache madison"
+        );
 
         let cmd_output = self
             .executor
@@ -930,7 +944,9 @@ mod tests {
                 })
             } else {
                 use rootcause::prelude::*;
-                bail!(uptrakit_command::CommandError::CommandFailed(self.exit_code))
+                bail!(uptrakit_command::CommandError::CommandFailed(
+                    self.exit_code
+                ))
             }
         }
     }
@@ -1064,7 +1080,8 @@ mod tests {
 
     #[test]
     fn parse_madison_output_non_security_source() {
-        let output = "   nginx | 1.24.0-2 | http://archive.ubuntu.com/ubuntu noble/main amd64 Packages\n";
+        let output =
+            "   nginx | 1.24.0-2 | http://archive.ubuntu.com/ubuntu noble/main amd64 Packages\n";
         let entry = AptPlugin::parse_madison_output(output).unwrap();
         assert!(!AptPlugin::is_security_source(&entry.source));
     }
@@ -1141,7 +1158,9 @@ mod tests {
 
     #[tokio::test]
     async fn apt_plugin_required_sudo_commands() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).await.expect("create plugin");
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
+            .await
+            .expect("create plugin");
         let entries = plugin.required_sudo_commands();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].command, "apt-get");
@@ -1152,7 +1171,9 @@ mod tests {
 
     #[tokio::test]
     async fn apt_plugin_capabilities() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).await.expect("create plugin");
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
+            .await
+            .expect("create plugin");
         assert!(plugin.has_capability(PluginCapability::DiscoverLocalSoftware));
         assert!(plugin.has_capability(PluginCapability::RefreshPackageIndex));
         assert!(plugin.has_capability(PluginCapability::DetectHostCompatibility));
@@ -1164,14 +1185,18 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_empty_identifier_fails() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).await.expect("create plugin");
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
+            .await
+            .expect("create plugin");
         let result = plugin.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn fetch_releases_empty_identifier_fails() {
-        let plugin = AptPlugin::new(AptConfig::default(), test_executor()).await.expect("create plugin");
+        let plugin = AptPlugin::new(AptConfig::default(), test_executor())
+            .await
+            .expect("create plugin");
         let result = plugin.fetch_releases("").await;
         assert!(result.is_err());
     }
@@ -1339,9 +1364,7 @@ mod tests {
     async fn discover_software_emits_targets_when_default_config() {
         // Default config (discovery_filter: None) → discover-all mode.
         // Effective filter is All, so only dpkg-query is called (no apt-mark).
-        let executor = RoutedOutputExecutor::with_routes(vec![
-            ("dpkg-query", "nginx\t1.24.0\n"),
-        ]);
+        let executor = RoutedOutputExecutor::with_routes(vec![("dpkg-query", "nginx\t1.24.0\n")]);
         let plugin = AptPlugin::new(AptConfig::default(), executor)
             .await
             .expect("create plugin");
@@ -1487,12 +1510,24 @@ mod tests {
             .expect("ok");
 
         assert_eq!(results.len(), 2);
-        let nginx = results.iter().find(|r| r.package_identifier == "nginx").unwrap();
-        assert_eq!(nginx.installed_version, Some(Version::new("1.24.0-2ubuntu7.3")));
+        let nginx = results
+            .iter()
+            .find(|r| r.package_identifier == "nginx")
+            .unwrap();
+        assert_eq!(
+            nginx.installed_version,
+            Some(Version::new("1.24.0-2ubuntu7.3"))
+        );
         assert!(nginx.error.is_none());
 
-        let python3 = results.iter().find(|r| r.package_identifier == "python3").unwrap();
-        assert_eq!(python3.installed_version, Some(Version::new("3.11.0-5ubuntu2")));
+        let python3 = results
+            .iter()
+            .find(|r| r.package_identifier == "python3")
+            .unwrap();
+        assert_eq!(
+            python3.installed_version,
+            Some(Version::new("3.11.0-5ubuntu2"))
+        );
         assert!(python3.error.is_none());
     }
 
@@ -1518,7 +1553,10 @@ mod tests {
             .expect("ok");
 
         assert_eq!(results.len(), 2);
-        let curl = results.iter().find(|r| r.package_identifier == "curl").unwrap();
+        let curl = results
+            .iter()
+            .find(|r| r.package_identifier == "curl")
+            .unwrap();
         assert!(curl.installed_version.is_none());
         assert!(curl.error.is_none(), "absent package is not an error");
     }
@@ -1551,10 +1589,13 @@ mod tests {
 
     #[tokio::test]
     async fn batch_fetch_releases_mixed_packages() {
-        let executor = RoutedOutputExecutor::with_routes(vec![("apt-cache", concat!(
-            "   nginx | 1.24.0-2ubuntu7.3 | http://archive.ubuntu.com/ubuntu noble/main amd64 Packages\n",
-            "   openssl | 3.0.2-0ubuntu1.16 | http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages\n",
-        ))]);
+        let executor = RoutedOutputExecutor::with_routes(vec![(
+            "apt-cache",
+            concat!(
+                "   nginx | 1.24.0-2ubuntu7.3 | http://archive.ubuntu.com/ubuntu noble/main amd64 Packages\n",
+                "   openssl | 3.0.2-0ubuntu1.16 | http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages\n",
+            ),
+        )]);
         let plugin = AptPlugin::new(AptConfig::default(), executor)
             .await
             .expect("create");
@@ -1574,18 +1615,27 @@ mod tests {
 
         assert_eq!(results.len(), 3);
 
-        let nginx = results.iter().find(|r| r.package_identifier == "nginx").unwrap();
+        let nginx = results
+            .iter()
+            .find(|r| r.package_identifier == "nginx")
+            .unwrap();
         assert_eq!(nginx.releases.len(), 1);
         assert_eq!(nginx.releases[0].tag, "1.24.0-2ubuntu7.3");
         assert!(nginx.releases[0].category.is_none());
         assert!(nginx.error.is_none());
 
-        let openssl = results.iter().find(|r| r.package_identifier == "openssl").unwrap();
+        let openssl = results
+            .iter()
+            .find(|r| r.package_identifier == "openssl")
+            .unwrap();
         assert_eq!(openssl.releases.len(), 1);
         assert_eq!(openssl.releases[0].category, Some(UpdateCategory::Security));
         assert!(openssl.error.is_none());
 
-        let curl = results.iter().find(|r| r.package_identifier == "curl").unwrap();
+        let curl = results
+            .iter()
+            .find(|r| r.package_identifier == "curl")
+            .unwrap();
         assert!(curl.releases.is_empty(), "absent package has no releases");
         assert!(curl.error.is_none(), "absent package is not an error");
     }

@@ -191,11 +191,7 @@ async fn run_controller_fetch_jobs(
             "controller-side fetch: succeeded"
         );
 
-        let category_str = latest
-            .category
-            .clone()
-            .unwrap_or_default()
-            .to_string();
+        let category_str = latest.category.clone().unwrap_or_default().to_string();
 
         for (host_id, software_item_id) in &job.targets {
             let active = host_software_item::ActiveModel {
@@ -712,30 +708,24 @@ pub async fn trigger_update(
                 TriggerUpdateError::HostNotFound => {
                     error_response(StatusCode::NOT_FOUND, "Host not found")
                 }
-                TriggerUpdateError::HostNotAssigned => {
-                    error_response(
-                        StatusCode::BAD_REQUEST,
-                        "Host is not assigned to this software item",
-                    )
-                }
+                TriggerUpdateError::HostNotAssigned => error_response(
+                    StatusCode::BAD_REQUEST,
+                    "Host is not assigned to this software item",
+                ),
                 TriggerUpdateError::NoAgent => {
                     error_response(StatusCode::NOT_FOUND, "No agent linked to this host")
                 }
                 TriggerUpdateError::AgentNotApproved => {
                     error_response(StatusCode::BAD_REQUEST, "Agent is not approved")
                 }
-                TriggerUpdateError::UpdateAlreadyActive => {
-                    error_response(
-                        StatusCode::CONFLICT,
-                        "An update is already pending or in progress",
-                    )
-                }
-                TriggerUpdateError::NoExecuteUpdatePlugin => {
-                    error_response(
-                        StatusCode::BAD_REQUEST,
-                        "No execute_update plugin assigned for this host",
-                    )
-                }
+                TriggerUpdateError::UpdateAlreadyActive => error_response(
+                    StatusCode::CONFLICT,
+                    "An update is already pending or in progress",
+                ),
+                TriggerUpdateError::NoExecuteUpdatePlugin => error_response(
+                    StatusCode::BAD_REQUEST,
+                    "No execute_update plugin assigned for this host",
+                ),
                 TriggerUpdateError::PluginConfigNotFound => {
                     error_response(StatusCode::INTERNAL_SERVER_ERROR, "Plugin config not found")
                 }

@@ -109,16 +109,8 @@ impl MigrationTrait for Migration {
                     .col(string(SshHostsOld::KeyType))
                     .col(string_null(SshHostsOld::HostKeyFingerprint))
                     .col(string_null(SshHostsOld::MachineId))
-                    .col(
-                        ColumnDef::new(SshHostsOld::CreatedAt)
-                            .integer()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(SshHostsOld::UpdatedAt)
-                            .integer()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(SshHostsOld::CreatedAt).integer().not_null())
+                    .col(ColumnDef::new(SshHostsOld::UpdatedAt).integer().not_null())
                     .col(ColumnDef::new(SshHostsOld::SudoAvailable).integer())
                     .col(ColumnDef::new(SshHostsOld::IsRoot).integer())
                     .col(

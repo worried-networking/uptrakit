@@ -123,8 +123,7 @@ pub(super) async fn handle_authenticated(
                             %service_id,
                             "rejected connection: no non-revoked certificate found"
                         );
-                        let _ =
-                            close_with_reason(&mut sink, CloseReason::NoValidCertificate).await;
+                        let _ = close_with_reason(&mut sink, CloseReason::NoValidCertificate).await;
                         return;
                     }
                     Err(e) => {
@@ -161,8 +160,7 @@ pub(super) async fn handle_authenticated(
                         serial_number = %cert_serial,
                         "rejected connection: certificate is revoked"
                     );
-                    let _ =
-                        close_with_reason(&mut sink, CloseReason::CertificateRevoked).await;
+                    let _ = close_with_reason(&mut sink, CloseReason::CertificateRevoked).await;
                     return;
                 }
                 CertLookupResult::Tenant(record)
@@ -183,11 +181,8 @@ pub(super) async fn handle_authenticated(
                                 serial_number = %cert_serial,
                                 "rejected connection: system service certificate is revoked"
                             );
-                            let _ = close_with_reason(
-                                &mut sink,
-                                CloseReason::CertificateRevoked,
-                            )
-                            .await;
+                            let _ =
+                                close_with_reason(&mut sink, CloseReason::CertificateRevoked).await;
                             return;
                         }
                         CertLookupResult::System(record)
@@ -198,11 +193,8 @@ pub(super) async fn handle_authenticated(
                             serial_number = %cert_serial,
                             "rejected connection: certificate not recognized"
                         );
-                        let _ = close_with_reason(
-                            &mut sink,
-                            CloseReason::CertificateNotRecognized,
-                        )
-                        .await;
+                        let _ = close_with_reason(&mut sink, CloseReason::CertificateNotRecognized)
+                            .await;
                         return;
                     }
                     Err(e) => {
@@ -347,8 +339,8 @@ pub(super) async fn handle_authenticated(
     let capabilities = parse_capabilities(&capabilities_json);
     let profile = ServiceProfile::from_capabilities(&capabilities);
     let shutdown_timeout = profile.shutdown_timeout_secs();
-    let ping_secs = ping_interval_seconds
-        .map_or_else(|| profile.default_ping_interval_secs(), |v| v as u32);
+    let ping_secs =
+        ping_interval_seconds.map_or_else(|| profile.default_ping_interval_secs(), |v| v as u32);
     let ping_interval = std::time::Duration::from_secs(u64::from(ping_secs));
     let settings_msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
         renewal_window_hours,
@@ -610,8 +602,7 @@ async fn enroll_service(
     out_seq: &mut OutgoingSeq,
 ) -> Option<(uuid::Uuid, bool)> {
     use crate::routes::agents::{
-        EnrollParams, ServiceStatus, SystemServiceEnrollParams, do_enroll,
-        do_enroll_system_service,
+        EnrollParams, ServiceStatus, SystemServiceEnrollParams, do_enroll, do_enroll_system_service,
     };
     use uptrakit_internal_wire::Capability;
 
@@ -654,8 +645,7 @@ async fn enroll_service(
 
                 let approved = enroll_result.status == ServiceStatus::Approved;
                 if approved {
-                    let approved_msg =
-                        ControllerMessage::Approved(ApprovedPayload { service_id });
+                    let approved_msg = ControllerMessage::Approved(ApprovedPayload { service_id });
                     let json = serialize_controller_msg(out_seq, approved_msg)?;
                     if sink.send(Message::Text(json.into())).await.is_err() {
                         return None;
@@ -712,8 +702,7 @@ async fn enroll_service(
 
                 let approved = enroll_result.status == ServiceStatus::Approved;
                 if approved {
-                    let approved_msg =
-                        ControllerMessage::Approved(ApprovedPayload { service_id });
+                    let approved_msg = ControllerMessage::Approved(ApprovedPayload { service_id });
                     let json = serialize_controller_msg(out_seq, approved_msg)?;
                     if sink.send(Message::Text(json.into())).await.is_err() {
                         return None;

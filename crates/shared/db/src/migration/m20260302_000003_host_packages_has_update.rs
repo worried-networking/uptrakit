@@ -80,10 +80,7 @@ async fn copy_table(
     source: impl IntoTableRef,
     target: impl IntoTableRef,
 ) -> Result<(), DbErr> {
-    let select = Query::select()
-        .columns(DATA_COLS)
-        .from(source)
-        .to_owned();
+    let select = Query::select().columns(DATA_COLS).from(source).to_owned();
 
     let mut insert = Query::insert()
         .into_table(target)
@@ -108,12 +105,7 @@ fn build_host_packages_table(
 ) -> TableCreateStatement {
     let mut t = Table::create();
     t.table(table_name.clone())
-        .col(
-            ColumnDef::new(Col::Id)
-                .uuid()
-                .not_null()
-                .primary_key(),
-        )
+        .col(ColumnDef::new(Col::Id).uuid().not_null().primary_key())
         .col(ColumnDef::new(Col::TenantId).uuid().not_null())
         .col(ColumnDef::new(Col::HostId).uuid().not_null())
         .col(ColumnDef::new(Col::PluginConfigId).uuid().not_null())
@@ -173,10 +165,7 @@ fn build_host_packages_table(
                 Expr::col(Col::InstalledVersion)
                     .is_not_null()
                     .and(Expr::col(Col::LatestVersion).is_not_null())
-                    .and(
-                        Expr::col(Col::InstalledVersion)
-                            .ne(Expr::col(Col::LatestVersion)),
-                    ),
+                    .and(Expr::col(Col::InstalledVersion).ne(Expr::col(Col::LatestVersion))),
                 true, // STORED
             ),
         );
@@ -220,10 +209,7 @@ impl MigrationTrait for Migration {
 
             // Step 1: create the replacement table (identical schema + has_update).
             manager
-                .create_table(build_host_packages_table(
-                    HostPackagesNew::Table,
-                    true,
-                ))
+                .create_table(build_host_packages_table(HostPackagesNew::Table, true))
                 .await?;
 
             // Step 2: copy all non-generated rows; has_update is computed by the engine.
@@ -348,10 +334,7 @@ impl MigrationTrait for Migration {
             // Create the pre-migration schema (no has_update column) under a
             // temporary name.
             manager
-                .create_table(build_host_packages_table(
-                    HostPackagesBak::Table,
-                    false,
-                ))
+                .create_table(build_host_packages_table(HostPackagesBak::Table, false))
                 .await?;
 
             // Copy all data rows (DATA_COLS, which already excludes has_update).

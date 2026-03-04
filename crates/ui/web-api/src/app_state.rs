@@ -1,5 +1,5 @@
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use sea_orm::DatabaseConnection;
 use tokio_util::sync::CancellationToken;
@@ -100,8 +100,7 @@ pub struct AppState {
     /// Per-update broadcast channels for real-time output streaming via SSE.
     pub update_output_broadcaster: crate::update_output_broadcaster::UpdateOutputBroadcaster,
     /// Per-batch broadcast channels for real-time batch progress streaming via SSE.
-    pub batch_progress_broadcaster:
-        crate::batch_progress_broadcaster::BatchProgressBroadcaster,
+    pub batch_progress_broadcaster: crate::batch_progress_broadcaster::BatchProgressBroadcaster,
     /// Cancellation token signalled during server shutdown to terminate open SSE streams.
     ///
     /// SSE handler loops `tokio::select!` on this token so that in-flight streams exit
@@ -165,8 +164,7 @@ pub struct AppStateBuilder {
     plugin_ops: Option<Arc<dyn PluginOps>>,
     credential_sources: Option<ServiceCredentialSources>,
     update_output_broadcaster: Option<crate::update_output_broadcaster::UpdateOutputBroadcaster>,
-    batch_progress_broadcaster:
-        Option<crate::batch_progress_broadcaster::BatchProgressBroadcaster>,
+    batch_progress_broadcaster: Option<crate::batch_progress_broadcaster::BatchProgressBroadcaster>,
     shutdown_token: Option<CancellationToken>,
     external_scheduler_connected: Option<Arc<AtomicBool>>,
     audit_log_filter: Option<uptrakit_audit_log::AuditFilter>,
@@ -310,7 +308,10 @@ impl AppStateBuilder {
         self
     }
 
-    pub fn channel_registry(mut self, v: std::sync::Arc<uptrakit_notification_channels::ChannelRegistry>) -> Self {
+    pub fn channel_registry(
+        mut self,
+        v: std::sync::Arc<uptrakit_notification_channels::ChannelRegistry>,
+    ) -> Self {
         self.channel_registry = Some(v);
         self
     }
@@ -330,7 +331,10 @@ impl AppStateBuilder {
         self
     }
 
-    pub fn notification_dispatcher(mut self, v: crate::notifications::dispatcher::NotificationDispatcher) -> Self {
+    pub fn notification_dispatcher(
+        mut self,
+        v: crate::notifications::dispatcher::NotificationDispatcher,
+    ) -> Self {
         self.notification_dispatcher = Some(v);
         self
     }

@@ -528,11 +528,10 @@ mod tests {
         let (mut rx_a, _) = registry.register(svc_a, caps.clone(), None, None).await;
         let (mut rx_b, _) = registry.register(svc_b, caps, None, None).await;
 
-        let msg = ControllerMessage::ServerRestarting(
-            uptrakit_internal_wire::ServerRestartingPayload {
+        let msg =
+            ControllerMessage::ServerRestarting(uptrakit_internal_wire::ServerRestartingPayload {
                 reason: "test".to_string(),
-            },
-        );
+            });
         registry.broadcast(msg).await;
 
         assert!(rx_a.recv().await.is_some(), "service A should receive msg");
@@ -557,11 +556,10 @@ mod tests {
             )
             .await;
 
-        let msg = ControllerMessage::ServerRestarting(
-            uptrakit_internal_wire::ServerRestartingPayload {
+        let msg =
+            ControllerMessage::ServerRestarting(uptrakit_internal_wire::ServerRestartingPayload {
                 reason: "test".to_string(),
-            },
-        );
+            });
         registry
             .broadcast_by_capability(&Capability::MqttBridge, msg)
             .await;

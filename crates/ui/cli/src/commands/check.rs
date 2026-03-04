@@ -58,7 +58,9 @@ pub async fn all(params: AllParams<'_>) -> Result<TriggerScheduledTaskResponse> 
 
     // Find the fetch_releases scheduler task.
     let tasks = client.list_scheduled_tasks().await.context_to()?;
-    let task = tasks.iter().find(|t| t.task_type == TASK_TYPE_FETCH_RELEASES);
+    let task = tasks
+        .iter()
+        .find(|t| t.task_type == TASK_TYPE_FETCH_RELEASES);
 
     let task = match task {
         Some(t) => t,

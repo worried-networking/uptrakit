@@ -167,7 +167,6 @@ mod tests {
         let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
     }
 
-
     #[test]
     fn encrypt_then_decrypt_roundtrip_check_versions() {
         init_test_crypto();
@@ -279,19 +278,18 @@ mod tests {
         init_test_crypto();
 
         let original_config = json!({"api_key": "key123"});
-        let msg =
-            ControllerMessage::ExecuteBatchHostPackageUpdate(Box::new(
-                ExecuteBatchHostPackageUpdatePayload {
-                    host_machine_id: "host-1".to_string(),
-                    batch_id: uuid::Uuid::nil(),
-                    plugin_type: PluginType::PackageManagerApt,
-                    plugin_config: original_config.clone(),
-                    updates: vec![],
-                    pre_update_hooks: vec![],
-                    post_update_hooks: vec![],
-                    timeout_seconds: 300,
-                },
-            ));
+        let msg = ControllerMessage::ExecuteBatchHostPackageUpdate(Box::new(
+            ExecuteBatchHostPackageUpdatePayload {
+                host_machine_id: "host-1".to_string(),
+                batch_id: uuid::Uuid::nil(),
+                plugin_type: PluginType::PackageManagerApt,
+                plugin_config: original_config.clone(),
+                updates: vec![],
+                pre_update_hooks: vec![],
+                post_update_hooks: vec![],
+                timeout_seconds: 300,
+            },
+        ));
 
         let encrypted = encrypt_message_configs(msg);
         if let ControllerMessage::ExecuteBatchHostPackageUpdate(ref p) = encrypted {
@@ -373,11 +371,7 @@ mod tests {
         let decrypted = decrypt_message_configs(msg);
         if let ControllerMessage::CheckVersions(ref p) = decrypted {
             assert_eq!(
-                p.assignments[0]
-                    .detect_version
-                    .as_ref()
-                    .unwrap()
-                    .config,
+                p.assignments[0].detect_version.as_ref().unwrap().config,
                 plain_config,
                 "non-encrypted config should pass through unchanged"
             );

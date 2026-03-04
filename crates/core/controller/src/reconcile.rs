@@ -189,13 +189,9 @@ mod tests {
     #[tokio::test]
     async fn db_exists_no_cli_uses_db() {
         let db = setup_db().await;
-        upsert_global_setting(
-            &db,
-            SettingKey::RealIpHeader,
-            serde_json::json!("db_val"),
-        )
-        .await
-        .unwrap();
+        upsert_global_setting(&db, SettingKey::RealIpHeader, serde_json::json!("db_val"))
+            .await
+            .unwrap();
 
         let raw = HashMap::from([(
             SettingKey::RealIpHeader.as_str().to_string(),
@@ -218,13 +214,9 @@ mod tests {
     #[tokio::test]
     async fn db_exists_cli_differs_no_force_uses_db() {
         let db = setup_db().await;
-        upsert_global_setting(
-            &db,
-            SettingKey::HttpsAddr,
-            serde_json::json!("db_val"),
-        )
-        .await
-        .unwrap();
+        upsert_global_setting(&db, SettingKey::HttpsAddr, serde_json::json!("db_val"))
+            .await
+            .unwrap();
 
         let raw = HashMap::from([(
             SettingKey::HttpsAddr.as_str().to_string(),
@@ -247,13 +239,9 @@ mod tests {
     #[tokio::test]
     async fn db_exists_cli_differs_force_uses_cli() {
         let db = setup_db().await;
-        upsert_global_setting(
-            &db,
-            SettingKey::PkiAddr,
-            serde_json::json!("db_val"),
-        )
-        .await
-        .unwrap();
+        upsert_global_setting(&db, SettingKey::PkiAddr, serde_json::json!("db_val"))
+            .await
+            .unwrap();
 
         let raw = HashMap::from([(
             SettingKey::PkiAddr.as_str().to_string(),
@@ -273,9 +261,7 @@ mod tests {
         assert_eq!(result, "cli_val");
 
         // Verify DB was updated
-        let saved = load_global_setting(&db, SettingKey::PkiAddr)
-            .await
-            .unwrap();
+        let saved = load_global_setting(&db, SettingKey::PkiAddr).await.unwrap();
         assert_eq!(saved.unwrap().as_str(), Some("cli_val"));
     }
 }

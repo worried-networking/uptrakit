@@ -82,9 +82,8 @@ impl MigrationTrait for Migration {
             let id_str: String = String::try_get_by_index(row, 0).map_err(|e| {
                 DbErr::Custom(format!("failed to read permission id as string: {e:?}"))
             })?;
-            let name: String = String::try_get_by_index(row, 1).map_err(|e| {
-                DbErr::Custom(format!("failed to read permission name: {e:?}"))
-            })?;
+            let name: String = String::try_get_by_index(row, 1)
+                .map_err(|e| DbErr::Custom(format!("failed to read permission name: {e:?}")))?;
             to_fix.push((id_str, name));
         }
 

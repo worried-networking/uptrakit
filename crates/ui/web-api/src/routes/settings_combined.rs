@@ -124,8 +124,14 @@ mod tests {
         assert!(combined.registration.require_token_for_oidc);
         assert!(!combined.authentication.password_auth_enabled);
         assert_eq!(combined.agent_certificates.lifetime_hours, 336);
-        assert_eq!(combined.agent_certificates.renewal_window_hours_override, None);
-        assert_eq!(combined.agent_certificates.effective_renewal_window_hours, 67);
+        assert_eq!(
+            combined.agent_certificates.renewal_window_hours_override,
+            None
+        );
+        assert_eq!(
+            combined.agent_certificates.effective_renewal_window_hours,
+            67
+        );
         assert_eq!(combined.enrollment_tokens.active_count, 3);
     }
 }

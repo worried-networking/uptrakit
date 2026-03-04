@@ -258,10 +258,7 @@ mod tests {
         };
         let mut incoming = existing.clone().with_secrets_masked();
         incoming.restore_secrets_from(&existing);
-        assert_eq!(
-            incoming.auth_token.unwrap().expose_secret(),
-            "real_token"
-        );
+        assert_eq!(incoming.auth_token.unwrap().expose_secret(), "real_token");
     }
 
     #[test]

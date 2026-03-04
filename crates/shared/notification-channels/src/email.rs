@@ -260,13 +260,12 @@ fn build_mailer(cfg: &EmailConfig) -> error::Result<AsyncSmtpTransport<Tokio1Exe
         }
         _ => {
             // Default: "starttls"
-            let mut builder =
-                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.smtp_host)
-                    .map_err(|e| {
-                        report!(ChannelError::DeliveryFailed(format!(
-                            "failed to build STARTTLS SMTP transport: {e}"
-                        )))
-                    })?;
+            let mut builder = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.smtp_host)
+                .map_err(|e| {
+                    report!(ChannelError::DeliveryFailed(format!(
+                        "failed to build STARTTLS SMTP transport: {e}"
+                    )))
+                })?;
             builder = builder.port(cfg.smtp_port);
             builder = builder.timeout(Some(SMTP_CONNECT_TIMEOUT));
             if let Some(c) = creds {

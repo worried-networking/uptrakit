@@ -22,8 +22,8 @@ use mqtt::{complete_mqtt_registration, handle_mqtt_register_handshake};
 use updates::{deliver_pending_updates, load_linked_host_ids};
 
 use std::collections::{BTreeSet, HashSet};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};

@@ -479,7 +479,10 @@ impl Settings {
     ///
     /// Returns `None` when automatic mode is active (no override configured).
     pub fn renewal_window_hours_override(&self) -> Option<u16> {
-        self.inner.snapshot_rx.borrow().renewal_window_hours_override
+        self.inner
+            .snapshot_rx
+            .borrow()
+            .renewal_window_hours_override
     }
 
     /// Set or clear the renewal window override.
@@ -644,9 +647,7 @@ impl Settings {
     /// Replace SMTP settings (acquires write mutex for atomic publish).
     pub async fn set_smtp(&self, smtp: SmtpSettingsSnapshot) {
         let _guard = self.inner.write_mutex.lock().await;
-        self.inner
-            .snapshot_tx
-            .send_modify(|snap| snap.smtp = smtp);
+        self.inner.snapshot_tx.send_modify(|snap| snap.smtp = smtp);
     }
 
     // --- NATS settings ---

@@ -1452,10 +1452,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
 
     #[test]
     fn apt_install_line_returns_none() {
-        assert_eq!(
-            parse_npm_install_global_line("apt install -y nodejs"),
-            None
-        );
+        assert_eq!(parse_npm_install_global_line("apt install -y nodejs"), None);
     }
 
     #[test]

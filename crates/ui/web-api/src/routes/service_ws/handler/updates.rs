@@ -19,9 +19,8 @@ use uptrakit_internal_wire::{
     UpdateStartedPayload,
 };
 use uptrakit_shared_db::entity::{
-    host, host_package, host_package_update_history, host_software_item,
-    host_software_item_plugin, plugin_config, service, service_host, software_item, update_history,
-    update_output_line,
+    host, host_package, host_package_update_history, host_software_item, host_software_item_plugin,
+    plugin_config, service, service_host, software_item, update_history, update_output_line,
 };
 
 use super::{HandlerError, HandlerResult, LoopAction, MAX_UPDATE_OUTPUT_BYTES};
@@ -146,16 +145,15 @@ pub(super) async fn deliver_pending_updates(
         .collect();
 
     // Batch 1: software items.
-    let sw_items_map: HashMap<uuid::Uuid, software_item::Model> =
-        software_item::Entity::find()
-            .filter(software_item::Column::Id.is_in(sw_ids.clone()))
-            .filter(software_item::Column::DeactivatedAt.is_null())
-            .all(state.db())
-            .await
-            .context_to::<HandlerError>()?
-            .into_iter()
-            .map(|i| (i.id, i))
-            .collect();
+    let sw_items_map: HashMap<uuid::Uuid, software_item::Model> = software_item::Entity::find()
+        .filter(software_item::Column::Id.is_in(sw_ids.clone()))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .all(state.db())
+        .await
+        .context_to::<HandlerError>()?
+        .into_iter()
+        .map(|i| (i.id, i))
+        .collect();
 
     // Batch 2: hosts.
     let hosts_map: HashMap<uuid::Uuid, host::Model> = host::Entity::find()
@@ -176,19 +174,20 @@ pub(super) async fn deliver_pending_updates(
             .filter(host_software_item_plugin::Column::HostId.is_in(host_ids))
             .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(sw_ids))
             .filter(
-                host_software_item_plugin::Column::Role
-                    .is_in(["execute_update", "detect_version"]),
+                host_software_item_plugin::Column::Role.is_in(["execute_update", "detect_version"]),
             )
             .all(state.db())
             .await
             .context_to::<HandlerError>()?;
 
     // Index assignments by (host_id, software_item_id, role).
-    let assignments_map: HashMap<(uuid::Uuid, uuid::Uuid, String), host_software_item_plugin::Model> =
-        assignments
-            .into_iter()
-            .map(|a| ((a.host_id, a.software_item_id, a.role.clone()), a))
-            .collect();
+    let assignments_map: HashMap<
+        (uuid::Uuid, uuid::Uuid, String),
+        host_software_item_plugin::Model,
+    > = assignments
+        .into_iter()
+        .map(|a| ((a.host_id, a.software_item_id, a.role.clone()), a))
+        .collect();
 
     // Batch 4: plugin configs referenced by the assignments above.
     let plugin_config_ids: Vec<uuid::Uuid> = assignments_map
@@ -653,11 +652,8 @@ pub(super) async fn handle_update_result(
             UpdateFinalStatus::Completed => {
                 crate::batch_progress_broadcaster::BatchProgressEvent::UpdateCompleted {
                     update_history_id: payload.update_history_id,
-                    software_item_name: resolve_software_item_name(
-                        state,
-                        record.software_item_id,
-                    )
-                    .await,
+                    software_item_name: resolve_software_item_name(state, record.software_item_id)
+                        .await,
                     host_name: resolve_host_name(state, record.host_id).await,
                 }
             }

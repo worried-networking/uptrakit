@@ -86,12 +86,9 @@ impl JwtManager {
         validation.required_spec_claims.insert("aud".to_string());
         validation.required_spec_claims.insert("iss".to_string());
 
-        let token_data = jsonwebtoken::decode::<AccessTokenClaims>(
-            token,
-            &self.decoding_key,
-            &validation,
-        )
-        .map_err(|e| report!(AuthError::JwtDecode(e.to_string())))?;
+        let token_data =
+            jsonwebtoken::decode::<AccessTokenClaims>(token, &self.decoding_key, &validation)
+                .map_err(|e| report!(AuthError::JwtDecode(e.to_string())))?;
 
         Ok(token_data.claims)
     }

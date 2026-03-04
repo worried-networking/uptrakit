@@ -168,9 +168,7 @@ pub async fn list_update_history(
         HashMap::new()
     } else {
         let rows = update_output_line::Entity::find()
-            .filter(
-                update_output_line::Column::UpdateHistoryId.is_in(streamed_ids),
-            )
+            .filter(update_output_line::Column::UpdateHistoryId.is_in(streamed_ids))
             .order_by_asc(update_output_line::Column::CreatedAt)
             .order_by_asc(update_output_line::Column::Id)
             .all(tenant_db.db())

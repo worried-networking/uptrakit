@@ -29,8 +29,7 @@ impl AuditLogCleanupExecutor {
 #[async_trait::async_trait]
 impl TaskExecutor for AuditLogCleanupExecutor {
     async fn execute(&self, _task: &scheduled_task::Model) -> crate::error::Result<()> {
-        let cutoff =
-            OffsetDateTime::now_utc() - time::Duration::days(DEFAULT_RETENTION_DAYS);
+        let cutoff = OffsetDateTime::now_utc() - time::Duration::days(DEFAULT_RETENTION_DAYS);
 
         let txn = self.db.begin().await.context_to()?;
 

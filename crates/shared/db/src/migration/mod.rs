@@ -7,20 +7,20 @@ mod m20260227_000002_remove_event_cleanup_tasks;
 mod m20260227_000003_discovery_allowlist;
 mod m20260301_000001_notifications;
 mod m20260302_000001_add_missing_indexes;
+mod m20260302_000002_host_packages;
+mod m20260302_000003_host_packages_has_update;
+mod m20260302_000004_service_cert_lifetime;
+mod m20260302_000005_system_services;
 mod m20260303_000001_global_settings;
 mod m20260303_000002_revoked_tokens;
+mod m20260303_000003_audit_logs;
 mod m20260305_000001_crl_cache;
 mod m20260306_000001_update_category;
 mod m20260306_000002_update_batches;
-mod m20260302_000002_host_packages;
-mod m20260302_000003_host_packages_has_update;
 mod m20260307_000001_split_version_check;
-mod m20260302_000004_service_cert_lifetime;
-mod m20260302_000005_system_services;
 mod m20260307_000002_manage_commands_permission;
 mod m20260308_000001_system_services_permissions;
 mod m20260308_000002_fix_permission_uuid_storage;
-mod m20260303_000003_audit_logs;
 mod m20260309_000001_fix_permission_created_at_format;
 mod m20260310_000001_data_encryption_keys;
 mod m20260311_000001_update_history_status_index;
@@ -141,11 +141,9 @@ mod tests {
         // here. This is an approved exception: the sole purpose of this
         // statement is to replicate the exact mid-migration crash state that
         // m20260302_000003 is designed to recover from.
-        db.execute_unprepared(
-            "CREATE TABLE host_packages_new AS SELECT * FROM host_packages",
-        )
-        .await
-        .unwrap();
+        db.execute_unprepared("CREATE TABLE host_packages_new AS SELECT * FROM host_packages")
+            .await
+            .unwrap();
 
         // The next Migrator::up call must not crash.
         Migrator::up(&db, None).await.expect(
@@ -166,22 +164,18 @@ mod tests {
 
         // Simulate: copy done, original dropped, rename not yet done.
         // See the State B comment above for why execute_unprepared is used here.
-        db.execute_unprepared(
-            "CREATE TABLE host_packages_new AS SELECT * FROM host_packages",
-        )
-        .await
-        .unwrap();
+        db.execute_unprepared("CREATE TABLE host_packages_new AS SELECT * FROM host_packages")
+            .await
+            .unwrap();
 
         // Drop the original table using the sea_query builder.
-        let drop_stmt = Table::drop()
-            .table(Alias::new("host_packages"))
-            .to_owned();
+        let drop_stmt = Table::drop().table(Alias::new("host_packages")).to_owned();
         db.execute(&drop_stmt).await.unwrap();
 
         // The next Migrator::up call must not crash.
-        Migrator::up(&db, None).await.expect(
-            "migration must succeed when only host_packages_new exists (State C)",
-        );
+        Migrator::up(&db, None)
+            .await
+            .expect("migration must succeed when only host_packages_new exists (State C)");
     }
 
     #[tokio::test]
@@ -193,9 +187,18 @@ mod tests {
         // Verify tables added by various migrations exist and are queryable.
         software_item::Entity::find().count(&db).await.unwrap();
         plugin_config::Entity::find().count(&db).await.unwrap();
-        tenant_discovery_allowlist::Entity::find().count(&db).await.unwrap();
-        host_discovery_allowlist::Entity::find().count(&db).await.unwrap();
-        notification_channel::Entity::find().count(&db).await.unwrap();
+        tenant_discovery_allowlist::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
+        host_discovery_allowlist::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
+        notification_channel::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
         notification_rule::Entity::find().count(&db).await.unwrap();
         notification_log::Entity::find().count(&db).await.unwrap();
         global_setting::Entity::find().count(&db).await.unwrap();
@@ -208,8 +211,14 @@ mod tests {
         update_history::Entity::find().count(&db).await.unwrap();
         update_batch::Entity::find().count(&db).await.unwrap();
         host_package::Entity::find().count(&db).await.unwrap();
-        host_package_ignore::Entity::find().count(&db).await.unwrap();
-        host_package_update_history::Entity::find().count(&db).await.unwrap();
+        host_package_ignore::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
+        host_package_update_history::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
 
         // `has_update` is a SQLite generated column not part of the entity
         // model; verify it exists via a targeted sea_query SELECT.
@@ -262,8 +271,7 @@ mod tests {
             ))
             .from(Alias::new("permissions"))
             .and_where(
-                sea_orm_migration::prelude::Expr::col(Alias::new("name"))
-                    .eq("manage_commands"),
+                sea_orm_migration::prelude::Expr::col(Alias::new("name")).eq("manage_commands"),
             )
             .to_owned();
         let perm_rows = db.query_all(&perm_count_stmt).await.unwrap();
@@ -286,10 +294,7 @@ mod tests {
                     sea_orm_migration::prelude::Expr::col(Alias::new("id")),
                 ))
                 .from(Alias::new("permissions"))
-                .and_where(
-                    sea_orm_migration::prelude::Expr::col(Alias::new("name"))
-                        .eq(perm_name),
-                )
+                .and_where(sea_orm_migration::prelude::Expr::col(Alias::new("name")).eq(perm_name))
                 .to_owned();
             let ss_rows = db.query_all(&ss_perm_stmt).await.unwrap();
             let ss_count: i64 = {
@@ -323,19 +328,15 @@ mod tests {
                     sea_orm_migration::prelude::JoinType::InnerJoin,
                     Alias::new("roles"),
                     Alias::new("r"),
-                    sea_orm_migration::prelude::Expr::col(
-                        (Alias::new("r"), Alias::new("id")),
-                    )
-                    .equals((Alias::new("rp"), Alias::new("role_id"))),
+                    sea_orm_migration::prelude::Expr::col((Alias::new("r"), Alias::new("id")))
+                        .equals((Alias::new("rp"), Alias::new("role_id"))),
                 )
                 .join_as(
                     sea_orm_migration::prelude::JoinType::InnerJoin,
                     Alias::new("permissions"),
                     Alias::new("p"),
-                    sea_orm_migration::prelude::Expr::col(
-                        (Alias::new("p"), Alias::new("id")),
-                    )
-                    .equals((Alias::new("rp"), Alias::new("permission_id"))),
+                    sea_orm_migration::prelude::Expr::col((Alias::new("p"), Alias::new("id")))
+                        .equals((Alias::new("rp"), Alias::new("permission_id"))),
                 )
                 .and_where(
                     sea_orm_migration::prelude::Expr::col((Alias::new("r"), Alias::new("name")))
@@ -570,19 +571,15 @@ mod tests {
                 sea_orm_migration::prelude::JoinType::InnerJoin,
                 Alias::new("roles"),
                 Alias::new("r"),
-                sea_orm_migration::prelude::Expr::col(
-                    (Alias::new("r"), Alias::new("id")),
-                )
-                .equals((Alias::new("rp"), Alias::new("role_id"))),
+                sea_orm_migration::prelude::Expr::col((Alias::new("r"), Alias::new("id")))
+                    .equals((Alias::new("rp"), Alias::new("role_id"))),
             )
             .join_as(
                 sea_orm_migration::prelude::JoinType::InnerJoin,
                 Alias::new("permissions"),
                 Alias::new("p"),
-                sea_orm_migration::prelude::Expr::col(
-                    (Alias::new("p"), Alias::new("id")),
-                )
-                .equals((Alias::new("rp"), Alias::new("permission_id"))),
+                sea_orm_migration::prelude::Expr::col((Alias::new("p"), Alias::new("id")))
+                    .equals((Alias::new("rp"), Alias::new("permission_id"))),
             )
             .and_where(
                 sea_orm_migration::prelude::Expr::col((Alias::new("r"), Alias::new("name")))

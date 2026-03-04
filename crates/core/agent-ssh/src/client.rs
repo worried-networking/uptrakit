@@ -246,7 +246,10 @@ pub(crate) async fn build_reload_host_infos(
 
     // Spawn parallel tasks for the SSH-needing hosts.
     let mut join_set: JoinSet<Option<HostInfo>> = JoinSet::new();
-    for host in current_hosts.iter().filter(|h| host_needs_ssh(h, changed_ids)) {
+    for host in current_hosts
+        .iter()
+        .filter(|h| host_needs_ssh(h, changed_ids))
+    {
         let db = db.clone();
         let pool = pool.clone();
         let host = host.clone();

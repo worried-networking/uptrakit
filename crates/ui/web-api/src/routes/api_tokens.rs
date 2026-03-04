@@ -2,7 +2,6 @@ use crate::AppState;
 use crate::auth::api_token::ApiTokenService;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
-use uptrakit_web_api_types::validation::Validate;
 use axum::{
     Json,
     extract::{Path, State},
@@ -10,6 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
+use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
 use uptrakit_web_api_types::SecretString;

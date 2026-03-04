@@ -250,7 +250,8 @@ mod tests {
 
     #[test]
     fn is_transient_network_websocket_error() {
-        let err = EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
+        let err =
+            EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
         assert!(err.is_transient_network());
     }
 

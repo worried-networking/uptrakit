@@ -192,7 +192,6 @@ impl NotificationService {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,10 +215,12 @@ mod tests {
     #[test]
     fn credential_bearing_variants_are_not_nats_publishable() {
         // Approved is a safe, publishable variant — sanity check.
-        assert!(ControllerMessage::Approved(ApprovedPayload {
-            service_id: Uuid::nil(),
-        })
-        .is_nats_publishable());
+        assert!(
+            ControllerMessage::Approved(ApprovedPayload {
+                service_id: Uuid::nil(),
+            })
+            .is_nats_publishable()
+        );
 
         // ServiceCredentials must never be published to NATS.
         assert!(

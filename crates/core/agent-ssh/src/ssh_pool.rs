@@ -126,9 +126,13 @@ impl SshConnectionPool {
         let session = {
             let mut pool = self.sessions.lock();
             match pool.entry(host.id.clone()) {
-                std::collections::hash_map::Entry::Vacant(v) => {
-                    Arc::clone(&v.insert(PoolEntry { session, last_used: Instant::now() }).session)
-                }
+                std::collections::hash_map::Entry::Vacant(v) => Arc::clone(
+                    &v.insert(PoolEntry {
+                        session,
+                        last_used: Instant::now(),
+                    })
+                    .session,
+                ),
                 std::collections::hash_map::Entry::Occupied(mut o) => {
                     // A concurrent acquire() beat us to the insert — reuse its
                     // session and let our newly-established one drop (russh
@@ -195,7 +199,6 @@ impl SshConnectionPool {
     pub async fn len(&self) -> usize {
         self.sessions.lock().len()
     }
-
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -318,8 +321,15 @@ mod tests {
             std::collections::hash_map::Entry::Vacant(v) => *v.insert(first_id),
             std::collections::hash_map::Entry::Occupied(o) => *o.get(),
         };
-        assert_eq!(result1, first_id, "first insert should return inserted value");
-        assert_eq!(map.len(), 1, "pool must have exactly one entry after first insert");
+        assert_eq!(
+            result1, first_id,
+            "first insert should return inserted value"
+        );
+        assert_eq!(
+            map.len(),
+            1,
+            "pool must have exactly one entry after first insert"
+        );
 
         // --- Second "acquire" (occupied — concurrent caller beat us) ---
         let second_id = 2u32;

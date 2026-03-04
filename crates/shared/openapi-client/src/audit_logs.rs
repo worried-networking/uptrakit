@@ -1,6 +1,8 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::audit_logs::{AuditLogListParams, AuditLogResponse, SystemAuditLogResponse};
+use uptrakit_web_api_types::audit_logs::{
+    AuditLogListParams, AuditLogResponse, SystemAuditLogResponse,
+};
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 
 impl UptrakitClient {

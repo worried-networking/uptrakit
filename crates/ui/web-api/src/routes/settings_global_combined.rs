@@ -16,8 +16,8 @@ use crate::AppState;
 use crate::middleware::permission::CanManageGlobalSettings;
 use uptrakit_web_api_types::settings_combined::GlobalSettingsCombinedResponse;
 use uptrakit_web_api_types::settings_mqtt::MqttLimitResponse;
-use uptrakit_web_api_types::settings_network::NetworkSettingsResponse;
 use uptrakit_web_api_types::settings_nats::NatsSettingsResponse;
+use uptrakit_web_api_types::settings_network::NetworkSettingsResponse;
 
 /// Get all global settings
 ///
@@ -67,7 +67,10 @@ pub async fn get_global_combined_settings(
     let nats = {
         let nats_url = state.settings.nats_url();
         let has_url = nats_url.is_some();
-        Some(NatsSettingsResponse { url: nats_url, has_url })
+        Some(NatsSettingsResponse {
+            url: nats_url,
+            has_url,
+        })
     };
     #[cfg(not(feature = "nats"))]
     let nats: Option<NatsSettingsResponse> = None;

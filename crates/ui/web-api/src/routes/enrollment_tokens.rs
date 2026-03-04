@@ -9,10 +9,10 @@ use uuid::Uuid;
 
 use crate::auth::{password, token};
 use crate::error_response::error_response;
-use uptrakit_web_api_types::validation::Validate;
 use crate::middleware::permission::CanManageAgents;
 use crate::queries::enrollment_tokens as et_queries;
 use crate::tenant_db::TenantDb;
+use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::enrollment_tokens::{
     CreateEnrollmentTokenRequest, EnrollmentTokenCreatedResponse, EnrollmentTokenResponse,

@@ -652,12 +652,9 @@ mod tests {
 
     #[test]
     fn audit_log_backend_none() {
-        let args = super::Args::try_parse_from([
-            "uptrakit-controller",
-            "--audit-log-backend",
-            "none",
-        ])
-        .expect("should parse none backend");
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller", "--audit-log-backend", "none"])
+                .expect("should parse none backend");
         assert_eq!(
             args.audit_log_backend,
             vec![super::AuditLogBackendArg::None]
@@ -666,12 +663,9 @@ mod tests {
 
     #[test]
     fn audit_log_filter_mutations() {
-        let args = super::Args::try_parse_from([
-            "uptrakit-controller",
-            "--audit-log-filter",
-            "mutations",
-        ])
-        .expect("should parse mutations filter");
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller", "--audit-log-filter", "mutations"])
+                .expect("should parse mutations filter");
         assert!(matches!(
             args.audit_log_filter,
             super::AuditLogFilterArg::Mutations

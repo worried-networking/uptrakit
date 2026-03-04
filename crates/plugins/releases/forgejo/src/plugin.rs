@@ -500,12 +500,16 @@ mod tests {
             assets: vec![
                 ForgejoAsset {
                     name: "app-linux-amd64.tar.gz".to_string(),
-                    browser_download_url: "https://codeberg.org/owner/repo/releases/download/v1.0.0/app.tar.gz".to_string(),
+                    browser_download_url:
+                        "https://codeberg.org/owner/repo/releases/download/v1.0.0/app.tar.gz"
+                            .to_string(),
                     size: 1000,
                 },
                 ForgejoAsset {
                     name: "app-linux-amd64.deb".to_string(),
-                    browser_download_url: "https://codeberg.org/owner/repo/releases/download/v1.0.0/app.deb".to_string(),
+                    browser_download_url:
+                        "https://codeberg.org/owner/repo/releases/download/v1.0.0/app.deb"
+                            .to_string(),
                     size: 2000,
                 },
             ],
@@ -530,12 +534,14 @@ mod tests {
             assets: vec![
                 ForgejoAsset {
                     name: "a.tar.gz".to_string(),
-                    browser_download_url: "https://codeberg.org/owner/repo/releases/download/v1.0.0/a".to_string(),
+                    browser_download_url:
+                        "https://codeberg.org/owner/repo/releases/download/v1.0.0/a".to_string(),
                     size: 100,
                 },
                 ForgejoAsset {
                     name: "b.deb".to_string(),
-                    browser_download_url: "https://codeberg.org/owner/repo/releases/download/v1.0.0/b".to_string(),
+                    browser_download_url:
+                        "https://codeberg.org/owner/repo/releases/download/v1.0.0/b".to_string(),
                     size: 200,
                 },
             ],

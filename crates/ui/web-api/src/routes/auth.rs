@@ -390,17 +390,15 @@ pub async fn logout(
             // denylist and DB write already took effect.
             state
                 .notification_service
-                .publish_controller_event(
-                    uptrakit_internal_wire::ControllerMessage::TokenRevoked(
-                        uptrakit_internal_wire::TokenRevokedPayload {
-                            jti: None,
-                            exp: None,
-                            user_id: Some(verified.user_id),
-                            iat_cutoff: Some(now),
-                            purge_after: Some(purge_after),
-                        },
-                    ),
-                )
+                .publish_controller_event(uptrakit_internal_wire::ControllerMessage::TokenRevoked(
+                    uptrakit_internal_wire::TokenRevokedPayload {
+                        jti: None,
+                        exp: None,
+                        user_id: Some(verified.user_id),
+                        iat_cutoff: Some(now),
+                        purge_after: Some(purge_after),
+                    },
+                ))
                 .await;
         }
 
@@ -583,9 +581,9 @@ mod tests {
             shutdown_token: Default::default(),
             external_scheduler_connected: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
-            audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(
-                Arc::new(uptrakit_audit_log::NoopBackend),
-            ),
+            audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+                uptrakit_audit_log::NoopBackend,
+            )),
         })
     }
 

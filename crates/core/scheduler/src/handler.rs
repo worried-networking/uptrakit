@@ -6,8 +6,8 @@
 //! and NATS transport, then spawns the scheduler engine loop.
 
 use std::collections::BTreeSet;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use rootcause::prelude::*;
@@ -198,11 +198,8 @@ impl ServiceHandler for SchedulerHandler {
                     task_execution_timeout: uptrakit_scheduler_engine::TASK_EXECUTION_TIMEOUT,
                 };
 
-                let mut scheduler = Scheduler::new(
-                    db.clone(),
-                    config,
-                    Arc::new(AtomicBool::new(false)),
-                );
+                let mut scheduler =
+                    Scheduler::new(db.clone(), config, Arc::new(AtomicBool::new(false)));
 
                 // Register all 4 external executors.
                 // Internal tasks (CrlRenewal, CaRotationCheck, ServiceCertCheck)
@@ -438,7 +435,10 @@ mod tests {
         assert!(caps.contains(&Capability::NatsAccess));
         assert!(caps.contains(&Capability::MasterKeyAccess));
         assert!(caps.contains(&Capability::GracefulShutdown));
-        assert!(!caps.contains(&Capability::CaManagement), "CaManagement is internal-only");
+        assert!(
+            !caps.contains(&Capability::CaManagement),
+            "CaManagement is internal-only"
+        );
         assert_eq!(caps.len(), 6);
     }
 }

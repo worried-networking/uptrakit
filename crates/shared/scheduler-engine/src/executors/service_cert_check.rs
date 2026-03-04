@@ -18,7 +18,10 @@ const MAX_RENEWAL_WINDOW_DAYS: i64 = 14;
 /// The window is `min(MAX_RENEWAL_WINDOW_DAYS, cert_lifetime / 5)` where
 /// `cert_lifetime` is the duration between `not_before` and `not_after`.
 /// Returns [`time::Duration::ZERO`] for certs with zero or negative lifetime.
-pub fn cert_renewal_window(not_before: OffsetDateTime, not_after: OffsetDateTime) -> time::Duration {
+pub fn cert_renewal_window(
+    not_before: OffsetDateTime,
+    not_after: OffsetDateTime,
+) -> time::Duration {
     let lifetime_hours = (not_after - not_before).whole_hours().max(0);
     let window_hours = (lifetime_hours / 5).min(MAX_RENEWAL_WINDOW_DAYS * 24);
     time::Duration::hours(window_hours)

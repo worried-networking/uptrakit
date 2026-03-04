@@ -4,11 +4,11 @@ use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
+use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::system_enrollment_tokens::{
     CreateSystemEnrollmentTokenRequest, ListSystemEnrollmentTokensQuery,
     SystemEnrollmentTokenCreatedResponse, SystemEnrollmentTokenResponse,
 };
-use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 
 use crate::commands::settings::DeletedOutput;
 
@@ -19,10 +19,7 @@ impl HumanOutput for PaginatedResponse<SystemEnrollmentTokenResponse> {
         if self.items.is_empty() {
             return "No system enrollment tokens found.\n".to_string();
         }
-        let mut out = format!(
-            "{:<38} {:<25} {:<12} STATUS\n",
-            "ID", "NAME", "USAGE"
-        );
+        let mut out = format!("{:<38} {:<25} {:<12} STATUS\n", "ID", "NAME", "USAGE");
         for t in &self.items {
             let usage = match t.max_uses {
                 Some(max) => format!("{}/{}", t.current_uses, max),
@@ -184,9 +181,7 @@ pub async fn list(
 }
 
 /// Create a new system enrollment token.
-pub async fn create(
-    params: CreateParams<'_>,
-) -> Result<SystemEnrollmentTokenCreatedResponse> {
+pub async fn create(params: CreateParams<'_>) -> Result<SystemEnrollmentTokenCreatedResponse> {
     let client = authenticated_client(
         params.server,
         params.token,
@@ -283,7 +278,10 @@ mod tests {
             per_page: 20,
             total_pages: 0,
         };
-        assert!(resp.to_human_string().contains("No system enrollment tokens"));
+        assert!(
+            resp.to_human_string()
+                .contains("No system enrollment tokens")
+        );
     }
 
     #[test]

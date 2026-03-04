@@ -1,7 +1,7 @@
 use uptrakit_web_api_types::notifications::{
-    CreateNotificationChannelRequest, CreateNotificationRuleRequest,
-    NotificationChannelResponse, NotificationLogResponse, NotificationRuleResponse,
-    TestNotificationResponse, UpdateNotificationChannelRequest, UpdateNotificationRuleRequest,
+    CreateNotificationChannelRequest, CreateNotificationRuleRequest, NotificationChannelResponse,
+    NotificationLogResponse, NotificationRuleResponse, TestNotificationResponse,
+    UpdateNotificationChannelRequest, UpdateNotificationRuleRequest,
 };
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uuid::Uuid;
@@ -30,10 +30,7 @@ impl crate::UptrakitClient {
     }
 
     /// Get a single notification channel by ID.
-    pub async fn get_notification_channel(
-        &self,
-        id: &Uuid,
-    ) -> Result<NotificationChannelResponse> {
+    pub async fn get_notification_channel(&self, id: &Uuid) -> Result<NotificationChannelResponse> {
         self.get(&paths::notifications::channel_by_id(id)).await
     }
 
@@ -53,10 +50,7 @@ impl crate::UptrakitClient {
     }
 
     /// Send a test notification through a channel.
-    pub async fn test_notification_channel(
-        &self,
-        id: &Uuid,
-    ) -> Result<TestNotificationResponse> {
+    pub async fn test_notification_channel(&self, id: &Uuid) -> Result<TestNotificationResponse> {
         self.post_empty(&paths::notifications::test_channel(id))
             .await
     }
@@ -81,10 +75,7 @@ impl crate::UptrakitClient {
     }
 
     /// Get a single notification rule by ID.
-    pub async fn get_notification_rule(
-        &self,
-        id: &Uuid,
-    ) -> Result<NotificationRuleResponse> {
+    pub async fn get_notification_rule(&self, id: &Uuid) -> Result<NotificationRuleResponse> {
         self.get(&paths::notifications::rule_by_id(id)).await
     }
 

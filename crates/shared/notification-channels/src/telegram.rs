@@ -41,20 +41,14 @@ impl NotificationChannel for TelegramChannel {
         config: &serde_json::Value,
         message: &DeliveryMessage,
     ) -> error::Result<()> {
-        let bot_token = config["bot_token"]
-            .as_str()
-            .ok_or_else(|| {
-                report!(ChannelError::InvalidConfig(
-                    "missing 'bot_token'".to_string()
-                ))
-            })?;
+        let bot_token = config["bot_token"].as_str().ok_or_else(|| {
+            report!(ChannelError::InvalidConfig(
+                "missing 'bot_token'".to_string()
+            ))
+        })?;
         let chat_id = config["chat_id"]
             .as_str()
-            .ok_or_else(|| {
-                report!(ChannelError::InvalidConfig(
-                    "missing 'chat_id'".to_string()
-                ))
-            })?;
+            .ok_or_else(|| report!(ChannelError::InvalidConfig("missing 'chat_id'".to_string())))?;
 
         let text = message.body_html.as_deref().unwrap_or(&message.body);
 

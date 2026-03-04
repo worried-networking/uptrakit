@@ -411,8 +411,8 @@ pub async fn trigger_update_for_host(
     notifier: &NotificationService,
     params: TriggerUpdateParams<'_>,
 ) -> Result<TriggerUpdateResult> {
-    let target = validate_update_preconditions(db, params.tenant_id, params.host_id, params.item_id)
-        .await?;
+    let target =
+        validate_update_preconditions(db, params.tenant_id, params.host_id, params.item_id).await?;
 
     let update_history_id = create_update_history_record(
         db,
@@ -452,19 +452,23 @@ pub async fn trigger_update_for_host(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait,
-        ModelTrait, QueryFilter, Set};
+    use sea_orm::{
+        ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, ModelTrait,
+        QueryFilter, Set,
+    };
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{
-        host, host_software_item, host_software_item_plugin, plugin_config, service,
-        service_host, software_item, tenant, update_history,
+        host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
+        software_item, tenant, update_history,
     };
     use uptrakit_shared_types::ServiceStatus;
     use uuid::Uuid;
 
     async fn setup_db() -> DatabaseConnection {
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        uptrakit_shared_db::migration::run_migrations(&db).await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .unwrap();
         db
     }
 
@@ -610,7 +614,13 @@ mod tests {
         .await
         .unwrap();
 
-        Fixture { tenant_id, item_id, host_id, service_id, plugin_config_id }
+        Fixture {
+            tenant_id,
+            item_id,
+            host_id,
+            service_id,
+            plugin_config_id,
+        }
     }
 
     // ── validate_update_preconditions ───────────────────────────────────
@@ -643,7 +653,11 @@ mod tests {
     async fn validate_preconditions_item_deactivated() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
-        let item = SoftwareItem::find_by_id(f.item_id).one(&db).await.unwrap().unwrap();
+        let item = SoftwareItem::find_by_id(f.item_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
         let mut active: software_item::ActiveModel = item.into();
         active.deactivated_at = Set(Some(OffsetDateTime::now_utc()));
         active.update(&db).await.unwrap();
@@ -741,7 +755,11 @@ mod tests {
     async fn validate_preconditions_agent_not_approved() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
-        let svc = Service::find_by_id(f.service_id).one(&db).await.unwrap().unwrap();
+        let svc = Service::find_by_id(f.service_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
         let mut active: service::ActiveModel = svc.into();
         active.status = Set(ServiceStatus::Pending);
         active.update(&db).await.unwrap();

@@ -200,8 +200,10 @@ pub async fn batch_check_versions(
                     .items
                     .iter()
                     .map(|(idx, pkg)| {
-                        let outcome =
-                            result_map.get(pkg.as_str()).cloned().unwrap_or((None, None));
+                        let outcome = result_map
+                            .get(pkg.as_str())
+                            .cloned()
+                            .unwrap_or((None, None));
                         (*idx, outcome)
                     })
                     .collect::<Vec<_>>()
@@ -218,8 +220,9 @@ pub async fn batch_check_versions(
 
     // ── Step 3: RefreshPackageIndex – at most once per unique fetch group ───
     // Runs sequentially to avoid concurrent `apt-get update` / `brew update`.
-    for (plugin_type, effective_config) in
-        fetch_groups.values().map(|g| (g.plugin_type.clone(), g.effective_config.clone()))
+    for (plugin_type, effective_config) in fetch_groups
+        .values()
+        .map(|g| (g.plugin_type.clone(), g.effective_config.clone()))
     {
         match PluginRegistry::create_plugin(
             plugin_type.clone(),
@@ -281,7 +284,10 @@ pub async fn batch_check_versions(
                             .items
                             .iter()
                             .map(|(idx, _)| {
-                                (*idx, (None::<String>, UpdateCategory::Unknown, Some(err.clone())))
+                                (
+                                    *idx,
+                                    (None::<String>, UpdateCategory::Unknown, Some(err.clone())),
+                                )
                             })
                             .collect::<Vec<_>>();
                     }
@@ -295,7 +301,10 @@ pub async fn batch_check_versions(
                             .items
                             .iter()
                             .map(|(idx, _)| {
-                                (*idx, (None::<String>, UpdateCategory::Unknown, Some(err.clone())))
+                                (
+                                    *idx,
+                                    (None::<String>, UpdateCategory::Unknown, Some(err.clone())),
+                                )
                             })
                             .collect::<Vec<_>>();
                     }
@@ -305,8 +314,7 @@ pub async fn batch_check_versions(
                     results
                         .into_iter()
                         .map(|r| {
-                            let error =
-                                r.error.map(|e| format!("fetch_releases failed: {e}"));
+                            let error = r.error.map(|e| format!("fetch_releases failed: {e}"));
                             let (version, category) = r
                                 .releases
                                 .first()
@@ -323,10 +331,11 @@ pub async fn batch_check_versions(
                     .items
                     .iter()
                     .map(|(idx, pkg)| {
-                        let outcome = result_map
-                            .get(pkg.as_str())
-                            .cloned()
-                            .unwrap_or((None, UpdateCategory::Unknown, None));
+                        let outcome = result_map.get(pkg.as_str()).cloned().unwrap_or((
+                            None,
+                            UpdateCategory::Unknown,
+                            None,
+                        ));
                         (*idx, outcome)
                     })
                     .collect::<Vec<_>>()

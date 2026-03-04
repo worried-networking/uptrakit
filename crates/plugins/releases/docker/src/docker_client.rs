@@ -14,11 +14,11 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use rootcause::prelude::*;
 #[cfg(feature = "daemon")]
-use uptrakit_plugin_infrastructure_core::command::send_output;
-use uptrakit_plugin_infrastructure_core::mpsc;
-#[cfg(feature = "daemon")]
 use uptrakit_plugin_infrastructure_core::OutputStreamType;
 use uptrakit_plugin_infrastructure_core::UpdateOutputLine;
+#[cfg(feature = "daemon")]
+use uptrakit_plugin_infrastructure_core::command::send_output;
+use uptrakit_plugin_infrastructure_core::mpsc;
 
 use crate::config::DockerAuth;
 use crate::error::{DockerError, Result};
@@ -93,10 +93,7 @@ pub(crate) trait DockerClient: Send + Sync {
 
     /// List all containers (running and stopped) whose image matches `full_ref`
     /// (e.g. `"nginx:latest"`).
-    async fn list_containers_for_image(
-        &self,
-        full_ref: &str,
-    ) -> Result<Vec<ContainerForImage>>;
+    async fn list_containers_for_image(&self, full_ref: &str) -> Result<Vec<ContainerForImage>>;
 
     /// Recreate a container in-place, preserving its full configuration.
     ///
@@ -150,10 +147,7 @@ impl DockerClient for NoopDockerClient {
         ))
     }
 
-    async fn list_containers_for_image(
-        &self,
-        _full_ref: &str,
-    ) -> Result<Vec<ContainerForImage>> {
+    async fn list_containers_for_image(&self, _full_ref: &str) -> Result<Vec<ContainerForImage>> {
         bail!(DockerError::Configuration(
             "Docker daemon operations require the 'daemon' Cargo feature".to_string(),
         ))
@@ -216,15 +210,13 @@ impl BollardDockerClient {
             // system-dial-stdio).  Pass the key path directly so the stored
             // per-host key is used rather than falling back to ~/.ssh/.
             #[cfg(feature = "ssh")]
-            Some(h) if h.starts_with("ssh://") => {
-                bollard::Docker::connect_with_ssh(
-                    h,
-                    TIMEOUT,
-                    API_DEFAULT_VERSION,
-                    ssh_key_path.map(str::to_string),
-                )
-                .context_to::<DockerError>()
-            }
+            Some(h) if h.starts_with("ssh://") => bollard::Docker::connect_with_ssh(
+                h,
+                TIMEOUT,
+                API_DEFAULT_VERSION,
+                ssh_key_path.map(str::to_string),
+            )
+            .context_to::<DockerError>(),
 
             Some(h) => {
                 // Give a clear error for SSH URLs when the `ssh` feature is
@@ -342,10 +334,7 @@ impl DockerClient for BollardDockerClient {
         Ok(infos)
     }
 
-    async fn list_containers_for_image(
-        &self,
-        full_ref: &str,
-    ) -> Result<Vec<ContainerForImage>> {
+    async fn list_containers_for_image(&self, full_ref: &str) -> Result<Vec<ContainerForImage>> {
         use bollard::models::ContainerSummaryStateEnum;
         use bollard::query_parameters::ListContainersOptions;
         use std::collections::HashMap;
@@ -450,20 +439,21 @@ impl DockerClient for BollardDockerClient {
                 "failed to serialize container config: {e}"
             )))
         })?;
-        let mut body: bollard::models::ContainerCreateBody =
-            serde_json::from_value(config_json).map_err(|e| {
+        let mut body: bollard::models::ContainerCreateBody = serde_json::from_value(config_json)
+            .map_err(|e| {
                 report!(DockerError::Configuration(format!(
                     "failed to deserialize container config: {e}"
                 )))
             })?;
 
         body.host_config = inspect.host_config;
-        body.networking_config = inspect
-            .network_settings
-            .and_then(|ns| ns.networks)
-            .map(|networks| NetworkingConfig {
-                endpoints_config: Some(networks),
-            });
+        body.networking_config =
+            inspect
+                .network_settings
+                .and_then(|ns| ns.networks)
+                .map(|networks| NetworkingConfig {
+                    endpoints_config: Some(networks),
+                });
 
         tracing::debug!(container = %name, "creating container from saved config");
         self.docker
@@ -598,10 +588,7 @@ impl DockerClient for MockDockerClient {
         Ok(self.containers.clone())
     }
 
-    async fn list_containers_for_image(
-        &self,
-        _full_ref: &str,
-    ) -> Result<Vec<ContainerForImage>> {
+    async fn list_containers_for_image(&self, _full_ref: &str) -> Result<Vec<ContainerForImage>> {
         Ok(self.containers_for_image.clone())
     }
 

@@ -223,10 +223,7 @@ impl CommandExecutor for SudoAwareCommandExecutor {
         self.inner.supports_stdio_tunnel()
     }
 
-    async fn open_stdio_tunnel(
-        &self,
-        command: &str,
-    ) -> crate::Result<Box<dyn StdioTunnel>> {
+    async fn open_stdio_tunnel(&self, command: &str) -> crate::Result<Box<dyn StdioTunnel>> {
         self.inner.open_stdio_tunnel(command).await
     }
 }
@@ -457,7 +454,10 @@ mod tests {
             other => panic!("expected Exec mode, got: {other:?}"),
         }
         // Envs must be cleared after forwarding as inline sudo assignments.
-        assert!(result.envs.is_empty(), "envs must be cleared after inline forwarding");
+        assert!(
+            result.envs.is_empty(),
+            "envs must be cleared after inline forwarding"
+        );
     }
 
     #[test]
@@ -491,7 +491,10 @@ mod tests {
             .with_env("DEBIAN_FRONTEND", "noninteractive");
         let result = exec.apply_sudo(&spec);
         // No sudo; envs remain on the spec for the underlying executor to handle
-        assert_eq!(result.envs, vec![("DEBIAN_FRONTEND".to_string(), "noninteractive".to_string())]);
+        assert_eq!(
+            result.envs,
+            vec![("DEBIAN_FRONTEND".to_string(), "noninteractive".to_string())]
+        );
         match &result.mode {
             CommandMode::Exec { program, .. } => assert_eq!(program, "apt-get"),
             other => panic!("expected Exec mode, got: {other:?}"),

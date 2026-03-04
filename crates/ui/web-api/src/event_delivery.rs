@@ -181,9 +181,7 @@ pub async fn deliver_controller_event(
                 tracing::debug!("CRL rebuild requested via cross-controller event");
                 notify.notify_one();
             } else {
-                tracing::debug!(
-                    "received RequestCrlRenewal but no revocation notify configured"
-                );
+                tracing::debug!("received RequestCrlRenewal but no revocation notify configured");
             }
             true
         }
@@ -200,8 +198,7 @@ pub async fn deliver_controller_event(
                     denylist.deny_token_remote(&jti, exp).await;
                 }
                 // User-level revocation from another controller instance.
-                if let (Some(uid), Some(cutoff), Some(purge)) = (user_id, iat_cutoff, purge_after)
-                {
+                if let (Some(uid), Some(cutoff), Some(purge)) = (user_id, iat_cutoff, purge_after) {
                     denylist.deny_user_remote(uid, cutoff, purge).await;
                 }
             } else {
@@ -326,7 +323,15 @@ mod tests {
             revocation_notify: None,
             token_denylist: None,
         };
-        let result = deliver_event(&registry, &db, &resources, None, Some("software_discovery"), msg).await;
+        let result = deliver_event(
+            &registry,
+            &db,
+            &resources,
+            None,
+            Some("software_discovery"),
+            msg,
+        )
+        .await;
         assert!(result);
     }
 }

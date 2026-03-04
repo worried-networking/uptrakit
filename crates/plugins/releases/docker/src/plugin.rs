@@ -18,13 +18,13 @@ type OpaqueHandle = Option<Box<dyn std::any::Any + Send + Sync>>;
 
 use crate::config::DockerConfig;
 #[cfg(feature = "daemon")]
-use uptrakit_plugin_infrastructure_core::HostCompatibility;
-#[cfg(feature = "daemon")]
 use crate::docker_client::BollardDockerClient;
 use crate::docker_client::{DockerClient, NoopDockerClient};
 use crate::error::Result;
 use crate::image_ref::ImageRef;
 use crate::registry::RegistryClient;
+#[cfg(feature = "daemon")]
+use uptrakit_plugin_infrastructure_core::HostCompatibility;
 
 /// Docker plugin implementation.
 ///
@@ -63,8 +63,7 @@ impl DockerPlugin {
         let proxy_handle: OpaqueHandle = None;
         #[cfg(feature = "daemon")]
         let (docker_client, proxy_handle) =
-            Self::upgrade_to_daemon_client(docker_client, proxy_handle, &config, &executor)
-                .await?;
+            Self::upgrade_to_daemon_client(docker_client, proxy_handle, &config, &executor).await?;
         Self::init(config, executor, docker_client, proxy_handle)
     }
 
@@ -93,8 +92,7 @@ impl DockerPlugin {
         // russh session.
         #[cfg(unix)]
         if executor.supports_stdio_tunnel() && config.docker_host.is_none() {
-            let proxy =
-                crate::docker_proxy::DockerSocketProxy::start(Arc::clone(executor)).await?;
+            let proxy = crate::docker_proxy::DockerSocketProxy::start(Arc::clone(executor)).await?;
             let uri = proxy.socket_uri();
             tracing::info!(
                 proxy_socket = %uri,
@@ -392,7 +390,11 @@ impl Plugin for DockerPlugin {
                 let line = format!(
                     "Recreating container {} (was {})",
                     container.name,
-                    if container.is_running { "running" } else { "stopped" }
+                    if container.is_running {
+                        "running"
+                    } else {
+                        "stopped"
+                    }
                 );
                 send_output(output_tx, &line, OutputStreamType::Stdout).await;
                 output.push_str(&line);
@@ -649,8 +651,8 @@ mod tests {
             inspect_result: Some(digest.clone()),
             ..Default::default()
         });
-        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
-            .unwrap();
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
         let result = plugin.detect_installed_version("nginx").await.unwrap();
         assert_eq!(result.map(|v| v.to_string()), Some(digest));
     }
@@ -661,8 +663,8 @@ mod tests {
             inspect_result: None,
             ..Default::default()
         });
-        let plugin = DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock)
-            .unwrap();
+        let plugin =
+            DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
         let result = plugin.detect_installed_version("nginx").await.unwrap();
         assert!(result.is_none());
     }

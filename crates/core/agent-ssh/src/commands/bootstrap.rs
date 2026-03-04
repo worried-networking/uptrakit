@@ -391,8 +391,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     println!("Configuring sudoers...");
     let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds =
-        PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
     for (_plugin_type, entries) in &plugin_sudo_cmds {
@@ -442,13 +441,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     };
 
     if let Some(ref content) = sudoers_content {
-        write_sudoers_file(
-            &session,
-            &params.target_username,
-            content,
-            use_sudo,
-        )
-        .await?;
+        write_sudoers_file(&session, &params.target_username, content, use_sudo).await?;
     }
 
     // 6. DISCONNECT auth session.
@@ -591,8 +584,9 @@ async fn save_host(
     fingerprint: &str,
     host_id: uuid::Uuid,
 ) -> Result<()> {
-    let encrypted_key = EncryptedString::new(private_pem.to_string(), "uptrakit:ssh_hosts:private_key")
-        .map_err(|e| report!(Error::Crypto(format!("failed to encrypt private key: {e}"))))?;
+    let encrypted_key =
+        EncryptedString::new(private_pem.to_string(), "uptrakit:ssh_hosts:private_key")
+            .map_err(|e| report!(Error::Crypto(format!("failed to encrypt private key: {e}"))))?;
 
     host_ops::add_host(
         db,
@@ -1005,9 +999,7 @@ mod tests {
         let svc_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         let other_svc = uuid::Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
         let host_id = uuid::Uuid::parse_str("018d7f12-3e4a-7000-b1a9-4d8e6c0f2a1b").unwrap();
-        let line = format!(
-            "no-pty ssh-ed25519 AAAA... uptrakit-svc:{other_svc}-host:{host_id}"
-        );
+        let line = format!("no-pty ssh-ed25519 AAAA... uptrakit-svc:{other_svc}-host:{host_id}");
         assert!(!is_same_service_key_line(&line, &svc_id));
     }
 
@@ -1052,9 +1044,7 @@ mod tests {
             "11111111-2222-3333-4444-555555555555",
             "ffffffff-ffff-ffff-ffff-ffffffffffff",
         ] {
-            let line = format!(
-                "no-pty ssh-ed25519 AAAA... uptrakit-svc:{svc_id}-host:{host_id}"
-            );
+            let line = format!("no-pty ssh-ed25519 AAAA... uptrakit-svc:{svc_id}-host:{host_id}");
             assert!(
                 is_same_service_key_line(&line, &svc_id),
                 "should match host_id={host_id}"

@@ -120,7 +120,8 @@ impl TenantManager {
             .collect();
 
         for client_id in client_ids {
-            self.publish_software_states(client_id, &payload.items).await;
+            self.publish_software_states(client_id, &payload.items)
+                .await;
             self.publish_host_package_states(client_id, &payload.host_package_hosts)
                 .await;
         }
@@ -208,12 +209,14 @@ impl TenantManager {
         let state = self.clients.get(&mqtt_client_id)?;
         let host_id =
             crate::ha_discovery::parse_host_packages_command_topic(&state.topic_prefix, topic)?;
-        Some(uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload {
-            tenant_id: state.tenant_id,
-            host_id,
-            mqtt_client_id,
-            security_only: false,
-        })
+        Some(
+            uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload {
+                tenant_id: state.tenant_id,
+                host_id,
+                mqtt_client_id,
+                security_only: false,
+            },
+        )
     }
 
     /// Given an inbound MQTT security-entity command topic, resolve it to an
@@ -230,12 +233,14 @@ impl TenantManager {
         let state = self.clients.get(&mqtt_client_id)?;
         let host_id =
             crate::ha_discovery::parse_host_security_command_topic(&state.topic_prefix, topic)?;
-        Some(uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload {
-            tenant_id: state.tenant_id,
-            host_id,
-            mqtt_client_id,
-            security_only: true,
-        })
+        Some(
+            uptrakit_internal_wire::MqttTriggerHostPackageUpdatePayload {
+                tenant_id: state.tenant_id,
+                host_id,
+                mqtt_client_id,
+                security_only: true,
+            },
+        )
     }
 
     /// Start or update an MQTT client.
@@ -369,11 +374,10 @@ impl TenantManager {
                     item.software_item_id,
                     host.host_id,
                 );
-                let attributes_bytes = crate::ha_discovery::build_attributes_payload(
-                    host.update_in_progress,
-                )
-                .to_string()
-                .into_bytes();
+                let attributes_bytes =
+                    crate::ha_discovery::build_attributes_payload(host.update_in_progress)
+                        .to_string()
+                        .into_bytes();
                 if let Err(e) = state.handle.publish_retained(&at, attributes_bytes).await {
                     tracing::warn!(
                         error = ?e,
@@ -389,8 +393,7 @@ impl TenantManager {
                         item.software_item_id,
                         host.host_id,
                     );
-                    let config_topic =
-                        crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
+                    let config_topic = crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
                     let config_json = crate::ha_discovery::build_discovery_config(
                         topic_prefix,
                         tenant_id,
@@ -521,10 +524,8 @@ impl TenantManager {
             }
 
             // Publish latest_version topic (always "up-to-date").
-            let lt = crate::ha_discovery::host_packages_latest_version_topic(
-                topic_prefix,
-                hs.host_id,
-            );
+            let lt =
+                crate::ha_discovery::host_packages_latest_version_topic(topic_prefix, hs.host_id);
             if let Err(e) = state
                 .handle
                 .publish_retained(&lt, b"up-to-date".to_vec())
@@ -539,17 +540,14 @@ impl TenantManager {
             }
 
             // Publish JSON attributes.
-            let at = crate::ha_discovery::host_packages_json_attributes_topic(
-                topic_prefix,
-                hs.host_id,
-            );
-            let attributes_bytes =
-                crate::ha_discovery::build_host_packages_attributes_payload(
-                    hs.update_in_progress,
-                    hs.pending_count,
-                )
-                .to_string()
-                .into_bytes();
+            let at =
+                crate::ha_discovery::host_packages_json_attributes_topic(topic_prefix, hs.host_id);
+            let attributes_bytes = crate::ha_discovery::build_host_packages_attributes_payload(
+                hs.update_in_progress,
+                hs.pending_count,
+            )
+            .to_string()
+            .into_bytes();
             if let Err(e) = state.handle.publish_retained(&at, attributes_bytes).await {
                 tracing::warn!(
                     error = ?e,
@@ -560,8 +558,7 @@ impl TenantManager {
             }
 
             // Subscribe to command topic.
-            let ct =
-                crate::ha_discovery::host_packages_command_topic(topic_prefix, hs.host_id);
+            let ct = crate::ha_discovery::host_packages_command_topic(topic_prefix, hs.host_id);
             if let Err(e) = state.handle.subscribe_topic(&ct).await {
                 tracing::warn!(
                     error = ?e,
@@ -574,9 +571,7 @@ impl TenantManager {
             // HA-only: publish HA discovery config for packages entity.
             if state.ha_discovery {
                 let config_topic = crate::ha_discovery::host_packages_discovery_config_topic(
-                    ha_prefix,
-                    tenant_id,
-                    hs.host_id,
+                    ha_prefix, tenant_id, hs.host_id,
                 );
                 let config_json = crate::ha_discovery::build_host_packages_discovery_config(
                     topic_prefix,
@@ -636,17 +631,14 @@ impl TenantManager {
             }
 
             // Always: publish security entity JSON attributes.
-            let sec_at = crate::ha_discovery::host_security_json_attributes_topic(
-                topic_prefix,
-                hs.host_id,
-            );
-            let sec_attributes_bytes =
-                crate::ha_discovery::build_host_packages_attributes_payload(
-                    hs.update_in_progress,
-                    hs.security_pending_count,
-                )
-                .to_string()
-                .into_bytes();
+            let sec_at =
+                crate::ha_discovery::host_security_json_attributes_topic(topic_prefix, hs.host_id);
+            let sec_attributes_bytes = crate::ha_discovery::build_host_packages_attributes_payload(
+                hs.update_in_progress,
+                hs.security_pending_count,
+            )
+            .to_string()
+            .into_bytes();
             if let Err(e) = state
                 .handle
                 .publish_retained(&sec_at, sec_attributes_bytes)
@@ -661,8 +653,7 @@ impl TenantManager {
             }
 
             // Always: subscribe to security command topic.
-            let sec_ct =
-                crate::ha_discovery::host_security_command_topic(topic_prefix, hs.host_id);
+            let sec_ct = crate::ha_discovery::host_security_command_topic(topic_prefix, hs.host_id);
             if let Err(e) = state.handle.subscribe_topic(&sec_ct).await {
                 tracing::warn!(
                     error = ?e,
@@ -675,9 +666,7 @@ impl TenantManager {
             // HA-only: publish HA discovery config for security entity.
             if state.ha_discovery {
                 let sec_config_topic = crate::ha_discovery::host_security_discovery_config_topic(
-                    ha_prefix,
-                    tenant_id,
-                    hs.host_id,
+                    ha_prefix, tenant_id, hs.host_id,
                 );
                 let sec_config_json = crate::ha_discovery::build_host_security_discovery_config(
                     topic_prefix,
@@ -728,9 +717,7 @@ impl TenantManager {
         for hs in host_states {
             // Packages entity config.
             let config_topic = crate::ha_discovery::host_packages_discovery_config_topic(
-                ha_prefix,
-                tenant_id,
-                hs.host_id,
+                ha_prefix, tenant_id, hs.host_id,
             );
             let config_json = crate::ha_discovery::build_host_packages_discovery_config(
                 topic_prefix,
@@ -754,9 +741,7 @@ impl TenantManager {
 
             // Security entity config.
             let sec_config_topic = crate::ha_discovery::host_security_discovery_config_topic(
-                ha_prefix,
-                tenant_id,
-                hs.host_id,
+                ha_prefix, tenant_id, hs.host_id,
             );
             let sec_config_json = crate::ha_discovery::build_host_security_discovery_config(
                 topic_prefix,

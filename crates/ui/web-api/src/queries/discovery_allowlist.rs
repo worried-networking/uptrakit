@@ -13,9 +13,7 @@
 use std::collections::HashSet;
 
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_registry::{PluginCapability, PluginOps};
 use uptrakit_shared_db::entity::{host_discovery_allowlist, tenant_discovery_allowlist};
@@ -441,20 +439,29 @@ mod tests {
     #[test]
     fn valid_discovery_plugin_homebrew() {
         let ops = MockOps::new_with_homebrew_apt();
-        assert!(is_valid_discovery_plugin(&ops, &PluginType::PackageManagerHomebrew));
+        assert!(is_valid_discovery_plugin(
+            &ops,
+            &PluginType::PackageManagerHomebrew
+        ));
     }
 
     #[test]
     fn valid_discovery_plugin_apt() {
         let ops = MockOps::new_with_homebrew_apt();
-        assert!(is_valid_discovery_plugin(&ops, &PluginType::PackageManagerApt));
+        assert!(is_valid_discovery_plugin(
+            &ops,
+            &PluginType::PackageManagerApt
+        ));
     }
 
     #[test]
     fn invalid_discovery_plugin_github() {
         let ops = MockOps::new_with_homebrew_apt();
         // ReleasesGithub does not have DiscoverLocalSoftware
-        assert!(!is_valid_discovery_plugin(&ops, &PluginType::ReleasesGithub));
+        assert!(!is_valid_discovery_plugin(
+            &ops,
+            &PluginType::ReleasesGithub
+        ));
     }
 
     #[test]
@@ -469,6 +476,9 @@ mod tests {
     #[test]
     fn invalid_discovery_plugin_docker() {
         let ops = MockOps::new_with_homebrew_apt();
-        assert!(!is_valid_discovery_plugin(&ops, &PluginType::ReleasesDocker));
+        assert!(!is_valid_discovery_plugin(
+            &ops,
+            &PluginType::ReleasesDocker
+        ));
     }
 }

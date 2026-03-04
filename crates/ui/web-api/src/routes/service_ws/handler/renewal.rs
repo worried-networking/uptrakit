@@ -7,7 +7,9 @@ use sea_orm::{ActiveModelTrait, Set};
 
 use rootcause::prelude::*;
 use thiserror::Error;
-use uptrakit_shared_db::entity::{service, service_certificate, system_service, system_service_certificate};
+use uptrakit_shared_db::entity::{
+    service, service_certificate, system_service, system_service_certificate,
+};
 use uptrakit_shared_macros::impl_report_conversion;
 
 // ---------------------------------------------------------------------------
@@ -149,9 +151,8 @@ pub(super) async fn sign_renewal_csr_system(
     let not_before =
         time::OffsetDateTime::from_unix_timestamp(validity_meta.not_before.timestamp())
             .map_err(|e| report!(RenewalError::Timestamp(format!("not_before: {e}"))))?;
-    let not_after =
-        time::OffsetDateTime::from_unix_timestamp(validity_meta.not_after.timestamp())
-            .map_err(|e| report!(RenewalError::Timestamp(format!("not_after: {e}"))))?;
+    let not_after = time::OffsetDateTime::from_unix_timestamp(validity_meta.not_after.timestamp())
+        .map_err(|e| report!(RenewalError::Timestamp(format!("not_after: {e}"))))?;
 
     let record = system_service_certificate::ActiveModel {
         ca_fingerprint: Set(ca_fp),

@@ -312,8 +312,11 @@ mod tests {
             "uptrakit:ssh_hosts:private_key".to_string(),
         );
         let _ = uptrakit_crypto::register_column_aad(mappings);
-        uptrakit_crypto::EncryptedString::new("test-key-content".to_string(), "uptrakit:ssh_hosts:private_key")
-            .expect("master key initialized above")
+        uptrakit_crypto::EncryptedString::new(
+            "test-key-content".to_string(),
+            "uptrakit:ssh_hosts:private_key",
+        )
+        .expect("master key initialized above")
     }
 
     fn add_params(

@@ -51,7 +51,10 @@ impl HumanOutput for SystemServiceResponse {
         out.push_str(&format!("Hostname:      {}\n", self.hostname));
         out.push_str(&format!("Friendly Name: {}\n", self.friendly_name));
         if !self.capabilities.is_empty() {
-            out.push_str(&format!("Capabilities:  {}\n", self.capabilities.join(", ")));
+            out.push_str(&format!(
+                "Capabilities:  {}\n",
+                self.capabilities.join(", ")
+            ));
         }
         if let Some(ref ip) = self.ip_address {
             out.push_str(&format!("IP Address:    {}\n", ip));
@@ -262,6 +265,9 @@ mod tests {
         let resp = MessageResponse {
             message: "System service deactivated.".to_string(),
         };
-        assert!(resp.to_human_string().contains("System service deactivated"));
+        assert!(
+            resp.to_human_string()
+                .contains("System service deactivated")
+        );
     }
 }

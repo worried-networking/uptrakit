@@ -2103,34 +2103,32 @@ async fn run(cli: Cli) -> error::Result<()> {
                 host_id,
                 package_id,
             } => {
-                let resp =
-                    commands::host_packages::update(commands::host_packages::UpdateParams {
-                        host_id: &host_id,
-                        package_id: &package_id,
-                        enabled: true,
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        insecure,
-                        request_timeout,
-                    })
-                    .await?;
+                let resp = commands::host_packages::update(commands::host_packages::UpdateParams {
+                    host_id: &host_id,
+                    package_id: &package_id,
+                    enabled: true,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
                 output::print_output(format, &resp)?;
             }
             HostPackagesCommands::Disable {
                 host_id,
                 package_id,
             } => {
-                let resp =
-                    commands::host_packages::update(commands::host_packages::UpdateParams {
-                        host_id: &host_id,
-                        package_id: &package_id,
-                        enabled: false,
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        insecure,
-                        request_timeout,
-                    })
-                    .await?;
+                let resp = commands::host_packages::update(commands::host_packages::UpdateParams {
+                    host_id: &host_id,
+                    package_id: &package_id,
+                    enabled: false,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
                 output::print_output(format, &resp)?;
             }
             HostPackagesCommands::Delete {
@@ -2138,17 +2136,16 @@ async fn run(cli: Cli) -> error::Result<()> {
                 package_id,
                 ignore,
             } => {
-                let resp =
-                    commands::host_packages::delete(commands::host_packages::DeleteParams {
-                        host_id: &host_id,
-                        package_id: &package_id,
-                        ignore,
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        insecure,
-                        request_timeout,
-                    })
-                    .await?;
+                let resp = commands::host_packages::delete(commands::host_packages::DeleteParams {
+                    host_id: &host_id,
+                    package_id: &package_id,
+                    ignore,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
                 output::print_output(format, &resp)?;
             }
             HostPackagesCommands::Ignore { command } => match command {
@@ -2184,10 +2181,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                     .await?;
                     output::print_output(format, &resp)?;
                 }
-                HostPackageIgnoreCommands::Remove {
-                    host_id,
-                    ignore_id,
-                } => {
+                HostPackageIgnoreCommands::Remove { host_id, ignore_id } => {
                     let resp = commands::host_packages::remove_ignore(
                         commands::host_packages::RemoveIgnoreParams {
                             host_id: &host_id,
@@ -2209,8 +2203,8 @@ async fn run(cli: Cli) -> error::Result<()> {
                 page,
                 per_page,
             } => {
-                let resp = commands::batch_update::list_batches(
-                    commands::batch_update::ListBatchParams {
+                let resp =
+                    commands::batch_update::list_batches(commands::batch_update::ListBatchParams {
                         status: status.as_deref(),
                         page,
                         per_page,
@@ -2218,22 +2212,20 @@ async fn run(cli: Cli) -> error::Result<()> {
                         token: cli.token.as_deref(),
                         insecure,
                         request_timeout,
-                    },
-                )
-                .await?;
+                    })
+                    .await?;
                 output::print_output(format, &resp)?;
             }
             UpdateBatchesCommands::Show { id } => {
-                let resp = commands::batch_update::show_batch(
-                    commands::batch_update::ShowBatchParams {
+                let resp =
+                    commands::batch_update::show_batch(commands::batch_update::ShowBatchParams {
                         batch_id: &id,
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
                         insecure,
                         request_timeout,
-                    },
-                )
-                .await?;
+                    })
+                    .await?;
                 output::print_output(format, &resp)?;
             }
             UpdateBatchesCommands::Follow { id } => {
@@ -2774,24 +2766,23 @@ async fn run(cli: Cli) -> error::Result<()> {
                     clear_from_name,
                     tls_mode,
                 } => {
-                    let resp =
-                        commands::settings::smtp_set(commands::settings::SmtpSetParams {
-                            server: cli.server.as_deref(),
-                            token: cli.token.as_deref(),
-                            insecure,
-                            request_timeout,
-                            host,
-                            port,
-                            username,
-                            clear_username,
-                            password,
-                            clear_password,
-                            from_address,
-                            from_name,
-                            clear_from_name,
-                            tls_mode,
-                        })
-                        .await?;
+                    let resp = commands::settings::smtp_set(commands::settings::SmtpSetParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                        host,
+                        port,
+                        username,
+                        clear_username,
+                        password,
+                        clear_password,
+                        from_address,
+                        from_name,
+                        clear_from_name,
+                        tls_mode,
+                    })
+                    .await?;
                     output::print_output(format, &resp)?;
                 }
             },
@@ -3260,16 +3251,15 @@ async fn run(cli: Cli) -> error::Result<()> {
                     output::print_output(format, &resp)?;
                 }
                 RulesCommands::Get { id } => {
-                    let resp = commands::notifications::rule_get(
-                        commands::notifications::RuleGetParams {
+                    let resp =
+                        commands::notifications::rule_get(commands::notifications::RuleGetParams {
                             id: &id,
                             server: cli.server.as_deref(),
                             token: cli.token.as_deref(),
                             insecure,
                             request_timeout,
-                        },
-                    )
-                    .await?;
+                        })
+                        .await?;
                     output::print_output(format, &resp)?;
                 }
                 RulesCommands::Create {
@@ -3344,17 +3334,16 @@ async fn run(cli: Cli) -> error::Result<()> {
                 }
             },
             NotificationsCommands::Log { page, per_page } => {
-                let resp = commands::notifications::log_list(
-                    commands::notifications::LogListParams {
+                let resp =
+                    commands::notifications::log_list(commands::notifications::LogListParams {
                         server: cli.server.as_deref(),
                         token: cli.token.as_deref(),
                         insecure,
                         request_timeout,
                         page,
                         per_page,
-                    },
-                )
-                .await?;
+                    })
+                    .await?;
                 output::print_output(format, &resp)?;
             }
         },
@@ -3365,18 +3354,17 @@ async fn run(cli: Cli) -> error::Result<()> {
                 page,
                 per_page,
             } => {
-                let resp =
-                    commands::system_services::list(commands::system_services::ListParams {
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        insecure,
-                        capability: capability.as_deref(),
-                        status: status.as_deref(),
-                        page,
-                        per_page,
-                        request_timeout,
-                    })
-                    .await?;
+                let resp = commands::system_services::list(commands::system_services::ListParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    capability: capability.as_deref(),
+                    status: status.as_deref(),
+                    page,
+                    per_page,
+                    request_timeout,
+                })
+                .await?;
                 output::print_output(format, &resp)?;
             }
             SystemServicesCommands::Show { id } => {
@@ -3996,12 +3984,7 @@ mod tests {
         .expect("should parse");
         match args.command {
             Some(Commands::Update {
-                command:
-                    UpdateCommands::BatchItem {
-                        host,
-                        follow,
-                        ..
-                    },
+                command: UpdateCommands::BatchItem { host, follow, .. },
             }) => {
                 assert_eq!(host.len(), 1);
                 assert_eq!(host[0], uuid(HOST_UUID));
@@ -4015,9 +3998,8 @@ mod tests {
 
     #[test]
     fn host_packages_list_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "host-packages", "list", HOST_UUID])
-                .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "host-packages", "list", HOST_UUID])
+            .expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::HostPackages {
@@ -4074,12 +4056,15 @@ mod tests {
 
     #[test]
     fn host_packages_show_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "host-packages", "show", HOST_UUID, PKG_UUID])
-                .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "host-packages", "show", HOST_UUID, PKG_UUID])
+            .expect("should parse");
         match args.command {
             Some(Commands::HostPackages {
-                command: HostPackagesCommands::Show { host_id, package_id },
+                command:
+                    HostPackagesCommands::Show {
+                        host_id,
+                        package_id,
+                    },
             }) => {
                 assert_eq!(host_id, uuid(HOST_UUID));
                 assert_eq!(package_id, uuid(PKG_UUID));
@@ -4144,9 +4129,8 @@ mod tests {
 
     #[test]
     fn host_packages_ignore_list_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "host-packages", "ignore", "list", HOST_UUID])
-                .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "host-packages", "ignore", "list", HOST_UUID])
+            .expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::HostPackages {
@@ -4206,11 +4190,7 @@ mod tests {
             Some(Commands::HostPackages {
                 command:
                     HostPackagesCommands::Ignore {
-                        command:
-                            HostPackageIgnoreCommands::Remove {
-                                host_id,
-                                ignore_id,
-                            },
+                        command: HostPackageIgnoreCommands::Remove { host_id, ignore_id },
                     },
             }) => {
                 assert_eq!(host_id, uuid(HOST_UUID));
@@ -5048,9 +5028,10 @@ mod tests {
         .expect("should parse");
         match args.command {
             Some(Commands::Settings {
-                command: SettingsCommands::Nats {
-                    command: NatsCommands::Set { url },
-                },
+                command:
+                    SettingsCommands::Nats {
+                        command: NatsCommands::Set { url },
+                    },
             }) => {
                 assert_eq!(url, "nats://host:4222");
             }
@@ -5524,9 +5505,8 @@ mod tests {
 
     #[test]
     fn system_enrollment_tokens_list_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "system-enrollment-tokens", "list"])
-                .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "system-enrollment-tokens", "list"])
+            .expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::SystemEnrollmentTokens {
@@ -5613,9 +5593,13 @@ mod tests {
 
     #[test]
     fn system_enrollment_tokens_revoke_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "system-enrollment-tokens", "revoke", SYS_ET_UUID])
-                .expect("should parse");
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "system-enrollment-tokens",
+            "revoke",
+            SYS_ET_UUID,
+        ])
+        .expect("should parse");
         match args.command {
             Some(Commands::SystemEnrollmentTokens {
                 command: SystemEnrollmentTokensCommands::Revoke { id },

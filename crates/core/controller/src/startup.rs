@@ -12,10 +12,10 @@ use std::sync::Arc;
 
 use ipnet::IpNet;
 use rootcause::prelude::*;
-use uptrakit_web_api::SettingKey;
-use uptrakit_web_api::settings::Settings;
 #[cfg(feature = "nats")]
 use uptrakit_web_api::MaskedUrl;
+use uptrakit_web_api::SettingKey;
+use uptrakit_web_api::settings::Settings;
 
 use crate::AppError;
 
@@ -207,9 +207,7 @@ pub(crate) async fn init_audit_database(
 
 /// Verify the master key matches existing encrypted data, or store a new
 /// verification token if this is the first run.
-pub(crate) async fn verify_master_key(
-    db: &sea_orm::DatabaseConnection,
-) -> crate::Result<()> {
+pub(crate) async fn verify_master_key(db: &sea_orm::DatabaseConnection) -> crate::Result<()> {
     if !uptrakit_crypto::master_key_available() {
         return Ok(());
     }
@@ -296,9 +294,7 @@ pub(crate) async fn verify_master_key(
 /// `key_id` column has a UNIQUE constraint, so the loser's insert fails
 /// with a DB error that is caught gracefully.  It then re-reads all rows
 /// and uses whatever was committed.
-pub(crate) async fn init_data_key_ring(
-    db: &sea_orm::DatabaseConnection,
-) -> crate::Result<()> {
+pub(crate) async fn init_data_key_ring(db: &sea_orm::DatabaseConnection) -> crate::Result<()> {
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
     use uptrakit_shared_db::entity::data_encryption_key;
 
@@ -374,13 +370,12 @@ fn build_and_init_ring(
             ))));
         }
 
-        let dek = uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id)
-            .map_err(|e| {
-                report!(AppError::Config(format!(
-                    "failed to unwrap DEK '{}': {e}",
-                    row.key_id
-                )))
-            })?;
+        let dek = uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id).map_err(|e| {
+            report!(AppError::Config(format!(
+                "failed to unwrap DEK '{}': {e}",
+                row.key_id
+            )))
+        })?;
         keys.insert(dek.key_id.clone(), dek.key);
 
         if row.status == "active" {
@@ -442,15 +437,13 @@ pub(crate) async fn rotate_master_key(
 
     let current_kek_fp = uptrakit_crypto::master_key_fingerprint().context_to()?;
     if new_kek_fp == current_kek_fp {
-        tracing::warn!("new master key has the same fingerprint as the current one — no rotation needed");
+        tracing::warn!(
+            "new master key has the same fingerprint as the current one — no rotation needed"
+        );
         return Ok(());
     }
 
-    tracing::info!(
-        current_kek_fp,
-        new_kek_fp,
-        "starting master key rotation"
-    );
+    tracing::info!(current_kek_fp, new_kek_fp, "starting master key rotation");
 
     // Re-wrap all DEKs in a transaction.
     let txn = db.begin().await.context(AppError::Database)?;
@@ -468,22 +461,20 @@ pub(crate) async fn rotate_master_key(
 
     for row in &rows {
         // Unwrap with current KEK.
-        let dek = uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id)
-            .map_err(|e| {
-                report!(AppError::Config(format!(
-                    "failed to unwrap DEK '{}' with current KEK: {e}",
-                    row.key_id
-                )))
-            })?;
+        let dek = uptrakit_crypto::unwrap_data_key(&row.wrapped_key, &row.key_id).map_err(|e| {
+            report!(AppError::Config(format!(
+                "failed to unwrap DEK '{}' with current KEK: {e}",
+                row.key_id
+            )))
+        })?;
 
         // Re-wrap with new KEK.
-        let new_wrapped = uptrakit_crypto::wrap_data_key_with(&new_kek, &dek)
-            .map_err(|e| {
-                report!(AppError::Config(format!(
-                    "failed to wrap DEK '{}' with new KEK: {e}",
-                    row.key_id
-                )))
-            })?;
+        let new_wrapped = uptrakit_crypto::wrap_data_key_with(&new_kek, &dek).map_err(|e| {
+            report!(AppError::Config(format!(
+                "failed to wrap DEK '{}' with new KEK: {e}",
+                row.key_id
+            )))
+        })?;
 
         // Update the row.
         let mut am: data_encryption_key::ActiveModel = row.clone().into_active_model();
@@ -493,8 +484,7 @@ pub(crate) async fn rotate_master_key(
     }
 
     // Update the master key verification token with the new KEK.
-    let new_token =
-        uptrakit_crypto::create_verification_token_with_key(&new_kek).context_to()?;
+    let new_token = uptrakit_crypto::create_verification_token_with_key(&new_kek).context_to()?;
     uptrakit_web_api::settings_store::upsert_global_setting(
         &txn,
         SettingKey::MasterKeyVerification,
@@ -765,8 +755,11 @@ pub(crate) async fn reconcile_all_settings(
         .await
         .context(AppError::Settings)?;
 
-        let nats_url_opt: Option<String> =
-            if nats_url_raw.is_empty() { None } else { Some(nats_url_raw) };
+        let nats_url_opt: Option<String> = if nats_url_raw.is_empty() {
+            None
+        } else {
+            Some(nats_url_raw)
+        };
         settings
             .set_nats_url(nats_url_opt.as_deref().map(MaskedUrl::new))
             .await;
@@ -844,8 +837,11 @@ pub(crate) async fn bootstrap_oidc(
             use time::OffsetDateTime;
 
             let now = OffsetDateTime::now_utc();
-            let encrypted_secret =
-                uptrakit_crypto::EncryptedString::new(client_secret.to_string(), "uptrakit:oidc_providers:client_secret").context_to()?;
+            let encrypted_secret = uptrakit_crypto::EncryptedString::new(
+                client_secret.to_string(),
+                "uptrakit:oidc_providers:client_secret",
+            )
+            .context_to()?;
             let provider = oidc_provider::ActiveModel {
                 id: Set(uuid::Uuid::now_v7()),
                 tenant_id: Set(tenant_id),
@@ -874,8 +870,11 @@ pub(crate) async fn bootstrap_oidc(
             use sea_orm::{ActiveModelTrait, IntoActiveModel};
             use time::OffsetDateTime;
 
-            let encrypted_secret =
-                uptrakit_crypto::EncryptedString::new(client_secret.to_string(), "uptrakit:oidc_providers:client_secret").context_to()?;
+            let encrypted_secret = uptrakit_crypto::EncryptedString::new(
+                client_secret.to_string(),
+                "uptrakit:oidc_providers:client_secret",
+            )
+            .context_to()?;
             let mut model = existing_provider.into_active_model();
             model.issuer_url = Set(issuer_url.to_string());
             model.client_id = Set(client_id.to_string());
@@ -1020,10 +1019,9 @@ pub(crate) async fn init_pki_runtime(
         if pki::should_rotate_ca(&state.active.cert_pem) {
             tracing::info!("CA certificate is within rotation window, rotating now");
             let active_fp = pki::ca_fingerprint(&state.active.cert_pem).context(AppError::Pki)?;
-            let rotation =
-                pki::rotate_managed_ca(db, reconciled.pki_addr.as_deref(), &active_fp)
-                    .await
-                    .context(AppError::Pki)?;
+            let rotation = pki::rotate_managed_ca(db, reconciled.pki_addr.as_deref(), &active_fp)
+                .await
+                .context(AppError::Pki)?;
             state = rotation.state;
         }
 
@@ -1137,9 +1135,7 @@ pub(crate) async fn init_pki_runtime(
     });
 
     let initial_ca_version = if ca_state.managed {
-        pki::load_ca_version(db)
-            .await
-            .context(AppError::Pki)?
+        pki::load_ca_version(db).await.context(AppError::Pki)?
     } else {
         0
     };

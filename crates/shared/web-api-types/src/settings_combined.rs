@@ -5,8 +5,8 @@ use crate::settings::RegistrationSettingsResponse;
 use crate::settings_agent_certs::AgentCertificateSettingsResponse;
 use crate::settings_auth::AuthenticationSettingsResponse;
 use crate::settings_mqtt::MqttLimitResponse;
-use crate::settings_network::NetworkSettingsResponse;
 use crate::settings_nats::NatsSettingsResponse;
+use crate::settings_network::NetworkSettingsResponse;
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

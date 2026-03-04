@@ -68,9 +68,10 @@ pub async fn create_channel(
     match notif_queries::create_channel(&tenant_db, &body, &state.channel_registry).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
         Err(report) => match report.current_context() {
-            ChannelQueryError::UnsupportedType(t) => {
-                error_response(StatusCode::BAD_REQUEST, format!("Unsupported channel type: {t}"))
-            }
+            ChannelQueryError::UnsupportedType(t) => error_response(
+                StatusCode::BAD_REQUEST,
+                format!("Unsupported channel type: {t}"),
+            ),
             ChannelQueryError::InvalidConfig(msg) => {
                 error_response(StatusCode::BAD_REQUEST, format!("Invalid config: {msg}"))
             }
@@ -183,9 +184,10 @@ pub async fn update_channel(
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Channel not found"),
         Err(report) => match report.current_context() {
-            ChannelQueryError::UnsupportedType(t) => {
-                error_response(StatusCode::BAD_REQUEST, format!("Unsupported channel type: {t}"))
-            }
+            ChannelQueryError::UnsupportedType(t) => error_response(
+                StatusCode::BAD_REQUEST,
+                format!("Unsupported channel type: {t}"),
+            ),
             ChannelQueryError::InvalidConfig(msg) => {
                 error_response(StatusCode::BAD_REQUEST, format!("Invalid config: {msg}"))
             }
@@ -285,10 +287,7 @@ pub async fn test_channel(
         None => {
             return error_response(
                 StatusCode::BAD_REQUEST,
-                format!(
-                    "Unsupported channel type: {}",
-                    channel_model.channel_type
-                ),
+                format!("Unsupported channel type: {}", channel_model.channel_type),
             );
         }
     };
@@ -374,9 +373,10 @@ pub async fn create_rule(
                 tracing::error!("Failed to create notification rule: {}", report);
                 error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
-            RuleQueryError::InvalidField(field) => {
-                error_response(StatusCode::BAD_REQUEST, format!("Invalid value for field '{field}'"))
-            }
+            RuleQueryError::InvalidField(field) => error_response(
+                StatusCode::BAD_REQUEST,
+                format!("Invalid value for field '{field}'"),
+            ),
         },
     }
 }
@@ -664,21 +664,17 @@ pub async fn telegram_callback(
     };
 
     // Look up notification log by action token
-    let log_entry =
-        match notif_queries::find_log_by_action_token(state.db(), action_token).await {
-            Ok(Some(entry)) => entry,
-            Ok(None) => {
-                tracing::warn!("No notification log found for action token: {action_token}");
-                return (StatusCode::OK, Json(serde_json::json!({}))).into_response();
-            }
-            Err(e) => {
-                tracing::error!("DB error looking up action token: {}", e);
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                );
-            }
-        };
+    let log_entry = match notif_queries::find_log_by_action_token(state.db(), action_token).await {
+        Ok(Some(entry)) => entry,
+        Ok(None) => {
+            tracing::warn!("No notification log found for action token: {action_token}");
+            return (StatusCode::OK, Json(serde_json::json!({}))).into_response();
+        }
+        Err(e) => {
+            tracing::error!("DB error looking up action token: {}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     // If already actioned, return 200 with empty JSON
     if log_entry.action_taken.is_some() {

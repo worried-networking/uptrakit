@@ -286,8 +286,7 @@ mod tests {
             .await
             .expect("write empty ca file");
 
-        let mut identity =
-            crate::identity::ServiceIdentityState::new_single_dir(dir.path());
+        let mut identity = crate::identity::ServiceIdentityState::new_single_dir(dir.path());
         identity.load().await.expect("load identity");
 
         let result = bootstrap_ca(

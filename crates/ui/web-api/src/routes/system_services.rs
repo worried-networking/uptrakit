@@ -165,9 +165,10 @@ pub async fn approve_system_service(
                 SystemServiceQueryError::NotFound => {
                     error_response(StatusCode::NOT_FOUND, "System service not found")
                 }
-                SystemServiceQueryError::NotPending => {
-                    error_response(StatusCode::BAD_REQUEST, "System service is not in pending status")
-                }
+                SystemServiceQueryError::NotPending => error_response(
+                    StatusCode::BAD_REQUEST,
+                    "System service is not in pending status",
+                ),
                 SystemServiceQueryError::Db(_) => {
                     tracing::error!("Failed to approve system service: {}", report);
                     error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -222,9 +223,10 @@ pub async fn reject_system_service(
                 SystemServiceQueryError::NotFound => {
                     error_response(StatusCode::NOT_FOUND, "System service not found")
                 }
-                SystemServiceQueryError::NotPending => {
-                    error_response(StatusCode::BAD_REQUEST, "System service is not in pending status")
-                }
+                SystemServiceQueryError::NotPending => error_response(
+                    StatusCode::BAD_REQUEST,
+                    "System service is not in pending status",
+                ),
                 SystemServiceQueryError::Db(_) => {
                     tracing::error!("Failed to reject system service: {}", report);
                     error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")

@@ -239,10 +239,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         let msg = err.current_context().to_string();
-        assert!(
-            msg.contains("http:// or https://"),
-            "got: {msg}"
-        );
+        assert!(msg.contains("http:// or https://"), "got: {msg}");
     }
 
     #[test]
@@ -365,7 +362,10 @@ mod tests {
             let result = check_header_allowed(blocked);
             assert!(result.is_err(), "should reject '{blocked}'");
             let msg = result.unwrap_err().current_context().to_string();
-            assert!(msg.contains(blocked), "error should mention header name; got: {msg}");
+            assert!(
+                msg.contains(blocked),
+                "error should mention header name; got: {msg}"
+            );
         }
     }
 

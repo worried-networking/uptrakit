@@ -181,9 +181,7 @@ impl TokenDenylist {
             }
         };
 
-        if updated
-            && let Some(db) = &self.db
-        {
+        if updated && let Some(db) = &self.db {
             let model = revoked_token_user::ActiveModel {
                 user_id: ActiveValue::Set(user_id),
                 iat_cutoff: ActiveValue::Set(iat_cutoff),
@@ -293,9 +291,7 @@ mod tests {
     use sea_orm::{ConnectionTrait, Database, Schema};
 
     async fn setup_db() -> DatabaseConnection {
-        let db = Database::connect("sqlite::memory:")
-            .await
-            .expect("test db");
+        let db = Database::connect("sqlite::memory:").await.expect("test db");
 
         let schema = Schema::new(db.get_database_backend());
 

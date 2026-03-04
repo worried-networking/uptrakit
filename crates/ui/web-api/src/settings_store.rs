@@ -207,7 +207,10 @@ pub async fn upsert_global_setting(
     GlobalSetting::insert(model)
         .on_conflict(
             OnConflict::column(global_setting::Column::Key)
-                .update_columns([global_setting::Column::Value, global_setting::Column::UpdatedAt])
+                .update_columns([
+                    global_setting::Column::Value,
+                    global_setting::Column::UpdatedAt,
+                ])
                 .to_owned(),
         )
         .exec(db)
@@ -240,10 +243,7 @@ pub async fn load_global_setting(
 }
 
 /// Delete a single global setting by key.
-pub async fn delete_global_setting(
-    db: &impl ConnectionTrait,
-    key: SettingKey,
-) -> Result<()> {
+pub async fn delete_global_setting(db: &impl ConnectionTrait, key: SettingKey) -> Result<()> {
     debug_assert!(
         key.is_global(),
         "delete_global_setting called with per-tenant key {key}; use delete_setting instead"
@@ -320,10 +320,7 @@ pub async fn insert_global_setting_if_absent(
 ///
 /// Increments `version` on the specific tenant's `settings_version` row only.
 /// Non-fatal on failure: callers should log and continue.
-pub async fn bump_settings_version(
-    db: &impl ConnectionTrait,
-    tenant_id: Uuid,
-) -> Result<()> {
+pub async fn bump_settings_version(db: &impl ConnectionTrait, tenant_id: Uuid) -> Result<()> {
     let now = OffsetDateTime::now_utc();
 
     let result = SettingsVersion::update_many()
@@ -479,12 +476,8 @@ pub async fn load_or_generate_jwt_key(db: &DatabaseConnection) -> Result<Vec<u8>
                     "failed to encrypt legacy JWT signing key: {e}"
                 )))
             })?;
-            upsert_global_setting(
-                db,
-                SettingKey::JwtSigningKey,
-                serde_json::json!(encrypted),
-            )
-            .await?;
+            upsert_global_setting(db, SettingKey::JwtSigningKey, serde_json::json!(encrypted))
+                .await?;
             stored.to_string()
         };
         return b64_engine.decode(&b64).map_err(|e| {
@@ -507,12 +500,7 @@ pub async fn load_or_generate_jwt_key(db: &DatabaseConnection) -> Result<Vec<u8>
     })?;
 
     // Store with upsert (race-safe: another instance may store concurrently)
-    upsert_global_setting(
-        db,
-        SettingKey::JwtSigningKey,
-        serde_json::json!(encrypted),
-    )
-    .await?;
+    upsert_global_setting(db, SettingKey::JwtSigningKey, serde_json::json!(encrypted)).await?;
 
     // Re-read to get the canonical value (in case another instance won the race)
     if let Some(value) = load_global_setting(db, SettingKey::JwtSigningKey).await?
@@ -543,10 +531,7 @@ pub async fn load_or_generate_jwt_key(db: &DatabaseConnection) -> Result<Vec<u8>
 /// If `{data_dir}/jwt_signing.key` exists and the DB does not yet have a key,
 /// reads the file and stores it in the `global_settings` table. Returns `true`
 /// if a migration was performed.
-pub async fn migrate_file_jwt_key(
-    db: &DatabaseConnection,
-    data_dir: &Path,
-) -> Result<bool> {
+pub async fn migrate_file_jwt_key(db: &DatabaseConnection, data_dir: &Path) -> Result<bool> {
     let key_path = data_dir.join("jwt_signing.key");
     if !key_path.exists() {
         return Ok(false);
@@ -572,12 +557,7 @@ pub async fn migrate_file_jwt_key(
             "failed to encrypt JWT signing key during file migration: {e}"
         )))
     })?;
-    upsert_global_setting(
-        db,
-        SettingKey::JwtSigningKey,
-        serde_json::json!(encrypted),
-    )
-    .await?;
+    upsert_global_setting(db, SettingKey::JwtSigningKey, serde_json::json!(encrypted)).await?;
 
     // Remove the plaintext key file now that it has been migrated to encrypted
     // DB storage. Failure is non-fatal: warn and continue so the controller

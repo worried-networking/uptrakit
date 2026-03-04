@@ -85,13 +85,11 @@ impl UptrakitClient {
     }
 
     /// Remove a package ignore rule.
-    pub async fn delete_host_package_ignore(
-        &self,
-        host_id: &Uuid,
-        ignore_id: &Uuid,
-    ) -> Result<()> {
-        self.delete(&crate::paths::host_packages::ignore_by_id(host_id, ignore_id))
-            .await
+    pub async fn delete_host_package_ignore(&self, host_id: &Uuid, ignore_id: &Uuid) -> Result<()> {
+        self.delete(&crate::paths::host_packages::ignore_by_id(
+            host_id, ignore_id,
+        ))
+        .await
     }
 }
 

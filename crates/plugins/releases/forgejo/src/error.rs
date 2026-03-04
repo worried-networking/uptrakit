@@ -63,6 +63,9 @@ mod tests {
     #[test]
     fn display_configuration() {
         let err = ForgejoError::Configuration("api_base_url required".to_string());
-        assert_eq!(err.to_string(), "configuration error: api_base_url required");
+        assert_eq!(
+            err.to_string(),
+            "configuration error: api_base_url required"
+        );
     }
 }

@@ -93,7 +93,11 @@ pub async fn list_services(
 
     let base_query = q.order_by_desc(service::Column::CreatedAt);
 
-    let total = base_query.clone().count(tenant_db.db()).await.context_to()?;
+    let total = base_query
+        .clone()
+        .count(tenant_db.db())
+        .await
+        .context_to()?;
 
     let services = base_query
         .offset(Some(pagination.offset()))
@@ -107,10 +111,7 @@ pub async fn list_services(
 }
 
 /// Returns `None` if not found or deactivated.
-pub async fn get_active_service(
-    tenant_db: &TenantDb,
-    id: Uuid,
-) -> Result<Option<ServiceResponse>> {
+pub async fn get_active_service(tenant_db: &TenantDb, id: Uuid) -> Result<Option<ServiceResponse>> {
     let svc = tenant_db
         .find_by_id::<service::Entity, _>(id)
         .filter(service::Column::DeactivatedAt.is_null())
@@ -162,10 +163,7 @@ pub async fn update_service_settings(
 }
 
 /// Approve a pending service.
-pub async fn approve_service(
-    tenant_db: &TenantDb,
-    id: Uuid,
-) -> Result<ServiceResponse> {
+pub async fn approve_service(tenant_db: &TenantDb, id: Uuid) -> Result<ServiceResponse> {
     let svc = tenant_db
         .find_by_id::<service::Entity, _>(id)
         .filter(service::Column::DeactivatedAt.is_null())
@@ -189,10 +187,7 @@ pub async fn approve_service(
 }
 
 /// Reject a pending service.
-pub async fn reject_service(
-    tenant_db: &TenantDb,
-    id: Uuid,
-) -> Result<ServiceResponse> {
+pub async fn reject_service(tenant_db: &TenantDb, id: Uuid) -> Result<ServiceResponse> {
     let svc = tenant_db
         .find_by_id::<service::Entity, _>(id)
         .filter(service::Column::DeactivatedAt.is_null())

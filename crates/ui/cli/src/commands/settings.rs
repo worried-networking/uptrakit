@@ -27,10 +27,14 @@ use uptrakit_openapi_client::types::settings_mqtt::{
     CreateMqttClientRequest, MqttClientResponse, MqttLimitResponse, UpdateMqttClientRequest,
     UpdateMqttLimitRequest,
 };
-use uptrakit_openapi_client::types::settings_nats::{NatsSettingsResponse, UpdateNatsSettingsRequest};
-use uptrakit_openapi_client::types::settings_smtp::{SmtpSettingsResponse, UpdateSmtpSettingsRequest};
+use uptrakit_openapi_client::types::settings_nats::{
+    NatsSettingsResponse, UpdateNatsSettingsRequest,
+};
 use uptrakit_openapi_client::types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
+};
+use uptrakit_openapi_client::types::settings_smtp::{
+    SmtpSettingsResponse, UpdateSmtpSettingsRequest,
 };
 use uptrakit_openapi_client::types::system_alerts::SystemAlertsResponse;
 
@@ -248,7 +252,10 @@ impl HumanOutput for NatsSettingsResponse {
         let mut out = String::new();
         out.push_str(&format!(
             "URL:      {}\n",
-            self.url.as_ref().map(|u| u.to_string()).unwrap_or_else(|| "-".to_string())
+            self.url
+                .as_ref()
+                .map(|u| u.to_string())
+                .unwrap_or_else(|| "-".to_string())
         ));
         out.push_str(&format!("Has URL:  {}\n", self.has_url));
         out
@@ -1096,7 +1103,10 @@ mod tests {
             has_url: true,
         };
         let s = resp.to_human_string();
-        assert!(s.contains("has_url") || s.contains("Has URL"), "has_url missing");
+        assert!(
+            s.contains("has_url") || s.contains("Has URL"),
+            "has_url missing"
+        );
         // Password must not appear
         assert!(!s.contains("secret"), "password must not appear in output");
         assert!(s.contains("***"), "masked password must appear");
@@ -1109,6 +1119,9 @@ mod tests {
             has_url: false,
         };
         let s = resp.to_human_string();
-        assert!(s.contains('-') || s.contains("false"), "empty state should show");
+        assert!(
+            s.contains('-') || s.contains("false"),
+            "empty state should show"
+        );
     }
 }

@@ -41,8 +41,7 @@ const AAD_NOTIFICATION_CONFIG: &str = "uptrakit:notification_channels:config";
 const AAD_SETTINGS_JWT_KEY: &str = "uptrakit:settings:jwt_signing_key";
 const AAD_SETTINGS_NATS_URL: &str = "uptrakit:settings:nats_url";
 const AAD_SETTINGS_SMTP_PASSWORD: &str = "uptrakit:settings:smtp_password";
-const AAD_SETTINGS_ENROLLMENT_TOKEN: &str =
-    "uptrakit:settings:system_services_enrollment_token";
+const AAD_SETTINGS_ENROLLMENT_TOKEN: &str = "uptrakit:settings:system_services_enrollment_token";
 
 /// Register the column-name-to-AAD mappings required for `ENC:v2:`/`ENC:v3:`
 /// decryption.
@@ -106,7 +105,10 @@ pub(crate) async fn reencrypt_to_v3(db: &DatabaseConnection) {
     .await;
 
     if total > 0 {
-        tracing::info!(count = total, "migrated values to ENC:v3 envelope encryption");
+        tracing::info!(
+            count = total,
+            "migrated values to ENC:v3 envelope encryption"
+        );
     } else {
         tracing::debug!("all encrypted values already at ENC:v3");
     }
@@ -149,7 +151,12 @@ async fn upgrade_ca_certificate_keys(db: &DatabaseConnection) -> u64 {
         }
     }
     if count > 0 {
-        tracing::info!(table = "ca_certificates", column = "key_pem", count, "upgraded to ENC:v3");
+        tracing::info!(
+            table = "ca_certificates",
+            column = "key_pem",
+            count,
+            "upgraded to ENC:v3"
+        );
     }
     count
 }
@@ -189,7 +196,12 @@ async fn upgrade_oidc_client_secrets(db: &DatabaseConnection) -> u64 {
         }
     }
     if count > 0 {
-        tracing::info!(table = "oidc_providers", column = "client_secret", count, "upgraded to ENC:v3");
+        tracing::info!(
+            table = "oidc_providers",
+            column = "client_secret",
+            count,
+            "upgraded to ENC:v3"
+        );
     }
     count
 }
@@ -232,7 +244,12 @@ async fn upgrade_mqtt_passwords(db: &DatabaseConnection) -> u64 {
         }
     }
     if count > 0 {
-        tracing::info!(table = "mqtt_clients", column = "password", count, "upgraded to ENC:v3");
+        tracing::info!(
+            table = "mqtt_clients",
+            column = "password",
+            count,
+            "upgraded to ENC:v3"
+        );
     }
     count
 }
@@ -275,7 +292,12 @@ async fn upgrade_mqtt_ca_certs(db: &DatabaseConnection) -> u64 {
         }
     }
     if count > 0 {
-        tracing::info!(table = "mqtt_clients", column = "ca_cert_pem", count, "upgraded to ENC:v3");
+        tracing::info!(
+            table = "mqtt_clients",
+            column = "ca_cert_pem",
+            count,
+            "upgraded to ENC:v3"
+        );
     }
     count
 }
@@ -315,7 +337,12 @@ async fn upgrade_oidc_flow_pkce_verifiers(db: &DatabaseConnection) -> u64 {
         }
     }
     if count > 0 {
-        tracing::info!(table = "pending_oidc_flows", column = "pkce_verifier", count, "upgraded to ENC:v3");
+        tracing::info!(
+            table = "pending_oidc_flows",
+            column = "pkce_verifier",
+            count,
+            "upgraded to ENC:v3"
+        );
     }
     count
 }
@@ -355,7 +382,12 @@ async fn upgrade_notification_channel_configs(db: &DatabaseConnection) -> u64 {
         }
     }
     if count > 0 {
-        tracing::info!(table = "notification_channels", column = "config", count, "upgraded to ENC:v3");
+        tracing::info!(
+            table = "notification_channels",
+            column = "config",
+            count,
+            "upgraded to ENC:v3"
+        );
     }
     count
 }
@@ -484,7 +516,11 @@ mod tests {
             logo_url: Set(None),
             issuer_url: Set("https://idp.example.com".to_string()),
             client_id: Set("client-id".to_string()),
-            client_secret: Set(EncryptedString::new("client-secret-val".to_string(), AAD_OIDC_CLIENT_SECRET).unwrap()),
+            client_secret: Set(EncryptedString::new(
+                "client-secret-val".to_string(),
+                AAD_OIDC_CLIENT_SECRET,
+            )
+            .unwrap()),
             scopes: Set("openid email".to_string()),
             auto_create_users: Set(false),
             role_claim_path: Set(None),
@@ -506,7 +542,9 @@ mod tests {
             port: Set(1883),
             client_id: Set(format!("client-{id}")),
             username: Set(Some("user".to_string())),
-            password: Set(Some(EncryptedString::new("mqtt-pass".to_string(), AAD_MQTT_PASSWORD).unwrap())),
+            password: Set(Some(
+                EncryptedString::new("mqtt-pass".to_string(), AAD_MQTT_PASSWORD).unwrap(),
+            )),
             ca_cert_pem: Set(None),
             topic_prefix: Set("uptrakit".to_string()),
             connection_status: Set(MqttClientConnectionStatus::Offline),
@@ -541,10 +579,16 @@ mod tests {
 
         // Simulate legacy plaintext.
         {
-            let model = uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("fp1".to_string())
-                .one(&db).await.expect("query").expect("row exists");
+            let model =
+                uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("fp1".to_string())
+                    .one(&db)
+                    .await
+                    .expect("query")
+                    .expect("row exists");
             let mut am: ca_certificate::ActiveModel = model.into();
-            am.key_pem = Set(EncryptedString::plaintext_for_test("secret_key".to_string()));
+            am.key_pem = Set(EncryptedString::plaintext_for_test(
+                "secret_key".to_string(),
+            ));
             am.update(&db).await.expect("set plaintext key_pem");
         }
 
@@ -552,8 +596,14 @@ mod tests {
         assert_eq!(count, 1, "exactly one row should be upgraded");
 
         let row = uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("fp1".to_string())
-            .one(&db).await.expect("query").expect("row exists");
-        assert!(row.key_pem.is_db_value_encrypted(), "key_pem must be encrypted after upgrade");
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert!(
+            row.key_pem.is_db_value_encrypted(),
+            "key_pem must be encrypted after upgrade"
+        );
         assert_eq!(row.key_pem.expose_secret(), "secret_key");
     }
 
@@ -580,8 +630,14 @@ mod tests {
         assert_eq!(count, 1, "v2 row should be upgraded");
 
         let row = uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("fp2".to_string())
-            .one(&db).await.expect("query").expect("row exists");
-        assert!(row.key_pem.is_db_value_encrypted(), "key_pem must be encrypted after upgrade");
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row exists");
+        assert!(
+            row.key_pem.is_db_value_encrypted(),
+            "key_pem must be encrypted after upgrade"
+        );
         assert_eq!(row.key_pem.expose_secret(), "ca_key_v2");
     }
 
@@ -599,7 +655,10 @@ mod tests {
         assert_eq!(count, 1);
 
         let row = uptrakit_shared_db::entity::prelude::OidcProvider::find_by_id(id)
-            .one(&db).await.expect("query").expect("row");
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
         assert!(row.client_secret.is_db_value_encrypted());
         assert_eq!(row.client_secret.expose_secret(), "client-secret-val");
     }
@@ -618,7 +677,10 @@ mod tests {
         assert_eq!(count, 1);
 
         let row = uptrakit_shared_db::entity::prelude::MqttClient::find_by_id(id)
-            .one(&db).await.expect("query").expect("row");
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
         assert!(row.password.as_ref().unwrap().is_db_value_encrypted());
         assert_eq!(row.password.as_ref().unwrap().expose_secret(), "mqtt-pass");
     }
@@ -647,7 +709,11 @@ mod tests {
 
         let mut am = mqtt_client_am(id, now);
         am.ca_cert_pem = Set(Some(
-            EncryptedString::new("-----BEGIN CERTIFICATE-----".to_string(), AAD_MQTT_CA_CERT_PEM).unwrap(),
+            EncryptedString::new(
+                "-----BEGIN CERTIFICATE-----".to_string(),
+                AAD_MQTT_CA_CERT_PEM,
+            )
+            .unwrap(),
         ));
         am.insert(&db).await.expect("insert");
 
@@ -655,7 +721,10 @@ mod tests {
         {
             let model = mqtt_client::Entity::find()
                 .filter(mqtt_client::Column::ClientId.eq(format!("client-{id}")))
-                .one(&db).await.expect("query").expect("row");
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row");
             let mut am: mqtt_client::ActiveModel = model.into();
             am.ca_cert_pem = Set(Some(EncryptedString::plaintext_for_test(
                 "-----BEGIN CERTIFICATE-----".to_string(),
@@ -667,7 +736,10 @@ mod tests {
         assert_eq!(count, 1);
 
         let row = uptrakit_shared_db::entity::prelude::MqttClient::find_by_id(id)
-            .one(&db).await.expect("query").expect("row");
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
         assert!(row.ca_cert_pem.as_ref().unwrap().is_db_value_encrypted());
     }
 
@@ -693,18 +765,26 @@ mod tests {
         pending_oidc_flow::ActiveModel {
             csrf_state: Set("csrf_1".to_string()),
             provider_id: Set(Uuid::nil()),
-            pkce_verifier: Set(EncryptedString::new("pkce_secret".to_string(), AAD_PKCE_VERIFIER).unwrap()),
+            pkce_verifier: Set(
+                EncryptedString::new("pkce_secret".to_string(), AAD_PKCE_VERIFIER).unwrap(),
+            ),
             nonce: Set("nonce".to_string()),
             created_at: Set(now),
             expires_at: Set(now),
         }
-        .insert(&db).await.expect("insert");
+        .insert(&db)
+        .await
+        .expect("insert");
 
         let count = upgrade_oidc_flow_pkce_verifiers(&db).await;
         assert_eq!(count, 1);
 
-        let row = uptrakit_shared_db::entity::prelude::PendingOidcFlow::find_by_id("csrf_1".to_string())
-            .one(&db).await.expect("query").expect("row");
+        let row =
+            uptrakit_shared_db::entity::prelude::PendingOidcFlow::find_by_id("csrf_1".to_string())
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row");
         assert!(row.pkce_verifier.is_db_value_encrypted());
         assert_eq!(row.pkce_verifier.expose_secret(), "pkce_secret");
     }
@@ -724,20 +804,32 @@ mod tests {
             tenant_id: Set(Uuid::nil()),
             name: Set("test-channel".to_string()),
             channel_type: Set("webhook".to_string()),
-            config: Set(EncryptedString::new(r#"{"url":"https://example.com"}"#.to_string(), AAD_NOTIFICATION_CONFIG).unwrap()),
+            config: Set(EncryptedString::new(
+                r#"{"url":"https://example.com"}"#.to_string(),
+                AAD_NOTIFICATION_CONFIG,
+            )
+            .unwrap()),
             enabled: Set(true),
             created_at: Set(now),
             updated_at: Set(now),
         }
-        .insert(&db).await.expect("insert");
+        .insert(&db)
+        .await
+        .expect("insert");
 
         let count = upgrade_notification_channel_configs(&db).await;
         assert_eq!(count, 1);
 
         let row = uptrakit_shared_db::entity::prelude::NotificationChannel::find_by_id(id)
-            .one(&db).await.expect("query").expect("row");
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
         assert!(row.config.is_db_value_encrypted());
-        assert_eq!(row.config.expose_secret(), r#"{"url":"https://example.com"}"#);
+        assert_eq!(
+            row.config.expose_secret(),
+            r#"{"url":"https://example.com"}"#
+        );
     }
 
     // ── Settings value upgrade ─────────────────────────────────────────────────
@@ -748,9 +840,12 @@ mod tests {
         let now = OffsetDateTime::now_utc();
 
         // Store a v2-encrypted value in global_settings.
-        let encrypted = uptrakit_crypto::encrypt_str("my-secret-url", AAD_SETTINGS_NATS_URL)
-            .expect("encrypt");
-        assert!(encrypted.starts_with("ENC:v2:"), "test precondition: should be v2 without DEK ring");
+        let encrypted =
+            uptrakit_crypto::encrypt_str("my-secret-url", AAD_SETTINGS_NATS_URL).expect("encrypt");
+        assert!(
+            encrypted.starts_with("ENC:v2:"),
+            "test precondition: should be v2 without DEK ring"
+        );
 
         use uptrakit_shared_db::entity::global_setting;
         global_setting::ActiveModel {
@@ -758,20 +853,27 @@ mod tests {
             value: Set(serde_json::json!(encrypted)),
             updated_at: Set(now),
         }
-        .insert(&db).await.expect("insert setting");
+        .insert(&db)
+        .await
+        .expect("insert setting");
 
         let count = upgrade_setting(&db, "nats.url", AAD_SETTINGS_NATS_URL).await;
         assert_eq!(count, 1, "v2 setting should be upgraded");
 
         // Verify it was re-encrypted (still v2 without DEK ring in test, but
         // the upgrade function ran).
-        let row = uptrakit_shared_db::entity::prelude::GlobalSetting::find_by_id("nats.url".to_string())
-            .one(&db).await.expect("query").expect("row");
+        let row =
+            uptrakit_shared_db::entity::prelude::GlobalSetting::find_by_id("nats.url".to_string())
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row");
         let stored = row.value.as_str().expect("string value");
         assert!(uptrakit_crypto::is_encrypted(stored), "must be encrypted");
 
         // Verify round-trip: decrypt should return original plaintext.
-        let decrypted = uptrakit_crypto::decrypt_str(stored, AAD_SETTINGS_NATS_URL).expect("decrypt");
+        let decrypted =
+            uptrakit_crypto::decrypt_str(stored, AAD_SETTINGS_NATS_URL).expect("decrypt");
         assert_eq!(decrypted, "my-secret-url");
     }
 
@@ -799,7 +901,9 @@ mod tests {
             deactivated_at: Set(None),
             created_at: Set(now),
         }
-        .insert(&db).await.expect("insert");
+        .insert(&db)
+        .await
+        .expect("insert");
 
         // First run upgrades v2→v2 (no DEK ring in tests).
         let count1 = upgrade_ca_certificate_keys(&db).await;
@@ -809,8 +913,12 @@ mod tests {
         let count2 = upgrade_ca_certificate_keys(&db).await;
         assert_eq!(count2, 1, "v2 re-processed (harmless without DEK ring)");
 
-        let row = uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("idem_fp".to_string())
-            .one(&db).await.expect("query").expect("row");
+        let row =
+            uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("idem_fp".to_string())
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row");
         assert!(row.key_pem.is_db_value_encrypted(), "still encrypted");
         assert_eq!(row.key_pem.expose_secret(), "idem_key", "data preserved");
     }
@@ -833,43 +941,82 @@ mod tests {
             deactivated_at: Set(None),
             created_at: Set(now),
         }
-        .insert(&db).await.expect("insert");
+        .insert(&db)
+        .await
+        .expect("insert");
 
         let oidc_id = Uuid::now_v7();
-        oidc_provider_am(oidc_id, now).insert(&db).await.expect("insert");
+        oidc_provider_am(oidc_id, now)
+            .insert(&db)
+            .await
+            .expect("insert");
 
         let mqtt_id = Uuid::now_v7();
-        mqtt_client_am(mqtt_id, now).insert(&db).await.expect("insert");
+        mqtt_client_am(mqtt_id, now)
+            .insert(&db)
+            .await
+            .expect("insert");
 
         pending_oidc_flow::ActiveModel {
             csrf_state: Set("v3_all_csrf".to_string()),
             provider_id: Set(Uuid::nil()),
-            pkce_verifier: Set(EncryptedString::new("all_pkce".to_string(), AAD_PKCE_VERIFIER).unwrap()),
+            pkce_verifier: Set(
+                EncryptedString::new("all_pkce".to_string(), AAD_PKCE_VERIFIER).unwrap(),
+            ),
             nonce: Set("nonce".to_string()),
             created_at: Set(now),
             expires_at: Set(now),
         }
-        .insert(&db).await.expect("insert");
+        .insert(&db)
+        .await
+        .expect("insert");
 
         // Run top-level migration.
         reencrypt_to_v3(&db).await;
 
         // Verify all encrypted.
-        let ca = uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("v3_all_fp".to_string())
-            .one(&db).await.expect("query").expect("row");
-        assert!(ca.key_pem.is_db_value_encrypted(), "key_pem must be encrypted");
+        let ca =
+            uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("v3_all_fp".to_string())
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row");
+        assert!(
+            ca.key_pem.is_db_value_encrypted(),
+            "key_pem must be encrypted"
+        );
 
         let oidc = uptrakit_shared_db::entity::prelude::OidcProvider::find_by_id(oidc_id)
-            .one(&db).await.expect("query").expect("row");
-        assert!(oidc.client_secret.is_db_value_encrypted(), "client_secret must be encrypted");
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert!(
+            oidc.client_secret.is_db_value_encrypted(),
+            "client_secret must be encrypted"
+        );
 
         let mqtt = uptrakit_shared_db::entity::prelude::MqttClient::find_by_id(mqtt_id)
-            .one(&db).await.expect("query").expect("row");
-        assert!(mqtt.password.as_ref().unwrap().is_db_value_encrypted(), "password must be encrypted");
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert!(
+            mqtt.password.as_ref().unwrap().is_db_value_encrypted(),
+            "password must be encrypted"
+        );
 
-        let flow = uptrakit_shared_db::entity::prelude::PendingOidcFlow::find_by_id("v3_all_csrf".to_string())
-            .one(&db).await.expect("query").expect("row");
-        assert!(flow.pkce_verifier.is_db_value_encrypted(), "pkce_verifier must be encrypted");
+        let flow = uptrakit_shared_db::entity::prelude::PendingOidcFlow::find_by_id(
+            "v3_all_csrf".to_string(),
+        )
+        .one(&db)
+        .await
+        .expect("query")
+        .expect("row");
+        assert!(
+            flow.pkce_verifier.is_db_value_encrypted(),
+            "pkce_verifier must be encrypted"
+        );
     }
 
     #[tokio::test]
@@ -888,11 +1035,17 @@ mod tests {
             deactivated_at: Set(None),
             created_at: Set(now),
         }
-        .insert(&db).await.expect("insert");
+        .insert(&db)
+        .await
+        .expect("insert");
 
         {
-            let model = uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("pt_fp".to_string())
-                .one(&db).await.expect("query").expect("row");
+            let model =
+                uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("pt_fp".to_string())
+                    .one(&db)
+                    .await
+                    .expect("query")
+                    .expect("row");
             let mut am: ca_certificate::ActiveModel = model.into();
             am.key_pem = Set(EncryptedString::plaintext_for_test("ca_key".to_string()));
             am.update(&db).await.expect("set plaintext");
@@ -900,9 +1053,16 @@ mod tests {
 
         reencrypt_to_v3(&db).await;
 
-        let row = uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("pt_fp".to_string())
-            .one(&db).await.expect("query").expect("row");
-        assert!(row.key_pem.is_db_value_encrypted(), "must be encrypted after migration");
+        let row =
+            uptrakit_shared_db::entity::prelude::CaCertificate::find_by_id("pt_fp".to_string())
+                .one(&db)
+                .await
+                .expect("query")
+                .expect("row");
+        assert!(
+            row.key_pem.is_db_value_encrypted(),
+            "must be encrypted after migration"
+        );
         assert_eq!(row.key_pem.expose_secret(), "ca_key");
     }
 }

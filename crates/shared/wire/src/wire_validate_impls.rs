@@ -134,11 +134,7 @@ impl WireValidate for VersionCheckResult {
             MAX_SHORT_STRING_LEN,
             "installed_version",
         )?;
-        check_opt_string_len(
-            &self.latest_version,
-            MAX_SHORT_STRING_LEN,
-            "latest_version",
-        )?;
+        check_opt_string_len(&self.latest_version, MAX_SHORT_STRING_LEN, "latest_version")?;
         check_opt_string_len(&self.error, MAX_MEDIUM_STRING_LEN, "error")?;
         Ok(())
     }
@@ -146,11 +142,7 @@ impl WireValidate for VersionCheckResult {
 
 impl WireValidate for UpdateStartedPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
-        check_opt_string_len(
-            &self.from_version,
-            MAX_SHORT_STRING_LEN,
-            "from_version",
-        )?;
+        check_opt_string_len(&self.from_version, MAX_SHORT_STRING_LEN, "from_version")?;
         Ok(())
     }
 }
@@ -212,11 +204,7 @@ impl WireValidate for DiscoveryResultsPayload {
 
 impl WireValidate for DiscoveryPluginResult {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
-        check_vec_len(
-            &self.discoveries,
-            MAX_DISCOVERIES_PER_PLUGIN,
-            "discoveries",
-        )?;
+        check_vec_len(&self.discoveries, MAX_DISCOVERIES_PER_PLUGIN, "discoveries")?;
         check_opt_string_len(&self.error, MAX_MEDIUM_STRING_LEN, "error")?;
         Ok(())
     }
@@ -363,11 +351,7 @@ impl WireValidate for ExecuteUpdatePayload {
             "software_item_name",
         )?;
         check_string_len(&self.to_version, MAX_SHORT_STRING_LEN, "to_version")?;
-        check_vec_len(
-            &self.pre_update_hooks,
-            MAX_UPDATE_HOOKS,
-            "pre_update_hooks",
-        )?;
+        check_vec_len(&self.pre_update_hooks, MAX_UPDATE_HOOKS, "pre_update_hooks")?;
         check_vec_len(
             &self.post_update_hooks,
             MAX_UPDATE_HOOKS,
@@ -391,11 +375,7 @@ impl WireValidate for HookCommand {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         match self {
             HookCommand::Shell { command, .. } => {
-                check_string_len(
-                    command,
-                    MAX_LONG_STRING_LEN,
-                    "hook_command.command",
-                )?;
+                check_string_len(command, MAX_LONG_STRING_LEN, "hook_command.command")?;
             }
             HookCommand::Exec {
                 program,
@@ -434,11 +414,7 @@ impl WireValidate for ExecuteBatchHostPackageUpdatePayload {
             "host_machine_id",
         )?;
         check_vec_len(&self.updates, MAX_BATCH_UPDATES, "updates")?;
-        check_vec_len(
-            &self.pre_update_hooks,
-            MAX_UPDATE_HOOKS,
-            "pre_update_hooks",
-        )?;
+        check_vec_len(&self.pre_update_hooks, MAX_UPDATE_HOOKS, "pre_update_hooks")?;
         check_vec_len(
             &self.post_update_hooks,
             MAX_UPDATE_HOOKS,
@@ -502,11 +478,7 @@ impl WireValidate for MqttTenantConfig {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.client_id, MAX_SHORT_STRING_LEN, "client_id")?;
         check_string_len(&self.host, MAX_SHORT_STRING_LEN, "host")?;
-        check_string_len(
-            &self.topic_prefix,
-            MAX_SHORT_STRING_LEN,
-            "topic_prefix",
-        )?;
+        check_string_len(&self.topic_prefix, MAX_SHORT_STRING_LEN, "topic_prefix")?;
         check_string_len(
             &self.ha_discovery_prefix,
             MAX_SHORT_STRING_LEN,
@@ -567,21 +539,9 @@ impl WireValidate for MqttSoftwareStateHostEntry {
             MAX_SHORT_STRING_LEN,
             "installed_version",
         )?;
-        check_opt_string_len(
-            &self.latest_version,
-            MAX_SHORT_STRING_LEN,
-            "latest_version",
-        )?;
-        check_opt_string_len(
-            &self.release_url,
-            MAX_MEDIUM_STRING_LEN,
-            "release_url",
-        )?;
-        check_opt_string_len(
-            &self.release_notes,
-            MAX_LONG_STRING_LEN,
-            "release_notes",
-        )?;
+        check_opt_string_len(&self.latest_version, MAX_SHORT_STRING_LEN, "latest_version")?;
+        check_opt_string_len(&self.release_url, MAX_MEDIUM_STRING_LEN, "release_url")?;
+        check_opt_string_len(&self.release_notes, MAX_LONG_STRING_LEN, "release_notes")?;
         Ok(())
     }
 }

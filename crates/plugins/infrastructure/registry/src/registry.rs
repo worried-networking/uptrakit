@@ -11,8 +11,8 @@ use uptrakit_plugin_infrastructure_core::{Plugin, PluginType, SecretMasking, Sud
 use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
 use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
 use uptrakit_plugin_package_manager_npm::{NpmConfig, NpmPlugin};
-use uptrakit_plugin_releases_forgejo::{ForgejoConfig, ForgejoPlugin};
 use uptrakit_plugin_releases_docker::{DockerConfig, DockerPlugin};
+use uptrakit_plugin_releases_forgejo::{ForgejoConfig, ForgejoPlugin};
 use uptrakit_plugin_releases_github::{GitHubConfig, GitHubPlugin};
 use uptrakit_plugin_releases_gitlab::{GitLabConfig, GitLabPlugin};
 
@@ -982,8 +982,7 @@ mod tests {
     async fn create_plugin_shell_version_only() {
         let config = serde_json::json!({"version_command": "myapp --version"});
         let plugin =
-            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor())
-                .await;
+            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor()).await;
         assert!(plugin.is_ok());
     }
 
@@ -991,8 +990,7 @@ mod tests {
     async fn create_plugin_shell_update_only() {
         let config = serde_json::json!({"update_command": "apt-get install -y myapp"});
         let plugin =
-            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor())
-                .await;
+            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor()).await;
         assert!(plugin.is_ok());
     }
 
@@ -1003,8 +1001,7 @@ mod tests {
             "update_command": "apt-get install -y myapp"
         });
         let plugin =
-            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor())
-                .await;
+            PluginRegistry::create_plugin(PluginType::GenericShell, &config, test_executor()).await;
         assert!(plugin.is_ok());
     }
 
@@ -1114,11 +1111,8 @@ mod tests {
     #[test]
     fn validate_package_identifier_forgejo_valid() {
         assert!(
-            PluginRegistry::validate_package_identifier(
-                PluginType::ReleasesForgejo,
-                "owner/repo"
-            )
-            .is_ok()
+            PluginRegistry::validate_package_identifier(PluginType::ReleasesForgejo, "owner/repo")
+                .is_ok()
         );
     }
 
@@ -1377,11 +1371,8 @@ mod tests {
     #[test]
     fn validate_package_identifier_npm_uppercase_fails() {
         assert!(
-            PluginRegistry::validate_package_identifier(
-                PluginType::PackageManagerNpm,
-                "MyPackage"
-            )
-            .is_err()
+            PluginRegistry::validate_package_identifier(PluginType::PackageManagerNpm, "MyPackage")
+                .is_err()
         );
     }
 

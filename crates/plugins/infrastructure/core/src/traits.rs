@@ -244,7 +244,10 @@ pub trait Plugin: Send + Sync {
     ) -> Result<Vec<BatchDetectResult>> {
         let mut results = Vec::with_capacity(items.len());
         for item in items {
-            match self.detect_installed_version(&item.package_identifier).await {
+            match self
+                .detect_installed_version(&item.package_identifier)
+                .await
+            {
                 Ok(v) => results.push(BatchDetectResult {
                     package_identifier: item.package_identifier.clone(),
                     installed_version: v,

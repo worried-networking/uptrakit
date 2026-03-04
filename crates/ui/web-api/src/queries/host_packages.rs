@@ -4,11 +4,11 @@
 //! and host package ignore rules.
 
 use rootcause::prelude::*;
+use sea_orm::sea_query::{Alias, Expr, ExprTrait};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
 };
-use sea_orm::sea_query::{Alias, Expr, ExprTrait};
 use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
@@ -92,7 +92,10 @@ pub async fn list_host_packages(
     }
 
     if let Some(has_update) = params.has_update {
-        condition = condition.add(ExprTrait::eq(Expr::col(Alias::new("has_update")), has_update));
+        condition = condition.add(ExprTrait::eq(
+            Expr::col(Alias::new("has_update")),
+            has_update,
+        ));
     }
 
     let base_query = tenant_db
@@ -190,9 +193,7 @@ pub async fn deactivate_host_package(
             package_identifier: Set(pkg.package_identifier.clone()),
             created_at: Set(now),
         };
-        if let Err(e) = HostPackageIgnore::insert(ignore)
-            .exec(tenant_db.db())
-            .await
+        if let Err(e) = HostPackageIgnore::insert(ignore).exec(tenant_db.db()).await
             && !is_unique_constraint_violation(&e)
         {
             return Err(report!(HostPackageError::Db(e)));
@@ -315,10 +316,7 @@ pub async fn create_host_package_ignore(
         created_at: Set(OffsetDateTime::now_utc()),
     };
 
-    match HostPackageIgnore::insert(record)
-        .exec(tenant_db.db())
-        .await
-    {
+    match HostPackageIgnore::insert(record).exec(tenant_db.db()).await {
         Ok(_) => Ok(true),
         Err(e) if is_unique_constraint_violation(&e) => Ok(false),
         Err(e) => Err(report!(HostPackageError::Db(e))),
@@ -483,7 +481,10 @@ pub async fn find_or_create_host_package(params: FindOrCreateHostPackageParams<'
 // ── Update history helpers ──────────────────────────────────────────────────
 
 fn history_to_response(m: host_package_update_history::Model) -> HostPackageUpdateHistoryResponse {
-    let status = m.status.parse::<UpdateStatus>().unwrap_or(UpdateStatus::Pending);
+    let status = m
+        .status
+        .parse::<UpdateStatus>()
+        .unwrap_or(UpdateStatus::Pending);
     HostPackageUpdateHistoryResponse {
         id: m.id,
         host_package_id: m.host_package_id,

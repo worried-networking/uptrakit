@@ -95,9 +95,7 @@ impl MigrationTrait for Migration {
                 &Query::update()
                     .table(Alias::new("permissions"))
                     .value(Alias::new("created_at"), fixed_created_at)
-                    .and_where(
-                        Expr::col(Alias::new("id")).eq(Value::Bytes(Some(id_bytes))),
-                    )
+                    .and_where(Expr::col(Alias::new("id")).eq(Value::Bytes(Some(id_bytes))))
                     .to_owned(),
             )
             .await?;

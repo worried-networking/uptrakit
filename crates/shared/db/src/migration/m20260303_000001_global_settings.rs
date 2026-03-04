@@ -89,16 +89,17 @@ impl MigrationTrait for Migration {
         let select = Query::select()
             .from(Settings::Table)
             .columns([Settings::Key, Settings::Value, Settings::UpdatedAt])
-            .and_where(
-                Expr::col(Settings::TenantId)
-                    .in_subquery(tenant_subquery),
-            )
+            .and_where(Expr::col(Settings::TenantId).in_subquery(tenant_subquery))
             .and_where(Expr::col(Settings::Key).is_in(GLOBAL_KEYS.iter().copied()))
             .to_owned();
 
         let insert = Query::insert()
             .into_table(GlobalSettings::Table)
-            .columns([GlobalSettings::Key, GlobalSettings::Value, GlobalSettings::UpdatedAt])
+            .columns([
+                GlobalSettings::Key,
+                GlobalSettings::Value,
+                GlobalSettings::UpdatedAt,
+            ])
             .select_from(select)
             .map_err(|e| DbErr::Migration(e.to_string()))?
             .to_owned();
@@ -129,13 +130,22 @@ impl MigrationTrait for Migration {
         let select = Query::select()
             .from(GlobalSettings::Table)
             .expr(tenant_subquery.into_sub_query_statement())
-            .columns([GlobalSettings::Key, GlobalSettings::Value, GlobalSettings::UpdatedAt])
+            .columns([
+                GlobalSettings::Key,
+                GlobalSettings::Value,
+                GlobalSettings::UpdatedAt,
+            ])
             .and_where(Expr::col(GlobalSettings::Key).is_in(GLOBAL_KEYS.iter().copied()))
             .to_owned();
 
         let insert = Query::insert()
             .into_table(Settings::Table)
-            .columns([Settings::TenantId, Settings::Key, Settings::Value, Settings::UpdatedAt])
+            .columns([
+                Settings::TenantId,
+                Settings::Key,
+                Settings::Value,
+                Settings::UpdatedAt,
+            ])
             .select_from(select)
             .map_err(|e| DbErr::Migration(e.to_string()))?
             .to_owned();

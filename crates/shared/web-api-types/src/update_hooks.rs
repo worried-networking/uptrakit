@@ -260,12 +260,10 @@ impl UpdateHookConfig {
                 });
             }
             for (i, cmd) in commands.iter().enumerate() {
-                if let Err(msg) =
-                    uptrakit_shared_types::command_validation::validate_command_length(
-                        cmd,
-                        &format!("{phase}.commands[{i}]"),
-                    )
-                {
+                if let Err(msg) = uptrakit_shared_types::command_validation::validate_command_length(
+                    cmd,
+                    &format!("{phase}.commands[{i}]"),
+                ) {
                     return Err(HookValidationError {
                         field: phase,
                         message: msg,
@@ -765,9 +763,8 @@ mod tests {
 
     #[test]
     fn validate_hooks_config_custom_command_over_limit_rejected() {
-        let long_cmd = "x".repeat(
-            uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1,
-        );
+        let long_cmd =
+            "x".repeat(uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1);
         let config = HooksConfig {
             pre_update: Some(UpdateHookConfig {
                 predefined: None,
@@ -832,9 +829,8 @@ mod tests {
 
     #[test]
     fn validate_hooks_config_post_update_validated_too() {
-        let long_cmd = "x".repeat(
-            uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1,
-        );
+        let long_cmd =
+            "x".repeat(uptrakit_shared_types::command_validation::MAX_COMMAND_LENGTH + 1);
         let config = HooksConfig {
             pre_update: None,
             post_update: Some(UpdateHookConfig {

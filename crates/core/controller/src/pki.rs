@@ -298,8 +298,11 @@ pub async fn load_or_init_managed_ca(
         return load_managed_ca_state(db).await;
     }
 
-    let encrypted_key =
-        uptrakit_crypto::EncryptedString::new(bundle.key_pem.clone(), "uptrakit:ca_certificates:key_pem").context_to()?;
+    let encrypted_key = uptrakit_crypto::EncryptedString::new(
+        bundle.key_pem.clone(),
+        "uptrakit:ca_certificates:key_pem",
+    )
+    .context_to()?;
     let cert_model = ca_certificate::ActiveModel {
         fingerprint: Set(fingerprint.clone()),
         cert_pem: Set(bundle.cert_pem.clone()),
@@ -325,13 +328,11 @@ pub async fn load_or_init_managed_ca(
 
 /// Load the full managed CA state from the database.
 pub async fn load_managed_ca_state(db: &DatabaseConnection) -> Result<CaState> {
-    let active_fp = load_active_ca_fingerprint(db)
-        .await?
-        .ok_or_else(|| {
-            report!(PkiError::CaValidation(
-                "missing active CA fingerprint".into()
-            ))
-        })?;
+    let active_fp = load_active_ca_fingerprint(db).await?.ok_or_else(|| {
+        report!(PkiError::CaValidation(
+            "missing active CA fingerprint".into()
+        ))
+    })?;
 
     let active_model = ca_certificate::Entity::find_by_id(active_fp.clone())
         .one(db)
@@ -427,8 +428,11 @@ pub async fn rotate_managed_ca(
     let not_before = cert_not_before(&new_ca.cert_pem)?;
     let not_after = cert_not_after(&new_ca.cert_pem)?;
 
-    let encrypted_key =
-        uptrakit_crypto::EncryptedString::new(new_ca.key_pem.clone(), "uptrakit:ca_certificates:key_pem").context_to()?;
+    let encrypted_key = uptrakit_crypto::EncryptedString::new(
+        new_ca.key_pem.clone(),
+        "uptrakit:ca_certificates:key_pem",
+    )
+    .context_to()?;
     let cert_model = ca_certificate::ActiveModel {
         fingerprint: Set(new_fp.clone()),
         cert_pem: Set(new_ca.cert_pem.clone()),
@@ -571,12 +575,11 @@ fn most_recent_deactivated(models: &[ca_certificate::Model]) -> Option<ca_certif
 }
 
 async fn load_active_ca_fingerprint(db: &impl ConnectionTrait) -> Result<Option<String>> {
-    let row = global_setting::Entity::find_by_id(
-        SettingKey::PkiActiveCaFingerprint.as_str().to_string(),
-    )
-    .one(db)
-    .await
-    .context_to::<PkiError>()?;
+    let row =
+        global_setting::Entity::find_by_id(SettingKey::PkiActiveCaFingerprint.as_str().to_string())
+            .one(db)
+            .await
+            .context_to::<PkiError>()?;
 
     let value = row.and_then(|r| r.value.as_str().map(String::from));
     Ok(value)
@@ -671,11 +674,10 @@ async fn bump_global_setting_i64(db: &impl ConnectionTrait, key: SettingKey) -> 
 }
 
 pub async fn load_ca_version(db: &DatabaseConnection) -> Result<i64> {
-    let row =
-        global_setting::Entity::find_by_id(SettingKey::PkiCaVersion.as_str().to_string())
-            .one(db)
-            .await
-            .context_to::<PkiError>()?;
+    let row = global_setting::Entity::find_by_id(SettingKey::PkiCaVersion.as_str().to_string())
+        .one(db)
+        .await
+        .context_to::<PkiError>()?;
     Ok(row.and_then(|r| r.value.as_i64()).unwrap_or(0))
 }
 
@@ -1454,9 +1456,7 @@ mod tests {
             .map_err(|e| format!("{e:?}"))?;
         let active_fp = ca_fingerprint(&state.active.cert_pem).map_err(|e| format!("{e:?}"))?;
 
-        let version = load_ca_version(&db)
-            .await
-            .map_err(|e| format!("{e:?}"))?;
+        let version = load_ca_version(&db).await.map_err(|e| format!("{e:?}"))?;
         if version != 1 {
             return Err(format!("expected CA version 1, got {version}"));
         }
@@ -1474,9 +1474,7 @@ mod tests {
             return Err("rotation did not update active CA".to_string());
         }
 
-        let version = load_ca_version(&db)
-            .await
-            .map_err(|e| format!("{e:?}"))?;
+        let version = load_ca_version(&db).await.map_err(|e| format!("{e:?}"))?;
         if version != 2 {
             return Err(format!("expected CA version 2, got {version}"));
         }

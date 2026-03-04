@@ -5,9 +5,7 @@ use rcgen::{
     CertificateRevocationListParams, Issuer, KeyIdMethod, KeyPair, RevokedCertParams, SerialNumber,
 };
 use rustls::pki_types::CertificateRevocationListDer;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use tokio::sync::{Notify, RwLock};
 use uptrakit_shared_db::entity::{crl_cache, prelude::*, service_certificate};
@@ -85,8 +83,8 @@ pub async fn try_load_crl_from_db(
 
     // Re-derive DER from PEM so we don't store duplicate bytes.
     let der = {
-        let (_, pem_block) = x509_parser::pem::parse_x509_pem(entry.crl_pem.as_bytes())
-            .map_err(|e| {
+        let (_, pem_block) =
+            x509_parser::pem::parse_x509_pem(entry.crl_pem.as_bytes()).map_err(|e| {
                 report!(pki::PkiError::CaValidation(format!(
                     "failed to parse cached CRL PEM for CA {ca_fingerprint}: {e}"
                 )))
@@ -321,7 +319,11 @@ impl CrlManager {
     /// Build DER-encoded CRLs and combined PEM from revoked certificates in the database.
     async fn build_crls(
         &self,
-    ) -> pki::Result<(Vec<CertificateRevocationListDer<'static>>, String, Vec<(String, String, i64, OffsetDateTime, OffsetDateTime)>)> {
+    ) -> pki::Result<(
+        Vec<CertificateRevocationListDer<'static>>,
+        String,
+        Vec<(String, String, i64, OffsetDateTime, OffsetDateTime)>,
+    )> {
         let issuers = self.issuers.read().await;
         let crl_number = self.crl_number.fetch_add(1, Ordering::Relaxed);
 
@@ -490,7 +492,12 @@ fn sign_crl_with_times(
     ca_issuer: &Issuer<'_, KeyPair>,
     revoked_certs: Vec<RevokedCertParams>,
     crl_number: u64,
-) -> pki::Result<(CertificateRevocationListDer<'static>, String, OffsetDateTime, OffsetDateTime)> {
+) -> pki::Result<(
+    CertificateRevocationListDer<'static>,
+    String,
+    OffsetDateTime,
+    OffsetDateTime,
+)> {
     let now = OffsetDateTime::now_utc();
     let next_update = now + time::Duration::hours(24);
     let params = CertificateRevocationListParams {

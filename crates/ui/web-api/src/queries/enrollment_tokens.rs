@@ -48,8 +48,9 @@ pub async fn create_enrollment_token(
     let caps_json = params
         .allowed_capabilities
         .map(|caps| {
-            serde_json::to_string(caps)
-                .map_err(|e| sea_orm::DbErr::Custom(format!("capability list serialization failed: {e}")))
+            serde_json::to_string(caps).map_err(|e| {
+                sea_orm::DbErr::Custom(format!("capability list serialization failed: {e}"))
+            })
         })
         .transpose()?;
 

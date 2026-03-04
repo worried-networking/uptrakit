@@ -11,7 +11,6 @@ pub mod signal;
 pub mod tls;
 pub(crate) mod ws;
 
-pub use uptrakit_backoff::Backoff;
 pub use cert_handler::{
     CertificateRenewalHandler, FAR_FUTURE, compute_renewal_delay, create_renewal_sleep,
     update_renewal_schedule,
@@ -31,3 +30,4 @@ pub use main_helper::{
     init_crypto, init_tracing, print_build_info, run_lifecycle_and_handle_errors,
 };
 pub use signal::{Signal, SignalWatcher};
+pub use uptrakit_backoff::Backoff;

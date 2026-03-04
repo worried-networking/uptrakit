@@ -24,11 +24,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("crl_pem"))
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Alias::new("crl_pem")).text().not_null())
                     .col(
                         ColumnDef::new(Alias::new("crl_number"))
                             .big_integer()

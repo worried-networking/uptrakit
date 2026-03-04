@@ -449,9 +449,15 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::services::deactivate_service
         ))
         .routes(routes!(crate::routes::services::merge_service))
-        .routes(routes!(crate::routes::system_services::list_system_services))
-        .routes(routes!(crate::routes::system_services::approve_system_service))
-        .routes(routes!(crate::routes::system_services::reject_system_service))
+        .routes(routes!(
+            crate::routes::system_services::list_system_services
+        ))
+        .routes(routes!(
+            crate::routes::system_services::approve_system_service
+        ))
+        .routes(routes!(
+            crate::routes::system_services::reject_system_service
+        ))
         .routes(routes!(
             crate::routes::system_services::get_system_service,
             crate::routes::system_services::update_system_service,

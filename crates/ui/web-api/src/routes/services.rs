@@ -194,8 +194,9 @@ pub async fn approve_service(
     // Dispatch notification event for service enrollment.
     {
         let service_label = resp.service_label.clone();
-        state.notification_dispatcher.dispatch(
-            crate::notifications::events::NotificationEvent {
+        state
+            .notification_dispatcher
+            .dispatch(crate::notifications::events::NotificationEvent {
                 tenant_id: tenant_db.tenant_id,
                 host_id: None,
                 host_name: None,
@@ -207,8 +208,7 @@ pub async fn approve_service(
                         service_id,
                         service_label,
                     },
-            },
-        );
+            });
     }
 
     (StatusCode::OK, Json(resp)).into_response()
@@ -371,15 +371,14 @@ pub async fn merge_service(
                 ServiceQueryError::SourceNotFound => {
                     error_response(StatusCode::NOT_FOUND, "Source service not found")
                 }
-                ServiceQueryError::TargetConnected => {
-                    error_response(StatusCode::CONFLICT, "Target service is currently connected")
-                }
-                ServiceQueryError::NotMergeable => {
-                    error_response(
-                        StatusCode::BAD_REQUEST,
-                        "Merge requires SoftwareDiscovery capability",
-                    )
-                }
+                ServiceQueryError::TargetConnected => error_response(
+                    StatusCode::CONFLICT,
+                    "Target service is currently connected",
+                ),
+                ServiceQueryError::NotMergeable => error_response(
+                    StatusCode::BAD_REQUEST,
+                    "Merge requires SoftwareDiscovery capability",
+                ),
                 ServiceQueryError::NotApproved => {
                     error_response(StatusCode::BAD_REQUEST, "Target service must be approved")
                 }
@@ -591,9 +590,9 @@ mod tests {
             shutdown_token: Default::default(),
             external_scheduler_connected: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
-            audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(
-                Arc::new(uptrakit_audit_log::NoopBackend),
-            ),
+            audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+                uptrakit_audit_log::NoopBackend,
+            )),
         })
     }
 

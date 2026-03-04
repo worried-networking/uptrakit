@@ -158,13 +158,9 @@ pub async fn release_all_claims(
 /// database with an unrecognised `task_type` string (added during a rolling upgrade
 /// where a newer controller instance created a task this instance doesn't know about)
 /// are silently skipped rather than causing a deserialization failure.
-pub async fn find_due_tasks(
-    db: &DatabaseConnection,
-) -> error::Result<Vec<scheduled_task::Model>> {
+pub async fn find_due_tasks(db: &DatabaseConnection) -> error::Result<Vec<scheduled_task::Model>> {
     let now = OffsetDateTime::now_utc();
-    let known_types: Vec<String> = ScheduledTaskType::iter()
-        .map(|t| t.into_value())
-        .collect();
+    let known_types: Vec<String> = ScheduledTaskType::iter().map(|t| t.into_value()).collect();
 
     scheduled_task::Entity::find()
         .filter(scheduled_task::Column::TaskType.is_in(known_types))
@@ -377,8 +373,7 @@ mod tests {
         seed_task(&db, tenant_b.id).await;
 
         let due = find_due_tasks(&db).await.unwrap();
-        let tenant_ids: std::collections::HashSet<Uuid> =
-            due.iter().map(|t| t.tenant_id).collect();
+        let tenant_ids: std::collections::HashSet<Uuid> = due.iter().map(|t| t.tenant_id).collect();
         assert!(
             tenant_ids.contains(&tenant_a.id),
             "tenant A task should be returned"
@@ -505,9 +500,7 @@ mod tests {
                 .to_owned();
 
             use sea_orm::ConnectionTrait as _;
-            db.execute(&insert)
-                .await
-                .expect("insert unknown task type");
+            db.execute(&insert).await.expect("insert unknown task type");
         }
 
         // find_due_tasks is tenant-agnostic; it may also return migration-seeded tasks.

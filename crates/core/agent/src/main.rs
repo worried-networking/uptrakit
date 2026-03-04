@@ -244,7 +244,9 @@ impl ServiceHandler for AgentHandler {
 /// I/O errors are treated conservatively as *not frozen* so a transient
 /// filesystem error does not permanently halt the agent.
 async fn is_frozen(freeze_file_path: &std::path::Path) -> bool {
-    tokio::fs::try_exists(freeze_file_path).await.unwrap_or(false)
+    tokio::fs::try_exists(freeze_file_path)
+        .await
+        .unwrap_or(false)
 }
 
 /// Handle a remote `SetUpdateFreeze` message by creating or removing the

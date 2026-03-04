@@ -68,7 +68,11 @@ impl OidcFlowStore {
         let model = pending_oidc_flow::ActiveModel {
             csrf_state: Set(state),
             provider_id: Set(provider_id),
-            pkce_verifier: Set(EncryptedString::new(pkce_verifier.secret().clone(), "uptrakit:pending_oidc_flows:pkce_verifier").context_to()?),
+            pkce_verifier: Set(EncryptedString::new(
+                pkce_verifier.secret().clone(),
+                "uptrakit:pending_oidc_flows:pkce_verifier",
+            )
+            .context_to()?),
             nonce: Set(nonce.secret().clone()),
             created_at: Set(now),
             expires_at: Set(expires_at),
@@ -623,7 +627,7 @@ mod tests {
 
         // Backdate the flow to make it expired
         {
-            use sea_orm::{sea_query::Expr, EntityTrait as _, QueryFilter as _};
+            use sea_orm::{EntityTrait as _, QueryFilter as _, sea_query::Expr};
             pending_oidc_flow::Entity::update_many()
                 .col_expr(
                     pending_oidc_flow::Column::ExpiresAt,
@@ -664,7 +668,7 @@ mod tests {
 
         // Backdate the link
         {
-            use sea_orm::{sea_query::Expr, EntityTrait as _};
+            use sea_orm::{EntityTrait as _, sea_query::Expr};
             pending_account_link::Entity::update_many()
                 .col_expr(
                     pending_account_link::Column::ExpiresAt,
@@ -697,7 +701,7 @@ mod tests {
 
         // Backdate the exchange
         {
-            use sea_orm::{sea_query::Expr, EntityTrait as _};
+            use sea_orm::{EntityTrait as _, sea_query::Expr};
             pending_oidc_token_exchange::Entity::update_many()
                 .col_expr(
                     pending_oidc_token_exchange::Column::ExpiresAt,
@@ -827,7 +831,7 @@ mod tests {
 
         // Backdate to make it expired
         {
-            use sea_orm::{sea_query::Expr, EntityTrait as _};
+            use sea_orm::{EntityTrait as _, sea_query::Expr};
             pending_oidc_registration::Entity::update_many()
                 .col_expr(
                     pending_oidc_registration::Column::ExpiresAt,
@@ -905,7 +909,7 @@ mod tests {
 
         // Backdate the registration
         {
-            use sea_orm::{sea_query::Expr, EntityTrait as _};
+            use sea_orm::{EntityTrait as _, sea_query::Expr};
             pending_oidc_registration::Entity::update_many()
                 .col_expr(
                     pending_oidc_registration::Column::ExpiresAt,

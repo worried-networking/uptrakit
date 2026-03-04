@@ -108,10 +108,8 @@ impl DockerSocketProxy {
             tokio::spawn(async move {
                 match executor.open_stdio_tunnel("docker system dial-stdio").await {
                     Ok(tunnel) => {
-                        let (mut stream_read, mut stream_write) =
-                            tokio::io::split(stream);
-                        let (mut tunnel_read, mut tunnel_write) =
-                            tokio::io::split(tunnel);
+                        let (mut stream_read, mut stream_write) = tokio::io::split(stream);
+                        let (mut tunnel_read, mut tunnel_write) = tokio::io::split(tunnel);
 
                         let client_to_docker = tokio::io::copy(&mut stream_read, &mut tunnel_write);
                         let docker_to_client = tokio::io::copy(&mut tunnel_read, &mut stream_write);

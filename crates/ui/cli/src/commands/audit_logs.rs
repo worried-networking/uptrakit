@@ -117,7 +117,9 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<AuditLogRe
 }
 
 /// List system-level audit log entries (paginated, with optional filters).
-pub async fn list_system(params: ListParams<'_>) -> Result<PaginatedResponse<SystemAuditLogResponse>> {
+pub async fn list_system(
+    params: ListParams<'_>,
+) -> Result<PaginatedResponse<SystemAuditLogResponse>> {
     let client = authenticated_client(
         params.server,
         params.token,
@@ -231,7 +233,10 @@ mod tests {
         };
         let s = resp.to_human_string();
         assert!(s.contains("PUT"), "method missing");
-        assert!(s.contains("/api/v1/global-settings/network"), "path missing");
+        assert!(
+            s.contains("/api/v1/global-settings/network"),
+            "path missing"
+        );
         assert!(s.contains("oidc"), "auth_method missing");
     }
 
@@ -244,9 +249,10 @@ mod tests {
             per_page: 25,
             total_pages: 0,
         };
-        assert!(resp
-            .to_human_string()
-            .contains("No system audit log entries"));
+        assert!(
+            resp.to_human_string()
+                .contains("No system audit log entries")
+        );
     }
 
     #[test]
@@ -260,6 +266,9 @@ mod tests {
             per_page: 25,
             total_pages: 1,
         };
-        assert!(resp.to_human_string().contains('-'), "missing dash for no IP");
+        assert!(
+            resp.to_human_string().contains('-'),
+            "missing dash for no IP"
+        );
     }
 }

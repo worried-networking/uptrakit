@@ -93,8 +93,7 @@ impl Validate for UpdateSystemServiceRequest {
             if interval != 0 && interval < 5 {
                 return Err(ValidationError {
                     field: "ping_interval_seconds",
-                    message: "ping_interval_seconds must be 0 (to clear) or at least 5"
-                        .to_string(),
+                    message: "ping_interval_seconds must be 0 (to clear) or at least 5".to_string(),
                 });
             }
         }

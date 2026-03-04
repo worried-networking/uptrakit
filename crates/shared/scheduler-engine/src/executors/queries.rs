@@ -92,9 +92,7 @@ pub(crate) async fn query_agent_assignment_rows(
             service_host::Relation::Host.def().rev(),
         )
         .join(JoinType::InnerJoin, service_host::Relation::Service.def())
-        .filter(
-            host_software_item_plugin::Column::Role.is_in(role_strings),
-        )
+        .filter(host_software_item_plugin::Column::Role.is_in(role_strings))
         .filter(software_item::Column::TenantId.eq(tenant_id))
         .filter(software_item::Column::Enabled.eq(true))
         .filter(software_item::Column::DeactivatedAt.is_null())
@@ -130,7 +128,10 @@ pub(crate) async fn query_host_package_assignment_rows(
         .column_as(host_package::Column::Id, "host_package_id")
         .column_as(host_package::Column::Name, "host_package_name")
         .column_as(plugin_config::Column::PluginType, "plugin_type")
-        .column_as(host_package::Column::PackageIdentifier, "package_identifier")
+        .column_as(
+            host_package::Column::PackageIdentifier,
+            "package_identifier",
+        )
         .column_as(plugin_config::Column::Config, "config")
         .join(JoinType::InnerJoin, host_package::Relation::Host.def())
         .join(

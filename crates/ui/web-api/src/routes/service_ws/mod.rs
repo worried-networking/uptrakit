@@ -10,9 +10,9 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use axum::Extension;
-use axum::extract::{Query, State};
 use axum::extract::WebSocketUpgrade;
 use axum::extract::ws::WebSocket;
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -86,9 +86,7 @@ pub async fn service_ws(
         }
     } else if let Some(secret) = connection::extract_bearer(&headers) {
         // Extract optional service_id query param for narrowing the secret lookup.
-        let query_service_id = query
-            .get("service_id")
-            .and_then(|v| v.parse::<Uuid>().ok());
+        let query_service_id = query.get("service_id").and_then(|v| v.parse::<Uuid>().ok());
 
         // Try unified lookup: find any non-deactivated service by secret hash.
         match lookup_by_secret(state.db(), &secret, query_service_id).await {
@@ -254,18 +252,22 @@ mod tests {
         MessageRateLimiter, ServiceWsError, WS_MESSAGE_RATE_WINDOW, deserialize_service_msg,
         record_service_activity,
     };
-    use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set};
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
+    };
     use uptrakit_internal_wire::IncomingSeq;
     use uptrakit_shared_db::entity::{service as service_entity, tenant};
 
     #[test]
     fn deserialize_unknown_type_returns_unknown_variant() {
         let mut in_seq = IncomingSeq::new();
-        let json =
-            r#"{"protocol_version":1,"seq":1,"type":"future_message","data":{"foo":"bar"}}"#;
+        let json = r#"{"protocol_version":1,"seq":1,"type":"future_message","data":{"foo":"bar"}}"#;
         let result = deserialize_service_msg(&mut in_seq, json);
         assert!(
-            matches!(result, Ok(Some(uptrakit_internal_wire::ServiceMessage::Unknown))),
+            matches!(
+                result,
+                Ok(Some(uptrakit_internal_wire::ServiceMessage::Unknown))
+            ),
             "unknown type should deserialize to Ok(Some(ServiceMessage::Unknown))"
         );
     }

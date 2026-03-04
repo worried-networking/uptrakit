@@ -195,10 +195,7 @@ pub async fn list_hosts(
                         .collect()
                 })
                 .unwrap_or_default();
-            let summary = update_summaries
-                .get(&host_id)
-                .cloned()
-                .unwrap_or_default();
+            let summary = update_summaries.get(&host_id).cloned().unwrap_or_default();
             host_to_response(h, agents, summary)
         })
         .collect();

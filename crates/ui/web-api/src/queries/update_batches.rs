@@ -14,7 +14,9 @@ use sea_orm::{
 };
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{BatchHostPackageUpdate, ControllerMessage, ExecuteBatchHostPackageUpdatePayload};
+use uptrakit_internal_wire::{
+    BatchHostPackageUpdate, ControllerMessage, ExecuteBatchHostPackageUpdatePayload,
+};
 use uptrakit_shared_db::entity::{
     host, host_package, host_package_update_history, host_software_item, host_software_item_plugin,
     plugin_config, prelude::*, service, service_host, software_item, update_batch, update_history,
@@ -558,7 +560,10 @@ async fn maybe_complete_batch(
 
     // Guard against double-write: if the batch is already in a terminal
     // status another concurrent call already committed its update.
-    if matches!(&batch.status, BatchStatus::Completed | BatchStatus::PartiallyCompleted) {
+    if matches!(
+        &batch.status,
+        BatchStatus::Completed | BatchStatus::PartiallyCompleted
+    ) {
         return Ok(None);
     }
 
@@ -628,7 +633,10 @@ pub async fn list_batches(
                 update_history::UpdateStatus::Pending
                 | update_history::UpdateStatus::InProgress => entry.2 += 1,
                 _ => {
-                    tracing::warn!("Unknown update status {:?}, counting as pending", child.status);
+                    tracing::warn!(
+                        "Unknown update status {:?}, counting as pending",
+                        child.status
+                    );
                     entry.2 += 1;
                 }
             }
@@ -720,7 +728,10 @@ pub async fn get_batch_with_items(
                 update_history::UpdateStatus::Pending
                 | update_history::UpdateStatus::InProgress => pending_count += 1,
                 _ => {
-                    tracing::warn!("Unknown update status {:?}, counting as pending", child.status);
+                    tracing::warn!(
+                        "Unknown update status {:?}, counting as pending",
+                        child.status
+                    );
                     pending_count += 1;
                 }
             }
@@ -912,7 +923,8 @@ pub async fn trigger_all_host_package_updates_for_host(
     batch_record.insert(&txn).await.context_to()?;
 
     // Collect (history_id, package) pairs for dispatch after commit.
-    let mut history_items: Vec<(Uuid, &host_package::Model)> = Vec::with_capacity(total_count as usize);
+    let mut history_items: Vec<(Uuid, &host_package::Model)> =
+        Vec::with_capacity(total_count as usize);
     for pkg in &outdated {
         let history_id = generate_uuid();
         let history = host_package_update_history::ActiveModel {
@@ -960,19 +972,18 @@ pub async fn trigger_all_host_package_updates_for_host(
             continue;
         };
 
-        let plugin_type: uptrakit_internal_wire::PluginType = match serde_json::from_value(
-            serde_json::Value::String(config.plugin_type.clone()),
-        ) {
-            Ok(pt) => pt,
-            Err(_) => {
-                tracing::warn!(
-                    plugin_type = %config.plugin_type,
-                    %batch_id,
-                    "unknown plugin type for host package group; skipping dispatch"
-                );
-                continue;
-            }
-        };
+        let plugin_type: uptrakit_internal_wire::PluginType =
+            match serde_json::from_value(serde_json::Value::String(config.plugin_type.clone())) {
+                Ok(pt) => pt,
+                Err(_) => {
+                    tracing::warn!(
+                        plugin_type = %config.plugin_type,
+                        %batch_id,
+                        "unknown plugin type for host package group; skipping dispatch"
+                    );
+                    continue;
+                }
+            };
 
         let updates: Vec<BatchHostPackageUpdate> = items
             .iter()
@@ -1014,15 +1025,17 @@ mod tests {
     use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, EntityTrait, Set};
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{
-        host, host_software_item, host_software_item_plugin, plugin_config, service,
-        service_host, software_item, tenant,
+        host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
+        software_item, tenant,
     };
     use uptrakit_shared_types::ServiceStatus;
     use uuid::Uuid;
 
     async fn setup_db() -> DatabaseConnection {
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        uptrakit_shared_db::migration::run_migrations(&db).await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .unwrap();
         db
     }
 
@@ -1170,7 +1183,11 @@ mod tests {
         .unwrap();
 
         let _ = plugin_config_id; // used in DB only; not needed by callers
-        Fixture { tenant_id, item_id, host_id }
+        Fixture {
+            tenant_id,
+            item_id,
+            host_id,
+        }
     }
 
     // ── find_outdated_items_for_host ────────────────────────────────────
@@ -1188,11 +1205,14 @@ mod tests {
         active.installed_version = Set(Some("1.1.0".to_string())); // same as latest
         active.update(&db).await.unwrap();
 
-        let candidates =
-            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None)
-                .await
-                .unwrap();
-        assert!(candidates.is_empty(), "expected empty; got {}", candidates.len());
+        let candidates = find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None)
+            .await
+            .unwrap();
+        assert!(
+            candidates.is_empty(),
+            "expected empty; got {}",
+            candidates.len()
+        );
     }
 
     #[tokio::test]
@@ -1200,10 +1220,9 @@ mod tests {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
 
-        let candidates =
-            find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None)
-                .await
-                .unwrap();
+        let candidates = find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, None)
+            .await
+            .unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].software_item_id, f.item_id);
         assert_eq!(candidates[0].installed_version, "1.0.0");
@@ -1305,7 +1324,10 @@ mod tests {
             find_outdated_items_for_host(&db, f.tenant_id, f.host_id, None, Some(&[f.item_id]))
                 .await
                 .unwrap();
-        assert!(candidates.is_empty(), "excluded item must not appear in results");
+        assert!(
+            candidates.is_empty(),
+            "excluded item must not appear in results"
+        );
     }
 
     // ── find_outdated_hosts_for_item ────────────────────────────────────
@@ -1323,11 +1345,14 @@ mod tests {
         active.installed_version = Set(Some("1.1.0".to_string())); // same as latest
         active.update(&db).await.unwrap();
 
-        let candidates =
-            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None)
-                .await
-                .unwrap();
-        assert!(candidates.is_empty(), "expected empty; got {}", candidates.len());
+        let candidates = find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None)
+            .await
+            .unwrap();
+        assert!(
+            candidates.is_empty(),
+            "expected empty; got {}",
+            candidates.len()
+        );
     }
 
     #[tokio::test]
@@ -1335,10 +1360,9 @@ mod tests {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
 
-        let candidates =
-            find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None)
-                .await
-                .unwrap();
+        let candidates = find_outdated_hosts_for_item(&db, f.tenant_id, f.item_id, None)
+            .await
+            .unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].host_id, f.host_id);
         assert_eq!(candidates[0].software_item_id, f.item_id);

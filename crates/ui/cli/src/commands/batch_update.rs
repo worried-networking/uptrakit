@@ -7,8 +7,8 @@ use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::batch_progress_stream::BatchProgressEvent;
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::update_batches::{
-    BatchUpdateResponse, HostBatchUpdateRequest, ItemBatchUpdateRequest,
-    UpdateBatchDetailResponse, UpdateBatchListQuery, UpdateBatchSummaryResponse,
+    BatchUpdateResponse, HostBatchUpdateRequest, ItemBatchUpdateRequest, UpdateBatchDetailResponse,
+    UpdateBatchListQuery, UpdateBatchSummaryResponse,
 };
 
 // ── Human output ────────────────────────────────────────────────────────────

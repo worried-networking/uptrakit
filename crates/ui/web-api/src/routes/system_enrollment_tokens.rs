@@ -16,11 +16,11 @@ use crate::middleware::permission::CanManageSystemServices;
 use crate::queries::system_enrollment_tokens as set_queries;
 use uptrakit_web_api_types::validation::Validate;
 
+pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::system_enrollment_tokens::{
     CreateSystemEnrollmentTokenRequest, ListSystemEnrollmentTokensQuery,
     SystemEnrollmentTokenCreatedResponse, SystemEnrollmentTokenResponse,
 };
-pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 
 /// Create a new system enrollment token.
 #[utoipa::path(

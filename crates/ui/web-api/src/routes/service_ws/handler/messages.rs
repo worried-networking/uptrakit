@@ -657,9 +657,7 @@ pub(super) async fn handle_discovery_results(
                     software_item_id: None,
                     software_item_name: None,
                     plugin_type: None,
-                    details: NotificationEventDetails::NewSoftwareDiscovered {
-                        discovered_count,
-                    },
+                    details: NotificationEventDetails::NewSoftwareDiscovered { discovered_count },
                 });
             }
         }

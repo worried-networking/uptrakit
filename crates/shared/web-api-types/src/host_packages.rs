@@ -352,10 +352,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.id, sample_uuid());
         assert_eq!(deserialized.package_identifier, "nginx");
-        assert_eq!(
-            deserialized.installed_version.as_deref(),
-            Some("1.22.0-1")
-        );
+        assert_eq!(deserialized.installed_version.as_deref(), Some("1.22.0-1"));
         assert!(deserialized.has_update);
         assert!(deserialized.enabled);
     }

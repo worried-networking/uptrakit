@@ -78,7 +78,6 @@ impl PluginType {
             Self::Other(s) => s.as_str(),
         }
     }
-
 }
 
 /// Error returned when parsing a string that does not match any *known*
@@ -382,10 +381,7 @@ mod tests {
     fn plugin_type_display() {
         assert_eq!(PluginType::ReleasesGithub.to_string(), "releases_github");
         assert_eq!(PluginType::ReleasesGitlab.to_string(), "releases_gitlab");
-        assert_eq!(
-            PluginType::ReleasesForgejo.to_string(),
-            "releases_forgejo"
-        );
+        assert_eq!(PluginType::ReleasesForgejo.to_string(), "releases_forgejo");
         assert_eq!(
             PluginType::DiscoveryProxmoxHelperScripts.to_string(),
             "discovery_proxmox_helper_scripts"
@@ -486,7 +482,10 @@ mod tests {
             PluginType::DiscoveryProxmoxHelperScripts.display_name(),
             "Proxmox Helper Scripts"
         );
-        assert_eq!(PluginType::PackageManagerHomebrew.display_name(), "Homebrew");
+        assert_eq!(
+            PluginType::PackageManagerHomebrew.display_name(),
+            "Homebrew"
+        );
         assert_eq!(PluginType::PackageManagerApt.display_name(), "APT");
         assert_eq!(PluginType::PackageManagerNpm.display_name(), "npm");
         assert_eq!(PluginType::GenericShell.display_name(), "Shell");

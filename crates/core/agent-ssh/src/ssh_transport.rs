@@ -255,10 +255,11 @@ impl SshSession {
             .map_err(|e| report!(Error::SshCommand(format!("failed to execute command: {e}"))))?;
 
         // Close stdin so remote scripts cannot block on `read`.
-        channel
-            .eof()
-            .await
-            .map_err(|e| report!(Error::SshCommand(format!("failed to close channel stdin: {e}"))))?;
+        channel.eof().await.map_err(|e| {
+            report!(Error::SshCommand(format!(
+                "failed to close channel stdin: {e}"
+            )))
+        })?;
 
         let mut stdout_buf = LineBuffer::new(OutputStreamType::Stdout, output_tx.cloned());
         let mut stderr_buf = LineBuffer::new(OutputStreamType::Stderr, output_tx.cloned());

@@ -62,7 +62,9 @@ impl UptrakitClient {
         host_id: &Uuid,
         entry_id: &Uuid,
     ) -> Result<()> {
-        self.delete(&crate::paths::discovery_allowlist::host_entry(host_id, entry_id))
-            .await
+        self.delete(&crate::paths::discovery_allowlist::host_entry(
+            host_id, entry_id,
+        ))
+        .await
     }
 }

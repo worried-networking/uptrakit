@@ -121,7 +121,10 @@ mod tests {
 
     #[test]
     fn effective_filter_default_is_all() {
-        assert_eq!(AptConfig::default().effective_filter(), AptDiscoveryFilter::All);
+        assert_eq!(
+            AptConfig::default().effective_filter(),
+            AptDiscoveryFilter::All
+        );
     }
 
     #[test]

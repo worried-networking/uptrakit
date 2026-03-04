@@ -78,9 +78,7 @@ impl CommandExecutor for SshCommandExecutor {
     async fn execute_quiet(&self, spec: &CommandSpec) -> uptrakit_command::Result<CommandOutput> {
         let remote_cmd = build_remote_command_string(spec)?;
 
-        let fut = self
-            .session
-            .exec_command_streaming(&remote_cmd, None);
+        let fut = self.session.exec_command_streaming(&remote_cmd, None);
 
         let result = if let Some(dur) = spec.timeout {
             tokio::time::timeout(dur, fut)
@@ -271,7 +269,10 @@ mod tests {
         let spec = CommandSpec::exec("apt-get", ["install".to_string()])
             .with_env("DEBIAN_FRONTEND", "noninteractive");
         let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
-        assert_eq!(result, "DEBIAN_FRONTEND='noninteractive' 'apt-get' 'install'");
+        assert_eq!(
+            result,
+            "DEBIAN_FRONTEND='noninteractive' 'apt-get' 'install'"
+        );
     }
 
     #[test]
@@ -285,8 +286,7 @@ mod tests {
 
     #[test]
     fn env_var_value_with_special_chars_is_escaped() {
-        let spec = CommandSpec::exec("echo", Vec::<String>::new())
-            .with_env("MSG", "it's fine");
+        let spec = CommandSpec::exec("echo", Vec::<String>::new()).with_env("MSG", "it's fine");
         let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
         assert_eq!(result, "MSG='it'\\''s fine' 'echo'");
     }

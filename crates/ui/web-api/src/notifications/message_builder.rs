@@ -1,4 +1,4 @@
-use uptrakit_notification_channels::{escape_html, DeliveryMessage, MessageAction};
+use uptrakit_notification_channels::{DeliveryMessage, MessageAction, escape_html};
 use uuid::Uuid;
 
 use super::events::{NotificationEvent, NotificationEventDetails};
@@ -128,9 +128,7 @@ fn build_content(event: &NotificationEvent) -> (String, String, String) {
             );
             (title, body, body_html)
         }
-        NotificationEventDetails::NewServiceEnrolled {
-            service_label, ..
-        } => {
+        NotificationEventDetails::NewServiceEnrolled { service_label, .. } => {
             let title = format!("New Service Enrolled: {service_label}");
             let body = format!("Service \"{service_label}\" has been enrolled and approved.");
             let service_html = escape_html(service_label);

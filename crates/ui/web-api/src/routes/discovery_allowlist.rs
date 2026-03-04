@@ -187,8 +187,7 @@ pub async fn list_host_discovery_allowlist(
         }
     }
 
-    match allowlist_queries::list_host_allowlist(tenant_db.db(), tenant_db.tenant_id, host_id)
-        .await
+    match allowlist_queries::list_host_allowlist(tenant_db.db(), tenant_db.tenant_id, host_id).await
     {
         Ok(entries) => (StatusCode::OK, Json(entries)).into_response(),
         Err(e) => {

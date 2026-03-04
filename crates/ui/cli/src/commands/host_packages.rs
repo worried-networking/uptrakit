@@ -35,10 +35,7 @@ impl HumanOutput for PaginatedResponse<HostPackageResponse> {
             "ID", "NAME", "INSTALLED", "LATEST", "ENABLED"
         );
         for p in &self.items {
-            let installed = p
-                .installed_version
-                .as_deref()
-                .unwrap_or("-");
+            let installed = p.installed_version.as_deref().unwrap_or("-");
             let latest = p.latest_version.as_deref().unwrap_or("-");
             let enabled = if p.enabled { "yes" } else { "no" };
             out.push_str(&format!(
@@ -89,7 +86,10 @@ impl HumanOutput for HostPackageDetailResponse {
                 let status = &u.status;
                 let from = u.from_version.as_deref().unwrap_or("-");
                 let to = u.to_version.as_deref().unwrap_or("-");
-                out.push_str(&format!("  [{status}] {from} → {to}  ({0})\n", u.created_at));
+                out.push_str(&format!(
+                    "  [{status}] {from} → {to}  ({0})\n",
+                    u.created_at
+                ));
             }
         }
         out
@@ -122,10 +122,7 @@ impl HumanOutput for Vec<HostPackageIgnoreResponse> {
         if self.is_empty() {
             return "No ignore rules found.\n".to_string();
         }
-        let mut out = format!(
-            "{:<38} {:<38} {:<30}\n",
-            "ID", "PLUGIN CONFIG", "PACKAGE"
-        );
+        let mut out = format!("{:<38} {:<38} {:<30}\n", "ID", "PLUGIN CONFIG", "PACKAGE");
         for r in self {
             out.push_str(&format!(
                 "{:<38} {:<38} {:<30}\n",

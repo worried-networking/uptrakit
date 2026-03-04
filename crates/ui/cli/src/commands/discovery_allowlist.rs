@@ -147,7 +147,10 @@ pub async fn tenant_add(params: AddTenantParams<'_>) -> Result<TenantDiscoveryAl
     let req = CreateDiscoveryAllowlistEntryRequest {
         plugin_type: params.plugin_type,
     };
-    client.add_discovery_allowlist_entry(&req).await.context_to()
+    client
+        .add_discovery_allowlist_entry(&req)
+        .await
+        .context_to()
 }
 
 /// Remove a tenant-wide discovery allowlist entry.

@@ -284,10 +284,7 @@ impl ServiceHandler for SshAgentHandler {
                 self.last_update_per_host
                     .insert(payload.host_machine_id.clone(), std::time::Instant::now());
                 Ok(client::handle_execute_batch_host_package_update_ssh(
-                    *payload,
-                    db,
-                    conn,
-                    &self.pool,
+                    *payload, db, conn, &self.pool,
                 )
                 .await)
             }
@@ -343,7 +340,9 @@ impl ServiceHandler for SshAgentHandler {
                         client::send_update_output(conn, update_history_id, output_msg).await;
                     }
                     client::UpdateEvent::Completed(result) => {
-                        if let Err(e) = client::send_update_result(conn, update_history_id, result).await {
+                        if let Err(e) =
+                            client::send_update_result(conn, update_history_id, result).await
+                        {
                             tracing::error!(error = %e, "failed to send UpdateResult; disconnecting");
                             self.in_flight_updates.remove(&host_machine_id);
                             return Ok(Some(LoopOutcome::Disconnected));
@@ -371,7 +370,9 @@ impl ServiceHandler for SshAgentHandler {
         cause: ShutdownCause,
         shutdown_timeout_seconds: u32,
     ) -> LoopOutcome {
-        use uptrakit_internal_wire::{DisconnectingPayload, ServiceMessage, UpdateFinalStatus, UpdateResultPayload};
+        use uptrakit_internal_wire::{
+            DisconnectingPayload, ServiceMessage, UpdateFinalStatus, UpdateResultPayload,
+        };
 
         let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
 
@@ -677,7 +678,10 @@ async fn init_ssh_data_key_ring(db: &sea_orm::DatabaseConnection) {
         }
     };
 
-    let rows = match db::entity::data_encryption_key::Entity::find().all(db).await {
+    let rows = match db::entity::data_encryption_key::Entity::find()
+        .all(db)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(error = %e, "failed to query data_encryption_keys");
@@ -719,7 +723,10 @@ async fn init_ssh_data_key_ring(db: &sea_orm::DatabaseConnection) {
         }
 
         // Re-read in case of race.
-        let rows = match db::entity::data_encryption_key::Entity::find().all(db).await {
+        let rows = match db::entity::data_encryption_key::Entity::find()
+            .all(db)
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!(error = %e, "failed to re-read data_encryption_keys");
@@ -734,10 +741,7 @@ async fn init_ssh_data_key_ring(db: &sea_orm::DatabaseConnection) {
 }
 
 /// Build and init the data key ring from loaded DEK rows.
-fn build_and_init_ssh_ring(
-    rows: &[db::entity::data_encryption_key::Model],
-    kek_fp: &str,
-) {
+fn build_and_init_ssh_ring(rows: &[db::entity::data_encryption_key::Model], kek_fp: &str) {
     let mut keys = std::collections::HashMap::new();
     let mut active_key_id: Option<String> = None;
 
@@ -832,10 +836,7 @@ async fn reencrypt_ssh_to_v3(db: &sea_orm::DatabaseConnection) {
 }
 
 /// Rotate DEKs from the current KEK to a new KEK (same pattern as controller).
-async fn rotate_ssh_master_key(
-    db: &sea_orm::DatabaseConnection,
-    new_key_path: &std::path::Path,
-) {
+async fn rotate_ssh_master_key(db: &sea_orm::DatabaseConnection, new_key_path: &std::path::Path) {
     use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, TransactionTrait};
 
     let new_key_hex = match std::fs::read_to_string(new_key_path) {
@@ -883,7 +884,11 @@ async fn rotate_ssh_master_key(
         return;
     }
 
-    tracing::info!(current_kek_fp, new_kek_fp, "starting SSH agent master key rotation");
+    tracing::info!(
+        current_kek_fp,
+        new_kek_fp,
+        "starting SSH agent master key rotation"
+    );
 
     let txn = match db.begin().await {
         Ok(t) => t,
@@ -893,7 +898,10 @@ async fn rotate_ssh_master_key(
         }
     };
 
-    let rows = match db::entity::data_encryption_key::Entity::find().all(&txn).await {
+    let rows = match db::entity::data_encryption_key::Entity::find()
+        .all(&txn)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::error!(error = %e, "failed to query DEKs for rotation");
@@ -1325,9 +1333,12 @@ mod tests {
         })
         .await;
 
-        tx.send(("host-1".to_string(), client::UpdateEvent::Completed(exec_result)))
-            .await
-            .unwrap();
+        tx.send((
+            "host-1".to_string(),
+            client::UpdateEvent::Completed(exec_result),
+        ))
+        .await
+        .unwrap();
 
         let result = tokio::time::timeout(
             std::time::Duration::from_millis(100),

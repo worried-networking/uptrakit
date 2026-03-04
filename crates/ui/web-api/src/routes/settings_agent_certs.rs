@@ -105,10 +105,7 @@ pub async fn update_agent_certificate_settings(
                 tracing::error!("Failed to delete renewal window setting: {e:?}");
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
-            state
-                .settings
-                .set_renewal_window_hours_override(None)
-                .await;
+            state.settings.set_renewal_window_hours_override(None).await;
         } else {
             if let Err(e) = upsert_setting(
                 state.db(),

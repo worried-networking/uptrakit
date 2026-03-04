@@ -2971,7 +2971,8 @@ mod tests {
     fn service_message_unknown_type_deserializes_to_unknown_variant() {
         // Forward-compatibility: an unknown message type from a newer service
         // build must deserialize to `ServiceMessage::Unknown`, not fail.
-        let json = r#"{"protocol_version":1,"seq":1,"type":"future_message","payload":{"foo":"bar"}}"#;
+        let json =
+            r#"{"protocol_version":1,"seq":1,"type":"future_message","payload":{"foo":"bar"}}"#;
         let envelope: ServiceEnvelope = serde_json::from_str(json).expect("should deserialize");
         assert_eq!(
             envelope.message,
@@ -2985,8 +2986,7 @@ mod tests {
         // Forward-compatibility: an unknown message type from a newer controller
         // build must deserialize to `ControllerMessage::Unknown`, not fail.
         let json = r#"{"protocol_version":1,"seq":1,"type":"future_command","data":{}}"#;
-        let envelope: ControllerEnvelope =
-            serde_json::from_str(json).expect("should deserialize");
+        let envelope: ControllerEnvelope = serde_json::from_str(json).expect("should deserialize");
         assert_eq!(
             envelope.message,
             ControllerMessage::Unknown,
@@ -3012,7 +3012,8 @@ mod tests {
     #[test]
     fn controller_envelope_missing_protocol_version_fails() {
         // Old-format envelope without protocol_version must fail deserialization.
-        let json = r#"{"seq":42,"type":"pong","service_ts":1706400000000,"controller_ts":1706400000050}"#;
+        let json =
+            r#"{"seq":42,"type":"pong","service_ts":1706400000000,"controller_ts":1706400000050}"#;
         assert!(serde_json::from_str::<ControllerEnvelope>(json).is_err());
     }
 
@@ -3853,25 +3854,24 @@ mod tests {
 
     #[test]
     fn execute_batch_host_package_update_serialization_roundtrip() {
-        let msg =
-            ControllerMessage::ExecuteBatchHostPackageUpdate(Box::new(
-                ExecuteBatchHostPackageUpdatePayload {
-                    host_machine_id: "test-machine-id".to_string(),
-                    batch_id: TEST_UUID_1,
-                    plugin_type: PluginType::PackageManagerApt,
-                    plugin_config: serde_json::json!({}),
-                    updates: vec![BatchHostPackageUpdate {
-                        host_package_id: TEST_UUID_1,
-                        update_history_id: TEST_UUID_2,
-                        package_identifier: "nginx".to_string(),
-                        to_version: "1.24.0-2".to_string(),
-                        release_info: None,
-                    }],
-                    pre_update_hooks: vec![],
-                    post_update_hooks: vec![],
-                    timeout_seconds: 7200,
-                },
-            ));
+        let msg = ControllerMessage::ExecuteBatchHostPackageUpdate(Box::new(
+            ExecuteBatchHostPackageUpdatePayload {
+                host_machine_id: "test-machine-id".to_string(),
+                batch_id: TEST_UUID_1,
+                plugin_type: PluginType::PackageManagerApt,
+                plugin_config: serde_json::json!({}),
+                updates: vec![BatchHostPackageUpdate {
+                    host_package_id: TEST_UUID_1,
+                    update_history_id: TEST_UUID_2,
+                    package_identifier: "nginx".to_string(),
+                    to_version: "1.24.0-2".to_string(),
+                    release_info: None,
+                }],
+                pre_update_hooks: vec![],
+                post_update_hooks: vec![],
+                timeout_seconds: 7200,
+            },
+        ));
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"execute_batch_host_package_update"#));
         assert!(json.contains(r#""plugin_type":"package_manager_apt"#));
@@ -3882,8 +3882,8 @@ mod tests {
 
     #[test]
     fn batch_host_package_update_result_serialization_roundtrip() {
-        let msg = ServiceMessage::BatchHostPackageUpdateResult(
-            BatchHostPackageUpdateResultPayload {
+        let msg =
+            ServiceMessage::BatchHostPackageUpdateResult(BatchHostPackageUpdateResultPayload {
                 batch_id: TEST_UUID_1,
                 results: vec![BatchHostPackageUpdateResult {
                     host_package_id: TEST_UUID_1,
@@ -3893,8 +3893,7 @@ mod tests {
                     installed_version: Some("1.24.0-2".to_string()),
                     error: None,
                 }],
-            },
-        );
+            });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"batch_host_package_update_result"#));
         assert!(json.contains(r#""status":"completed"#));
@@ -3905,26 +3904,24 @@ mod tests {
     #[test]
     fn spec_conformance_execute_batch_host_package_update() {
         let spec = AsyncApiSpec::load();
-        let json = controller_envelope_json(
-            ControllerMessage::ExecuteBatchHostPackageUpdate(Box::new(
-                ExecuteBatchHostPackageUpdatePayload {
-                    host_machine_id: "test-machine-id".to_string(),
-                    batch_id: TEST_UUID_1,
-                    plugin_type: PluginType::PackageManagerApt,
-                    plugin_config: serde_json::json!({}),
-                    updates: vec![BatchHostPackageUpdate {
-                        host_package_id: TEST_UUID_1,
-                        update_history_id: TEST_UUID_2,
-                        package_identifier: "nginx".to_string(),
-                        to_version: "1.24.0-2".to_string(),
-                        release_info: None,
-                    }],
-                    pre_update_hooks: vec![],
-                    post_update_hooks: vec![],
-                    timeout_seconds: 7200,
-                },
-            )),
-        );
+        let json = controller_envelope_json(ControllerMessage::ExecuteBatchHostPackageUpdate(
+            Box::new(ExecuteBatchHostPackageUpdatePayload {
+                host_machine_id: "test-machine-id".to_string(),
+                batch_id: TEST_UUID_1,
+                plugin_type: PluginType::PackageManagerApt,
+                plugin_config: serde_json::json!({}),
+                updates: vec![BatchHostPackageUpdate {
+                    host_package_id: TEST_UUID_1,
+                    update_history_id: TEST_UUID_2,
+                    package_identifier: "nginx".to_string(),
+                    to_version: "1.24.0-2".to_string(),
+                    release_info: None,
+                }],
+                pre_update_hooks: vec![],
+                post_update_hooks: vec![],
+                timeout_seconds: 7200,
+            }),
+        ));
         spec.validate("executeBatchHostPackageUpdatePayload", &json);
     }
 
@@ -3995,14 +3992,13 @@ mod tests {
 
     #[test]
     fn mqtt_trigger_host_package_update_roundtrip() {
-        let msg = ServiceMessage::MqttTriggerHostPackageUpdate(
-            MqttTriggerHostPackageUpdatePayload {
+        let msg =
+            ServiceMessage::MqttTriggerHostPackageUpdate(MqttTriggerHostPackageUpdatePayload {
                 tenant_id: TEST_UUID_1,
                 host_id: TEST_UUID_2,
                 mqtt_client_id: TEST_UUID_3,
                 security_only: false,
-            },
-        );
+            });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"mqtt_trigger_host_package_update""#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
@@ -4011,14 +4007,13 @@ mod tests {
 
     #[test]
     fn mqtt_trigger_host_package_update_security_only_roundtrip() {
-        let msg = ServiceMessage::MqttTriggerHostPackageUpdate(
-            MqttTriggerHostPackageUpdatePayload {
+        let msg =
+            ServiceMessage::MqttTriggerHostPackageUpdate(MqttTriggerHostPackageUpdatePayload {
                 tenant_id: TEST_UUID_1,
                 host_id: TEST_UUID_2,
                 mqtt_client_id: TEST_UUID_3,
                 security_only: true,
-            },
-        );
+            });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""security_only":true"#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
@@ -4275,64 +4270,76 @@ mod tests {
     #[test]
     fn is_nats_publishable_blocks_credential_bearing_variants() {
         // ServiceCredentials must never be published to NATS.
-        assert!(!ControllerMessage::ServiceCredentials(ServiceCredentialsPayload {
-            db_url: Some(SecretString::new("postgres://localhost/db".into())),
-            master_key_hex: None,
-            nats_url: None,
-        })
-        .is_nats_publishable());
+        assert!(
+            !ControllerMessage::ServiceCredentials(ServiceCredentialsPayload {
+                db_url: Some(SecretString::new("postgres://localhost/db".into())),
+                master_key_hex: None,
+                nats_url: None,
+            })
+            .is_nats_publishable()
+        );
 
         // MQTT tenant credential variants must also be blocked.
-        assert!(!ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
-            tenants: vec![],
-        })
-        .is_nats_publishable());
+        assert!(
+            !ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload { tenants: vec![] })
+                .is_nats_publishable()
+        );
 
-        assert!(!ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
-            tenant: MqttTenantConfig {
+        assert!(
+            !ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
+                tenant: MqttTenantConfig {
+                    mqtt_client_id: TEST_UUID_1,
+                    tenant_id: TEST_UUID_2,
+                    enabled: true,
+                    transport: MqttTransport::Tcp,
+                    host: "localhost".into(),
+                    port: 1883,
+                    client_id: "c".into(),
+                    username: None,
+                    password: None,
+                    ca_pem: None,
+                    topic_prefix: "t/".into(),
+                    ha_discovery: false,
+                    ha_discovery_prefix: "homeassistant".into(),
+                    updated_at: time::UtcDateTime::UNIX_EPOCH,
+                },
+            })
+            .is_nats_publishable()
+        );
+
+        assert!(
+            !ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
                 mqtt_client_id: TEST_UUID_1,
-                tenant_id: TEST_UUID_2,
-                enabled: true,
-                transport: MqttTransport::Tcp,
-                host: "localhost".into(),
-                port: 1883,
-                client_id: "c".into(),
-                username: None,
-                password: None,
-                ca_pem: None,
-                topic_prefix: "t/".into(),
-                ha_discovery: false,
-                ha_discovery_prefix: "homeassistant".into(),
-                updated_at: time::UtcDateTime::UNIX_EPOCH,
-            },
-        })
-        .is_nats_publishable());
-
-        assert!(!ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
-            mqtt_client_id: TEST_UUID_1,
-            reason: "test".into(),
-        })
-        .is_nats_publishable());
+                reason: "test".into(),
+            })
+            .is_nats_publishable()
+        );
     }
 
     #[test]
     fn is_nats_publishable_allows_non_credential_variants() {
         // Ordinary messages must be publishable.
-        assert!(ControllerMessage::Pong(PongPayload {
-            service_ts: 0,
-            controller_ts: 0,
-        })
-        .is_nats_publishable());
+        assert!(
+            ControllerMessage::Pong(PongPayload {
+                service_ts: 0,
+                controller_ts: 0,
+            })
+            .is_nats_publishable()
+        );
 
-        assert!(ControllerMessage::Approved(ApprovedPayload {
-            service_id: TEST_UUID_1,
-        })
-        .is_nats_publishable());
+        assert!(
+            ControllerMessage::Approved(ApprovedPayload {
+                service_id: TEST_UUID_1,
+            })
+            .is_nats_publishable()
+        );
 
-        assert!(ControllerMessage::RequestCaRotation(RequestCaRotationPayload {
-            reason: "test".into(),
-        })
-        .is_nats_publishable());
+        assert!(
+            ControllerMessage::RequestCaRotation(RequestCaRotationPayload {
+                reason: "test".into(),
+            })
+            .is_nats_publishable()
+        );
     }
 
     // ── SetUpdateFreeze tests ────────────────────────────────────────────

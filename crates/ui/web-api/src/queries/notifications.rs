@@ -25,9 +25,11 @@ pub async fn create_channel(
 ) -> ChannelResult<NotificationChannelResponse> {
     // Validate config with channel implementation
     let channel_type_str = req.channel_type.as_str();
-    let channel_impl = channel_registry
-        .get(channel_type_str)
-        .ok_or_else(|| report!(ChannelQueryError::UnsupportedType(channel_type_str.to_string())))?;
+    let channel_impl = channel_registry.get(channel_type_str).ok_or_else(|| {
+        report!(ChannelQueryError::UnsupportedType(
+            channel_type_str.to_string()
+        ))
+    })?;
 
     channel_impl
         .validate_config(&req.config)
@@ -39,8 +41,9 @@ pub async fn create_channel(
     let now = OffsetDateTime::now_utc();
     let id = Uuid::now_v7();
 
-    let encrypted_config = uptrakit_crypto::EncryptedString::new(config_str, "uptrakit:notification_channels:config")
-        .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+    let encrypted_config =
+        uptrakit_crypto::EncryptedString::new(config_str, "uptrakit:notification_channels:config")
+            .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
 
     let model = notification_channel::ActiveModel {
         id: Set(id),
@@ -140,8 +143,11 @@ pub async fn update_channel(
         }
         let config_str = serde_json::to_string(config)
             .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
-        let encrypted_config = uptrakit_crypto::EncryptedString::new(config_str, "uptrakit:notification_channels:config")
-            .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
+        let encrypted_config = uptrakit_crypto::EncryptedString::new(
+            config_str,
+            "uptrakit:notification_channels:config",
+        )
+        .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
         active.config = Set(encrypted_config);
     }
     if let Some(enabled) = req.enabled {
@@ -292,9 +298,7 @@ pub async fn update_rule(
                 })?;
                 active.software_item_id = Set(Some(id));
             }
-            _ => bail!(RuleQueryError::InvalidField(
-                "software_item_id".to_string()
-            )),
+            _ => bail!(RuleQueryError::InvalidField("software_item_id".to_string())),
         }
     }
     if let Some(val) = &req.plugin_type {

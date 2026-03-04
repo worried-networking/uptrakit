@@ -19,21 +19,9 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("tenant_id"))
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("actor_id"))
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("actor_type"))
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+                    .col(ColumnDef::new(Alias::new("actor_id")).uuid().not_null())
+                    .col(ColumnDef::new(Alias::new("actor_type")).string().not_null())
                     .col(
                         ColumnDef::new(Alias::new("auth_method"))
                             .string()
@@ -44,11 +32,7 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("http_path"))
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Alias::new("http_path")).text().not_null())
                     .col(ColumnDef::new(Alias::new("route_pattern")).text())
                     .col(
                         ColumnDef::new(Alias::new("http_status"))
@@ -105,16 +89,8 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("actor_id"))
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("actor_type"))
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Alias::new("actor_id")).uuid().not_null())
+                    .col(ColumnDef::new(Alias::new("actor_type")).string().not_null())
                     .col(
                         ColumnDef::new(Alias::new("auth_method"))
                             .string()
@@ -125,11 +101,7 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("http_path"))
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Alias::new("http_path")).text().not_null())
                     .col(ColumnDef::new(Alias::new("route_pattern")).text())
                     .col(
                         ColumnDef::new(Alias::new("http_status"))
@@ -222,7 +194,7 @@ impl MigrationTrait for Migration {
                         tenant_id.into(),
                         "audit_log_cleanup".into(),
                         "0 3 * * *".into(),
-                        false.into(),               // disabled by default
+                        false.into(),                  // disabled by default
                         Option::<String>::None.into(), // last_run_at
                         next_run.into(),
                         Option::<uuid::Uuid>::None.into(), // locked_by
@@ -260,11 +232,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         manager
-            .drop_table(
-                Table::drop()
-                    .table(Alias::new("audit_logs"))
-                    .to_owned(),
-            )
+            .drop_table(Table::drop().table(Alias::new("audit_logs")).to_owned())
             .await
     }
 }

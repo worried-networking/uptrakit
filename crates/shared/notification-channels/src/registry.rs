@@ -88,7 +88,8 @@ mod tests {
 
     #[test]
     fn registry_creates_successfully() {
-        let registry = ChannelRegistry::new(ChannelRegistryConfig::default()).expect("registry should build");
+        let registry =
+            ChannelRegistry::new(ChannelRegistryConfig::default()).expect("registry should build");
         let types = registry.supported_types();
 
         #[cfg(feature = "webhook")]
@@ -106,28 +107,32 @@ mod tests {
 
     #[test]
     fn registry_get_returns_none_for_unknown() {
-        let registry = ChannelRegistry::new(ChannelRegistryConfig::default()).expect("registry should build");
+        let registry =
+            ChannelRegistry::new(ChannelRegistryConfig::default()).expect("registry should build");
         assert!(registry.get("nonexistent").is_none());
     }
 
     #[cfg(feature = "webhook")]
     #[test]
     fn registry_get_returns_webhook_channel() {
-        let registry = ChannelRegistry::new(ChannelRegistryConfig::default()).expect("registry should build");
+        let registry =
+            ChannelRegistry::new(ChannelRegistryConfig::default()).expect("registry should build");
         assert!(registry.get("webhook").is_some());
     }
 
     #[cfg(feature = "telegram")]
     #[test]
     fn registry_get_returns_telegram_channel() {
-        let registry = ChannelRegistry::new(ChannelRegistryConfig::default()).expect("registry should build");
+        let registry =
+            ChannelRegistry::new(ChannelRegistryConfig::default()).expect("registry should build");
         assert!(registry.get("telegram").is_some());
     }
 
     #[cfg(feature = "email")]
     #[test]
     fn registry_get_returns_email_channel() {
-        let registry = ChannelRegistry::new(ChannelRegistryConfig::default()).expect("registry should build");
+        let registry =
+            ChannelRegistry::new(ChannelRegistryConfig::default()).expect("registry should build");
         assert!(registry.get("email").is_some());
     }
 }

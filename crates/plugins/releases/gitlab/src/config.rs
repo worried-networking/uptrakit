@@ -108,9 +108,7 @@ impl GitLabConfig {
 
     /// Returns the API base URL, falling back to the public GitLab instance.
     pub fn api_base_url(&self) -> &str {
-        self.api_base_url
-            .as_deref()
-            .unwrap_or("https://gitlab.com")
+        self.api_base_url.as_deref().unwrap_or("https://gitlab.com")
     }
 }
 
@@ -243,10 +241,7 @@ mod tests {
         };
         let mut incoming = existing.clone().with_secrets_masked();
         incoming.restore_secrets_from(&existing);
-        assert_eq!(
-            incoming.auth_token.unwrap().expose_secret(),
-            "glpat-real"
-        );
+        assert_eq!(incoming.auth_token.unwrap().expose_secret(), "glpat-real");
     }
 
     #[test]

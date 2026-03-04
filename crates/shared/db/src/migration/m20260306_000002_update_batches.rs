@@ -92,11 +92,7 @@ impl MigrationTrait for Migration {
                     .col(string_null(UpdateHistory::FromVersion))
                     .col(string(UpdateHistory::ToVersion))
                     .col(string(UpdateHistory::Status))
-                    .col(
-                        ColumnDef::new(UpdateHistory::Output)
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(UpdateHistory::Output).text().not_null())
                     .col(
                         ColumnDef::new(UpdateHistory::OutputBytes)
                             .big_integer()
@@ -195,19 +191,12 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(string(UpdateOutputLines::Stream))
-                    .col(
-                        ColumnDef::new(UpdateOutputLines::Output)
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(UpdateOutputLines::Output).text().not_null())
                     .col(timestamp(UpdateOutputLines::CreatedAt))
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_update_output_lines_update_history")
-                            .from(
-                                UpdateOutputLines::Table,
-                                UpdateOutputLines::UpdateHistoryId,
-                            )
+                            .from(UpdateOutputLines::Table, UpdateOutputLines::UpdateHistoryId)
                             .to(UpdateHistory::Table, UpdateHistory::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
@@ -273,11 +262,7 @@ impl MigrationTrait for Migration {
                     .col(string_null(UpdateHistory::FromVersion))
                     .col(string(UpdateHistory::ToVersion))
                     .col(string(UpdateHistory::Status))
-                    .col(
-                        ColumnDef::new(UpdateHistory::Output)
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(UpdateHistory::Output).text().not_null())
                     .col(
                         ColumnDef::new(UpdateHistory::OutputBytes)
                             .big_integer()
@@ -360,19 +345,12 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(string(UpdateOutputLines::Stream))
-                    .col(
-                        ColumnDef::new(UpdateOutputLines::Output)
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(UpdateOutputLines::Output).text().not_null())
                     .col(timestamp(UpdateOutputLines::CreatedAt))
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_update_output_lines_update_history")
-                            .from(
-                                UpdateOutputLines::Table,
-                                UpdateOutputLines::UpdateHistoryId,
-                            )
+                            .from(UpdateOutputLines::Table, UpdateOutputLines::UpdateHistoryId)
                             .to(UpdateHistory::Table, UpdateHistory::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )

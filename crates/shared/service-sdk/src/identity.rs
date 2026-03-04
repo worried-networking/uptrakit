@@ -811,7 +811,10 @@ mod tests {
 
         // load_ca_cert must treat empty file as missing.
         let result = identity.load_ca_cert().await.expect("load_ca_cert");
-        assert!(result.is_none(), "empty ca.pem should be treated as missing");
+        assert!(
+            result.is_none(),
+            "empty ca.pem should be treated as missing"
+        );
     }
 
     #[tokio::test]

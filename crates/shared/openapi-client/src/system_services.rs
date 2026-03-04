@@ -61,8 +61,7 @@ impl UptrakitClient {
 
     /// Deactivate (remove) a system service.
     pub async fn remove_system_service(&self, id: &Uuid) -> Result<()> {
-        self.delete(&crate::paths::system_services::by_id(id))
-            .await
+        self.delete(&crate::paths::system_services::by_id(id)).await
     }
 }
 

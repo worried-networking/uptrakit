@@ -145,9 +145,7 @@ mod sea_orm_impl {
                         "unexpected BatchStatus value in database: {val:?}"
                     )))
                 }),
-                Ok(None) => Err(TryGetError::Null(
-                    index.as_str().unwrap_or("").to_string(),
-                )),
+                Ok(None) => Err(TryGetError::Null(index.as_str().unwrap_or("").to_string())),
                 Err(e) => Err(e),
             }
         }
@@ -156,10 +154,9 @@ mod sea_orm_impl {
     impl ValueType for BatchStatus {
         fn try_from(v: Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
             match v {
-                Value::String(Some(s)) => {
-                    s.parse::<BatchStatus>()
-                        .map_err(|_| sea_orm::sea_query::ValueTypeErr)
-                }
+                Value::String(Some(s)) => s
+                    .parse::<BatchStatus>()
+                    .map_err(|_| sea_orm::sea_query::ValueTypeErr),
                 _ => Err(sea_orm::sea_query::ValueTypeErr),
             }
         }
@@ -235,7 +232,10 @@ mod tests {
     fn unknown_status_deserializes_to_other() {
         let deserialized: BatchStatus =
             serde_json::from_str(r#""future_status""#).expect("deserialize unknown");
-        assert_eq!(deserialized, BatchStatus::Other("future_status".to_string()));
+        assert_eq!(
+            deserialized,
+            BatchStatus::Other("future_status".to_string())
+        );
     }
 
     #[test]

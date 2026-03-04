@@ -305,7 +305,11 @@ impl ProxmoxHelperScriptsPlugin {
             .get("version")?
             .as_str()?
             .to_string();
-        if version.is_empty() { None } else { Some(version) }
+        if version.is_empty() {
+            None
+        } else {
+            Some(version)
+        }
     }
 
     /// Build a `DiscoveryTarget` for an APT-managed PHS app.
@@ -724,8 +728,7 @@ mod tests {
 
     #[test]
     fn forgejo_fetch_target_structure() {
-        let target =
-            ProxmoxHelperScriptsPlugin::forgejo_fetch_target("readeck", "readeck");
+        let target = ProxmoxHelperScriptsPlugin::forgejo_fetch_target("readeck", "readeck");
         assert_eq!(target.plugin_type, PluginType::ReleasesForgejo);
         assert_eq!(target.plugin_config_name, "Forgejo Releases");
         // FetchReleases only — no agent-side roles.
@@ -733,7 +736,10 @@ mod tests {
         assert_eq!(target.roles[0], PluginRole::FetchReleases);
         // api_base_url points to Codeberg (PHS scripts use check_for_codeberg_release).
         assert_eq!(
-            target.plugin_config.get("api_base_url").and_then(|v| v.as_str()),
+            target
+                .plugin_config
+                .get("api_base_url")
+                .and_then(|v| v.as_str()),
             Some("https://codeberg.org")
         );
         // No owner/repo in config.
@@ -835,15 +841,24 @@ mod tests {
             .find(|e| e.command == "uptrakit-phs-version")
             .expect("uptrakit-phs-version sudo entry must be present");
         assert!(!version_entry.explanation.is_empty());
-        assert!(!version_entry.needs_setenv, "version helper does not use env var forwarding");
+        assert!(
+            !version_entry.needs_setenv,
+            "version helper does not use env var forwarding"
+        );
 
         let version_helper = version_entry
             .helper_script
             .as_ref()
             .expect("version sudo entry must have a helper_script");
         assert_eq!(version_helper.install_path, PHS_VERSION_HELPER_PATH);
-        assert!(version_helper.content.contains("[!a-z0-9-]"), "version helper must validate slug");
-        assert!(version_helper.content.contains("/root/."), "version helper must read /root/.<slug>");
+        assert!(
+            version_helper.content.contains("[!a-z0-9-]"),
+            "version helper must validate slug"
+        );
+        assert!(
+            version_helper.content.contains("/root/."),
+            "version helper must read /root/.<slug>"
+        );
 
         // ── Update — direct /usr/bin/update, no helper script ─────────────────
         let update_entry = entries
@@ -889,9 +904,6 @@ mod tests {
     fn npm_target_scoped_package() {
         let target = ProxmoxHelperScriptsPlugin::npm_target("@angular/cli");
         assert_eq!(target.plugin_type, PluginType::PackageManagerNpm);
-        assert_eq!(
-            target.package_identifier.as_deref(),
-            Some("@angular/cli")
-        );
+        assert_eq!(target.package_identifier.as_deref(), Some("@angular/cli"));
     }
 }

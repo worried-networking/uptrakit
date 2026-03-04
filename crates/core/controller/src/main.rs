@@ -194,13 +194,8 @@ async fn run(args: cli::Args) -> Result<()> {
     }
 
     // Phase 6: Reconcile settings
-    let reconciled = startup::reconcile_all_settings(
-        &db_conn,
-        &args,
-        &settings,
-        &global_raw,
-    )
-    .await?;
+    let reconciled =
+        startup::reconcile_all_settings(&db_conn, &args, &settings, &global_raw).await?;
 
     // Phase 7: OIDC bootstrap
     startup::bootstrap_oidc(&db_conn, default_tenant_id, &args).await?;
@@ -209,13 +204,8 @@ async fn run(args: cli::Args) -> Result<()> {
     let validated = startup::validate_configuration(&args, &reconciled)?;
 
     // Phase 9: PKI + TLS
-    let pki = startup::init_pki_runtime(
-        &args,
-        &db_conn,
-        app_dirs.config_dir(),
-        &reconciled,
-    )
-    .await?;
+    let pki =
+        startup::init_pki_runtime(&args, &db_conn, app_dirs.config_dir(), &reconciled).await?;
 
     // Phase 10: JWT
     let jwt_manager = startup::init_jwt(&db_conn, app_dirs.state_dir()).await?;
@@ -300,16 +290,19 @@ async fn run(args: cli::Args) -> Result<()> {
     };
     let channel_registry = Arc::new(
         uptrakit_notification_channels::ChannelRegistry::new(channel_registry_config)
-            .context_transform(|_| AppError::Config("failed to build channel registry".to_string()))?,
+            .context_transform(|_| {
+                AppError::Config("failed to build channel registry".to_string())
+            })?,
     );
 
     let callback_base_url = format!("https://{}", reconciled.https_addr);
-    let notification_dispatcher = uptrakit_web_api::notifications::dispatcher::NotificationDispatcher::new(
-        db_conn.clone(),
-        Arc::clone(&channel_registry),
-        callback_base_url,
-        settings.clone(),
-    );
+    let notification_dispatcher =
+        uptrakit_web_api::notifications::dispatcher::NotificationDispatcher::new(
+            db_conn.clone(),
+            Arc::clone(&channel_registry),
+            callback_base_url,
+            settings.clone(),
+        );
 
     // Build credential sources for external services that need direct infrastructure access.
     let credential_sources = {
@@ -379,9 +372,7 @@ async fn run(args: cli::Args) -> Result<()> {
                     }
                     #[cfg(feature = "journald")]
                     cli::AuditLogBackendArg::Journald => {
-                        backends.push(std::sync::Arc::new(
-                            uptrakit_audit_log::JournaldBackend,
-                        ));
+                        backends.push(std::sync::Arc::new(uptrakit_audit_log::JournaldBackend));
                     }
                     cli::AuditLogBackendArg::None => {
                         // Already handled above (has_none guard).
@@ -450,11 +441,11 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Seed the in-memory token denylist from DB before accepting traffic.
     // This ensures revocations made before a controller restart are honoured.
-    app_state
-        .token_denylist
-        .load_from_db()
-        .await
-        .map_err(|e| report!(AppError::Config(format!("failed to seed token denylist: {e}"))))?;
+    app_state.token_denylist.load_from_db().await.map_err(|e| {
+        report!(AppError::Config(format!(
+            "failed to seed token denylist: {e}"
+        )))
+    })?;
 
     // Spawn background tasks
     let mut bg = tasks::BackgroundTasks::new(shutdown_token);
@@ -625,12 +616,7 @@ async fn run(args: cli::Args) -> Result<()> {
     // is bound and ready to accept.  A 10-second timeout guards against a port
     // conflict or slow TLS init keeping us blocked indefinitely.
     if let Some(old_pid) = args.takeover_from {
-        match tokio::time::timeout(
-            Duration::from_secs(10),
-            server_handle.listening(),
-        )
-        .await
-        {
+        match tokio::time::timeout(Duration::from_secs(10), server_handle.listening()).await {
             Ok(_) => tracing::info!("server is listening; signaling old process"),
             Err(_) => tracing::warn!(
                 "timed out waiting for server to become ready (10s); \

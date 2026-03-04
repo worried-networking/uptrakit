@@ -4,8 +4,8 @@ use sea_orm::{
 };
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::system_enrollment_token;
-use uptrakit_web_api_types::system_enrollment_tokens::SystemEnrollmentTokenResponse;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
+use uptrakit_web_api_types::system_enrollment_tokens::SystemEnrollmentTokenResponse;
 use uuid::Uuid;
 
 /// Parameters for creating a new system enrollment token.

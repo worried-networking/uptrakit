@@ -11,7 +11,9 @@ use uptrakit_web_api_types::settings_auth::{
     AuthenticationSettingsResponse, UpdateAuthenticationSettingsRequest,
 };
 use uptrakit_web_api_types::settings_ca::RotateCaResponse;
-use uptrakit_web_api_types::settings_combined::{CombinedSettingsResponse, GlobalSettingsCombinedResponse};
+use uptrakit_web_api_types::settings_combined::{
+    CombinedSettingsResponse, GlobalSettingsCombinedResponse,
+};
 use uptrakit_web_api_types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
 };

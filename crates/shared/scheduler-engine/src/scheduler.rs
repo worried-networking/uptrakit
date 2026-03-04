@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use rootcause::prelude::*;
@@ -591,7 +591,11 @@ mod tests {
             .await
             .expect("query")
             .expect("task exists");
-        assert_eq!(locked.locked_by, Some(controller_id), "task should be claimed");
+        assert_eq!(
+            locked.locked_by,
+            Some(controller_id),
+            "task should be claimed"
+        );
 
         // Cancel the scheduler while the executor is still running.
         token.cancel();
@@ -630,9 +634,7 @@ mod tests {
                 .enable_all()
                 .build()
                 .unwrap();
-            rt.block_on(async {
-                sea_orm::Database::connect("sqlite::memory:").await.unwrap()
-            })
+            rt.block_on(async { sea_orm::Database::connect("sqlite::memory:").await.unwrap() })
         };
         let config = SchedulerConfig::new(Uuid::now_v7());
         let mut scheduler = Scheduler::new(db, config, Arc::new(AtomicBool::new(false)));

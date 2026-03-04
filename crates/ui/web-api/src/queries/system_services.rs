@@ -1,8 +1,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set, TransactionTrait,
-    sea_query::Expr,
+    QueryOrder, QuerySelect, Set, TransactionTrait, sea_query::Expr,
 };
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -89,16 +88,15 @@ pub async fn list_system_services(
 ) -> Result<PaginatedResponse<SystemServiceResponse>> {
     let pagination = query.pagination().resolve();
 
-    let mut q = system_service::Entity::find()
-        .filter(system_service::Column::DeactivatedAt.is_null());
+    let mut q =
+        system_service::Entity::find().filter(system_service::Column::DeactivatedAt.is_null());
 
     if let Some(ref cap_filter) = query.capability {
         q = q.filter(system_service::Column::Capabilities.contains(cap_filter));
     }
     if let Some(ref status_filter) = query.status {
-        q = q.filter(
-            system_service::Column::Status.eq(service_status_to_db_status(*status_filter)),
-        );
+        q = q
+            .filter(system_service::Column::Status.eq(service_status_to_db_status(*status_filter)));
     }
 
     let base_query = q.order_by_desc(system_service::Column::CreatedAt);

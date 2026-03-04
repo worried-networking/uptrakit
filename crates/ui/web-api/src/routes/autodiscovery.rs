@@ -7,7 +7,6 @@
 
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
-use uptrakit_web_api_types::validation::Validate;
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -16,6 +15,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::autodiscovery::{

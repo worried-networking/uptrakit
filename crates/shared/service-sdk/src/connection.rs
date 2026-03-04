@@ -12,7 +12,7 @@ use rootcause::prelude::*;
 use serde::Deserialize;
 use tokio_rustls::TlsConnector;
 use uptrakit_internal_wire::{
-    Capability, CloseReason, CURRENT_PROTOCOL_VERSION, ControllerEnvelope, ControllerMessage,
+    CURRENT_PROTOCOL_VERSION, Capability, CloseReason, ControllerEnvelope, ControllerMessage,
     IncomingSeq, OutgoingSeq, ServiceMessage,
 };
 

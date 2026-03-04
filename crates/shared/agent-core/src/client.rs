@@ -53,7 +53,8 @@ pub async fn send_update_result(
         Ok(exec_result) => {
             let status = exec_result.result.status;
             let error = exec_result.result.error.clone();
-            conn.send(ServiceMessage::UpdateResult(exec_result.result)).await?;
+            conn.send(ServiceMessage::UpdateResult(exec_result.result))
+                .await?;
             match status {
                 uptrakit_internal_wire::UpdateFinalStatus::Completed => {
                     tracing::info!(update_id = %update_history_id, "update execution completed successfully");
@@ -174,12 +175,9 @@ pub async fn handle_check_versions(
         "received CheckVersions request"
     );
 
-    let results: Vec<VersionCheckResult> = crate::version_check::batch_check_versions(
-        payload.assignments,
-        Arc::clone(&executor),
-        ctx,
-    )
-    .await;
+    let results: Vec<VersionCheckResult> =
+        crate::version_check::batch_check_versions(payload.assignments, Arc::clone(&executor), ctx)
+            .await;
 
     let response = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results });
     if let Err(e) = conn.send(response).await {
@@ -470,12 +468,11 @@ pub async fn handle_execute_batch_host_package_update(
         }
     };
 
-    let response = ServiceMessage::BatchHostPackageUpdateResult(
-        BatchHostPackageUpdateResultPayload {
+    let response =
+        ServiceMessage::BatchHostPackageUpdateResult(BatchHostPackageUpdateResultPayload {
             batch_id: payload.batch_id,
             results,
-        },
-    );
+        });
     if let Err(e) = conn.send(response).await {
         tracing::error!(error = %e, "failed to send BatchHostPackageUpdateResult");
         return Some(LoopOutcome::Disconnected);

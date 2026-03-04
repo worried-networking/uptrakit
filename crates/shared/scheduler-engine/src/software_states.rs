@@ -162,9 +162,7 @@ pub async fn load_software_states_for_tenant(
 /// Extract `release_url` and `release_notes` from a `latest_release_metadata` JSON blob.
 ///
 /// Returns `(None, None)` when `metadata` is `None` or the expected keys are absent.
-fn extract_release_info(
-    metadata: Option<&serde_json::Value>,
-) -> (Option<String>, Option<String>) {
+fn extract_release_info(metadata: Option<&serde_json::Value>) -> (Option<String>, Option<String>) {
     let Some(meta) = metadata else {
         return (None, None);
     };

@@ -13,9 +13,8 @@ use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_internal_wire::{
-    Capability, CloseReason, ControllerMessage, CURRENT_PROTOCOL_VERSION, IncomingSeq, OutgoingSeq,
-    PongPayload, ServiceEnvelope, ServiceMessage, now_millis,
-    limits::WireValidate,
+    CURRENT_PROTOCOL_VERSION, Capability, CloseReason, ControllerMessage, IncomingSeq, OutgoingSeq,
+    PongPayload, ServiceEnvelope, ServiceMessage, limits::WireValidate, now_millis,
 };
 use uptrakit_shared_db::entity::service as service_entity;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -77,13 +76,10 @@ impl MessageRateLimiter {
         }
 
         // Weighted estimate: fraction of the previous window still relevant.
-        let elapsed_frac = now
-            .duration_since(self.window_start)
-            .as_secs_f64()
-            / self.window.as_secs_f64();
+        let elapsed_frac =
+            now.duration_since(self.window_start).as_secs_f64() / self.window.as_secs_f64();
         let weight = 1.0 - elapsed_frac;
-        let estimate =
-            (f64::from(self.prev_count) * weight) + f64::from(self.curr_count);
+        let estimate = (f64::from(self.prev_count) * weight) + f64::from(self.curr_count);
 
         if estimate < f64::from(self.max_per_window) {
             self.curr_count = self.curr_count.saturating_add(1);

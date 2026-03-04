@@ -287,7 +287,11 @@ pub fn unwrap_data_key_with(
 
     let mut ciphertext_and_tag = raw[12..].to_vec();
     let plaintext = key
-        .open_in_place(nonce, Aad::from(aad_str.as_bytes()), &mut ciphertext_and_tag)
+        .open_in_place(
+            nonce,
+            Aad::from(aad_str.as_bytes()),
+            &mut ciphertext_and_tag,
+        )
         .map_err(|_| {
             report!(CryptoError::Decryption(
                 "DEK unwrap failed: wrong KEK or tampered data".into()
@@ -341,9 +345,7 @@ static COLUMN_AAD_REGISTRY: OnceLock<std::collections::HashMap<String, String>> 
 ///
 /// Returns `Err(CryptoError::AlreadyInitialized)` if the registry has already
 /// been initialized.
-pub fn register_column_aad(
-    mappings: std::collections::HashMap<String, String>,
-) -> Result<()> {
+pub fn register_column_aad(mappings: std::collections::HashMap<String, String>) -> Result<()> {
     COLUMN_AAD_REGISTRY
         .set(mappings)
         .map_err(|_| report!(CryptoError::AlreadyInitialized))
@@ -734,9 +736,11 @@ fn decrypt_value_v3(stored: &str, aad: &str) -> Result<String> {
         .ok_or_else(|| report!(CryptoError::Decryption("missing ENC:v3: prefix".into())))?;
 
     // Parse key_id (8 hex chars) and hex payload separated by ':'
-    let colon_pos = after_prefix
-        .find(':')
-        .ok_or_else(|| report!(CryptoError::Decryption("missing key_id separator in ENC:v3".into())))?;
+    let colon_pos = after_prefix.find(':').ok_or_else(|| {
+        report!(CryptoError::Decryption(
+            "missing key_id separator in ENC:v3".into()
+        ))
+    })?;
 
     let key_id = &after_prefix[..colon_pos];
     let hex_part = &after_prefix[colon_pos + 1..];
@@ -918,8 +922,8 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
                         decrypt_value_v3(&s, "").map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
                     Ok(EncryptedString::from_db(plaintext, s))
                 } else if s.starts_with(ENC_V1_PREFIX) {
-                    let plaintext =
-                        decrypt_value_v1_legacy(&s).map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
+                    let plaintext = decrypt_value_v1_legacy(&s)
+                        .map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
                     Ok(EncryptedString::from_db(plaintext, s))
                 } else if s.starts_with(ENC_V2_PREFIX) {
                     // ValueType has no column name — use empty AAD as fallback.
@@ -1043,8 +1047,7 @@ mod tests {
         ] {
             let encrypted = encrypt_value_v1(plaintext).expect("encryption should succeed");
             assert!(encrypted.starts_with(ENC_V1_PREFIX));
-            let decrypted =
-                decrypt_value_v1_legacy(&encrypted).expect("decryption should succeed");
+            let decrypted = decrypt_value_v1_legacy(&encrypted).expect("decryption should succeed");
             assert_eq!(decrypted, plaintext);
         }
     }
@@ -1116,7 +1119,10 @@ mod tests {
         if let Some(byte) = raw.last_mut() {
             *byte ^= 0xFF;
         }
-        let tampered = format!("{ENC_V1_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
+        let tampered = format!(
+            "{ENC_V1_PREFIX}{}",
+            uptrakit_shared_types::hex::encode(&raw)
+        );
         assert!(decrypt_value_v1_legacy(&tampered).is_err());
     }
 
@@ -1214,8 +1220,8 @@ mod tests {
 
         // Simulate a legacy ENC:v1: token (from an installation before this change).
         // ENC:v1: tokens are decrypted with empty AAD — the sentinel must match.
-        let legacy_token = encrypt_value_v1(KEY_VERIFICATION_SENTINEL)
-            .expect("should encrypt sentinel with v1");
+        let legacy_token =
+            encrypt_value_v1(KEY_VERIFICATION_SENTINEL).expect("should encrypt sentinel with v1");
         assert!(legacy_token.starts_with(ENC_V1_PREFIX));
         assert!(
             verify_key_verification_token(&legacy_token).is_ok(),
@@ -1235,7 +1241,10 @@ mod tests {
         if let Some(byte) = raw.last_mut() {
             *byte ^= 0xFF;
         }
-        let tampered = format!("{ENC_V2_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
+        let tampered = format!(
+            "{ENC_V2_PREFIX}{}",
+            uptrakit_shared_types::hex::encode(&raw)
+        );
         let result = verify_key_verification_token(&tampered);
         assert!(result.is_err());
         assert!(
@@ -1327,7 +1336,8 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let es1 = EncryptedString::new("test value".to_string(), "test-aad").expect("should encrypt");
+        let es1 =
+            EncryptedString::new("test value".to_string(), "test-aad").expect("should encrypt");
         let es2 = es1.clone();
 
         // Clone should produce equal values (PartialEq compares plaintext only).
@@ -1340,10 +1350,8 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let es1 =
-            EncryptedString::new("value_a".to_string(), "test-aad").expect("should encrypt");
-        let es2 =
-            EncryptedString::new("value_b".to_string(), "test-aad").expect("should encrypt");
+        let es1 = EncryptedString::new("value_a".to_string(), "test-aad").expect("should encrypt");
+        let es2 = EncryptedString::new("value_b".to_string(), "test-aad").expect("should encrypt");
 
         assert_ne!(es1, es2);
     }
@@ -1396,12 +1404,15 @@ mod tests {
         ensure_test_key();
 
         let aad = "uptrakit:test:context";
-        for plaintext in ["hello", "", "multi\nline\nvalue", "a".repeat(1_000).as_str()] {
-            let encrypted =
-                encrypt_str(plaintext, aad).expect("encryption should succeed");
+        for plaintext in [
+            "hello",
+            "",
+            "multi\nline\nvalue",
+            "a".repeat(1_000).as_str(),
+        ] {
+            let encrypted = encrypt_str(plaintext, aad).expect("encryption should succeed");
             assert!(is_encrypted(&encrypted));
-            let decrypted =
-                decrypt_str(&encrypted, aad).expect("decryption should succeed");
+            let decrypted = decrypt_str(&encrypted, aad).expect("decryption should succeed");
             assert_eq!(decrypted, plaintext);
         }
     }
@@ -1411,13 +1422,9 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let encrypted =
-            encrypt_str("secret", "correct-aad").expect("encryption should succeed");
+        let encrypted = encrypt_str("secret", "correct-aad").expect("encryption should succeed");
         let result = decrypt_str(&encrypted, "wrong-aad");
-        assert!(
-            result.is_err(),
-            "decrypting with wrong AAD must fail"
-        );
+        assert!(result.is_err(), "decrypting with wrong AAD must fail");
         assert!(matches!(
             result.unwrap_err().current_context(),
             CryptoError::Decryption(_)
@@ -1432,7 +1439,10 @@ mod tests {
         let aad = "uptrakit:test:nonce";
         let enc1 = encrypt_str("same", aad).expect("should encrypt");
         let enc2 = encrypt_str("same", aad).expect("should encrypt");
-        assert_ne!(enc1, enc2, "encryptions of the same value must differ (random nonces)");
+        assert_ne!(
+            enc1, enc2,
+            "encryptions of the same value must differ (random nonces)"
+        );
     }
 
     #[test]
@@ -1458,8 +1468,7 @@ mod tests {
         ensure_test_key();
 
         let aad = "uptrakit:test_table:test_column";
-        let es = EncryptedString::new("aad secret".to_string(), aad)
-            .expect("new should succeed");
+        let es = EncryptedString::new("aad secret".to_string(), aad).expect("new should succeed");
         // Produces v3 when ring is available, v2 otherwise
         assert!(
             es.db_value.starts_with(ENC_V2_PREFIX) || es.db_value.starts_with(ENC_V3_PREFIX),
@@ -1468,8 +1477,7 @@ mod tests {
         assert_eq!(es.expose_secret(), "aad secret");
 
         // Must decrypt with the same AAD (decrypt_str handles both v2 and v3)
-        let decrypted =
-            decrypt_str(&es.db_value, aad).expect("decryption with correct AAD");
+        let decrypted = decrypt_str(&es.db_value, aad).expect("decryption with correct AAD");
         assert_eq!(decrypted, "aad secret");
     }
 
@@ -1478,8 +1486,7 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let es = EncryptedString::new("secret".to_string(), "correct:aad")
-            .expect("should encrypt");
+        let es = EncryptedString::new("secret".to_string(), "correct:aad").expect("should encrypt");
         // Try decrypting with wrong AAD — should fail regardless of v2/v3 format
         let result = decrypt_str(&es.db_value, "wrong:aad");
         assert!(
@@ -1497,10 +1504,7 @@ mod tests {
         // (which stores the value directly as db_value — works for any format).
         let v1_ciphertext = encrypt_value_v1("v1 value").expect("should encrypt");
         let es = EncryptedString::plaintext_for_test(v1_ciphertext);
-        assert!(
-            es.needs_v3_upgrade(),
-            "v1 ciphertext needs v3 upgrade"
-        );
+        assert!(es.needs_v3_upgrade(), "v1 ciphertext needs v3 upgrade");
     }
 
     #[test]
@@ -1508,13 +1512,9 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let v2_ciphertext =
-            encrypt_value_v2("v2 value", "test:aad").expect("should encrypt");
+        let v2_ciphertext = encrypt_value_v2("v2 value", "test:aad").expect("should encrypt");
         let es = EncryptedString::plaintext_for_test(v2_ciphertext);
-        assert!(
-            es.needs_v3_upgrade(),
-            "v2 ciphertext needs v3 upgrade"
-        );
+        assert!(es.needs_v3_upgrade(), "v2 ciphertext needs v3 upgrade");
     }
 
     #[test]
@@ -1522,8 +1522,7 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_ring();
 
-        let v3_ciphertext =
-            encrypt_value_v3("v3 value", "test:aad").expect("should encrypt");
+        let v3_ciphertext = encrypt_value_v3("v3 value", "test:aad").expect("should encrypt");
         let es = EncryptedString::plaintext_for_test(v3_ciphertext);
         assert!(
             !es.needs_v3_upgrade(),
@@ -1546,11 +1545,8 @@ mod tests {
         ensure_test_key();
 
         // Encrypt with one AAD context (simulating column A)
-        let es = EncryptedString::new(
-            "sensitive".to_string(),
-            "uptrakit:table_a:column_a",
-        )
-        .expect("should encrypt");
+        let es = EncryptedString::new("sensitive".to_string(), "uptrakit:table_a:column_a")
+            .expect("should encrypt");
 
         // Attempt to decrypt with a different AAD (simulating column B) — must fail
         let result = decrypt_str(&es.db_value, "uptrakit:table_b:column_b");
@@ -1692,10 +1688,7 @@ mod tests {
 
         // Should fail with the original KEK
         let result = unwrap_data_key(&wrapped, &dek.key_id);
-        assert!(
-            result.is_err(),
-            "unwrapping with wrong KEK must fail"
-        );
+        assert!(result.is_err(), "unwrapping with wrong KEK must fail");
     }
 
     #[test]
@@ -1731,9 +1724,13 @@ mod tests {
         ensure_test_ring();
 
         let aad = "uptrakit:test:v3_context";
-        for plaintext in ["hello", "", "multi\nline\nvalue", "a".repeat(1_000).as_str()] {
-            let encrypted =
-                encrypt_value_v3(plaintext, aad).expect("v3 encryption should succeed");
+        for plaintext in [
+            "hello",
+            "",
+            "multi\nline\nvalue",
+            "a".repeat(1_000).as_str(),
+        ] {
+            let encrypted = encrypt_value_v3(plaintext, aad).expect("v3 encryption should succeed");
             assert!(
                 encrypted.starts_with(ENC_V3_PREFIX),
                 "v3 ciphertext must carry ENC:v3: prefix"
@@ -1750,8 +1747,7 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_ring();
 
-        let encrypted =
-            encrypt_value_v3("test", "aad").expect("v3 encryption should succeed");
+        let encrypted = encrypt_value_v3("test", "aad").expect("v3 encryption should succeed");
         // Format: ENC:v3:<key_id>:<hex>
         let after_prefix = encrypted.strip_prefix(ENC_V3_PREFIX).unwrap();
         let colon_pos = after_prefix.find(':').unwrap();
@@ -1812,8 +1808,7 @@ mod tests {
         ensure_test_ring();
 
         // Craft a v3 ciphertext with a non-existent key_id
-        let encrypted =
-            encrypt_value_v3("test", "aad").expect("v3 encryption should succeed");
+        let encrypted = encrypt_value_v3("test", "aad").expect("v3 encryption should succeed");
         let after_prefix = encrypted.strip_prefix(ENC_V3_PREFIX).unwrap();
         let colon_pos = after_prefix.find(':').unwrap();
         let hex_part = &after_prefix[colon_pos + 1..];
@@ -1828,8 +1823,7 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_ring();
 
-        let es = EncryptedString::new("v3 secret".to_string(), "test:aad")
-            .expect("should encrypt");
+        let es = EncryptedString::new("v3 secret".to_string(), "test:aad").expect("should encrypt");
         assert!(
             es.db_value.starts_with(ENC_V3_PREFIX),
             "new must produce ENC:v3: when ring is available"

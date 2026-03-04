@@ -351,12 +351,8 @@ pub fn spawn_ca_rotation(
             let snapshot = ca_tx.borrow().clone();
             let expected_fp = snapshot.active_fingerprint.clone();
 
-            match crate::pki::rotate_managed_ca(
-                &db,
-                current_pki_addr.as_deref(),
-                &expected_fp,
-            )
-            .await
+            match crate::pki::rotate_managed_ca(&db, current_pki_addr.as_deref(), &expected_fp)
+                .await
             {
                 Ok(rotation) => {
                     if !rotation.rotated {
@@ -536,7 +532,14 @@ pub fn spawn_nats_consumer(
     revocation_notify: Option<Arc<tokio::sync::Notify>>,
     token_denylist: Option<Arc<uptrakit_web_api::auth::token_denylist::TokenDenylist>>,
 ) -> JoinHandle<()> {
-    tokio::spawn(nats.run_consumer(registry, db, ca_rotation_trigger, revocation_notify, token_denylist, token))
+    tokio::spawn(nats.run_consumer(
+        registry,
+        db,
+        ca_rotation_trigger,
+        revocation_notify,
+        token_denylist,
+        token,
+    ))
 }
 
 // ---------------------------------------------------------------------------

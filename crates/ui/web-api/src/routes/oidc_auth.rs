@@ -14,9 +14,9 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use openidconnect::{
-    AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
-    EndpointMaybeSet, EndpointNotSet, EndpointSet,
-    IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
+    AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet,
+    EndpointNotSet, EndpointSet, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier,
+    RedirectUrl, Scope, TokenResponse,
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
     reqwest,
 };
@@ -280,14 +280,8 @@ pub async fn oidc_callback(
         first_name,
         last_name,
         additional_claims,
-    } = match exchange_code_for_claims(
-        &client,
-        code,
-        flow.pkce_verifier,
-        flow.nonce,
-        redirect_url,
-    )
-    .await
+    } = match exchange_code_for_claims(&client, code, flow.pkce_verifier, flow.nonce, redirect_url)
+        .await
     {
         Ok(c) => c,
         Err(response) => return response,
@@ -1019,12 +1013,10 @@ async fn exchange_code_for_claims(
         .ok_or_else(|| Redirect::to("/login?error=oidc_no_id_token").into_response())?;
 
     let id_token_verifier = client.id_token_verifier();
-    let claims = id_token
-        .claims(&id_token_verifier, &nonce)
-        .map_err(|e| {
-            tracing::error!("OIDC ID token validation failed: {e}");
-            Redirect::to("/login?error=oidc_token_validation_failed").into_response()
-        })?;
+    let claims = id_token.claims(&id_token_verifier, &nonce).map_err(|e| {
+        tracing::error!("OIDC ID token validation failed: {e}");
+        Redirect::to("/login?error=oidc_token_validation_failed").into_response()
+    })?;
 
     let sub = claims.subject().to_string();
     let email = claims.email().map(|e| e.to_string()).unwrap_or_default();
@@ -1042,8 +1034,7 @@ async fn exchange_code_for_claims(
         return Err(Redirect::to("/login?error=oidc_no_email").into_response());
     }
 
-    let additional_claims =
-        serde_json::to_value(claims.additional_claims()).unwrap_or_default();
+    let additional_claims = serde_json::to_value(claims.additional_claims()).unwrap_or_default();
 
     Ok(ExtractedOidcClaims {
         sub,
@@ -1101,12 +1092,7 @@ fn build_fake_claims_for_sync(
 async fn mint_oidc_auth_response(state: &AppState, user_id: Uuid, provider_id: Uuid) -> Response {
     let session_service = SessionService::new(state.db().clone());
     let refresh_token = match session_service
-        .create_refresh_token(
-            user_id,
-            AuthMethod::Oidc { provider_id },
-            None,
-            None,
-        )
+        .create_refresh_token(user_id, AuthMethod::Oidc { provider_id }, None, None)
         .await
     {
         Ok(t) => t,
@@ -1126,16 +1112,17 @@ async fn mint_oidc_auth_response(state: &AppState, user_id: Uuid, provider_id: U
             .await
             .unwrap_or_default();
 
-    let access_token = match state
-        .jwt
-        .create_access_token(user_id, &permissions, "oidc", Some(provider_id))
-    {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("Failed to create OIDC access token: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    let access_token =
+        match state
+            .jwt
+            .create_access_token(user_id, &permissions, "oidc", Some(provider_id))
+        {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!("Failed to create OIDC access token: {e:?}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {

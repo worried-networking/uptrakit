@@ -267,8 +267,9 @@ async fn dispatch_loop(
                             delivered_at: Set(Some(now)),
                             ..Default::default()
                         };
-                        if let Err(e) =
-                            notification_log::Entity::update(update).exec(&db_clone).await
+                        if let Err(e) = notification_log::Entity::update(update)
+                            .exec(&db_clone)
+                            .await
                         {
                             tracing::error!(
                                 error = %e,
@@ -289,8 +290,9 @@ async fn dispatch_loop(
                             error_message: Set(Some(e.to_string())),
                             ..Default::default()
                         };
-                        if let Err(db_err) =
-                            notification_log::Entity::update(update).exec(&db_clone).await
+                        if let Err(db_err) = notification_log::Entity::update(update)
+                            .exec(&db_clone)
+                            .await
                         {
                             tracing::error!(
                                 error = %db_err,

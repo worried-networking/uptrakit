@@ -162,7 +162,11 @@ pub(super) async fn complete_mqtt_registration(
 
     let tenant_configs = if !handshake.active_mqtt_clients.is_empty() {
         match lease_coordinator
-            .reconcile_mqtt_clients(service_id, &handshake.instance_id, &handshake.active_mqtt_clients)
+            .reconcile_mqtt_clients(
+                service_id,
+                &handshake.instance_id,
+                &handshake.active_mqtt_clients,
+            )
             .await
         {
             Ok(configs) => configs,
@@ -172,7 +176,11 @@ pub(super) async fn complete_mqtt_registration(
             }
         }
     } else {
-        let requested = if handshake.max_tenants == 0 { 100 } else { handshake.max_tenants };
+        let requested = if handshake.max_tenants == 0 {
+            100
+        } else {
+            handshake.max_tenants
+        };
         match lease_coordinator
             .assign_available_tenants(service_id, &handshake.instance_id, requested)
             .await

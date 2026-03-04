@@ -173,7 +173,6 @@ pub async fn create_plugin_config(
     })
 }
 
-
 pub async fn list_plugin_configs(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
@@ -186,7 +185,11 @@ pub async fn list_plugin_configs(
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .order_by_asc(plugin_config::Column::Name);
 
-    let total = base_query.clone().count(tenant_db.db()).await.context_to()?;
+    let total = base_query
+        .clone()
+        .count(tenant_db.db())
+        .await
+        .context_to()?;
 
     let configs = base_query
         .offset(Some(pagination.offset()))
@@ -268,10 +271,11 @@ pub async fn update_plugin_config(
 
     let updated = model.update(tenant_db.db()).await.context_to()?;
 
-    plugin_config_to_response(ops, updated)
-        .ok_or_else(|| report!(PluginConfigError::ConfigValidation(
+    plugin_config_to_response(ops, updated).ok_or_else(|| {
+        report!(PluginConfigError::ConfigValidation(
             "updated record has unrecognised plugin_type".to_string(),
-        )))
+        ))
+    })
 }
 
 /// Soft-delete a plugin configuration.

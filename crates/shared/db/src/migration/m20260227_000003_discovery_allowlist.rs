@@ -17,11 +17,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("tenant_id"))
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
                     .col(
                         ColumnDef::new(Alias::new("plugin_type"))
                             .string()
@@ -68,16 +64,8 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("tenant_id"))
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("host_id"))
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+                    .col(ColumnDef::new(Alias::new("host_id")).uuid().not_null())
                     .col(
                         ColumnDef::new(Alias::new("plugin_type"))
                             .string()

@@ -124,7 +124,11 @@ pub async fn list_tenant_audit_logs(
 
     let base_query = q.order_by_desc(audit_log::Column::OccurredAt);
 
-    let total = base_query.clone().count(tenant_db.db()).await.context_to()?;
+    let total = base_query
+        .clone()
+        .count(tenant_db.db())
+        .await
+        .context_to()?;
 
     let items: Vec<AuditLogResponse> = base_query
         .offset(Some(pagination.offset()))

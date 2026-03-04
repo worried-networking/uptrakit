@@ -44,8 +44,9 @@ pub async fn rotate_ca(
     state.ca_rotation_trigger.notify_one();
 
     // Dispatch notification event for CA rotation.
-    state.notification_dispatcher.dispatch(
-        crate::notifications::events::NotificationEvent {
+    state
+        .notification_dispatcher
+        .dispatch(crate::notifications::events::NotificationEvent {
             tenant_id: state.default_tenant_id,
             host_id: None,
             host_name: None,
@@ -55,8 +56,7 @@ pub async fn rotate_ca(
             details: crate::notifications::events::NotificationEventDetails::CaRotated {
                 reason: "manual rotation via API".to_string(),
             },
-        },
-    );
+        });
 
     (
         StatusCode::OK,

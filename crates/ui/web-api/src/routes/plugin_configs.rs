@@ -523,10 +523,7 @@ pub async fn discard_plugin_config_discovered(
 ///
 /// This is advisory only — the `manage_commands` permission is already
 /// documented as equivalent to RCE on managed hosts.
-fn audit_dangerous_patterns(
-    config: &serde_json::Value,
-    context_fields: &[(&str, &str, &str)],
-) {
+fn audit_dangerous_patterns(config: &serde_json::Value, context_fields: &[(&str, &str, &str)]) {
     let obj = match config.as_object() {
         Some(o) => o,
         None => return,

@@ -246,8 +246,7 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     // Arc refcount returns to 1 before we call `disconnect_shared`.
     let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
-    let plugin_sudo_cmds =
-        PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
     for (_plugin_type, entries) in &plugin_sudo_cmds {
@@ -341,7 +340,10 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
         SshSession::disconnect_shared(session).await;
 
         println!();
-        println!("No sudoers changes for host '{}' — no compatible plugin commands found on this host.", host.name);
+        println!(
+            "No sudoers changes for host '{}' — no compatible plugin commands found on this host.",
+            host.name
+        );
     }
 
     Ok(())

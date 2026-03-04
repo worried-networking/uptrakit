@@ -17,26 +17,14 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("tenant_id"))
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("name"))
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+                    .col(ColumnDef::new(Alias::new("name")).string().not_null())
                     .col(
                         ColumnDef::new(Alias::new("channel_type"))
                             .string()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("config"))
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Alias::new("config")).text().not_null())
                     .col(
                         ColumnDef::new(Alias::new("enabled"))
                             .boolean()
@@ -55,10 +43,7 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .from(
-                                Alias::new("notification_channels"),
-                                Alias::new("tenant_id"),
-                            )
+                            .from(Alias::new("notification_channels"), Alias::new("tenant_id"))
                             .to(Alias::new("tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Restrict),
                     )
@@ -99,33 +84,12 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("tenant_id"))
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("channel_id"))
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("event_type"))
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("host_id"))
-                            .uuid(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("software_item_id"))
-                            .uuid(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("plugin_type"))
-                            .string(),
-                    )
+                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+                    .col(ColumnDef::new(Alias::new("channel_id")).uuid().not_null())
+                    .col(ColumnDef::new(Alias::new("event_type")).string().not_null())
+                    .col(ColumnDef::new(Alias::new("host_id")).uuid())
+                    .col(ColumnDef::new(Alias::new("software_item_id")).uuid())
+                    .col(ColumnDef::new(Alias::new("plugin_type")).string())
                     .col(
                         ColumnDef::new(Alias::new("enabled"))
                             .boolean()
@@ -139,28 +103,19 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .from(
-                                Alias::new("notification_rules"),
-                                Alias::new("tenant_id"),
-                            )
+                            .from(Alias::new("notification_rules"), Alias::new("tenant_id"))
                             .to(Alias::new("tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Restrict),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .from(
-                                Alias::new("notification_rules"),
-                                Alias::new("channel_id"),
-                            )
+                            .from(Alias::new("notification_rules"), Alias::new("channel_id"))
                             .to(Alias::new("notification_channels"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .from(
-                                Alias::new("notification_rules"),
-                                Alias::new("host_id"),
-                            )
+                            .from(Alias::new("notification_rules"), Alias::new("host_id"))
                             .to(Alias::new("hosts"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
@@ -209,26 +164,10 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("tenant_id"))
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("channel_id"))
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("rule_id"))
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("event_type"))
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Alias::new("tenant_id")).uuid().not_null())
+                    .col(ColumnDef::new(Alias::new("channel_id")).uuid().not_null())
+                    .col(ColumnDef::new(Alias::new("rule_id")).uuid().not_null())
+                    .col(ColumnDef::new(Alias::new("event_type")).string().not_null())
                     .col(
                         ColumnDef::new(Alias::new("event_payload"))
                             .json()
@@ -240,51 +179,30 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default("pending"),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("error_message"))
-                            .text(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("action_token"))
-                            .uuid(),
-                    )
-                    .col(
-                        ColumnDef::new(Alias::new("action_taken"))
-                            .string(),
-                    )
+                    .col(ColumnDef::new(Alias::new("error_message")).text())
+                    .col(ColumnDef::new(Alias::new("action_token")).uuid())
+                    .col(ColumnDef::new(Alias::new("action_taken")).string())
                     .col(
                         ColumnDef::new(Alias::new("created_at"))
                             .timestamp_with_time_zone()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(Alias::new("delivered_at"))
-                            .timestamp_with_time_zone(),
-                    )
+                    .col(ColumnDef::new(Alias::new("delivered_at")).timestamp_with_time_zone())
                     .foreign_key(
                         ForeignKey::create()
-                            .from(
-                                Alias::new("notification_log"),
-                                Alias::new("tenant_id"),
-                            )
+                            .from(Alias::new("notification_log"), Alias::new("tenant_id"))
                             .to(Alias::new("tenants"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Restrict),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .from(
-                                Alias::new("notification_log"),
-                                Alias::new("channel_id"),
-                            )
+                            .from(Alias::new("notification_log"), Alias::new("channel_id"))
                             .to(Alias::new("notification_channels"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .from(
-                                Alias::new("notification_log"),
-                                Alias::new("rule_id"),
-                            )
+                            .from(Alias::new("notification_log"), Alias::new("rule_id"))
                             .to(Alias::new("notification_rules"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )

@@ -30,10 +30,7 @@ impl AuditLogDispatcher {
     /// If the channel is closed (dispatcher shut down), the entry is silently dropped.
     pub fn dispatch(&self, entry: AuditEntry) {
         if let Err(e) = self.tx.send(entry) {
-            tracing::warn!(
-                "audit log dispatcher channel closed, dropping entry: {}",
-                e
-            );
+            tracing::warn!("audit log dispatcher channel closed, dropping entry: {}", e);
         }
     }
 }

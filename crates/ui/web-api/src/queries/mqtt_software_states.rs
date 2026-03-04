@@ -7,8 +7,8 @@ use uptrakit_internal_wire::{
     MqttSoftwareStatesPayload,
 };
 use uptrakit_shared_db::entity::{
-    host, host_package, host_package_update_history, host_software_item, prelude::*,
-    software_item, update_history,
+    host, host_package, host_package_update_history, host_software_item, prelude::*, software_item,
+    update_history,
 };
 use uptrakit_shared_types::SoftwareDiscoveryState;
 use uuid::Uuid;
@@ -113,14 +113,8 @@ pub async fn load_software_states_for_tenant(
         .filter(update_history::Column::SoftwareItemId.is_in(item_ids.clone()))
         .filter(
             Condition::any()
-                .add(
-                    update_history::Column::Status
-                        .eq(update_history::UpdateStatus::Pending),
-                )
-                .add(
-                    update_history::Column::Status
-                        .eq(update_history::UpdateStatus::InProgress),
-                ),
+                .add(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+                .add(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress)),
         )
         .into_model::<ActiveUpdateRow>()
         .all(db)
@@ -331,9 +325,7 @@ pub async fn load_host_package_host_states_for_tenant(
 /// Extract `release_url` and `release_notes` from a `latest_release_metadata` JSON blob.
 ///
 /// Returns `(None, None)` when `metadata` is `None` or the expected keys are absent.
-fn extract_release_info(
-    metadata: Option<&serde_json::Value>,
-) -> (Option<String>, Option<String>) {
+fn extract_release_info(metadata: Option<&serde_json::Value>) -> (Option<String>, Option<String>) {
     let Some(meta) = metadata else {
         return (None, None);
     };

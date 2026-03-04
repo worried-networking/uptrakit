@@ -67,8 +67,9 @@ impl UptrakitClient {
     pub async fn stream_batch_progress(
         &self,
         id: &Uuid,
-    ) -> Result<impl futures_util::Stream<Item = std::result::Result<BatchProgressEvent, StreamError>>>
-    {
+    ) -> Result<
+        impl futures_util::Stream<Item = std::result::Result<BatchProgressEvent, StreamError>>,
+    > {
         let url = format!(
             "{}{}",
             self.base_url,
@@ -128,11 +129,7 @@ fn parse_typed_event(
         "progress" => {
             let parsed: std::result::Result<BatchProgressData, _> =
                 serde_json::from_str(&event.data);
-            Some(
-                parsed
-                    .map(BatchProgressEvent::Progress)
-                    .map_err(Into::into),
-            )
+            Some(parsed.map(BatchProgressEvent::Progress).map_err(Into::into))
         }
         "batch_completed" => {
             let parsed: std::result::Result<BatchCompletedData, _> =
@@ -160,7 +157,9 @@ mod tests {
         };
         let result = parse_typed_event(event).expect("should produce event");
         let typed = result.expect("should parse");
-        assert!(matches!(typed, BatchProgressEvent::Update(ref u) if u.software_item_name == "nginx"));
+        assert!(
+            matches!(typed, BatchProgressEvent::Update(ref u) if u.software_item_name == "nginx")
+        );
     }
 
     #[test]

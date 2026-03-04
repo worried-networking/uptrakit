@@ -20,10 +20,7 @@ impl HumanOutput for PaginatedResponse<NotificationChannelResponse> {
         if self.items.is_empty() {
             return "No notification channels found.\n".to_string();
         }
-        let mut out = format!(
-            "{:<38} {:<25} {:<12} ENABLED\n",
-            "ID", "NAME", "TYPE"
-        );
+        let mut out = format!("{:<38} {:<25} {:<12} ENABLED\n", "ID", "NAME", "TYPE");
         for ch in &self.items {
             out.push_str(&format!(
                 "{:<38} {:<25} {:<12} {}\n",
@@ -295,7 +292,10 @@ pub async fn channel_list(
         page: params.page,
         per_page: params.per_page,
     };
-    client.list_notification_channels(&pagination).await.context_to()
+    client
+        .list_notification_channels(&pagination)
+        .await
+        .context_to()
 }
 
 /// Get a single notification channel by ID.
@@ -306,7 +306,10 @@ pub async fn channel_get(params: ChannelGetParams<'_>) -> Result<NotificationCha
         params.insecure,
         params.request_timeout,
     )?;
-    client.get_notification_channel(params.id).await.context_to()
+    client
+        .get_notification_channel(params.id)
+        .await
+        .context_to()
 }
 
 /// Create a new notification channel.
@@ -396,7 +399,10 @@ pub async fn rule_list(
         page: params.page,
         per_page: params.per_page,
     };
-    client.list_notification_rules(&pagination).await.context_to()
+    client
+        .list_notification_rules(&pagination)
+        .await
+        .context_to()
 }
 
 /// Get a single notification rule by ID.
@@ -531,7 +537,8 @@ mod tests {
             rule_id: sample_uuid(),
             event_type: NotificationEventType::UpdateCompleted,
             event_payload: serde_json::json!({"version": "1.2.3"}),
-            status: uptrakit_openapi_client::types::notifications::NotificationDeliveryStatus::Delivered,
+            status:
+                uptrakit_openapi_client::types::notifications::NotificationDeliveryStatus::Delivered,
             error_message: None,
             action_token: None,
             action_taken: None,
@@ -561,7 +568,10 @@ mod tests {
             per_page: 20,
             total_pages: 0,
         };
-        assert!(resp.to_human_string().contains("No notification channels found"));
+        assert!(
+            resp.to_human_string()
+                .contains("No notification channels found")
+        );
     }
 
     #[test]
@@ -596,7 +606,10 @@ mod tests {
         r.plugin_type = Some("releases_github".to_string());
         let s = r.to_human_string();
         assert!(s.contains("Host ID:"), "host id label missing");
-        assert!(s.contains("Software Item ID:"), "software item id label missing");
+        assert!(
+            s.contains("Software Item ID:"),
+            "software item id label missing"
+        );
         assert!(s.contains("releases_github"), "plugin type missing");
     }
 
@@ -609,7 +622,10 @@ mod tests {
             per_page: 20,
             total_pages: 0,
         };
-        assert!(resp.to_human_string().contains("No notification rules found"));
+        assert!(
+            resp.to_human_string()
+                .contains("No notification rules found")
+        );
     }
 
     #[test]
@@ -637,7 +653,10 @@ mod tests {
             per_page: 20,
             total_pages: 0,
         };
-        assert!(resp.to_human_string().contains("No notification log entries found"));
+        assert!(
+            resp.to_human_string()
+                .contains("No notification log entries found")
+        );
     }
 
     #[test]
@@ -686,6 +705,10 @@ mod tests {
         let output = DeletedOutput {
             message: "Notification channel deleted.".to_string(),
         };
-        assert!(output.to_human_string().contains("Notification channel deleted"));
+        assert!(
+            output
+                .to_human_string()
+                .contains("Notification channel deleted")
+        );
     }
 }

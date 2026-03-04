@@ -23,7 +23,9 @@ use uptrakit_shared_db::entity::{
 use uptrakit_shared_types::PluginType;
 use uuid::Uuid;
 
-use super::queries::{merge_config, query_agent_assignment_rows, query_host_package_assignment_rows};
+use super::queries::{
+    merge_config, query_agent_assignment_rows, query_host_package_assignment_rows,
+};
 use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
 use crate::notifier::SchedulerNotifier;
@@ -237,7 +239,9 @@ impl FetchReleasesExecutor {
                 Vec<uptrakit_plugin_infrastructure_core::BatchFetchResult>,
             >,
         )>;
-        let sem = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_CONTROLLER_FETCHES));
+        let sem = Arc::new(tokio::sync::Semaphore::new(
+            MAX_CONCURRENT_CONTROLLER_FETCHES,
+        ));
         let mut join_set: JoinSet<FetchResult> = JoinSet::new();
 
         for job in jobs {
@@ -371,8 +375,7 @@ impl FetchReleasesExecutor {
             }
 
             // Load software states then push to MQTT services.
-            match crate::software_states::load_software_states_for_tenant(&self.db, tenant_id)
-                .await
+            match crate::software_states::load_software_states_for_tenant(&self.db, tenant_id).await
             {
                 Ok(payload) => {
                     self.notifier.push_software_states_for_tenant(payload).await;
@@ -465,8 +468,7 @@ impl FetchReleasesExecutor {
         &self,
         tenant_id: Uuid,
     ) -> crate::error::Result<()> {
-        let rows =
-            query_agent_assignment_rows(&self.db, tenant_id, &["fetch_releases"]).await?;
+        let rows = query_agent_assignment_rows(&self.db, tenant_id, &["fetch_releases"]).await?;
         let hp_rows = query_host_package_assignment_rows(&self.db, tenant_id).await?;
 
         if rows.is_empty() && hp_rows.is_empty() {
@@ -514,15 +516,16 @@ impl FetchReleasesExecutor {
 
             let agent_key = (row.service_id, row.host_machine_id.clone());
             let items = by_agent_host.entry(agent_key).or_default();
-            let item = items
-                .entry(row.software_item_id)
-                .or_insert_with(|| VersionCheckAssignment {
-                    software_item_id: row.software_item_id,
-                    name: row.software_item_name.clone(),
-                    detect_version: None,
-                    fetch_releases: None,
-                    host_package_id: None,
-                });
+            let item =
+                items
+                    .entry(row.software_item_id)
+                    .or_insert_with(|| VersionCheckAssignment {
+                        software_item_id: row.software_item_id,
+                        name: row.software_item_name.clone(),
+                        detect_version: None,
+                        fetch_releases: None,
+                        host_package_id: None,
+                    });
 
             item.fetch_releases = Some(assignment);
         }

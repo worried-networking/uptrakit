@@ -94,8 +94,8 @@ impl GitLabPlugin {
 
         if let Some(ref token) = config.auth_token {
             // GitLab uses the PRIVATE-TOKEN header for personal access tokens.
-            let header_value =
-                reqwest::header::HeaderValue::from_str(token.expose_secret()).map_err(|e| {
+            let header_value = reqwest::header::HeaderValue::from_str(token.expose_secret())
+                .map_err(|e| {
                     report!(GitLabError::Configuration(format!(
                         "invalid auth token header value: {e}"
                     )))
@@ -160,8 +160,7 @@ impl GitLabPlugin {
             return None;
         }
 
-        let version_str =
-            strip_tag_prefix(&gl_release.tag_name, &self.config.tag_strip_prefix);
+        let version_str = strip_tag_prefix(&gl_release.tag_name, &self.config.tag_strip_prefix);
         let version = Version::new(version_str);
 
         let published_at = gl_release.released_at.as_ref().and_then(|s| {
@@ -528,11 +527,13 @@ mod tests {
                 links: vec![
                     GitLabReleaseLink {
                         name: "a.tar.gz".to_string(),
-                        url: "https://gitlab.com/owner/project/-/releases/v1.0.0/downloads/a".to_string(),
+                        url: "https://gitlab.com/owner/project/-/releases/v1.0.0/downloads/a"
+                            .to_string(),
                     },
                     GitLabReleaseLink {
                         name: "b.deb".to_string(),
-                        url: "https://gitlab.com/owner/project/-/releases/v1.0.0/downloads/b".to_string(),
+                        url: "https://gitlab.com/owner/project/-/releases/v1.0.0/downloads/b"
+                            .to_string(),
                     },
                 ],
             },

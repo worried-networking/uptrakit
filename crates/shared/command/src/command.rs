@@ -626,14 +626,9 @@ mod tests {
     async fn run_command_exec_impl_sets_env_vars() {
         let envs = vec![("MY_TEST_VAR".to_string(), "hello_env".to_string())];
         // Use printenv to echo the env var value.
-        let result = run_command_exec_impl(
-            "printenv",
-            &["MY_TEST_VAR".to_string()],
-            None,
-            &envs,
-            None,
-        )
-        .await;
+        let result =
+            run_command_exec_impl("printenv", &["MY_TEST_VAR".to_string()], None, &envs, None)
+                .await;
         let (output, exit_code) = result.expect("printenv should succeed");
         assert_eq!(exit_code, 0);
         assert!(

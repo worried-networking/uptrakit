@@ -1,5 +1,6 @@
 pub mod app_state;
 pub mod auth;
+pub mod batch_progress_broadcaster;
 pub mod ca_snapshot;
 pub mod cert_signer;
 pub mod error_response;
@@ -22,7 +23,6 @@ pub mod setting_key;
 pub mod settings;
 pub mod settings_store;
 pub mod tenant_db;
-pub mod batch_progress_broadcaster;
 pub mod update_output_broadcaster;
 
 pub use app_state::{AppState, AppStateBuildError, AppStateBuilder, ServiceCredentialSources};
@@ -198,9 +198,9 @@ mod tests {
             shutdown_token: Default::default(),
             external_scheduler_connected: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
-            audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(
-                Arc::new(uptrakit_audit_log::NoopBackend),
-            ),
+            audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+                uptrakit_audit_log::NoopBackend,
+            )),
         })
     }
 

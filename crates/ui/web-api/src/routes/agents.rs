@@ -2,9 +2,7 @@ use crate::auth::{password, token};
 use crate::cert_signer::SignedCertBundle;
 use crate::queries::enrollment_tokens as et_queries;
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
 use std::net::IpAddr;
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -95,8 +93,9 @@ pub(crate) async fn do_enroll(
     {
         let caps: Vec<String> = serde_json::from_str(&capabilities_json).unwrap_or_default();
         let has_system_service = caps.iter().any(|c| c == "system_service");
-        let requests_system_creds =
-            caps.iter().any(|c| SYSTEM_CREDENTIAL_CAPS.contains(&c.as_str()));
+        let requests_system_creds = caps
+            .iter()
+            .any(|c| SYSTEM_CREDENTIAL_CAPS.contains(&c.as_str()));
         if requests_system_creds && !has_system_service {
             bail!(AgentRouteError::Forbidden(
                 "system credentials (database_access, nats_access, master_key_access, \
@@ -202,7 +201,9 @@ pub(crate) async fn do_enroll(
         ServiceStatus::Approved => service::ServiceStatus::Approved,
         ServiceStatus::Rejected => service::ServiceStatus::Rejected,
         ServiceStatus::Deactivated => service::ServiceStatus::Deactivated,
-        _ => bail!(AgentRouteError::Internal("unknown service status variant".into())),
+        _ => bail!(AgentRouteError::Internal(
+            "unknown service status variant".into()
+        )),
     };
     let model = service::ActiveModel {
         id: Set(agent_id),
@@ -504,14 +505,13 @@ pub(crate) async fn do_enroll_system_service(
 
     // Token comparison: Argon2id verify against all active system enrollment tokens.
     let (status, matched_token_id) = if let Some(provided_token) = enrollment_token {
-        let active_tokens =
-            crate::queries::system_enrollment_tokens::find_active_system_tokens(db)
-                .await
-                .context_to::<AgentRouteError>()?;
+        let active_tokens = crate::queries::system_enrollment_tokens::find_active_system_tokens(db)
+            .await
+            .context_to::<AgentRouteError>()?;
 
-        let matched = active_tokens.iter().find(|t| {
-            password::verify_password(provided_token, &t.token_hash).unwrap_or(false)
-        });
+        let matched = active_tokens
+            .iter()
+            .find(|t| password::verify_password(provided_token, &t.token_hash).unwrap_or(false));
 
         if let Some(t) = matched {
             if let Err(e) =
@@ -547,7 +547,9 @@ pub(crate) async fn do_enroll_system_service(
         ServiceStatus::Approved => system_service::SystemServiceStatus::Approved,
         ServiceStatus::Rejected => system_service::SystemServiceStatus::Rejected,
         ServiceStatus::Deactivated => system_service::SystemServiceStatus::Deactivated,
-        _ => bail!(AgentRouteError::Internal("unknown service status variant".into())),
+        _ => bail!(AgentRouteError::Internal(
+            "unknown service status variant".into()
+        )),
     };
 
     let model = system_service::ActiveModel {
@@ -609,11 +611,12 @@ pub(crate) async fn do_sign_csr_for_system_service(
         })?;
 
     // Record certificate in system_service_certificates.
-    let (serial, not_before, not_after) = parse_cert_metadata(&bundle.cert_pem)
-        .map_err(|e| {
-            tracing::error!("Failed to parse cert metadata: {e}");
-            report!(AgentRouteError::Internal("cert metadata parse failed".into()))
-        })?;
+    let (serial, not_before, not_after) = parse_cert_metadata(&bundle.cert_pem).map_err(|e| {
+        tracing::error!("Failed to parse cert metadata: {e}");
+        report!(AgentRouteError::Internal(
+            "cert metadata parse failed".into()
+        ))
+    })?;
 
     let record = system_service_certificate::ActiveModel {
         ca_fingerprint: Set(ca_fp),

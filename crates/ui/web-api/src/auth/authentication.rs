@@ -494,8 +494,11 @@ mod tests {
 
         // Ensure a test master key is set (no-op if already initialized).
         let _ = init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
-        let client_secret =
-            EncryptedString::new("test-secret".to_string(), "uptrakit:oidc_providers:client_secret").expect("master key initialized above");
+        let client_secret = EncryptedString::new(
+            "test-secret".to_string(),
+            "uptrakit:oidc_providers:client_secret",
+        )
+        .expect("master key initialized above");
 
         oidc_provider::Model {
             id: uuid::Uuid::nil(),

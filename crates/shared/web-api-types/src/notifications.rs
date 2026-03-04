@@ -493,9 +493,7 @@ mod tests {
             Some(NotificationEventType::NewSoftwareDiscovered)
         );
         assert_eq!(
-            "new_service_enrolled"
-                .parse::<NotificationEventType>()
-                .ok(),
+            "new_service_enrolled".parse::<NotificationEventType>().ok(),
             Some(NotificationEventType::NewServiceEnrolled)
         );
         assert_eq!(
@@ -867,7 +865,10 @@ mod tests {
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         // None scope fields are skipped in serialization (skip_serializing_if)
-        assert!(!json.contains("host_id"), "None host_id must not be serialized: {json}");
+        assert!(
+            !json.contains("host_id"),
+            "None host_id must not be serialized: {json}"
+        );
         let deserialized: UpdateNotificationRuleRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(
@@ -875,7 +876,10 @@ mod tests {
             Some(NotificationEventType::CaRotated)
         );
         assert_eq!(deserialized.enabled, Some(false));
-        assert!(deserialized.host_id.is_none(), "absent host_id must deserialize to None");
+        assert!(
+            deserialized.host_id.is_none(),
+            "absent host_id must deserialize to None"
+        );
     }
 
     #[test]
@@ -1088,10 +1092,7 @@ mod tests {
             deserialized.event_type,
             NotificationEventType::UpdateCompleted
         );
-        assert_eq!(
-            deserialized.status,
-            NotificationDeliveryStatus::Delivered
-        );
+        assert_eq!(deserialized.status, NotificationDeliveryStatus::Delivered);
         assert!(deserialized.error_message.is_none());
         assert_eq!(deserialized.action_token, Some(sample_uuid()));
         assert_eq!(deserialized.action_taken.as_deref(), Some("acknowledged"));
@@ -1116,10 +1117,7 @@ mod tests {
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: NotificationLogResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert_eq!(
-            deserialized.status,
-            NotificationDeliveryStatus::Failed
-        );
+        assert_eq!(deserialized.status, NotificationDeliveryStatus::Failed);
         assert_eq!(
             deserialized.error_message.as_deref(),
             Some("connection refused")

@@ -242,8 +242,7 @@ pub fn build_discovery_config(
         config["release_url"] = serde_json::Value::String(url.to_string());
     }
     if let Some(notes) = release.notes {
-        config["release_summary"] =
-            serde_json::Value::String(truncate_str(notes, 500).to_string());
+        config["release_summary"] = serde_json::Value::String(truncate_str(notes, 500).to_string());
     }
 
     config
@@ -1242,7 +1241,10 @@ mod tests {
             host(),
             "App",
             "h",
-            ReleaseInfo { url: Some(url), notes: None },
+            ReleaseInfo {
+                url: Some(url),
+                notes: None,
+            },
         );
         assert_eq!(v["release_url"], url);
         assert!(v.get("release_summary").is_none());
@@ -1258,7 +1260,10 @@ mod tests {
             host(),
             "App",
             "h",
-            ReleaseInfo { url: None, notes: Some(notes) },
+            ReleaseInfo {
+                url: None,
+                notes: Some(notes),
+            },
         );
         assert_eq!(v["release_summary"], notes);
         assert!(v.get("release_url").is_none());
@@ -1275,7 +1280,10 @@ mod tests {
             host(),
             "App",
             "h",
-            ReleaseInfo { url: None, notes: Some(&notes) },
+            ReleaseInfo {
+                url: None,
+                notes: Some(&notes),
+            },
         );
         let summary = v["release_summary"].as_str().unwrap();
         assert_eq!(summary.len(), 500);
@@ -1372,7 +1380,10 @@ mod tests {
 
     #[test]
     fn slugify_dots_become_underscores() {
-        assert_eq!(slugify("pangolin.uk.home.yantsen.su"), "pangolin_uk_home_yantsen_su");
+        assert_eq!(
+            slugify("pangolin.uk.home.yantsen.su"),
+            "pangolin_uk_home_yantsen_su"
+        );
     }
 
     #[test]
@@ -1417,10 +1428,7 @@ mod tests {
 
     #[test]
     fn slugify_real_world_example() {
-        assert_eq!(
-            slugify("uptrakit pangolin"),
-            "uptrakit_pangolin"
-        );
+        assert_eq!(slugify("uptrakit pangolin"), "uptrakit_pangolin");
         assert_eq!(
             slugify("pangolin.uk.home.yantsen.su"),
             "pangolin_uk_home_yantsen_su"
@@ -1483,10 +1491,7 @@ mod tests {
     #[test]
     fn host_packages_command_topic_format() {
         let t = host_packages_command_topic("uptrakit", host());
-        assert_eq!(
-            t,
-            "uptrakit/hosts/33333333-3333-3333-3333-333333333333/set"
-        );
+        assert_eq!(t, "uptrakit/hosts/33333333-3333-3333-3333-333333333333/set");
     }
 
     // -------------------------------------------------------------------------
@@ -1536,68 +1541,38 @@ mod tests {
 
     #[test]
     fn build_host_packages_discovery_config_platform_mqtt() {
-        let v = build_host_packages_discovery_config(
-            "uptrakit",
-            tenant(),
-            host(),
-            "myserver",
-        );
+        let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "myserver");
         assert_eq!(v["platform"], "mqtt");
     }
 
     #[test]
     fn build_host_packages_discovery_config_payload_install() {
-        let v = build_host_packages_discovery_config(
-            "uptrakit",
-            tenant(),
-            host(),
-            "myserver",
-        );
+        let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "myserver");
         assert_eq!(v["payload_install"], "install");
     }
 
     #[test]
     fn build_host_packages_discovery_config_name_includes_packages() {
-        let v = build_host_packages_discovery_config(
-            "uptrakit",
-            tenant(),
-            host(),
-            "myserver",
-        );
+        let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "myserver");
         assert_eq!(v["name"], "myserver packages");
     }
 
     #[test]
     fn build_host_packages_discovery_config_default_entity_id() {
-        let v = build_host_packages_discovery_config(
-            "uptrakit",
-            tenant(),
-            host(),
-            "My Server",
-        );
+        let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "My Server");
         assert_eq!(v["default_entity_id"], "my_server_packages");
     }
 
     #[test]
     fn build_host_packages_discovery_config_state_topic_correct() {
-        let v = build_host_packages_discovery_config(
-            "uptrakit",
-            tenant(),
-            host(),
-            "h",
-        );
+        let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "h");
         let expected = host_packages_state_topic("uptrakit", host());
         assert_eq!(v["state_topic"], expected.as_str());
     }
 
     #[test]
     fn build_host_packages_discovery_config_device_identifiers() {
-        let v = build_host_packages_discovery_config(
-            "uptrakit",
-            tenant(),
-            host(),
-            "h",
-        );
+        let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "h");
         let tenant_simple = tenant().simple().to_string();
         let host_simple = host().simple().to_string();
         let expected_id = format!("uptrakit_host_{tenant_simple}_{host_simple}");
@@ -1606,12 +1581,7 @@ mod tests {
 
     #[test]
     fn build_host_packages_discovery_config_device_name_is_hostname() {
-        let v = build_host_packages_discovery_config(
-            "uptrakit",
-            tenant(),
-            host(),
-            "pangolin",
-        );
+        let v = build_host_packages_discovery_config("uptrakit", tenant(), host(), "pangolin");
         assert_eq!(v["device"]["name"], "pangolin");
     }
 

@@ -14,8 +14,7 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use std::collections::HashSet;
 use time::OffsetDateTime;
@@ -511,7 +510,12 @@ async fn process_plugin_result(
                 };
                 if !item.targets.is_empty() {
                     process_targets_discovery(
-                        db, tenant_id, host_id, &item_info, &item.targets, now,
+                        db,
+                        tenant_id,
+                        host_id,
+                        &item_info,
+                        &item.targets,
+                        now,
                     )
                     .await?;
                 } else if let Some(existing_pc_id) = result.plugin_config_id {
@@ -900,7 +904,6 @@ struct IdRow {
     id: Uuid,
 }
 
-
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
@@ -909,8 +912,8 @@ mod tests {
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
         PluginRole, PluginType,
     };
-    use uptrakit_shared_db::entity::{host, host_package, plugin_config, tenant};
     use uptrakit_shared_db::entity::prelude::HostPackage;
+    use uptrakit_shared_db::entity::{host, host_package, plugin_config, tenant};
     use uptrakit_shared_types::{SoftwareDiscoveryState, TrackingSystem};
 
     async fn setup_db() -> DatabaseConnection {
@@ -1876,14 +1879,9 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_plugin_config(&db, plugin_config_id, tenant_id).await;
 
-        let inserted = create_or_ignore_ignore_rule(
-            &db,
-            tenant_id,
-            plugin_config_id,
-            "my-package",
-        )
-        .await
-        .expect("should succeed");
+        let inserted = create_or_ignore_ignore_rule(&db, tenant_id, plugin_config_id, "my-package")
+            .await
+            .expect("should succeed");
 
         assert!(inserted, "first insert must return true");
 
@@ -1904,25 +1902,18 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_plugin_config(&db, plugin_config_id, tenant_id).await;
 
-        let first = create_or_ignore_ignore_rule(
-            &db,
-            tenant_id,
-            plugin_config_id,
-            "dup-package",
-        )
-        .await
-        .expect("first call");
+        let first = create_or_ignore_ignore_rule(&db, tenant_id, plugin_config_id, "dup-package")
+            .await
+            .expect("first call");
         assert!(first, "first call must return true (new row)");
 
-        let second = create_or_ignore_ignore_rule(
-            &db,
-            tenant_id,
-            plugin_config_id,
-            "dup-package",
-        )
-        .await
-        .expect("second call");
-        assert!(!second, "second call must return false (duplicate suppressed)");
+        let second = create_or_ignore_ignore_rule(&db, tenant_id, plugin_config_id, "dup-package")
+            .await
+            .expect("second call");
+        assert!(
+            !second,
+            "second call must return false (duplicate suppressed)"
+        );
 
         // Exactly one row must exist after both calls.
         let count = AutodiscoveryIgnore::find()
@@ -1987,7 +1978,11 @@ mod tests {
             .all(&db)
             .await
             .expect("query plugin configs");
-        assert_eq!(configs.len(), 1, "exactly one Homebrew plugin config must exist");
+        assert_eq!(
+            configs.len(),
+            1,
+            "exactly one Homebrew plugin config must exist"
+        );
         assert_eq!(configs[0].name, "Homebrew (Formulae)");
 
         // host_package row must have been created.
@@ -2070,7 +2065,11 @@ mod tests {
             .all(&db)
             .await
             .expect("query host packages");
-        assert_eq!(packages.len(), 1, "must not create duplicate host_package rows");
+        assert_eq!(
+            packages.len(),
+            1,
+            "must not create duplicate host_package rows"
+        );
         assert_eq!(
             packages[0].installed_version.as_deref(),
             Some("1.24.5"),
