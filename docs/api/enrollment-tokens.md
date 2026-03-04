@@ -174,7 +174,7 @@ Types are defined in `crates/shared/web-api-types/src/enrollment_tokens.rs`:
 | `crates/shared/db/src/migration/m20260227_000001_enrollment_tokens.rs` | Database migration |
 | `crates/shared/web-api-types/src/enrollment_tokens.rs` | Request/response types |
 | `crates/ui/web-api/src/routes/enrollment_tokens.rs` | Route handlers |
-| `crates/ui/web-api/src/queries/enrollment_tokens.rs` | Database queries |
+| `crates/ui/web-api-queries/src/queries/enrollment_tokens.rs` | Database queries |
 | `crates/shared/openapi-client/src/enrollment_tokens.rs` | Typed client methods |
 
 ## Related Documentation

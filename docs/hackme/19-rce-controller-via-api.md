@@ -164,6 +164,6 @@ The most impactful indirect attacks are:
 - [ATK-16: RCE via Plugin Config Manipulation](16-rce-plugin-config-manipulation.md)
 - `crates/ui/web-api/src/middleware/resolve_proxy_headers.rs` — header trust and
   stripping
-- `crates/ui/web-api/src/auth/rate_limit.rs` — the single raw SQL statement
+- `crates/ui/web-api-auth/src/auth/rate_limit.rs` — the single raw SQL statement
 - `crates/ui/web-api/src/notifications/message_builder.rs` — notification body
   construction

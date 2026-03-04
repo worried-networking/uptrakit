@@ -146,7 +146,7 @@ environment.
 ## Permissions Model - Detailed
 
 Authorization uses a typed `Permission` enum (defined in `crates/shared/web-api-types/src/permissions.rs`, re-exported
-from `crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name strings. The enum variants are:
+from `crates/ui/web-api-auth/src/auth/permissions.rs`) rather than raw role-name strings. The enum variants are:
 
 | Permission | Serialized name | Purpose |
 | --- | --- | --- |

@@ -103,7 +103,9 @@ uptrakit/
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-packages, services, software-items, plugin-configs, autodiscovery, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
-│       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API; split into app_state.rs, ca_snapshot.rs, router.rs modules; auth/auth_method.rs hosts AuthMethod; test_harness/ shared integration test fixtures (TestApp, TestClient, DB/HTTP helpers); integration_tests/ REST API + WebSocket integration tests (#[cfg(all(test, feature = "db-sqlite"))])
+│       ├── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API layer; routes, middleware, AppState, router, notification_service; re-exports auth/queries from sibling crates; test_harness/ shared integration test fixtures (TestApp, TestClient, DB/HTTP helpers); integration_tests/ REST API + WebSocket integration tests (#[cfg(all(test, feature = "db-sqlite"))])
+│       ├── web-api-auth/               # uptrakit-web-api-auth                  (lib)  — authentication subsystem: auth module (JWT, sessions, OIDC, tokens, permissions), SettingKey, settings_store
+│       └── web-api-queries/            # uptrakit-web-api-queries               (lib)  — database query logic: all query modules, TenantDb, ServiceNotifier trait
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
 │   │   ├── lib/                        # Shared modules: api client, auth store, types, utils, notifications, sse.ts (SSE connection utility)
@@ -155,12 +157,12 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 
 | Feature | Default | Description |
 | --- | --- | --- |
-| `oidc` | Yes | OpenID Connect authentication. Gates the `openidconnect` dependency and all OIDC-specific modules (`oidc_auth`, `oidc_providers`, `oidc_state`), routes, OpenAPI schemas, rate limit entries, and `AppState` stores. Non-OIDC types (`AuthMethod::Oidc`, `require_token_for_oidc`, OIDC DB entities) remain unconditional. |
+| `oidc` | Yes | OpenID Connect authentication. Propagates to `uptrakit-web-api-auth/oidc`. Gates the `openidconnect` dependency and all OIDC-specific modules (`oidc_auth`, `oidc_providers`, `oidc_state`), routes, OpenAPI schemas, rate limit entries, and `AppState` stores. Non-OIDC types (`AuthMethod::Oidc`, `require_token_for_oidc`, OIDC DB entities) remain unconditional. |
 | `swagger-ui` | No | Swagger UI at `/swagger-ui` |
-| `db-sqlite` | No | SQLite backend |
-| `db-postgres` | No | PostgreSQL backend |
-| `db-mysql` | No | MySQL backend |
-| `db-all` | No | All database backends |
+| `db-sqlite` | No | SQLite backend. Propagates to `uptrakit-web-api-queries/db-sqlite`. |
+| `db-postgres` | No | PostgreSQL backend. Propagates to `uptrakit-web-api-queries/db-postgres`. |
+| `db-mysql` | No | MySQL backend. Propagates to `uptrakit-web-api-queries/db-mysql`. |
+| `db-all` | No | All database backends. Propagates to `uptrakit-web-api-queries/db-all`. |
 
 ### Build profiles
 
@@ -266,7 +268,7 @@ These are non-negotiable design constraints. Do not violate them.
    migrations. Partial unique indexes use `Index::create().and_where()`, composite foreign keys use
    `ForeignKey::create().from_tbl().from_col().to_col()`, and `INSERT...SELECT` uses `Query::insert().select_from()`.
    **Approved exceptions** (each must have an inline comment naming the limitation):
-   - Rate limiter (`crates/ui/web-api/src/auth/rate_limit.rs`): `CASE WHEN` in `ON CONFLICT DO UPDATE` — SeaORM's
+   - Rate limiter (`crates/ui/web-api-auth/src/auth/rate_limit.rs`): `CASE WHEN` in `ON CONFLICT DO UPDATE` — SeaORM's
      `on_conflict` builder doesn't support conditional expressions. Fully parameterized (no injection risk).
    - SQLite-specific functions (`strftime`, `typeof`) in migrations — no sea_query equivalent.
    - `PRAGMA foreign_keys` in migrations — SQLite-specific pragma with no sea_query equivalent.
@@ -564,12 +566,12 @@ for user review. Key invariants:
 | `crates/shared/db/src/entity/host_software_item_plugin.rs` | SeaORM entity for role-based plugin assignments |
 | `crates/shared/db/src/entity/autodiscovery_ignore.rs` | SeaORM entity for ignore rules |
 | `crates/shared/agent-core/src/discovery.rs` | `handle_discover_software()` agent-side logic |
-| `crates/ui/web-api/src/queries/autodiscovery.rs` | DB helpers + `process_discovery_results()` |
+| `crates/ui/web-api-queries/src/queries/autodiscovery.rs` | DB helpers + `process_discovery_results()` |
 | `crates/ui/web-api/src/routes/autodiscovery.rs` | Ignore list CRUD routes |
 | `crates/ui/web-api/src/routes/service_ws/handler/discovery.rs` | `trigger_discovery_for_agent_host()` helper — applies allowlist before dispatching |
 | `crates/shared/db/src/entity/tenant_discovery_allowlist.rs` | SeaORM entity for tenant-wide discovery allowlist |
 | `crates/shared/db/src/entity/host_discovery_allowlist.rs` | SeaORM entity for per-host discovery allowlist |
-| `crates/ui/web-api/src/queries/discovery_allowlist.rs` | DB helpers: list, add, remove, and `load_*_allowlist_set()` for filter lookups |
+| `crates/ui/web-api-queries/src/queries/discovery_allowlist.rs` | DB helpers: list, add, remove, and `load_*_allowlist_set()` for filter lookups |
 | `crates/ui/web-api/src/routes/discovery_allowlist.rs` | Route handlers for tenant/host allowlist CRUD |
 | `docs/api/autodiscovery.md` | Full API reference for autodiscovery endpoints |
 | `docs/api/discovery-allowlist.md` | Full API reference for discovery allowlist endpoints |
@@ -670,11 +672,11 @@ Security update entities: same device as host package entities (`uptrakit_host_{
 | `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager`: software state + host package state cache, `publish_host_package_states`, `resolve_update_trigger`, `resolve_host_package_update_trigger`, `resolve_host_security_update_trigger` |
 | `crates/core/mqtt/src/mqtt_client.rs` | `MqttServiceEvent` enum, `publish_retained`, `subscribe_topic`, HA status topic handling |
 | `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler; `MqttTriggerHostPackageUpdate` dispatch |
-| `crates/ui/web-api/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items + `load_host_package_host_states_for_tenant` |
+| `crates/ui/web-api-queries/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items + `load_host_package_host_states_for_tenant` |
 | `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + optional NATS publish); merges host package states |
 | `crates/ui/web-api/src/routes/service_ws/handler/mqtt.rs` | `MqttTriggerUpdate` and `MqttTriggerHostPackageUpdate` handlers |
-| `crates/ui/web-api/src/queries/update_triggers.rs` | `trigger_update_for_host` (refactored into `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent` layers); shared by REST, MQTT, and batch handlers |
-| `crates/ui/web-api/src/queries/update_batches.rs` | Batch update logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch`, `trigger_all_host_package_updates_for_host` |
+| `crates/ui/web-api-queries/src/queries/update_triggers.rs` | `trigger_update_for_host` (refactored into `validate_update_preconditions`, `create_update_history_record`, `dispatch_update_to_agent` layers); shared by REST, MQTT, and batch handlers |
+| `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch update logic: `find_outdated_items_for_host`, `create_batch`, `dispatch_next_in_batch`, `trigger_all_host_package_updates_for_host` |
 | `crates/ui/web-api/src/routes/update_batches.rs` | Batch update route handlers + SSE batch progress endpoint |
 | `crates/ui/web-api/src/batch_progress_broadcaster.rs` | `BatchProgressBroadcaster`: per-batch `broadcast` channels for SSE streaming |
 | `crates/shared/web-api-types/src/update_batches.rs` | Batch API types (`HostBatchUpdateRequest`, `ItemBatchUpdateRequest`, `BatchUpdateResponse`, etc.) |
@@ -791,7 +793,7 @@ The NATS server URL is persisted in the global `settings` table under key `nats.
 It is reconciled with the `--nats-url` CLI flag at startup using the standard 5-case priority. Changing the
 URL via `PUT /api/v1/settings/nats` or `uptrakit settings nats set` requires a controller restart to take
 effect. The `SettingsSnapshot.nats_url` field is a `MaskedUrl` that redacts the password in all
-serialized/logged output. See `crates/ui/web-api/src/setting_key.rs` (`NatsUrl` variant) and
+serialized/logged output. See `crates/ui/web-api-auth/src/setting_key.rs` (`NatsUrl` variant) and
 `docs/development/nats-integration.md` for full details.
 
 #### REST API
@@ -826,8 +828,8 @@ and appears in `/api/v1/system-services`, not `/api/v1/services`.
 | `crates/shared/db/src/entity/system_service.rs` | SeaORM entity for `system_services` table |
 | `crates/shared/db/src/entity/system_service_certificate.rs` | SeaORM entity for `system_service_certificates` table |
 | `crates/shared/db/src/entity/system_enrollment_token.rs` | SeaORM entity for `system_enrollment_tokens` table |
-| `crates/ui/web-api/src/queries/system_services.rs` | DB query helpers (list, get, approve, reject, deactivate, update) |
-| `crates/ui/web-api/src/queries/system_enrollment_tokens.rs` | DB query helpers for system enrollment tokens |
+| `crates/ui/web-api-queries/src/queries/system_services.rs` | DB query helpers (list, get, approve, reject, deactivate, update) |
+| `crates/ui/web-api-queries/src/queries/system_enrollment_tokens.rs` | DB query helpers for system enrollment tokens |
 | `crates/ui/web-api/src/routes/system_services.rs` | Route handlers for `/api/v1/system-services` |
 | `crates/ui/web-api/src/routes/system_enrollment_tokens.rs` | Route handlers for `/api/v1/system-enrollment-tokens` |
 | `crates/shared/web-api-types/src/system_services.rs` | `SystemServiceResponse`, `UpdateSystemServiceRequest`, `ListSystemServicesQuery` |
@@ -877,7 +879,7 @@ The frontend filters services by capability instead of type and displays `servic
 | `crates/ui/web-api/src/service_connections.rs` | `register()`, `broadcast_by_capability()` |
 | `crates/shared/db/src/entity/enrollment_token.rs` | `enrollment_tokens` SeaORM entity |
 | `crates/ui/web-api/src/routes/enrollment_tokens.rs` | Enrollment token REST endpoints |
-| `crates/ui/web-api/src/queries/enrollment_tokens.rs` | Enrollment token DB queries |
+| `crates/ui/web-api-queries/src/queries/enrollment_tokens.rs` | Enrollment token DB queries |
 | `crates/shared/service-sdk/src/connection.rs` | `agreed_capabilities` field + accessors |
 | `crates/shared/service-sdk/src/event_loop.rs` | Capability intersection in `ServiceSettings` handler |
 | `crates/ui/web-api/src/routes/service_ws/protocol.rs` | `controller_capabilities()`, `ServiceSettingsPayload` construction |
@@ -1082,7 +1084,7 @@ tenant-scoped rules, builds a `DeliveryMessage`, and hands it to the appropriate
 | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus` enums |
 | `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher`, `message_builder` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers (channels, rules, log, telegram callback) |
-| `crates/ui/web-api/src/queries/notifications.rs` | CRUD query helpers using `TenantDb` |
+| `crates/ui/web-api-queries/src/queries/notifications.rs` | CRUD query helpers using `TenantDb` |
 | `crates/shared/openapi-client/src/notifications.rs` | Typed HTTP client methods |
 | `crates/ui/cli/src/commands/notifications.rs` | CLI `notifications` command group |
 
@@ -1133,12 +1135,12 @@ fire-and-forget `mpsc::UnboundedSender` dispatcher pattern as notifications.
 | `crates/shared/db/src/entity/audit_log.rs` | SeaORM entity for `audit_logs` table (tenant-scoped, no FK on `tenant_id`) |
 | `crates/shared/db/src/entity/system_audit_log.rs` | SeaORM entity for `system_audit_logs` table (global) |
 | `crates/ui/web-api/src/middleware/audit_log.rs` | Axum middleware (runs inside `require_auth`); detects system routes by prefix (`/api/v1/global-settings/`, `/api/v1/system-services`) |
-| `crates/ui/web-api/src/queries/audit_logs.rs` | `list_tenant_audit_logs` + `list_system_audit_logs` with filter/pagination support |
+| `crates/ui/web-api-queries/src/queries/audit_logs.rs` | `list_tenant_audit_logs` + `list_system_audit_logs` with filter/pagination support |
 | `crates/ui/web-api/src/routes/audit_logs.rs` | `GET /api/v1/audit-logs` (`CanViewAuditLogs`) and `GET /api/v1/system-audit-logs` (`CanViewSystemAuditLogs`) |
 | `crates/shared/web-api-types/src/audit_logs.rs` | `AuditLogResponse`, `SystemAuditLogResponse`, `AuditLogListParams` |
 | `crates/shared/openapi-client/src/audit_logs.rs` | `list_audit_logs` + `list_system_audit_logs` client methods |
 | `crates/ui/cli/src/commands/audit_logs.rs` | `audit-logs list` (tenant) and `audit-logs system list` (system) CLI subcommands |
-| `crates/ui/web-api/src/setting_key.rs` | `AuditLogFilter` + `AuditLogRetentionDays` setting keys |
+| `crates/ui/web-api-auth/src/setting_key.rs` | `AuditLogFilter` + `AuditLogRetentionDays` setting keys |
 | `crates/ui/web-api/src/app_state.rs` | `audit_log_filter` + `audit_log_dispatcher` fields |
 | `crates/core/controller/src/cli.rs` | `AuditLogBackendArg`, `AuditLogFilterArg` enums + CLI flags |
 | `crates/core/controller/src/main.rs` | Backend construction + AppState wiring |

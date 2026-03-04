@@ -26,7 +26,7 @@ This separation means adding a new channel never requires changes to event-produ
 | `uptrakit-notification-channels` | `crates/shared/notification-channels/` | `NotificationChannel` trait, `DeliveryMessage`, webhook + telegram impls, `ChannelRegistry` |
 | `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, public enums (`NotificationEventType`, `NotificationChannelType`, `NotificationDeliveryStatus`) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/notifications/` | Dispatcher, internal event types, `message_builder` |
-| `uptrakit-web-api` | `crates/ui/web-api/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
+| `uptrakit-web-api` | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers + Telegram callback endpoint |
 
 ## Feature flags
@@ -534,7 +534,7 @@ The same merge logic is applied in the `test_channel` route handler
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget background dispatcher loop |
 | `crates/ui/web-api/src/notifications/events.rs` | `NotificationEvent`, `NotificationEventDetails`, `ActionParams` |
 | `crates/ui/web-api/src/notifications/message_builder.rs` | Event-to-`DeliveryMessage` translation |
-| `crates/ui/web-api/src/queries/notifications.rs` | DB query helpers, `ChannelQueryError`, `RuleQueryError` |
+| `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers, `ChannelQueryError`, `RuleQueryError` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST route handlers, Telegram callback |
 
 ## Cross-references

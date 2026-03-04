@@ -369,8 +369,8 @@ See [NATS Integration — Plugin Config Protection](../development/nats-integrat
 | --- | --- |
 | `crates/shared/crypto/src/lib.rs` | `EncryptedString` type, `init_master_key()`, `DataKeyRing`, AES-256-GCM encrypt/decrypt, key verification, `ENC:v1:`/`ENC:v2:`/`ENC:v3:` formats, DEK wrap/unwrap |
 | `crates/shared/types/src/secret_string.rs` | `SecretString` newtype with redacted Debug/Display |
-| `crates/ui/web-api/src/settings_store.rs` | JWT signing key storage with AAD `"uptrakit:settings:jwt_signing_key"` |
-| `crates/ui/web-api/src/setting_key.rs` | `SettingKey::MasterKeyVerification` — stores the key verification token |
+| `crates/ui/web-api-auth/src/settings_store.rs` | JWT signing key storage with AAD `"uptrakit:settings:jwt_signing_key"` |
+| `crates/ui/web-api-auth/src/setting_key.rs` | `SettingKey::MasterKeyVerification` — stores the key verification token |
 | `crates/core/controller/src/startup.rs` | `verify_master_key()`, `init_data_key_ring()`, `rotate_master_key()` |
 | `crates/core/controller/src/reencrypt.rs` | Automatic v3 re-encryption of all encrypted columns and settings |
 | `crates/core/agent-ssh/src/main.rs` | SSH agent DEK ring init, v3 re-encryption, master key rotation |

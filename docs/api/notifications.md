@@ -581,7 +581,7 @@ Types are defined in `crates/shared/web-api-types/src/notifications.rs`:
 | File | Purpose |
 | --- | --- |
 | `crates/ui/web-api/src/routes/notifications.rs` | Route handlers (channels, rules, log, Telegram callback) |
-| `crates/ui/web-api/src/queries/notifications.rs` | Database query helpers and error types |
+| `crates/ui/web-api-queries/src/queries/notifications.rs` | Database query helpers and error types |
 | `crates/shared/web-api-types/src/notifications.rs` | Request/response types and enum definitions |
 | `crates/shared/notification-channels/src/channel.rs` | `NotificationChannel` trait and `DeliveryMessage` type |
 | `crates/shared/notification-channels/src/webhook.rs` | Webhook channel implementation |

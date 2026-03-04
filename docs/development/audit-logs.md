@@ -336,7 +336,7 @@ The permissions are seeded in migration `m20260311_000001_audit_log_permissions`
 
 ### Query module
 
-`crates/ui/web-api/src/queries/audit_logs.rs` provides:
+`crates/ui/web-api-queries/src/queries/audit_logs.rs` provides:
 
 ```rust
 pub async fn list_tenant_audit_logs(
@@ -396,12 +396,12 @@ Error types: `AuditLogQueryError::Database` (500) and `AuditLogQueryError::Inval
 | `crates/shared/db/src/entity/audit_log.rs` | SeaORM entity for `audit_logs` table |
 | `crates/shared/db/src/entity/system_audit_log.rs` | SeaORM entity for `system_audit_logs` table |
 | `crates/ui/web-api/src/middleware/audit_log.rs` | Axum middleware + system-route detection |
-| `crates/ui/web-api/src/queries/audit_logs.rs` | DB query functions for tenant + system logs |
+| `crates/ui/web-api-queries/src/queries/audit_logs.rs` | DB query functions for tenant + system logs |
 | `crates/ui/web-api/src/routes/audit_logs.rs` | REST route handlers |
 | `crates/shared/web-api-types/src/audit_logs.rs` | `AuditLogResponse`, `SystemAuditLogResponse`, `AuditLogListParams` |
 | `crates/shared/openapi-client/src/audit_logs.rs` | OpenAPI client methods |
 | `crates/ui/cli/src/commands/audit_logs.rs` | CLI `audit-logs` subcommand |
-| `crates/ui/web-api/src/setting_key.rs` | `AuditLogFilter` + `AuditLogRetentionDays` setting keys |
+| `crates/ui/web-api-auth/src/setting_key.rs` | `AuditLogFilter` + `AuditLogRetentionDays` setting keys |
 | `crates/ui/web-api/src/app_state.rs` | `AppState` fields: `audit_log_filter`, `audit_log_dispatcher` |
 | `crates/core/controller/src/cli.rs` | `AuditLogBackendArg`, `AuditLogFilterArg` enums + CLI flags |
 | `crates/core/controller/src/main.rs` | Backend construction + AppState wiring |

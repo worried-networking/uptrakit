@@ -123,9 +123,9 @@
 
 - [Auth and Authorization](../security/auth-and-authorization.md)
 - [Secrets and Encryption](../security/secrets-and-encryption.md)
-- `crates/ui/web-api/src/auth/jwt.rs` — `JwtManager`, `AccessTokenClaims`
-- `crates/ui/web-api/src/auth/session.rs` — `SessionService`, refresh token rotation
-- `crates/ui/web-api/src/auth/api_token.rs` — `ApiTokenService`
-- `crates/ui/web-api/src/auth/token_denylist.rs` — `TokenDenylist`
-- `crates/ui/web-api/src/auth/refresh_cookie.rs` — cookie attributes
+- `crates/ui/web-api-auth/src/auth/jwt.rs` — `JwtManager`, `AccessTokenClaims`
+- `crates/ui/web-api-auth/src/auth/session.rs` — `SessionService`, refresh token rotation
+- `crates/ui/web-api-auth/src/auth/api_token.rs` — `ApiTokenService`
+- `crates/ui/web-api-auth/src/auth/token_denylist.rs` — `TokenDenylist`
+- `crates/ui/web-api-auth/src/auth/refresh_cookie.rs` — cookie attributes
 - `crates/ui/web-api/src/middleware/require_auth.rs` — auth middleware

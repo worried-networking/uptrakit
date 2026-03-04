@@ -51,7 +51,7 @@ cargo deny check                                                     # Validate 
 ```
 
 Workspace lints (`[workspace.lints]` in root `Cargo.toml`) enforce `warnings = "deny"` and
-`clippy::all = "deny"` across all 26 crates. The `-- -D warnings` flag is no longer needed on
+`clippy::all = "deny"` across all 28 crates. The `-- -D warnings` flag is no longer needed on
 clippy commands — it is inherited automatically via `[lints] workspace = true` in each crate.
 
 **Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/` to exist.
@@ -60,11 +60,13 @@ Build the frontend first (`cd frontend && npm ci && npm run build`) before runni
 ### OIDC feature toggle
 
 The `oidc` feature (default-enabled on `uptrakit-web-api` and `uptrakit-controller`) gates
-`openidconnect` and its transitive dependencies. Changes that touch OIDC-gated code, `AppState`
-fields, or authentication routes should also be verified with the feature disabled:
+`openidconnect` and its transitive dependencies. It propagates from `uptrakit-web-api` to
+`uptrakit-web-api-auth/oidc`. Changes that touch OIDC-gated code, `AppState` fields, or
+authentication routes should also be verified with the feature disabled:
 
 ```sh
-cargo check -p uptrakit-web-api --no-default-features                               # web-api without OIDC
+cargo check -p uptrakit-web-api-auth --no-default-features                           # auth crate without OIDC
+cargo check -p uptrakit-web-api --no-default-features                                # web-api without OIDC
 cargo check -p uptrakit-controller --no-default-features --features db-sqlite        # controller without OIDC
 cargo clippy -p uptrakit-web-api --no-default-features -- -D warnings                # clippy without OIDC
 cargo clippy -p uptrakit-controller --no-default-features --features db-sqlite -- -D warnings

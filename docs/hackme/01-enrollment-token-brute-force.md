@@ -83,5 +83,5 @@
 - [Auth and Authorization](../security/auth-and-authorization.md)
 - [Secrets and Encryption](../security/secrets-and-encryption.md)
 - `crates/ui/web-api/src/routes/agents.rs` — `do_enroll()`
-- `crates/ui/web-api/src/auth/password.rs` — `hash_password()`, `verify_password()`
-- `crates/ui/web-api/src/auth/token.rs` — `generate_secure_token()`, `hash_token()`
+- `crates/ui/web-api-auth/src/auth/password.rs` — `hash_password()`, `verify_password()`
+- `crates/ui/web-api-auth/src/auth/token.rs` — `generate_secure_token()`, `hash_token()`

@@ -132,7 +132,7 @@ let store = MyStore::with_clock(db, clock_fn);
 *clock.lock() += time::Duration::seconds(120);
 ```
 
-See `RateLimitStore::with_clock` (`crates/ui/web-api/src/auth/rate_limit.rs`)
+See `RateLimitStore::with_clock` (`crates/ui/web-api-auth/src/auth/rate_limit.rs`)
 for the canonical example.
 
 ### Rules
@@ -166,18 +166,23 @@ If you prefer `nextest`:
 cargo nextest run --all-features
 ```
 
-### Running `uptrakit-web-api` tests
+### Running web-API tests
 
-Some query tests in `uptrakit-web-api` (specifically in
-`crates/ui/web-api/src/queries/hosts.rs` and `crates/ui/web-api/src/queries/autodiscovery.rs`)
+The web-API is split across three crates: `uptrakit-web-api`, `uptrakit-web-api-auth`, and
+`uptrakit-web-api-queries`. Test each independently or run the workspace together.
+
+Some query tests in `uptrakit-web-api-queries` (specifically in
+`crates/ui/web-api-queries/src/queries/hosts.rs` and `crates/ui/web-api-queries/src/queries/autodiscovery.rs`)
 use an in-memory SQLite database and are gated behind `#[cfg(all(test, feature = "db-sqlite"))]`.
 They are excluded from compilation entirely without the feature, so running
-`cargo test -p uptrakit-web-api` alone will not execute them.
+`cargo test -p uptrakit-web-api-queries` alone will not execute them.
 
-Run the full `uptrakit-web-api` test suite — including DB-backed tests — with:
+Run the full test suite for all three crates:
 
 ```bash
-cargo test -p uptrakit-web-api --features db-sqlite
+cargo test -p uptrakit-web-api-auth --all-features     # auth + settings + registration tests
+cargo test -p uptrakit-web-api-queries --features db-sqlite  # DB-backed query tests
+cargo test -p uptrakit-web-api --features db-sqlite    # route/integration tests
 ```
 
 Or run the entire workspace (preferred, mirrors CI):

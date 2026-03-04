@@ -284,6 +284,28 @@ An in-process `UpdateOutputBroadcaster` (`crates/ui/web-api/src/update_output_br
 out to both the database and any SSE subscribers. The SSE handler replays stored lines on connect and then streams new
 lines in real time. The frontend renders output in an xterm.js terminal with full ANSI color support.
 
+## Web-API crate split
+
+The HTTP API is composed of three independent crates under `crates/ui/`:
+
+- **`uptrakit-web-api-auth`** (`crates/ui/web-api-auth/`): authentication subsystem (~5k lines).
+  Contains the `auth` module (JWT, sessions, OIDC, tokens, permissions, registration), `SettingKey`,
+  and `settings_store`. The `oidc` feature gates `openidconnect` dependency.
+
+- **`uptrakit-web-api-queries`** (`crates/ui/web-api-queries/`): database query logic (~10.5k lines).
+  Contains all query modules, `TenantDb` (tenant-scoped DB wrapper), and the `ServiceNotifier` trait
+  (decouples queries from the concrete `NotificationService`). DB feature flags (`db-sqlite`,
+  `db-postgres`, `db-mysql`) are forwarded from the parent crate.
+
+- **`uptrakit-web-api`** (`crates/ui/web-api/`): HTTP API layer (~27k lines). Contains routes,
+  middleware, `AppState`, router, `NotificationService`, PKI utilities, and SSE broadcasters.
+  Depends on both sibling crates and re-exports their public APIs at the original module paths
+  (`crate::auth::*`, `crate::queries::*`, `crate::SettingKey`, `crate::settings_store::*`)
+  for backward compatibility.
+
+The auth and queries crates have no dependency on each other, enabling parallel compilation.
+Only `uptrakit-controller` depends on `uptrakit-web-api`.
+
 ## OpenAPI Client
 
 The `uptrakit-openapi-client` crate (`crates/shared/openapi-client/`) provides a typed HTTP
@@ -294,8 +316,9 @@ See [OpenAPI Client](docs/development/openapi-client.md) for details.
 
 ## Optional OIDC support
 
-OpenID Connect (OIDC) authentication is gated behind the `oidc` Cargo feature on `uptrakit-web-api`
-(enabled by default, propagated via the controller's `oidc` feature). When disabled, the
+OpenID Connect (OIDC) authentication is gated behind the `oidc` Cargo feature on `uptrakit-web-api`,
+which propagates to `uptrakit-web-api-auth/oidc` (enabled by default, propagated via the controller's
+`oidc` feature). When disabled, the
 `openidconnect` crate and its heavy transitive tree (`oauth2`, `reqwest` 0.12, RSA/EC crypto,
 `rand` 0.8, `thiserror` v1, `base64` 0.21) are excluded from the build. OIDC DB entities
 (`oidc_provider`, `user_oidc_link`), `AuthMethod::Oidc`, and the `require_token_for_oidc`

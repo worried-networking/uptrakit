@@ -159,7 +159,7 @@ pub enum MyError {
 pub type Result<T> = std::result::Result<T, Report<MyError>>;
 ```
 
-Real example: [`crates/ui/web-api/src/auth/error.rs`](../../crates/ui/web-api/src/auth/error.rs) (`AuthError`),
+Real example: [`crates/ui/web-api-auth/src/auth/error.rs`](../../crates/ui/web-api-auth/src/auth/error.rs) (`AuthError`),
 [`crates/core/controller/src/db/error.rs`](../../crates/core/controller/src/db/error.rs) (`DbError`).
 
 ### Pattern 2: Implement `ReportConversion` for cross-boundary error conversion

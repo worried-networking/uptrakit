@@ -102,5 +102,5 @@ See [Batch Update Endpoints](../api/http-web-api.md#batch-update-endpoints) for 
 | `crates/shared/web-api-types/src/update_batches.rs` | Batch API types (requests, responses) |
 | `crates/ui/web-api/src/routes/update_history.rs` | Route handlers + unit tests |
 | `crates/ui/web-api/src/routes/update_batches.rs` | Batch route handlers + SSE endpoint |
-| `crates/ui/web-api/src/queries/update_batches.rs` | Batch query logic |
+| `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch query logic |
 | `crates/ui/web-api/src/batch_progress_broadcaster.rs` | In-process SSE broadcast registry |

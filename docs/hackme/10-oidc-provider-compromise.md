@@ -105,7 +105,7 @@
 - [Auth and Authorization](../security/auth-and-authorization.md)
 - [Auth Flows](../api/auth-flows.md)
 - [Secrets and Encryption](../security/secrets-and-encryption.md)
-- `crates/ui/web-api/src/auth/authentication.rs` — `resolve_oidc_user()`,
+- `crates/ui/web-api-auth/src/auth/authentication.rs` — `resolve_oidc_user()`,
   `sync_oidc_roles()`
-- `crates/ui/web-api/src/auth/oidc_state.rs` — `OidcFlowStore`, PKCE, CSRF
+- `crates/ui/web-api-auth/src/auth/oidc_state.rs` — `OidcFlowStore`, PKCE, CSRF
 - `crates/ui/web-api/src/routes/oidc_auth.rs` — OIDC route handlers

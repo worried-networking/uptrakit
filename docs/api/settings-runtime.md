@@ -117,7 +117,7 @@ returns `true` when mode is `Invite` AND (`is_first_user` OR `require_token_for_
 | --- | --- | --- | --- |
 | `registration.require_token_for_oidc` | bool | `false` | When `true` and mode is `Invite`, require registration token for OIDC user creation |
 
-**New store:** `OidcRegistrationStore` in `crates/ui/web-api/src/auth/oidc_state.rs` — follows the same atomic-delete
+**New store:** `OidcRegistrationStore` in `crates/ui/web-api-auth/src/auth/oidc_state.rs` — follows the same atomic-delete
 pattern as `AccountLinkStore`. Methods: `insert()`, `get()` (non-destructive read for pre-validation), `take()` (atomic
 consume), `cleanup_expired()`.
 
@@ -148,7 +148,7 @@ At startup, `Settings::load(db, tenant_id)` issues two bulk queries:
 The two `RawSettings` maps (`HashMap<String, serde_json::Value>`) are merged (global first, then
 tenant) and distributed to all sub-loaders. After the bulk load, `warn_unrecognised_keys()` logs a
 warning for any DB key not recognised by `SettingKey::from_db_key()`. The `SettingKey` enum
-(defined in `crates/ui/web-api/src/setting_key.rs`) is the single source of truth for all known
+(defined in `crates/ui/web-api-auth/src/setting_key.rs`) is the single source of truth for all known
 setting keys. In tests, `SettingKey::iter()` (via `strum::EnumIter`) provides iteration over every
 variant.
 
@@ -222,7 +222,7 @@ other controller instances. Each revocation site bumps `revocation_version` in t
 | `crates/shared/db/src/entity/settings_version.rs` | SeaORM entity for version tracking |
 | `crates/shared/db/src/migration/m20260209_000001_initial.rs` | Single consolidated migration (includes settings_version + revocation_version) |
 | `crates/shared/db/src/migration/m20260303_000001_global_settings.rs` | Migration: create `global_settings` table, move 13 keys from `settings` |
-| `crates/ui/web-api/src/settings_store.rs` | `upsert_global_setting()`, `load_global_setting()`, `bump_settings_version()`, `bump_global_settings_version()`, `get_settings_versions()`, `bump_revocation_version()`, `get_revocation_version()` |
+| `crates/ui/web-api-auth/src/settings_store.rs` | `upsert_global_setting()`, `load_global_setting()`, `bump_settings_version()`, `bump_global_settings_version()`, `get_settings_versions()`, `bump_revocation_version()`, `get_revocation_version()` |
 | `crates/ui/web-api/src/settings.rs` | `reload_from_db()`, `check_version_and_reload()` |
 | `crates/core/controller/src/crl_manager.rs` | Version-gated CRL rebuild loop |
 

@@ -14,7 +14,7 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
 - Responses use JSON envelopes with standard pagination (`limit`, `offset`, `total`).
 - All entity ID fields in response types are `Uuid`, not `String`. The only exception is `SystemAlert::id`, which uses
   hardcoded string identifiers. This ensures UUID validation at the serialization boundary.
-- Rate limiting applies per-IP via the `api_rate_limits` table (see `crates/ui/web-api/src/auth/rate_limit.rs`). Rate limited endpoints return `429`
+- Rate limiting applies per-IP via the `api_rate_limits` table (see `crates/ui/web-api-auth/src/auth/rate_limit.rs`). Rate limited endpoints return `429`
   with a message describing the limit window.
 - Route handlers enforce permissions via typed Axum extractors (e.g. `CanViewHosts`, `CanManageAgents`) defined in
   `crates/ui/web-api/src/middleware/permission.rs`. The required permission is declared once in the extractor and
@@ -381,7 +381,7 @@ Types are defined in `crates/shared/web-api-types/src/update_batches.rs`:
 | File | Purpose |
 | --- | --- |
 | `crates/ui/web-api/src/routes/update_batches.rs` | Route handlers and SSE endpoint |
-| `crates/ui/web-api/src/queries/update_batches.rs` | Batch query logic |
+| `crates/ui/web-api-queries/src/queries/update_batches.rs` | Batch query logic |
 | `crates/ui/web-api/src/batch_progress_broadcaster.rs` | In-process broadcast registry |
 | `crates/shared/web-api-types/src/update_batches.rs` | Request/response types |
 | `crates/shared/db/src/entity/update_batch.rs` | SeaORM entity |
@@ -417,9 +417,9 @@ examples.
 | File | Purpose |
 | --- | --- |
 | `crates/ui/web-api/src/routes/host_packages.rs` | Route handlers |
-| `crates/ui/web-api/src/queries/host_packages.rs` | CRUD queries |
-| `crates/ui/web-api/src/queries/host_package_ignores.rs` | Ignore list queries |
-| `crates/ui/web-api/src/queries/host_package_triggers.rs` | Update trigger pipeline |
+| `crates/ui/web-api-queries/src/queries/host_packages.rs` | CRUD queries |
+| `crates/ui/web-api-queries/src/queries/host_package_ignores.rs` | Ignore list queries |
+| `crates/ui/web-api-queries/src/queries/host_package_triggers.rs` | Update trigger pipeline |
 | `crates/shared/web-api-types/src/host_packages.rs` | Request/response types |
 
 ## System Services Endpoints
@@ -501,7 +501,7 @@ tokens. All endpoints require `manage_system_services`.
 | File | Purpose |
 | --- | --- |
 | `crates/ui/web-api/src/routes/system_enrollment_tokens.rs` | Route handlers |
-| `crates/ui/web-api/src/queries/system_enrollment_tokens.rs` | DB query helpers |
+| `crates/ui/web-api-queries/src/queries/system_enrollment_tokens.rs` | DB query helpers |
 | `crates/shared/web-api-types/src/system_enrollment_tokens.rs` | Request/response types |
 | `crates/shared/db/src/entity/system_enrollment_token.rs` | SeaORM entity |
 | `crates/shared/openapi-client/src/system_enrollment_tokens.rs` | Typed HTTP client methods |
@@ -539,7 +539,7 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
 | File | Purpose |
 | --- | --- |
 | `crates/ui/web-api/src/routes/system_services.rs` | Route handlers |
-| `crates/ui/web-api/src/queries/system_services.rs` | DB query helpers |
+| `crates/ui/web-api-queries/src/queries/system_services.rs` | DB query helpers |
 | `crates/shared/web-api-types/src/system_services.rs` | Request/response types |
 | `crates/shared/db/src/entity/system_service.rs` | SeaORM entity for `system_services` |
 | `crates/shared/db/src/entity/system_service_certificate.rs` | SeaORM entity for `system_service_certificates` |
@@ -837,7 +837,7 @@ This prevents bypass under database pressure. The check is in `service_ws()` in
 
 ### Implementation
 
-- **Store**: `crates/ui/web-api/src/auth/rate_limit.rs` — `RateLimitStore` with sliding-window counter algorithm using
+- **Store**: `crates/ui/web-api-auth/src/auth/rate_limit.rs` — `RateLimitStore` with sliding-window counter algorithm using
   atomic upserts.
 - **Middleware**: `crates/ui/web-api/src/middleware/rate_limit.rs` — `rate_limit_auth` middleware with
   `LazyLock<HashMap>` endpoint config. Fails open on store errors.
