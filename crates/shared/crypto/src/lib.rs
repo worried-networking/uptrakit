@@ -72,7 +72,9 @@ pub enum CryptoError {
     #[error("master key does not match existing encrypted data")]
     MasterKeyMismatch,
 
-    #[error("duplicate column AAD: column '{column}' in table '{new_table}' conflicts with existing AAD '{existing_aad}'")]
+    #[error(
+        "duplicate column AAD: column '{column}' in table '{new_table}' conflicts with existing AAD '{existing_aad}'"
+    )]
     DuplicateColumnAad {
         column: String,
         existing_aad: String,

@@ -54,12 +54,36 @@ pub(crate) fn register_column_aad_mappings() {
     }
 
     let entries: &[ColumnAadEntry] = &[
-        ColumnAadEntry { table: "ca_certificates",      column: "key_pem",       aad: AAD_CA_KEY_PEM },
-        ColumnAadEntry { table: "oidc_providers",       column: "client_secret", aad: AAD_OIDC_CLIENT_SECRET },
-        ColumnAadEntry { table: "mqtt_clients",         column: "password",      aad: AAD_MQTT_PASSWORD },
-        ColumnAadEntry { table: "mqtt_clients",         column: "ca_cert_pem",   aad: AAD_MQTT_CA_CERT_PEM },
-        ColumnAadEntry { table: "pending_oidc_flows",   column: "pkce_verifier", aad: AAD_PKCE_VERIFIER },
-        ColumnAadEntry { table: "notification_channels", column: "config",       aad: AAD_NOTIFICATION_CONFIG },
+        ColumnAadEntry {
+            table: "ca_certificates",
+            column: "key_pem",
+            aad: AAD_CA_KEY_PEM,
+        },
+        ColumnAadEntry {
+            table: "oidc_providers",
+            column: "client_secret",
+            aad: AAD_OIDC_CLIENT_SECRET,
+        },
+        ColumnAadEntry {
+            table: "mqtt_clients",
+            column: "password",
+            aad: AAD_MQTT_PASSWORD,
+        },
+        ColumnAadEntry {
+            table: "mqtt_clients",
+            column: "ca_cert_pem",
+            aad: AAD_MQTT_CA_CERT_PEM,
+        },
+        ColumnAadEntry {
+            table: "pending_oidc_flows",
+            column: "pkce_verifier",
+            aad: AAD_PKCE_VERIFIER,
+        },
+        ColumnAadEntry {
+            table: "notification_channels",
+            column: "config",
+            aad: AAD_NOTIFICATION_CONFIG,
+        },
     ];
 
     if let Err(e) = uptrakit_crypto::register_column_aad(entries) {
