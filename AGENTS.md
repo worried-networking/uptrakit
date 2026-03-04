@@ -153,6 +153,16 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `db-mysql` | No | MySQL backend |
 | `db-all` | No | All database backends |
 
+### Build profiles
+
+| Profile | Usage | Notes |
+| --- | --- | --- |
+| `dev` (default) | `cargo build` | `debug = "line-tables-only"`, deps at `opt-level = 1`, `aws-lc-sys` at `opt-level = 3`. macOS uses `split-debuginfo=unpacked` (via `.cargo/config.toml`). |
+| `release` | `cargo build --release` | `lto = "fat"`, `codegen-units = 1`, `strip = true`. Production-grade but slow to build. |
+| `release-fast` | `cargo build --profile release-fast` | Inherits `release` with `lto = false`, `codegen-units = 16`, `strip = false`. For iterative release testing — not production. |
+
+See [Build Speed Optimizations](docs/development/setup.md#build-speed-optimizations) for details.
+
 ## General MUST FOLLOW Rules for AI Coding Agents
 
 ### Quality Gates

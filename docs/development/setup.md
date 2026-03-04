@@ -42,6 +42,48 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo deny check
 ```
 
+## Build Speed Optimizations
+
+The workspace includes several settings that speed up development builds
+without affecting release builds or CI.
+
+### Dev profile
+
+The `[profile.dev]` section in the workspace root `Cargo.toml` applies
+these optimizations automatically:
+
+- **`debug = "line-tables-only"`** — reduces debug info to line tables.
+  Backtraces still work, but variables are not inspectable in a debugger.
+  Saves significant compile and link time.
+- **`opt-level = 1` for dependencies** (`[profile.dev.package."*"]`) —
+  compiles all third-party crates at optimization level 1. Minimal
+  compile-time cost, but makes runtime (tests, local runs) noticeably
+  faster. Workspace crates remain at `opt-level = 0` for fast incremental
+  rebuilds.
+- **`opt-level = 3` for `aws-lc-sys`** — the cryptography C library is
+  always fully optimized to avoid extremely slow builds.
+
+### macOS link-time optimization
+
+`.cargo/config.toml` sets `split-debuginfo=unpacked` on macOS, which
+skips the expensive `dsymutil` step during linking. Debug info is kept in
+individual object files instead of being merged into a `.dSYM` bundle.
+
+### `release-fast` profile
+
+The default `release` profile uses `lto = "fat"` and `codegen-units = 1`
+for maximum runtime performance, but is very slow to build. For iterative
+release testing, use the `release-fast` profile:
+
+```bash
+cargo build --profile release-fast -p uptrakit-controller
+```
+
+This profile inherits from `release` but disables LTO and uses
+`codegen-units = 16` for significantly faster builds at the cost of
+slightly larger binaries and marginally lower runtime performance. It is
+not intended for production artifacts.
+
 ## Frontend Workflow
 
 ```bash
