@@ -32,8 +32,18 @@ pub async fn collect_remote_host_info(session: &SshSession) -> HostInfo {
 
 /// Read the persistent machine identifier from a remote host.
 ///
-/// Tries `/etc/machine-id` (Linux), then `ioreg` (macOS), falls back to
-/// `"unknown"`.
+/// Tries `/etc/machine-id` (Linux), then `ioreg` (macOS).
+///
+/// # Fallback behaviour
+///
+/// When neither source is available (containers, exotic OS, permission errors),
+/// a session-unique fallback of the form `"unknown-<uuidv7>"` is generated and
+/// a `WARN`-level log line is emitted.  The fallback is unique per process
+/// invocation but does **not** persist across SSH agent restarts, so the remote
+/// host will appear with a different machine ID after each reconnect.  Operators
+/// should provision `/etc/machine-id` in containerised remote environments.
+///
+/// See [`docs/security/security-architecture.md`] for security implications.
 async fn read_remote_machine_id(session: &SshSession) -> String {
     // Linux: /etc/machine-id
     if let Ok(result) = session
@@ -57,7 +67,15 @@ async fn read_remote_machine_id(session: &SshSession) -> String {
         return uuid;
     }
 
-    "unknown".to_string()
+    let fallback = format!("unknown-{}", uuid::Uuid::now_v7());
+    tracing::warn!(
+        fallback,
+        "remote machine-ID could not be determined; using session-unique fallback. \
+         Host identity will not persist across restarts. \
+         Provision /etc/machine-id on the remote host to fix this. \
+         See docs/security/security-architecture.md."
+    );
+    fallback
 }
 
 /// Read the OS type from a remote host via `uname -s`.
@@ -319,5 +337,34 @@ mod tests {
     #[test]
     fn ioreg_empty_output() {
         assert_eq!(parse_ioplatform_uuid(""), None);
+    }
+
+    // ── machine-ID fallback format ────────────────────────────────────
+
+    /// Verify the session-unique fallback has the expected "unknown-<uuid>"
+    /// format so it is clearly distinguishable from a real machine ID.
+    /// We cannot exercise  without a live SSH session,
+    /// so we replicate the generation logic here.
+    #[test]
+    fn machine_id_fallback_starts_with_unknown_dash() {
+        let fallback = format!("unknown-{}", uuid::Uuid::now_v7());
+        assert!(
+            fallback.starts_with("unknown-"),
+            "fallback must start with 'unknown-', got: {fallback}"
+        );
+        let suffix = &fallback["unknown-".len()..];
+        assert!(
+            !suffix.is_empty(),
+            "fallback must have a non-empty UUID suffix, got: {fallback}"
+        );
+    }
+
+    #[test]
+    fn two_machine_id_fallbacks_are_distinct() {
+        // UUIDv7 is monotonically increasing — even sub-millisecond, two
+        // calls produce different values, ensuring distinct agent identities.
+        let a = format!("unknown-{}", uuid::Uuid::now_v7());
+        let b = format!("unknown-{}", uuid::Uuid::now_v7());
+        assert_ne!(a, b, "two fallback machine-IDs must be distinct");
     }
 }

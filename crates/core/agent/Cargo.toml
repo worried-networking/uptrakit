@@ -21,6 +21,7 @@ uptrakit-directories = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-service-sdk = { workspace = true }
 uptrakit-shared-types = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

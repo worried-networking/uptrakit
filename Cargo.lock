@@ -6480,6 +6480,7 @@ dependencies = [
  "uptrakit-internal-wire",
  "uptrakit-service-sdk",
  "uptrakit-shared-types",
+ "uuid",
 ]
 
 [[package]]

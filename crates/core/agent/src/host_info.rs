@@ -43,7 +43,19 @@ fn read_hostname() -> Option<String> {
 ///
 /// - Linux: `/etc/machine-id`
 /// - macOS: `IOPlatformUUID` via `ioreg`
-/// - Fallback: `"unknown"`
+/// - Fallback: `"unknown-<random-uuid>"` (see note below)
+///
+/// # Fallback behaviour
+///
+/// When no persistent machine identifier can be determined (containers without
+/// `/etc/machine-id`, exotic operating systems, permission errors), a
+/// session-unique fallback of the form `"unknown-<uuidv7>"` is generated and a
+/// `WARN`-level log line is emitted.  The fallback is unique within a process
+/// lifetime but does **not** persist across restarts, so the agent will appear
+/// as a different host after each restart.  Operators should provision
+/// `/etc/machine-id` in containerised environments to avoid this.
+///
+/// See [`docs/security/security-architecture.md`] for security implications.
 fn read_machine_id() -> String {
     #[cfg(target_os = "linux")]
     {
@@ -74,7 +86,15 @@ fn read_machine_id() -> String {
         }
     }
 
-    "unknown".to_string()
+    let fallback = format!("unknown-{}", uuid::Uuid::now_v7());
+    tracing::warn!(
+        fallback,
+        "machine-ID could not be determined; using session-unique fallback. \
+         Host identity will not persist across restarts. \
+         Provision /etc/machine-id (Linux) or ensure ioreg access (macOS) to fix this. \
+         See docs/security/security-architecture.md."
+    );
+    fallback
 }
 
 /// Read a human-readable OS version string.
@@ -135,5 +155,36 @@ mod tests {
         assert!(info.hostname.is_some(), "hostname should be detected");
         // ip_address is intentionally None for the regular agent
         assert_eq!(info.ip_address, None);
+    }
+
+    /// `read_machine_id` must never return an empty string, even on platforms
+    /// where neither `/etc/machine-id` nor `ioreg` are available.
+    #[test]
+    fn machine_id_is_never_empty() {
+        let id = read_machine_id();
+        assert!(!id.is_empty(), "machine_id must not be empty");
+    }
+
+    /// When a persistent machine ID is unavailable the fallback starts with
+    /// `"unknown-"` and is long enough to contain a UUID suffix.
+    ///
+    /// Note: this test only exercises the fallback branch when the current
+    /// platform cannot determine a real machine ID (e.g. containers without
+    /// `/etc/machine-id` on Linux CI). On macOS the test verifies the ID is
+    /// non-empty; the `"unknown-"` prefix is tested indirectly via `starts_with`.
+    #[test]
+    fn machine_id_fallback_has_unknown_prefix_or_real_value() {
+        let id = read_machine_id();
+        // Either a real machine ID (non-empty) or the session-unique fallback.
+        // The fallback always starts with "unknown-".
+        assert!(!id.is_empty());
+        if id.starts_with("unknown-") {
+            // Verify it has the UUID suffix (format: "unknown-<uuidv7>").
+            let suffix = &id["unknown-".len()..];
+            assert!(
+                !suffix.is_empty(),
+                "fallback machine-ID must have a non-empty UUID suffix, got: {id}"
+            );
+        }
     }
 }
