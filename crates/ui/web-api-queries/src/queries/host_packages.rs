@@ -347,16 +347,15 @@ pub async fn delete_host_package_ignore(
 
 /// Load the ignore set for `(host_id, plugin_config_id)`.
 pub async fn load_host_package_ignore_set(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: Uuid,
+    tenant_db: &TenantDb,
     host_id: Uuid,
     plugin_config_id: Uuid,
 ) -> Result<HashSet<String>> {
-    let rules = HostPackageIgnore::find()
-        .filter(host_package_ignore::Column::TenantId.eq(tenant_id))
+    let rules = tenant_db
+        .find::<host_package_ignore::Entity>()
         .filter(host_package_ignore::Column::HostId.eq(host_id))
         .filter(host_package_ignore::Column::PluginConfigId.eq(plugin_config_id))
-        .all(db)
+        .all(tenant_db.db())
         .await
         .context_to()?;
     Ok(rules.into_iter().map(|r| r.package_identifier).collect())
@@ -476,6 +475,70 @@ pub async fn find_or_create_host_package(params: FindOrCreateHostPackageParams<'
     }
 
     Ok(())
+}
+
+// ── Disappearance handling ───────────────────────────────────────────────────
+
+/// Soft-delete host packages that are no longer present in the latest discovery run.
+///
+/// `discovered_identifiers` is the complete set of package identifiers returned by
+/// the most recent discovery pass for this `(host_id, plugin_config_id)` pair.
+/// Any active record whose identifier is absent from that set — and is not in the
+/// `ignore_set` — is considered uninstalled and is soft-deleted (`deactivated_at = now`).
+///
+/// Returns the number of records deactivated.
+pub async fn deactivate_missing_host_packages(
+    tenant_db: &TenantDb,
+    host_id: Uuid,
+    plugin_config_id: Uuid,
+    discovered_identifiers: &HashSet<String>,
+    ignore_set: &HashSet<String>,
+) -> Result<u64> {
+    // Load all active host packages for this (host_id, plugin_config_id) pair.
+    // TenantDb::find() automatically applies the tenant_id filter via TenantScoped.
+    let active = tenant_db
+        .find::<host_package::Entity>()
+        .filter(host_package::Column::HostId.eq(host_id))
+        .filter(host_package::Column::PluginConfigId.eq(plugin_config_id))
+        .filter(host_package::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await
+        .context_to()?;
+
+    // Identify packages no longer present in this discovery snapshot and not ignored.
+    let missing_ids: Vec<Uuid> = active
+        .into_iter()
+        .filter(|pkg| {
+            !discovered_identifiers.contains(&pkg.package_identifier)
+                && !ignore_set.contains(&pkg.package_identifier)
+        })
+        .map(|pkg| pkg.id)
+        .collect();
+
+    if missing_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let count = missing_ids.len() as u64;
+    let now = OffsetDateTime::now_utc();
+
+    // TenantDb::update_many() automatically applies the tenant_id filter.
+    tenant_db
+        .update_many::<host_package::Entity>()
+        .col_expr(host_package::Column::DeactivatedAt, Expr::value(Some(now)))
+        .col_expr(host_package::Column::UpdatedAt, Expr::value(now))
+        .filter(host_package::Column::Id.is_in(missing_ids))
+        .exec(tenant_db.db())
+        .await
+        .context_to()?;
+
+    tracing::info!(
+        count,
+        %host_id,
+        "deactivated host packages no longer present on host"
+    );
+
+    Ok(count)
 }
 
 // ── Update history helpers ──────────────────────────────────────────────────

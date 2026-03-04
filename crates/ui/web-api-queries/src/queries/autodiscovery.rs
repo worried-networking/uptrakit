@@ -431,6 +431,14 @@ async fn process_plugin_result(
     now: OffsetDateTime,
     result: &DiscoveryPluginResult,
 ) -> Result<()> {
+    // Tenant-scoped DB handle used for host-package operations below.
+    let tenant_db = crate::tenant_db::TenantDb::new(db.clone(), tenant_id);
+
+    // Track all identifiers seen in this discovery snapshot for the HostManaged path.
+    // Used after the loop to deactivate packages that have disappeared from the host.
+    let mut host_managed_pc_id: Option<uuid::Uuid> = None;
+    let mut discovered_identifiers: HashSet<String> = HashSet::new();
+
     for item in &result.discoveries {
         match item.tracking_system {
             TrackingSystem::HostManaged => {
@@ -463,8 +471,7 @@ async fn process_plugin_result(
 
                 if let Some(plugin_config_id) = pc_id {
                     let ignore_set = super::host_packages::load_host_package_ignore_set(
-                        db,
-                        tenant_id,
+                        &tenant_db,
                         host_id,
                         plugin_config_id,
                     )
@@ -493,6 +500,10 @@ async fn process_plugin_result(
                             e.to_string()
                         )))
                     })?;
+
+                    // Record this identifier as discovered for the disappearance check below.
+                    discovered_identifiers.insert(item.package_identifier.clone());
+                    host_managed_pc_id = Some(plugin_config_id);
                 } else {
                     tracing::warn!(
                         plugin_type = %result.plugin_type,
@@ -547,6 +558,38 @@ async fn process_plugin_result(
                 );
             }
         }
+    }
+
+    // After processing all HostManaged items for this plugin result, deactivate
+    // packages that were previously known but not seen in this discovery snapshot.
+    // Each DiscoveryPluginResult represents one complete snapshot for one plugin
+    // config on one host, so we can safely treat absence as "uninstalled".
+    if let Some(plugin_config_id) = host_managed_pc_id {
+        let ignore_set = super::host_packages::load_host_package_ignore_set(
+            &tenant_db,
+            host_id,
+            plugin_config_id,
+        )
+        .await
+        .map_err(|e| {
+            report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(
+                e.to_string()
+            )))
+        })?;
+
+        super::host_packages::deactivate_missing_host_packages(
+            &tenant_db,
+            host_id,
+            plugin_config_id,
+            &discovered_identifiers,
+            &ignore_set,
+        )
+        .await
+        .map_err(|e| {
+            report!(AutodiscoveryError::Db(sea_orm::DbErr::Custom(
+                e.to_string()
+            )))
+        })?;
     }
 
     Ok(())
