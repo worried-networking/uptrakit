@@ -113,6 +113,13 @@ Self-hosted / single-tenant deployments can opt out via the `--allow-private-not
 controller CLI flag. When set, the private-host check is skipped, allowing webhooks to reach
 internal services (e.g. internal Mattermost, local Docker registries).
 
+### Redirect following disabled
+
+The webhook HTTP client uses `redirect(Policy::none())` to disable automatic redirect following.
+Any 3xx response is explicitly rejected with a descriptive error message. This prevents
+redirect-based SSRF where an attacker-controlled server returns a 301 to an internal address
+after passing initial URL validation.
+
 ### Header blocklist
 
 Custom webhook headers (`config["headers"]`) are validated against a case-insensitive blocklist.
