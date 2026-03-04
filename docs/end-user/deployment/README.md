@@ -13,6 +13,7 @@ This folder contains end-user deployment documentation for running Uptrakit behi
 | [Caddy](caddy.md) | Caddy reverse proxy configuration and PEM header handling. |
 | [Envoy](envoy.md) | Envoy reverse proxy configuration and XFCC header handling. |
 | [HAProxy](haproxy.md) | HAProxy reverse proxy configuration and CRL refresh strategy. |
+| [Docker](docker.md) | Docker Compose deployment with auto-enrollment and profiles. |
 
 ## Single-binary Deployment
 

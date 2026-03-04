@@ -101,6 +101,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Notifications](development/notifications.md) | Notification subsystem architecture: dispatcher, channel trait, adding new channels, feature flags, event hooks. See also: [Notifications API](api/notifications.md), [Notifications Security](security/notifications-security.md). |
 | [Audit Logs](development/audit-logs.md) | Audit log subsystem: crate structure, backend selection, filter config, separate DB, retention, testing, REST API (query module, route handlers, permissions). See also: [Audit Logs Security](security/audit-logs.md), [Audit Logs API](api/audit-logs.md). |
 | [Embedded Frontend](development/embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). See also: [Setup](development/setup.md), [Deployment Guides](end-user/deployment/README.md). |
+| [Docker](development/docker.md) | Docker image build, CI workflow, and local development with docker-compose. See also: [Docker Deployment](end-user/deployment/docker.md). |
 
 ## Deployment Guides
 
@@ -116,6 +117,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Caddy](end-user/deployment/caddy.md) | Caddy reverse proxy configuration guidance. |
 | [NATS](end-user/deployment/nats.md) | NATS JetStream deployment for multi-controller HA setups. |
 | [External Scheduler](end-user/deployment/external-scheduler.md) | External scheduler binary deployment, enrollment, and credential flow. |
+| [Docker](end-user/deployment/docker.md) | Docker Compose deployment with auto-enrollment and profiles. |
 
 ## Additional Resources
 

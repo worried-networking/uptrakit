@@ -47,7 +47,8 @@ details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [d
   ([database-migrations.md](docs/development/database-migrations.md)).
 - **Deployment guides**: reverse proxy deployment and per-proxy guides live under
   [`docs/end-user/deployment/`](docs/end-user/deployment/). Reverse proxy security model is at
-  [`docs/security/reverse-proxy-security.md`](docs/security/reverse-proxy-security.md). Human documentation must link
+  [`docs/security/reverse-proxy-security.md`](docs/security/reverse-proxy-security.md). Docker deployment guide at
+  [`docs/end-user/deployment/docker.md`](docs/end-user/deployment/docker.md). Human documentation must link
   into those files rather than [AGENTS.md](AGENTS.md).
 
 ## Codebase layout
@@ -118,8 +119,14 @@ uptrakit/
 │   ├── tsconfig.json
 │   ├── vite.config.ts
 │   └── vitest.config.ts
+├── docker/
+│   ├── .dockerignore                   # Docker build context exclusions
+│   └── Dockerfile                      # Multi-stage build (ARG PACKAGE/BINARY/FEATURES)
+├── docker-compose.yml                  # Compose with profiles: postgres, mqtt, ssh, scheduler, full
+├── .env.example                        # Template for docker-compose environment
 ├── .github/
 │   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, reverse-proxy Docker tests, frontend lint + format + check + build
+│   ├── workflows/docker.yml            # CI: multi-arch Docker image builds, push to GHCR
 │   └── dependabot.yml                  # Weekly Cargo + npm dependency updates
 ├── CONTRIBUTING.md
 ├── README.md
@@ -1228,6 +1235,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Logging](docs/development/logging.md)
 - [Notifications](docs/development/notifications.md)
 - [Audit Logs](docs/development/audit-logs.md)
+- [Docker](docs/development/docker.md)
 
 ### Architecture
 

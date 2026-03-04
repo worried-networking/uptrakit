@@ -17,6 +17,7 @@ This folder contains user-facing guides for operating Uptrakit, including update
 | [Home Assistant and MQTT](home-assistant-mqtt.md) | MQTT setup and Home Assistant update entity integration. |
 | [Deployment Map](deployment-map.md) | Navigation guide for deployment-related docs and configuration entry points. |
 | [Deployment Guides](deployment/README.md) | Deployment-specific references, including reverse proxy setup guidance. |
+| [Docker Deployment](deployment/docker.md) | Docker Compose deployment with auto-enrollment and profiles. |
 | [Database Data Migration](db-migration.md) | Moving data from SQLite to PostgreSQL or MySQL using `uptrakit-controller db-migrate`. |
 
 ## Related Documentation

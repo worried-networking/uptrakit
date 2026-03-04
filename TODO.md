@@ -946,7 +946,7 @@ Making the system usable and maintainable.
   - [ ] System requirements
   - [ ] Network requirements
   - [ ] Security considerations
-- [ ] Create Docker deployment guide
+- [x] Create Docker deployment guide
 - [ ] Create Kubernetes deployment guide
 - [ ] Document systemd service setup
 - [ ] Add upgrade guide
@@ -986,10 +986,10 @@ Development and release automation.
 - [ ] Automate binary releases
   - [ ] Multi-platform binaries
   - [ ] Checksums and signatures
-- [ ] Automate container image builds
-  - [ ] Multi-arch images
+- [x] Automate container image builds
+  - [x] Multi-arch images
   - [ ] Image scanning
-  - [ ] Registry publishing
+  - [x] Registry publishing
 - [ ] Create release checklist
 - [ ] Automate release notes generation
 - [ ] Implement version bumping automation
