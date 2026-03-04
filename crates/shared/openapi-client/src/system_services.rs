@@ -1,9 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
-use uptrakit_web_api_types::settings_system_services::{
-    SystemServicesSettingsResponse, UpdateSystemServicesSettingsRequest,
-};
 use uptrakit_web_api_types::system_services::{
     ListSystemServicesQuery, SystemServiceResponse, UpdateSystemServiceRequest,
 };
@@ -65,20 +62,6 @@ impl UptrakitClient {
     /// Deactivate (remove) a system service.
     pub async fn remove_system_service(&self, id: &Uuid) -> Result<()> {
         self.delete(&crate::paths::system_services::by_id(id))
-            .await
-    }
-
-    /// Get the global system services settings (enrollment token).
-    pub async fn get_system_services_settings(&self) -> Result<SystemServicesSettingsResponse> {
-        self.get(crate::paths::settings_system_services::BASE).await
-    }
-
-    /// Update the global system services settings.
-    pub async fn update_system_services_settings(
-        &self,
-        req: &UpdateSystemServicesSettingsRequest,
-    ) -> Result<SystemServicesSettingsResponse> {
-        self.put_json(crate::paths::settings_system_services::BASE, req)
             .await
     }
 }

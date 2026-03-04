@@ -237,9 +237,14 @@ pub(crate) mod system_services {
     }
 }
 
-pub(crate) mod settings_system_services {
-    /// `GET /api/v1/global-settings/system-services` · `PUT …`
-    pub(crate) const BASE: &str = "/api/v1/global-settings/system-services";
+pub(crate) mod system_enrollment_tokens {
+    use uuid::Uuid;
+    /// `GET /api/v1/system-enrollment-tokens` · `POST /api/v1/system-enrollment-tokens`
+    pub(crate) const BASE: &str = "/api/v1/system-enrollment-tokens";
+    /// `GET /api/v1/system-enrollment-tokens/{id}` · `DELETE /api/v1/system-enrollment-tokens/{id}`
+    pub(crate) fn by_id(id: &Uuid) -> String {
+        format!("/api/v1/system-enrollment-tokens/{id}")
+    }
 }
 
 pub(crate) mod global_settings {

@@ -21,6 +21,7 @@ pub mod pki;
 pub mod plugin_configs;
 pub mod scheduler;
 pub mod services;
+pub mod system_enrollment_tokens;
 pub mod system_services;
 pub mod settings;
 pub mod settings_mqtt;
