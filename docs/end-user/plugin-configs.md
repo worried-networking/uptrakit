@@ -39,6 +39,8 @@ as the `package_identifier` of the software item (format: `"owner/repo"`). A sin
 | `include_prereleases` | No | Include pre-release tags when resolving latest (default: `false`). |
 | `tag_strip_prefix` | No | Prefix to strip from tag names when extracting version strings (default: `"v"`). |
 | `asset_patterns` | No | List of regex patterns to filter release assets. Only assets whose names match at least one pattern are included. An empty list includes all assets. |
+| `verify_attestation` | No | Download the release checksums file and query the [GitHub Attestations API](https://docs.github.com/en/rest/repos/repos#list-attestations) for each release (default: `true`). Attestation status is stored in `latest_release_metadata` and shown in the UI. Set to `false` to disable entirely (not recommended for production use of public repositories). |
+| `require_attestation` | No | Abort the update on the agent if no GitHub Actions attestation is found for the release (default: `false`). When `true`, the agent independently re-verifies the attestation before install and blocks any release with `attestation_status = NotFound`. See [GitHub Actions Attestation Verification](../security/github-attestation.md) for details. |
 
 **Package identifier:** The software item's `package_identifier` for a GitHub-tracked package
 must be set to `"owner/repo"` (e.g. `"octocat/hello-world"`). This value is validated when

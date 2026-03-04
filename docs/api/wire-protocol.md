@@ -186,7 +186,20 @@ and is not sent to the agent.
     "config": {}
   },
   "pre_update_hooks": [],
-  "post_update_hooks": []
+  "post_update_hooks": [],
+  "release_info": {
+    "tag": "v1.24.0",
+    "release_url": "https://github.com/owner/repo/releases/tag/v1.24.0",
+    "assets": [
+      {
+        "name": "nginx_1.24.0_linux_amd64.tar.gz",
+        "download_url": "https://github.com/owner/repo/releases/download/v1.24.0/nginx_1.24.0_linux_amd64.tar.gz",
+        "sha256_digest": "a1b2c3d4..."
+      }
+    ],
+    "attestation_status": "Verified",
+    "require_attestation": false
+  }
 }
 ```
 
@@ -201,7 +214,46 @@ and is not sent to the agent.
 | `execute_update_plugin` | `PluginAssignment` | Plugin for the `execute_update` role (required) |
 | `pre_update_hooks` | `Vec<HookCommand>` | Pre-update hook commands |
 | `post_update_hooks` | `Vec<HookCommand>` | Post-update hook commands |
+| `release_info` | `ReleaseInfo?` | Release metadata from the upstream source. Only present for GitHub Releases items. See [`ReleaseInfo` fields](#releaseinfo-fields). |
 | `timeout_seconds` | `u32` | Maximum execution time for the entire update (including hooks). Defaults to 7200 (2 hours) when omitted. |
+
+#### `ReleaseInfo` fields
+
+`ReleaseInfo` carries metadata about the upstream release being installed. It is populated by the
+controller from `latest_release_metadata` at update-trigger time and is used by the agent for
+attestation verification and by update plugins for download URL resolution.
+
+| Field | Type | Serde | Description |
+| --- | --- | --- | --- |
+| `tag` | `string` | required | Release tag name (e.g. `"v1.24.0"`) |
+| `release_url` | `string` | required | URL of the release page (e.g. `"https://github.com/owner/repo/releases/tag/v1.24.0"`) |
+| `assets` | `ReleaseAsset[]` | `#[serde(default, skip_serializing_if = "Vec::is_empty")]` | Release assets available for download |
+| `attestation_status` | `AttestationStatus?` | `#[serde(default, skip_serializing_if = "Option::is_none")]` | GitHub Actions attestation status determined at fetch time. Only set for GitHub Releases items when `verify_attestation = true`. See [`AttestationStatus`](#attestationstatus). |
+| `require_attestation` | `bool` | `#[serde(default)]` | When `true`, the agent aborts the update if `attestation_status` is `NotFound` after independent re-verification. Set by the controller from `GitHubConfig.require_attestation`. |
+
+#### `ReleaseAsset` fields
+
+| Field | Type | Serde | Description |
+| --- | --- | --- | --- |
+| `name` | `string` | required | Asset filename (e.g. `"nginx_1.24.0_linux_amd64.tar.gz"`) |
+| `download_url` | `string` | required | Direct download URL for the asset |
+| `sha256_digest` | `string?` | `#[serde(default, skip_serializing_if = "Option::is_none")]` | SHA-256 hex digest parsed from the release checksums file. Exactly 64 lowercase hex characters. Used by the agent for attestation re-verification. |
+
+#### `AttestationStatus`
+
+Describes the result of querying the GitHub Attestations API for the release. Only present in
+`release_info` for GitHub Releases items when `verify_attestation = true`.
+
+The enum is `#[non_exhaustive]` — consumers must include a wildcard match arm.
+
+| Value | Description |
+| --- | --- |
+| `Verified` | At least one attestation was found for the release asset digest via the GitHub Attestations API. |
+| `NotFound` | The GitHub Attestations API returned no attestations (404 or empty array) for the digest. |
+| `Unverified` | The check was skipped or inconclusive (no checksums file found, network error, or `verify_attestation = false`). |
+
+See [GitHub Actions Attestation Verification](../security/github-attestation.md) for the full
+two-stage verification flow.
 
 #### `discover_software` payload
 
@@ -415,6 +467,7 @@ deserialization failures (hard fail, connection close).
 | `MAX_DISCOVERY_PLUGIN_RESULTS` | 50 | `DiscoveryResultsPayload.results` |
 | `MAX_DISCOVERIES_PER_PLUGIN` | 1,000 | `DiscoveryPluginResult.discoveries` |
 | `MAX_HOOK_ARGS` | 100 | `HookCommand::Exec.args` |
+| `MAX_RELEASE_ASSETS` | 500 | `ReleaseInfo.assets` |
 
 #### String length limits
 
@@ -424,6 +477,7 @@ deserialization failures (hard fail, connection close).
 | `MAX_MEDIUM_STRING_LEN` | 4,096 | Error messages, URLs |
 | `MAX_LONG_STRING_LEN` | 65,536 | PEM certificates, CSRs, release notes |
 | `MAX_OUTPUT_STRING_LEN` | 1,048,576 | Command output (matches 1 MB frame limit) |
+| `SHA256_DIGEST_LEN` | 64 | `ReleaseAsset.sha256_digest` (must be exactly 64 lowercase hex characters) |
 
 All limits are defined in `crates/shared/wire/src/limits.rs`. Implementations
 are in `crates/shared/wire/src/wire_validate_impls.rs`.
