@@ -1,0 +1,177 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json
+
+  build-frontend:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install and build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build
+          retention-days: 1
+
+  build-artifacts:
+    needs: [release-please, build-frontend]
+    if: needs.release-please.outputs.release_created == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            cross: false
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            cross: false
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.release-please.outputs.version }}
+      TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build
+
+      - name: Set cargo command
+        id: cargo-cmd
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            echo "cmd=cross" >> "$GITHUB_OUTPUT"
+          else
+            echo "cmd=cargo" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- controller (without swagger-ui) ---
+      - name: Build controller
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-controller \
+            --features embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+          cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-${{ env.TAG_NAME }}-${{ matrix.target }}
+
+      # --- controller-swagger (overwrites the same binary name) ---
+      - name: Build controller-swagger
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-controller \
+            --features embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui
+          cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-swagger-${{ env.TAG_NAME }}-${{ matrix.target }}
+
+      # --- agent ---
+      - name: Build agent
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-agent
+          cp target/${{ matrix.target }}/release/uptrakit-agent uptrakit-agent-${{ env.TAG_NAME }}-${{ matrix.target }}
+
+      # --- agent-ssh ---
+      - name: Build agent-ssh
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-agent-ssh
+          cp target/${{ matrix.target }}/release/uptrakit-agent-ssh uptrakit-agent-ssh-${{ env.TAG_NAME }}-${{ matrix.target }}
+
+      # --- mqtt ---
+      - name: Build mqtt
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-mqtt
+          cp target/${{ matrix.target }}/release/uptrakit-mqtt uptrakit-mqtt-${{ env.TAG_NAME }}-${{ matrix.target }}
+
+      # --- scheduler ---
+      - name: Build scheduler
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-scheduler --no-default-features \
+            --features db-all,oidc
+          cp target/${{ matrix.target }}/release/uptrakit-scheduler uptrakit-scheduler-${{ env.TAG_NAME }}-${{ matrix.target }}
+
+      # --- cli ---
+      - name: Build cli
+        run: |
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+            -p uptrakit-cli
+          cp target/${{ matrix.target }}/release/uptrakit uptrakit-cli-${{ env.TAG_NAME }}-${{ matrix.target }}
+
+      # --- upload to release ---
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ env.TAG_NAME }}" \
+            uptrakit-controller-${{ env.TAG_NAME }}-${{ matrix.target }} \
+            uptrakit-controller-swagger-${{ env.TAG_NAME }}-${{ matrix.target }} \
+            uptrakit-agent-${{ env.TAG_NAME }}-${{ matrix.target }} \
+            uptrakit-agent-ssh-${{ env.TAG_NAME }}-${{ matrix.target }} \
+            uptrakit-mqtt-${{ env.TAG_NAME }}-${{ matrix.target }} \
+            uptrakit-scheduler-${{ env.TAG_NAME }}-${{ matrix.target }} \
+            uptrakit-cli-${{ env.TAG_NAME }}-${{ matrix.target }}
+
+      # --- attestation ---
+      - name: Attest build provenance
+        uses: actions/attest@v2
+        with:
+          subject-path: |
+            uptrakit-controller-${{ env.TAG_NAME }}-${{ matrix.target }}
+            uptrakit-controller-swagger-${{ env.TAG_NAME }}-${{ matrix.target }}
+            uptrakit-agent-${{ env.TAG_NAME }}-${{ matrix.target }}
+            uptrakit-agent-ssh-${{ env.TAG_NAME }}-${{ matrix.target }}
+            uptrakit-mqtt-${{ env.TAG_NAME }}-${{ matrix.target }}
+            uptrakit-scheduler-${{ env.TAG_NAME }}-${{ matrix.target }}
+            uptrakit-cli-${{ env.TAG_NAME }}-${{ matrix.target }}
