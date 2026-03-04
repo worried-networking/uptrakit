@@ -24,7 +24,8 @@ use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
 use uptrakit_command::{CommandExecutor, UpdateOutputLine};
 use uptrakit_internal_wire::{
-    ExecuteUpdatePayload, HookCommand, OutputStreamType, UpdateFinalStatus, UpdateResultPayload,
+    AttestationStatus, ExecuteUpdatePayload, HookCommand, OutputStreamType, ReleaseInfo,
+    UpdateFinalStatus, UpdateResultPayload,
 };
 use uptrakit_plugin_infrastructure_core::UpdateHookContext;
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
@@ -149,6 +150,10 @@ pub async fn execute_update(
                 }
             }
         }
+
+        // Attestation gate — abort if policy requires a verified attestation
+        // and none was found.
+        check_attestation_gate(payload.release_info.as_ref(), &output_tx).await?;
 
         // Execute actual update based on plugin type
         send_output(
@@ -623,6 +628,208 @@ async fn send_output(
         .await;
 }
 
+// ---------------------------------------------------------------------------
+// Attestation gate
+// ---------------------------------------------------------------------------
+
+/// Parse `owner` and `repo` from a GitHub HTML release URL.
+///
+/// Accepts `https://github.com/{owner}/{repo}/releases/...` and returns
+/// `Some((owner, repo))`, or `None` for any other URL format.
+fn parse_github_owner_repo(url: &str) -> Option<(String, String)> {
+    let path = url.strip_prefix("https://github.com/")?;
+    let mut parts = path.splitn(3, '/');
+    let owner = parts.next().filter(|s| !s.is_empty())?.to_string();
+    let repo = parts.next().filter(|s| !s.is_empty())?.to_string();
+    Some((owner, repo))
+}
+
+/// Query the GitHub Attestations API for the given asset SHA-256 digest.
+///
+/// Returns:
+/// - [`AttestationStatus::Verified`] if one or more attestations are found.
+/// - [`AttestationStatus::NotFound`] if the API returns 404 or an empty list.
+/// - [`AttestationStatus::Unverified`] on any network or parse error.
+async fn independently_verify_attestation(
+    owner: &str,
+    repo: &str,
+    digest_hex: &str,
+) -> AttestationStatus {
+    #[derive(serde::Deserialize)]
+    struct ApiResponse {
+        #[serde(default)]
+        attestations: Vec<serde_json::Value>,
+    }
+
+    let url =
+        format!("https://api.github.com/repos/{owner}/{repo}/attestations/sha256:{digest_hex}");
+
+    let client = match reqwest::Client::builder()
+        .user_agent(concat!("uptrakit-agent/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to build reqwest client for attestation check");
+            return AttestationStatus::Unverified;
+        }
+    };
+
+    let response = match client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, "attestation API request failed");
+            return AttestationStatus::Unverified;
+        }
+    };
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return AttestationStatus::NotFound;
+    }
+
+    if !response.status().is_success() {
+        tracing::warn!(
+            status = %response.status(),
+            "attestation API returned unexpected status"
+        );
+        return AttestationStatus::Unverified;
+    }
+
+    match response.json::<ApiResponse>().await {
+        Ok(body) if !body.attestations.is_empty() => AttestationStatus::Verified,
+        Ok(_) => AttestationStatus::NotFound,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to parse attestation API response");
+            AttestationStatus::Unverified
+        }
+    }
+}
+
+/// Pre-install attestation gate.
+///
+/// Checks the GitHub Actions attestation for the release before allowing the
+/// update to proceed. The gate is skipped when:
+///
+/// - `release_info` is `None` (no GitHub release source).
+/// - The release URL does not parse as a `https://github.com/{owner}/{repo}/…`
+///   URL (non-GitHub update paths are unaffected).
+/// - No asset with a known `sha256_digest` is available for re-verification.
+///
+/// When the controller already set `attestation_status = Verified`, the agent
+/// trusts that verdict and returns `Ok` immediately without a live API call.
+///
+/// Otherwise, the agent independently re-queries the GitHub Attestations API
+/// using the first asset's `sha256_digest`. The result governs whether to
+/// block (`require_attestation = true`) or warn.
+async fn check_attestation_gate(
+    release_info: Option<&ReleaseInfo>,
+    output_tx: &mpsc::Sender<UpdateOutputMessage>,
+) -> std::result::Result<(), AgentCoreError> {
+    let Some(ri) = release_info else {
+        return Ok(());
+    };
+
+    let Some((owner, repo)) = parse_github_owner_repo(&ri.release_url) else {
+        return Ok(());
+    };
+
+    // Trust the controller's Verified verdict — already confirmed at fetch time.
+    if ri.attestation_status == Some(AttestationStatus::Verified) {
+        send_output(
+            output_tx,
+            &format!("[attestation] GitHub Actions attestation verified for {owner}/{repo}"),
+            OutputStreamType::System,
+        )
+        .await;
+        return Ok(());
+    }
+
+    // Independent re-verify using an asset SHA-256 digest.
+    let digest = ri.assets.iter().find_map(|a| a.sha256_digest.as_deref());
+    let Some(digest) = digest else {
+        send_output(
+            output_tx,
+            "[attestation] No asset digest available for independent attestation check; proceeding",
+            OutputStreamType::System,
+        )
+        .await;
+        return Ok(());
+    };
+
+    let verified_status = independently_verify_attestation(&owner, &repo, digest).await;
+
+    match verified_status {
+        AttestationStatus::Verified => {
+            send_output(
+                output_tx,
+                &format!(
+                    "[attestation] GitHub Actions attestation independently verified for \
+                     {owner}/{repo}"
+                ),
+                OutputStreamType::System,
+            )
+            .await;
+            Ok(())
+        }
+        AttestationStatus::NotFound => {
+            if ri.require_attestation {
+                let msg = format!(
+                    "no GitHub Actions attestation found for {owner}/{repo}; \
+                     update blocked by require_attestation policy"
+                );
+                send_output(
+                    output_tx,
+                    &format!("[attestation] [error] {msg}"),
+                    OutputStreamType::Stderr,
+                )
+                .await;
+                Err(AgentCoreError::AttestationFailed(msg))
+            } else {
+                send_output(
+                    output_tx,
+                    &format!(
+                        "[attestation] [warning] No GitHub Actions attestation found for \
+                         {owner}/{repo}. Proceeding (require_attestation is false)."
+                    ),
+                    OutputStreamType::System,
+                )
+                .await;
+                Ok(())
+            }
+        }
+        AttestationStatus::Unverified => {
+            send_output(
+                output_tx,
+                &format!(
+                    "[attestation] Attestation check inconclusive for {owner}/{repo}; \
+                     proceeding with install"
+                ),
+                OutputStreamType::System,
+            )
+            .await;
+            Ok(())
+        }
+        _ => {
+            // Forward-compatible: treat unknown statuses as Unverified.
+            send_output(
+                output_tx,
+                "[attestation] Attestation check returned unknown status; proceeding with install",
+                OutputStreamType::System,
+            )
+            .await;
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -860,5 +1067,99 @@ mod tests {
         assert!(summaries.contains("echo 1"));
         assert!(summaries.contains("echo 2"));
         assert!(summaries.contains(", "));
+    }
+
+    // ── Attestation gate tests ───────────────────────────────────────────
+
+    fn make_release_info_with_status(
+        status: Option<AttestationStatus>,
+        require: bool,
+    ) -> ReleaseInfo {
+        ReleaseInfo {
+            tag: "v1.0.0".to_string(),
+            release_url: "https://github.com/owner/repo/releases/tag/v1.0.0".to_string(),
+            assets: vec![uptrakit_internal_wire::ReleaseAsset {
+                name: "app.tar.gz".to_string(),
+                download_url: "https://github.com/owner/repo/releases/download/v1.0.0/app.tar.gz"
+                    .to_string(),
+                size: None,
+                content_type: None,
+                sha256_digest: None,
+            }],
+            attestation_status: status,
+            require_attestation: require,
+        }
+    }
+
+    #[test]
+    fn parse_github_owner_repo_valid() {
+        let r = parse_github_owner_repo("https://github.com/owner/repo/releases/tag/v1.0.0");
+        assert_eq!(r, Some(("owner".to_string(), "repo".to_string())));
+    }
+
+    #[test]
+    fn parse_github_owner_repo_non_github() {
+        assert!(
+            parse_github_owner_repo("https://gitlab.com/owner/repo/releases/tag/v1.0.0").is_none()
+        );
+    }
+
+    #[test]
+    fn parse_github_owner_repo_missing_repo() {
+        assert!(parse_github_owner_repo("https://github.com/owner/").is_none());
+    }
+
+    #[test]
+    fn parse_github_owner_repo_empty_owner() {
+        assert!(parse_github_owner_repo("https://github.com//repo/releases").is_none());
+    }
+
+    #[tokio::test]
+    async fn check_attestation_gate_none_release_info_ok() {
+        let (tx, _rx) = mpsc::channel(10);
+        let result = check_attestation_gate(None, &tx).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn check_attestation_gate_already_verified_ok() {
+        let (tx, mut rx) = mpsc::channel(10);
+        let ri = make_release_info_with_status(Some(AttestationStatus::Verified), false);
+        let result = check_attestation_gate(Some(&ri), &tx).await;
+        assert!(result.is_ok());
+        rx.close();
+        let mut found = false;
+        while let Some(msg) = rx.recv().await {
+            if msg.output.contains("verified") {
+                found = true;
+            }
+        }
+        assert!(found);
+    }
+
+    #[tokio::test]
+    async fn check_attestation_gate_non_github_url_ok() {
+        let (tx, _rx) = mpsc::channel(10);
+        let mut ri = make_release_info_with_status(None, true);
+        ri.release_url = "https://example.com/releases/v1.0.0".to_string();
+        let result = check_attestation_gate(Some(&ri), &tx).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn check_attestation_gate_no_digest_ok() {
+        let (tx, mut rx) = mpsc::channel(10);
+        // No sha256_digest on any asset → skip independent verify.
+        let ri = make_release_info_with_status(None, false);
+        let result = check_attestation_gate(Some(&ri), &tx).await;
+        assert!(result.is_ok());
+        rx.close();
+        let mut found = false;
+        while let Some(msg) = rx.recv().await {
+            if msg.output.contains("No asset digest") {
+                found = true;
+            }
+        }
+        assert!(found);
     }
 }

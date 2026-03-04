@@ -21,6 +21,11 @@ pub enum AgentCoreError {
     #[error("plugin post-update hook failed (non-fatal): {0}")]
     PluginPostUpdateHookFailed(String),
 
+    // ── Attestation ───────────────────────────────────────────────────
+    /// GitHub Actions attestation check failed; update aborted by policy.
+    #[error("attestation verification failed: {0}")]
+    AttestationFailed(String),
+
     // ── I/O ───────────────────────────────────────────────────────────
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

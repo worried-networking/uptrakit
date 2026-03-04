@@ -20,6 +20,8 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
+reqwest = { workspace = true }
+serde = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-plugin-infrastructure-core = { workspace = true }
