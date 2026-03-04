@@ -552,6 +552,13 @@ async fn run(args: cli::Args) -> Result<()> {
                 app_state.db().clone(),
             )),
         );
+        sched.register(
+            ScheduledTaskType::DiscoverHostPackages,
+            Box::new(discover_host_packages::DiscoverHostPackagesExecutor::new(
+                app_state.db().clone(),
+                Arc::clone(&notifier),
+            )),
+        );
 
         let h = tokio::spawn(sched.run(bg.child_token()));
         bg.track_with_timeout("scheduler", h, durations::SCHEDULER_SHUTDOWN_TIMEOUT);
