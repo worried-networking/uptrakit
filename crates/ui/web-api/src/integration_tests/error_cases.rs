@@ -63,11 +63,8 @@ async fn expired_jwt_returns_401() {
     });
 
     let header = jsonwebtoken::Header::default();
-    let key = jsonwebtoken::EncodingKey::from_secret(
-        b"integration-test-jwt-secret-key-do-not-use",
-    );
-    let expired_token =
-        jsonwebtoken::encode(&header, &claims, &key).expect("encode expired token");
+    let key = jsonwebtoken::EncodingKey::from_secret(b"integration-test-jwt-secret-key-do-not-use");
+    let expired_token = jsonwebtoken::encode(&header, &claims, &key).expect("encode expired token");
 
     let status = client
         .get("/api/v1/auth/me")

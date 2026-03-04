@@ -10,11 +10,8 @@ async fn list_hosts_empty_returns_200() {
     let client = app.client();
     let token = register_and_get_token(&client).await;
 
-    let (status, body): (_, serde_json::Value) = client
-        .get("/api/v1/hosts")
-        .bearer(&token)
-        .send_json()
-        .await;
+    let (status, body): (_, serde_json::Value) =
+        client.get("/api/v1/hosts").bearer(&token).send_json().await;
 
     assert_eq!(status, http::StatusCode::OK);
     assert_eq!(body["items"].as_array().expect("data array").len(), 0);
@@ -30,11 +27,8 @@ async fn list_hosts_returns_linked_hosts() {
     let host = insert_host(&app.db, app.tenant_id).await;
     link_service_host(&app.db, svc.id, host.id).await;
 
-    let (status, body): (_, serde_json::Value) = client
-        .get("/api/v1/hosts")
-        .bearer(&token)
-        .send_json()
-        .await;
+    let (status, body): (_, serde_json::Value) =
+        client.get("/api/v1/hosts").bearer(&token).send_json().await;
 
     assert_eq!(status, http::StatusCode::OK);
     assert_eq!(body["items"].as_array().expect("data array").len(), 1);

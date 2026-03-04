@@ -4,11 +4,7 @@ use crate::test_harness::fixtures::{register_and_get_token, seed_permissions_for
 /// Seed notification permissions and register an owner user, returning the
 /// access token ready for authenticated requests.
 async fn setup_with_notification_perms(app: &TestApp) -> String {
-    seed_permissions_for_owner(
-        &app.db,
-        &["view_notifications", "manage_notifications"],
-    )
-    .await;
+    seed_permissions_for_owner(&app.db, &["view_notifications", "manage_notifications"]).await;
     let client = app.client();
     register_and_get_token(&client).await
 }

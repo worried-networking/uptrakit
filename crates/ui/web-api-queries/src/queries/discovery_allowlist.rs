@@ -331,10 +331,7 @@ pub async fn remove_host_allowlist_entry(
 /// Returns an empty set when no entries exist.
 /// On database failure, logs a warning and falls back to an empty set so that
 /// discovery proceeds unfiltered rather than silently failing.
-pub async fn load_host_allowlist_set(
-    db: &DatabaseConnection,
-    host_id: Uuid,
-) -> HashSet<String> {
+pub async fn load_host_allowlist_set(db: &DatabaseConnection, host_id: Uuid) -> HashSet<String> {
     match host_discovery_allowlist::Entity::find()
         .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
         .all(db)

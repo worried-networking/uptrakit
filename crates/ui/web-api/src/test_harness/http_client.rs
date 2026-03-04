@@ -115,14 +115,13 @@ impl RequestBuilder {
         let resp = self.send().await;
         let status = resp.status();
         let bytes = resp.into_body().collect().await.expect("body").to_bytes();
-        let value: T =
-            serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-                panic!(
-                    "failed to deserialize response body as {}: {e}\nbody: {}",
-                    std::any::type_name::<T>(),
-                    String::from_utf8_lossy(&bytes),
-                )
-            });
+        let value: T = serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            panic!(
+                "failed to deserialize response body as {}: {e}\nbody: {}",
+                std::any::type_name::<T>(),
+                String::from_utf8_lossy(&bytes),
+            )
+        });
         (status, value)
     }
 

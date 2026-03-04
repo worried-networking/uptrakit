@@ -310,7 +310,11 @@ pub struct OidcBootstrapArgs {
     pub oidc_provider_slug: Option<String>,
 
     /// Space-separated OIDC scopes.
-    #[arg(long, env = "UPTRAKIT_OIDC_SCOPES", default_value = "openid email profile groups")]
+    #[arg(
+        long,
+        env = "UPTRAKIT_OIDC_SCOPES",
+        default_value = "openid email profile groups"
+    )]
     pub oidc_scopes: Option<String>,
 }
 
@@ -805,12 +809,35 @@ mod tests {
     fn enrollment_bootstrap_not_set_by_default() {
         let args =
             super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
-        assert!(args.enrollment_bootstrap.bootstrap_enrollment_token.is_none());
-        assert_eq!(args.enrollment_bootstrap.bootstrap_enrollment_token_max_uses, 1);
-        assert_eq!(args.enrollment_bootstrap.bootstrap_enrollment_token_ttl, 300);
-        assert!(args.enrollment_bootstrap.bootstrap_system_enrollment_token.is_none());
-        assert_eq!(args.enrollment_bootstrap.bootstrap_system_enrollment_token_max_uses, 1);
-        assert_eq!(args.enrollment_bootstrap.bootstrap_system_enrollment_token_ttl, 300);
+        assert!(
+            args.enrollment_bootstrap
+                .bootstrap_enrollment_token
+                .is_none()
+        );
+        assert_eq!(
+            args.enrollment_bootstrap
+                .bootstrap_enrollment_token_max_uses,
+            1
+        );
+        assert_eq!(
+            args.enrollment_bootstrap.bootstrap_enrollment_token_ttl,
+            300
+        );
+        assert!(
+            args.enrollment_bootstrap
+                .bootstrap_system_enrollment_token
+                .is_none()
+        );
+        assert_eq!(
+            args.enrollment_bootstrap
+                .bootstrap_system_enrollment_token_max_uses,
+            1
+        );
+        assert_eq!(
+            args.enrollment_bootstrap
+                .bootstrap_system_enrollment_token_ttl,
+            300
+        );
     }
 
     #[test]
@@ -833,17 +860,36 @@ mod tests {
         .expect("should parse custom values");
 
         assert_eq!(
-            args.enrollment_bootstrap.bootstrap_enrollment_token.as_deref(),
+            args.enrollment_bootstrap
+                .bootstrap_enrollment_token
+                .as_deref(),
             Some("my-secret-token")
         );
-        assert_eq!(args.enrollment_bootstrap.bootstrap_enrollment_token_max_uses, 5);
-        assert_eq!(args.enrollment_bootstrap.bootstrap_enrollment_token_ttl, 600);
         assert_eq!(
-            args.enrollment_bootstrap.bootstrap_system_enrollment_token.as_deref(),
+            args.enrollment_bootstrap
+                .bootstrap_enrollment_token_max_uses,
+            5
+        );
+        assert_eq!(
+            args.enrollment_bootstrap.bootstrap_enrollment_token_ttl,
+            600
+        );
+        assert_eq!(
+            args.enrollment_bootstrap
+                .bootstrap_system_enrollment_token
+                .as_deref(),
             Some("system-secret")
         );
-        assert_eq!(args.enrollment_bootstrap.bootstrap_system_enrollment_token_max_uses, 3);
-        assert_eq!(args.enrollment_bootstrap.bootstrap_system_enrollment_token_ttl, 120);
+        assert_eq!(
+            args.enrollment_bootstrap
+                .bootstrap_system_enrollment_token_max_uses,
+            3
+        );
+        assert_eq!(
+            args.enrollment_bootstrap
+                .bootstrap_system_enrollment_token_ttl,
+            120
+        );
     }
 
     #[test]
@@ -854,7 +900,15 @@ mod tests {
             "tenant-secret",
         ])
         .expect("should parse with tenant token only");
-        assert!(args.enrollment_bootstrap.bootstrap_enrollment_token.is_some());
-        assert!(args.enrollment_bootstrap.bootstrap_system_enrollment_token.is_none());
+        assert!(
+            args.enrollment_bootstrap
+                .bootstrap_enrollment_token
+                .is_some()
+        );
+        assert!(
+            args.enrollment_bootstrap
+                .bootstrap_system_enrollment_token
+                .is_none()
+        );
     }
 }

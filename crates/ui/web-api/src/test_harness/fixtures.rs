@@ -1,8 +1,6 @@
 //! Reusable data-insertion helpers and HTTP convenience wrappers for tests.
 
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use uptrakit_shared_db::entity::{host, permission, role, role_permission, service, service_host};
 use uptrakit_web_api_types::SecretString;
 use uptrakit_web_api_types::auth::{AuthResponse, LoginRequest, RefreshResponse, RegisterRequest};
@@ -24,7 +22,10 @@ pub async fn register_user(
         password: SecretString::new(password.to_string()),
         registration_token: None,
     };
-    client.post_json("/api/v1/auth/register", &req).send_json().await
+    client
+        .post_json("/api/v1/auth/register", &req)
+        .send_json()
+        .await
 }
 
 /// Register a user and return just the access token (panics on failure).
@@ -44,7 +45,10 @@ pub async fn login_user(
         email: email.to_string(),
         password: SecretString::new(password.to_string()),
     };
-    client.post_json("/api/v1/auth/login", &req).send_json().await
+    client
+        .post_json("/api/v1/auth/login", &req)
+        .send_json()
+        .await
 }
 
 /// Refresh a token via HTTP.
@@ -53,7 +57,10 @@ pub async fn refresh_token(
     refresh: &str,
 ) -> (http::StatusCode, RefreshResponse) {
     let body = serde_json::json!({ "refresh_token": refresh });
-    client.post_json("/api/v1/auth/refresh", &body).send_json().await
+    client
+        .post_json("/api/v1/auth/refresh", &body)
+        .send_json()
+        .await
 }
 
 // ── Direct DB helpers ───────────────────────────────────────────────────

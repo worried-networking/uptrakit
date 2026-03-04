@@ -143,10 +143,7 @@ async fn create_empty_name_returns_400() {
     let token = register_and_get_token(&client).await;
 
     let status = client
-        .post_json(
-            "/api/v1/software-items",
-            &serde_json::json!({ "name": "" }),
-        )
+        .post_json("/api/v1/software-items", &serde_json::json!({ "name": "" }))
         .bearer(&token)
         .send_status()
         .await;

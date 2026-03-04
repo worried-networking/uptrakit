@@ -966,8 +966,11 @@ async fn bootstrap_tenant_enrollment_token(
         return Ok(());
     }
 
-    let hash = uptrakit_web_api::auth::password::hash_password(token_value)
-        .map_err(|e| report!(AppError::Config(format!("failed to hash bootstrap enrollment token: {e}"))))?;
+    let hash = uptrakit_web_api::auth::password::hash_password(token_value).map_err(|e| {
+        report!(AppError::Config(format!(
+            "failed to hash bootstrap enrollment token: {e}"
+        )))
+    })?;
 
     let expires_at = now + time::Duration::seconds(eb.bootstrap_enrollment_token_ttl as i64);
 
@@ -1031,8 +1034,11 @@ async fn bootstrap_system_enrollment_token(
         return Ok(());
     }
 
-    let hash = uptrakit_web_api::auth::password::hash_password(token_value)
-        .map_err(|e| report!(AppError::Config(format!("failed to hash bootstrap system enrollment token: {e}"))))?;
+    let hash = uptrakit_web_api::auth::password::hash_password(token_value).map_err(|e| {
+        report!(AppError::Config(format!(
+            "failed to hash bootstrap system enrollment token: {e}"
+        )))
+    })?;
 
     let expires_at = now + time::Duration::seconds(eb.bootstrap_system_enrollment_token_ttl as i64);
 

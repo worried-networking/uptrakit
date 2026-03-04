@@ -15,8 +15,8 @@ use uptrakit_web_api_types::plugin_configs::{
 };
 use uuid::Uuid;
 
-use crate::token_utils::generate_uuid;
 use crate::tenant_db::TenantDb;
+use crate::token_utils::generate_uuid;
 
 /// Error returned by plugin config query helpers.
 #[derive(Debug, Error)]

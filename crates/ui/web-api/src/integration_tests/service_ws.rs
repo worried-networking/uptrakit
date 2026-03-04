@@ -22,10 +22,9 @@ async fn serve_app() -> (String, TestApp) {
 async fn anonymous_connect_and_enroll() {
     let (base_url, _app) = serve_app().await;
 
-    let (mut ws, _resp) =
-        tokio_tungstenite::connect_async(format!("{base_url}/api/v1/ws/service"))
-            .await
-            .expect("ws connect");
+    let (mut ws, _resp) = tokio_tungstenite::connect_async(format!("{base_url}/api/v1/ws/service"))
+        .await
+        .expect("ws connect");
 
     // Send an enroll message.
     let enroll = serde_json::json!({
@@ -60,10 +59,9 @@ async fn enrolled_reconnect_with_bearer() {
     let (base_url, _app) = serve_app().await;
 
     // First: enroll anonymously.
-    let (mut ws, _) =
-        tokio_tungstenite::connect_async(format!("{base_url}/api/v1/ws/service"))
-            .await
-            .expect("ws connect");
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("{base_url}/api/v1/ws/service"))
+        .await
+        .expect("ws connect");
 
     let enroll = serde_json::json!({
         "protocol_version": 1,
@@ -177,12 +175,8 @@ async fn service_connection_registry_broadcast() {
 
     let id1 = uuid::Uuid::now_v7();
     let id2 = uuid::Uuid::now_v7();
-    let (mut rx1, _c1) = registry
-        .register(id1, Default::default(), None, None)
-        .await;
-    let (mut rx2, _c2) = registry
-        .register(id2, Default::default(), None, None)
-        .await;
+    let (mut rx1, _c1) = registry.register(id1, Default::default(), None, None).await;
+    let (mut rx2, _c2) = registry.register(id2, Default::default(), None, None).await;
 
     registry
         .broadcast(ControllerMessage::Pong(

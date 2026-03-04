@@ -197,9 +197,7 @@ pub async fn build_test_state(
         account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
         jwt: Arc::clone(&jwt),
         #[cfg(feature = "oidc")]
-        oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
-            db.clone(),
-        ),
+        oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(db.clone()),
         #[cfg(feature = "oidc")]
         oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(db.clone()),
         device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),

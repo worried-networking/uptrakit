@@ -178,8 +178,7 @@ async fn refresh_valid_token_returns_200() {
     let client = app.client();
 
     let (_, auth) = register_user(&client, "refresh@test.local", "StrongPassword1!").await;
-    let (status, refreshed) =
-        refresh_token(&client, auth.refresh_token.expose_secret()).await;
+    let (status, refreshed) = refresh_token(&client, auth.refresh_token.expose_secret()).await;
 
     assert_eq!(status, http::StatusCode::OK);
     assert!(!refreshed.access_token.expose_secret().is_empty());
@@ -224,8 +223,7 @@ async fn refresh_rotates_token() {
     assert_eq!(s2, http::StatusCode::UNAUTHORIZED);
 
     // The new refresh token should still work.
-    let (s3, _) =
-        refresh_token(&client, new_tokens.refresh_token.expose_secret()).await;
+    let (s3, _) = refresh_token(&client, new_tokens.refresh_token.expose_secret()).await;
     assert_eq!(s3, http::StatusCode::OK);
 }
 

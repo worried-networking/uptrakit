@@ -354,7 +354,8 @@ pub async fn merge_service(
         }
     }
 
-    if let Err(e) = crate::settings_version::bump_revocation_version(&txn, default_tenant_id).await {
+    if let Err(e) = crate::settings_version::bump_revocation_version(&txn, default_tenant_id).await
+    {
         tracing::warn!(error = ?e, "failed to bump revocation version counter during merge");
     }
 

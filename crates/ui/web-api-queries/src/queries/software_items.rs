@@ -19,9 +19,9 @@ use uptrakit_web_api_types::software_items::{
 };
 use uuid::Uuid;
 
-use crate::token_utils::generate_uuid;
 use crate::queries::plugin_configs::{find_raw_active_config_txn, validate_hooks_internal};
 use crate::tenant_db::TenantDb;
+use crate::token_utils::generate_uuid;
 
 /// Errors returned by software item queries.
 #[derive(Debug, thiserror::Error)]
