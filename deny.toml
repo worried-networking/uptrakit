@@ -185,7 +185,7 @@ registries = [
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
 [bans]
 # Lint level for when multiple versions of the same crate are detected
-multiple-versions = "warn"
+multiple-versions = "deny"
 # Lint level for when a crate version requirement is `*`
 wildcards = "allow"
 # The graph highlighting used when creating dotgraphs for crates
@@ -341,6 +341,9 @@ skip = [
     # getrandom: 0.3 via jobserver/cc (build dep), 0.4 via rand 0.9
     { crate = "getrandom@0.3.4", reason = "pulled by jobserver (cc build dep); newer 0.4 used by rand 0.9" },
 
+    # r-efi: 5.3.0 via getrandom 0.3.4 (cc/jobserver build dep), 6.0.0 via getrandom 0.4.2 (rand 0.9)
+    { crate = "r-efi@5.3.0", reason = "pulled by getrandom 0.3.4 (cc/jobserver build dep, already skipped); newer 6.0.0 used by getrandom 0.4.2 (rand 0.9)" },
+
     # windows-sys: 0.59 via nix 0.29, 0.61 via clap; 0.60 already skipped above
     { crate = "windows-sys@0.59.0", reason = "pulled by nix 0.29; newer 0.60/0.61 used by tokio/clap" },
 ]
@@ -359,10 +362,10 @@ skip-tree = [
 [sources]
 # Lint level for what to happen when a crate from a crate registry that is not
 # in the allow list is encountered
-unknown-registry = "warn"
+unknown-registry = "deny"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
-unknown-git = "warn"
+unknown-git = "deny"
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
