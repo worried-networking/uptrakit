@@ -65,9 +65,11 @@ pub enum OidcUserResolution {
     },
     /// Email match, user has password, no active OIDC links -> require password.
     LinkViaPasswordRequired { user_id: uuid::Uuid },
-    /// The OIDC provider explicitly reported that the email address is not
-    /// verified (`email_verified: false`). Authentication is rejected to
-    /// prevent account takeover via an attacker-controlled IdP.
+    /// The OIDC provider did not confirm that the email address is verified.
+    /// This variant is returned when `email_verified` is `false` **or absent**
+    /// (`None`). Only `email_verified: true` is accepted as proof of
+    /// ownership. Authentication is rejected to prevent account takeover via
+    /// an attacker-controlled IdP that omits or falsifies the claim.
     ///
     /// Also returned when an email address is found but no OIDC link exists
     /// and linking is not permitted in the current flow.
@@ -120,8 +122,10 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
         email_verified,
     } = params;
 
-    // Reject explicitly-unverified email addresses before any DB lookup.
-    if email_verified == Some(false) {
+    // Reject unverified email addresses before any DB lookup.
+    // Both `Some(false)` and `None` (claim absent) are treated as unverified.
+    // This prevents account takeover via a rogue IdP that omits the claim.
+    if email_verified != Some(true) {
         return Ok(OidcUserResolution::EmailNotVerified);
     }
 

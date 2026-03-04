@@ -45,9 +45,10 @@
   new OIDC subject to an existing user by email match alone. If the email matches
   an existing user with a different OIDC link or a password account, explicit account
   linking is required. This prevents email-based account takeover.
-- **`email_verified` enforcement.** If the IdP returns `email_verified: false`, the
-  login is rejected with `OidcUserResolution::EmailNotVerified`. This prevents
-  accounts with unverified email addresses from being created or linked.
+- **`email_verified` enforcement.** Only `email_verified: true` is accepted. If the
+  IdP returns `email_verified: false` or omits the claim entirely, the login is
+  rejected with `OidcUserResolution::EmailNotVerified`. This prevents accounts with
+  unverified email addresses from being created or linked.
 - **PKCE and CSRF protection.** The OIDC authorization flow uses PKCE code challenges
   and CSRF state tokens (stored encrypted, single-use, 10-minute TTL), preventing
   authorization code injection and cross-site request forgery.
@@ -63,10 +64,10 @@
 
 ## Residual risk
 
-- **`email_verified = None` passes.** When the IdP omits the `email_verified` claim
-  entirely (rather than setting it to `false`), the check is bypassed. Many
-  legitimate providers omit this claim for confirmed accounts, but a compromised
-  provider could exploit this to skip verification.
+- ~~`email_verified = None` passes.~~ **Fixed.** `resolve_oidc_user()` now requires
+  `email_verified == Some(true)`. Both `None` (absent claim) and `Some(false)` are
+  rejected with `OidcUserResolution::EmailNotVerified`. Providers that omit the claim
+  for confirmed accounts must be configured to always include `email_verified: true`.
 - **Role mapping fully replaces roles on login.** `sync_oidc_roles()` deletes all
   existing `user_roles` and inserts the mapped roles on every OIDC login. A
   compromised provider can escalate or de-escalate any user's roles silently.
@@ -93,8 +94,8 @@
   receive elevated roles via role mapping.
 - Provide a "freeze" mode for OIDC providers that blocks new account creation and role
   changes while allowing existing linked users to continue logging in.
-- Consider treating `email_verified = null/absent` as `false` by default, with a
-  per-provider toggle for IdPs that are known to omit the claim.
+- ~~Consider treating `email_verified = null/absent` as `false` by default~~ — **Done.**
+  `email_verified != Some(true)` is now the guard condition.
 - Add monitoring for unexpected JWKS key rotations on configured OIDC providers.
 - Document the security implications of `auto_create_users` and role mapping in
   operator guides, emphasizing that these features should only be enabled for

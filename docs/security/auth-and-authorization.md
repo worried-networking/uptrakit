@@ -74,7 +74,7 @@ lookup. This prevents account creation or matching for addresses that the identi
 | --- | --- |
 | `true` | Accepted — proceeds to user resolution |
 | `false` | **Rejected** — returns `OidcUserResolution::EmailNotVerified`; user is redirected to the login page with `error=email_not_verified` |
-| absent / `null` | Accepted conservatively — many legitimate providers (GitHub, Google) omit the claim for confirmed accounts |
+| absent / `null` | **Rejected** — treated the same as `false`. A rogue IdP that omits the claim cannot bypass verification. Providers that omit the claim for confirmed accounts must be configured to always include `email_verified: true`. |
 
 The check occurs at the entry point of `resolve_oidc_user` before any DB query, ensuring no account is created
 or linked for an unverified email regardless of `auto_create` or role-mapping configuration.
