@@ -306,33 +306,18 @@ fn register_column_aad_mappings() {
         return;
     }
 
-    let mut mappings = std::collections::HashMap::new();
-    mappings.insert(
-        "key_pem".to_string(),
-        "uptrakit:ca_certificates:key_pem".to_string(),
-    );
-    mappings.insert(
-        "client_secret".to_string(),
-        "uptrakit:oidc_providers:client_secret".to_string(),
-    );
-    mappings.insert(
-        "password".to_string(),
-        "uptrakit:mqtt_clients:password".to_string(),
-    );
-    mappings.insert(
-        "ca_cert_pem".to_string(),
-        "uptrakit:mqtt_clients:ca_cert_pem".to_string(),
-    );
-    mappings.insert(
-        "pkce_verifier".to_string(),
-        "uptrakit:pending_oidc_flows:pkce_verifier".to_string(),
-    );
-    mappings.insert(
-        "config".to_string(),
-        "uptrakit:notification_channels:config".to_string(),
-    );
+    use uptrakit_crypto::ColumnAadEntry;
 
-    if let Err(e) = uptrakit_crypto::register_column_aad(mappings) {
+    let entries: &[ColumnAadEntry] = &[
+        ColumnAadEntry { table: "ca_certificates",      column: "key_pem",       aad: "uptrakit:ca_certificates:key_pem" },
+        ColumnAadEntry { table: "oidc_providers",       column: "client_secret", aad: "uptrakit:oidc_providers:client_secret" },
+        ColumnAadEntry { table: "mqtt_clients",         column: "password",      aad: "uptrakit:mqtt_clients:password" },
+        ColumnAadEntry { table: "mqtt_clients",         column: "ca_cert_pem",   aad: "uptrakit:mqtt_clients:ca_cert_pem" },
+        ColumnAadEntry { table: "pending_oidc_flows",   column: "pkce_verifier", aad: "uptrakit:pending_oidc_flows:pkce_verifier" },
+        ColumnAadEntry { table: "notification_channels", column: "config",       aad: "uptrakit:notification_channels:config" },
+    ];
+
+    if let Err(e) = uptrakit_crypto::register_column_aad(entries) {
         tracing::warn!(error = %e, "column AAD registry already initialized (harmless)");
     }
 }

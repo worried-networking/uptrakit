@@ -602,9 +602,14 @@ fn register_ssh_column_aad() {
     if !uptrakit_crypto::master_key_available() {
         return;
     }
-    let mut mappings = std::collections::HashMap::new();
-    mappings.insert("private_key".to_string(), AAD_SSH_PRIVATE_KEY.to_string());
-    if let Err(e) = uptrakit_crypto::register_column_aad(mappings) {
+
+    use uptrakit_crypto::ColumnAadEntry;
+
+    let entries: &[ColumnAadEntry] = &[
+        ColumnAadEntry { table: "ssh_hosts", column: "private_key", aad: AAD_SSH_PRIVATE_KEY },
+    ];
+
+    if let Err(e) = uptrakit_crypto::register_column_aad(entries) {
         tracing::warn!(error = %e, "column AAD registry already initialized (harmless)");
     }
 }

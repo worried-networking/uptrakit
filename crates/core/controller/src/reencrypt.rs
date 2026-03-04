@@ -22,10 +22,8 @@
 //! - **Fault-tolerant**: errors on individual rows are logged and skipped —
 //!   the controller still starts successfully.
 
-use std::collections::HashMap;
-
 use sea_orm::{DatabaseConnection, EntityTrait, IntoActiveModel};
-use uptrakit_crypto::EncryptedString;
+use uptrakit_crypto::{ColumnAadEntry, EncryptedString};
 
 // ── Column AAD constants ───────────────────────────────────────────────
 
@@ -55,18 +53,16 @@ pub(crate) fn register_column_aad_mappings() {
         return;
     }
 
-    let mut mappings = HashMap::new();
-    mappings.insert("key_pem".to_string(), AAD_CA_KEY_PEM.to_string());
-    mappings.insert(
-        "client_secret".to_string(),
-        AAD_OIDC_CLIENT_SECRET.to_string(),
-    );
-    mappings.insert("password".to_string(), AAD_MQTT_PASSWORD.to_string());
-    mappings.insert("ca_cert_pem".to_string(), AAD_MQTT_CA_CERT_PEM.to_string());
-    mappings.insert("pkce_verifier".to_string(), AAD_PKCE_VERIFIER.to_string());
-    mappings.insert("config".to_string(), AAD_NOTIFICATION_CONFIG.to_string());
+    let entries: &[ColumnAadEntry] = &[
+        ColumnAadEntry { table: "ca_certificates",      column: "key_pem",       aad: AAD_CA_KEY_PEM },
+        ColumnAadEntry { table: "oidc_providers",       column: "client_secret", aad: AAD_OIDC_CLIENT_SECRET },
+        ColumnAadEntry { table: "mqtt_clients",         column: "password",      aad: AAD_MQTT_PASSWORD },
+        ColumnAadEntry { table: "mqtt_clients",         column: "ca_cert_pem",   aad: AAD_MQTT_CA_CERT_PEM },
+        ColumnAadEntry { table: "pending_oidc_flows",   column: "pkce_verifier", aad: AAD_PKCE_VERIFIER },
+        ColumnAadEntry { table: "notification_channels", column: "config",       aad: AAD_NOTIFICATION_CONFIG },
+    ];
 
-    if let Err(e) = uptrakit_crypto::register_column_aad(mappings) {
+    if let Err(e) = uptrakit_crypto::register_column_aad(entries) {
         tracing::warn!(error = %e, "column AAD registry already initialized (harmless in tests)");
     }
 }

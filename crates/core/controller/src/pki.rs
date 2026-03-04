@@ -1444,6 +1444,10 @@ mod tests {
 
         // EncryptedString requires a master key for DB writes
         let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
+        // Column AAD registry must be populated so TryGetable can decrypt
+        // ENC:v2 values with the correct AAD (maps "key_pem" →
+        // "uptrakit:ca_certificates:key_pem").
+        crate::reencrypt::register_column_aad_mappings();
 
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.map_err(|e| e.to_string())?;
