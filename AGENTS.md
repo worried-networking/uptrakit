@@ -102,7 +102,7 @@ uptrakit/
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-packages, services, software-items, plugin-configs, autodiscovery, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
-│       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API; split into app_state.rs, ca_snapshot.rs, router.rs modules; auth/auth_method.rs hosts AuthMethod
+│       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API; split into app_state.rs, ca_snapshot.rs, router.rs modules; auth/auth_method.rs hosts AuthMethod; test_harness/ shared integration test fixtures (TestApp, TestClient, DB/HTTP helpers); integration_tests/ REST API + WebSocket integration tests (#[cfg(all(test, feature = "db-sqlite"))])
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
 │   │   ├── lib/                        # Shared modules: api client, auth store, types, utils, notifications, sse.ts (SSE connection utility)
@@ -350,6 +350,13 @@ These are non-negotiable design constraints. Do not violate them.
    `Arc<dyn Fn() -> OffsetDateTime + Send + Sync>` clock and advance it in tests using
    `parking_lot::Mutex<OffsetDateTime>`. See `RateLimitStore::with_clock` for the canonical pattern and
    [Testing § Wall-Clock Time Injection](docs/development/testing.md#wall-clock-time-injection).
+1. **New API endpoint tests must use the shared `TestApp` harness.** The `test_harness/` module
+   (`crates/ui/web-api/src/test_harness/`) provides `TestApp` (in-memory SQLite + migrated schema +
+   seeded tenant + fully wired Axum router), `TestClient` (ergonomic HTTP client via `tower::oneshot`),
+   and fixture helpers (`register_user`, `insert_service`, `seed_permissions_for_owner`, etc.). Never
+   duplicate `test_state()` or `build_test_state()` inline. All integration tests live in
+   `integration_tests/` and are gated behind `#[cfg(all(test, feature = "db-sqlite"))]`. See
+   [Testing § REST API Integration Tests](docs/development/testing.md#rest-api-integration-tests).
 1. **Use `TenantDb` helpers for all tenant-scoped queries.** Never call `Entity::find().all(tenant_db.db())` directly
    on a `TenantScoped` entity — `tenant_db.db()` carries no tenant filter and loads all tenants' data. For entities
    that implement `TenantScoped`, always use `tenant_db.find::<E>()`, `.find_by_id::<E>(id)`, `.update_many::<E>()`,

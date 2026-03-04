@@ -830,7 +830,9 @@ Ensuring robustness and maintainability.
   - [ ] Target 80%+ coverage for core logic
   - [ ] Test error handling paths
   - [ ] Test edge cases
-- [ ] Add integration tests
+- [x] Add integration tests
+  - [x] REST API integration tests (auth, services, hosts, software items, enrollment tokens, settings, notifications, plugin configs, error cases)
+  - [x] WebSocket integration tests (enrollment, reconnection, registry send/broadcast)
   - [ ] Agent-controller communication
   - [ ] Database operations
   - [ ] Plugin implementations

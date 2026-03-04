@@ -194,6 +194,10 @@ cargo test --workspace --all-features
 
 - API boundaries (request/response types, compatibility)
 
+- REST API integration tests (full HTTP stack with in-memory SQLite)
+
+- WebSocket integration tests (enrollment and reconnection flows)
+
 - Error paths with clear messaging
 
 - Reverse proxy integration tests (Docker-based, ignored by default):
@@ -204,6 +208,76 @@ cargo test --workspace --all-features
 
   Requires Docker and covers L4/L7 TLS modes, CRL/OCSP revocation, and proxy-specific flows.
 
+## REST API Integration Tests
+
+The `test_harness/` module (`crates/ui/web-api/src/test_harness/`) provides a shared
+test fixture for exercising the full Axum HTTP stack (request → router → middleware →
+handler → database → response) without Docker or external services.
+
+### Architecture
+
+Each test gets its own **in-memory SQLite database** with all migrations applied.
+Tests are parallel-safe with no cleanup required.
+
+```text
+crates/ui/web-api/src/
+  test_harness/
+    mod.rs          — TestApp, setup_migrated_db, build_test_state, NoopCertSigner
+    http_client.rs  — TestClient (tower::oneshot wrapper with ergonomic API)
+    fixtures.rs     — register_user, insert_service, seed_permissions_for_owner, etc.
+  integration_tests/
+    mod.rs           — module declarations
+    auth_flow.rs     — registration, login, refresh, token rotation, logout
+    services_crud.rs — service list, approve, reject, deactivate, update
+    hosts.rs         — host list, detail, deactivate
+    software_items_crud.rs — CRUD lifecycle
+    enrollment_tokens.rs   — create, list, revoke
+    settings.rs      — registration settings get/update
+    notifications.rs — channel and rule CRUD
+    plugin_configs.rs — plugin type list, config create/delete
+    error_cases.rs   — 401/404/expired JWT systematic testing
+    service_ws.rs    — WebSocket enrollment, reconnection, registry send/broadcast
+```
+
+All modules are gated behind `#[cfg(all(test, feature = "db-sqlite"))]`.
+
+### Key components
+
+- **`TestApp`**: spins up a fully wired Axum router backed by a migrated SQLite DB
+  with a seeded default tenant. Provides `client()` for HTTP requests and direct `db`
+  access for fixture insertion.
+- **`TestClient`**: thin wrapper around `tower::ServiceExt::oneshot()` with methods
+  like `get()`, `post_json()`, `put_json()`, `delete()`, `bearer()`, `send_json()`,
+  and `send_status()`.
+- **`seed_permissions_for_owner()`**: inserts permissions not present in the initial
+  migration (e.g., `view_notifications`, `manage_notifications`) and assigns them to
+  the `owner` role. Use this when testing endpoints gated by permissions added in
+  later migrations.
+
+### Adding new tests
+
+1. Create a new file in `integration_tests/` and add its `mod` declaration to
+   `integration_tests/mod.rs`.
+2. Use `TestApp::new().await` to get a fully initialized app.
+3. Use `register_and_get_token(&client)` for authenticated requests.
+4. For endpoints requiring non-default permissions, call
+   `seed_permissions_for_owner()` before registration.
+5. WebSocket tests must use `tokio::net::TcpListener` + `axum::serve()` (HTTP
+   upgrade does not work via `tower::oneshot`).
+
+### Running
+
+```bash
+# All integration tests
+cargo test -p uptrakit-web-api --features db-sqlite
+
+# Specific module
+cargo test -p uptrakit-web-api --features db-sqlite integration_tests::auth_flow
+
+# Full workspace (includes these automatically)
+cargo test --workspace --all-features
+```
+
 ## Testing Expectations - Detailed
 
 Every behaviour change must include tests. Types of tests used:
@@ -211,6 +285,7 @@ Every behaviour change must include tests. Types of tests used:
 - **Unit tests**: pure logic, version comparison, parsing.
 - **Plugin tests**: parsing upstream metadata, mapping to internal models.
 - **API boundary tests**: request/response (de)serialisation, backwards compatibility.
+- **REST API integration tests**: full HTTP stack tests via `TestApp` (see above).
 - **Error path tests**: expected failures produce correct error types and messages.
 - **Docker integration tests**: reverse proxy tests using real containers (see below).
 - **Service activity parity tests**: ensure Agent and MQTT service records update `ip_address` and `last_seen_at`
