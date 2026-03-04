@@ -31,6 +31,22 @@ Every plugin that accepts a `package_identifier` parameter must validate it via 
 See [Plugin Guidelines — Package identifier validation](../development/plugin-guidelines.md#package-identifier-validation)
 for the implementation pattern.
 
+### Path traversal in plugin configs
+
+Plugin config fields that represent filesystem paths (`compose_file`, `working_dir`,
+`project_dir`) must reject `..` path segments to prevent directory traversal. The Docker plugin's
+`DockerConfig::validate()` enforces this for both `compose_restart.compose_file` and
+`compose_restart.working_dir`. The structured hook system's `DockerComposeHook::validate()`
+applies the same check to `compose_file` and `project_dir`.
+
+Any new plugin config field that accepts a path must apply the same validation pattern:
+
+```rust
+if path.split('/').any(|seg| seg == "..") {
+    bail!(PluginError::Configuration("field must not contain '..' path segments".into()));
+}
+```
+
 ### Version string validation
 
 Plugins that interpolate a `to_version` parameter into install commands (e.g.,

@@ -137,6 +137,22 @@ code execution on managed hosts via plugin configuration manipulation.
   handler validates both plugin-specific config (via `validate_config_str()`) and
   hooks (via `validate_hooks_internal()`), matching the existing update path. This
   closes a gap where the create path previously skipped validation.
+- **Legacy hook array validation.** *(Implemented)* The `validate_hooks_internal()`
+  function now validates `pre_update_commands` and `post_update_commands` legacy flat
+  arrays in plugin configs — checking element count against
+  `MAX_HOOK_COMMANDS_PER_PHASE`, verifying each element is a string, and validating
+  command length via `validate_command_length()`. Previously these arrays bypassed all
+  validation.
+- **Malformed hooks rejection.** *(Implemented)* If the `"hooks"` JSON key is present
+  but cannot be parsed as a valid `HooksConfig`, validation now returns HTTP 400
+  instead of silently accepting the malformed value.
+- **Docker `working_dir` path traversal check.** *(Implemented)*
+  `DockerConfig::validate()` now rejects `compose_restart.working_dir` values
+  containing `..` path segments, matching the existing `compose_file` check.
+- **Pipe-to-shell evasion detection.** *(Implemented)* The dangerous pattern
+  detector now recognizes `sudo`, `env`, `doas`, and `run0` as wrappers that can
+  precede a shell interpreter in pipe-to-shell patterns (e.g.,
+  `curl ... | sudo bash`, `wget ... | env -i sh`).
 
 ## Residual risk
 
