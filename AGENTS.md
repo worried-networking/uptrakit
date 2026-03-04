@@ -131,7 +131,11 @@ uptrakit/
 ├── .github/
 │   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, reverse-proxy Docker tests, system integration tests, frontend lint + format + check + build
 │   ├── workflows/docker.yml            # CI: multi-arch Docker image builds, push to GHCR
+│   ├── workflows/release-please.yml    # Release: version bumps, changelog, binary artifact builds + attestation
+│   ├── release-please-config.json      # release-please package configuration
+│   ├── .release-please-manifest.json   # Current version tracked by release-please
 │   └── dependabot.yml                  # Weekly Cargo + npm dependency updates
+├── Cross.toml                          # cross-compilation config for ARM64 Linux (aws-lc-sys deps)
 ├── CONTRIBUTING.md
 ├── README.md
 └── AGENTS.md                           # This file
@@ -173,6 +177,22 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `release-fast` | `cargo build --profile release-fast` | Inherits `release` with `lto = false`, `codegen-units = 16`, `strip = false`. For iterative release testing — not production. |
 
 See [Build Speed Optimizations](docs/development/setup.md#build-speed-optimizations) for details.
+
+### Release workflow
+
+Releases are automated via [release-please](https://github.com/googleapis/release-please). Pushing
+conventional commits to `main` triggers a release PR. Merging the PR creates a GitHub release with
+a `v0.0.x` tag, which triggers binary artifact builds (7 binaries x 4 targets) and Docker image
+builds.
+
+Key files:
+
+- `.github/release-please-config.json` — release-please configuration
+- `.github/.release-please-manifest.json` — current version tracker
+- `.github/workflows/release-please.yml` — release + artifact build workflow
+- `Cross.toml` — ARM64 Linux cross-compilation settings
+
+See [docs/development/releases.md](docs/development/releases.md) for full details.
 
 ## General MUST FOLLOW Rules for AI Coding Agents
 

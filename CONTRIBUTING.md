@@ -32,6 +32,12 @@ Thanks for helping improve Uptrakit. Focus on boring, testable, and well-reviewe
 - Provide screenshots for UI changes and mention significant AI assistance if applicable.
 - Follow Conventional Commits ([docs/development/pr-process.md](docs/development/pr-process.md)) for your PR title/message.
 
+## Releases
+
+Conventional commits on `main` automatically trigger [release-please](https://github.com/googleapis/release-please)
+to open a release PR. Merging it creates a GitHub release with binary artifacts and Docker images.
+See [docs/development/releases.md](docs/development/releases.md) for details.
+
 ## Responsible AI use
 
 Read and follow [docs/development/ai-guidelines.md](docs/development/ai-guidelines.md) before incorporating AI-generated content. Your judgment and

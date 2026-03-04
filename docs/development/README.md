@@ -29,6 +29,7 @@ Uptrakit.
 | [OpenAPI Client](openapi-client.md) | Typed HTTP client crate for the web API (`uptrakit-openapi-client`). |
 | [Embedded Frontend](embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). |
 | [Logging](logging.md) | Logging infrastructure, verbosity flags, `RUST_LOG` interaction, and best practices. |
+| [Releases](releases.md) | release-please workflow, binary artifact matrix, attestation verification, and `cargo install` instructions. |
 
 ## Related Documentation
 
