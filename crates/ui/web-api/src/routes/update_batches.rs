@@ -26,6 +26,9 @@ use uptrakit_web_api_types::update_batches::{
 };
 use uptrakit_web_api_types::validation::Validate;
 
+#[cfg(feature = "nats")]
+use futures_util::StreamExt as _;
+
 use crate::AppState;
 use crate::batch_progress_broadcaster::BatchProgressEvent;
 use crate::error_response::error_response;
@@ -472,7 +475,7 @@ pub async fn stream_batch_progress(
             return;
         }
 
-        // Stream from broadcast (if we got a subscription).
+        // Stream from local broadcast channel when available.
         if let Some(mut rx) = broadcast_rx {
             loop {
                 tokio::select! {
@@ -506,6 +509,45 @@ pub async fn stream_batch_progress(
                     }
                     _ = shutdown_token.cancelled() => {
                         // Server is shutting down; terminate the SSE stream.
+                        return;
+                    }
+                }
+            }
+        }
+
+        // No local channel: the batch is running on another controller instance.
+        // Fall back to a NATS subscription when NATS is configured.
+        #[cfg(feature = "nats")]
+        if let Some(mut nats_sub) = state.batch_progress_broadcaster.subscribe_nats(batch_id).await {
+            tracing::debug!(
+                batch_id = %batch_id,
+                "no local broadcast channel; falling back to NATS subscription for SSE stream"
+            );
+            loop {
+                tokio::select! {
+                    msg = nats_sub.next() => {
+                        let Some(msg) = msg else { return; };
+                        let Ok(event) = serde_json::from_slice::<BatchProgressEvent>(&msg.payload) else {
+                            tracing::warn!(batch_id = %batch_id, "received unparseable NATS batch progress event");
+                            continue;
+                        };
+                        let event_name = match &event {
+                            BatchProgressEvent::UpdateDispatched { .. }
+                            | BatchProgressEvent::UpdateStarted { .. }
+                            | BatchProgressEvent::UpdateCompleted { .. }
+                            | BatchProgressEvent::UpdateFailed { .. } => "update",
+                            BatchProgressEvent::Progress { .. } => "progress",
+                            BatchProgressEvent::BatchCompleted { .. } => "batch_completed",
+                        };
+                        let is_batch_completed = matches!(event, BatchProgressEvent::BatchCompleted { .. });
+                        if let Ok(json) = serde_json::to_string(&event) {
+                            yield Ok::<_, Infallible>(Event::default().event(event_name).data(json));
+                        }
+                        if is_batch_completed {
+                            return;
+                        }
+                    }
+                    _ = shutdown_token.cancelled() => {
                         return;
                     }
                 }

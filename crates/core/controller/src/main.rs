@@ -284,6 +284,22 @@ async fn run(args: cli::Args) -> Result<()> {
         None
     };
 
+    // Build the batch progress broadcaster with NATS for cross-instance SSE.
+    // When NATS is not configured the broadcaster operates in single-instance mode.
+    #[cfg(feature = "nats")]
+    let batch_progress_broadcaster = {
+        let broadcaster =
+            uptrakit_web_api::batch_progress_broadcaster::BatchProgressBroadcaster::new();
+        if let Some(ref nats) = nats_transport {
+            broadcaster.with_nats(nats.nats_client())
+        } else {
+            broadcaster
+        }
+    };
+    #[cfg(not(feature = "nats"))]
+    let batch_progress_broadcaster =
+        uptrakit_web_api::batch_progress_broadcaster::BatchProgressBroadcaster::new();
+
     let token_denylist = Arc::new(
         uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
     );
@@ -425,6 +441,7 @@ async fn run(args: cli::Args) -> Result<()> {
         .channel_registry(channel_registry)
         .token_denylist(token_denylist)
         .credential_sources(credential_sources)
+        .batch_progress_broadcaster(batch_progress_broadcaster)
         .shutdown_token(shutdown_token.clone())
         .audit_log_filter(audit_filter)
         .audit_log_dispatcher(audit_dispatcher);

@@ -4,6 +4,17 @@
 //! channels, one per in-progress batch. As individual updates within a batch
 //! start, complete, or fail, the corresponding events are sent to all SSE
 //! subscribers watching that batch.
+//!
+//! ## Multi-instance support (NATS)
+//!
+//! When the `nats` feature is enabled and a NATS client is attached via
+//! [`BatchProgressBroadcaster::with_nats`], every event is also published to the
+//! ephemeral core-NATS subject `uptrakit.batch_progress.<batch_id>`.  SSE clients
+//! connected to a controller instance that did not originate the batch can
+//! subscribe to that subject as a fallback when no local broadcast channel exists.
+//!
+//! Core NATS publish/subscribe (not JetStream) is used intentionally — batch
+//! progress events are transient and must not be persisted.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -61,13 +72,48 @@ pub enum BatchProgressEvent {
 #[derive(Clone)]
 pub struct BatchProgressBroadcaster {
     channels: Arc<RwLock<HashMap<Uuid, broadcast::Sender<BatchProgressEvent>>>>,
+    /// Optional NATS client for cross-instance event fan-out.
+    ///
+    /// When present, every call to [`send`](Self::send) and
+    /// [`send_batch_completed`](Self::send_batch_completed) also publishes the
+    /// serialised event to the ephemeral NATS subject
+    /// `uptrakit.batch_progress.<batch_id>` so that SSE clients connected to
+    /// other controller instances can receive the event.
+    #[cfg(feature = "nats")]
+    nats_client: Option<async_nats::Client>,
 }
 
 impl BatchProgressBroadcaster {
-    /// Create a new empty broadcaster.
+    /// Create a new empty broadcaster (no NATS, single-instance mode).
     pub fn new() -> Self {
         Self {
             channels: Arc::new(RwLock::new(HashMap::new())),
+            #[cfg(feature = "nats")]
+            nats_client: None,
+        }
+    }
+
+    /// Attach a NATS client for cross-instance event fan-out.
+    ///
+    /// Returns a new `BatchProgressBroadcaster` that publishes every progress
+    /// event to core NATS in addition to the local broadcast channel.  Events
+    /// are published to `uptrakit.batch_progress.<batch_id>` (not JetStream).
+    #[cfg(feature = "nats")]
+    #[must_use]
+    pub fn with_nats(mut self, client: async_nats::Client) -> Self {
+        self.nats_client = Some(client);
+        self
+    }
+
+    /// Returns `true` when a NATS client has been attached.
+    pub fn has_nats(&self) -> bool {
+        #[cfg(feature = "nats")]
+        {
+            self.nats_client.is_some()
+        }
+        #[cfg(not(feature = "nats"))]
+        {
+            false
         }
     }
 
@@ -77,31 +123,116 @@ impl BatchProgressBroadcaster {
         self.channels.write().await.insert(batch_id, tx);
     }
 
-    /// Send a progress event to all subscribers of the given batch.
-    pub async fn send(&self, batch_id: Uuid, event: BatchProgressEvent) {
-        let channels = self.channels.read().await;
-        if let Some(tx) = channels.get(&batch_id) {
-            let _ = tx.send(event);
-        }
-    }
-
-    /// Send a batch completion event and remove the channel.
-    pub async fn send_batch_completed(&self, batch_id: Uuid, status: String) {
-        let mut channels = self.channels.write().await;
-        if let Some(tx) = channels.remove(&batch_id) {
-            let _ = tx.send(BatchProgressEvent::BatchCompleted { status });
-        }
-    }
-
-    /// Subscribe to the broadcast channel for the given batch.
+    /// Send a progress event to all local subscribers of the given batch.
     ///
-    /// Returns `None` if no channel exists.
+    /// When a NATS client is configured the event is also published to the
+    /// ephemeral core-NATS subject `uptrakit.batch_progress.<batch_id>` so
+    /// that SSE clients on other controller instances receive it.
+    pub async fn send(&self, batch_id: Uuid, event: BatchProgressEvent) {
+        // Local broadcast.
+        {
+            let channels = self.channels.read().await;
+            if let Some(tx) = channels.get(&batch_id) {
+                let _ = tx.send(event.clone());
+            }
+        }
+
+        // Cross-instance NATS publish (best-effort; failures are logged only).
+        #[cfg(feature = "nats")]
+        if let Some(ref client) = self.nats_client {
+            self.publish_nats(client, batch_id, &event).await;
+        }
+    }
+
+    /// Send a batch completion event, remove the local channel, and publish to
+    /// NATS when configured.
+    pub async fn send_batch_completed(&self, batch_id: Uuid, status: String) {
+        let event = BatchProgressEvent::BatchCompleted { status };
+
+        // Local broadcast (removes channel atomically).
+        {
+            let mut channels = self.channels.write().await;
+            if let Some(tx) = channels.remove(&batch_id) {
+                let _ = tx.send(event.clone());
+            }
+        }
+
+        // Cross-instance NATS publish.
+        #[cfg(feature = "nats")]
+        if let Some(ref client) = self.nats_client {
+            self.publish_nats(client, batch_id, &event).await;
+        }
+    }
+
+    /// Publish `event` to the ephemeral core-NATS subject for `batch_id`.
+    ///
+    /// Failures are logged at `WARN` level and never propagate to callers —
+    /// NATS delivery is best-effort for progress events.
+    #[cfg(feature = "nats")]
+    async fn publish_nats(
+        &self,
+        client: &async_nats::Client,
+        batch_id: Uuid,
+        event: &BatchProgressEvent,
+    ) {
+        let subject = uptrakit_nats::subjects::batch_progress(&batch_id);
+        match serde_json::to_vec(event) {
+            Ok(payload) => {
+                if let Err(e) = client.publish(subject.clone(), payload.into()).await {
+                    tracing::warn!(
+                        batch_id = %batch_id,
+                        subject,
+                        error = %e,
+                        "failed to publish batch progress event to NATS"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    batch_id = %batch_id,
+                    error = %e,
+                    "failed to serialize batch progress event for NATS"
+                );
+            }
+        }
+    }
+
+    /// Subscribe to the local broadcast channel for the given batch.
+    ///
+    /// Returns `None` if no local channel exists (batch running on another
+    /// instance).  In that case callers with NATS access should fall back to
+    /// [`subscribe_nats`](Self::subscribe_nats).
     pub async fn subscribe(
         &self,
         batch_id: Uuid,
     ) -> Option<broadcast::Receiver<BatchProgressEvent>> {
         let channels = self.channels.read().await;
         channels.get(&batch_id).map(|tx| tx.subscribe())
+    }
+
+    /// Subscribe to the NATS subject for the given batch.
+    ///
+    /// Returns `Some(Subscriber)` when a NATS client is configured, or `None`
+    /// when running in single-instance mode (no NATS).  The subscriber receives
+    /// serialised [`BatchProgressEvent`] JSON published by the origin instance.
+    ///
+    /// Errors creating the subscription are logged and returned as `None`.
+    #[cfg(feature = "nats")]
+    pub async fn subscribe_nats(&self, batch_id: Uuid) -> Option<async_nats::Subscriber> {
+        let client = self.nats_client.as_ref()?;
+        let subject = uptrakit_nats::subjects::batch_progress(&batch_id);
+        match client.subscribe(subject.clone()).await {
+            Ok(sub) => Some(sub),
+            Err(e) => {
+                tracing::warn!(
+                    batch_id = %batch_id,
+                    subject,
+                    error = %e,
+                    "failed to subscribe to NATS batch progress subject"
+                );
+                None
+            }
+        }
     }
 }
 

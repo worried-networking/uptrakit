@@ -361,6 +361,20 @@ impl AppStateBuilder {
         self
     }
 
+    /// Override the batch progress broadcaster.
+    ///
+    /// Optional — defaults to [`BatchProgressBroadcaster::new()`] (single-instance
+    /// mode with no NATS).  Pass a broadcaster built with
+    /// [`BatchProgressBroadcaster::with_nats`] to enable cross-instance SSE
+    /// delivery when NATS is configured.
+    pub fn batch_progress_broadcaster(
+        mut self,
+        v: crate::batch_progress_broadcaster::BatchProgressBroadcaster,
+    ) -> Self {
+        self.batch_progress_broadcaster = Some(v);
+        self
+    }
+
     /// Set the shutdown cancellation token for SSE stream graceful termination.
     ///
     /// Optional — defaults to a new, never-cancelled token (no-op for tests
