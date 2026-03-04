@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-mqtt"
+description = "Uptrakit MQTT bridge service for Home Assistant integration"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [[bin]]
 name = "uptrakit-mqtt"

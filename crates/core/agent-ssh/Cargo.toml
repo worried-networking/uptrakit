@@ -1,5 +1,6 @@
 [package]
 name = "uptrakit-agent-ssh"
+description = "Uptrakit SSH agent for remote host update management"
 edition = "2024"
 license.workspace = true
 authors.workspace = true

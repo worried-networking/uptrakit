@@ -1,5 +1,6 @@
 [package]
 name = "uptrakit-controller"
+description = "Uptrakit controller — self-hosted software update management server"
 edition = "2024"
 license.workspace = true
 authors.workspace = true

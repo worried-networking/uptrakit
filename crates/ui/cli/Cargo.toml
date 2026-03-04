@@ -1,5 +1,6 @@
 [package]
 name = "uptrakit-cli"
+description = "Command-line interface for the Uptrakit platform"
 edition = "2024"
 license.workspace = true
 authors.workspace = true

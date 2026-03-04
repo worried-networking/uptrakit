@@ -8,6 +8,7 @@ members = [
 ]
 
 [workspace.package]
+description = "Agent-based update tracking toolkit for self-hosted Linux environments"
 license = "MIT OR Apache-2.0"
 authors = ["Andrey Yantsen"]
 repository = "https://github.com/worried-networking/uptrakit"

@@ -1,5 +1,6 @@
 [package]
 name = "uptrakit-agent"
+description = "Uptrakit agent daemon for local host update management"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
