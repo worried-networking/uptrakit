@@ -33,6 +33,7 @@ pub enum PluginType {
     PackageManagerHomebrew,
     PackageManagerApt,
     PackageManagerNpm,
+    PackageManagerMas,
     GenericShell,
     /// An unknown plugin type received from a newer peer.
     ///
@@ -56,6 +57,7 @@ impl PluginType {
             Self::PackageManagerHomebrew => "package_manager_homebrew",
             Self::PackageManagerApt => "package_manager_apt",
             Self::PackageManagerNpm => "package_manager_npm",
+            Self::PackageManagerMas => "package_manager_mas",
             Self::GenericShell => "generic_shell",
             Self::Other(s) => s.as_str(),
         }
@@ -74,6 +76,7 @@ impl PluginType {
             Self::PackageManagerHomebrew => "Homebrew",
             Self::PackageManagerApt => "APT",
             Self::PackageManagerNpm => "npm",
+            Self::PackageManagerMas => "Mac App Store",
             Self::GenericShell => "Shell",
             Self::Other(s) => s.as_str(),
         }
@@ -108,6 +111,7 @@ impl FromStr for PluginType {
             "package_manager_homebrew" => Ok(Self::PackageManagerHomebrew),
             "package_manager_apt" => Ok(Self::PackageManagerApt),
             "package_manager_npm" => Ok(Self::PackageManagerNpm),
+            "package_manager_mas" => Ok(Self::PackageManagerMas),
             "generic_shell" => Ok(Self::GenericShell),
             _ => Err(ParsePluginTypeError::Invalid),
         }
@@ -142,6 +146,7 @@ impl From<String> for PluginType {
             "package_manager_homebrew" => Self::PackageManagerHomebrew,
             "package_manager_apt" => Self::PackageManagerApt,
             "package_manager_npm" => Self::PackageManagerNpm,
+            "package_manager_mas" => Self::PackageManagerMas,
             "generic_shell" => Self::GenericShell,
             _ => Self::Other(s),
         }
@@ -161,6 +166,7 @@ impl From<PluginType> for String {
             PluginType::PackageManagerHomebrew => "package_manager_homebrew".to_string(),
             PluginType::PackageManagerApt => "package_manager_apt".to_string(),
             PluginType::PackageManagerNpm => "package_manager_npm".to_string(),
+            PluginType::PackageManagerMas => "package_manager_mas".to_string(),
             PluginType::GenericShell => "generic_shell".to_string(),
             PluginType::Other(s) => s,
         }
@@ -390,6 +396,10 @@ mod tests {
             PluginType::PackageManagerNpm
         );
         assert_eq!(
+            PluginType::from("package_manager_mas".to_string()),
+            PluginType::PackageManagerMas
+        );
+        assert_eq!(
             PluginType::from("generic_shell".to_string()),
             PluginType::GenericShell
         );
@@ -430,6 +440,10 @@ mod tests {
             PluginType::PackageManagerNpm.to_string(),
             "package_manager_npm"
         );
+        assert_eq!(
+            PluginType::PackageManagerMas.to_string(),
+            "package_manager_mas"
+        );
         assert_eq!(PluginType::GenericShell.to_string(), "generic_shell");
         assert_eq!(
             PluginType::Other("custom_type".to_string()).to_string(),
@@ -464,6 +478,10 @@ mod tests {
         assert_eq!(
             "package_manager_npm".parse::<PluginType>().ok(),
             Some(PluginType::PackageManagerNpm)
+        );
+        assert_eq!(
+            "package_manager_mas".parse::<PluginType>().ok(),
+            Some(PluginType::PackageManagerMas)
         );
         assert_eq!(
             "releases_gitlab".parse::<PluginType>().ok(),
@@ -519,6 +537,10 @@ mod tests {
         );
         assert_eq!(PluginType::PackageManagerApt.display_name(), "APT");
         assert_eq!(PluginType::PackageManagerNpm.display_name(), "npm");
+        assert_eq!(
+            PluginType::PackageManagerMas.display_name(),
+            "Mac App Store"
+        );
         assert_eq!(PluginType::GenericShell.display_name(), "Shell");
     }
 
@@ -539,6 +561,7 @@ mod tests {
             PluginType::PackageManagerHomebrew,
             PluginType::PackageManagerApt,
             PluginType::PackageManagerNpm,
+            PluginType::PackageManagerMas,
             PluginType::GenericShell,
         ];
         for pt in &variants {
@@ -561,6 +584,7 @@ mod tests {
             PluginType::PackageManagerHomebrew,
             PluginType::PackageManagerApt,
             PluginType::PackageManagerNpm,
+            PluginType::PackageManagerMas,
             PluginType::GenericShell,
             PluginType::Other("my_plugin".to_string()),
         ];
