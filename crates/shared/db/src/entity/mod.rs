@@ -37,6 +37,7 @@ pub mod scheduled_task;
 pub mod service;
 pub mod service_certificate;
 pub mod service_host;
+pub mod system_enrollment_token;
 pub mod system_service;
 pub mod system_service_certificate;
 pub mod session;

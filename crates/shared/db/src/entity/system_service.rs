@@ -22,10 +22,14 @@ pub enum SystemServiceStatus {
 
 /// A tenant-agnostic infrastructure service (MQTT bridge, external scheduler).
 ///
-/// Unlike [`super::service::Model`], this entity has no `tenant_id` or
-/// `enrollment_token_id` — system services are global and serve all tenants.
-/// Enrollment is authenticated via the `SystemServicesEnrollmentToken` global
-/// setting rather than per-tenant enrollment tokens.
+/// Unlike [`super::service::Model`], this entity has no `tenant_id` — system
+/// services are global and serve all tenants. Enrollment is authenticated via
+/// [`super::system_enrollment_token::Model`] tokens (Argon2id-hashed, named,
+/// expirable) rather than a plaintext global setting.
+///
+/// `system_enrollment_token_id` is audit-only: the token that approved this
+/// enrollment. No FK constraint — tokens may be revoked or deleted after the
+/// service has already enrolled.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "system_services")]
 pub struct Model {
@@ -46,17 +50,32 @@ pub struct Model {
     pub deactivated_at: Option<OffsetDateTime>,
     pub ping_interval_seconds: Option<i32>,
     pub cert_lifetime_hours: Option<i32>,
+    /// Audit trail: ID of the system enrollment token used to approve enrollment.
+    /// `None` for services enrolled manually or before this feature was introduced.
+    pub system_enrollment_token_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(has_many = "super::system_service_certificate::Entity")]
     SystemServiceCertificate,
+    #[sea_orm(
+        belongs_to = "super::system_enrollment_token::Entity",
+        from = "Column::SystemEnrollmentTokenId",
+        to = "super::system_enrollment_token::Column::Id"
+    )]
+    SystemEnrollmentToken,
 }
 
 impl Related<super::system_service_certificate::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::SystemServiceCertificate.def()
+    }
+}
+
+impl Related<super::system_enrollment_token::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::SystemEnrollmentToken.def()
     }
 }
 

@@ -25,6 +25,7 @@ mod m20260309_000001_fix_permission_created_at_format;
 mod m20260310_000001_data_encryption_keys;
 mod m20260311_000001_update_history_status_index;
 mod m20260311_000002_audit_log_permissions;
+mod m20260312_000001_system_enrollment_tokens;
 
 pub struct Migrator;
 
@@ -56,6 +57,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260310_000001_data_encryption_keys::Migration),
             Box::new(m20260311_000001_update_history_status_index::Migration),
             Box::new(m20260311_000002_audit_log_permissions::Migration),
+            Box::new(m20260312_000001_system_enrollment_tokens::Migration),
         ]
     }
 }
@@ -78,7 +80,7 @@ mod tests {
         host_package, host_package_ignore, host_package_update_history, host_software_item,
         notification_channel, notification_log, notification_rule, plugin_config,
         revoked_token_jti, revoked_token_user, role, role_permission, service, software_item,
-        system_audit_log, system_service, system_service_certificate,
+        system_audit_log, system_enrollment_token, system_service, system_service_certificate,
         tenant_discovery_allowlist, update_batch, update_history,
     };
 
@@ -227,6 +229,12 @@ mod tests {
         // Verify audit_logs and system_audit_logs tables exist.
         audit_log::Entity::find().count(&db).await.unwrap();
         system_audit_log::Entity::find().count(&db).await.unwrap();
+
+        // Verify system_enrollment_tokens table exists.
+        system_enrollment_token::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
 
         // Verify split_version_check migration: detect_version task row exists.
         let count_stmt = Query::select()
