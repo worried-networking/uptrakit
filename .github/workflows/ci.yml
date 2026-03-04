@@ -107,8 +107,21 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: cd frontend && npm ci && npm run build
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-all-features"
+          save-if: "false"
+      - uses: docker/setup-buildx-action@v3
       - name: Build test Docker image
-        run: docker build -f docker/Dockerfile.test -t uptrakit-test:latest .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.test
+          push: false
+          load: true
+          tags: uptrakit-test:latest
+          cache-from: type=gha,scope=integration-test
+          cache-to: type=gha,mode=max,scope=integration-test
       - name: Run system integration tests
         run: cargo test -p uptrakit-integration-tests -- --ignored
 
