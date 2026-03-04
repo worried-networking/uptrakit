@@ -1,5 +1,5 @@
 pub mod app_state;
-pub mod auth;
+pub use uptrakit_web_api_auth::auth;
 pub mod batch_progress_broadcaster;
 pub mod ca_snapshot;
 pub mod cert_signer;
@@ -20,16 +20,16 @@ pub use uptrakit_web_api_queries::notifier::ServiceNotifier;
 pub mod router;
 pub mod routes;
 pub mod service_connections;
-pub mod setting_key;
+pub use uptrakit_web_api_auth::setting_key;
 pub mod settings;
-pub mod settings_store;
+pub use uptrakit_web_api_auth::settings_store;
 pub mod tenant_db;
 pub mod update_output_broadcaster;
 
 pub use app_state::{AppState, AppStateBuildError, AppStateBuilder, ServiceCredentialSources};
 pub use ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
 pub use router::{api_not_found, build_pki_router, build_router};
-pub use setting_key::SettingKey;
+pub use uptrakit_web_api_auth::SettingKey;
 pub use uptrakit_web_api_types::MaskedUrl;
 
 #[cfg(all(test, feature = "db-sqlite"))]

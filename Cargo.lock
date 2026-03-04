@@ -7163,7 +7163,6 @@ dependencies = [
 name = "uptrakit-web-api"
 version = "0.0.1"
 dependencies = [
- "argon2",
  "async-nats",
  "async-stream",
  "async-trait",
@@ -7181,7 +7180,6 @@ dependencies = [
  "http",
  "http-body-util",
  "ipnet",
- "jsonwebtoken",
  "openidconnect",
  "parking_lot",
  "percent-encoding",
@@ -7216,6 +7214,7 @@ dependencies = [
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-update-hooks",
+ "uptrakit-web-api-auth",
  "uptrakit-web-api-queries",
  "uptrakit-web-api-types",
  "url",
@@ -7226,6 +7225,39 @@ dependencies = [
  "x509-cert",
  "x509-ocsp",
  "x509-parser",
+ "zeroize",
+]
+
+[[package]]
+name = "uptrakit-web-api-auth"
+version = "0.0.1"
+dependencies = [
+ "argon2",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "http",
+ "jsonwebtoken",
+ "openidconnect",
+ "parking_lot",
+ "rand 0.9.2",
+ "rootcause",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "strum",
+ "subtle",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uptrakit-crypto",
+ "uptrakit-shared-db",
+ "uptrakit-shared-macros",
+ "uptrakit-shared-types",
+ "uptrakit-web-api-types",
+ "uuid",
  "zeroize",
 ]
 
