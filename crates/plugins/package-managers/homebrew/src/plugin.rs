@@ -227,6 +227,22 @@ impl HomebrewPlugin {
                     continue;
                 };
 
+                // Casks with `auto_updates: true` manage their own update
+                // mechanism (e.g. Google Chrome) and cannot be upgraded via
+                // `brew upgrade`. Exclude them from discovery so they don't
+                // appear in the UI.
+                if cask
+                    .get("auto_updates")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    tracing::debug!(
+                        token,
+                        "skipping auto-updating cask from discovery (auto_updates=true)"
+                    );
+                    continue;
+                }
+
                 let targets = if emit_targets {
                     vec![DiscoveryTarget {
                         plugin_type: PluginType::PackageManagerHomebrew,
@@ -1033,6 +1049,50 @@ mod tests {
         let json = sample_cask_json_not_installed();
         let packages = HomebrewPlugin::parse_installed_casks(&json, false);
         assert!(packages.is_empty());
+    }
+
+    #[test]
+    fn parse_installed_casks_skips_auto_updates_true() {
+        let json = serde_json::json!({
+            "formulae": [],
+            "casks": [
+                {
+                    "token": "google-chrome",
+                    "name": ["Google Chrome"],
+                    "version": "130.0",
+                    "installed": "129.0",
+                    "auto_updates": true
+                },
+                {
+                    "token": "firefox",
+                    "name": ["Mozilla Firefox"],
+                    "version": "133.0",
+                    "installed": "132.0",
+                    "auto_updates": false
+                }
+            ]
+        });
+        let packages = HomebrewPlugin::parse_installed_casks(&json, false);
+        // google-chrome (auto_updates=true) is excluded; firefox (auto_updates=false) is included.
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].package_identifier, "firefox");
+    }
+
+    #[test]
+    fn parse_installed_casks_includes_cask_without_auto_updates_field() {
+        let json = serde_json::json!({
+            "formulae": [],
+            "casks": [{
+                "token": "iterm2",
+                "name": ["iTerm2"],
+                "version": "3.5.0",
+                "installed": "3.4.23"
+            }]
+        });
+        let packages = HomebrewPlugin::parse_installed_casks(&json, false);
+        // No auto_updates field → defaults to false → included.
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].package_identifier, "iterm2");
     }
 
     #[test]
