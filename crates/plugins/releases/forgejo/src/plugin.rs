@@ -196,6 +196,7 @@ impl ForgejoPlugin {
                 download_url: a.browser_download_url.clone(),
                 size: Some(a.size),
                 content_type: None,
+                sha256_digest: None,
             })
             .collect();
 
@@ -208,6 +209,7 @@ impl ForgejoPlugin {
             published_at,
             assets,
             category: None,
+            attestation_status: None,
         })
     }
 

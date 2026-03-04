@@ -498,6 +498,7 @@ impl Plugin for AptPlugin {
             published_at: None,
             assets: vec![],
             category,
+            attestation_status: None,
         }])
     }
 
@@ -832,6 +833,7 @@ impl Plugin for AptPlugin {
                         published_at: None,
                         assets: vec![],
                         category,
+                        attestation_status: None,
                     }],
                     error: None,
                 }

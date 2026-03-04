@@ -288,6 +288,7 @@ impl NpmPlugin {
                 published_at,
                 assets: vec![],
                 category: None,
+                attestation_status: None,
             });
         }
 
@@ -328,6 +329,7 @@ impl NpmPlugin {
                     published_at,
                     assets: vec![],
                     category: None,
+                    attestation_status: None,
                 });
             }
         }

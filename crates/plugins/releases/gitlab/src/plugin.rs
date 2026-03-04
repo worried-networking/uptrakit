@@ -193,6 +193,7 @@ impl GitLabPlugin {
                 download_url: a.url.clone(),
                 size: None,
                 content_type: None,
+                sha256_digest: None,
             })
             .collect();
 
@@ -207,6 +208,7 @@ impl GitLabPlugin {
             published_at,
             assets,
             category: None,
+            attestation_status: None,
         })
     }
 

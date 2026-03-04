@@ -236,6 +236,8 @@ mod tests {
             tag: "v1.2.3".to_string(),
             release_url: "https://example.com".to_string(),
             assets: vec![],
+            attestation_status: None,
+            require_attestation: false,
         };
         let result = plugin
             .execute_update("mypkg", "1.2.3", Some(&release_info), &tx)

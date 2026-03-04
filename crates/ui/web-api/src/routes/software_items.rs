@@ -662,8 +662,13 @@ pub async fn trigger_update(
                     download_url: a.download_url,
                     size: a.size,
                     content_type: None,
+                    sha256_digest: None,
                 })
                 .collect(),
+            // Attestation fields are enriched server-side at dispatch time from
+            // latest_release_metadata and the fetch_releases plugin config.
+            attestation_status: None,
+            require_attestation: false,
         });
 
     match crate::queries::update_triggers::trigger_update_for_host(

@@ -56,6 +56,7 @@ mod tests {
                 published_at: None,
                 assets: vec![],
                 category: None,
+                attestation_status: None,
             }],
             error: None,
         };
