@@ -22,6 +22,30 @@ Install `cargo-deny` before running dependency checks:
 cargo install cargo-deny
 ```
 
+## Pre-commit hooks
+
+Git hooks are managed by [`husky-rs`](https://crates.io/crates/husky-rs) and auto-install on the
+first `cargo build` or `cargo test` run. No manual setup is required.
+
+The hooks are committed in `.husky/` and activated via `core.hooksPath = .husky` in the local git
+config. This works for both regular clones and git worktrees.
+
+### Hook tiers
+
+| Hook | Trigger | What runs |
+| --- | --- | --- |
+| `pre-commit` | Every commit | `cargo fmt --check` (if `.rs` staged), `markdownlint` (if `.md` staged), `npm run lint` + `npm run format:check` (if `frontend/` staged) |
+| `pre-push` | Every push | `cargo check`, `cargo clippy`, `cargo deny check`, `cargo test` (all with `db-sqlite`), frontend checks (if `node_modules` present) |
+
+### Disabling hooks
+
+- **CI / hermetic builds**: set `NO_HUSKY_HOOKS=1` before running `cargo build` or `cargo test`
+  to prevent `core.hooksPath` from being set.
+- **Emergency bypass**: `git commit --no-verify` or `git push --no-verify` skips all hooks for
+  that invocation.
+
+See [Quality Gates](quality-gates.md) for the full list of checks enforced at each tier.
+
 ## Master Encryption Key
 
 The controller requires a 256-bit master key (64 hex characters) for encrypting sensitive DB fields. Provide it via:

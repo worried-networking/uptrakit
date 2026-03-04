@@ -1,4 +1,40 @@
-# Quality gates (must pass before committing)
+# Quality gates
+
+## Local enforcement (pre-commit hooks)
+
+Quality gates are automatically enforced locally via git hooks managed by
+[`husky-rs`](https://crates.io/crates/husky-rs). Hooks auto-install on the first
+`cargo build --workspace` or `cargo test --workspace` — no manual setup required.
+
+### Hook tiers
+
+**`pre-commit`** (fast, ~30 s) — checks only staged files:
+
+| Condition | Command |
+| --- | --- |
+| Any `.rs` file staged | `cargo fmt --all -- --check` |
+| Any `.md` file staged | `markdownlint --config .markdownlint.json '**/*.md'` |
+| Any `frontend/` file staged | `npm run lint` + `npm run format:check` (if `node_modules` present) |
+
+**`pre-push`** (thorough) — always runs on every push:
+
+| Command | Notes |
+| --- | --- |
+| `cargo check --workspace --no-default-features --features db-sqlite` | |
+| `cargo clippy --workspace --all-targets --no-default-features --features db-sqlite` | |
+| `cargo deny check` | Fast (~3 s) |
+| `cargo test --workspace --no-default-features --features db-sqlite` | |
+| `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`) | Guarded by `node_modules` |
+
+### Bypass methods
+
+- **CI**: set `NO_HUSKY_HOOKS=1` before `cargo build`/`cargo test` to skip hook installation.
+- **Emergency**: `git commit --no-verify` or `git push --no-verify` skips hooks for that
+  invocation.
+
+See [Setup — Pre-commit hooks](setup.md#pre-commit-hooks) for installation details.
+
+## Full quality gate suite (must pass before committing)
 
 Run all relevant quality gates for the areas touched by your change.
 

@@ -169,6 +169,11 @@ See [Build Speed Optimizations](docs/development/setup.md#build-speed-optimizati
 
 All changes must pass defined quality gates. See [docs/development/quality-gates.md](docs/development/quality-gates.md) for details.
 
+Git hooks (managed by [`husky-rs`](https://crates.io/crates/husky-rs)) enforce a subset of these
+gates locally on commit and push. They auto-install via `core.hooksPath = .husky` on the first
+`cargo build`/`cargo test` run. Set `NO_HUSKY_HOOKS=1` to prevent installation in CI or hermetic
+build environments.
+
 #### AI execution guidance
 
 - Always run quality gates relevant to modified areas before finalizing.
