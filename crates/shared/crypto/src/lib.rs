@@ -71,6 +71,13 @@ pub enum CryptoError {
 
     #[error("master key does not match existing encrypted data")]
     MasterKeyMismatch,
+
+    #[error("duplicate column AAD: column '{column}' in table '{new_table}' conflicts with existing AAD '{existing_aad}'")]
+    DuplicateColumnAad {
+        column: String,
+        existing_aad: String,
+        new_table: String,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Report<CryptoError>>;
@@ -327,27 +334,59 @@ pub fn unwrap_data_key_with(
 /// Global registry mapping column names to their AAD strings.
 ///
 /// Used by [`EncryptedString`]'s `TryGetable` implementation to look up the
-/// correct AAD for `ENC:v2:` decryption based on the column name in the
-/// query result.
+/// correct AAD for `ENC:v2:`/`ENC:v3:` decryption based on the column name
+/// in the query result.
 ///
 /// Initialized at controller startup via [`register_column_aad`].
 static COLUMN_AAD_REGISTRY: OnceLock<std::collections::HashMap<String, String>> = OnceLock::new();
 
-/// Register the column-name-to-AAD mappings used for `ENC:v2:` decryption.
+/// A column-level AAD registration entry.
+///
+/// Each entry maps a `(table, column)` pair to an AAD string.
+/// The runtime lookup uses only `column` (bare column name) because
+/// SeaORM's `TryGetable` does not provide table context. Column
+/// names MUST be unique across all encrypted columns; registration
+/// fails with [`CryptoError::DuplicateColumnAad`] if a collision is
+/// detected.
+pub struct ColumnAadEntry {
+    /// Table name (e.g., `"ca_certificates"`).
+    pub table: &'static str,
+    /// Column name (e.g., `"key_pem"`). Must be unique across all tables.
+    pub column: &'static str,
+    /// The full AAD string (e.g., `"uptrakit:ca_certificates:key_pem"`).
+    pub aad: &'static str,
+}
+
+/// Register column-name-to-AAD mappings used for `ENC:v2:`/`ENC:v3:`
+/// decryption.
 ///
 /// Must be called once at startup, before any database queries that read
 /// `EncryptedString` columns. Subsequent calls return an error.
 ///
-/// The map keys are column names (e.g. `"password"`, `"client_secret"`) and
-/// values are the corresponding AAD strings (e.g. `"uptrakit:mqtt_clients:password"`).
+/// Each [`ColumnAadEntry`] records a `(table, column, aad)` triple. The
+/// runtime lookup key is the bare column name (SeaORM limitation), so
+/// column names must be unique across all tables. If a duplicate column
+/// name is detected, the function returns
+/// [`CryptoError::DuplicateColumnAad`].
 ///
 /// # Errors
 ///
-/// Returns `Err(CryptoError::AlreadyInitialized)` if the registry has already
-/// been initialized.
-pub fn register_column_aad(mappings: std::collections::HashMap<String, String>) -> Result<()> {
+/// - [`CryptoError::DuplicateColumnAad`] if two entries share a column name.
+/// - [`CryptoError::AlreadyInitialized`] if the registry has already been
+///   initialized.
+pub fn register_column_aad(entries: &[ColumnAadEntry]) -> Result<()> {
+    let mut map = HashMap::with_capacity(entries.len());
+    for entry in entries {
+        if let Some(existing_aad) = map.insert(entry.column.to_string(), entry.aad.to_string()) {
+            bail!(CryptoError::DuplicateColumnAad {
+                column: entry.column.to_string(),
+                existing_aad,
+                new_table: entry.table.to_string(),
+            });
+        }
+    }
     COLUMN_AAD_REGISTRY
-        .set(mappings)
+        .set(map)
         .map_err(|_| report!(CryptoError::AlreadyInitialized))
 }
 
@@ -1562,10 +1601,13 @@ mod tests {
         // process-wide OnceLock. Since other tests may call register_column_aad
         // too, we just verify the lookup function works with whatever is
         // registered (or not).
-        let mut mappings = std::collections::HashMap::new();
-        mappings.insert("test_col".to_string(), "uptrakit:t:test_col".to_string());
+        let entries = &[ColumnAadEntry {
+            table: "test_table",
+            column: "test_col",
+            aad: "uptrakit:t:test_col",
+        }];
         // Ignore error — may already be initialized by another test
-        let _ = register_column_aad(mappings);
+        let _ = register_column_aad(entries);
 
         // If registry was initialized by us, lookup should work.
         // If already initialized by another test, we just verify no panic.
