@@ -676,6 +676,7 @@ async fn independently_verify_attestation(
 
     let client = match reqwest::Client::builder()
         .user_agent(concat!("uptrakit-agent/", env!("CARGO_PKG_VERSION")))
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(30))
         .build()

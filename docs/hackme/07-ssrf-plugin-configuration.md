@@ -71,9 +71,9 @@ requests to cloud metadata endpoints.
 - **Error message information leakage.** Connection errors from SSRF attempts may
   include internal IP addresses, port numbers, or service banners in error messages
   returned to the API caller or logged in version check results.
-- **Redirect following.** The `reqwest` client follows HTTP redirects by default. An
-  attacker's external server could redirect the controller to an internal address
-  after passing the initial URL validation.
+- ~~Redirect following.~~ **Fixed.** All plugin HTTP clients now use
+  `redirect(Policy::none())`, disabling automatic redirect following. API endpoints
+  should not redirect; any 3xx response is treated as an error.
 
 ## Recommended improvements
 
@@ -83,8 +83,8 @@ requests to cloud metadata endpoints.
 - Add `is_private_host()` validation to the Docker plugin's registry hostname.
 - ~~Block IPv6 ULA, link-local, and CGNAT ranges~~ — **Done.** Consolidated shared
   `is_private_host()` in `uptrakit_shared_types::network` covers all ranges.
-- Disable HTTP redirect following in plugin HTTP clients, or validate redirect targets
-  against the same private-host rules.
+- ~~Disable HTTP redirect following in plugin HTTP clients~~ — **Done.** All plugin
+  clients use `redirect(Policy::none())`.
 - Sanitize error messages from failed SSRF attempts to avoid leaking internal network
   information in API responses and logs.
 - Consider an allowlist-based approach for `api_base_url` where operators explicitly

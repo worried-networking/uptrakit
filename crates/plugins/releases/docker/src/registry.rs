@@ -31,6 +31,7 @@ impl RegistryClient {
                 "uptrakit-plugin-releases-docker/",
                 env!("CARGO_PKG_VERSION")
             ))
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
             .build()

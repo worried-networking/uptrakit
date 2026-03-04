@@ -177,6 +177,7 @@ impl NpmPlugin {
                 "uptrakit-plugin-package-manager-npm/",
                 env!("CARGO_PKG_VERSION")
             ))
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
             .build()

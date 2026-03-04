@@ -68,8 +68,9 @@
 - ~~No URL validation beyond scheme.~~ **Fixed.** `validate_config()` now validates
   the URL host against `is_private_host()` (unless `--allow-private-notification-urls`
   is set). Encoded IP addresses (e.g. `http://0x7f000001`) are not yet covered.
-- **No redirect validation.** The `reqwest` client follows HTTP redirects by default.
-  An external URL could redirect to an internal address, bypassing URL validation.
+- ~~No redirect validation.~~ **Fixed.** The webhook HTTP client now uses
+  `redirect(Policy::none())`. Redirect responses (3xx) are explicitly rejected with
+  a descriptive error message including the `Location` target.
 - ~~Arbitrary custom headers.~~ **Fixed.** A header name blocklist rejects
   `Authorization`, `Cookie`, `Host`, `Proxy-Authorization`, `X-Forwarded-For`,
   `X-Forwarded-Host`, and `X-Real-Ip` in custom headers.
@@ -83,8 +84,8 @@
 - ~~Implement `is_private_host()` validation for webhook URLs~~ — **Done.** Configurable
   via `--allow-private-notification-urls` for self-hosted deployments.
 - ~~Add a header name blocklist~~ — **Done.** Always enforced regardless of URL flag.
-- Disable HTTP redirect following in the webhook client, or validate redirect targets
-  against the same private-host rules.
+- ~~Disable HTTP redirect following in the webhook client~~ — **Done.** The webhook
+  client uses `redirect(Policy::none())` and explicitly rejects 3xx responses.
 - Implement DNS resolution validation at connection time to prevent DNS rebinding
   attacks.
 - Add a "test delivery" dry-run that shows the resolved IP address and response

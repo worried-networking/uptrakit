@@ -245,14 +245,18 @@ let client = reqwest::Client::builder()
         "uptrakit-plugin-my-plugin/",
         env!("CARGO_PKG_VERSION")
     ))
-    .connect_timeout(Duration::from_secs(10))   // prevents hangs on unreachable hosts
-    .timeout(Duration::from_secs(60))            // caps total request duration
+    .redirect(reqwest::redirect::Policy::none()) // SSRF protection
+    .connect_timeout(Duration::from_secs(10))    // prevents hangs on unreachable hosts
+    .timeout(Duration::from_secs(60))             // caps total request duration
     .build()
     .context_to::<MyPluginError>()?;
 ```
 
-**Required timeouts:**
+**Required settings:**
 
+- `.redirect(Policy::none())` — disables automatic redirect following. Prevents SSRF via
+  attacker-controlled redirect targets (e.g., a 301 to `http://169.254.169.254/...`). Plugin API
+  endpoints should not redirect; any 3xx response should be treated as an error.
 - `.connect_timeout(Duration::from_secs(10))` — prevents hanging on a host that accepts the TCP
   connection but never sends data.
 - `.timeout(Duration::from_secs(60))` — caps the total wall-clock time of any single request

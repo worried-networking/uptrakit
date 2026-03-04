@@ -111,6 +111,7 @@ impl ForgejoPlugin {
                 env!("CARGO_PKG_VERSION")
             ))
             .default_headers(headers)
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
             .build()

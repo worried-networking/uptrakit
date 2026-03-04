@@ -70,6 +70,7 @@ impl WebhookChannel {
     /// constructed.
     pub fn new(allow_private_urls: bool) -> error::Result<Self> {
         let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
             .build()
@@ -139,6 +140,25 @@ impl NotificationChannel for WebhookChannel {
             .send()
             .await
             .map_err(|e| report!(ChannelError::HttpRequest(e.to_string())))?;
+
+        // Reject redirect responses explicitly. Redirect following is disabled
+        // to prevent SSRF via attacker-controlled redirect targets.
+        if resp.status().is_redirection() {
+            let status = resp.status();
+            let location = resp
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("<missing>");
+            tracing::warn!(
+                %status,
+                redirect_target = %location,
+                "webhook delivery returned redirect — not following (SSRF protection)"
+            );
+            bail!(ChannelError::DeliveryFailed(format!(
+                "webhook returned redirect {status} to {location} — redirects are not followed"
+            )));
+        }
 
         if !resp.status().is_success() {
             let status = resp.status();
