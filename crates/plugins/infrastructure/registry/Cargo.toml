@@ -25,6 +25,7 @@ uptrakit-plugin-package-manager-homebrew = { workspace = true }
 uptrakit-plugin-package-manager-apt = { workspace = true }
 uptrakit-plugin-package-manager-npm = { workspace = true }
 uptrakit-plugin-generic-shell = { workspace = true }
+futures-util = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 rootcause = { workspace = true }

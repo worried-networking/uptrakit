@@ -6868,6 +6868,7 @@ dependencies = [
 name = "uptrakit-plugin-infrastructure-registry"
 version = "0.0.1"
 dependencies = [
+ "futures-util",
  "rootcause",
  "serde_json",
  "thiserror 2.0.18",

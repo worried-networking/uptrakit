@@ -319,12 +319,32 @@ macro_rules! register_plugins {
             pub async fn compatible_sudo_commands_for_host(
                 executor: Arc<dyn CommandExecutor>,
             ) -> Vec<(PluginType, Vec<SudoCommandEntry>)> {
+                use futures_util::future::join_all;
                 let empty = serde_json::Value::Object(serde_json::Map::new());
-                let mut result = Vec::new();
+
+                // Phase 1: create all plugin instances sequentially.
+                // Plugin construction itself has no blocking I/O; the only async
+                // call here is `BollardDockerClient::upgrade_to_daemon_client`
+                // which returns immediately (it builds the bollard client object
+                // without opening a connection).
+                let mut instances: Vec<(PluginType, Box<dyn Plugin>)> = Vec::new();
                 $(
                     if let Ok(p) = Self::create_plugin_for_discovery(
                         PluginType::$variant, &empty, Arc::clone(&executor)).await
                     {
+                        instances.push((PluginType::$variant, p));
+                    }
+                )+
+
+                // Phase 2: run all host compatibility probes concurrently.
+                // Each probe is an independent subprocess or network call; running
+                // them in parallel reduces total latency to max(individual) rather
+                // than sum(individual).  This is especially important for the Docker
+                // probe, which contacts the daemon socket and may take several
+                // seconds if Docker Desktop is in a slow or restarting state.
+                let check_futs: Vec<_> = instances
+                    .into_iter()
+                    .map(|(pt, p)| async move {
                         let is_compatible = if p.has_capability(
                             uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility)
                         {
@@ -332,7 +352,7 @@ macro_rules! register_plugins {
                                 Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Compatible) => true,
                                 Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(reason)) => {
                                     tracing::debug!(
-                                        plugin = %PluginType::$variant,
+                                        plugin = %pt,
                                         reason = %reason,
                                         "plugin not compatible with host; skipping sudo commands"
                                     );
@@ -340,14 +360,14 @@ macro_rules! register_plugins {
                                 }
                                 Ok(_) => {
                                     tracing::warn!(
-                                        plugin = %PluginType::$variant,
+                                        plugin = %pt,
                                         "unknown HostCompatibility variant; assuming compatible"
                                     );
                                     true
                                 }
                                 Err(e) => {
                                     tracing::debug!(
-                                        plugin = %PluginType::$variant,
+                                        plugin = %pt,
                                         error = %e,
                                         "host compatibility check failed; assuming compatible"
                                     );
@@ -361,12 +381,18 @@ macro_rules! register_plugins {
                         if is_compatible {
                             let entries = p.required_sudo_commands();
                             if !entries.is_empty() {
-                                result.push((PluginType::$variant, entries));
+                                return Some((pt, entries));
                             }
                         }
-                    }
-                )+
-                result
+                        None
+                    })
+                    .collect();
+
+                join_all(check_futs)
+                    .await
+                    .into_iter()
+                    .flatten()
+                    .collect()
             }
         }
     };
