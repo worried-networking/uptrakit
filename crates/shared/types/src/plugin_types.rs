@@ -181,6 +181,22 @@ impl<'de> Deserialize<'de> for PluginType {
     }
 }
 
+/// Attestation status for a GitHub release as determined by the GitHub Attestations API.
+///
+/// Used by the controller to record results of `actions/attest`-based Sigstore
+/// provenance checks and by the agent to enforce the `require_attestation` policy.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
+pub enum AttestationStatus {
+    /// At least one release asset was verified via the GitHub Attestations API.
+    Verified,
+    /// GitHub Attestations API returned no attestations for the release asset digest.
+    NotFound,
+    /// Attestation check was not performed (no checksums file found or check disabled).
+    Unverified,
+}
+
 /// A downloadable asset attached to a release.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseAsset {
@@ -194,6 +210,9 @@ pub struct ReleaseAsset {
     /// MIME content type, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
+    /// SHA-256 digest from the release checksums file, if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256_digest: Option<String>,
 }
 
 /// Simplified release info for update execution context.
@@ -205,6 +224,18 @@ pub struct ReleaseInfo {
     pub release_url: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assets: Vec<ReleaseAsset>,
+    /// Attestation status as determined by the GitHub Attestations API.
+    ///
+    /// Set by the controller from the most recent `fetch_releases` run.
+    /// `None` means the check was never performed or the source is not GitHub.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation_status: Option<AttestationStatus>,
+    /// When `true`, the agent must abort the update if attestation is not `Verified`.
+    ///
+    /// Copied from `GitHubConfig.require_attestation` by the controller at
+    /// trigger time.
+    #[serde(default)]
+    pub require_attestation: bool,
 }
 
 #[cfg(test)]
@@ -539,12 +570,27 @@ mod tests {
     }
 
     #[test]
+    fn attestation_status_roundtrip() {
+        for (status, expected) in [
+            (AttestationStatus::Verified, r#""Verified""#),
+            (AttestationStatus::NotFound, r#""NotFound""#),
+            (AttestationStatus::Unverified, r#""Unverified""#),
+        ] {
+            let json = serde_json::to_string(&status).expect("serialize");
+            assert_eq!(json, expected);
+            let deserialized: AttestationStatus = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(deserialized, status);
+        }
+    }
+
+    #[test]
     fn release_asset_serialization_roundtrip() {
         let asset = ReleaseAsset {
             name: "app-linux-amd64.tar.gz".to_string(),
             download_url: "https://example.com/download".to_string(),
             size: Some(12345),
             content_type: Some("application/gzip".to_string()),
+            sha256_digest: Some("a".repeat(64)),
         };
         let json = serde_json::to_string(&asset).expect("serialize");
         let deserialized: ReleaseAsset = serde_json::from_str(&json).expect("deserialize");
@@ -558,10 +604,12 @@ mod tests {
             download_url: "https://example.com/app.zip".to_string(),
             size: None,
             content_type: None,
+            sha256_digest: None,
         };
         let json = serde_json::to_string(&asset).expect("serialize");
         assert!(!json.contains("size"));
         assert!(!json.contains("content_type"));
+        assert!(!json.contains("sha256_digest"));
     }
 
     #[test]
@@ -574,7 +622,10 @@ mod tests {
                 download_url: "https://example.com/app.tar.gz".to_string(),
                 size: Some(1024),
                 content_type: None,
+                sha256_digest: None,
             }],
+            attestation_status: Some(AttestationStatus::Verified),
+            require_attestation: true,
         };
         let json = serde_json::to_string(&info).expect("serialize");
         let deserialized: ReleaseInfo = serde_json::from_str(&json).expect("deserialize");
@@ -587,10 +638,23 @@ mod tests {
             tag: "v1.0.0".to_string(),
             release_url: "https://example.com/release".to_string(),
             assets: vec![],
+            attestation_status: None,
+            require_attestation: false,
         };
         let json = serde_json::to_string(&info).expect("serialize");
         assert!(!json.contains("assets"));
+        assert!(!json.contains("attestation_status"));
         let deserialized: ReleaseInfo = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, info);
+    }
+
+    #[test]
+    fn release_info_defaults_on_deserialize() {
+        // Old wire messages without attestation fields must deserialize cleanly.
+        let json = r#"{"tag":"v1.0.0","release_url":"https://example.com"}"#;
+        let info: ReleaseInfo = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(info.tag, "v1.0.0");
+        assert!(info.attestation_status.is_none());
+        assert!(!info.require_attestation);
     }
 }

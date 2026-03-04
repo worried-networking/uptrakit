@@ -34,7 +34,9 @@ pub use mqtt_transport::{MqttTransport, ParseMqttTransportError};
 pub use output_stream_type::{OutputStreamType, ParseOutputStreamTypeError};
 pub use plugin_capability::PluginCapability;
 pub use plugin_role::{ParsePluginRoleError, PluginRole};
-pub use plugin_types::{ParsePluginTypeError, PluginType, ReleaseAsset, ReleaseInfo};
+pub use plugin_types::{
+    AttestationStatus, ParsePluginTypeError, PluginType, ReleaseAsset, ReleaseInfo,
+};
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};

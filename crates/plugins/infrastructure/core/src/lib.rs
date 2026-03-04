@@ -19,8 +19,8 @@ pub use traits::{
     UpdateHookContext,
 };
 pub use types::{
-    DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole, PluginType, ReleaseAsset,
-    ReleaseInfo, TrackingSystem, UpdateCategory, UpstreamRelease,
+    AttestationStatus, DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole,
+    PluginType, ReleaseAsset, ReleaseInfo, TrackingSystem, UpdateCategory, UpstreamRelease,
 };
 pub use version::Version;
 

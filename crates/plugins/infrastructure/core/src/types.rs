@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 pub use uptrakit_shared_types::{
-    DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole, PluginType, ReleaseAsset,
-    ReleaseInfo, TrackingSystem, UpdateCategory,
+    AttestationStatus, DiscoveredSoftware, DiscoveryTarget, PluginCapability, PluginRole,
+    PluginType, ReleaseAsset, ReleaseInfo, TrackingSystem, UpdateCategory,
 };
 
 use crate::version::Version;
@@ -34,6 +34,12 @@ pub struct UpstreamRelease {
     /// `None` is treated as `Unknown` at storage time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<UpdateCategory>,
+    /// GitHub Actions attestation status. Only set by the GitHub Releases plugin.
+    ///
+    /// Stored in `latest_release_metadata` and propagated into
+    /// `ExecuteUpdatePayload.release_info.attestation_status` at trigger time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation_status: Option<AttestationStatus>,
 }
 
 #[cfg(test)]
@@ -90,8 +96,10 @@ mod tests {
                 download_url: "https://example.com/app.tar.gz".to_string(),
                 size: Some(1024),
                 content_type: None,
+                sha256_digest: None,
             }],
             category: None,
+            attestation_status: None,
         };
         let json = serde_json::to_string(&release).expect("serialize");
         let deserialized: UpstreamRelease = serde_json::from_str(&json).expect("deserialize");
@@ -112,6 +120,7 @@ mod tests {
             published_at: None,
             assets: vec![],
             category: None,
+            attestation_status: None,
         };
         let json = serde_json::to_string(&release).expect("serialize");
         assert!(!json.contains("release_notes"));
