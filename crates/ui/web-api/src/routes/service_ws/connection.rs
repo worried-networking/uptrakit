@@ -623,7 +623,6 @@ async fn enroll_service(
         // Route to system_services table.
         let result = do_enroll_system_service(SystemServiceEnrollParams {
             db: state.db(),
-            settings: &state.settings,
             hostname: &payload.hostname,
             friendly_name: &payload.friendly_name,
             enrollment_token: payload.enrollment_token.as_ref().map(|s| s.expose_secret()),

@@ -33,8 +33,8 @@ pub mod settings_network;
 #[cfg(feature = "nats")]
 pub mod settings_nats;
 pub mod settings_smtp;
-pub mod settings_system_services;
 pub mod software_items;
+pub mod system_enrollment_tokens;
 pub mod system_alerts;
 pub mod update_batches;
 pub mod update_history;

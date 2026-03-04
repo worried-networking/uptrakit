@@ -18,13 +18,15 @@ use uptrakit_web_api_types::settings_combined::GlobalSettingsCombinedResponse;
 use uptrakit_web_api_types::settings_mqtt::MqttLimitResponse;
 use uptrakit_web_api_types::settings_network::NetworkSettingsResponse;
 use uptrakit_web_api_types::settings_nats::NatsSettingsResponse;
-use uptrakit_web_api_types::settings_system_services::SystemServicesSettingsResponse;
 
 /// Get all global settings
 ///
-/// Returns network settings, system services settings, MQTT client limit, and
-/// (when NATS support is compiled in) the NATS URL configuration in a single
-/// response. Requires the `manage_global_settings` permission.
+/// Returns network settings, MQTT client limit, and (when NATS support is
+/// compiled in) the NATS URL configuration in a single response. Requires the
+/// `manage_global_settings` permission.
+///
+/// System service enrollment tokens are managed via the dedicated
+/// `/api/v1/system-enrollment-tokens` endpoints.
 #[utoipa::path(
     get,
     path = "/api/v1/global-settings",
@@ -57,13 +59,6 @@ pub async fn get_global_combined_settings(
         pki_addr_warning: None,
     };
 
-    let token = state.settings.system_services_enrollment_token();
-    let has_token = token.is_some();
-    let system_services = SystemServicesSettingsResponse {
-        enrollment_token: token,
-        has_token,
-    };
-
     let mqtt_limit = MqttLimitResponse {
         max_clients_per_tenant: state.settings.mqtt_max_clients_per_tenant(),
     };
@@ -79,7 +74,6 @@ pub async fn get_global_combined_settings(
 
     let response = GlobalSettingsCombinedResponse {
         network: network_response,
-        system_services,
         mqtt_limit,
         nats,
     };

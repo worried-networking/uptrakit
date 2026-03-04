@@ -35,13 +35,6 @@ pub enum SettingKey {
     SmtpFromName,
     SmtpTlsMode,
     NatsUrl,
-    /// Plaintext enrollment token for system services (encrypted at rest with master key).
-    ///
-    /// Value type: `Option<String>`. Stored encrypted. `None` means no token is configured
-    /// — system services will enroll in `Pending` status until manually approved.
-    ///
-    /// DB key: `system_services.enrollment_token`
-    SystemServicesEnrollmentToken,
     /// Per-tenant audit log filter mode (`all`, `mutations`, `none`).
     ///
     /// Overrides the global `--audit-log-filter` CLI flag for this tenant.
@@ -87,7 +80,6 @@ impl SettingKey {
             Self::SmtpFromName => "smtp.from_name",
             Self::SmtpTlsMode => "smtp.tls_mode",
             Self::NatsUrl => "nats.url",
-            Self::SystemServicesEnrollmentToken => "system_services.enrollment_token",
             Self::AuditLogFilter => "audit_log.filter",
             Self::AuditLogRetentionDays => "audit_log.retention_days",
         }
@@ -125,7 +117,6 @@ impl SettingKey {
             "smtp.from_name" => Some(Self::SmtpFromName),
             "smtp.tls_mode" => Some(Self::SmtpTlsMode),
             "nats.url" => Some(Self::NatsUrl),
-            "system_services.enrollment_token" => Some(Self::SystemServicesEnrollmentToken),
             "audit_log.filter" => Some(Self::AuditLogFilter),
             "audit_log.retention_days" => Some(Self::AuditLogRetentionDays),
             _ => None,
@@ -150,7 +141,6 @@ impl SettingKey {
                 | Self::JwtSigningKey
                 | Self::MasterKeyVerification
                 | Self::NatsUrl
-                | Self::SystemServicesEnrollmentToken
         )
     }
 }
@@ -207,6 +197,5 @@ mod tests {
         assert!(!SettingKey::RegistrationMode.is_global());
         assert!(!SettingKey::AuditLogFilter.is_global());
         assert!(!SettingKey::AuditLogRetentionDays.is_global());
-        assert!(SettingKey::SystemServicesEnrollmentToken.is_global());
     }
 }

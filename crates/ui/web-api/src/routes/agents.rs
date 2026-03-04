@@ -462,7 +462,6 @@ pub(crate) fn parse_cert_metadata(
 /// Parameters for [`do_enroll_system_service`].
 pub(crate) struct SystemServiceEnrollParams<'a> {
     pub db: &'a sea_orm::DatabaseConnection,
-    pub settings: &'a crate::settings::Settings,
     pub hostname: &'a str,
     pub friendly_name: &'a str,
     pub enrollment_token: Option<&'a str>,
@@ -479,18 +478,17 @@ pub(crate) struct EnrollSystemServiceResult {
 
 /// Core enrollment logic for system (tenant-agnostic) services.
 ///
-/// Inserts into `system_services` table. Token comparison is direct equality
-/// (no Argon2id) — the stored token is the authoritative plaintext secret.
+/// Inserts into `system_services` table. Token comparison uses Argon2id against
+/// active system enrollment tokens stored in the `system_enrollment_tokens` table.
 ///
-/// When a token is configured and matches, the service is auto-approved.
-/// When no token is configured, the service is placed in Pending status.
-/// An incorrect token is rejected with `Forbidden`.
+/// When a valid token is provided and matches, the service is auto-approved.
+/// When no token is provided, the service is placed in Pending status.
+/// An incorrect or invalid token is rejected with `Forbidden`.
 pub(crate) async fn do_enroll_system_service(
     params: SystemServiceEnrollParams<'_>,
 ) -> Result<EnrollSystemServiceResult, Report<AgentRouteError>> {
     let SystemServiceEnrollParams {
         db,
-        settings,
         hostname,
         friendly_name,
         enrollment_token,
@@ -504,20 +502,32 @@ pub(crate) async fn do_enroll_system_service(
         ));
     }
 
-    // Token comparison: direct plaintext equality with stored (decrypted) token.
-    let status = if let Some(provided_token) = enrollment_token {
-        let stored_token = settings.system_services_enrollment_token();
-        match stored_token {
-            Some(ref stored) if stored == provided_token => ServiceStatus::Approved,
-            Some(_) => {
-                bail!(AgentRouteError::Forbidden(
-                    "Invalid system services enrollment token".into()
-                ));
+    // Token comparison: Argon2id verify against all active system enrollment tokens.
+    let (status, matched_token_id) = if let Some(provided_token) = enrollment_token {
+        let active_tokens =
+            crate::queries::system_enrollment_tokens::find_active_system_tokens(db)
+                .await
+                .context_to::<AgentRouteError>()?;
+
+        let matched = active_tokens.iter().find(|t| {
+            password::verify_password(provided_token, &t.token_hash).unwrap_or(false)
+        });
+
+        if let Some(t) = matched {
+            if let Err(e) =
+                crate::queries::system_enrollment_tokens::increment_system_token_uses(db, t.id)
+                    .await
+            {
+                tracing::error!("Failed to increment system enrollment token uses: {e}");
             }
-            None => ServiceStatus::Pending,
+            (ServiceStatus::Approved, Some(t.id))
+        } else {
+            bail!(AgentRouteError::Forbidden(
+                "Invalid system enrollment token".into()
+            ));
         }
     } else {
-        ServiceStatus::Pending
+        (ServiceStatus::Pending, None)
     };
 
     let service_id = uuid::Uuid::now_v7();
@@ -530,7 +540,6 @@ pub(crate) async fn do_enroll_system_service(
     };
     let secret_hash = token::hash_token(&enrollment_secret);
     let ip_str = ip_address.map(|ip| ip.to_string());
-    let _ = settings; // settings already consumed above for token check
     let now = OffsetDateTime::now_utc();
 
     let db_status = match status {
@@ -556,6 +565,7 @@ pub(crate) async fn do_enroll_system_service(
         deactivated_at: Set(None),
         ping_interval_seconds: Set(None),
         cert_lifetime_hours: Set(None),
+        system_enrollment_token_id: Set(matched_token_id),
     };
 
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;

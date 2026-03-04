@@ -152,8 +152,11 @@ use crate::AppState;
         crate::routes::notifications::list_log,
         crate::routes::settings_smtp::get_smtp_settings,
         crate::routes::settings_smtp::update_smtp_settings,
-        crate::routes::settings_system_services::get_system_services_settings,
-        crate::routes::settings_system_services::update_system_services_settings,
+        // System enrollment tokens
+        crate::routes::system_enrollment_tokens::create_system_enrollment_token,
+        crate::routes::system_enrollment_tokens::list_system_enrollment_tokens,
+        crate::routes::system_enrollment_tokens::get_system_enrollment_token,
+        crate::routes::system_enrollment_tokens::revoke_system_enrollment_token,
         // Audit logs
         crate::routes::audit_logs::list_audit_logs,
         crate::routes::audit_logs::list_system_audit_logs,
@@ -269,8 +272,11 @@ use crate::AppState;
             crate::routes::notifications::TestNotificationResponse,
             crate::routes::settings_smtp::SmtpSettingsResponse,
             crate::routes::settings_smtp::UpdateSmtpSettingsRequest,
-            crate::routes::settings_system_services::SystemServicesSettingsResponse,
-            crate::routes::settings_system_services::UpdateSystemServicesSettingsRequest,
+            // System enrollment tokens
+            crate::routes::system_enrollment_tokens::CreateSystemEnrollmentTokenRequest,
+            crate::routes::system_enrollment_tokens::SystemEnrollmentTokenCreatedResponse,
+            crate::routes::system_enrollment_tokens::SystemEnrollmentTokenResponse,
+            uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::system_enrollment_tokens::SystemEnrollmentTokenResponse>,
             uptrakit_web_api_types::settings_combined::GlobalSettingsCombinedResponse,
             // Audit logs
             crate::routes::audit_logs::AuditLogResponse,
@@ -582,10 +588,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::settings_smtp::get_smtp_settings,
             crate::routes::settings_smtp::update_smtp_settings
         ))
-        // System services settings
+        // System enrollment tokens
         .routes(routes!(
-            crate::routes::settings_system_services::get_system_services_settings,
-            crate::routes::settings_system_services::update_system_services_settings
+            crate::routes::system_enrollment_tokens::create_system_enrollment_token,
+            crate::routes::system_enrollment_tokens::list_system_enrollment_tokens
+        ))
+        .routes(routes!(
+            crate::routes::system_enrollment_tokens::get_system_enrollment_token,
+            crate::routes::system_enrollment_tokens::revoke_system_enrollment_token
         ))
         // Audit logs
         .routes(routes!(crate::routes::audit_logs::list_audit_logs))
