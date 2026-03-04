@@ -1,0 +1,30 @@
+#!/bin/sh
+# pre-push: thorough checks run on every push.
+# Skip with: git push --no-verify
+
+set -e
+
+echo "[pre-push] Running cargo check (db-sqlite)..."
+cargo check --workspace --no-default-features --features db-sqlite
+
+echo "[pre-push] Running cargo clippy (db-sqlite)..."
+cargo clippy --workspace --all-targets --no-default-features --features db-sqlite
+
+echo "[pre-push] Running cargo deny check..."
+cargo deny check
+
+echo "[pre-push] Running cargo test (db-sqlite)..."
+cargo test --workspace --no-default-features --features db-sqlite
+
+# --- Frontend ---
+if [ -d frontend/node_modules ]; then
+  echo "[pre-push] Running npm check..."
+  npm run check --prefix frontend
+  echo "[pre-push] Running npm test..."
+  npm run test --prefix frontend
+  echo "[pre-push] Running npm build..."
+  npm run build --prefix frontend
+else
+  echo "[pre-push] frontend/node_modules not found, skipping frontend checks."
+  echo "[pre-push] Run: cd frontend && npm install"
+fi

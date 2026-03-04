@@ -1,0 +1,32 @@
+#!/bin/sh
+# pre-commit: fast checks on staged files only (<30 s typical).
+# Skip with: git commit --no-verify
+
+set -e
+
+STAGED=$(git diff --cached --name-only)
+
+# --- Rust: format check ---
+if echo "$STAGED" | grep -q '\.rs$'; then
+  echo "[pre-commit] Running cargo fmt check..."
+  cargo fmt --all -- --check
+fi
+
+# --- Markdown: lint ---
+if echo "$STAGED" | grep -q '\.md$'; then
+  echo "[pre-commit] Running markdownlint..."
+  markdownlint --config .markdownlint.json '**/*.md'
+fi
+
+# --- Frontend: lint + format check ---
+if echo "$STAGED" | grep -q '^frontend/'; then
+  if [ -d frontend/node_modules ]; then
+    echo "[pre-commit] Running npm lint..."
+    npm run lint --prefix frontend
+    echo "[pre-commit] Running npm format:check..."
+    npm run format:check --prefix frontend
+  else
+    echo "[pre-commit] frontend/node_modules not found, skipping frontend checks."
+    echo "[pre-commit] Run: cd frontend && npm install"
+  fi
+fi
