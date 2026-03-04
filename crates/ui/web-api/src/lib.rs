@@ -31,6 +31,12 @@ pub use router::{api_not_found, build_pki_router, build_router};
 pub use setting_key::SettingKey;
 pub use uptrakit_web_api_types::MaskedUrl;
 
+#[cfg(all(test, feature = "db-sqlite"))]
+mod test_harness;
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod integration_tests;
+
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};

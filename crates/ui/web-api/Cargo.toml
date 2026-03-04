@@ -83,11 +83,13 @@ uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-notification-channels = { workspace = true, features = ["webhook"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util", "net"] }
 tower = { workspace = true }
 http-body-util = { workspace = true }
 strum = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
+tokio-tungstenite = { workspace = true }
+jsonwebtoken = { workspace = true }
 
 [lints]
 workspace = true
