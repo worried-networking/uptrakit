@@ -65,7 +65,8 @@ uptrakit/
 │   │   │   ├── src/scheduler/          #   (cfg: embedded-scheduler) Embedded scheduler using uptrakit-scheduler-engine
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
 │   │   ├── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
-│   │   └── scheduler/                  # uptrakit-scheduler                     (bin)  — external scheduler binary; enrolls as a system service (system_service + scheduler + database_access + nats_access + master_key_access + graceful_shutdown), receives credentials, runs scheduled tasks across all tenants via direct DB + NATS
+│   │   ├── scheduler/                  # uptrakit-scheduler                     (bin)  — external scheduler binary; enrolls as a system service (system_service + scheduler + database_access + nats_access + master_key_access + graceful_shutdown), receives credentials, runs scheduled tasks across all tenants via direct DB + NATS
+│   │   └── integration-tests/          # uptrakit-integration-tests             (test) — system integration tests using testcontainers; builds uptrakit-test:latest Docker image with all 5 binaries, verifies enrollment and inter-component communication
 │   ├── plugins/
 │   │   ├── infrastructure/
 │   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult; batch types: BatchDetectItem/Result, BatchFetchItem/Result, BatchUpdateItem/Result
@@ -121,11 +122,12 @@ uptrakit/
 │   └── vitest.config.ts
 ├── docker/
 │   ├── .dockerignore                   # Docker build context exclusions
-│   └── Dockerfile                      # Multi-stage build (ARG PACKAGE/BINARY/FEATURES)
+│   ├── Dockerfile                      # Multi-stage build (ARG PACKAGE/BINARY/FEATURES)
+│   └── Dockerfile.test                 # Multi-binary test image (all 5 binaries, no ENTRYPOINT)
 ├── docker-compose.yml                  # Compose with profiles: postgres, mqtt, ssh, scheduler, full
 ├── .env.example                        # Template for docker-compose environment
 ├── .github/
-│   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, reverse-proxy Docker tests, frontend lint + format + check + build
+│   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, reverse-proxy Docker tests, system integration tests, frontend lint + format + check + build
 │   ├── workflows/docker.yml            # CI: multi-arch Docker image builds, push to GHCR
 │   └── dependabot.yml                  # Weekly Cargo + npm dependency updates
 ├── CONTRIBUTING.md
@@ -198,6 +200,10 @@ build environments.
   - auth behavior behind proxies
   - IP detection / `ClientIp`, forwarded headers, trusted-proxy logic
   - reverse proxy middleware/settings and related TLS behavior
+- If anything related to enrollment, wire protocol, service lifecycle, or inter-component
+  communication changes, run the system integration tests (requires Docker and pre-built image):
+  - `docker build -f docker/Dockerfile.test -t uptrakit-test:latest .`
+  - `cargo test -p uptrakit-integration-tests -- --ignored`
 
 ### Dependency registration
 

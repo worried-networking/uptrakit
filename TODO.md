@@ -833,7 +833,9 @@ Ensuring robustness and maintainability.
 - [x] Add integration tests
   - [x] REST API integration tests (auth, services, hosts, software items, enrollment tokens, settings, notifications, plugin configs, error cases)
   - [x] WebSocket integration tests (enrollment, reconnection, registry send/broadcast)
-  - [ ] Agent-controller communication
+  - [x] System integration tests (Docker-based, testcontainers): controller startup,
+    agent/scheduler/mqtt/agent-ssh enrollment, concurrent multi-service enrollment
+  - [ ] Agent-controller communication (message exchange beyond enrollment)
   - [ ] Database operations
   - [ ] Plugin implementations
   - [ ] End-to-end update workflows

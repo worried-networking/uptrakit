@@ -110,6 +110,20 @@ At startup the controller hashes the provided value with Argon2id and inserts a 
 
 Source: `crates/core/controller/src/startup.rs` (`bootstrap_enrollment_tokens`).
 
+## Test Docker Image
+
+A separate `docker/Dockerfile.test` builds all five binaries (controller, agent, agent-ssh,
+scheduler, mqtt) into a single image for system integration tests:
+
+```bash
+docker build -f docker/Dockerfile.test -t uptrakit-test:latest .
+```
+
+This image has **no `ENTRYPOINT`** — each container specifies its command via testcontainers
+`with_cmd()`. It uses the same cargo-chef caching pattern as the production Dockerfile.
+
+See [system-integration-tests.md](system-integration-tests.md) for the full testing guide.
+
 ## .dockerignore
 
 The `docker/.dockerignore` file excludes build artifacts, VCS metadata, documentation,
@@ -121,3 +135,4 @@ and IDE files from the Docker build context.
 - [Embedded frontend](embedded-frontend.md) — the `embed-frontend` feature used by Docker images
 - [Setup](setup.md) — local development prerequisites
 - [Quality gates](quality-gates.md) — CI checks that run alongside Docker builds
+- [System integration tests](system-integration-tests.md) — Docker-based end-to-end tests

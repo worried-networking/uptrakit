@@ -208,6 +208,16 @@ cargo test --workspace --all-features
 
   Requires Docker and covers L4/L7 TLS modes, CRL/OCSP revocation, and proxy-specific flows.
 
+- System integration tests (Docker-based, ignored by default):
+
+  ```bash
+  docker build -f docker/Dockerfile.test -t uptrakit-test:latest .
+  cargo test -p uptrakit-integration-tests -- --ignored
+  ```
+
+  Requires Docker and the `uptrakit-test:latest` image. Verifies end-to-end enrollment and
+  communication between all binaries.
+
 ## REST API Integration Tests
 
 The `test_harness/` module (`crates/ui/web-api/src/test_harness/`) provides a shared
@@ -288,6 +298,7 @@ Every behaviour change must include tests. Types of tests used:
 - **REST API integration tests**: full HTTP stack tests via `TestApp` (see above).
 - **Error path tests**: expected failures produce correct error types and messages.
 - **Docker integration tests**: reverse proxy tests using real containers (see below).
+- **System integration tests**: end-to-end tests with all binaries in Docker containers (see below).
 - **Service activity parity tests**: ensure Agent and MQTT service records update `ip_address` and `last_seen_at`
   consistently across connect and ping flows.
 
@@ -339,6 +350,29 @@ A dedicated `reverse-proxy-tests` CI job runs these on `ubuntu-latest` (Docker p
 When validating reverse proxy setups locally, confirm `/api/v1/services` shows expected service IP metadata and
 `last_seen_at` movement for both Agent and MQTT services. Cross-check the security model in
 [docs/security/reverse-proxy-security.md](../security/reverse-proxy-security.md).
+
+### System integration tests
+
+End-to-end tests in `crates/core/integration-tests/` verify that the actual compiled binaries
+(controller, agent, agent-ssh, scheduler, mqtt) can communicate correctly as a system. Each test
+uses `testcontainers` to orchestrate Docker containers on a shared network, verifying enrollment
+flows and inter-component communication.
+
+See [system-integration-tests.md](system-integration-tests.md) for the full guide.
+
+```sh
+# Build the multi-binary test Docker image (required before running tests)
+docker build -f docker/Dockerfile.test -t uptrakit-test:latest .
+
+# Run all system integration tests
+cargo test -p uptrakit-integration-tests -- --ignored
+
+# Run a specific test
+cargo test -p uptrakit-integration-tests -- --ignored agent_enrolls
+```
+
+A dedicated `system-integration-tests` CI job builds the Docker image and runs these tests on
+`ubuntu-latest`.
 
 ## Frontend Testing
 
