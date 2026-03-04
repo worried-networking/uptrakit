@@ -60,12 +60,6 @@ arguments. No documented rationale for the split. The new NATS commands (`nats_s
 `nats_set`, `nats_clear`) follow the naked-positional pattern rather than introducing a
 `NatsParams<'a>` struct, widening the inconsistency (compare `SmtpSetParams<'a>`).
 
-**[LOW]** `src/main.rs:529` -- `NatsCommands::Get` uses variant name `Get` while all other
-read-only subcommands in the codebase use `Show` (e.g. `SmtpCommands::Show`,
-`RegistrationCommands::Show`, `NetworkCommands::Show`, `MqttCommands::Show`). The
-function backing it is even named `nats_show`. This breaks the naming convention and
-produces `uptrakit settings nats get` instead of the expected `uptrakit settings nats show`.
-
 **[LOW]** `src/main.rs` (dispatch section, ~834-1830 LoC) -- Monolithic dispatch block. The
 `run()` function's `match command { ... }` handles all thirteen namespaces in a single
 function. Splitting into per-namespace dispatch helpers would reduce navigation complexity.
@@ -136,7 +130,7 @@ an approved site. Function lacks inline comment justifying the exception.
   explicitly assert that passwords embedded in a NATS URL (`nats://user:secret@host:4222`)
   do not appear in the output and that the masked form is present. This is the correct level
   of security-focused test coverage for a display formatter.
-- `src/main.rs:3831-3887` -- Three parse-only tests for `settings nats get`, `set`, and
+- `src/main.rs:3831-3887` -- Three parse-only tests for `settings nats show`, `set`, and
   `clear` cover every NatsCommands variant. The `set` test uses the `match` form to extract
   and assert the URL value directly.
 

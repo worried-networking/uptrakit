@@ -9,8 +9,8 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, FromQueryResult,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
@@ -39,6 +39,18 @@ use crate::tenant_db::TenantDb;
 use crate::token_utils::generate_uuid;
 
 type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
+
+// ---------------------------------------------------------------------------
+// Private query result types
+// ---------------------------------------------------------------------------
+
+/// Aggregated status count row returned by the `list_batches` GROUP BY query.
+#[derive(Debug, FromQueryResult)]
+struct BatchStatusCount {
+    batch_id: Option<Uuid>,
+    status: String,
+    count: i64,
+}
 
 // ---------------------------------------------------------------------------
 // Candidate discovery
@@ -616,29 +628,35 @@ pub async fn list_batches(
         return Ok(PaginatedResponse::new(vec![], total, pagination));
     }
 
-    // Load child status counts for all batches in one pass
+    // Aggregate child status counts per batch in a single GROUP BY query,
+    // avoiding loading all child records into application memory.
     let batch_ids: Vec<Uuid> = records.iter().map(|b| b.id).collect();
-    let child_records = UpdateHistory::find()
-        .filter(update_history::Column::BatchId.is_in(batch_ids))
-        .all(tenant_db.db())
-        .await?;
+    let status_rows: Vec<BatchStatusCount> = {
+        use sea_orm::sea_query::ExprTrait;
+        UpdateHistory::find()
+            .select_only()
+            .column(update_history::Column::BatchId)
+            .column(update_history::Column::Status)
+            .column_as(
+                sea_orm::sea_query::Expr::col(update_history::Column::BatchId).count(),
+                "count",
+            )
+            .filter(update_history::Column::BatchId.is_in(batch_ids))
+            .group_by(update_history::Column::BatchId)
+            .group_by(update_history::Column::Status)
+            .into_model::<BatchStatusCount>()
+            .all(tenant_db.db())
+            .await?
+    };
 
     let mut counts: HashMap<Uuid, (i64, i64, i64)> = HashMap::new();
-    for child in &child_records {
-        if let Some(batch_id) = child.batch_id {
+    for row in status_rows {
+        if let Some(batch_id) = row.batch_id {
             let entry = counts.entry(batch_id).or_default();
-            match child.status {
-                update_history::UpdateStatus::Completed => entry.0 += 1,
-                update_history::UpdateStatus::Failed => entry.1 += 1,
-                update_history::UpdateStatus::Pending
-                | update_history::UpdateStatus::InProgress => entry.2 += 1,
-                _ => {
-                    tracing::warn!(
-                        "Unknown update status {:?}, counting as pending",
-                        child.status
-                    );
-                    entry.2 += 1;
-                }
+            match row.status.as_str() {
+                "completed" => entry.0 += row.count,
+                "failed" => entry.1 += row.count,
+                _ => entry.2 += row.count,
             }
         }
     }

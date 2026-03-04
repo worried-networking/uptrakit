@@ -13,9 +13,7 @@ which are strong correctness properties. The `SchedulerNotifier` ORM coupling ha
 (callers now load and pass a `MqttSoftwareStatesPayload`), and the sequential execution model
 now uses a `JoinSet` for parallel task execution within each poll cycle. The anonymous tuple
 `FetchGroupValue` accumulator in `version_check.rs` has been refactored to named structs
-(`AgentAssignmentRow`, `HostPackageAssignmentRow`), eliminating index-fragility. Three of five
-executors (`AuthCleanupExecutor`, `ServiceCertCheckExecutor`, `StaleLeaseCleanupExecutor`) have
-no tests.
+(`AgentAssignmentRow`, `HostPackageAssignmentRow`), eliminating index-fragility. All five executors now have tests.
 
 ## Architecture
 
@@ -134,12 +132,6 @@ a missing executor at startup -- the scheduler will silently skip tasks of an un
   and `cert_not_after` returning `None` for garbage input.
 
 ### Issues
-
-**[HIGH]** Three of the five executor types (`AuthCleanupExecutor`, `ServiceCertCheckExecutor`,
-`StaleLeaseCleanupExecutor`) have no tests at all. The `AuthCleanupExecutor` deletes
-session rows from the database -- an incorrect predicate or missing filter would silently
-delete valid sessions. Each executor should have at minimum a success-path test and a
-no-rows-to-process test against an in-memory SQLite database.
 
 **[MEDIUM]** `src/executors/version_check.rs` -- `run_controller_side_fetch_releases` and
 `send_agent_assignments` (the two primary async methods) have no tests. These methods

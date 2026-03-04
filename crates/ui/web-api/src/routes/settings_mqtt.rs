@@ -58,6 +58,7 @@ fn parse_connection_status(model: &mqtt_client::Model) -> MqttClientConnectionSt
 fn resolve_connection_status(
     model: &mqtt_client::Model,
     heartbeat_at: Option<OffsetDateTime>,
+    now: OffsetDateTime,
 ) -> MqttClientConnectionStatus {
     if !model.enabled {
         return MqttClientConnectionStatus::Offline;
@@ -68,7 +69,6 @@ fn resolve_connection_status(
         return MqttClientConnectionStatus::Offline;
     };
 
-    let now = OffsetDateTime::now_utc();
     let age = now - heartbeat_at;
     let stale_after = time::Duration::seconds(MQTT_LEASE_STALE_AFTER.as_secs() as i64);
     if age > stale_after {
@@ -123,11 +123,12 @@ pub async fn list_mqtt_settings(
                 lease_map.insert(lease.mqtt_client_id, lease.heartbeat_at);
             }
 
+            let now = OffsetDateTime::now_utc();
             let responses: Vec<MqttClientResponse> = models
                 .iter()
                 .map(|model| {
                     let heartbeat_at = lease_map.get(&model.id).copied();
-                    let status = resolve_connection_status(model, heartbeat_at);
+                    let status = resolve_connection_status(model, heartbeat_at, now);
                     model_to_response(model, status)
                 })
                 .collect();
@@ -225,7 +226,7 @@ pub async fn create_mqtt_settings(
     .await
     {
         Ok(model) => {
-            let status = resolve_connection_status(&model, None);
+            let status = resolve_connection_status(&model, None, OffsetDateTime::now_utc());
             let lease_coordinator =
                 MqttLeaseCoordinator::new(state.db().clone(), state.service_connections.clone());
             match lease_coordinator
@@ -402,7 +403,8 @@ pub async fn get_mqtt_settings(
                     );
                 }
             };
-            let status = resolve_connection_status(&model, heartbeat_at);
+            let now = OffsetDateTime::now_utc();
+            let status = resolve_connection_status(&model, heartbeat_at, now);
             (StatusCode::OK, Json(model_to_response(&model, status))).into_response()
         }
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Not found"),
@@ -578,7 +580,8 @@ pub async fn update_mqtt_settings(
                     );
                 }
             };
-            let status = resolve_connection_status(&model, heartbeat_at);
+            let now = OffsetDateTime::now_utc();
+            let status = resolve_connection_status(&model, heartbeat_at, now);
             (StatusCode::OK, Json(model_to_response(&model, status))).into_response()
         }
         Err(e) => {
@@ -642,5 +645,78 @@ pub async fn delete_mqtt_settings(
             tracing::error!("Failed to delete MQTT client: {e:?}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uptrakit_shared_types::MqttTransport;
+
+    fn make_model(enabled: bool, status: MqttClientConnectionStatus) -> mqtt_client::Model {
+        let now = time::OffsetDateTime::UNIX_EPOCH;
+        mqtt_client::Model {
+            id: uuid::Uuid::nil(),
+            tenant_id: uuid::Uuid::nil(),
+            enabled,
+            transport: MqttTransport::Tcp,
+            host: "localhost".to_string(),
+            port: 1883,
+            client_id: "test".to_string(),
+            username: None,
+            password: None,
+            ca_cert_pem: None,
+            topic_prefix: "test".to_string(),
+            connection_status: status,
+            status_updated_at: now,
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn disabled_model_returns_offline() {
+        let model = make_model(false, MqttClientConnectionStatus::Online);
+        let now = time::OffsetDateTime::now_utc();
+        assert_eq!(
+            resolve_connection_status(&model, Some(now), now),
+            MqttClientConnectionStatus::Offline
+        );
+    }
+
+    #[test]
+    fn no_heartbeat_returns_offline() {
+        let model = make_model(true, MqttClientConnectionStatus::Online);
+        let now = time::OffsetDateTime::now_utc();
+        assert_eq!(
+            resolve_connection_status(&model, None, now),
+            MqttClientConnectionStatus::Offline
+        );
+    }
+
+    #[test]
+    fn fresh_heartbeat_returns_persisted_status() {
+        let model = make_model(true, MqttClientConnectionStatus::Online);
+        let now = time::OffsetDateTime::now_utc();
+        // 10 seconds ago — well within the stale threshold
+        let heartbeat_at = now - time::Duration::seconds(10);
+        assert_eq!(
+            resolve_connection_status(&model, Some(heartbeat_at), now),
+            MqttClientConnectionStatus::Online
+        );
+    }
+
+    #[test]
+    fn stale_heartbeat_returns_offline() {
+        let model = make_model(true, MqttClientConnectionStatus::Online);
+        let now = time::OffsetDateTime::now_utc();
+        // 5 minutes ago — much older than the stale threshold
+        let heartbeat_at = now - time::Duration::seconds(300);
+        assert_eq!(
+            resolve_connection_status(&model, Some(heartbeat_at), now),
+            MqttClientConnectionStatus::Offline
+        );
     }
 }

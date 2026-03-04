@@ -122,9 +122,6 @@ router function, and OpenAPI annotation.
 **[MEDIUM]** `src/batch_progress_broadcaster.rs` -- Instance-local HashMap. Multi-instance
 deployments will not deliver SSE events cross-instance.
 
-**[MEDIUM]** `src/queries/update_batches.rs:563-579` -- `list_batches` loads ALL child
-update_history records to compute status counts. A GROUP BY aggregation would be more
-efficient.
 
 **[LOW]** `api_tokens` table has no `expires_at` column. API tokens valid indefinitely once
 issued. A compromised token that was never explicitly revoked remains valid forever.
@@ -380,9 +377,6 @@ changes.
 
 ### Issues
 
-**[CRITICAL]** `src/routes/update_batches.rs` (532 lines) -- Zero test coverage. All 5 batch
-route handlers untested.
-
 **[CRITICAL]** `src/routes/oidc_auth.rs:221-625` -- `oidc_callback` is 404 lines with at
 least 10 distinct code paths (provider-error redirect, missing-params redirect, state-expired,
 state-DB-error, provider-gone, base-URL-missing, PKCE-build-failure, code-exchange-failure,
@@ -438,14 +432,6 @@ that warrants at minimum a happy-path DB test.
 **[MEDIUM]** `src/queries/notifications.rs` (463 lines), `src/queries/enrollment_tokens.rs`
 (194 lines), `src/queries/services.rs` (396 lines), `src/queries/plugin_configs.rs`
 (286 lines), `src/queries/scheduled_tasks.rs` (165 lines) -- All have zero inline tests.
-
-**[MEDIUM]** `src/routes/settings_mqtt.rs:58-79` -- `resolve_connection_status` calls
-`OffsetDateTime::now_utc()` directly to decide whether a heartbeat is stale. The function
-is pure (takes `model` and `heartbeat_at`) but has no tests. Three distinct paths —
-disabled-client short-circuit, no-heartbeat returns offline, stale-heartbeat returns offline,
-fresh-heartbeat returns persisted status — are all unexercised. The function should accept an
-injected `now: OffsetDateTime` parameter and be tested with fixed timestamps, following the
-same clock-injection pattern already used in `MessageRateLimiter`.
 
 **[MEDIUM]** `src/routes/auth.rs`, `src/middleware/require_auth.rs`, `src/lib.rs`,
 `src/routes/services.rs`, `src/middleware/resolve_ip.rs`, `src/auth/device_flow.rs`,

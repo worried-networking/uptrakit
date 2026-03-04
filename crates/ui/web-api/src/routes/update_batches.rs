@@ -522,6 +522,105 @@ pub async fn stream_batch_progress(
 // Error mapping
 // ---------------------------------------------------------------------------
 
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use crate::test_harness::TestApp;
+    use crate::test_harness::fixtures::{register_and_get_token, seed_permissions_for_owner};
+    use http::StatusCode;
+    use serde_json::Value;
+
+    #[tokio::test]
+    async fn list_batches_unauthenticated_returns_401() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let status = client.get("/api/v1/update-batches").send_status().await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn list_batches_authenticated_empty_db_returns_empty_list() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["view_software"]).await;
+        let token = register_and_get_token(&client).await;
+
+        let (status, body): (StatusCode, Value) = client
+            .get("/api/v1/update-batches")
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let items = body["items"].as_array().expect("items array");
+        assert!(items.is_empty(), "expected empty list on empty DB");
+    }
+
+    #[tokio::test]
+    async fn get_batch_unauthenticated_returns_401() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let id = uuid::Uuid::now_v7();
+        let status = client
+            .get(&format!("/api/v1/update-batches/{id}"))
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn get_batch_not_found_returns_404() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["view_software"]).await;
+        let token = register_and_get_token(&client).await;
+
+        let id = uuid::Uuid::now_v7();
+        let status = client
+            .get(&format!("/api/v1/update-batches/{id}"))
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn trigger_host_batch_update_not_found_returns_404() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["manage_software"]).await;
+        let token = register_and_get_token(&client).await;
+
+        let host_id = uuid::Uuid::now_v7();
+        let body = serde_json::json!({});
+        let status = client
+            .post_json(&format!("/api/v1/hosts/{host_id}/batch-update"), &body)
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn trigger_item_batch_update_not_found_returns_404() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["manage_software"]).await;
+        let token = register_and_get_token(&client).await;
+
+        let item_id = uuid::Uuid::now_v7();
+        // ItemBatchUpdateRequest requires `to_version`.
+        let body = serde_json::json!({ "to_version": "1.0.0" });
+        let status = client
+            .post_json(
+                &format!("/api/v1/software-items/{item_id}/batch-update"),
+                &body,
+            )
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+}
+
 fn trigger_error_to_response(report: rootcause::Report<TriggerUpdateError>) -> Response {
     match report.current_context() {
         TriggerUpdateError::SoftwareItemNotFound => {

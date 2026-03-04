@@ -106,6 +106,266 @@ impl TaskExecutor for ServiceCertCheckExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{ActiveModelTrait, ConnectOptions, Database, Set};
+    use uptrakit_crypto::EncryptedString;
+    use uptrakit_internal_wire::MqttSoftwareStatesPayload;
+    use uptrakit_shared_db::entity::{ca_certificate, service, service_certificate, tenant};
+    use uptrakit_shared_db::migration::run_migrations;
+    use uuid::Uuid;
+
+    async fn setup_db() -> sea_orm::DatabaseConnection {
+        // Enable plaintext crypto mode so EncryptedString columns (e.g.
+        // ca_certificate.key_pem) can be written without a real key ring.
+        uptrakit_crypto::enable_plaintext_mode();
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.expect("test db");
+        run_migrations(&db).await.expect("run migrations");
+        db
+    }
+
+    /// Insert all rows required to satisfy FK constraints for
+    /// `service_certificates`: tenant → ca_certificate + service.
+    /// Returns `(ca_fingerprint, service_id)`.
+    async fn insert_service_for_test(db: &sea_orm::DatabaseConnection) -> (String, Uuid) {
+        let now = OffsetDateTime::now_utc();
+        let tenant_id = Uuid::now_v7();
+        tenant::ActiveModel {
+            id: Set(tenant_id),
+            name: Set("test-tenant".to_string()),
+            slug: Set(tenant_id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert tenant");
+
+        let fingerprint = format!("fp-{}", Uuid::now_v7());
+        ca_certificate::ActiveModel {
+            fingerprint: Set(fingerprint.clone()),
+            cert_pem: Set("---TEST CERT---".to_string()),
+            key_pem: Set(EncryptedString::plaintext_for_test(
+                "---TEST KEY---".to_string(),
+            )),
+            not_before: Set(now - time::Duration::days(1)),
+            not_after: Set(now + time::Duration::days(365)),
+            activated_at: Set(now),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert ca_certificate");
+
+        let service_id = Uuid::now_v7();
+        service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set(format!("host-{service_id}")),
+            friendly_name: Set("Test Service".to_string()),
+            ip_address: Set(None),
+            status: Set(uptrakit_shared_types::ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("hash-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert service");
+
+        (fingerprint, service_id)
+    }
+
+    fn make_task() -> scheduled_task::Model {
+        let now = OffsetDateTime::now_utc();
+        scheduled_task::Model {
+            id: Uuid::now_v7(),
+            tenant_id: Uuid::now_v7(),
+            task_type:
+                uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType::ServiceCertCheck,
+            cron_expression: "0 * * * *".to_string(),
+            enabled: true,
+            task_config: None,
+            last_run_at: None,
+            next_run_at: now,
+            locked_by: None,
+            locked_at: None,
+            last_error: None,
+            run_count: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// A spy notifier that records each `send_to_service` call.
+    struct SpyNotifier {
+        sent: std::sync::Mutex<Vec<Uuid>>,
+    }
+
+    impl SpyNotifier {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                sent: std::sync::Mutex::new(Vec::new()),
+            })
+        }
+
+        fn sent_count(&self) -> usize {
+            self.sent.lock().unwrap().len()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl SchedulerNotifier for SpyNotifier {
+        async fn send_to_service(&self, service_id: &Uuid, _msg: ControllerMessage) {
+            self.sent.lock().unwrap().push(*service_id);
+        }
+        async fn broadcast(&self, _msg: ControllerMessage) {}
+        async fn send_by_capability(&self, _cap: &str, _msg: ControllerMessage) {}
+        async fn signal_ca_rotation(&self, _reason: &str) {}
+        async fn push_software_states_for_tenant(&self, _payload: MqttSoftwareStatesPayload) {}
+        async fn signal_crl_renewal(&self) {}
+    }
+
+    // ── execute() tests ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn execute_empty_db_returns_ok() {
+        let db = setup_db().await;
+        let notifier = SpyNotifier::new();
+        let executor =
+            ServiceCertCheckExecutor::new(db, notifier.clone() as Arc<dyn SchedulerNotifier>);
+        executor
+            .execute(&make_task())
+            .await
+            .expect("should succeed");
+        assert_eq!(notifier.sent_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn execute_non_expiring_cert_sends_no_message() {
+        let db = setup_db().await;
+        let now = OffsetDateTime::now_utc();
+        // Cert valid for 365 days, not expiring soon.
+        let not_before = now - time::Duration::days(10);
+        let not_after = now + time::Duration::days(355);
+        let (ca_fingerprint, service_id) = insert_service_for_test(&db).await;
+
+        service_certificate::ActiveModel {
+            ca_fingerprint: Set(ca_fingerprint),
+            serial_number: Set("sn-01".to_string()),
+            service_id: Set(service_id),
+            not_before: Set(not_before),
+            not_after: Set(not_after),
+            revoked_at: Set(None),
+            revocation_reason: Set(None),
+            created_at: Set(now),
+            last_seen_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert cert");
+
+        let notifier = SpyNotifier::new();
+        let executor =
+            ServiceCertCheckExecutor::new(db, notifier.clone() as Arc<dyn SchedulerNotifier>);
+        executor
+            .execute(&make_task())
+            .await
+            .expect("should succeed");
+        assert_eq!(
+            notifier.sent_count(),
+            0,
+            "long-lived cert should not trigger renewal"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_expiring_cert_sends_renewal_message() {
+        let db = setup_db().await;
+        let now = OffsetDateTime::now_utc();
+        // 7-day cert → renewal window = 33 h.
+        // Set not_after to now + 20 h (within the 33 h window).
+        let not_before = now - time::Duration::days(6);
+        let not_after = now + time::Duration::hours(20);
+        let (ca_fingerprint, service_id) = insert_service_for_test(&db).await;
+
+        service_certificate::ActiveModel {
+            ca_fingerprint: Set(ca_fingerprint),
+            serial_number: Set("sn-02".to_string()),
+            service_id: Set(service_id),
+            not_before: Set(not_before),
+            not_after: Set(not_after),
+            revoked_at: Set(None),
+            revocation_reason: Set(None),
+            created_at: Set(now),
+            last_seen_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert cert");
+
+        let notifier = SpyNotifier::new();
+        let executor =
+            ServiceCertCheckExecutor::new(db, notifier.clone() as Arc<dyn SchedulerNotifier>);
+        executor
+            .execute(&make_task())
+            .await
+            .expect("should succeed");
+        assert_eq!(
+            notifier.sent_count(),
+            1,
+            "expiring cert should trigger one renewal message"
+        );
+        assert_eq!(notifier.sent.lock().unwrap()[0], service_id);
+    }
+
+    #[tokio::test]
+    async fn execute_revoked_cert_sends_no_message() {
+        let db = setup_db().await;
+        let now = OffsetDateTime::now_utc();
+        let not_before = now - time::Duration::days(6);
+        let not_after = now + time::Duration::hours(20);
+        let (ca_fingerprint, service_id) = insert_service_for_test(&db).await;
+
+        service_certificate::ActiveModel {
+            ca_fingerprint: Set(ca_fingerprint),
+            serial_number: Set("sn-03".to_string()),
+            service_id: Set(service_id),
+            not_before: Set(not_before),
+            not_after: Set(not_after),
+            revoked_at: Set(Some(now - time::Duration::hours(1))),
+            revocation_reason: Set(Some(
+                service_certificate::RevocationReason::CertificateRenewed,
+            )),
+            created_at: Set(now),
+            last_seen_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert revoked cert");
+
+        let notifier = SpyNotifier::new();
+        let executor =
+            ServiceCertCheckExecutor::new(db, notifier.clone() as Arc<dyn SchedulerNotifier>);
+        executor
+            .execute(&make_task())
+            .await
+            .expect("should succeed");
+        assert_eq!(
+            notifier.sent_count(),
+            0,
+            "revoked cert must not trigger renewal"
+        );
+    }
 
     // ── cert_renewal_window ─────────────────────────────────────────────────
 

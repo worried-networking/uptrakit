@@ -851,7 +851,7 @@ enum SmtpCommands {
 #[derive(Debug, Subcommand)]
 enum NatsCommands {
     /// Show current NATS server URL configuration
-    Get,
+    Show,
     /// Set the NATS server URL
     Set {
         /// NATS server URL (e.g. nats://host:4222 or nats://user:password@host:4222)
@@ -2797,7 +2797,7 @@ async fn run(cli: Cli) -> error::Result<()> {
                 output::print_output(format, &resp)?;
             }
             SettingsCommands::Nats { command } => match command {
-                NatsCommands::Get => {
+                NatsCommands::Show => {
                     let resp = commands::settings::nats_show(
                         cli.server.as_deref(),
                         cli.token.as_deref(),
@@ -5002,14 +5002,14 @@ mod tests {
     }
 
     #[test]
-    fn settings_nats_get_parses() {
+    fn settings_nats_show_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit", "settings", "nats", "get"]).expect("should parse");
+            Cli::try_parse_from(["uptrakit", "settings", "nats", "show"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Settings {
                 command: SettingsCommands::Nats {
-                    command: NatsCommands::Get
+                    command: NatsCommands::Show
                 }
             })
         ));

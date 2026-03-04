@@ -7063,6 +7063,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uptrakit-command",
+ "uptrakit-crypto",
  "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
