@@ -11,7 +11,7 @@ same plugin config.
 
 ## Plugin Types
 
-Uptrakit ships with nine built-in plugin types:
+Uptrakit ships with ten built-in plugin types:
 
 | Plugin type | Description | Autodiscovery |
 | --- | --- | --- |
@@ -24,6 +24,7 @@ Uptrakit ships with nine built-in plugin types:
 | `discovery_proxmox_helper_scripts` | Discovery-only. Scans the container's update script, fetches each CT script, and synthesizes downstream plugin configs automatically. Does not perform version detection or updates directly. | Yes |
 | `package_manager_apt` | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh. | Yes |
 | `package_manager_npm` | Tracks globally installed npm packages. Fetches upstream versions from the npm registry (controller-side). Discovers globally installed packages and executes updates via `npm install -g`. Requires `sudo` access for updates. | Yes |
+| `package_manager_mas` | Tracks Mac App Store apps via the `mas` CLI tool. Agent-side only. Discovers installed apps and checks for updates via `mas list` and `mas outdated`. No `sudo` required. Requires `brew install mas`. | Yes |
 
 ### `releases_github` configuration fields
 
@@ -191,6 +192,36 @@ and no matching plugin config exists.
 Upstream release versions are fetched from the npm registry by the controller (no local
 package index needed). Updates are executed on the agent via `npm install -g <pkg>@<version>`
 and require `sudo` access. See [npm Plugin](npm-plugin.md) for details.
+
+### `package_manager_mas` configuration fields
+
+The `mas` plugin has no configuration fields. All Mac App Store apps use the same config (`{}`).
+
+| Field | Required | Description |
+| --- | --- | --- |
+| _(none)_ | — | No configuration options. |
+
+**Package identifier format:** The numeric App Store ID (e.g. `497799835` for Xcode).
+This is the integer value shown in every App Store URL after `/id`.
+
+- `497799835` (Xcode)
+- `1147396723` (WhatsApp)
+- `408981434` (iMovie)
+
+**Prerequisites:** Install `mas` on the macOS host before running the agent:
+
+```bash
+brew install mas
+```
+
+**Discovery behaviour:** When `mas` discovers installed App Store apps, it emits one
+`DiscoveryTarget` per app pointing to a shared plugin config named `"Mac App Store"` with an
+empty config (`{}`). Uptrakit creates this config once and reuses it across all discovered apps —
+no per-app config object is needed.
+
+Installed and upstream versions are resolved entirely on the agent via `mas list` and
+`mas outdated`. No controller-side network access is required. Updates run via `mas upgrade <id>`
+and do **not** require `sudo`.
 
 ## Role-Based Host Assignments
 
