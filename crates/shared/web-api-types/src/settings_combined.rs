@@ -7,7 +7,6 @@ use crate::settings_auth::AuthenticationSettingsResponse;
 use crate::settings_mqtt::MqttLimitResponse;
 use crate::settings_network::NetworkSettingsResponse;
 use crate::settings_nats::NatsSettingsResponse;
-use crate::settings_system_services::SystemServicesSettingsResponse;
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -24,11 +23,13 @@ pub struct CombinedSettingsResponse {
 /// global-settings UI page needs to populate all its sections. The `nats`
 /// field is omitted from serialized output when it is `None` (i.e. when the
 /// controller is compiled without NATS support).
+///
+/// System service enrollment tokens are managed via the dedicated
+/// `/api/v1/system-enrollment-tokens` endpoints.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct GlobalSettingsCombinedResponse {
     pub network: NetworkSettingsResponse,
-    pub system_services: SystemServicesSettingsResponse,
     pub mqtt_limit: MqttLimitResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nats: Option<NatsSettingsResponse>,
