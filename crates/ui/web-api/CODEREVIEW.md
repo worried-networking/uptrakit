@@ -646,3 +646,119 @@ the OpenAPI list silently omits the endpoint from generated docs without a compi
 no doc comment explaining that 64 bytes corresponds to a 512-bit HMAC key. The constant is used
 only in `generate_or_load_jwt_key`, which is the correct location, but without a comment a
 reader cannot verify whether 64 is bytes or hex characters.
+
+---
+
+## Test Coverage Analysis (2026-03-05)
+
+Overall crate coverage: 9,090 / 18,914 lines (48.1%).
+
+### Files With 0% Coverage
+
+| File | Lines | Description |
+| --- | ---: | --- |
+| `routes/service_ws/handler/updates.rs` | 665 | Update lifecycle (start, output, result, batch) |
+| `routes/service_ws/handler/messages.rs` | 412 | Ping, cert renewal, report hosts, version check results |
+| `routes/service_ws/handler/mqtt.rs` | 248 | MQTT register, trigger update, trigger batch |
+| `mqtt_client_store.rs` | 202 | MQTT client store operations |
+| `routes/service_ws/handler/renewal.rs` | 119 | Certificate renewal flow |
+| `routes/ocsp.rs` | 63 | OCSP responder route |
+| `routes/service_ws/handler/discovery.rs` | 60 | Discovery allowlist + dispatch |
+| `oidc_http_client.rs` | 27 | OIDC HTTP client wrapper |
+
+### Route Handlers Below 40% Coverage
+
+| File | Coverage | Lines |
+| --- | ---: | ---: |
+| `routes/oidc_auth.rs` | 8.8% | 800 |
+| `routes/device_auth.rs` | 9.7% | 134 |
+| `routes/settings_network.rs` | 11.2% | 196 |
+| `routes/system_alerts.rs` | 11.7% | 77 |
+| `routes/autodiscovery.rs` | 12.4% | 113 |
+| `routes/agents.rs` | 13.1% | 458 |
+| `routes/settings_smtp.rs` | 14.1% | 156 |
+| `routes/discovery_allowlist.rs` | 14.5% | 138 |
+| `routes/software_items.rs` | 16.0% | 730 |
+| `routes/settings_global_combined.rs` | 21.3% | 47 |
+| `routes/settings_mqtt.rs` | 22.5% | 448 |
+| `routes/settings_ca.rs` | 24.4% | 41 |
+| `routes/api_tokens.rs` | 25.0% | 76 |
+| `routes/settings_agent_certs.rs` | 25.3% | 87 |
+| `routes/settings_auth.rs` | 27.4% | 73 |
+| `routes/update_history.rs` | 28.7% | 101 |
+| `routes/settings_nats.rs` | 30.6% | 72 |
+| `routes/system_enrollment_tokens.rs` | 31.2% | 128 |
+| `routes/host_packages.rs` | 34.2% | 292 |
+| `routes/system_services.rs` | 39.4% | 193 |
+
+### Critical Uncovered Paths
+
+**[SECURITY] WebSocket handler — cross-tenant isolation (0% coverage)**
+
+`validate_update_ownership` in `handler/updates.rs` is the sole gate preventing one service
+from manipulating another's update records. It verifies `update_history.host_id` is in the
+caller's `linked_host_ids` set. With zero tests, a regression here would silently allow
+cross-tenant update injection.
+
+Recommended tests:
+
+- Record belonging to a linked host returns the model successfully
+- Record belonging to an unlinked host returns `Err`
+- Non-existent record returns `Err`
+
+**[SECURITY] MQTT trigger — tenant assignment check (0% coverage)**
+
+`handle_mqtt_trigger_update` and `handle_mqtt_trigger_host_package_update` verify that the
+target tenant is assigned to the calling MQTT service before dispatching updates. A bypass
+would allow update injection from any MQTT service to any tenant.
+
+Recommended tests:
+
+- Unassigned tenant returns `BadRequest` error
+- Assigned tenant dispatches update correctly
+- `handle_mqtt_trigger_host_package_update` with no outdated packages returns `BadRequest`
+
+**[DATA INTEGRITY] Update result handling (0% coverage)**
+
+`handle_update_result` writes `installed_version` on `Completed` status and handles output
+reconciliation (picking the longer of DB-side vs agent-side output). `deliver_pending_updates`
+must correctly deduplicate batch entries on reconnect.
+
+Recommended tests:
+
+- `Completed` status writes `installed_version` to `host_software_item`
+- `Failed` status does NOT write `installed_version`
+- Output reconciliation picks the longer source
+- Batch-aware deduplication skips non-first pending updates per `(batch_id, host_id)`
+- Missing plugin config or deactivated config skips the update with a warning
+
+**[SECURITY] OIDC auth flow (8.8% coverage)**
+
+`oidc_callback` handles all `OidcUserResolution` variants via redirects. The `oidc_exchange`
+endpoint validates CSRF via `Origin` header. `oidc_complete_registration` atomically creates
+user + link + roles.
+
+Recommended tests:
+
+- Each `OidcUserResolution` variant produces the correct redirect
+- Missing or wrong `Origin` in `oidc_exchange` returns 403
+- Expired OIDC flow state returns error redirect
+- `oidc_complete_registration` with invalid token returns 400
+- `oidc_link` duplicate link attempt is rejected
+
+**[SECURITY] Device auth flow (9.7% coverage)**
+
+`routes/device_auth.rs` implements device authorization grant. Nearly untested.
+
+**[BUSINESS] Discovery allowlist dispatch (0% coverage)**
+
+`trigger_discovery_for_agent_host` implements three-level allowlist precedence (host > tenant >
+all-allowed). Zero tests for this logic.
+
+Recommended tests:
+
+- Host allowlist non-empty: only host-allowed types dispatched
+- Only tenant allowlist non-empty: only tenant-allowed types dispatched
+- Both empty: all discovery types dispatched
+- Plugin type with no active configs gets a default empty-config assignment
+- All types filtered out: no `DiscoverSoftware` message sent

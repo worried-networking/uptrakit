@@ -165,3 +165,43 @@ tests. These are thin NATS publish wrappers, but the topic construction and payl
 inside each method are exercised only by integration. At minimum, the `signal_ca_rotation`
 topic format should be asserted with a mock NATS connection to guard against breaking the
 topic contract between the external scheduler and the controller's subscription.
+
+---
+
+## Test Coverage Analysis (2026-03-05)
+
+Overall crate coverage: 83 / 274 lines (30.3%).
+
+### Per-File Coverage
+
+| File | Coverage | Lines |
+| --- | ---: | ---: |
+| `main.rs` | 0.0% | 26 |
+| `handler.rs` | 17.6% | 182 |
+| `nats_notifier.rs` | 25.0% | 20 |
+| `cli.rs` | 97.8% | 46 |
+
+### Critical Uncovered Paths
+
+**[BUSINESS] `handler.rs` — credential delivery + scheduler lifecycle (17.6% coverage)**
+
+`SchedulerHandler` processes `ServiceSettings`, `DatabaseCredentials`, `NatsCredentials`, and
+`MasterKey` messages. On receiving all credentials, it starts the scheduler engine. On
+credential re-delivery, it stops and restarts the scheduler.
+
+Key untested paths:
+
+- Credential accumulation: all four credential types must be received before starting
+- `stop_scheduler` on re-delivery: must cleanly tear down before restart
+- Error handling when scheduler engine fails to start
+
+Recommended tests:
+
+- Mock `ControllerConnection` to deliver credentials sequentially
+- Verify scheduler starts only after all credentials are received
+- Verify `stop_scheduler` + restart on credential re-delivery
+
+**[BUSINESS] `nats_notifier.rs` — topic construction (25.0% coverage)**
+
+NATS publish wrappers with topic construction. The topic format is a contract between the
+scheduler and the controller. At minimum, topic string formatting should be unit-tested.

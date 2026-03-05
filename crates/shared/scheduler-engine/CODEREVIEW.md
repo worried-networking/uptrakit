@@ -280,3 +280,40 @@ in the MQTT lease coordinator. If the heartbeat interval changes, this constant 
 in tandem, but there is no cross-reference making that dependency visible. A doc comment
 (`/// Must exceed the MQTT lease heartbeat interval (currently 30 s) to avoid evicting healthy
 leases`) would make the invariant self-documenting.
+
+---
+
+## Test Coverage Analysis (2026-03-05)
+
+Overall crate coverage: 2,046 / 2,600 lines (78.7%).
+
+### Files Below 40% Coverage
+
+| File | Coverage | Lines |
+| --- | ---: | ---: |
+| `executors/detect_version.rs` | 33.9% | 118 |
+| `executors/fetch_releases.rs` | 31.1% | 350 |
+| `software_states.rs` | 27.2% | 151 |
+
+### Critical Uncovered Paths
+
+**[BUSINESS] `fetch_releases.rs` — Phase B host package assignments (31.1% coverage)**
+
+`FetchReleasesExecutor` Phase B builds fetch assignments for both `host_software_items` and
+`host_packages` so that `latest_version` is populated in both tables. The host-package path
+within Phase B has limited coverage.
+
+Recommended tests:
+
+- Phase B includes `host_packages` assignments alongside `host_software_items`
+- Controller-side plugins (`ControllerSideFetchReleases`) are grouped and dispatched correctly
+- Agent-side plugins send `VersionCheckAssignment` messages to the correct agents
+
+**[BUSINESS] `detect_version.rs` — assignment building (33.9% coverage)**
+
+The assignment-building logic groups by host and sends batch version check messages.
+
+**[BUSINESS] `software_states.rs` — MQTT state push (27.2% coverage)**
+
+`push_software_states` builds the state payload and publishes to MQTT services. The state
+aggregation logic (combining host software items + host packages) has low coverage.

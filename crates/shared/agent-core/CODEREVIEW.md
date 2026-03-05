@@ -168,4 +168,59 @@ difference is intentional (a hook command that cannot be executed must fail the 
 comment explaining why the fallback is fatal rather than skipped would clarify the deviation
 from the workspace pattern.~~
 
-> **Fixed:** The wildcard arm in both `run_hook_command_inner` and `run_hook_for_batch_inner` now warns via `tracing::warn!` and skips (returns `Ok`) instead of returning `Err`, aligning with the `#[non_exhaustive]` forward-compatibility contract for unknown variants in dispatch.
+> **Fixed:** The wildcard arm in both `run_hook_command_inner` and
+> `run_hook_for_batch_inner` now warns via `tracing::warn!` and skips
+> (returns `Ok`) instead of returning `Err`, aligning with the
+> `#[non_exhaustive]` forward-compatibility contract for unknown variants
+> in dispatch.
+
+---
+
+## Test Coverage Analysis (2026-03-05)
+
+Overall crate coverage: 852 / 1,694 lines (50.3%).
+
+### Per-File Coverage
+
+| File | Coverage | Lines |
+| --- | ---: | ---: |
+| `client.rs` | 0.0% | 372 |
+| `version_check.rs` | 36.0% | 417 |
+| `update.rs` | 77.5% | 865 |
+| `discovery.rs` | 100.0% | 40 |
+
+### Critical Uncovered Paths
+
+**[BUSINESS] `client.rs` — entire file at 0% coverage**
+
+This file contains the core agent-side dispatch logic: `handle_execute_update`,
+`handle_graceful_shutdown`, `handle_check_versions`, `handle_execute_batch_host_package_update`,
+`handle_discover_software`, `start_update`, `send_update_result`, and `send_update_output`.
+
+Key untested invariants:
+
+1. **Concurrent update rejection**: `handle_execute_update` must send `Failed` when
+   `in_flight_update.is_some()`, not spawn a second task
+2. **Graceful shutdown sequencing**: must send `UpdateResult` before `Disconnecting`; on timeout,
+   must send `Failed` result then `Disconnecting`
+3. **`send_update_result` with task panic** (`JoinError`): must construct a `Failed` payload
+4. **Batch update pre-hook failure**: all packages must be marked `Failed`
+5. **Discovery host compatibility**: incompatible plugin returns empty discoveries (non-fatal)
+
+Recommended tests:
+
+- Mock `ControllerConnection` + `CommandExecutor` to test dispatch logic
+- `handle_execute_update` with `in_flight_update = Some(...)` sends `Failed` immediately
+- `handle_graceful_shutdown` with timeout sends `Failed` then `Disconnecting`
+- `handle_discover_software` with incompatible host returns empty discoveries
+
+**[BUSINESS] `version_check.rs` — batch grouping (36.0% coverage)**
+
+`batch_check_versions` groups assignments by `(PluginType, effective_config)` and calls batch
+methods once per group. `RefreshPackageIndex` is called at most once per unique fetch group.
+
+Key untested paths:
+
+- Multiple assignments with same plugin type but different configs form separate groups
+- `RefreshPackageIndex` is called before `batch_fetch_releases` but not for detect-only groups
+- Plugin creation failure for one group does not block other groups

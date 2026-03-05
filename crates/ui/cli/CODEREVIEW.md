@@ -384,3 +384,31 @@ is a step toward solving this but is not shared across modules.
 Recommended split: (1) move command enum definitions to `src/commands.rs` or `src/cli.rs`,
 (2) move parse tests to `tests/cli_parsing.rs`, (3) split the dispatch `match` into
 per-namespace helper functions.
+
+---
+
+## Test Coverage Analysis (2026-03-05)
+
+Overall crate coverage: 4,170 / 8,502 lines (49.0%).
+
+### Files Below 40% Coverage
+
+| File | Coverage | Lines |
+| --- | ---: | ---: |
+| `commands/batch_update.rs` | 34.4% | 282 |
+| `commands/settings.rs` | 32.4% | 820 |
+| `main.rs` | 39.9% | 3,202 |
+| `commands/update.rs` | 40.0% | 40 |
+
+### Notes
+
+The CLI crate's coverage is split between the `main.rs` dispatch table (which is large but
+largely tested via argument parsing tests) and the individual command modules. The `commands/`
+modules that interact with `openapi-client` are partially tested through mock API server
+integration tests. Key gaps:
+
+- `batch_update.rs`: the `--follow` SSE streaming path and error handling for partial batch
+  failures are untested
+- `settings.rs`: the SMTP, NATS, and auth settings subcommands have low coverage
+- `main.rs`: the dispatch match arms for newer command groups (system-services,
+  system-enrollment-tokens, audit-logs, discovery-allowlist) lack test coverage

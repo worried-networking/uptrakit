@@ -601,3 +601,180 @@ The highest-value, lowest-risk improvement is the `uptrakit-shared-wire` module 
 splitting `src/lib.rs` into domain-specific sub-modules with `lib.rs` as a re-export façade.
 This is a pure file reorganization with no dependency changes and no impact on consumers, and
 it directly addresses the single largest navigation pain point in the codebase.
+
+---
+
+## Test Coverage Analysis
+
+- **Analysis date**: 2026-03-05
+- **Tool**: `cargo-llvm-cov` (all features, workspace, unit + integration tests)
+- **Branch**: docs/test-coverage
+
+### Overall Coverage
+
+| Metric | Covered | Total | Percentage |
+| --- | --- | --- | --- |
+| Lines | 60,518 | 92,310 | 65.6% |
+| Functions | 6,921 | 10,235 | 67.6% |
+| Regions | 89,839 | 133,607 | 67.2% |
+
+### Per-Crate Coverage (sorted by uncovered lines)
+
+| Crate | Lines | Covered | Uncovered | Coverage |
+| --- | ---: | ---: | ---: | ---: |
+| web-api | 18,914 | 9,090 | 9,824 | 48.1% |
+| cli | 8,502 | 4,170 | 4,332 | 49.0% |
+| web-api-queries | 7,786 | 4,319 | 3,467 | 55.5% |
+| controller | 5,897 | 2,835 | 3,062 | 48.1% |
+| agent-ssh | 6,091 | 3,510 | 2,581 | 57.6% |
+| openapi-client | 3,268 | 1,622 | 1,646 | 49.6% |
+| service-sdk | 2,815 | 1,644 | 1,171 | 58.4% |
+| agent-core | 1,694 | 852 | 842 | 50.3% |
+| mqtt | 2,179 | 1,516 | 663 | 69.6% |
+| web-api-auth | 3,575 | 2,977 | 598 | 83.3% |
+| scheduler-engine | 2,600 | 2,046 | 554 | 78.7% |
+| shared-db | 1,532 | 1,057 | 475 | 69.0% |
+| docker plugin | 1,840 | 1,463 | 377 | 79.5% |
+| wire | 3,375 | 3,085 | 290 | 91.4% |
+| web-api-types | 6,196 | 6,003 | 193 | 96.9% |
+| scheduler | 274 | 83 | 191 | 30.3% |
+| agent | 373 | 202 | 171 | 54.2% |
+| github plugin | 891 | 745 | 146 | 83.6% |
+| homebrew plugin | 1,092 | 981 | 111 | 89.8% |
+| PHS plugin | 1,408 | 1,299 | 109 | 92.3% |
+| nats | 375 | 267 | 108 | 71.2% |
+| types | 2,010 | 1,911 | 99 | 95.1% |
+| crypto | 1,056 | 958 | 98 | 90.7% |
+| forgejo plugin | 707 | 617 | 90 | 87.3% |
+| notification-channels | 625 | 541 | 84 | 86.6% |
+| gitlab plugin | 639 | 564 | 75 | 88.3% |
+| apt plugin | 982 | 908 | 74 | 92.5% |
+| npm plugin | 782 | 715 | 67 | 91.4% |
+| directories | 621 | 565 | 56 | 91.0% |
+| command | 1,020 | 982 | 38 | 96.3% |
+| plugin-core | 646 | 619 | 27 | 95.8% |
+| audit-log | 149 | 125 | 24 | 83.9% |
+| shell plugin | 257 | 245 | 12 | 95.3% |
+| update-hooks | 475 | 469 | 6 | 98.7% |
+| backoff | 55 | 55 | 0 | 100.0% |
+| macros | 26 | 26 | 0 | 100.0% |
+
+### Files With 0% Coverage (>50 lines)
+
+These files contain zero test-exercised code paths:
+
+| File | Lines | Category |
+| --- | ---: | --- |
+| `service_ws/handler/updates.rs` | 665 | WebSocket update handling |
+| `controller/src/main.rs` | 497 | Controller binary entry |
+| `service_ws/handler/messages.rs` | 412 | WebSocket message handling |
+| `agent-ssh/src/commands/host.rs` | 393 | SSH host management CLI |
+| `agent-core/src/client.rs` | 372 | Agent client logic |
+| `service-sdk/src/ws.rs` | 308 | WebSocket SDK |
+| `service_ws/handler/mqtt.rs` | 248 | MQTT trigger via WS |
+| `mqtt_client_store.rs` | 202 | MQTT client store |
+| `commands/update_sudoers.rs` | 179 | Sudoers generation |
+| `queries/system_services.rs` | 175 | System service queries |
+| `queries/audit_logs.rs` | 149 | Audit log queries |
+| `queries/system_enrollment_tokens.rs` | 133 | System enrollment token queries |
+| `service-sdk/src/connection.rs` | 130 | Service connection |
+| `service_ws/handler/renewal.rs` | 119 | Certificate renewal handler |
+| `queries/scheduled_tasks.rs` | 110 | Scheduler task queries |
+| `agent/src/main.rs` | 89 | Agent binary entry |
+| `nats/src/connection.rs` | 86 | NATS connection |
+| `docker/src/docker_proxy.rs` | 83 | Docker-over-SSH proxy |
+| `controller/src/server.rs` | 79 | Controller server setup |
+| `openapi-client/src/notifications.rs` | 76 | Notification API client |
+| `mqtt/src/main.rs` | 66 | MQTT binary entry |
+| `routes/ocsp.rs` | 63 | OCSP responder route |
+| `agent/src/client.rs` | 62 | Agent client |
+| `service_ws/handler/discovery.rs` | 60 | Discovery handler |
+| `openapi-client/src/autodiscovery.rs` | 54 | Autodiscovery API client |
+
+### Security-Critical Files Below 70% Coverage
+
+| File | Coverage | Risk |
+| --- | ---: | --- |
+| `controller/src/crl_manager.rs` | 28.9% | CRL generation and distribution |
+| `controller/src/mtls_acceptor.rs` | 0.0% | mTLS connection acceptance |
+| `openapi-client/src/enrollment_tokens.rs` | 49.2% | Enrollment token operations |
+| `openapi-client/src/system_enrollment_tokens.rs` | 45.6% | System enrollment tokens |
+| `auth/authentication.rs` | 51.7% | OIDC user resolution |
+| `settings_store.rs` | 35.3% | Settings persistence |
+| `queries/enrollment_tokens.rs` | 62.4% | Enrollment token queries |
+| `queries/system_enrollment_tokens.rs` | 0.0% | System enrollment token queries |
+| `ocsp.rs` | 48.6% | OCSP response building |
+| `routes/ocsp.rs` | 0.0% | OCSP route handler |
+| `routes/oidc_auth.rs` | 8.8% | OIDC auth flow |
+| `routes/device_auth.rs` | 9.7% | Device auth flow |
+| `routes/api_tokens.rs` | 25.0% | API token CRUD |
+| `routes/settings_auth.rs` | 27.4% | Auth settings |
+| `routes/system_enrollment_tokens.rs` | 31.2% | System enrollment token routes |
+
+### Priority Test Recommendations
+
+#### Tier 1: Security-Critical (test first)
+
+1. **`resolve_oidc_user` email verification** (`authentication.rs`): The `email_verified = None`
+   and `email_verified = Some(false)` paths must return `EmailNotVerified`. A bug here enables
+   account takeover via an IdP that omits or falsifies the claim.
+
+2. **`validate_update_ownership`** (`handler/updates.rs`): Cross-tenant isolation gate. Must
+   reject update records belonging to unlinked hosts.
+
+3. **MQTT trigger tenant assignment** (`handler/mqtt.rs`): `handle_mqtt_trigger_update` and
+   `handle_mqtt_trigger_host_package_update` must reject operations for unassigned tenants.
+
+4. **`find_active_system_tokens` compound filter** (`system_enrollment_tokens.rs`): All three
+   conditions (not revoked, not expired, uses remaining) must be ANDed correctly. A logic bug
+   would allow enrollment with exhausted or revoked tokens.
+
+#### Tier 2: Data Integrity (prevent silent corruption)
+
+1. **`handle_update_result` version propagation** (`handler/updates.rs`):
+   `installed_version` must be written to `host_software_item` on `Completed`
+   status, not on `Failed`.
+1. **`deactivate_system_service` transaction** (`system_services.rs`): Must
+   atomically mark `deactivated_at` and bulk-revoke all certificates.
+1. **`sync_oidc_roles` atomicity** (`authentication.rs`): Must delete all existing
+   roles before inserting mapped ones; partial application mixes old and new.
+1. **`deliver_pending_updates` batch deduplication** (`handler/updates.rs`): Must
+   skip non-first pending updates per `(batch_id, host_id)` on reconnect.
+
+#### Tier 3: Business Rule Correctness
+
+1. **Discovery allowlist three-level precedence** (`handler/discovery.rs`):
+   Host-specific overrides tenant-wide, which overrides all-allowed default.
+1. **`deactivate_missing_host_packages` ignore-set** (`host_packages.rs`): Ignored
+   packages must never be deactivated even when absent from discovery snapshot.
+1. **`handle_graceful_shutdown` sequencing** (`agent-core/client.rs`): Must send
+   `UpdateResult` before `Disconnecting`; timeout must send `Failed` result.
+1. **Cron normalization in `update_scheduled_task`** (`scheduled_tasks.rs`):
+   5-field expressions must be prefixed with `0` for seconds field; invalid cron
+   must return error.
+
+#### Tier 4: Error Resilience
+
+1. **Allowlist `load_*_set` fail-open** (`discovery_allowlist.rs`): Must return
+   empty set on DB error so discovery is not blocked.
+1. **`handle_discover_software` isolation** (`agent-core/client.rs`): One failing
+   plugin must not prevent other plugins from running.
+1. **OIDC callback error redirects** (`oidc_auth.rs`): All `OidcUserResolution`
+   error variants must redirect to `/login?error=...`, not return 500.
+
+### Well-Tested Areas (>90% coverage, >100 lines)
+
+These files demonstrate excellent test discipline:
+
+- `wire/src/lib.rs` (2,410 lines, 99.0%) - wire protocol
+- `crypto/src/lib.rs` (1,056 lines, 90.7%) - cryptographic operations
+- `phs/discovery.rs` (970 lines, 97.0%) - PHS discovery logic
+- `registry/src/registry.rs` (943 lines, 97.3%) - plugin registry
+- `apt/src/plugin.rs` (872 lines, 91.7%) - APT plugin
+- `mqtt/ha_discovery.rs` (857 lines, 99.9%) - HA discovery topics
+- `controller/reencrypt.rs` (767 lines, 92.2%) - re-encryption
+- `web-api-types/src/lib.rs` (767 lines, 100.0%) - API types
+- `npm/src/plugin.rs` (732 lines, 90.8%) - npm plugin
+- `agent-ssh/host_ops.rs` (679 lines, 95.1%) - SSH host operations
+- `command/src/command.rs` (478 lines, 95.6%) - command executor
+- `update-hooks/src/lib.rs` (475 lines, 98.7%) - update hooks

@@ -319,3 +319,50 @@ local constant inside `run_event_loop` rather than in a `durations` module. This
 invisible to operators looking for tunable timeouts. The constant is sent to the controller as
 the initial `ServiceSettings` fallback. Moving it to `src/lib.rs` or a `durations.rs` with a
 doc comment would make it discoverable.
+
+---
+
+## Test Coverage Analysis (2026-03-05)
+
+Overall crate coverage: 1,644 / 2,815 lines (58.4%).
+
+### Per-File Coverage (key files)
+
+| File | Coverage | Lines |
+| --- | ---: | ---: |
+| `ws.rs` | 0.0% | 308 |
+| `connection.rs` | 0.0% | 130 |
+| `main_helper.rs` | 0.0% | 38 |
+| `lifecycle.rs` | 10.1% | 227 |
+| `identity.rs` | 81.2% | 866 |
+| `event_loop.rs` | 75.0% | 515 |
+
+### Critical Uncovered Paths
+
+**[SECURITY] `ws.rs` — enrollment and certificate flows (0% coverage)**
+
+The entire WebSocket connection, enrollment, approval-wait, and certificate-request flow is
+untested. This includes:
+
+1. **`run_enrollment`**: Full enrollment orchestration (connect → enroll → wait → CSR → cert)
+2. **`resume_enrollment`**: Reconnect with Bearer token for pending approval
+3. **`send_enroll` protocol validation**: Version mismatch and sequence number checks
+4. **`wait_for_approval` timeout**: 30-minute timeout must return `ApprovalTimeout`
+5. **`wait_for_approval` rejection**: `Rejected` response must return `EnrollmentRejected`
+6. **`is_peer_closed` classification**: Must correctly identify `UnexpectedEof` and
+   `ResetWithoutClosingHandshake` as peer-closed conditions
+
+Recommended tests (unit-testable with mock WebSocket streams):
+
+- `is_peer_closed`: `UnexpectedEof` → true; `ResetWithoutClosingHandshake` → true; generic IO → false
+- `send_enroll`: `Enrolled` → Ok; `Error` → protocol error; `ServerRestarting` → `ReceiveClosed`
+- `wait_for_approval`: `Approved` → Ok; `Rejected` → error; `Pong` → silently ignored
+- Protocol version mismatch in `send_enroll` returns `VersionMismatch`
+
+**[BUSINESS] `lifecycle.rs` — service lifecycle (10.1% coverage)**
+
+`ServiceHandler` trait implementation and `default_resolve_shutdown` are barely tested.
+
+**[BUSINESS] `connection.rs` — agreed capabilities (0% coverage)**
+
+`ControllerConnection::set_agreed_capabilities` and accessor methods have no tests.

@@ -194,3 +194,26 @@ authentication logic, retry/backoff engine, error types, and all retry tests liv
 single file. Splitting into `src/client.rs` (struct + HTTP methods), `src/retry.rs`
 (backoff engine + `RetryConfig`), `src/error.rs` (error types), and `src/lib.rs`
 (re-exports only) would make each concern independently navigable and testable.
+
+---
+
+## Test Coverage Analysis (2026-03-05)
+
+Overall crate coverage: 1,622 / 3,268 lines (49.6%).
+
+### Files With 0% Coverage
+
+| File | Lines | Description |
+| --- | ---: | --- |
+| `notifications.rs` | 76 | Notification channel/rule API client |
+| `autodiscovery.rs` | 54 | Autodiscovery ignore list API client |
+| `update_batches.rs` | 47 | Batch update API client |
+| `discovery_allowlist.rs` | 45 | Discovery allowlist API client |
+
+### Notes
+
+The openapi-client crate's coverage is inherently limited because its methods are thin HTTP
+wrappers. Most coverage comes from the `mock` module used by other crates' integration tests.
+The 0%-coverage files above represent newer API surface that has not yet been exercised by
+any consumer's tests. Adding mock endpoint definitions for these would enable downstream
+integration tests to exercise the full API surface.

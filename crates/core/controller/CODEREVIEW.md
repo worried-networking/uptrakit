@@ -506,3 +506,69 @@ is user-configurable via `--db-max-connections`, but the timeout values are invi
 be tuned for environments where the DB server is remote or under load. A comment citing the
 rationale for the 8-second value (or exposing them as optional CLI parameters with these
 defaults) would aid operators debugging slow connection acquisition.
+
+---
+
+## Test Coverage Analysis (2026-03-05)
+
+Overall crate coverage: 2,835 / 5,897 lines (48.1%).
+
+### Files With 0% Coverage
+
+| File | Lines | Description |
+| --- | ---: | --- |
+| `main.rs` | 497 | Binary entry point |
+| `server.rs` | 79 | Server setup (TLS, bind, serve) |
+| `mtls_acceptor.rs` | 39 | mTLS connection acceptance |
+| `embedded_frontend.rs` | 37 | rust-embed frontend serving |
+| `db/config.rs` | 46 | Database configuration |
+
+### Files Below 30% Coverage
+
+| File | Coverage | Lines |
+| --- | ---: | ---: |
+| `startup.rs` | 8.7% | 1,143 |
+| `tasks.rs` | 19.8% | 359 |
+| `crl_manager.rs` | 28.9% | 450 |
+| `db_migrate/tables.rs` | 1.6% | 257 |
+
+### Critical Uncovered Paths
+
+**[SECURITY] `crl_manager.rs` — CRL generation (28.9% coverage)**
+
+The CRL manager generates and caches Certificate Revocation Lists. The `build_crl` and
+`schedule_crl_renewal` logic has low coverage. A bug in CRL generation would leave revoked
+certificates accepted by clients.
+
+Recommended tests:
+
+- CRL includes all revoked certificates from the DB
+- CRL is re-generated after cert revocation notification
+- CRL cache is invalidated on rebuild
+
+**[SECURITY] `mtls_acceptor.rs` — mTLS acceptance (0% coverage)**
+
+This module handles mTLS connection acceptance for service WebSocket connections. Zero tests.
+Requires integration testing with actual TLS connections.
+
+**[BUSINESS] `startup.rs` — initialization (8.7% coverage)**
+
+The 1,143-line startup module handles CA initialization, settings reconciliation, migration
+running, and audit log setup. Most paths are only exercised by full binary startup.
+
+Key untested paths:
+
+- CA certificate generation on first startup
+- Settings 5-case reconciliation (CLI flag vs DB vs default)
+- Migration runner error handling
+- Audit database initialization
+
+**[BUSINESS] `tasks.rs` — scheduled task registration (19.8% coverage)**
+
+Task registration and the embedded scheduler toggle logic have low coverage.
+
+**[BUSINESS] `db_migrate/tables.rs` — cross-backend migration (1.6% coverage)**
+
+The `db-migrate` subcommand copies all data between DB backends (42 tables). Nearly untested.
+This is acceptable since it requires two running DB instances, but the `verify_all` function
+could be unit-tested with mock data.
