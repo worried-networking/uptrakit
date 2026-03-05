@@ -351,7 +351,16 @@
 										<span class="badge preset-filled-warning-500">Pending</span>
 									{:else}
 										{#if item.update_available}
-											<span class="badge preset-filled-warning-500">Update Available</span>
+											{#if canManage}
+												<button
+													class="badge preset-filled-warning-500 cursor-pointer hover:opacity-80"
+													onclick={() => openUpdateModal(item)}
+												>
+													Update Available
+												</button>
+											{:else}
+												<span class="badge preset-filled-warning-500">Update Available</span>
+											{/if}
 										{/if}
 										{#if !item.enabled}
 											<span class="badge preset-tonal">Disabled</span>
@@ -466,16 +475,6 @@
 								onclick={() => triggerVersionCheck(item)}
 							>
 								{checkingVersionsId === item.id ? 'Checking…' : 'Check Versions'}
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => openUpdateModal(item)}
-							>
-								Update…
 							</button>
 						</li>
 						<li>
