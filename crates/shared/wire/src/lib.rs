@@ -1,6 +1,8 @@
 pub mod close_reason;
 pub use close_reason::CloseReason;
 
+pub mod extension;
+
 pub mod limits;
 mod wire_validate_impls;
 
@@ -111,6 +113,11 @@ pub enum Capability {
     ///
     /// Wire string: `system_service`.
     SystemService,
+    /// Service supports UI extensions: it will send `ExtensionRegister` after
+    /// connection and respond to `ExtensionRequest` messages.
+    ///
+    /// Wire string: `ui_extensions`.
+    UiExtensions,
     /// Unknown capability from a newer peer; never participates in intersection.
     ///
     /// Provides forward compatibility: a newer peer may advertise capabilities
@@ -134,6 +141,7 @@ impl Capability {
             Self::MasterKeyAccess => "master_key_access",
             Self::CaManagement => "ca_management",
             Self::SystemService => "system_service",
+            Self::UiExtensions => "ui_extensions",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -185,6 +193,7 @@ impl FromStr for Capability {
             "master_key_access" => Self::MasterKeyAccess,
             "ca_management" => Self::CaManagement,
             "system_service" => Self::SystemService,
+            "ui_extensions" => Self::UiExtensions,
             other => Self::Other(other.to_string()),
         })
     }
@@ -361,6 +370,19 @@ pub enum ServiceMessage {
     /// Sent when a Home Assistant user presses "Install" on a host packages update entity.
     #[serde(rename = "mqtt_trigger_host_package_update")]
     MqttTriggerHostPackageUpdate(MqttTriggerHostPackageUpdatePayload),
+    // -- UI Extensions --
+    /// Service declares its UI extensions after connecting.
+    ///
+    /// Sent once after connection setup by services with the `UiExtensions`
+    /// capability. Contains one or more extension manifests that the controller
+    /// registers in its in-memory extension registry.
+    ExtensionRegister(extension::ExtensionRegisterPayload),
+    /// Response to a proxied extension action invocation.
+    ///
+    /// Sent by the service after processing an `ExtensionRequest` from the
+    /// controller. The `request_id` correlates this response with the original
+    /// request.
+    ExtensionResponse(extension::ExtensionResponsePayload),
     /// Unknown message type from a newer service build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
@@ -407,6 +429,13 @@ pub enum ControllerMessage {
     TenantRevoked(MqttTenantRevokedPayload),
     MqttClientCreated(MqttClientCreatedPayload),
     SoftwareStates(MqttSoftwareStatesPayload),
+    // -- UI Extensions --
+    /// Proxied action invocation from the controller to a service.
+    ///
+    /// Sent to services with the `UiExtensions` capability when a REST client
+    /// invokes an extension action. The service should process the action and
+    /// respond with `ExtensionResponse`.
+    ExtensionRequest(extension::ExtensionRequestPayload),
     // -- Infrastructure credential delivery --
     /// Infrastructure credentials for services that advertise credential
     /// capabilities. Fields are populated based on the service's capability set:
@@ -544,6 +573,11 @@ pub struct EnrollPayload {
     /// The controller persists these in the `services.capabilities` column and
     /// derives behavioral defaults from the resulting [`ServiceProfile`].
     pub capabilities: BTreeSet<Capability>,
+    /// The binary/crate name of the enrolling service (e.g., `"uptrakit-agent-ssh"`).
+    ///
+    /// Derived from `env!("CARGO_PKG_NAME")` at compile time. Used for UI
+    /// display, extension conflict detection, and distinguishing service binaries.
+    pub service_app_name: String,
 }
 
 /// Payload for requesting a client certificate after approval.
@@ -1646,6 +1680,7 @@ mod tests {
             friendly_name: "Node One".to_string(),
             enrollment_token: Some(SecretString::new("tok-123".into())),
             capabilities: agent_capabilities(),
+            service_app_name: "uptrakit-agent".to_string(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
@@ -1661,6 +1696,7 @@ mod tests {
             friendly_name: "MQTT Service Node 1".to_string(),
             enrollment_token: Some(SecretString::new("tok-456".into())),
             capabilities: mqtt_capabilities(),
+            service_app_name: "uptrakit-mqtt".to_string(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"enroll"#));
@@ -1677,6 +1713,7 @@ mod tests {
             friendly_name: "SSH Agent Node 1".to_string(),
             enrollment_token: Some(SecretString::new("tok-789".into())),
             capabilities: ssh_agent_capabilities(),
+            service_app_name: "uptrakit-agent-ssh".to_string(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"enroll"#));
@@ -1693,6 +1730,7 @@ mod tests {
             friendly_name: "Node Two".to_string(),
             enrollment_token: None,
             capabilities: agent_capabilities(),
+            service_app_name: "uptrakit-agent".to_string(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         // enrollment_token should be omitted when None
@@ -3033,6 +3071,7 @@ mod tests {
                 friendly_name: "Test".to_string(),
                 enrollment_token: None,
                 capabilities: agent_capabilities(),
+                service_app_name: "uptrakit-agent".to_string(),
             }),
         };
         let json = serde_json::to_string(&envelope).unwrap();
@@ -3338,6 +3377,7 @@ mod tests {
             friendly_name: "Node One".to_string(),
             enrollment_token: Some(SecretString::new("tok-123".into())),
             capabilities: agent_capabilities(),
+            service_app_name: "uptrakit-agent".to_string(),
         }));
         spec.validate("enrollPayload", &json);
     }

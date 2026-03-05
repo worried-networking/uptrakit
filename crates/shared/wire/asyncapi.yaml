@@ -1236,6 +1236,7 @@ components:
         - hostname
         - friendly_name
         - capabilities
+        - service_app_name
       properties:
         protocol_version:
           type: integer
@@ -1290,6 +1291,17 @@ components:
           description: Optional pre-shared enrollment token for auto-approval
           examples:
             - tok-abc123
+        service_app_name:
+          type: string
+          description: >-
+            Binary/crate name of the service, derived from `env!("CARGO_PKG_NAME")`
+            at compile time. Used for UI extension conflict detection and service
+            type identification.
+          examples:
+            - uptrakit-agent
+            - uptrakit-agent-ssh
+            - uptrakit-mqtt
+            - uptrakit-scheduler
 
     enrolledPayload:
       type: object

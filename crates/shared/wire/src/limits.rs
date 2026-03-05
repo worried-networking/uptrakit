@@ -91,6 +91,30 @@ pub const MAX_HOST_PACKAGE_HOST_STATES: usize = 2_000;
 /// Maximum number of active MQTT client IDs.
 pub const MAX_ACTIVE_MQTT_CLIENTS: usize = 500;
 
+/// Maximum number of extension manifests in a single `ExtensionRegister` message.
+pub const MAX_EXTENSION_MANIFESTS: usize = 50;
+
+/// Maximum number of columns in a `TableColumns` placement or `DataTable` UI.
+pub const MAX_EXTENSION_COLUMNS: usize = 50;
+
+/// Maximum number of actions in an extension UI.
+pub const MAX_EXTENSION_ACTIONS: usize = 50;
+
+/// Maximum number of fields in a single form.
+pub const MAX_EXTENSION_FIELDS: usize = 100;
+
+/// Maximum number of steps in a wizard.
+pub const MAX_EXTENSION_WIZARD_STEPS: usize = 20;
+
+/// Maximum number of options in a select field.
+pub const MAX_EXTENSION_SELECT_OPTIONS: usize = 200;
+
+/// Maximum byte length of extension action params JSON.
+pub const MAX_EXTENSION_PARAMS_LEN: usize = 65_536;
+
+/// Maximum byte length of extension action response JSON.
+pub const MAX_EXTENSION_RESPONSE_LEN: usize = 1_048_576;
+
 // ── String length limits ──────────────────────────────────────────────────────
 
 /// Maximum length for short strings (identifiers, names, versions).

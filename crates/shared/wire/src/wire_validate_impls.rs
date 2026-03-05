@@ -28,6 +28,8 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::MqttTriggerUpdate(p) => p.wire_validate(),
             ServiceMessage::MqttTriggerHostPackageUpdate(_) => Ok(()),
             ServiceMessage::Disconnecting(p) => p.wire_validate(),
+            ServiceMessage::ExtensionRegister(p) => p.wire_validate(),
+            ServiceMessage::ExtensionResponse(p) => p.wire_validate(),
             // Forward-compatible: unknown variants from newer peers pass validation.
             _ => Ok(()),
         }
@@ -60,6 +62,7 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::TenantRevoked(p) => p.wire_validate(),
             ControllerMessage::MqttClientCreated(_) => Ok(()),
             ControllerMessage::SoftwareStates(p) => p.wire_validate(),
+            ControllerMessage::ExtensionRequest(p) => p.wire_validate(),
             ControllerMessage::ServiceCredentials(_) => Ok(()),
             ControllerMessage::RequestCaRotation(p) => p.wire_validate(),
             ControllerMessage::RequestCrlRenewal(_) => Ok(()),
@@ -76,6 +79,11 @@ impl WireValidate for EnrollPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.hostname, MAX_SHORT_STRING_LEN, "hostname")?;
         check_string_len(&self.friendly_name, MAX_SHORT_STRING_LEN, "friendly_name")?;
+        check_string_len(
+            &self.service_app_name,
+            MAX_SHORT_STRING_LEN,
+            "service_app_name",
+        )?;
         Ok(())
     }
 }
@@ -247,6 +255,241 @@ impl WireValidate for DisconnectingPayload {
             MAX_ACTIVE_MQTT_CLIENTS,
             "active_mqtt_clients",
         )?;
+        Ok(())
+    }
+}
+
+// ── Extension payload impls ──────────────────────────────────────────────────
+
+impl WireValidate for extension::ExtensionRegisterPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_vec_len(&self.manifests, MAX_EXTENSION_MANIFESTS, "manifests")?;
+        for manifest in &self.manifests {
+            manifest.wire_validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::ExtensionManifest {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.id, MAX_SHORT_STRING_LEN, "extension.id")?;
+        check_string_len(&self.label, MAX_SHORT_STRING_LEN, "extension.label")?;
+        check_string_len(
+            &self.required_permission,
+            MAX_SHORT_STRING_LEN,
+            "extension.required_permission",
+        )?;
+        self.placement.wire_validate()?;
+        self.ui.wire_validate()?;
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::ExtensionPlacement {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        match self {
+            extension::ExtensionPlacement::Page { nav_section, icon } => {
+                check_string_len(nav_section, MAX_SHORT_STRING_LEN, "placement.nav_section")?;
+                check_opt_string_len(icon, MAX_SHORT_STRING_LEN, "placement.icon")?;
+            }
+            extension::ExtensionPlacement::Panel {
+                target_page,
+                position: _,
+            } => {
+                check_string_len(target_page, MAX_SHORT_STRING_LEN, "placement.target_page")?;
+            }
+            extension::ExtensionPlacement::ContextMenuGroup {
+                target_entity,
+                group_label,
+            } => {
+                check_string_len(
+                    target_entity,
+                    MAX_SHORT_STRING_LEN,
+                    "placement.target_entity",
+                )?;
+                check_string_len(group_label, MAX_SHORT_STRING_LEN, "placement.group_label")?;
+            }
+            extension::ExtensionPlacement::TableColumns {
+                target_table,
+                columns,
+            } => {
+                check_string_len(target_table, MAX_SHORT_STRING_LEN, "placement.target_table")?;
+                check_vec_len(columns, MAX_EXTENSION_COLUMNS, "placement.columns")?;
+                for col in columns {
+                    col.wire_validate()?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::ExtensionColumn {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.key, MAX_SHORT_STRING_LEN, "column.key")?;
+        check_string_len(&self.label, MAX_SHORT_STRING_LEN, "column.label")?;
+        check_string_len(
+            &self.data_action,
+            MAX_SHORT_STRING_LEN,
+            "column.data_action",
+        )?;
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::ExtensionUi {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        match self {
+            extension::ExtensionUi::DataTable {
+                columns,
+                data_action,
+                row_actions,
+                primary_actions,
+            } => {
+                check_vec_len(columns, MAX_EXTENSION_COLUMNS, "ui.columns")?;
+                check_string_len(data_action, MAX_SHORT_STRING_LEN, "ui.data_action")?;
+                check_vec_len(row_actions, MAX_EXTENSION_ACTIONS, "ui.row_actions")?;
+                check_vec_len(primary_actions, MAX_EXTENSION_ACTIONS, "ui.primary_actions")?;
+                for col in columns {
+                    col.wire_validate()?;
+                }
+                for action in row_actions {
+                    action.wire_validate()?;
+                }
+                for action in primary_actions {
+                    action.wire_validate()?;
+                }
+            }
+            extension::ExtensionUi::Form(form) => {
+                form.wire_validate()?;
+            }
+            extension::ExtensionUi::KeyValue { data_action } => {
+                check_string_len(data_action, MAX_SHORT_STRING_LEN, "ui.data_action")?;
+            }
+            extension::ExtensionUi::Actions { actions } => {
+                check_vec_len(actions, MAX_EXTENSION_ACTIONS, "ui.actions")?;
+                for action in actions {
+                    action.wire_validate()?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::TableColumn {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.key, MAX_SHORT_STRING_LEN, "table_column.key")?;
+        check_string_len(&self.label, MAX_SHORT_STRING_LEN, "table_column.label")?;
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::ActionDef {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.action_id, MAX_SHORT_STRING_LEN, "action.action_id")?;
+        check_string_len(&self.label, MAX_SHORT_STRING_LEN, "action.label")?;
+        check_string_len(&self.permission, MAX_SHORT_STRING_LEN, "action.permission")?;
+        if let Some(ref ui) = self.ui {
+            ui.wire_validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::ActionUi {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        match self {
+            extension::ActionUi::Form(form) => form.wire_validate()?,
+            extension::ActionUi::Wizard { steps } => {
+                check_vec_len(steps, MAX_EXTENSION_WIZARD_STEPS, "wizard.steps")?;
+                for step in steps {
+                    step.wire_validate()?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::WizardStep {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.step_id, MAX_SHORT_STRING_LEN, "step.step_id")?;
+        check_string_len(&self.label, MAX_SHORT_STRING_LEN, "step.label")?;
+        check_opt_string_len(
+            &self.submit_action,
+            MAX_SHORT_STRING_LEN,
+            "step.submit_action",
+        )?;
+        self.form.wire_validate()?;
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::FormDef {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_vec_len(&self.fields, MAX_EXTENSION_FIELDS, "form.fields")?;
+        for field in &self.fields {
+            field.wire_validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::FieldDef {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.key, MAX_SHORT_STRING_LEN, "field.key")?;
+        check_string_len(&self.label, MAX_SHORT_STRING_LEN, "field.label")?;
+        check_opt_string_len(&self.placeholder, MAX_SHORT_STRING_LEN, "field.placeholder")?;
+        check_opt_string_len(&self.help_text, MAX_MEDIUM_STRING_LEN, "field.help_text")?;
+        check_vec_len(&self.options, MAX_EXTENSION_SELECT_OPTIONS, "field.options")?;
+        for opt in &self.options {
+            opt.wire_validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::SelectOption {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.value, MAX_SHORT_STRING_LEN, "option.value")?;
+        check_string_len(&self.label, MAX_SHORT_STRING_LEN, "option.label")?;
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::ExtensionRequestPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.request_id, MAX_SHORT_STRING_LEN, "request_id")?;
+        check_string_len(&self.extension_id, MAX_SHORT_STRING_LEN, "extension_id")?;
+        check_string_len(&self.action_id, MAX_SHORT_STRING_LEN, "action_id")?;
+        let params_len = self.params.to_string().len();
+        if params_len > MAX_EXTENSION_PARAMS_LEN {
+            return Err(WireValidationError {
+                field: "params",
+                message: format!(
+                    "params JSON is {params_len} bytes, max {MAX_EXTENSION_PARAMS_LEN}"
+                ),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::ExtensionResponsePayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.request_id, MAX_SHORT_STRING_LEN, "request_id")?;
+        check_opt_string_len(&self.error, MAX_MEDIUM_STRING_LEN, "error")?;
+        let data_len = self.data.to_string().len();
+        if data_len > MAX_EXTENSION_RESPONSE_LEN {
+            return Err(WireValidationError {
+                field: "data",
+                message: format!(
+                    "response data is {data_len} bytes, max {MAX_EXTENSION_RESPONSE_LEN}"
+                ),
+            });
+        }
         Ok(())
     }
 }
@@ -884,5 +1127,203 @@ mod tests {
         };
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "results");
+    }
+
+    // ── Extension wire validation tests ─────────────────────────────────────
+
+    fn test_manifest() -> extension::ExtensionManifest {
+        extension::ExtensionManifest {
+            id: "test.ext".to_string(),
+            label: "Test".to_string(),
+            placement: extension::ExtensionPlacement::Page {
+                nav_section: "test".to_string(),
+                icon: None,
+            },
+            required_permission: String::new(),
+            targeting: extension::ExtensionTargeting::Universal,
+            ui: extension::ExtensionUi::Actions { actions: vec![] },
+        }
+    }
+
+    #[test]
+    fn extension_register_validates() {
+        let payload = extension::ExtensionRegisterPayload {
+            manifests: vec![test_manifest()],
+        };
+        assert!(payload.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn extension_register_too_many_manifests() {
+        let manifests: Vec<extension::ExtensionManifest> = (0..MAX_EXTENSION_MANIFESTS + 1)
+            .map(|i| extension::ExtensionManifest {
+                id: format!("ext-{i}"),
+                ..test_manifest()
+            })
+            .collect();
+        let payload = extension::ExtensionRegisterPayload { manifests };
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "manifests");
+    }
+
+    #[test]
+    fn extension_manifest_id_too_long() {
+        let manifest = extension::ExtensionManifest {
+            id: "x".repeat(MAX_SHORT_STRING_LEN + 1),
+            ..test_manifest()
+        };
+        let err = manifest.wire_validate().unwrap_err();
+        assert_eq!(err.field, "extension.id");
+    }
+
+    #[test]
+    fn extension_table_columns_too_many() {
+        let columns: Vec<extension::ExtensionColumn> = (0..MAX_EXTENSION_COLUMNS + 1)
+            .map(|i| extension::ExtensionColumn {
+                key: format!("col-{i}"),
+                label: format!("Column {i}"),
+                data_action: "fetch".to_string(),
+            })
+            .collect();
+        let placement = extension::ExtensionPlacement::TableColumns {
+            target_table: "hosts".to_string(),
+            columns,
+        };
+        let err = placement.wire_validate().unwrap_err();
+        assert_eq!(err.field, "placement.columns");
+    }
+
+    #[test]
+    fn extension_form_too_many_fields() {
+        let fields: Vec<extension::FieldDef> = (0..MAX_EXTENSION_FIELDS + 1)
+            .map(|i| extension::FieldDef {
+                key: format!("field-{i}"),
+                label: format!("Field {i}"),
+                field_type: extension::FieldType::Text,
+                required: false,
+                placeholder: None,
+                help_text: None,
+                default_value: None,
+                options: vec![],
+            })
+            .collect();
+        let form = extension::FormDef { fields };
+        let err = form.wire_validate().unwrap_err();
+        assert_eq!(err.field, "form.fields");
+    }
+
+    #[test]
+    fn extension_wizard_too_many_steps() {
+        let steps: Vec<extension::WizardStep> = (0..MAX_EXTENSION_WIZARD_STEPS + 1)
+            .map(|i| extension::WizardStep {
+                step_id: format!("s-{i}"),
+                label: format!("Step {i}"),
+                form: extension::FormDef { fields: vec![] },
+                submit_action: None,
+            })
+            .collect();
+        let ui = extension::ActionUi::Wizard { steps };
+        let err = ui.wire_validate().unwrap_err();
+        assert_eq!(err.field, "wizard.steps");
+    }
+
+    #[test]
+    fn extension_select_too_many_options() {
+        let options: Vec<extension::SelectOption> = (0..MAX_EXTENSION_SELECT_OPTIONS + 1)
+            .map(|i| extension::SelectOption {
+                value: format!("v-{i}"),
+                label: format!("Label {i}"),
+            })
+            .collect();
+        let field = extension::FieldDef {
+            key: "select".to_string(),
+            label: "Select".to_string(),
+            field_type: extension::FieldType::Select,
+            required: false,
+            placeholder: None,
+            help_text: None,
+            default_value: None,
+            options,
+        };
+        let err = field.wire_validate().unwrap_err();
+        assert_eq!(err.field, "field.options");
+    }
+
+    #[test]
+    fn extension_request_validates() {
+        let payload = extension::ExtensionRequestPayload {
+            request_id: "req-1".to_string(),
+            extension_id: "test.ext".to_string(),
+            action_id: "do-thing".to_string(),
+            params: serde_json::json!({}),
+        };
+        assert!(payload.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn extension_request_params_too_large() {
+        let big_value = "x".repeat(MAX_EXTENSION_PARAMS_LEN + 1);
+        let payload = extension::ExtensionRequestPayload {
+            request_id: "req-1".to_string(),
+            extension_id: "test.ext".to_string(),
+            action_id: "do-thing".to_string(),
+            params: serde_json::Value::String(big_value),
+        };
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "params");
+    }
+
+    #[test]
+    fn extension_response_validates() {
+        let payload = extension::ExtensionResponsePayload {
+            request_id: "req-1".to_string(),
+            success: true,
+            data: serde_json::json!({"ok": true}),
+            error: None,
+        };
+        assert!(payload.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn extension_response_data_too_large() {
+        let big_value = "x".repeat(MAX_EXTENSION_RESPONSE_LEN + 1);
+        let payload = extension::ExtensionResponsePayload {
+            request_id: "req-1".to_string(),
+            success: false,
+            data: serde_json::Value::String(big_value),
+            error: None,
+        };
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "data");
+    }
+
+    #[test]
+    fn extension_service_message_register_validates() {
+        let msg = ServiceMessage::ExtensionRegister(extension::ExtensionRegisterPayload {
+            manifests: vec![test_manifest()],
+        });
+        assert!(msg.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn extension_service_message_response_validates() {
+        let msg = ServiceMessage::ExtensionResponse(extension::ExtensionResponsePayload {
+            request_id: "r1".to_string(),
+            success: true,
+            data: serde_json::Value::Null,
+            error: None,
+        });
+        assert!(msg.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn extension_controller_message_request_validates() {
+        let msg = ControllerMessage::ExtensionRequest(extension::ExtensionRequestPayload {
+            request_id: "r1".to_string(),
+            extension_id: "test.ext".to_string(),
+            action_id: "action".to_string(),
+            params: serde_json::json!({}),
+        });
+        assert!(msg.wire_validate().is_ok());
     }
 }
