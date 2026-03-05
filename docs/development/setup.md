@@ -112,14 +112,15 @@ these optimizations automatically:
 
 ### Dependency deduplication
 
-The workspace pins `async-nats`, `rumqttc`, `sea-orm`, and `sqlx` with
-explicit features to route TLS through `aws-lc-rs` instead of `ring`
-wherever possible:
+The workspace pins dependencies with explicit features to route TLS
+through `aws-lc-rs` instead of `ring` wherever possible:
 
 - `async-nats`: `default-features = false` + `aws-lc-rs` (not `ring`)
 - `rumqttc`: `use-rustls-no-provider` (provider comes from workspace rustls)
 - `sea-orm`: `runtime-tokio` without TLS (TLS handled by sqlx directly)
 - `sqlx`: `tls-rustls-aws-lc-rs` instead of the default `tls-rustls-ring`
+- `testcontainers`: `default-features = false` + `aws-lc-rs` (default
+  enables `ring` via `bollard/ssl`)
 
 `openidconnect` is configured with `default-features = false` so it does
 not pull in its bundled `reqwest 0.12` (and transitively, `ring`).
@@ -128,10 +129,18 @@ Instead, a custom `OidcHttpClient` adapter in `web-api` implements the
 This also enforces project-standard HTTP timeouts (10 s connect, 60 s
 total) on OIDC discovery and token exchange requests.
 
-`ring` is still present transitively through `rustls` (enabled by
-third-party crates like `axum-server`, `bollard`, and `hyper-rustls`
-with default features). This is not directly actionable until those
-crates adopt `rustls` with `default-features = false`.
+The only remaining `ring` path is `rustls-webpki@0.102.8`, pulled
+internally by `async-nats` and `rumqttc`. This old webpki version
+includes `ring` in its default features with no way to opt out. Fixing
+this requires upstream updates:
+
+- **rumqttc**: [PR #1021](https://github.com/bytebeamio/rumqtt/pull/1021)
+  upgrades to `rustls-webpki 0.103` with explicit provider flags — open
+  but stalled. A community fork
+  [`rumqttc-next`](https://crates.io/crates/rumqttc-next) ships 0.103.
+- **async-nats**: no issue or PR exists for the `rustls-webpki` upgrade.
+  The maintainers have merged other TLS improvements on `main` but have
+  not published a new release since v0.46.0.
 
 ### `release-fast` profile
 
