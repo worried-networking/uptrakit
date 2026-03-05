@@ -70,6 +70,8 @@ pub(crate) struct EnrollParams<'a> {
     pub ip_address: Option<IpAddr>,
     /// Serialized JSON capability set for the new service.
     pub capabilities_json: String,
+    /// The binary/crate name of the enrolling service.
+    pub service_app_name: String,
 }
 
 /// Core enrollment logic: creates agent record, returns model + plaintext secret.
@@ -87,6 +89,7 @@ pub(crate) async fn do_enroll(
         enrollment_token,
         ip_address,
         capabilities_json,
+        service_app_name,
     } = params;
 
     // Credential guard: system credentials require the system_service capability.
@@ -222,6 +225,7 @@ pub(crate) async fn do_enroll(
         ping_interval_seconds: Set(None),
         enrollment_token_id: Set(enrollment_token_id),
         cert_lifetime_hours: Set(None),
+        service_app_name: Set(Some(service_app_name)),
     };
 
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;
@@ -468,6 +472,7 @@ pub(crate) struct SystemServiceEnrollParams<'a> {
     pub enrollment_token: Option<&'a str>,
     pub ip_address: Option<IpAddr>,
     pub capabilities_json: String,
+    pub service_app_name: String,
 }
 
 /// Result of a successful system service enrollment.
@@ -495,6 +500,7 @@ pub(crate) async fn do_enroll_system_service(
         enrollment_token,
         ip_address,
         capabilities_json,
+        service_app_name,
     } = params;
 
     if hostname.trim().is_empty() {
@@ -568,6 +574,7 @@ pub(crate) async fn do_enroll_system_service(
         ping_interval_seconds: Set(None),
         cert_lifetime_hours: Set(None),
         system_enrollment_token_id: Set(matched_token_id),
+        service_app_name: Set(Some(service_app_name)),
     };
 
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;

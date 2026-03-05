@@ -44,6 +44,7 @@ struct AgentHandler {
 impl ServiceHandler for AgentHandler {
     const DIR_NAME: &'static str = "agent";
     const SERVICE_LABEL: &'static str = "uptrakit-agent service";
+    const SERVICE_APP_NAME: &'static str = env!("CARGO_PKG_NAME");
 
     type ServiceEvent = client::UpdateEvent;
 

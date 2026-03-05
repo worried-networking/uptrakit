@@ -37,6 +37,7 @@ struct MqttHandler {
 impl ServiceHandler for MqttHandler {
     const DIR_NAME: &'static str = "mqtt";
     const SERVICE_LABEL: &'static str = "uptrakit-mqtt service";
+    const SERVICE_APP_NAME: &'static str = env!("CARGO_PKG_NAME");
 
     type ServiceEvent = Option<crate::mqtt_client::MqttServiceEvent>;
 

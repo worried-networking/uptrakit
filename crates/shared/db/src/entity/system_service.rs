@@ -53,6 +53,9 @@ pub struct Model {
     /// Audit trail: ID of the system enrollment token used to approve enrollment.
     /// `None` for services enrolled manually or before this feature was introduced.
     pub system_enrollment_token_id: Option<Uuid>,
+    /// The binary/crate name of the service (e.g., `"uptrakit-mqtt"`).
+    /// Null for services enrolled before this field was introduced.
+    pub service_app_name: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

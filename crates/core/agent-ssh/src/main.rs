@@ -164,6 +164,7 @@ impl SshAgentHandler {
 impl ServiceHandler for SshAgentHandler {
     const DIR_NAME: &'static str = "agent-ssh";
     const SERVICE_LABEL: &'static str = "uptrakit-agent-ssh service";
+    const SERVICE_APP_NAME: &'static str = env!("CARGO_PKG_NAME");
 
     type ServiceEvent = SshAgentEvent;
 

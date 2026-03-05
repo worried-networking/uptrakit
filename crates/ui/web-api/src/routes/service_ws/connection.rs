@@ -619,6 +619,7 @@ async fn enroll_service(
             enrollment_token: payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
             ip_address: client_ip,
             capabilities_json,
+            service_app_name: payload.service_app_name.clone(),
         })
         .await;
 
@@ -676,6 +677,7 @@ async fn enroll_service(
             enrollment_token: payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
             ip_address: client_ip,
             capabilities_json,
+            service_app_name: payload.service_app_name.clone(),
         })
         .await;
 

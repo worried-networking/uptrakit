@@ -100,6 +100,12 @@ pub trait ServiceHandler: Send {
     /// Human-readable label for log messages (e.g. `"uptrakit-agent service"`).
     const SERVICE_LABEL: &'static str;
 
+    /// The binary/crate name sent during enrollment (e.g., `"uptrakit-agent-ssh"`).
+    ///
+    /// Implementors should set this to `env!("CARGO_PKG_NAME")` so it's derived
+    /// automatically from each binary's `Cargo.toml`.
+    const SERVICE_APP_NAME: &'static str;
+
     /// Service-specific event type from [`poll_service_event`](Self::poll_service_event).
     ///
     /// Use [`std::convert::Infallible`] for services with no custom select arms.
@@ -354,6 +360,7 @@ async fn do_enrollment<H: ServiceHandler>(
             friendly_name: &friendly_name,
             enrollment_token: args.enrollment_token.as_deref(),
             capabilities: handler.capabilities(),
+            service_app_name: H::SERVICE_APP_NAME,
         })
         .await?;
     }

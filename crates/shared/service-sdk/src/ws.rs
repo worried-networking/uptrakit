@@ -380,6 +380,7 @@ pub struct EnrollmentParams<'a> {
     pub friendly_name: &'a str,
     pub enrollment_token: Option<&'a str>,
     pub capabilities: BTreeSet<Capability>,
+    pub service_app_name: &'a str,
 }
 
 /// Run a fresh enrollment flow: enroll → wait for approval → generate CSR → request certificate.
@@ -395,6 +396,7 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
         friendly_name,
         enrollment_token,
         capabilities,
+        service_app_name,
     } = params;
     // Fresh enrollment: no service_id yet, so no query parameter.
     let mut ws = connect_ws(host, port, tls_connector, None, None).await?;
@@ -410,6 +412,7 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
             friendly_name: friendly_name.to_string(),
             enrollment_token: enrollment_token.map(|s| SecretString::new(s.to_string())),
             capabilities,
+            service_app_name: service_app_name.to_string(),
         },
     )
     .await?;

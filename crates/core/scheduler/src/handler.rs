@@ -87,6 +87,7 @@ impl SchedulerHandler {
 impl ServiceHandler for SchedulerHandler {
     const DIR_NAME: &'static str = "scheduler";
     const SERVICE_LABEL: &'static str = "uptrakit-scheduler service";
+    const SERVICE_APP_NAME: &'static str = env!("CARGO_PKG_NAME");
 
     type ServiceEvent = std::convert::Infallible;
 

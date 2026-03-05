@@ -235,6 +235,7 @@ struct MyHandler;
 impl ServiceHandler for MyHandler {
     const DIR_NAME: &'static str = "my-service";
     const SERVICE_LABEL: &'static str = "uptrakit-my-service";
+    const SERVICE_APP_NAME: &'static str = env!("CARGO_PKG_NAME");
 
     type ServiceEvent = std::convert::Infallible;
 

@@ -629,6 +629,7 @@ mod tests {
             ping_interval_seconds: Set(None),
             enrollment_token_id: Set(None),
             cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
         };
         let target = target.insert(db).await.unwrap();
 
@@ -649,6 +650,7 @@ mod tests {
             ping_interval_seconds: Set(None),
             enrollment_token_id: Set(None),
             cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
         };
         let source = source.insert(db).await.unwrap();
 

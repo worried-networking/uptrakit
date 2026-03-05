@@ -26,6 +26,9 @@ pub struct Model {
     pub ping_interval_seconds: Option<i32>,
     pub enrollment_token_id: Option<Uuid>,
     pub cert_lifetime_hours: Option<i32>,
+    /// The binary/crate name of the service (e.g., `"uptrakit-agent-ssh"`).
+    /// Null for services enrolled before this field was introduced.
+    pub service_app_name: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

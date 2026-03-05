@@ -15,6 +15,7 @@ mod m20260303_000001_global_settings;
 mod m20260303_000002_revoked_tokens;
 mod m20260303_000003_audit_logs;
 mod m20260305_000001_crl_cache;
+mod m20260305_000002_service_app_name;
 mod m20260306_000001_update_category;
 mod m20260306_000002_update_batches;
 mod m20260307_000001_split_version_check;
@@ -62,6 +63,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260312_000001_system_enrollment_tokens::Migration),
             Box::new(m20260312_000002_discover_host_packages_task::Migration),
             Box::new(m20260313_000001_per_host_update_locking::Migration),
+            Box::new(m20260305_000002_service_app_name::Migration),
         ]
     }
 }

@@ -33,7 +33,8 @@ async fn anonymous_connect_and_enroll() {
         "type": "enroll",
         "hostname": "test-host",
         "friendly_name": "Test Host",
-        "capabilities": ["SoftwareDiscovery"]
+        "capabilities": ["SoftwareDiscovery"],
+        "service_app_name": "uptrakit-agent"
     });
     ws.send(Message::Text(enroll.to_string().into()))
         .await
@@ -69,7 +70,8 @@ async fn enrolled_reconnect_with_bearer() {
         "type": "enroll",
         "hostname": "reconnect-host",
         "friendly_name": "Reconnect Host",
-        "capabilities": ["SoftwareDiscovery"]
+        "capabilities": ["SoftwareDiscovery"],
+        "service_app_name": "uptrakit-agent"
     });
     ws.send(Message::Text(enroll.to_string().into()))
         .await
