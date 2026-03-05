@@ -112,12 +112,19 @@ these optimizations automatically:
 
 ### Dependency deduplication
 
-The workspace pins `async-nats` and `rumqttc` with `default-features = false`
-to avoid pulling in the `ring` cryptography library alongside `aws-lc-rs`.
-All TLS is routed through `aws-lc-rs` via the workspace-level `rustls` and
-`tokio-rustls` dependencies. Some upstream crates (`reqwest v0.12` via
-`openidconnect`, `sqlx`) still force `ring` through feature unification —
-this will resolve as upstreams migrate to provider-agnostic TLS.
+The workspace pins `async-nats`, `rumqttc`, `sea-orm`, and `sqlx` with
+explicit features to route TLS through `aws-lc-rs` instead of `ring`
+wherever possible:
+
+- `async-nats`: `default-features = false` + `aws-lc-rs` (not `ring`)
+- `rumqttc`: `use-rustls-no-provider` (provider comes from workspace rustls)
+- `sea-orm`: `runtime-tokio` without TLS (TLS handled by sqlx directly)
+- `sqlx`: `tls-rustls-aws-lc-rs` instead of the default `tls-rustls-ring`
+
+The only remaining `ring` path is `openidconnect` → `oauth2/rustls-tls` →
+`reqwest 0.12/rustls-tls` → `ring`. This is not fixable until
+openidconnect/oauth2 upgrade to reqwest 0.13 or reqwest 0.12 switches
+its default TLS provider ([reqwest#2723](https://github.com/seanmonstar/reqwest/issues/2723)).
 
 ### `release-fast` profile
 
