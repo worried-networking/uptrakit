@@ -109,7 +109,12 @@ async fn main() -> std::process::ExitCode {
                 .init();
         }
     } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
+        // Use registry-based subscriber so an OpenTelemetry layer can be added
+        // later as a one-line change.
+        use tracing_subscriber::prelude::*;
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_filter(filter))
+            .init();
     }
 
     // Dispatch optional subcommands before entering the normal server path.

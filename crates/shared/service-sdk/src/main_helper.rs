@@ -36,6 +36,7 @@ pub fn init_crypto() {
 /// the global tracing dispatcher autonomously.
 pub fn init_tracing(own_module: &str, verbosity: u8) {
     use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::prelude::*;
 
     if verbosity > 3 {
         eprintln!(
@@ -53,7 +54,11 @@ pub fn init_tracing(own_module: &str, verbosity: u8) {
     if let Ok(d) = directive.parse() {
         filter = filter.add_directive(d);
     }
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    // Use registry-based subscriber so an OpenTelemetry layer can be added
+    // later as a one-line change.
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(filter))
+        .init();
 }
 
 /// Print human-readable build information and return.
