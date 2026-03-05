@@ -45,6 +45,7 @@ impl Plugin for ShellPlugin {
         PluginType::GenericShell
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(
         &self,
         package_identifier: &str,
@@ -75,6 +76,7 @@ impl Plugin for ShellPlugin {
         Ok(version)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
         package_identifier: &str,

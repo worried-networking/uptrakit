@@ -341,6 +341,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
         Self::CAPABILITIES
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_host_compatibility(
         &self,
     ) -> uptrakit_plugin_infrastructure_core::Result<HostCompatibility> {
@@ -389,6 +390,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
         ]
     }
 
+    #[tracing::instrument(skip_all)]
     async fn discover_software(
         &self,
     ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {

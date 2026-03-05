@@ -232,6 +232,7 @@ impl Plugin for AptPlugin {
         Self::CAPABILITIES
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
         match self
             .executor
@@ -245,6 +246,7 @@ impl Plugin for AptPlugin {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     async fn post_update_hook(
         &self,
         _ctx: &UpdateHookContext,
@@ -282,6 +284,7 @@ impl Plugin for AptPlugin {
         }]
     }
 
+    #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing APT package index");
         let cmd_output = self
@@ -306,6 +309,7 @@ impl Plugin for AptPlugin {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering APT-managed software");
 
@@ -409,6 +413,7 @@ impl Plugin for AptPlugin {
         Ok(packages)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting APT installed version");
@@ -451,6 +456,7 @@ impl Plugin for AptPlugin {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "fetching APT releases via apt-cache madison");
@@ -502,6 +508,7 @@ impl Plugin for AptPlugin {
         }])
     }
 
+    #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
         package_identifier: &str,
@@ -566,6 +573,7 @@ impl Plugin for AptPlugin {
     /// specifically targeted packages, then runs `apt-get upgrade --yes`.
     /// The temp file is written to a user-writable path (no sudo needed) and
     /// deleted after the upgrade completes.
+    #[tracing::instrument(skip_all)]
     async fn execute_batch_update(
         &self,
         items: &[BatchUpdateItem],
@@ -687,6 +695,7 @@ impl Plugin for AptPlugin {
     /// requested package is unknown, but packages that *are* found still appear in
     /// stdout. Packages absent from stdout are treated as not installed (`None` with
     /// no error).
+    #[tracing::instrument(skip_all)]
     async fn batch_detect_installed_version(
         &self,
         items: &[BatchDetectItem],
@@ -764,6 +773,7 @@ impl Plugin for AptPlugin {
     ///
     /// Output lines are grouped by package name; only the first (highest-priority)
     /// entry per package is used. Packages absent from the output have empty releases.
+    #[tracing::instrument(skip_all)]
     async fn batch_fetch_releases(
         &self,
         items: &[BatchFetchItem],

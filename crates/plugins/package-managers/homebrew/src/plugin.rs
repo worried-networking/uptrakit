@@ -345,6 +345,7 @@ impl Plugin for HomebrewPlugin {
         Self::CAPABILITIES
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
         match self
             .executor
@@ -358,6 +359,7 @@ impl Plugin for HomebrewPlugin {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing Homebrew package index");
         let cmd_output = self
@@ -378,6 +380,7 @@ impl Plugin for HomebrewPlugin {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         let cmd_output = self
             .executor
@@ -429,6 +432,7 @@ impl Plugin for HomebrewPlugin {
         Ok(packages)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting installed Homebrew version");
@@ -465,6 +469,7 @@ impl Plugin for HomebrewPlugin {
         Ok(version)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "fetching Homebrew releases");
@@ -532,6 +537,7 @@ impl Plugin for HomebrewPlugin {
         Ok(releases)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
         package_identifier: &str,
@@ -569,6 +575,7 @@ impl Plugin for HomebrewPlugin {
     }
 
     /// Execute batch updates using a single `brew upgrade pkg1 pkg2 ...` command.
+    #[tracing::instrument(skip_all)]
     async fn execute_batch_update(
         &self,
         items: &[BatchUpdateItem],
@@ -634,6 +641,7 @@ impl Plugin for HomebrewPlugin {
     /// Parses the returned JSON once and looks up each package individually using the
     /// existing [`parse_installed_version`](Self::parse_installed_version) helper. If
     /// the command fails, all items receive the same error.
+    #[tracing::instrument(skip_all)]
     async fn batch_detect_installed_version(
         &self,
         items: &[BatchDetectItem],
@@ -718,6 +726,7 @@ impl Plugin for HomebrewPlugin {
     ///
     /// Parses the returned JSON once and resolves the latest version and homepage for
     /// each package individually. If the command fails, all items receive the same error.
+    #[tracing::instrument(skip_all)]
     async fn batch_fetch_releases(
         &self,
         items: &[BatchFetchItem],

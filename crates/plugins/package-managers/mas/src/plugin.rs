@@ -215,6 +215,7 @@ impl Plugin for MasPlugin {
         Self::CAPABILITIES
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
         match self
             .executor
@@ -226,6 +227,7 @@ impl Plugin for MasPlugin {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::debug!("discovering installed Mac App Store apps via mas list");
 
@@ -263,6 +265,7 @@ impl Plugin for MasPlugin {
         Ok(items)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting installed mas version");
@@ -280,6 +283,7 @@ impl Plugin for MasPlugin {
         Ok(version)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "fetching mas releases");
@@ -322,6 +326,7 @@ impl Plugin for MasPlugin {
         Ok(releases)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
         package_identifier: &str,
@@ -353,6 +358,7 @@ impl Plugin for MasPlugin {
         Ok(output)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn batch_detect_installed_version(
         &self,
         items: &[BatchDetectItem],
@@ -393,6 +399,7 @@ impl Plugin for MasPlugin {
         Ok(results)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn batch_fetch_releases(
         &self,
         items: &[BatchFetchItem],

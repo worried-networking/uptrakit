@@ -358,6 +358,7 @@ impl Plugin for NpmPlugin {
         }]
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
         match self
             .executor
@@ -369,6 +370,7 @@ impl Plugin for NpmPlugin {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "detecting npm installed version");
@@ -404,6 +406,7 @@ impl Plugin for NpmPlugin {
         Ok(version.map(|v| Version::new(&v)))
     }
 
+    #[tracing::instrument(skip_all)]
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
         tracing::debug!(package = %package_identifier, "fetching npm releases from registry");
@@ -442,6 +445,7 @@ impl Plugin for NpmPlugin {
         Ok(releases)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
         package_identifier: &str,
@@ -491,6 +495,7 @@ impl Plugin for NpmPlugin {
     }
 
     /// Execute batch updates using a single `npm install -g pkg1@v1 pkg2@v2 ...` command.
+    #[tracing::instrument(skip_all)]
     async fn execute_batch_update(
         &self,
         items: &[BatchUpdateItem],
@@ -549,6 +554,7 @@ impl Plugin for NpmPlugin {
         Ok(results)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
         tracing::info!("discovering globally installed npm packages");
 
@@ -607,6 +613,7 @@ impl Plugin for NpmPlugin {
     /// If the command fails (non-zero exit or process error), all items are treated
     /// as not installed rather than erroring — consistent with the single-item
     /// `detect_installed_version` behaviour.
+    #[tracing::instrument(skip_all)]
     async fn batch_detect_installed_version(
         &self,
         items: &[BatchDetectItem],

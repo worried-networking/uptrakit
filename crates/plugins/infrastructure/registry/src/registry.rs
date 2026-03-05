@@ -71,6 +71,7 @@ macro_rules! register_plugins {
             /// Deserializes the config, validates it, and constructs the plugin.
             /// All plugins follow the same pattern: deserialize → validate →
             /// construct.
+            #[tracing::instrument(skip_all)]
             pub async fn create_plugin(
                 plugin_type: PluginType,
                 config: &serde_json::Value,

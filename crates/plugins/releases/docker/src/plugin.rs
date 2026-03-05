@@ -165,6 +165,7 @@ impl Plugin for DockerPlugin {
     }
 
     #[cfg(feature = "daemon")]
+    #[tracing::instrument(skip_all)]
     async fn detect_host_compatibility(
         &self,
     ) -> uptrakit_plugin_infrastructure_core::Result<HostCompatibility> {
@@ -190,6 +191,7 @@ impl Plugin for DockerPlugin {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     async fn fetch_releases(
         &self,
         package_identifier: &str,
@@ -230,6 +232,7 @@ impl Plugin for DockerPlugin {
         Ok(vec![release])
     }
 
+    #[tracing::instrument(skip_all)]
     async fn detect_installed_version(
         &self,
         package_identifier: &str,
@@ -261,6 +264,7 @@ impl Plugin for DockerPlugin {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     async fn execute_update(
         &self,
         package_identifier: &str,
@@ -422,6 +426,7 @@ impl Plugin for DockerPlugin {
         Ok(output)
     }
 
+    #[tracing::instrument(skip_all)]
     async fn discover_software(
         &self,
     ) -> uptrakit_plugin_infrastructure_core::Result<Vec<DiscoveredSoftware>> {

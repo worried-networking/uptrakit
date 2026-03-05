@@ -243,6 +243,7 @@ impl Plugin for ForgejoPlugin {
         Self::CAPABILITIES
     }
 
+    #[tracing::instrument(skip_all)]
     async fn fetch_releases(
         &self,
         package_identifier: &str,
