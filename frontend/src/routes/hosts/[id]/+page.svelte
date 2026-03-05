@@ -17,7 +17,7 @@
 	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import { Permission, PluginCapability } from '$lib/types';
 	import type {
 		HostResponse,
@@ -243,17 +243,6 @@
 		}
 	}
 </script>
-
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') {
-			if (showAllowlistModal) closeAllowlistModal();
-			else if (allowlistDeleteConfirm) allowlistDeleteConfirm = null;
-			else if (editHost) cancelEdit();
-			else if (confirmDeactivate) confirmDeactivate = false;
-		}
-	}}
-/>
 
 {#if getUser()}
 	<div class="mb-4">
@@ -516,55 +505,41 @@
 {/if}
 
 {#if editHost}
-	<ModalBackdrop onclose={cancelEdit}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">Edit Host Name</h3>
-			<label class="label">
-				<span>Friendly Name</span>
-				<input class="input" type="text" bind:value={editHost.friendlyName} />
-			</label>
-			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
-				<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeEdit}>
-					{submitting ? 'Saving...' : 'Save'}
-				</button>
-			</div>
-		</div>
-	</ModalBackdrop>
+	<Modal title="Edit Host Name" onclose={cancelEdit}>
+		<label class="label">
+			<span>Friendly Name</span>
+			<input class="input" type="text" bind:value={editHost.friendlyName} />
+		</label>
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
+			<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeEdit}>
+				{submitting ? 'Saving...' : 'Save'}
+			</button>
+		{/snippet}
+	</Modal>
 {/if}
 
 <!-- Discovery allowlist modal -->
 {#if showAllowlistModal}
-	<ModalBackdrop onclose={closeAllowlistModal}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">Add Discovery Plugin Type</h3>
-			<p class="text-sm text-surface-500">
-				Once any entry exists, only the listed plugin types will run discovery on this host.
-			</p>
+	<Modal title="Add Discovery Plugin Type" onclose={closeAllowlistModal}>
+		<p class="text-sm text-surface-500">
+			Once any entry exists, only the listed plugin types will run discovery on this host.
+		</p>
 
-			<label class="label">
-				<span>Plugin Type</span>
-				<select class="select" bind:value={allowlistForm.plugin_type}>
-					{#each discoveryPluginTypes as t (t.plugin_type)}
-						<option value={t.plugin_type}>{t.display_name}</option>
-					{/each}
-				</select>
-			</label>
+		<label class="label">
+			<span>Plugin Type</span>
+			<select class="select" bind:value={allowlistForm.plugin_type}>
+				{#each discoveryPluginTypes as t (t.plugin_type)}
+					<option value={t.plugin_type}>{t.display_name}</option>
+				{/each}
+			</select>
+		</label>
 
-			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
-				<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
-			</div>
-		</div>
-	</ModalBackdrop>
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
+			<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
+		{/snippet}
+	</Modal>
 {/if}
 
 {#if allowlistDeleteConfirm}

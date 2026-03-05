@@ -9,6 +9,7 @@
 	import { Permission } from '$lib/types';
 	import type { HostResponse, HostPackageResponse } from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 
 	const id = $derived(page.params.id as string);
@@ -176,15 +177,6 @@
 		}
 	}
 </script>
-
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') {
-			if (confirmDelete) confirmDelete = null;
-			if (promoteModal) promoteModal = null;
-		}
-	}}
-/>
 
 {#if getUser()}
 	<div class="mb-4">
@@ -354,55 +346,43 @@
 {/if}
 
 {#if promoteModal}
-	<!-- Promote modal backdrop -->
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-		role="dialog"
-		tabindex="-1"
-		aria-modal="true"
-		aria-labelledby="promote-modal-title"
-		onkeydown={(e) => {
-			if (e.key === 'Escape') promoteModal = null;
-		}}
-	>
-		<div class="card w-full max-w-md p-6 space-y-4">
-			<h2 id="promote-modal-title" class="h3">Promote to Software Item</h2>
-			<p class="text-sm text-surface-500">
-				Creates a tracked software item for <strong>{promoteModal.pkg.name}</strong> alongside the existing host package.
-				The operation is idempotent — if a matching item already exists it will be returned.
-			</p>
+	<Modal title="Promote to Software Item" onclose={() => (promoteModal = null)}>
+		<p class="text-sm text-surface-500">
+			Creates a tracked software item for <strong>{promoteModal.pkg.name}</strong> alongside the existing host package. The
+			operation is idempotent — if a matching item already exists it will be returned.
+		</p>
 
+		<label class="label">
+			<span>Software Item Name</span>
+			<input class="input" type="text" placeholder={promoteModal.pkg.name} bind:value={promoteName} />
+		</label>
+
+		<button
+			class="btn btn-sm preset-tonal text-xs"
+			type="button"
+			onclick={() => (promoteShowAdvanced = !promoteShowAdvanced)}
+		>
+			{promoteShowAdvanced ? 'Hide advanced' : 'Show advanced'}
+		</button>
+
+		{#if promoteShowAdvanced}
 			<label class="label">
-				<span>Software Item Name</span>
-				<input class="input" type="text" placeholder={promoteModal.pkg.name} bind:value={promoteName} />
+				<span>Link to existing software item UUID (optional)</span>
+				<input
+					class="input"
+					type="text"
+					placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+					bind:value={promoteExistingId}
+				/>
 			</label>
+		{/if}
 
-			<button
-				class="btn btn-sm preset-tonal text-xs"
-				type="button"
-				onclick={() => (promoteShowAdvanced = !promoteShowAdvanced)}
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={() => (promoteModal = null)} disabled={promoting}>Cancel</button
 			>
-				{promoteShowAdvanced ? 'Hide advanced' : 'Show advanced'}
+			<button class="btn preset-filled-primary-500" onclick={executePromote} disabled={promoting}>
+				{promoting ? 'Promoting…' : 'Promote'}
 			</button>
-
-			{#if promoteShowAdvanced}
-				<label class="label">
-					<span>Link to existing software item UUID (optional)</span>
-					<input
-						class="input"
-						type="text"
-						placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-						bind:value={promoteExistingId}
-					/>
-				</label>
-			{/if}
-
-			<div class="flex gap-2 justify-end pt-2">
-				<button class="btn preset-tonal" onclick={() => (promoteModal = null)} disabled={promoting}> Cancel </button>
-				<button class="btn preset-filled-primary-500" onclick={executePromote} disabled={promoting}>
-					{promoting ? 'Promoting…' : 'Promote'}
-				</button>
-			</div>
-		</div>
-	</div>
+		{/snippet}
+	</Modal>
 {/if}

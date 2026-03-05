@@ -10,7 +10,7 @@
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 
 	let hosts: HostResponse[] = $state([]);
@@ -153,15 +153,7 @@
 	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 </script>
 
-<svelte:window
-	onclick={handleWindowClick}
-	onkeydown={(e) => {
-		if (e.key === 'Escape') {
-			if (confirmAction) cancelConfirm();
-			else if (editHost) cancelEdit();
-		}
-	}}
-/>
+<svelte:window onclick={handleWindowClick} />
 
 {#if getUser()}
 	<h1 class="h1 mb-6">Hosts</h1>
@@ -311,24 +303,17 @@
 	{/if}
 
 	{#if editHost}
-		<ModalBackdrop onclose={cancelEdit}>
-			<div
-				class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-				role="dialog"
-				aria-modal="true"
-			>
-				<h3 class="h3">Edit Host Name</h3>
-				<label class="label">
-					<span>Friendly Name</span>
-					<input class="input" type="text" bind:value={editHost.friendlyName} />
-				</label>
-				<div class="flex justify-end gap-2">
-					<button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
-					<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeEdit}>
-						{submitting ? 'Saving...' : 'Save'}
-					</button>
-				</div>
-			</div>
-		</ModalBackdrop>
+		<Modal title="Edit Host Name" onclose={cancelEdit}>
+			<label class="label">
+				<span>Friendly Name</span>
+				<input class="input" type="text" bind:value={editHost.friendlyName} />
+			</label>
+			{#snippet footer()}
+				<button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
+				<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeEdit}>
+					{submitting ? 'Saving...' : 'Save'}
+				</button>
+			{/snippet}
+		</Modal>
 	{/if}
 {/if}
