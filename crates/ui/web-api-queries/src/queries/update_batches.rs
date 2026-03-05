@@ -371,6 +371,7 @@ pub async fn create_batch(
                 host_id: candidate.host_id,
                 item_id: candidate.software_item_id,
                 to_version: &candidate.latest_version,
+                from_version: Some(candidate.installed_version.clone()),
                 actor_type: params.actor_type,
                 actor_id: params.actor_id,
                 update_category: &candidate.update_category,

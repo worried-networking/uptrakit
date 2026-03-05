@@ -125,6 +125,12 @@ pub struct CreateUpdateRecordParams<'a> {
     pub host_id: Uuid,
     pub item_id: Uuid,
     pub to_version: &'a str,
+    /// The currently installed version at the time the update was triggered.
+    ///
+    /// Populated from `host_software_items.installed_version` so the history
+    /// record shows the "before" version even while the update is still
+    /// pending or in progress.
+    pub from_version: Option<String>,
     /// Who initiated the update.
     pub actor_type: ActorType,
     pub actor_id: &'a str,
@@ -321,7 +327,7 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         id: Set(update_history_id),
         host_id: Set(params.host_id),
         software_item_id: Set(params.item_id),
-        from_version: Set(None),
+        from_version: Set(params.from_version.clone()),
         to_version: Set(params.to_version.to_string()),
         status: Set(update_history::UpdateStatus::Pending),
         output: Set(String::new()),
@@ -440,6 +446,7 @@ pub async fn trigger_update_for_host(
             host_id: params.host_id,
             item_id: params.item_id,
             to_version: &params.to_version,
+            from_version: target.hsi_link.installed_version.clone(),
             actor_type: params.actor_type,
             actor_id: params.actor_id,
             update_category: &target.hsi_link.update_category,
