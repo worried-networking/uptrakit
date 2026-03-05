@@ -803,5 +803,6 @@ pub fn build_pki_router(state: Arc<AppState>) -> Router {
         .layer(axum_mw::from_fn(
             crate::middleware::request_log::request_log,
         ))
+        .layer(axum_mw::from_fn(crate::middleware::request_id::request_id))
         .with_state(state)
 }

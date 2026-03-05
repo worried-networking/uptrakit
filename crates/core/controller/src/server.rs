@@ -84,9 +84,15 @@ pub async fn run(cfg: ServerOptions) -> Result<()> {
 
     // Apply request_log as the outermost layer so it wraps the entire Router
     // including fallback services. This ensures all requests (API and SPA) are
-    // logged with method, path, status, and latency.
+    // logged with method, path, status, latency, and request ID.
     router = router.layer(axum_mw::from_fn(
         uptrakit_web_api::middleware::request_log::request_log,
+    ));
+    // request_id generates a unique ID per request (or preserves x-request-id
+    // from the client) and creates a tracing span. Listed after request_log
+    // because Axum executes layers listed later first.
+    router = router.layer(axum_mw::from_fn(
+        uptrakit_web_api::middleware::request_id::request_id,
     ));
 
     let rustls_acceptor = axum_server::tls_rustls::RustlsAcceptor::new(cfg.rustls_config);
