@@ -91,6 +91,7 @@ fn resolve_connection_status(
     tag = "Settings",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_mqtt_settings(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,
@@ -157,6 +158,7 @@ pub async fn list_mqtt_settings(
     tag = "Settings",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_mqtt_settings(
     State(state): State<Arc<AppState>>,
     CanManageSettings(_user): CanManageSettings,
@@ -295,6 +297,7 @@ pub async fn create_mqtt_settings(
     tag = "Global Settings",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_mqtt_limit(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,
@@ -324,6 +327,7 @@ pub async fn get_mqtt_limit(
     tag = "Global Settings",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_mqtt_limit(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
@@ -379,6 +383,7 @@ pub async fn update_mqtt_limit(
     tag = "Settings",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_mqtt_settings(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,
@@ -434,6 +439,7 @@ pub async fn get_mqtt_settings(
     tag = "Settings",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_mqtt_settings(
     State(state): State<Arc<AppState>>,
     CanManageSettings(_user): CanManageSettings,
@@ -608,6 +614,7 @@ pub async fn update_mqtt_settings(
     tag = "Settings",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn delete_mqtt_settings(
     State(state): State<Arc<AppState>>,
     CanManageSettings(_user): CanManageSettings,

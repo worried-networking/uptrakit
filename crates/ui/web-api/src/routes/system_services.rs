@@ -44,6 +44,7 @@ pub use uptrakit_web_api_types::system_services::{
     extensions(("x-required-permission" = json!("view_system_services"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_system_services(
     State(state): State<Arc<AppState>>,
     CanViewSystemServices(_user): CanViewSystemServices,
@@ -75,6 +76,7 @@ pub async fn list_system_services(
     extensions(("x-required-permission" = json!("view_system_services"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_system_service(
     State(state): State<Arc<AppState>>,
     CanViewSystemServices(_user): CanViewSystemServices,
@@ -109,6 +111,7 @@ pub async fn get_system_service(
     extensions(("x-required-permission" = json!("manage_system_services"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_system_service(
     State(state): State<Arc<AppState>>,
     CanManageSystemServices(_user): CanManageSystemServices,
@@ -154,6 +157,7 @@ pub async fn update_system_service(
     extensions(("x-required-permission" = json!("manage_system_services"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn approve_system_service(
     State(state): State<Arc<AppState>>,
     CanManageSystemServices(_user): CanManageSystemServices,
@@ -220,6 +224,7 @@ pub async fn approve_system_service(
     extensions(("x-required-permission" = json!("manage_system_services"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn reject_system_service(
     State(state): State<Arc<AppState>>,
     CanManageSystemServices(_user): CanManageSystemServices,
@@ -288,6 +293,7 @@ pub async fn reject_system_service(
     extensions(("x-required-permission" = json!("manage_system_services"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn deactivate_system_service(
     State(state): State<Arc<AppState>>,
     CanManageSystemServices(_user): CanManageSystemServices,

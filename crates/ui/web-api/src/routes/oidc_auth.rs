@@ -67,6 +67,7 @@ struct ExtractedOidcClaims {
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
     let auth_settings = state.settings.authentication();
 
@@ -126,6 +127,7 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn oidc_authorize(
     State(state): State<Arc<AppState>>,
     Path(provider_id): Path<Uuid>,
@@ -217,6 +219,7 @@ pub async fn oidc_authorize(
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn oidc_callback(
     State(state): State<Arc<AppState>>,
     Query(params): Query<OidcCallbackParams>,
@@ -631,6 +634,7 @@ pub async fn oidc_callback(
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn oidc_exchange(
     State(state): State<Arc<AppState>>,
     Json(req): Json<OidcExchangeRequest>,
@@ -664,6 +668,7 @@ pub async fn oidc_exchange(
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn oidc_complete_registration(
     State(state): State<Arc<AppState>>,
     Json(req): Json<OidcCompleteRegistrationRequest>,
@@ -825,6 +830,7 @@ pub async fn oidc_complete_registration(
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn oidc_link(
     State(state): State<Arc<AppState>>,
     req: axum::extract::Request,

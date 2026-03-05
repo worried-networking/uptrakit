@@ -48,6 +48,7 @@ fn snapshot_to_response(nats_url: Option<MaskedUrl>) -> NatsSettingsResponse {
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_nats_settings(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
@@ -78,6 +79,7 @@ pub async fn get_nats_settings(
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_nats_settings(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,

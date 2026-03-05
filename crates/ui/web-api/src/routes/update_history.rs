@@ -48,6 +48,7 @@ pub use uptrakit_web_api_types::update_history::{
     extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_update_history(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -77,6 +78,7 @@ pub async fn list_update_history(
     extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_update_history(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -115,6 +117,7 @@ pub async fn get_update_history(
     extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn stream_update_output(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,

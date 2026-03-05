@@ -12,6 +12,7 @@ const OCSP_RESPONSE_CONTENT_TYPE: &str = "application/ocsp-response";
 /// POST /api/v1/pki/ocsp
 ///
 /// Accepts a DER-encoded OCSP request body and returns a DER-encoded OCSP response.
+#[tracing::instrument(skip_all)]
 pub async fn ocsp_post(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
     let snapshot = state.ca_snapshot.borrow().clone();
     let response_der =
@@ -32,6 +33,7 @@ pub async fn ocsp_post(State(state): State<Arc<AppState>>, body: Bytes) -> Respo
 ///
 /// Accepts a base64url-encoded OCSP request in the URL path and returns a DER-encoded OCSP response.
 /// This follows RFC 6960 Section A.1 (HTTP-based OCSP, GET method).
+#[tracing::instrument(skip_all)]
 pub async fn ocsp_get(State(state): State<Arc<AppState>>, Path(encoded): Path<String>) -> Response {
     use base64::Engine;
 

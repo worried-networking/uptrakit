@@ -54,6 +54,7 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
     extensions(("x-required-permission" = json!("view_audit_logs"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_audit_logs(
     tenant_db: TenantDb,
     CanViewAuditLogs(_user): CanViewAuditLogs,
@@ -95,6 +96,7 @@ pub async fn list_audit_logs(
     extensions(("x-required-permission" = json!("view_system_audit_logs"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_system_audit_logs(
     State(state): State<Arc<AppState>>,
     CanViewSystemAuditLogs(_user): CanViewSystemAuditLogs,

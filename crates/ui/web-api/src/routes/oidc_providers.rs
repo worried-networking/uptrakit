@@ -53,6 +53,7 @@ fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse 
     tag = "OIDC Providers",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_provider(
     tenant_db: TenantDb,
     CanManageSettings(_user): CanManageSettings,
@@ -129,6 +130,7 @@ pub async fn create_provider(
     tag = "OIDC Providers",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_providers(
     tenant_db: TenantDb,
     CanViewSettings(_user): CanViewSettings,
@@ -167,6 +169,7 @@ pub async fn list_providers(
     tag = "OIDC Providers",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_provider(
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
@@ -194,6 +197,7 @@ pub async fn get_provider(
     tag = "OIDC Providers",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_provider(
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
@@ -289,6 +293,7 @@ pub async fn update_provider(
     tag = "OIDC Providers",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn delete_provider(
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
@@ -341,6 +346,7 @@ pub async fn delete_provider(
     tag = "OIDC Providers",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn activate_provider(
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
@@ -407,6 +413,7 @@ pub async fn activate_provider(
     tag = "OIDC Providers",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn deactivate_provider(
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,

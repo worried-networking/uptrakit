@@ -34,6 +34,7 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
     extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_enrollment_token(
     tenant_db: TenantDb,
     CanManageAgents(user): CanManageAgents,
@@ -124,6 +125,7 @@ pub async fn create_enrollment_token(
     extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_enrollment_tokens(
     tenant_db: TenantDb,
     CanManageAgents(_user): CanManageAgents,
@@ -155,6 +157,7 @@ pub async fn list_enrollment_tokens(
     extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_enrollment_token(
     tenant_db: TenantDb,
     CanManageAgents(_user): CanManageAgents,
@@ -187,6 +190,7 @@ pub async fn get_enrollment_token(
     extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn revoke_enrollment_token(
     tenant_db: TenantDb,
     CanManageAgents(_user): CanManageAgents,

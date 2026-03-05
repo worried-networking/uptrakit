@@ -46,6 +46,7 @@ fn snapshot_to_response(smtp: &SmtpSettingsSnapshot) -> SmtpSettingsResponse {
     extensions(("x-required-permission" = json!("view_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_smtp_settings(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,
@@ -69,6 +70,7 @@ pub async fn get_smtp_settings(
     extensions(("x-required-permission" = json!("manage_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_smtp_settings(
     State(state): State<Arc<AppState>>,
     CanManageSettings(_user): CanManageSettings,

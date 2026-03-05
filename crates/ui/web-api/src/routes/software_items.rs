@@ -255,6 +255,7 @@ async fn run_controller_fetch_jobs(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_software_item(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -295,6 +296,7 @@ pub async fn create_software_item(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_software_items(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -322,6 +324,7 @@ pub async fn list_software_items(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_software_item(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -352,6 +355,7 @@ pub async fn get_software_item(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_software_item(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -389,6 +393,7 @@ pub async fn update_software_item(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn delete_software_item(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -421,6 +426,7 @@ pub async fn delete_software_item(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn approve_software_item(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -492,6 +498,7 @@ pub async fn approve_software_item(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn assign_hosts(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -537,6 +544,7 @@ pub struct DeleteHostAssignmentParams {
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn unassign_host(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -631,6 +639,7 @@ pub async fn unassign_host(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_host_assignment(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -662,6 +671,7 @@ pub async fn update_host_assignment(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn trigger_update(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -789,6 +799,7 @@ pub async fn trigger_update(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn check_versions(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -1076,6 +1087,7 @@ pub async fn check_versions(
     tag = "Software Items",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn check_versions_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,

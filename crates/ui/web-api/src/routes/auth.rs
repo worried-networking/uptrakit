@@ -44,6 +44,7 @@ pub use uptrakit_web_api_types::auth::{
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterRequest>,
@@ -214,6 +215,7 @@ pub async fn register(
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequest>) -> Response {
     // Check if password auth is enabled
     if !state.settings.authentication().password_auth_enabled {
@@ -339,6 +341,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     extensions(("x-required-permission" = json!("self"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn logout(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
@@ -682,6 +685,7 @@ mod tests {
     extensions(("x-required-permission" = json!("self"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn me(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
@@ -730,6 +734,7 @@ pub async fn me(
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Request) -> Response {
     // Extract refresh token: prefer cookie, fall back to JSON body
     let cookie_token = extract_refresh_token_from_cookie(&req);

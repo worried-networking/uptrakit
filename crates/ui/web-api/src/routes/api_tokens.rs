@@ -30,6 +30,7 @@ pub use uptrakit_web_api_types::api_tokens::{
     extensions(("x-required-permission" = json!("self"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_api_token(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
@@ -69,6 +70,7 @@ pub async fn create_api_token(
     extensions(("x-required-permission" = json!("self"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_api_tokens(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
@@ -114,6 +116,7 @@ pub async fn list_api_tokens(
     extensions(("x-required-permission" = json!("self"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn revoke_api_token(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,

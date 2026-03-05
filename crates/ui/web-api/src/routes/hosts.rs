@@ -44,6 +44,7 @@ pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams
     extensions(("x-required-permission" = json!("view_hosts"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_hosts(
     tenant_db: TenantDb,
     CanViewHosts(_user): CanViewHosts,
@@ -75,6 +76,7 @@ pub async fn list_hosts(
     extensions(("x-required-permission" = json!("view_hosts"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_host(
     tenant_db: TenantDb,
     CanViewHosts(_user): CanViewHosts,
@@ -108,6 +110,7 @@ pub async fn get_host(
     extensions(("x-required-permission" = json!("manage_hosts"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -148,6 +151,7 @@ pub async fn update_host(
     extensions(("x-required-permission" = json!("manage_hosts"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn deactivate_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -187,6 +191,7 @@ pub async fn deactivate_host(
     tag = "Hosts",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn discover_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -264,6 +269,7 @@ pub async fn discover_host(
     tag = "Hosts",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn discard_host_discovered(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,

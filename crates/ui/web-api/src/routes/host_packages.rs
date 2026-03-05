@@ -84,6 +84,7 @@ async fn verify_host(tenant_db: &TenantDb, host_id: Uuid) -> Result<(), Response
     extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_host_packages(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -122,6 +123,7 @@ pub async fn list_host_packages(
     extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_host_package(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -190,6 +192,7 @@ pub async fn get_host_package(
     extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_host_package(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -242,6 +245,7 @@ pub async fn update_host_package(
     extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn delete_host_package(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -294,6 +298,7 @@ pub async fn delete_host_package(
     extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_host_package_ignores(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -334,6 +339,7 @@ pub async fn list_host_package_ignores(
     extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_host_package_ignore(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -401,6 +407,7 @@ pub async fn create_host_package_ignore(
     extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn delete_host_package_ignore(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -448,6 +455,7 @@ pub async fn delete_host_package_ignore(
     extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn promote_host_package(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,

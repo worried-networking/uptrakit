@@ -39,6 +39,7 @@ pub use uptrakit_web_api_types::plugin_configs::{
     tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_plugin_types(
     State(state): State<Arc<AppState>>,
     CanViewSoftware(_user): CanViewSoftware,
@@ -78,6 +79,7 @@ pub async fn list_plugin_types(
     tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -164,6 +166,7 @@ pub async fn create_plugin_config(
     tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_plugin_configs(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -192,6 +195,7 @@ pub async fn list_plugin_configs(
     tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -225,6 +229,7 @@ pub async fn get_plugin_config(
     tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -308,6 +313,7 @@ pub async fn update_plugin_config(
     tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn delete_plugin_config(
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
@@ -350,6 +356,7 @@ pub async fn delete_plugin_config(
     tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn discover_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -476,6 +483,7 @@ pub async fn discover_plugin_config(
     tag = "Plugin Configs",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn discard_plugin_config_discovered(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,

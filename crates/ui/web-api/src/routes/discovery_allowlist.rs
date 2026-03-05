@@ -49,6 +49,7 @@ pub use uptrakit_web_api_types::discovery_allowlist::{
     tag = "Autodiscovery",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_tenant_discovery_allowlist(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -81,6 +82,7 @@ pub async fn list_tenant_discovery_allowlist(
     tag = "Autodiscovery",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn add_tenant_discovery_allowlist_entry(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -126,6 +128,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
     tag = "Autodiscovery",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn remove_tenant_discovery_allowlist_entry(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -167,6 +170,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
     tag = "Autodiscovery",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_host_discovery_allowlist(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -219,6 +223,7 @@ pub async fn list_host_discovery_allowlist(
     tag = "Autodiscovery",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn add_host_discovery_allowlist_entry(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -285,6 +290,7 @@ pub async fn add_host_discovery_allowlist_entry(
     tag = "Autodiscovery",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn remove_host_discovery_allowlist_entry(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,

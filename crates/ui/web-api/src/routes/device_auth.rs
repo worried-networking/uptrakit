@@ -35,6 +35,7 @@ pub use uptrakit_web_api_types::device_auth::{
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn device_auth_start(
     State(state): State<Arc<AppState>>,
     external_base_url: Option<axum::Extension<crate::extract::ExternalBaseUrl>>,
@@ -98,6 +99,7 @@ pub async fn device_auth_start(
     ),
     tag = "Authentication"
 )]
+#[tracing::instrument(skip_all)]
 pub async fn device_auth_poll(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeviceAuthPollRequest>,
@@ -196,6 +198,7 @@ pub async fn device_auth_poll(
     extensions(("x-required-permission" = json!("view_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn device_auth_approve(
     State(state): State<Arc<AppState>>,
     CanViewAgents(auth_user): CanViewAgents,

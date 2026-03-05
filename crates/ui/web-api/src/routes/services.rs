@@ -46,6 +46,7 @@ pub use uptrakit_web_api_types::services::{
     extensions(("x-required-permission" = json!("view_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_services(
     tenant_db: TenantDb,
     CanViewAgents(_user): CanViewAgents,
@@ -77,6 +78,7 @@ pub async fn list_services(
     extensions(("x-required-permission" = json!("view_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_service(
     tenant_db: TenantDb,
     CanViewAgents(_user): CanViewAgents,
@@ -111,6 +113,7 @@ pub async fn get_service(
     extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_service(
     tenant_db: TenantDb,
     CanManageAgents(_user): CanManageAgents,
@@ -155,6 +158,7 @@ pub async fn update_service(
     extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn approve_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -243,6 +247,7 @@ pub async fn approve_service(
     extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn reject_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -314,6 +319,7 @@ pub async fn reject_service(
     extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn deactivate_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -371,6 +377,7 @@ pub async fn deactivate_service(
     extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn merge_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,

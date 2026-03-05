@@ -37,6 +37,7 @@ pub use uptrakit_web_api_types::system_enrollment_tokens::{
     extensions(("x-required-permission" = json!("manage_system_services"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_system_enrollment_token(
     State(state): State<Arc<AppState>>,
     CanManageSystemServices(user): CanManageSystemServices,
@@ -120,6 +121,7 @@ pub async fn create_system_enrollment_token(
     extensions(("x-required-permission" = json!("manage_system_services"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_system_enrollment_tokens(
     State(state): State<Arc<AppState>>,
     CanManageSystemServices(_user): CanManageSystemServices,
@@ -151,6 +153,7 @@ pub async fn list_system_enrollment_tokens(
     extensions(("x-required-permission" = json!("manage_system_services"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_system_enrollment_token(
     State(state): State<Arc<AppState>>,
     CanManageSystemServices(_user): CanManageSystemServices,
@@ -183,6 +186,7 @@ pub async fn get_system_enrollment_token(
     extensions(("x-required-permission" = json!("manage_system_services"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn revoke_system_enrollment_token(
     State(state): State<Arc<AppState>>,
     CanManageSystemServices(_user): CanManageSystemServices,

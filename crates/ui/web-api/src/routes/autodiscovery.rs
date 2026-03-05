@@ -41,6 +41,7 @@ pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams
     tag = "Autodiscovery",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_autodiscovery_ignores(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -84,6 +85,7 @@ pub async fn list_autodiscovery_ignores(
     tag = "Autodiscovery",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_autodiscovery_ignore(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -190,6 +192,7 @@ pub async fn create_autodiscovery_ignore(
     tag = "Autodiscovery",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn delete_autodiscovery_ignore(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,

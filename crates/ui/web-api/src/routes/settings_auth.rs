@@ -34,6 +34,7 @@ pub use uptrakit_web_api_types::settings_auth::{
     extensions(("x-required-permission" = json!("view_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_authentication_settings(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,
@@ -58,6 +59,7 @@ pub async fn get_authentication_settings(
     extensions(("x-required-permission" = json!("manage_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_authentication_settings(
     State(state): State<Arc<AppState>>,
     CanManageSettings(user): CanManageSettings,

@@ -28,6 +28,7 @@ pub use uptrakit_web_api_types::settings_ca::RotateCaResponse;
     tag = "Global Settings",
     extensions(("x-required-permission" = json!("manage_global_settings")))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn rotate_ca(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,

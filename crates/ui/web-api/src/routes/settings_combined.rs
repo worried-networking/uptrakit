@@ -44,6 +44,7 @@ fn build_combined_settings_response(
     extensions(("x-required-permission" = json!("view_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_combined_settings(
     State(state): State<Arc<AppState>>,
     CanViewSettings(_user): CanViewSettings,

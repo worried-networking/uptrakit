@@ -39,6 +39,7 @@ use uptrakit_web_api_types::settings_network::NetworkSettingsResponse;
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_global_combined_settings(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,

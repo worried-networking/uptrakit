@@ -68,6 +68,7 @@ pub use uptrakit_web_api_types::update_batches::{
     tag = "Update Batches",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn trigger_host_batch_update(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -146,6 +147,7 @@ pub async fn trigger_host_batch_update(
     tag = "Update Batches",
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn trigger_item_batch_update(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -228,6 +230,7 @@ pub async fn trigger_item_batch_update(
     extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_batches(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -261,6 +264,7 @@ pub async fn list_batches(
     extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_batch(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
@@ -299,6 +303,7 @@ pub async fn get_batch(
     extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn stream_batch_progress(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,

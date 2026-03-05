@@ -55,6 +55,7 @@ pub struct ListRulesQuery {
     extensions(("x-required-permission" = json!("manage_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_channel(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -100,6 +101,7 @@ pub async fn create_channel(
     extensions(("x-required-permission" = json!("view_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_channels(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -132,6 +134,7 @@ pub async fn list_channels(
     extensions(("x-required-permission" = json!("view_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_channel(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -167,6 +170,7 @@ pub async fn get_channel(
     extensions(("x-required-permission" = json!("manage_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_channel(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -216,6 +220,7 @@ pub async fn update_channel(
     extensions(("x-required-permission" = json!("manage_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn delete_channel(
     tenant_db: TenantDb,
     CanManageNotifications(_user): CanManageNotifications,
@@ -248,6 +253,7 @@ pub async fn delete_channel(
     extensions(("x-required-permission" = json!("manage_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn test_channel(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
@@ -354,6 +360,7 @@ pub async fn test_channel(
     extensions(("x-required-permission" = json!("manage_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn create_rule(
     tenant_db: TenantDb,
     CanManageNotifications(_user): CanManageNotifications,
@@ -400,6 +407,7 @@ pub async fn create_rule(
     extensions(("x-required-permission" = json!("view_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_rules(
     tenant_db: TenantDb,
     CanViewNotifications(_user): CanViewNotifications,
@@ -443,6 +451,7 @@ pub async fn list_rules(
     extensions(("x-required-permission" = json!("view_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_rule(
     tenant_db: TenantDb,
     CanViewNotifications(_user): CanViewNotifications,
@@ -477,6 +486,7 @@ pub async fn get_rule(
     extensions(("x-required-permission" = json!("manage_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_rule(
     tenant_db: TenantDb,
     CanManageNotifications(_user): CanManageNotifications,
@@ -514,6 +524,7 @@ pub async fn update_rule(
     extensions(("x-required-permission" = json!("manage_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn delete_rule(
     tenant_db: TenantDb,
     CanManageNotifications(_user): CanManageNotifications,
@@ -550,6 +561,7 @@ pub async fn delete_rule(
     extensions(("x-required-permission" = json!("view_notifications"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_log(
     tenant_db: TenantDb,
     CanViewNotifications(_user): CanViewNotifications,
@@ -574,6 +586,7 @@ pub async fn list_log(
 /// inline keyboard button. It is not authenticated via JWT but verified
 /// via the `X-Telegram-Bot-Api-Secret-Token` header against the channel's
 /// `webhook_secret` config field.
+#[tracing::instrument(skip_all)]
 pub async fn telegram_callback(
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,

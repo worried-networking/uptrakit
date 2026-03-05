@@ -27,6 +27,7 @@ pub use uptrakit_web_api_types::scheduler::{
     extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn list_scheduled_tasks(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -56,6 +57,7 @@ pub async fn list_scheduled_tasks(
     extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_scheduled_task(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -89,6 +91,7 @@ pub async fn get_scheduled_task(
     extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_scheduled_task(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
@@ -130,6 +133,7 @@ pub async fn update_scheduled_task(
     extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn trigger_scheduled_task(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,

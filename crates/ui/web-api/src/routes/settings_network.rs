@@ -31,6 +31,7 @@ use uptrakit_web_api_types::validation::Validate;
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_network_settings(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
@@ -68,6 +69,7 @@ pub async fn get_network_settings(
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn update_network_settings(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,

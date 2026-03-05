@@ -22,6 +22,7 @@ pub use uptrakit_web_api_types::system_alerts::{AlertSeverity, SystemAlert, Syst
     extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
+#[tracing::instrument(skip_all)]
 pub async fn get_system_alerts(
     State(state): State<Arc<AppState>>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
