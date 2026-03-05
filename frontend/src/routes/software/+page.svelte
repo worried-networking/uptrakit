@@ -8,7 +8,10 @@
 		deleteSoftwareItem,
 		approveSoftwareItem,
 		checkSoftwareItemVersions,
-		updateSoftwareItem
+		updateSoftwareItem,
+		listPluginTypes,
+		getSoftwareItem,
+		triggerSoftwareUpdate
 	} from '$lib/api';
 	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -18,7 +21,7 @@
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
-	import type { SoftwareItemResponse } from '$lib/types';
+	import type { SoftwareItemResponse, SoftwareItemDetailResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
 
 	type FilterTab = 'all' | 'pending' | 'active';
@@ -42,6 +45,12 @@
 	let editItem: { id: string; name: string; enabled: boolean } | null = $state(null);
 	let editForm = $state({ name: '', enabled: true });
 	let editSubmitting: boolean = $state(false);
+	let pluginTypeNames: Map<string, string> = $state(new Map());
+	let updateModalItem: SoftwareItemResponse | null = $state(null);
+	let updateModalDetail: SoftwareItemDetailResponse | null = $state(null);
+	let updateModalLoading: boolean = $state(false);
+	let selectedHostIds: Set<string> = $state(new Set());
+	let triggeringUpdate: boolean = $state(false);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
@@ -67,6 +76,13 @@
 				if (document.visibilityState === 'visible') loadAll(currentPage, true);
 			}, 60_000);
 		}
+		listPluginTypes()
+			.then((types) => {
+				pluginTypeNames = new Map(types.map((t) => [t.plugin_type, t.display_name]));
+			})
+			.catch(() => {
+				// Non-fatal: raw plugin type keys will show as fallback
+			});
 	});
 
 	onDestroy(() => {
@@ -206,6 +222,42 @@
 		}
 	}
 
+	async function openUpdateModal(item: SoftwareItemResponse) {
+		closeMenu();
+		updateModalItem = item;
+		updateModalDetail = null;
+		selectedHostIds = new Set();
+		updateModalLoading = true;
+		try {
+			const detail = await getSoftwareItem(item.id);
+			updateModalDetail = detail;
+			selectedHostIds = new Set(detail.hosts.filter((h) => h.update_available).map((h) => h.host_id));
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to load host details.');
+			updateModalItem = null;
+		} finally {
+			updateModalLoading = false;
+		}
+	}
+
+	async function executeUpdate() {
+		if (!updateModalItem || !updateModalDetail || triggeringUpdate) return;
+		triggeringUpdate = true;
+		const targets = updateModalDetail.hosts.filter(
+			(h) => h.update_available && selectedHostIds.has(h.host_id) && h.latest_version
+		);
+		const results = await Promise.allSettled(
+			targets.map((h) => triggerSoftwareUpdate(updateModalItem!.id, h.host_id, { to_version: h.latest_version! }))
+		);
+		const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+		const failed = results.filter((r) => r.status === 'rejected').length;
+		if (succeeded > 0) showSuccess(`Update triggered for ${succeeded} host(s).`);
+		if (failed > 0) showError(`Failed to trigger update for ${failed} host(s).`);
+		triggeringUpdate = false;
+		updateModalItem = null;
+		loadAll(currentPage);
+	}
+
 	function handleWindowClick(event: MouseEvent) {
 		if (openMenuId && !(event.target as HTMLElement).closest('.actions-menu')) {
 			closeMenu();
@@ -219,6 +271,7 @@
 		if (e.key === 'Escape') {
 			if (confirmDelete) confirmDelete = null;
 			else if (editItem) editItem = null;
+			else if (updateModalItem) updateModalItem = null;
 		}
 	}}
 />
@@ -290,20 +343,22 @@
 								<td>
 									<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
 								</td>
-								<td>{item.plugins.join(', ') || '\u2014'}</td>
-								<td class="flex flex-wrap items-center gap-1">
-									{#if item.enabled}
-										<span class="badge preset-filled-success-500">Enabled</span>
-									{:else}
-										<span class="badge preset-tonal">Disabled</span>
-									{/if}
-									{#if item.update_available}
-										<span class="badge preset-filled-warning-500">Update Available</span>
-									{/if}
+								<td class="text-sm text-surface-500">
+									{item.plugins.map((p) => pluginTypeNames.get(p) ?? p).join(', ') || '\u2014'}
+								</td>
+								<td>
 									{#if item.discovery_state === 'pending'}
 										<span class="badge preset-filled-warning-500">Pending</span>
-									{:else if item.discovery_state === 'approved'}
-										<span class="badge preset-tonal-success">Approved</span>
+									{:else}
+										{#if item.update_available}
+											<span class="badge preset-filled-warning-500">Update Available</span>
+										{/if}
+										{#if !item.enabled}
+											<span class="badge preset-tonal">Disabled</span>
+										{/if}
+										{#if !item.update_available && item.enabled}
+											<span class="text-surface-400">—</span>
+										{/if}
 									{/if}
 								</td>
 								<td>{item.host_count}</td>
@@ -418,6 +473,16 @@
 								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
 								role="menuitem"
 								tabindex="-1"
+								onclick={() => openUpdateModal(item)}
+							>
+								Update…
+							</button>
+						</li>
+						<li>
+							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+								role="menuitem"
+								tabindex="-1"
 								onclick={() => openAssignModal(item)}
 							>
 								Assign to Host
@@ -473,6 +538,70 @@
 			/>
 		{/if}
 	{/if}
+{/if}
+
+{#if updateModalItem}
+	<ModalBackdrop onclose={() => (updateModalItem = null)}>
+		<div
+			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-lg space-y-4 p-6 shadow-xl"
+			role="dialog"
+			aria-modal="true"
+		>
+			<h3 class="h3">Trigger Update — {updateModalItem.name}</h3>
+
+			{#if updateModalLoading}
+				<p class="text-sm text-surface-500">Loading hosts…</p>
+			{:else if updateModalDetail}
+				<p class="text-sm text-surface-500 mb-2">
+					Select the hosts to update. Hosts that are already up to date cannot be selected.
+				</p>
+				<ul class="space-y-2">
+					{#each updateModalDetail.hosts as host (host.host_id)}
+						{@const upToDate = !host.update_available}
+						<li class="flex items-start gap-3 {upToDate ? 'opacity-50' : ''}">
+							<input
+								type="checkbox"
+								class="checkbox mt-0.5"
+								disabled={upToDate}
+								checked={selectedHostIds.has(host.host_id)}
+								onchange={(e) => {
+									const next = new Set(selectedHostIds);
+									if ((e.target as HTMLInputElement).checked) {
+										next.add(host.host_id);
+									} else {
+										next.delete(host.host_id);
+									}
+									selectedHostIds = next;
+								}}
+							/>
+							<div class="flex-1 min-w-0">
+								<p class="text-sm font-medium truncate">
+									{host.friendly_name || host.hostname}
+								</p>
+								{#if upToDate}
+									<p class="text-xs text-surface-400">Already up to date</p>
+								{:else}
+									<p class="text-xs text-surface-500">
+										{host.installed_version ?? 'unknown'} → {host.latest_version}
+									</p>
+								{/if}
+							</div>
+						</li>
+					{/each}
+				</ul>
+				<div class="flex justify-end gap-2 pt-2">
+					<button class="btn preset-tonal-surface" onclick={() => (updateModalItem = null)}> Cancel </button>
+					<button
+						class="btn preset-filled-primary-500"
+						disabled={selectedHostIds.size === 0 || triggeringUpdate}
+						onclick={executeUpdate}
+					>
+						{triggeringUpdate ? 'Triggering…' : `Update ${selectedHostIds.size} host(s)`}
+					</button>
+				</div>
+			{/if}
+		</div>
+	</ModalBackdrop>
 {/if}
 
 {#if editItem}
