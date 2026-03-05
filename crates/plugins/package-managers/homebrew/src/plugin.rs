@@ -165,6 +165,13 @@ impl HomebrewPlugin {
                     continue;
                 };
 
+                // Formulae pinned to "latest" have no deterministic version
+                // and cannot be meaningfully tracked or upgraded.
+                if installed_version == "latest" {
+                    tracing::debug!(name, "skipping formula with version=latest from discovery");
+                    continue;
+                }
+
                 let targets = if emit_targets {
                     vec![DiscoveryTarget {
                         plugin_type: PluginType::PackageManagerHomebrew,
@@ -226,6 +233,13 @@ impl HomebrewPlugin {
                     // Skip casks without a known installed version.
                     continue;
                 };
+
+                // Casks with version "latest" have no deterministic version
+                // and cannot be meaningfully tracked or upgraded.
+                if installed_version == "latest" {
+                    tracing::debug!(token, "skipping cask with version=latest from discovery");
+                    continue;
+                }
 
                 // Casks with `auto_updates: true` manage their own update
                 // mechanism (e.g. Google Chrome) and cannot be upgraded via
@@ -1093,6 +1107,56 @@ mod tests {
         // No auto_updates field → defaults to false → included.
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].package_identifier, "iterm2");
+    }
+
+    #[test]
+    fn parse_installed_casks_skips_latest_version() {
+        let json = serde_json::json!({
+            "formulae": [],
+            "casks": [
+                {
+                    "token": "some-cask",
+                    "name": ["Some Cask"],
+                    "version": "latest",
+                    "installed": "latest"
+                },
+                {
+                    "token": "iterm2",
+                    "name": ["iTerm2"],
+                    "version": "3.5.0",
+                    "installed": "3.4.23"
+                }
+            ]
+        });
+        let packages = HomebrewPlugin::parse_installed_casks(&json, false);
+        // "latest" cask excluded; iterm2 included.
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].package_identifier, "iterm2");
+    }
+
+    #[test]
+    fn parse_installed_formulae_skips_latest_version() {
+        let json = serde_json::json!({
+            "formulae": [
+                {
+                    "name": "some-formula",
+                    "full_name": "some-formula",
+                    "versions": { "stable": "latest" },
+                    "installed": [{ "version": "latest" }]
+                },
+                {
+                    "name": "wget",
+                    "full_name": "wget",
+                    "versions": { "stable": "1.24.5" },
+                    "installed": [{ "version": "1.24.4" }]
+                }
+            ],
+            "casks": []
+        });
+        let packages = HomebrewPlugin::parse_installed_formulae(&json, false);
+        // "latest" formula excluded; wget included.
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].package_identifier, "wget");
     }
 
     #[test]
