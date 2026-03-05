@@ -22,7 +22,7 @@ it:
 | Tracking system | Destination | Approval required | Typical plugins |
 | --- | --- | --- | --- |
 | `Targeted` | `software_items` table (cross-host catalog) | Yes — items start as `pending` | Docker, GitHub Releases, Proxmox Helper Scripts |
-| `HostManaged` | `host_packages` table (per-host packages) | No — items are created enabled immediately | APT (discover-all), Homebrew, npm (discover-all) |
+| `HostManaged` | `host_packages` table (per-host packages) | No — items are created enabled immediately | APT (discover-all), Homebrew, Mac App Store, npm (discover-all) |
 
 **Targeted** items follow the existing autodiscovery workflow described below: they appear in the
 Software list as pending items for manual review.
@@ -74,6 +74,7 @@ Discovery-capable plugins currently supported:
 | Docker | Running and stopped containers on the host, grouped by image reference |
 | Homebrew (Formulae) | Homebrew formula packages installed on the host |
 | Homebrew (Casks) | Homebrew cask packages installed on the host |
+| Mac App Store | Apps installed from the Mac App Store via `mas list` |
 | Proxmox Helper Scripts | Applications managed by community Proxmox VE helper scripts |
 
 If no plugin config exists for a discovery-capable plugin when a host registers, the plugin

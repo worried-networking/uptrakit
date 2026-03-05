@@ -1423,4 +1423,13 @@ mod tests {
             "npm should be in discovery_plugins()"
         );
     }
+
+    #[test]
+    fn discovery_plugins_includes_mas() {
+        let types = PluginRegistry::discovery_plugins();
+        assert!(
+            types.contains(&PluginType::PackageManagerMas),
+            "Mac App Store plugin should be in discovery_plugins()"
+        );
+    }
 }
