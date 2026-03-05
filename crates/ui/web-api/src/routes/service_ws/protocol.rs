@@ -174,6 +174,7 @@ struct EnvelopeHeader {
 /// - `Ok(None)` when the full envelope parse fails for other reasons (soft
 ///   failure — sequence was already advanced).
 /// - `Ok(Some(msg))` on successful parse.
+#[tracing::instrument(skip_all, name = "ws.deserialize")]
 pub(crate) fn deserialize_service_msg(
     in_seq: &mut IncomingSeq,
     text: &str,
@@ -267,6 +268,7 @@ pub(crate) async fn send_pong(
         .map_err(|_| ())
 }
 
+#[tracing::instrument(skip_all, fields(service_id = %service_id))]
 pub(crate) async fn record_service_activity(
     db: &sea_orm::DatabaseConnection,
     service_id: uuid::Uuid,
@@ -294,6 +296,7 @@ pub(crate) async fn record_service_activity(
 }
 
 /// Record activity (last_seen_at, ip_address) for a system service.
+#[tracing::instrument(skip_all, fields(service_id = %service_id))]
 pub(crate) async fn record_system_service_activity(
     db: &sea_orm::DatabaseConnection,
     service_id: uuid::Uuid,

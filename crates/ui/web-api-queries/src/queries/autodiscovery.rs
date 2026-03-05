@@ -383,6 +383,7 @@ pub async fn find_or_create_default_plugin_config(
 ///    find-or-create and role-assignment creation.
 /// 2. **Config-ID-based**: Items with empty `targets` use the pre-existing
 ///    `plugin_config_id` from the result for all three standard roles.
+#[tracing::instrument(skip_all)]
 pub async fn process_discovery_results(
     db: &sea_orm::DatabaseConnection,
     agent_id: Uuid,
