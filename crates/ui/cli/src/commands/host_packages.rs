@@ -4,9 +4,11 @@ use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use uptrakit_openapi_client::types::host_packages::{
     CreateHostPackageIgnoreRequest, HostPackageDetailResponse, HostPackageIgnoreResponse,
-    HostPackageResponse, ListHostPackagesParams, UpdateHostPackageRequest,
+    HostPackageResponse, ListHostPackagesParams, PromoteHostPackageRequest,
+    UpdateHostPackageRequest,
 };
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
+use uptrakit_openapi_client::types::software_items::SoftwareItemDetailResponse;
 use uuid::Uuid;
 
 /// Simple wrapper for status messages that implements `Serialize` + `HumanOutput`.
@@ -227,6 +229,17 @@ pub struct RemoveIgnoreParams<'a> {
     pub request_timeout: Option<std::time::Duration>,
 }
 
+pub struct PromoteParams<'a> {
+    pub host_id: &'a Uuid,
+    pub package_id: &'a Uuid,
+    pub name: Option<String>,
+    pub software_item_id: Option<Uuid>,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
 // ---------------------------------------------------------------------------
 // Command functions
 // ---------------------------------------------------------------------------
@@ -346,6 +359,24 @@ pub async fn remove_ignore(params: RemoveIgnoreParams<'_>) -> Result<StatusMessa
     Ok(StatusMessage {
         message: "Ignore rule removed.".to_string(),
     })
+}
+
+/// Promote a host package to a tracked software item.
+pub async fn promote(params: PromoteParams<'_>) -> Result<SoftwareItemDetailResponse> {
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    let req = PromoteHostPackageRequest {
+        name: params.name,
+        software_item_id: params.software_item_id,
+    };
+    client
+        .promote_host_package(params.host_id, params.package_id, &req)
+        .await
+        .context_to()
 }
 
 #[cfg(test)]

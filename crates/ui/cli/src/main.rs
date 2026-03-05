@@ -294,6 +294,19 @@ enum HostPackagesCommands {
         #[arg(long)]
         ignore: bool,
     },
+    /// Promote a host package to a tracked software item
+    Promote {
+        /// Host UUID
+        host_id: Uuid,
+        /// Package UUID
+        package_id: Uuid,
+        /// Display name for the new software item (defaults to package name)
+        #[arg(long)]
+        name: Option<String>,
+        /// Promote into an existing software item instead of creating a new one
+        #[arg(long)]
+        software_item_id: Option<Uuid>,
+    },
     /// Manage ignore rules
     Ignore {
         #[command(subcommand)]
@@ -2146,6 +2159,26 @@ async fn run(cli: Cli) -> error::Result<()> {
                     request_timeout,
                 })
                 .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostPackagesCommands::Promote {
+                host_id,
+                package_id,
+                name,
+                software_item_id,
+            } => {
+                let resp =
+                    commands::host_packages::promote(commands::host_packages::PromoteParams {
+                        host_id: &host_id,
+                        package_id: &package_id,
+                        name,
+                        software_item_id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    })
+                    .await?;
                 output::print_output(format, &resp)?;
             }
             HostPackagesCommands::Ignore { command } => match command {
@@ -4197,6 +4230,68 @@ mod tests {
                 assert_eq!(ignore_id, uuid(IGNORE_UUID));
             }
             _ => panic!("expected HostPackages Ignore Remove"),
+        }
+    }
+
+    #[test]
+    fn host_packages_promote_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "host-packages",
+            "promote",
+            HOST_UUID,
+            PKG_UUID,
+            "--name",
+            "My App",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::HostPackages {
+                command:
+                    HostPackagesCommands::Promote {
+                        host_id,
+                        package_id,
+                        name,
+                        software_item_id,
+                    },
+            }) => {
+                assert_eq!(host_id, uuid(HOST_UUID));
+                assert_eq!(package_id, uuid(PKG_UUID));
+                assert_eq!(name.as_deref(), Some("My App"));
+                assert!(software_item_id.is_none());
+            }
+            _ => panic!("expected HostPackages Promote"),
+        }
+    }
+
+    #[test]
+    fn host_packages_promote_with_software_item_id_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit",
+            "host-packages",
+            "promote",
+            HOST_UUID,
+            PKG_UUID,
+            "--software-item-id",
+            IGNORE_UUID,
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::HostPackages {
+                command:
+                    HostPackagesCommands::Promote {
+                        host_id,
+                        package_id,
+                        name,
+                        software_item_id,
+                    },
+            }) => {
+                assert_eq!(host_id, uuid(HOST_UUID));
+                assert_eq!(package_id, uuid(PKG_UUID));
+                assert!(name.is_none());
+                assert_eq!(software_item_id, Some(uuid(IGNORE_UUID)));
+            }
+            _ => panic!("expected HostPackages Promote with software_item_id"),
         }
     }
 
