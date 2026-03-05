@@ -52,6 +52,11 @@ WORKDIR /app
 
 # Cook dependencies first (cached as long as Cargo.toml/lock don't change)
 COPY --from=planner /app/recipe.json recipe.json
+# Cook controller deps with its non-default feature set first (ensures rust-embed etc. are cached)
+RUN cargo chef cook --release --recipe-path recipe.json \
+    -p uptrakit-controller --no-default-features \
+    --features embed-frontend,db-sqlite,oidc,embedded-scheduler
+# Cook remaining workspace deps with default features (agent, scheduler, mqtt, etc.)
 RUN cargo chef cook --release --recipe-path recipe.json
 
 # Copy full source and built frontend
