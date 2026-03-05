@@ -30,6 +30,7 @@ tracing-subscriber = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
 sha2 = { workspace = true }
+socket2 = { workspace = true }
 webpki-roots = { workspace = true }
 x509-parser = { workspace = true }
 uptrakit-build-info = { workspace = true }

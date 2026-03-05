@@ -6,6 +6,7 @@
 //! event loops.
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use rootcause::prelude::*;
@@ -18,6 +19,14 @@ use uptrakit_internal_wire::{
 
 use crate::error::{EnrollmentError, ProtocolError, Result};
 use crate::ws::{WsStream, connect_ws, is_peer_closed, log_close_frame};
+
+/// Maximum time to wait for a single WebSocket write to complete.
+///
+/// If the controller stops consuming data (e.g. after a restart), the TCP
+/// send buffer fills and writes block indefinitely. This timeout bounds
+/// the worst-case hang to 30 seconds, after which the connection is treated
+/// as dead and the agent reconnects.
+const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Minimal envelope used to extract protocol version and sequence number before
 /// full deserialization. This lets us validate both fields and advance the
@@ -76,9 +85,9 @@ impl ControllerConnection {
         tracing::trace!("sending message to controller");
         let envelope = self.out_seq.wrap_service(msg);
         let json = serde_json::to_string(&envelope).context_to::<EnrollmentError>()?;
-        self.ws
-            .send(Message::Text(json.into()))
+        tokio::time::timeout(SEND_TIMEOUT, self.ws.send(Message::Text(json.into())))
             .await
+            .map_err(|_| report!(EnrollmentError::Protocol(ProtocolError::SendTimeout)))?
             .context_to::<EnrollmentError>()?;
         Ok(())
     }
@@ -151,9 +160,11 @@ impl ControllerConnection {
                 }
                 Some(Ok(Message::Ping(data))) => {
                     tracing::trace!("received ping from controller");
-                    self.ws
-                        .send(Message::Pong(data))
+                    tokio::time::timeout(SEND_TIMEOUT, self.ws.send(Message::Pong(data)))
                         .await
+                        .map_err(|_| {
+                            report!(EnrollmentError::Protocol(ProtocolError::SendTimeout))
+                        })?
                         .context_to::<EnrollmentError>()?;
                     continue;
                 }

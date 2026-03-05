@@ -53,6 +53,8 @@ pub enum ProtocolError {
     ResponseTimeout,
     #[error("TCP connection timed out")]
     ConnectionTimeout,
+    #[error("timed out sending message to controller")]
+    SendTimeout,
     #[error("protocol version mismatch: expected {expected}, received {received}")]
     VersionMismatch { expected: u32, received: u32 },
 }
@@ -126,6 +128,8 @@ impl EnrollmentError {
     ///   **unless** the underlying error is a rustls `CertificateExpired` alert
     ///   (which is permanent: the agent's client certificate needs renewal).
     /// - [`ProtocolError::ConnectionTimeout`] — explicit TCP connect timeout.
+    /// - [`ProtocolError::SendTimeout`] — write blocked until the OS buffer filled
+    ///   (controller stopped consuming); the connection is dead and should reconnect.
     ///
     /// The following are **not** retried:
     /// - `Protocol::EnrollmentRejected` — server explicitly refused the token.
@@ -139,7 +143,7 @@ impl EnrollmentError {
         match self {
             Self::WebSocket(_) => true,
             Self::Io(e) if !is_rustls_cert_expired(e) => true,
-            Self::Protocol(ProtocolError::ConnectionTimeout) => true,
+            Self::Protocol(ProtocolError::ConnectionTimeout | ProtocolError::SendTimeout) => true,
             _ => false,
         }
     }
@@ -267,6 +271,12 @@ mod tests {
     #[test]
     fn is_transient_network_connection_timeout() {
         let err = EnrollmentError::Protocol(ProtocolError::ConnectionTimeout);
+        assert!(err.is_transient_network());
+    }
+
+    #[test]
+    fn is_transient_network_send_timeout() {
+        let err = EnrollmentError::Protocol(ProtocolError::SendTimeout);
         assert!(err.is_transient_network());
     }
 

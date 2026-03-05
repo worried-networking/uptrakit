@@ -132,6 +132,7 @@ sha1 = "0.10"
 httpmock = "0.8"
 serde_urlencoded = "0.7"
 husky-rs = { version = "0.3", default-features = false }
+socket2 = "0.6"
 
 [workspace.lints.rust]
 warnings = "deny"

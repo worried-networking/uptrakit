@@ -68,6 +68,21 @@ pub async fn connect_ws(
     .map_err(|_| report!(EnrollmentError::Protocol(ProtocolError::ConnectionTimeout)))?
     .context_to::<EnrollmentError>()?;
 
+    // Configure TCP keepalive for faster dead-connection detection.
+    // Without keepalive, OS defaults (macOS: 2 h, Linux: ~2 h) apply during
+    // idle periods, causing recv() to block for hours on a dead connection.
+    // We set idle time and probe interval; the OS default retry count
+    // (8-9 on macOS, 9 on Linux) is sufficient for our purposes.
+    {
+        use socket2::{SockRef, TcpKeepalive};
+        let keepalive = TcpKeepalive::new()
+            .with_time(Duration::from_secs(30))
+            .with_interval(Duration::from_secs(10));
+        SockRef::from(&tcp_stream)
+            .set_tcp_keepalive(&keepalive)
+            .context_to::<EnrollmentError>()?;
+    }
+
     let server_name = ServerName::try_from(host.to_string()).context_to::<EnrollmentError>()?;
 
     let tls_stream = tls_connector
