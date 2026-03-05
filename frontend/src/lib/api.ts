@@ -73,6 +73,7 @@ import type {
 	HostPackageResponse,
 	HostPackageDetailResponse,
 	UpdateHostPackageRequest,
+	PromoteHostPackageRequest,
 	HostPackageIgnoreResponse,
 	CreateHostPackageIgnoreRequest,
 	ListHostPackagesParams,
@@ -435,6 +436,17 @@ export function createHostPackageIgnore(
 	data: CreateHostPackageIgnoreRequest
 ): Promise<HostPackageIgnoreResponse> {
 	return request(`/hosts/${encodeURIComponent(hostId)}/package-ignores`, {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
+}
+
+export function promoteHostPackage(
+	hostId: string,
+	packageId: string,
+	data: PromoteHostPackageRequest
+): Promise<SoftwareItemDetailResponse> {
+	return request(`/hosts/${encodeURIComponent(hostId)}/packages/${encodeURIComponent(packageId)}/promote`, {
 		method: 'POST',
 		body: JSON.stringify(data)
 	});

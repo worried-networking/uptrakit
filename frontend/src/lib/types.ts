@@ -700,6 +700,11 @@ export interface UpdateHostPackageRequest {
 	enabled: boolean;
 }
 
+export interface PromoteHostPackageRequest {
+	name?: string;
+	software_item_id?: string;
+}
+
 export interface HostPackageIgnoreResponse {
 	id: string;
 	plugin_config_id: string;

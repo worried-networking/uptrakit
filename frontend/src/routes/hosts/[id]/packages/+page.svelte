@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
-	import { getHost, listHostPackages, updateHostPackage, deleteHostPackage } from '$lib/api';
+	import { getHost, listHostPackages, updateHostPackage, deleteHostPackage, promoteHostPackage } from '$lib/api';
 	import { formatDate, formatVersion, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { Permission } from '$lib/types';
@@ -30,6 +30,13 @@
 
 	let confirmDelete: { pkg: HostPackageResponse; ignore: boolean } | null = $state(null);
 	let togglingIds: Set<string> = $state(new Set());
+
+	// Promote state
+	let promoteModal: { pkg: HostPackageResponse } | null = $state(null);
+	let promoteName: string = $state('');
+	let promoteExistingId: string = $state('');
+	let promoteShowAdvanced: boolean = $state(false);
+	let promoting: boolean = $state(false);
 
 	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
@@ -144,11 +151,38 @@
 	}
 
 	const hasActiveFilters = $derived(filterHasUpdate != null || filterCategory != null || filterSearch !== '');
+
+	function openPromoteModal(pkg: HostPackageResponse) {
+		promoteModal = { pkg };
+		promoteName = pkg.name;
+		promoteExistingId = '';
+		promoteShowAdvanced = false;
+	}
+
+	async function executePromote() {
+		if (!promoteModal) return;
+		promoting = true;
+		try {
+			const result = await promoteHostPackage(id, promoteModal.pkg.id, {
+				name: promoteName.trim() || undefined,
+				software_item_id: promoteExistingId.trim() || undefined
+			});
+			promoteModal = null;
+			showSuccess(`Package promoted to software item "${result.name}". View it at /software/${result.id}.`);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to promote package');
+		} finally {
+			promoting = false;
+		}
+	}
 </script>
 
 <svelte:window
 	onkeydown={(e) => {
-		if (e.key === 'Escape' && confirmDelete) confirmDelete = null;
+		if (e.key === 'Escape') {
+			if (confirmDelete) confirmDelete = null;
+			if (promoteModal) promoteModal = null;
+		}
 	}}
 />
 
@@ -258,6 +292,13 @@
 							{#if canManageSoftware}
 								<td>
 									<div class="flex gap-1">
+										<button
+											class="btn btn-sm preset-tonal-primary"
+											title="Promote to software item"
+											onclick={() => openPromoteModal(pkg)}
+										>
+											Promote
+										</button>
 										<button class="btn btn-sm preset-tonal-error" onclick={() => requestDelete(pkg, false)}>
 											Delete
 										</button>
@@ -310,4 +351,58 @@
 		onconfirm={executeDelete}
 		oncancel={() => (confirmDelete = null)}
 	/>
+{/if}
+
+{#if promoteModal}
+	<!-- Promote modal backdrop -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+		role="dialog"
+		tabindex="-1"
+		aria-modal="true"
+		aria-labelledby="promote-modal-title"
+		onkeydown={(e) => {
+			if (e.key === 'Escape') promoteModal = null;
+		}}
+	>
+		<div class="card w-full max-w-md p-6 space-y-4">
+			<h2 id="promote-modal-title" class="h3">Promote to Software Item</h2>
+			<p class="text-sm text-surface-500">
+				Creates a tracked software item for <strong>{promoteModal.pkg.name}</strong> alongside the existing host package.
+				The operation is idempotent — if a matching item already exists it will be returned.
+			</p>
+
+			<label class="label">
+				<span>Software Item Name</span>
+				<input class="input" type="text" placeholder={promoteModal.pkg.name} bind:value={promoteName} />
+			</label>
+
+			<button
+				class="btn btn-sm preset-tonal text-xs"
+				type="button"
+				onclick={() => (promoteShowAdvanced = !promoteShowAdvanced)}
+			>
+				{promoteShowAdvanced ? 'Hide advanced' : 'Show advanced'}
+			</button>
+
+			{#if promoteShowAdvanced}
+				<label class="label">
+					<span>Link to existing software item UUID (optional)</span>
+					<input
+						class="input"
+						type="text"
+						placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+						bind:value={promoteExistingId}
+					/>
+				</label>
+			{/if}
+
+			<div class="flex gap-2 justify-end pt-2">
+				<button class="btn preset-tonal" onclick={() => (promoteModal = null)} disabled={promoting}> Cancel </button>
+				<button class="btn preset-filled-primary-500" onclick={executePromote} disabled={promoting}>
+					{promoting ? 'Promoting…' : 'Promote'}
+				</button>
+			</div>
+		</div>
+	</div>
 {/if}
