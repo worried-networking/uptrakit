@@ -18,7 +18,6 @@ use openidconnect::{
     EndpointNotSet, EndpointSet, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier,
     RedirectUrl, Scope, TokenResponse,
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
-    reqwest,
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
@@ -957,7 +956,7 @@ async fn build_oidc_client(
     let issuer_url = IssuerUrl::new(provider.issuer_url.clone())
         .map_err(|e| tracing::error!("Invalid OIDC issuer URL for provider {}: {e}", provider.id))
         .ok()?;
-    let http_client = reqwest::Client::default();
+    let http_client = crate::oidc_http_client::OidcHttpClient::new();
     let provider_metadata = CoreProviderMetadata::discover_async(issuer_url, &http_client)
         .await
         .map_err(|e| {
@@ -991,7 +990,7 @@ async fn exchange_code_for_claims(
     nonce: Nonce,
     redirect_url: RedirectUrl,
 ) -> Result<ExtractedOidcClaims, Response> {
-    let http_client = reqwest::Client::default();
+    let http_client = crate::oidc_http_client::OidcHttpClient::new();
     let token_request = client
         .exchange_code(AuthorizationCode::new(code))
         .map_err(|e| {

@@ -9,7 +9,7 @@ publish = false
 
 [features]
 default = ["oidc"]
-oidc = ["uptrakit-web-api-auth/oidc", "dep:openidconnect"]
+oidc = ["uptrakit-web-api-auth/oidc", "dep:openidconnect", "dep:reqwest"]
 swagger-ui = ["dep:utoipa-swagger-ui"]
 nats = ["dep:async-nats", "dep:uptrakit-nats"]
 notifications-telegram = ["uptrakit-notification-channels/telegram"]
@@ -59,6 +59,7 @@ uptrakit-web-api-types = { workspace = true, features = ["openapi"] }
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-axum = { workspace = true }
 openidconnect = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
 url = { workspace = true }
 percent-encoding = { workspace = true }
 axum-server = { workspace = true }

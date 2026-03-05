@@ -14,6 +14,8 @@ pub mod nats_transport;
 pub mod notification_service;
 pub mod notifications;
 pub mod ocsp;
+#[cfg(feature = "oidc")]
+pub(crate) mod oidc_http_client;
 pub mod pki_utils;
 pub use uptrakit_web_api_queries::notifier::ServiceNotifier;
 pub use uptrakit_web_api_queries::queries;

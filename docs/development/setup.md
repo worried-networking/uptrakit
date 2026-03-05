@@ -121,10 +121,17 @@ wherever possible:
 - `sea-orm`: `runtime-tokio` without TLS (TLS handled by sqlx directly)
 - `sqlx`: `tls-rustls-aws-lc-rs` instead of the default `tls-rustls-ring`
 
-The only remaining `ring` path is `openidconnect` → `oauth2/rustls-tls` →
-`reqwest 0.12/rustls-tls` → `ring`. This is not fixable until
-openidconnect/oauth2 upgrade to reqwest 0.13 or reqwest 0.12 switches
-its default TLS provider ([reqwest#2723](https://github.com/seanmonstar/reqwest/issues/2723)).
+`openidconnect` is configured with `default-features = false` so it does
+not pull in its bundled `reqwest 0.12` (and transitively, `ring`).
+Instead, a custom `OidcHttpClient` adapter in `web-api` implements the
+`oauth2::AsyncHttpClient` trait using our workspace `reqwest` 0.13.
+This also enforces project-standard HTTP timeouts (10 s connect, 60 s
+total) on OIDC discovery and token exchange requests.
+
+`ring` is still present transitively through `rustls` (enabled by
+third-party crates like `axum-server`, `bollard`, and `hyper-rustls`
+with default features). This is not directly actionable until those
+crates adopt `rustls` with `default-features = false`.
 
 ### `release-fast` profile
 
