@@ -14,6 +14,8 @@
 - Rust stable (managed with `rustup`)
 - Recent `cargo` toolchain
 - Node.js LTS and `npm` (for the frontend)
+- macOS only: `lld` linker (`brew install lld`) — see
+  [Build Speed Optimizations](#build-speed-optimizations) below
 - Optional but recommended: `cargo-nextest`, `cargo-deny`
 
 Install `cargo-deny` before running dependency checks:
@@ -87,11 +89,35 @@ these optimizations automatically:
 - **`opt-level = 3` for `aws-lc-sys`** — the cryptography C library is
   always fully optimized to avoid extremely slow builds.
 
-### macOS link-time optimization
+### macOS linker and debug info
 
-`.cargo/config.toml` sets `split-debuginfo=unpacked` on macOS, which
-skips the expensive `dsymutil` step during linking. Debug info is kept in
-individual object files instead of being merged into a `.dSYM` bundle.
+`.cargo/config.toml` applies two optimizations on macOS:
+
+- **`split-debuginfo=unpacked`** — skips the expensive `dsymutil` step
+  during linking. Debug info is kept in individual object files instead
+  of being merged into a `.dSYM` bundle.
+- **`lld` linker** — uses LLVM's `ld64.lld` instead of Apple's default
+  `ld`, which is significantly faster for large binaries. Requires
+  installing `lld` via Homebrew:
+
+  ```bash
+  brew install lld
+  ```
+
+  If `lld` is not installed, cargo will fail with a clear error
+  pointing to this section. The linker path
+  (`/opt/homebrew/bin/ld64.lld`) is hardcoded for Apple Silicon Macs.
+  Intel Macs need to adjust the path in `.cargo/config.toml` to
+  `/usr/local/bin/ld64.lld`.
+
+### Dependency deduplication
+
+The workspace pins `async-nats` and `rumqttc` with `default-features = false`
+to avoid pulling in the `ring` cryptography library alongside `aws-lc-rs`.
+All TLS is routed through `aws-lc-rs` via the workspace-level `rustls` and
+`tokio-rustls` dependencies. Some upstream crates (`reqwest v0.12` via
+`openidconnect`, `sqlx`) still force `ring` through feature unification —
+this will resolve as upstreams migrate to provider-agnostic TLS.
 
 ### `release-fast` profile
 
