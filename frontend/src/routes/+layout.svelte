@@ -204,7 +204,7 @@
 			<main id="main-content" class="flex-1 overflow-auto">
 				<ToastNotifications alerts={visibleAlerts} onDismiss={dismissAlert} />
 
-				<div class="container mx-auto max-w-2xl p-4">
+				<div class="container mx-auto max-w-5xl p-4">
 					{#if getUser() || publicRoutes.has($page.url.pathname)}
 						{@render children()}
 					{/if}
