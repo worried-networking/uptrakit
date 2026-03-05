@@ -16,6 +16,7 @@ pub mod device_auth;
 pub mod discovery_allowlist;
 pub mod enrollment_tokens;
 pub mod error;
+pub mod events;
 pub mod extensions;
 pub mod host_packages;
 pub mod hosts;
@@ -1185,6 +1186,32 @@ mod tests {
         };
         let err = req.validate().unwrap_err();
         assert_eq!(err.field, "config");
+    }
+
+    // ── 14. Device auth SSE types ────────────────────────────────────
+
+    #[test]
+    fn device_auth_authorized_sse_round_trip() {
+        use crate::device_auth::DeviceAuthAuthorizedSse;
+        let event = DeviceAuthAuthorizedSse {
+            token: SecretString::new("secret-api-token".to_string()),
+            token_name: "my-device".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: DeviceAuthAuthorizedSse = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.token.expose_secret(), "secret-api-token");
+        assert_eq!(deserialized.token_name, "my-device");
+    }
+
+    #[test]
+    fn device_auth_expired_sse_round_trip() {
+        use crate::device_auth::DeviceAuthExpiredSse;
+        let event = DeviceAuthExpiredSse {
+            message: "Device flow expired".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: DeviceAuthExpiredSse = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.message, "Device flow expired");
     }
 
     #[test]
