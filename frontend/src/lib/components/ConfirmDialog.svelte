@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ModalBackdrop from './ModalBackdrop.svelte';
+	import Modal from './Modal.svelte';
 
 	let {
 		title,
@@ -24,26 +24,19 @@
 	} = $props();
 </script>
 
-<ModalBackdrop onclose={oncancel}>
-	<div
-		class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-		role="dialog"
-		aria-modal="true"
-	>
-		<h3 class="h3">{title}</h3>
-		<p>{messagePrefix} <strong>{entityName}</strong>?</p>
-		{#if warnings.length > 0}
-			<aside class="rounded-lg p-3 preset-filled-warning-500 text-sm space-y-1">
-				{#each warnings as warning (warning)}
-					<p>{warning}</p>
-				{/each}
-			</aside>
-		{/if}
-		<div class="flex justify-end gap-2">
-			<button class="btn preset-tonal-surface" onclick={oncancel}>Cancel</button>
-			<button class="btn {confirmClass}" disabled={confirmDisabled} onclick={onconfirm}>
-				{confirmLabel}
-			</button>
-		</div>
-	</div>
-</ModalBackdrop>
+<Modal {title} onclose={oncancel}>
+	<p>{messagePrefix} <strong>{entityName}</strong>?</p>
+	{#if warnings.length > 0}
+		<aside class="rounded-lg p-3 preset-filled-warning-500 text-sm space-y-1">
+			{#each warnings as warning (warning)}
+				<p>{warning}</p>
+			{/each}
+		</aside>
+	{/if}
+	{#snippet footer()}
+		<button class="btn preset-tonal-surface" onclick={oncancel}>Cancel</button>
+		<button class="btn {confirmClass}" disabled={confirmDisabled} onclick={onconfirm}>
+			{confirmLabel}
+		</button>
+	{/snippet}
+</Modal>

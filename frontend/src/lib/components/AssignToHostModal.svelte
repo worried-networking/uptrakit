@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import {
 		getSoftwareItem,
 		getHosts,
@@ -128,109 +128,99 @@
 	}
 </script>
 
-<ModalBackdrop {onclose}>
-	<div
-		class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl max-h-[85vh] flex flex-col space-y-4 p-6 shadow-xl"
-		role="dialog"
-		aria-modal="true"
-		aria-labelledby="assign-host-title"
-	>
-		<div>
-			<h3 class="h3" id="assign-host-title">Assign to Hosts</h3>
-			<p class="text-sm text-surface-500">
-				Select hosts to track <strong>{softwareItemName}</strong> on.
-			</p>
-		</div>
+<Modal title="Assign to Hosts" {onclose} maxWidth="max-w-2xl max-h-[85vh] flex flex-col">
+	<p class="text-sm text-surface-500">
+		Select hosts to track <strong>{softwareItemName}</strong> on.
+	</p>
 
-		{#if loading}
-			<p class="text-surface-500">Loading...</p>
-		{:else if loadError}
-			<aside class="rounded-lg p-4 preset-filled-error-500">
-				<p>{loadError}</p>
-			</aside>
-		{:else if allHosts.length === 0}
-			<aside class="rounded-lg p-4 preset-tonal-surface">
-				<p class="text-sm">No hosts are registered yet. Hosts appear once an approved agent reports from a machine.</p>
-			</aside>
-		{:else}
-			<ul class="overflow-y-auto space-y-1 flex-1 min-h-0">
-				{#each allHosts as host (host.id)}
-					<li>
-						<label
-							class="flex items-center gap-3 rounded-md px-3 py-2 cursor-pointer hover:bg-surface-100 dark:hover:bg-surface-800"
-						>
-							<input
-								class="checkbox"
-								type="checkbox"
-								checked={selectedIds.has(host.id)}
-								onchange={() => toggleHost(host.id)}
-							/>
-							<span class="flex-1 min-w-0">
-								<span class="block font-medium truncate">{host.friendly_name}</span>
-								<span class="block text-xs text-surface-500 truncate">{host.hostname}</span>
-							</span>
-						</label>
-					</li>
-				{/each}
-			</ul>
+	{#if loading}
+		<p class="text-surface-500">Loading...</p>
+	{:else if loadError}
+		<aside class="rounded-lg p-4 preset-filled-error-500">
+			<p>{loadError}</p>
+		</aside>
+	{:else if allHosts.length === 0}
+		<aside class="rounded-lg p-4 preset-tonal-surface">
+			<p class="text-sm">No hosts are registered yet. Hosts appear once an approved agent reports from a machine.</p>
+		</aside>
+	{:else}
+		<ul class="overflow-y-auto space-y-1 flex-1 min-h-0">
+			{#each allHosts as host (host.id)}
+				<li>
+					<label
+						class="flex items-center gap-3 rounded-md px-3 py-2 cursor-pointer hover:bg-surface-100 dark:hover:bg-surface-800"
+					>
+						<input
+							class="checkbox"
+							type="checkbox"
+							checked={selectedIds.has(host.id)}
+							onchange={() => toggleHost(host.id)}
+						/>
+						<span class="flex-1 min-w-0">
+							<span class="block font-medium truncate">{host.friendly_name}</span>
+							<span class="block text-xs text-surface-500 truncate">{host.hostname}</span>
+						</span>
+					</label>
+				</li>
+			{/each}
+		</ul>
 
-			{#if toAdd.length > 0}
-				<div class="space-y-3 border-t border-surface-200 dark:border-surface-700 pt-3">
-					<p class="text-sm font-medium">Role assignments for new hosts</p>
-					<div class="table-wrap">
-						<table class="table text-sm">
-							<thead>
+		{#if toAdd.length > 0}
+			<div class="space-y-3 border-t border-surface-200 dark:border-surface-700 pt-3">
+				<p class="text-sm font-medium">Role assignments for new hosts</p>
+				<div class="table-wrap">
+					<table class="table text-sm">
+						<thead>
+							<tr>
+								<th class="w-36">Role</th>
+								<th>Plugin Config</th>
+								<th>Package Identifier</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each ALL_ROLES as role (role)}
+								{@const a = roleAssignments[role]}
 								<tr>
-									<th class="w-36">Role</th>
-									<th>Plugin Config</th>
-									<th>Package Identifier</th>
+									<td>
+										<label class="flex items-center gap-2 cursor-pointer">
+											<input class="checkbox" type="checkbox" bind:checked={roleAssignments[role].enabled} />
+											<span class="whitespace-nowrap">{ROLE_LABELS[role]}</span>
+										</label>
+									</td>
+									<td>
+										<select
+											class="select text-sm"
+											bind:value={roleAssignments[role].plugin_config_id}
+											disabled={!a.enabled}
+										>
+											<option value="">— none —</option>
+											{#each pluginConfigs as config (config.id)}
+												<option value={config.id}>{config.name}</option>
+											{/each}
+										</select>
+									</td>
+									<td>
+										<input
+											class="input text-sm"
+											type="text"
+											placeholder="e.g. owner/repo"
+											bind:value={roleAssignments[role].package_identifier}
+											disabled={!a.enabled}
+										/>
+									</td>
 								</tr>
-							</thead>
-							<tbody>
-								{#each ALL_ROLES as role (role)}
-									{@const a = roleAssignments[role]}
-									<tr>
-										<td>
-											<label class="flex items-center gap-2 cursor-pointer">
-												<input class="checkbox" type="checkbox" bind:checked={roleAssignments[role].enabled} />
-												<span class="whitespace-nowrap">{ROLE_LABELS[role]}</span>
-											</label>
-										</td>
-										<td>
-											<select
-												class="select text-sm"
-												bind:value={roleAssignments[role].plugin_config_id}
-												disabled={!a.enabled}
-											>
-												<option value="">— none —</option>
-												{#each pluginConfigs as config (config.id)}
-													<option value={config.id}>{config.name}</option>
-												{/each}
-											</select>
-										</td>
-										<td>
-											<input
-												class="input text-sm"
-												type="text"
-												placeholder="e.g. owner/repo"
-												bind:value={roleAssignments[role].package_identifier}
-												disabled={!a.enabled}
-											/>
-										</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
+							{/each}
+						</tbody>
+					</table>
 				</div>
-			{/if}
+			</div>
 		{/if}
+	{/if}
 
-		<div class="flex justify-end gap-2">
-			<button class="btn preset-tonal-surface" onclick={onclose}>Cancel</button>
-			<button class="btn preset-filled-primary-500" disabled={submitting || loading || !!loadError} onclick={submit}>
-				{submitting ? 'Saving...' : 'Save'}
-			</button>
-		</div>
-	</div>
-</ModalBackdrop>
+	{#snippet footer()}
+		<button class="btn preset-tonal-surface" onclick={onclose}>Cancel</button>
+		<button class="btn preset-filled-primary-500" disabled={submitting || loading || !!loadError} onclick={submit}>
+			{submitting ? 'Saving...' : 'Save'}
+		</button>
+	{/snippet}
+</Modal>

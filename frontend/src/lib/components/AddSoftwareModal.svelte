@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import { createSoftwareItem } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type { SoftwareItemResponse } from '$lib/types';
@@ -36,33 +36,23 @@
 	}
 </script>
 
-<ModalBackdrop {onclose}>
-	<div
-		class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-		role="dialog"
-		aria-modal="true"
-		aria-labelledby="add-software-title"
-	>
-		<div>
-			<h3 class="h3" id="add-software-title">Add Software</h3>
-			<p class="text-sm text-surface-500">Register a software item to start tracking updates.</p>
-		</div>
+<Modal title="Add Software" {onclose}>
+	<p class="text-sm text-surface-500">Register a software item to start tracking updates.</p>
 
-		<label class="label">
-			<span>Name</span>
-			<input class="input" bind:value={name} placeholder="Firefox" />
-		</label>
+	<label class="label">
+		<span>Name</span>
+		<input class="input" bind:value={name} placeholder="Firefox" />
+	</label>
 
-		<label class="flex items-center gap-3">
-			<input class="checkbox" type="checkbox" bind:checked={enabled} />
-			<span>Track updates for this item</span>
-		</label>
+	<label class="flex items-center gap-3">
+		<input class="checkbox" type="checkbox" bind:checked={enabled} />
+		<span>Track updates for this item</span>
+	</label>
 
-		<div class="flex justify-end gap-2">
-			<button class="btn preset-tonal-surface" onclick={onclose}>Cancel</button>
-			<button class="btn preset-filled-primary-500" disabled={submitting} onclick={submit}>
-				{submitting ? 'Registering...' : 'Register Software'}
-			</button>
-		</div>
-	</div>
-</ModalBackdrop>
+	{#snippet footer()}
+		<button class="btn preset-tonal-surface" onclick={onclose}>Cancel</button>
+		<button class="btn preset-filled-primary-500" disabled={submitting} onclick={submit}>
+			{submitting ? 'Registering...' : 'Register Software'}
+		</button>
+	{/snippet}
+</Modal>
