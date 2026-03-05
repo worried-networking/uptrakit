@@ -39,6 +39,7 @@ impl DetectVersionExecutor {
 
 #[async_trait::async_trait]
 impl TaskExecutor for DetectVersionExecutor {
+    #[tracing::instrument(skip_all, fields(task = "detect_version"))]
     async fn execute(&self, task: &scheduled_task::Model) -> crate::error::Result<()> {
         self.send_detect_version_assignments(task.tenant_id).await
     }

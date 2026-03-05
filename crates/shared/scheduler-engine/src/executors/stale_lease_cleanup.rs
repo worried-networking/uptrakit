@@ -26,6 +26,7 @@ impl StaleLeaseCleanupExecutor {
 
 #[async_trait::async_trait]
 impl TaskExecutor for StaleLeaseCleanupExecutor {
+    #[tracing::instrument(skip_all, fields(task = "stale_lease_cleanup"))]
     async fn execute(&self, _task: &scheduled_task::Model) -> crate::error::Result<()> {
         let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(STALE_AFTER_SECS);
 

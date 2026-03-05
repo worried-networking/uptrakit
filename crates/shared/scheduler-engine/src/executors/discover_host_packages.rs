@@ -58,6 +58,7 @@ struct HostRow {
 
 #[async_trait::async_trait]
 impl TaskExecutor for DiscoverHostPackagesExecutor {
+    #[tracing::instrument(skip_all, fields(task = "discover_host_packages"))]
     async fn execute(&self, task: &scheduled_task::Model) -> crate::error::Result<()> {
         let tenant_id = task.tenant_id;
 

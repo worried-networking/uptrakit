@@ -109,6 +109,7 @@ struct FetchJob {
 
 #[async_trait::async_trait]
 impl TaskExecutor for FetchReleasesExecutor {
+    #[tracing::instrument(skip_all, fields(task = "fetch_releases"))]
     async fn execute(&self, task: &scheduled_task::Model) -> crate::error::Result<()> {
         let tenant_id = task.tenant_id;
 

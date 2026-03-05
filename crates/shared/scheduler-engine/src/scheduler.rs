@@ -137,6 +137,7 @@ impl Scheduler {
     /// `token` is checked before each claim attempt. If cancelled, the claiming
     /// loop stops immediately; already-running tasks observe the same token inside
     /// their own `biased` select and release their claims before terminating.
+    #[tracing::instrument(skip_all, fields(controller_id = %self.config.controller_id))]
     async fn poll_cycle(&self, token: &CancellationToken) {
         // Recover stale claims from crashed controllers
         match claim::recover_stale_claims(&self.db).await {
