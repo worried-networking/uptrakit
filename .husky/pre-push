@@ -11,10 +11,10 @@ echo "[pre-push] Running markdownlint..."
 markdownlint --config .markdownlint.json '**/*.md'
 
 echo "[pre-push] Running cargo check (db-sqlite)..."
-cargo check --workspace --no-default-features --features db-sqlite
+cargo check --no-default-features --features db-sqlite
 
 echo "[pre-push] Running cargo clippy (db-sqlite)..."
-cargo clippy --workspace --all-targets --no-default-features --features db-sqlite
+cargo clippy --all-targets --no-default-features --features db-sqlite
 
 echo "[pre-push] Running cargo deny check..."
 # Capture output so we can also detect warnings (cargo deny exits 0 on warn-level findings).
@@ -31,7 +31,7 @@ else
 fi
 
 echo "[pre-push] Running cargo test (db-sqlite)..."
-cargo test --workspace --no-default-features --features db-sqlite
+cargo test --no-default-features --features db-sqlite
 
 # --- Frontend ---
 if [ -d frontend/node_modules ]; then

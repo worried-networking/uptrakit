@@ -75,7 +75,7 @@ cargo test -p uptrakit-integration-tests -- --ignored all_components
 ```
 
 All tests are marked `#[ignore]` with descriptive messages explaining the Docker image
-requirement. They never run during `cargo test --workspace`.
+requirement. They never run during `cargo test`.
 
 ## Crate Structure
 

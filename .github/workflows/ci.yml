@@ -54,10 +54,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "rust-all-features"
-      - run: cargo check --workspace --no-default-features --features db-sqlite
-      - run: cargo check --workspace --all-features
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - run: cargo clippy --workspace --all-targets --no-default-features --features db-sqlite -- -D warnings
+      - run: cargo check --no-default-features --features db-sqlite
+      - run: cargo check --all-features
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --all-targets --no-default-features --features db-sqlite -- -D warnings
 
   backend-test:
     runs-on:
@@ -75,7 +75,7 @@ jobs:
         with:
           shared-key: "rust-all-features"
           save-if: "false"
-      - run: cargo test --workspace --all-features
+      - run: cargo test --all-features
 
   reverse-proxy-tests:
     runs-on:

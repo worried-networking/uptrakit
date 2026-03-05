@@ -4,7 +4,7 @@
 
 Quality gates are automatically enforced locally via git hooks managed by
 [`husky-rs`](https://crates.io/crates/husky-rs). Hooks auto-install on the first
-`cargo build --workspace` or `cargo test --workspace` — no manual setup required.
+`cargo build` or `cargo test` — no manual setup required.
 
 ### Hook tiers
 
@@ -20,10 +20,10 @@ Quality gates are automatically enforced locally via git hooks managed by
 
 | Command | Notes |
 | --- | --- |
-| `cargo check --workspace --no-default-features --features db-sqlite` | |
-| `cargo clippy --workspace --all-targets --no-default-features --features db-sqlite` | |
+| `cargo check --no-default-features --features db-sqlite` | |
+| `cargo clippy --all-targets --no-default-features --features db-sqlite` | |
 | `cargo deny check` | Fast (~3 s) |
-| `cargo test --workspace --no-default-features --features db-sqlite` | |
+| `cargo test --no-default-features --features db-sqlite` | |
 | `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`) | Guarded by `node_modules` |
 
 ### Bypass methods
@@ -42,10 +42,10 @@ Run all relevant quality gates for the areas touched by your change.
 
 ```sh
 cargo fmt --all                                                      # Format
-cargo check --workspace --no-default-features --features db-sqlite   # Lint with minimal features-set
-cargo check --workspace --all-features                               # Lint
-cargo clippy --workspace --all-targets --no-default-features --features db-sqlite # Lint with Clippy over minimal features-set
-cargo clippy --workspace --all-targets --all-features                # Lint with Clippy
+cargo check --no-default-features --features db-sqlite               # Lint with minimal features-set
+cargo check --all-features                                           # Lint
+cargo clippy --all-targets --no-default-features --features db-sqlite # Lint with Clippy over minimal features-set
+cargo clippy --all-targets --all-features                            # Lint with Clippy
 cargo test --all-features                                            # Tests
 cargo deny check                                                     # Validate new dependencies
 ```
@@ -92,6 +92,19 @@ This includes (non-exhaustive):
 - TLS termination and certificate validation behavior that proxies depend on
 - reverse proxy middleware, settings, or related wire/auth flows
 
+### System integration-sensitive changes (mandatory)
+
+If the change can affect enrollment, wire protocol, service lifecycle, or inter-component
+communication, you must also run the system integration tests:
+
+```sh
+docker build -f docker/Dockerfile.test -t uptrakit-test:latest .
+cargo test -p uptrakit-integration-tests -- --ignored
+```
+
+This requires Docker and covers end-to-end enrollment and communication between all binaries
+(controller, agent, agent-ssh, scheduler, mqtt).
+
 ## Frontend (SvelteKit)
 
 ```sh
@@ -99,6 +112,7 @@ cd frontend && npm install                                   # Install dependenc
 cd frontend && npm run lint                                  # ESLint
 cd frontend && npm run format:check                          # Prettier format check
 cd frontend && npm run check                                 # Svelte/TypeScript type check
+cd frontend && npm run test                                  # Vitest unit and component tests
 cd frontend && npm run build                                 # Production build
 ```
 

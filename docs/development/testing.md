@@ -188,7 +188,7 @@ cargo test -p uptrakit-web-api --features db-sqlite    # route/integration tests
 Or run the entire workspace (preferred, mirrors CI):
 
 ```bash
-cargo test --workspace --all-features
+cargo test --all-features
 ```
 
 ### What We Test
@@ -290,7 +290,7 @@ cargo test -p uptrakit-web-api --features db-sqlite
 cargo test -p uptrakit-web-api --features db-sqlite integration_tests::auth_flow
 
 # Full workspace (includes these automatically)
-cargo test --workspace --all-features
+cargo test --all-features
 ```
 
 ## Testing Expectations - Detailed
