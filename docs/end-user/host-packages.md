@@ -89,6 +89,40 @@ Packages are classified by update category:
 
 The APT plugin detects security updates by checking if the package source is a `*-security` repository.
 
+## Promoting a package to a software item
+
+You can promote any host package into a tracked [software item](update-workflow.md) for richer
+visibility: named entry in the Software list, per-host version history, multi-host tracking, and
+access to approval workflows, manual update triggers, and update history.
+
+**The operation is additive** — the host package is not removed or modified.
+
+### Web UI
+
+1. Open the **Packages** page for a host (`/hosts/{id}/packages`).
+2. Click the **Promote** button on any package row.
+3. Optionally set a custom name (defaults to the package name).
+4. Advanced: optionally link to an existing software item by UUID.
+5. Click **Promote** — a toast notification links directly to the new software item.
+
+### CLI
+
+```bash
+# Promote with the package name as the software item name
+uptrakit host-packages promote <host_id> <package_id>
+
+# Set a custom display name
+uptrakit host-packages promote <host_id> <package_id> --name "Claude Code"
+
+# Link to an existing software item instead of creating a new one
+uptrakit host-packages promote <host_id> <package_id> --software-item-id <uuid>
+```
+
+### Idempotency
+
+Calling promote a second time for the same package returns the existing software item without
+creating duplicates. The call is safe to repeat.
+
 ## Relationship to software items
 
 Host packages and [software items](update-workflow.md) are complementary tracking systems:
@@ -98,7 +132,8 @@ Host packages and [software items](update-workflow.md) are complementary trackin
 - **Host packages** are for aggregate system update monitoring. They are created immediately on discovery
   (no approval step) and shown per-host.
 
-The same package can exist in both systems simultaneously. Updates through either system work independently.
+The same package can exist in both systems simultaneously. Updates through either system work
+independently. Use [promote](#promoting-a-package-to-a-software-item) to bridge the two.
 
 ## Related documentation
 

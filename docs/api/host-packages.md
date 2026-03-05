@@ -13,6 +13,7 @@ See [architecture: host packages](../architecture/host-packages.md) for entity d
 | GET | `/api/v1/hosts/{host_id}/packages/{id}` | ViewSoftware | Get package detail with update history |
 | PUT | `/api/v1/hosts/{host_id}/packages/{id}` | ManageSoftware | Update package (enable/disable) |
 | DELETE | `/api/v1/hosts/{host_id}/packages/{id}` | ManageSoftware | Soft-delete package |
+| POST | `/api/v1/hosts/{host_id}/packages/{id}/promote` | ManageSoftware | Promote package to tracked software item |
 | GET | `/api/v1/hosts/{host_id}/package-ignores` | ViewSoftware | List ignore rules |
 | POST | `/api/v1/hosts/{host_id}/package-ignores` | ManageSoftware | Create ignore rule |
 | DELETE | `/api/v1/hosts/{host_id}/package-ignores/{id}` | ManageSoftware | Remove ignore rule |
@@ -113,6 +114,53 @@ DELETE /api/v1/hosts/{host_id}/packages/{id}[?ignore=true]
 Soft-deletes the package. If `ignore=true`, also creates an ignore rule to prevent re-discovery.
 
 Returns `204 No Content`.
+
+## Promote a host package
+
+```text
+POST /api/v1/hosts/{host_id}/packages/{id}/promote
+```
+
+Promotes an auto-discovered host package into a fully tracked software item. The original host
+package is unchanged (additive operation). The software item is pre-populated with the installed
+version, latest version, and all three plugin roles (`DetectVersion`, `FetchReleases`,
+`ExecuteUpdate`) pointing to the same plugin config and package identifier as the source package.
+
+### Idempotency
+
+If the host already has a `host_software_item_plugin` row matching the same
+`(host_id, plugin_config_id, package_identifier)` triple, the existing software item is returned
+without creating duplicates. Providing `software_item_id` explicitly bypasses the auto-detection
+and links the package to the specified item instead.
+
+### Request body
+
+All fields are optional.
+
+```json
+{
+  "name": "Claude Code",
+  "software_item_id": "uuid"
+}
+```
+
+| Field | Type | Description |
+| :---- | :--- | :---------- |
+| `name` | string | Display name for the new software item. Defaults to the package name. Ignored when `software_item_id` is provided. Must not be blank if present. |
+| `software_item_id` | UUID | Promote into an existing software item instead of creating a new one. Must belong to the same tenant. |
+
+### Response
+
+Returns `200 OK` with a `SoftwareItemDetailResponse` — the same structure returned by
+`GET /api/v1/software-items/{id}`, including the host assignment and version data.
+
+### Errors
+
+| Status | Condition |
+| :----- | :-------- |
+| `400 Bad Request` | `name` is blank |
+| `404 Not Found` | Package or explicit `software_item_id` not found |
+| `500 Internal Server Error` | Database error |
 
 ## Ignore rules
 

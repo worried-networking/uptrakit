@@ -402,6 +402,8 @@ examples.
   ignore rule). Requires `ManageSoftware`.
 - `POST /api/v1/hosts/{host_id}/packages/{id}/update` — trigger single package update. Requires
   `ManageSoftware`.
+- `POST /api/v1/hosts/{host_id}/packages/{id}/promote` — promote a host package into a tracked
+  software item. Requires `ManageSoftware`. See [host-packages.md](host-packages.md#promote-a-host-package).
 - `POST /api/v1/hosts/{host_id}/packages/update-all` — trigger batch update for outdated
   packages (`?category=security` for security-only). Requires `ManageSoftware`.
 - `POST /api/v1/hosts/{host_id}/packages/check-versions` — trigger version check. Requires
