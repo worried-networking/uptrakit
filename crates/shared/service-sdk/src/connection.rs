@@ -79,6 +79,7 @@ impl ControllerConnection {
     /// Wraps the message in a [`ServiceEnvelope`](uptrakit_internal_wire::ServiceEnvelope)
     /// with the next sequence number, serializes to JSON, and sends as a
     /// WebSocket text frame.
+    #[tracing::instrument(skip_all)]
     pub async fn send(&mut self, msg: ServiceMessage) -> Result<()> {
         use tokio_tungstenite::tungstenite::Message;
 
@@ -103,6 +104,7 @@ impl ControllerConnection {
     /// - Skips `Pong` and `Frame` messages
     /// - Stores close frame reason (accessible via [`close_reason`](Self::close_reason))
     /// - Validates incoming sequence numbers
+    #[tracing::instrument(skip_all)]
     pub async fn recv(&mut self) -> Result<Option<ControllerMessage>> {
         use tokio_tungstenite::tungstenite::Message;
 

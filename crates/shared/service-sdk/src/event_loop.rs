@@ -51,6 +51,7 @@ pub struct EventLoopContext<'a> {
 ///
 /// Service-specific behaviour is injected through [`ServiceHandler`]
 /// callbacks.
+#[tracing::instrument(skip_all, name = "service.event_loop")]
 pub(crate) async fn run_event_loop<H: ServiceHandler>(
     handler: &mut H,
     host: &str,
