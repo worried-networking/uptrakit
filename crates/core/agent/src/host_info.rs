@@ -178,9 +178,8 @@ mod tests {
         // Either a real machine ID (non-empty) or the session-unique fallback.
         // The fallback always starts with "unknown-".
         assert!(!id.is_empty());
-        if id.starts_with("unknown-") {
+        if let Some(suffix) = id.strip_prefix("unknown-") {
             // Verify it has the UUID suffix (format: "unknown-<uuidv7>").
-            let suffix = &id["unknown-".len()..];
             assert!(
                 !suffix.is_empty(),
                 "fallback machine-ID must have a non-empty UUID suffix, got: {id}"

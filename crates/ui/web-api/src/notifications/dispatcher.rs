@@ -98,109 +98,6 @@ pub(crate) fn merge_smtp_into_config_pub(
     merge_smtp_into_config(smtp, config)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::settings::SmtpSettingsSnapshot;
-
-    fn make_smtp(
-        host: Option<&str>,
-        port: Option<u16>,
-        from: Option<&str>,
-    ) -> SmtpSettingsSnapshot {
-        SmtpSettingsSnapshot {
-            host: host.map(|s| s.to_string()),
-            port,
-            username: None,
-            password: None,
-            from_address: from.map(|s| s.to_string()),
-            from_name: None,
-            tls_mode: "starttls".to_string(),
-        }
-    }
-
-    // ── merge_smtp_into_config ────────────────────────────────────────────────
-
-    /// The SMTP host and default port (587) are injected into the config object.
-    #[test]
-    fn merge_smtp_sets_host_and_default_port() {
-        let smtp = make_smtp(Some("mail.example.com"), None, Some("noreply@example.com"));
-        let config = serde_json::json!({ "to_addresses": ["user@test.local"] });
-        let merged = merge_smtp_into_config(&smtp, config);
-
-        assert_eq!(merged["smtp_host"], "mail.example.com");
-        assert_eq!(
-            merged["smtp_port"], 587,
-            "default port must be 587 when port is None"
-        );
-        assert_eq!(merged["from_address"], "noreply@example.com");
-        // Original fields are preserved.
-        assert!(merged["to_addresses"].is_array());
-    }
-
-    /// When a non-default port is set it is used verbatim.
-    #[test]
-    fn merge_smtp_uses_explicit_port() {
-        let smtp = make_smtp(
-            Some("smtp.corp.internal"),
-            Some(465),
-            Some("alerts@corp.internal"),
-        );
-        let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&smtp, config);
-
-        assert_eq!(merged["smtp_port"], 465);
-    }
-
-    /// Username, password, from_name, and tls_mode are all propagated.
-    #[test]
-    fn merge_smtp_propagates_all_optional_fields() {
-        let mut smtp = make_smtp(Some("smtp.example.com"), None, Some("from@example.com"));
-        smtp.username = Some("smtpuser".to_string());
-        smtp.password = Some("secret".to_string());
-        smtp.from_name = Some("Uptrakit Alerts".to_string());
-        smtp.tls_mode = "tls".to_string();
-
-        let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&smtp, config);
-
-        assert_eq!(merged["smtp_username"], "smtpuser");
-        assert_eq!(merged["smtp_password"], "secret");
-        assert_eq!(merged["from_name"], "Uptrakit Alerts");
-        assert_eq!(merged["tls_mode"], "tls");
-    }
-
-    /// When no host is set the `smtp_host` key is not inserted.
-    #[test]
-    fn merge_smtp_omits_host_when_none() {
-        let smtp = make_smtp(None, None, None);
-        let config = serde_json::json!({});
-        let merged = merge_smtp_into_config(&smtp, config);
-
-        assert!(
-            merged.get("smtp_host").is_none(),
-            "smtp_host must not be set when host is None"
-        );
-    }
-
-    /// Non-email channel configs are returned unchanged by the caller-side guard
-    /// in `dispatch_loop`.  We test this by verifying `merge_smtp_into_config`
-    /// does not inspect the channel type — the guard is purely at the call site.
-    /// The function is only called for email channels, so this test documents the
-    /// assumption: passing a non-email config object still works (no panic).
-    #[test]
-    fn merge_smtp_works_on_any_json_object() {
-        let smtp = make_smtp(Some("smtp.example.com"), None, Some("from@example.com"));
-        // A webhook-style config with no email fields.
-        let config = serde_json::json!({ "url": "https://webhook.example.com" });
-        let merged = merge_smtp_into_config(&smtp, config);
-
-        // SMTP fields are merged in but the original webhook field is still there.
-        assert_eq!(merged["url"], "https://webhook.example.com");
-        assert_eq!(merged["smtp_host"], "smtp.example.com");
-    }
-}
-
 async fn dispatch_loop(
     db: DatabaseConnection,
     channel_registry: Arc<ChannelRegistry>,
@@ -407,5 +304,108 @@ async fn dispatch_loop(
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::SmtpSettingsSnapshot;
+
+    fn make_smtp(
+        host: Option<&str>,
+        port: Option<u16>,
+        from: Option<&str>,
+    ) -> SmtpSettingsSnapshot {
+        SmtpSettingsSnapshot {
+            host: host.map(|s| s.to_string()),
+            port,
+            username: None,
+            password: None,
+            from_address: from.map(|s| s.to_string()),
+            from_name: None,
+            tls_mode: "starttls".to_string(),
+        }
+    }
+
+    // ── merge_smtp_into_config ────────────────────────────────────────────────
+
+    /// The SMTP host and default port (587) are injected into the config object.
+    #[test]
+    fn merge_smtp_sets_host_and_default_port() {
+        let smtp = make_smtp(Some("mail.example.com"), None, Some("noreply@example.com"));
+        let config = serde_json::json!({ "to_addresses": ["user@test.local"] });
+        let merged = merge_smtp_into_config(&smtp, config);
+
+        assert_eq!(merged["smtp_host"], "mail.example.com");
+        assert_eq!(
+            merged["smtp_port"], 587,
+            "default port must be 587 when port is None"
+        );
+        assert_eq!(merged["from_address"], "noreply@example.com");
+        // Original fields are preserved.
+        assert!(merged["to_addresses"].is_array());
+    }
+
+    /// When a non-default port is set it is used verbatim.
+    #[test]
+    fn merge_smtp_uses_explicit_port() {
+        let smtp = make_smtp(
+            Some("smtp.corp.internal"),
+            Some(465),
+            Some("alerts@corp.internal"),
+        );
+        let config = serde_json::json!({});
+        let merged = merge_smtp_into_config(&smtp, config);
+
+        assert_eq!(merged["smtp_port"], 465);
+    }
+
+    /// Username, password, from_name, and tls_mode are all propagated.
+    #[test]
+    fn merge_smtp_propagates_all_optional_fields() {
+        let mut smtp = make_smtp(Some("smtp.example.com"), None, Some("from@example.com"));
+        smtp.username = Some("smtpuser".to_string());
+        smtp.password = Some("secret".to_string());
+        smtp.from_name = Some("Uptrakit Alerts".to_string());
+        smtp.tls_mode = "tls".to_string();
+
+        let config = serde_json::json!({});
+        let merged = merge_smtp_into_config(&smtp, config);
+
+        assert_eq!(merged["smtp_username"], "smtpuser");
+        assert_eq!(merged["smtp_password"], "secret");
+        assert_eq!(merged["from_name"], "Uptrakit Alerts");
+        assert_eq!(merged["tls_mode"], "tls");
+    }
+
+    /// When no host is set the `smtp_host` key is not inserted.
+    #[test]
+    fn merge_smtp_omits_host_when_none() {
+        let smtp = make_smtp(None, None, None);
+        let config = serde_json::json!({});
+        let merged = merge_smtp_into_config(&smtp, config);
+
+        assert!(
+            merged.get("smtp_host").is_none(),
+            "smtp_host must not be set when host is None"
+        );
+    }
+
+    /// Non-email channel configs are returned unchanged by the caller-side guard
+    /// in `dispatch_loop`.  We test this by verifying `merge_smtp_into_config`
+    /// does not inspect the channel type — the guard is purely at the call site.
+    /// The function is only called for email channels, so this test documents the
+    /// assumption: passing a non-email config object still works (no panic).
+    #[test]
+    fn merge_smtp_works_on_any_json_object() {
+        let smtp = make_smtp(Some("smtp.example.com"), None, Some("from@example.com"));
+        // A webhook-style config with no email fields.
+        let config = serde_json::json!({ "url": "https://webhook.example.com" });
+        let merged = merge_smtp_into_config(&smtp, config);
+
+        // SMTP fields are merged in but the original webhook field is still there.
+        assert_eq!(merged["url"], "https://webhook.example.com");
+        assert_eq!(merged["smtp_host"], "smtp.example.com");
     }
 }
