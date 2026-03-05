@@ -111,6 +111,7 @@ use crate::AppState;
         crate::routes::host_packages::get_host_package,
         crate::routes::host_packages::update_host_package,
         crate::routes::host_packages::delete_host_package,
+        crate::routes::host_packages::promote_host_package,
         crate::routes::host_packages::list_host_package_ignores,
         crate::routes::host_packages::create_host_package_ignore,
         crate::routes::host_packages::delete_host_package_ignore,
@@ -255,6 +256,7 @@ use crate::AppState;
             crate::routes::host_packages::HostPackageDetailResponse,
             uptrakit_web_api_types::host_packages::HostPackageUpdateHistoryResponse,
             crate::routes::host_packages::UpdateHostPackageRequest,
+            crate::routes::host_packages::PromoteHostPackageRequest,
             crate::routes::host_packages::HostPackageIgnoreResponse,
             crate::routes::host_packages::CreateHostPackageIgnoreRequest,
             crate::routes::host_packages::HostUpdateSummary,
@@ -548,6 +550,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::host_packages::update_host_package,
             crate::routes::host_packages::delete_host_package
         ))
+        .routes(routes!(crate::routes::host_packages::promote_host_package))
         .routes(routes!(
             crate::routes::host_packages::list_host_package_ignores,
             crate::routes::host_packages::create_host_package_ignore

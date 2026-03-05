@@ -26,9 +26,11 @@ use uuid::Uuid;
 
 pub use uptrakit_web_api_types::host_packages::{
     CreateHostPackageIgnoreRequest, HostPackageDetailResponse, HostPackageIgnoreResponse,
-    HostPackageResponse, HostUpdateSummary, ListHostPackagesParams, UpdateHostPackageRequest,
+    HostPackageResponse, HostUpdateSummary, ListHostPackagesParams, PromoteHostPackageRequest,
+    UpdateHostPackageRequest,
 };
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
+pub use uptrakit_web_api_types::software_items::SoftwareItemDetailResponse;
 
 // ── Helper: verify host belongs to tenant ───────────────────────────────────
 
@@ -390,6 +392,66 @@ pub async fn delete_host_package_ignore(
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Ignore rule not found"),
         Err(e) => {
             tracing::error!("Failed to delete host package ignore: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
+    }
+}
+
+// ── Promote host package ─────────────────────────────────────────────────────
+
+/// Promote a host package to a tracked software item.
+///
+/// Creates a software item alongside the host package (additive — the package is
+/// kept unchanged). If the host is already assigned to a matching software item,
+/// the existing item is returned (idempotent). Returns the full software item detail
+/// including host assignments and pre-populated version data.
+#[utoipa::path(
+    post,
+    path = "/api/v1/hosts/{host_id}/packages/{id}/promote",
+    params(
+        ("host_id" = Uuid, Path, description = "Host UUID"),
+        ("id" = Uuid, Path, description = "Host package UUID")
+    ),
+    request_body = PromoteHostPackageRequest,
+    responses(
+        (status = 200, description = "Software item created or returned (idempotent)", body = SoftwareItemDetailResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Host, package, or referenced software item not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "Host Packages",
+    extensions(("x-required-permission" = json!("manage_software"))),
+    security(("bearer_token" = []))
+)]
+pub async fn promote_host_package(
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Path((host_id, package_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<PromoteHostPackageRequest>,
+) -> Response {
+    if let Err(e) = req.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    if let Err(resp) = verify_host(&tenant_db, host_id).await {
+        return resp;
+    }
+
+    match hp_queries::promote_host_package(&tenant_db, host_id, package_id, req).await {
+        Ok(detail) => (StatusCode::OK, Json(detail)).into_response(),
+        Err(ref e)
+            if matches!(
+                e.current_context(),
+                hp_queries::HostPackageError::PackageNotFound
+                    | hp_queries::HostPackageError::SoftwareItemNotFound(_)
+            ) =>
+        {
+            error_response(StatusCode::NOT_FOUND, e.current_context().to_string())
+        }
+        Err(e) => {
+            tracing::error!("Failed to promote host package: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }

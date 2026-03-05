@@ -12,18 +12,25 @@ use sea_orm::{
 use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
-    host_package, host_package_ignore, host_package_update_history, plugin_config, prelude::*,
+    host_package, host_package_ignore, host_package_update_history, host_software_item,
+    host_software_item_plugin, plugin_config, prelude::*, software_item,
 };
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_shared_types::PluginRole;
 use uptrakit_web_api_types::host_packages::{
     HostPackageIgnoreResponse, HostPackageResponse, HostPackageUpdateHistoryResponse,
-    HostUpdateSummary, ListHostPackagesParams,
+    HostUpdateSummary, ListHostPackagesParams, PromoteHostPackageRequest,
 };
 use uptrakit_web_api_types::pagination::PaginatedResponse;
+use uptrakit_web_api_types::software_items::{
+    AssignHostsRequest, CreateSoftwareItemRequest, HostPluginRoleAssignment,
+    HostSoftwareAssignment, SoftwareItemDetailResponse,
+};
 use uptrakit_web_api_types::update_history::UpdateStatus;
 use uuid::Uuid;
 
+use crate::queries::software_items as si_queries;
 use crate::tenant_db::TenantDb;
 
 /// Error returned by host package query helpers.
@@ -31,6 +38,15 @@ use crate::tenant_db::TenantDb;
 pub enum HostPackageError {
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
+    /// Host package not found (for promote).
+    #[error("host package not found")]
+    PackageNotFound,
+    /// Explicit software_item_id not found in this tenant.
+    #[error("software item not found: {0}")]
+    SoftwareItemNotFound(Uuid),
+    /// Wraps errors from software_items query calls.
+    #[error("software item error: {0}")]
+    SoftwareItemError(String),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<HostPackageError>>;
@@ -594,4 +610,169 @@ pub async fn get_host_package_plugin_config(
         .await
         .context_to()?;
     Ok(result)
+}
+
+// ── Promote host package to software item ──────────────────────────────────
+
+/// Promote a host package to a tracked software item.
+///
+/// Behaviour:
+/// - Loads the host package and verifies it belongs to `host_id`.
+/// - Resolves the target software item:
+///   - If `req.software_item_id` is set: verifies it exists in this tenant.
+///   - Otherwise: looks up an existing assignment by `(host_id, plugin_config_id,
+///     package_identifier)` for idempotency; if none found, creates a new software item.
+/// - Calls `assign_hosts` with all three plugin roles pointing to the package's plugin config.
+/// - Copies version data from the host package into the `host_software_item` row.
+/// - Returns the full `SoftwareItemDetailResponse`.
+///
+/// This operation is additive — the host package is never deleted or modified.
+pub async fn promote_host_package(
+    tenant_db: &TenantDb,
+    host_id: Uuid,
+    package_id: Uuid,
+    req: PromoteHostPackageRequest,
+) -> Result<SoftwareItemDetailResponse> {
+    // 1. Load host package, verify it belongs to host_id.
+    let pkg = tenant_db
+        .find_by_id::<host_package::Entity, _>(package_id)
+        .filter(host_package::Column::HostId.eq(host_id))
+        .filter(host_package::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(HostPackageError::PackageNotFound))?;
+
+    // 2. Resolve the target software item.
+    let software_item_id = if let Some(sid) = req.software_item_id {
+        // Caller specified an existing software item — verify tenant ownership.
+        let exists = SoftwareItem::find_by_id(sid)
+            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .one(tenant_db.db())
+            .await
+            .context_to()?;
+        if exists.is_none() {
+            bail!(HostPackageError::SoftwareItemNotFound(sid));
+        }
+        sid
+    } else {
+        // Check idempotency: is this host already assigned via the same plugin config +
+        // package_identifier?
+        let existing_plugin = HostSoftwareItemPlugin::find()
+            .filter(host_software_item_plugin::Column::HostId.eq(host_id))
+            .filter(host_software_item_plugin::Column::PluginConfigId.eq(pkg.plugin_config_id))
+            .filter(
+                host_software_item_plugin::Column::PackageIdentifier.eq(&pkg.package_identifier),
+            )
+            .one(tenant_db.db())
+            .await
+            .context_to()?;
+
+        if let Some(existing) = existing_plugin {
+            // Verify the referenced software item still exists and is active.
+            let exists = SoftwareItem::find_by_id(existing.software_item_id)
+                .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+                .filter(software_item::Column::DeactivatedAt.is_null())
+                .one(tenant_db.db())
+                .await
+                .context_to()?;
+            if exists.is_some() {
+                existing.software_item_id
+            } else {
+                // Software item was deactivated — fall through and create a new one.
+                create_new_software_item(tenant_db, &pkg.name, req.name).await?
+            }
+        } else {
+            create_new_software_item(tenant_db, &pkg.name, req.name).await?
+        }
+    };
+
+    // 3. Build AssignHostsRequest with all 3 roles.
+    let roles = [
+        PluginRole::DetectVersion,
+        PluginRole::FetchReleases,
+        PluginRole::ExecuteUpdate,
+    ];
+    let plugins: Vec<HostPluginRoleAssignment> = roles
+        .into_iter()
+        .map(|role| HostPluginRoleAssignment {
+            role,
+            plugin_config_id: Some(pkg.plugin_config_id),
+            plugin_config: None,
+            package_identifier: pkg.package_identifier.clone(),
+            config_override: None,
+            execution_site: "auto".to_string(),
+        })
+        .collect();
+
+    let assignment = AssignHostsRequest {
+        host_assignments: vec![HostSoftwareAssignment { host_id, plugins }],
+    };
+
+    // 4. Assign hosts (idempotent — upserts host_software_item and plugin rows).
+    si_queries::assign_hosts(tenant_db, software_item_id, assignment)
+        .await
+        .map_err(|e| report!(HostPackageError::SoftwareItemError(e.to_string())))?;
+
+    // 5. Copy version data from the host package to host_software_item if any non-null.
+    let has_version_data = pkg.installed_version.is_some()
+        || pkg.latest_version.is_some()
+        || pkg.latest_release_metadata.is_some();
+
+    if has_version_data {
+        HostSoftwareItem::update_many()
+            .col_expr(
+                host_software_item::Column::InstalledVersion,
+                Expr::value(pkg.installed_version),
+            )
+            .col_expr(
+                host_software_item::Column::InstalledVersionDetectedAt,
+                Expr::value(pkg.installed_version_detected_at),
+            )
+            .col_expr(
+                host_software_item::Column::LatestVersion,
+                Expr::value(pkg.latest_version),
+            )
+            .col_expr(
+                host_software_item::Column::LatestVersionFetchedAt,
+                Expr::value(pkg.latest_version_fetched_at),
+            )
+            .col_expr(
+                host_software_item::Column::LatestReleaseMetadata,
+                Expr::value(pkg.latest_release_metadata),
+            )
+            .col_expr(
+                host_software_item::Column::UpdateCategory,
+                Expr::value(pkg.update_category),
+            )
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
+            .exec(tenant_db.db())
+            .await
+            .context_to()?;
+    }
+
+    // 6. Return the full software item detail.
+    si_queries::get_software_item(tenant_db, software_item_id)
+        .await
+        .map_err(|e| report!(HostPackageError::SoftwareItemError(e.to_string())))?
+        .ok_or_else(|| report!(HostPackageError::SoftwareItemNotFound(software_item_id)))
+}
+
+/// Helper: create a new software item using the package name or a caller-supplied override.
+async fn create_new_software_item(
+    tenant_db: &TenantDb,
+    pkg_name: &str,
+    name_override: Option<String>,
+) -> Result<Uuid> {
+    let name = name_override.unwrap_or_else(|| pkg_name.to_string());
+    let create_req = CreateSoftwareItemRequest {
+        name,
+        enabled: true,
+    };
+    si_queries::create_software_item(tenant_db, create_req)
+        .await
+        .map(|r| r.id)
+        .map_err(|e| report!(HostPackageError::SoftwareItemError(e.to_string())))
 }

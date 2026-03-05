@@ -2,9 +2,11 @@ use crate::Result;
 use crate::UptrakitClient;
 use uptrakit_web_api_types::host_packages::{
     CreateHostPackageIgnoreRequest, HostPackageDetailResponse, HostPackageIgnoreResponse,
-    HostPackageResponse, ListHostPackagesParams, UpdateHostPackageRequest,
+    HostPackageResponse, ListHostPackagesParams, PromoteHostPackageRequest,
+    UpdateHostPackageRequest,
 };
 use uptrakit_web_api_types::pagination::PaginatedResponse;
+use uptrakit_web_api_types::software_items::SoftwareItemDetailResponse;
 use uuid::Uuid;
 
 impl UptrakitClient {
@@ -91,6 +93,24 @@ impl UptrakitClient {
         ))
         .await
     }
+
+    /// Promote a host package to a tracked software item.
+    ///
+    /// Creates a software item alongside the host package (additive). If the host is
+    /// already assigned to a matching software item, the existing item is returned
+    /// (idempotent).
+    pub async fn promote_host_package(
+        &self,
+        host_id: &Uuid,
+        package_id: &Uuid,
+        req: &PromoteHostPackageRequest,
+    ) -> Result<SoftwareItemDetailResponse> {
+        self.post_json(
+            &crate::paths::host_packages::promote(host_id, package_id),
+            req,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]
@@ -157,6 +177,10 @@ mod tests {
             format!("/api/v1/hosts/{host_id}/packages/{pkg_id}")
         );
         assert_eq!(
+            crate::paths::host_packages::promote(&host_id, &pkg_id),
+            format!("/api/v1/hosts/{host_id}/packages/{pkg_id}/promote")
+        );
+        assert_eq!(
             crate::paths::host_packages::ignores(&host_id),
             format!("/api/v1/hosts/{host_id}/package-ignores")
         );
@@ -164,5 +188,16 @@ mod tests {
             crate::paths::host_packages::ignore_by_id(&host_id, &pkg_id),
             format!("/api/v1/hosts/{host_id}/package-ignores/{pkg_id}")
         );
+    }
+
+    #[test]
+    fn promote_request_serialization() {
+        let req = PromoteHostPackageRequest {
+            name: Some("My App".to_string()),
+            software_item_id: None,
+        };
+        let json = serde_json::to_value(&req).expect("serialize");
+        assert_eq!(json["name"], "My App");
+        assert!(json.get("software_item_id").is_none() || json["software_item_id"].is_null());
     }
 }

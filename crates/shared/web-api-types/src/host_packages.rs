@@ -212,6 +212,35 @@ pub struct BatchHostPackageSkippedItem {
     pub reason: String,
 }
 
+/// Request body for promoting a host package to a tracked software item.
+///
+/// Creates a software item alongside the host package (additive — the package
+/// is kept unchanged). If the host is already assigned to a matching software
+/// item the existing item is returned (idempotent).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PromoteHostPackageRequest {
+    /// Display name for the new software item.
+    /// Defaults to the package name if omitted.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Promote into an existing software item instead of creating a new one.
+    #[serde(default)]
+    pub software_item_id: Option<Uuid>,
+}
+
+impl Validate for PromoteHostPackageRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.name.as_deref().is_some_and(|n| n.trim().is_empty()) {
+            return Err(ValidationError {
+                field: "name",
+                message: "name must not be blank".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Ignore rules
 // ---------------------------------------------------------------------------
@@ -455,6 +484,55 @@ mod tests {
         };
         let err = req.validate().unwrap_err();
         assert_eq!(err.field, "package_identifier");
+    }
+
+    // ── PromoteHostPackageRequest ────────────────────────────────────
+
+    #[test]
+    fn promote_request_validate_valid_with_name() {
+        let req = PromoteHostPackageRequest {
+            name: Some("Claude Code".to_string()),
+            software_item_id: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn promote_request_validate_valid_no_name() {
+        let req = PromoteHostPackageRequest {
+            name: None,
+            software_item_id: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn promote_request_validate_blank_name() {
+        let req = PromoteHostPackageRequest {
+            name: Some("   ".to_string()),
+            software_item_id: None,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "name");
+    }
+
+    #[test]
+    fn promote_request_round_trip() {
+        let req = PromoteHostPackageRequest {
+            name: Some("My App".to_string()),
+            software_item_id: Some(sample_uuid()),
+        };
+        let json = serde_json::to_string(&req).expect("serialize");
+        let de: PromoteHostPackageRequest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(de.name.as_deref(), Some("My App"));
+        assert_eq!(de.software_item_id, Some(sample_uuid()));
+    }
+
+    #[test]
+    fn promote_request_defaults_on_empty_json() {
+        let de: PromoteHostPackageRequest = serde_json::from_str("{}").expect("deserialize empty");
+        assert!(de.name.is_none());
+        assert!(de.software_item_id.is_none());
     }
 
     // ── HostUpdateSummary ────────────────────────────────────────────

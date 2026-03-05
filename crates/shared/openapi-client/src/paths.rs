@@ -362,6 +362,10 @@ pub(crate) mod host_packages {
     pub(crate) fn by_id(host_id: &Uuid, id: &Uuid) -> String {
         format!("/api/v1/hosts/{host_id}/packages/{id}")
     }
+    /// `POST /api/v1/hosts/{host_id}/packages/{id}/promote`
+    pub(crate) fn promote(host_id: &Uuid, id: &Uuid) -> String {
+        format!("/api/v1/hosts/{host_id}/packages/{id}/promote")
+    }
     /// `GET /api/v1/hosts/{host_id}/package-ignores` · `POST …`
     pub(crate) fn ignores(host_id: &Uuid) -> String {
         format!("/api/v1/hosts/{host_id}/package-ignores")
