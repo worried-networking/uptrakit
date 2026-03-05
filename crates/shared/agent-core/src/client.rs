@@ -189,6 +189,7 @@ pub async fn run_check_versions(
 /// Docker host for the SSH agent) into each plugin config before creation.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
+#[tracing::instrument(skip_all, fields(assignment_count = payload.assignments.len()))]
 pub async fn handle_check_versions(
     payload: uptrakit_internal_wire::CheckVersionsPayload,
     executor: Arc<dyn CommandExecutor>,
@@ -269,6 +270,7 @@ pub async fn start_update(
 ///
 /// For the SSH agent (which manages multiple hosts), use `start_update()`
 /// directly together with a per-host concurrency check and a forwarder task.
+#[tracing::instrument(skip_all, fields(update_history_id = %payload.update_history_id))]
 pub async fn handle_execute_update(
     payload: uptrakit_internal_wire::ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
@@ -346,6 +348,7 @@ pub async fn run_execute_batch_host_package_update(
 /// config before instantiation.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
+#[tracing::instrument(skip_all)]
 pub async fn handle_execute_batch_host_package_update(
     payload: ExecuteBatchHostPackageUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
@@ -558,6 +561,7 @@ pub async fn run_discover_software(
 /// Docker host for the SSH agent) into each plugin config before creation.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if sending the response fails.
+#[tracing::instrument(skip_all)]
 pub async fn handle_discover_software(
     payload: DiscoverSoftwarePayload,
     executor: Arc<dyn CommandExecutor>,

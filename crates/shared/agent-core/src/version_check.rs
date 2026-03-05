@@ -94,6 +94,7 @@ pub async fn check_version(
 /// for detect-only groups.
 ///
 /// Results are returned in the same order as `assignments`.
+#[tracing::instrument(skip_all, fields(assignment_count = assignments.len()))]
 pub async fn batch_check_versions(
     assignments: Vec<VersionCheckAssignment>,
     executor: Arc<dyn CommandExecutor>,

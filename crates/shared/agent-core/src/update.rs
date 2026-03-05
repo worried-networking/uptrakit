@@ -91,6 +91,7 @@ pub struct UpdateOutputMessage {
 ///
 /// The `executor` parameter controls where commands run — `LocalCommandExecutor`
 /// for the regular agent, `SshCommandExecutor` for the SSH agent.
+#[tracing::instrument(skip_all, fields(software_item = %payload.software_item_name, update_history_id = %payload.update_history_id))]
 pub async fn execute_update(
     payload: ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
@@ -327,6 +328,7 @@ async fn detect_current_version(
 /// plugin.execute_update(...)         ← the actual update
 /// plugin.post_update_hook(ctx, tx)   ← errors logged at WARN, non-fatal
 /// ```
+#[tracing::instrument(skip_all, fields(plugin_type = %payload.execute_update_plugin.plugin_type))]
 async fn execute_plugin_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
@@ -438,6 +440,7 @@ async fn execute_plugin_update(
 /// Each hook is wrapped in [`HOOK_TIMEOUT`] — if a single hook exceeds the
 /// limit, its child process is killed (`kill_on_drop(true)`) and a
 /// `HookFailed` error is returned.
+#[tracing::instrument(skip_all, fields(hook = ?hook_cmd))]
 async fn run_hook_command(
     hook_cmd: &HookCommand,
     stream_type: OutputStreamType,
