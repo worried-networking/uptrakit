@@ -66,7 +66,7 @@ uptrakit/
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
 │   │   ├── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   │   ├── scheduler/                  # uptrakit-scheduler                     (bin)  — external scheduler binary; enrolls as a system service (system_service + scheduler + database_access + nats_access + master_key_access + graceful_shutdown), receives credentials, runs scheduled tasks across all tenants via direct DB + NATS
-│   │   └── integration-tests/          # uptrakit-integration-tests             (test) — system integration tests using testcontainers; builds uptrakit-test:latest Docker image with all 5 binaries, verifies enrollment and inter-component communication
+│   │   └── integration-tests/          # uptrakit-integration-tests             (test) — Docker-based integration tests: (1) reverse-proxy tests (real nginx/haproxy/traefik/caddy/envoy containers, CRL/OCSP revocation); (2) system integration tests (uptrakit-test:latest image, verifies enrollment and inter-component communication)
 │   ├── plugins/
 │   │   ├── infrastructure/
 │   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult; batch types: BatchDetectItem/Result, BatchFetchItem/Result, BatchUpdateItem/Result
@@ -217,7 +217,7 @@ build environments.
   - Rust/backend-only changes: run Rust checks/tests/linters and markdownlint.
   - mixed changes: run both Rust and frontend gates plus markdownlint.
 - If anything related to reverse proxy behavior changes, run ignored reverse proxy integration tests:
-  - `cargo test -p uptrakit-controller reverse_proxy -- --ignored`
+  - `cargo test -p uptrakit-integration-tests --test reverse_proxy -- --ignored`
 - Treat the reverse proxy trigger list broadly, including (non-exhaustive):
   - mTLS and certificate forwarding/extraction
   - auth behavior behind proxies

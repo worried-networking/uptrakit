@@ -81,7 +81,7 @@ default features include both `db-sqlite` and `oidc`).
 If the change can affect reverse proxy behavior, you must also run ignored reverse proxy integration tests:
 
 ```sh
-cargo test -p uptrakit-controller reverse_proxy -- --ignored
+cargo test -p uptrakit-integration-tests --test reverse_proxy -- --ignored
 ```
 
 This includes (non-exhaustive):

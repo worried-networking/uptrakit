@@ -208,7 +208,7 @@ cargo test --all-features
 - Reverse proxy integration tests (Docker-based, ignored by default):
 
   ```bash
-  cargo test -p uptrakit-controller reverse_proxy -- --ignored
+  cargo test -p uptrakit-integration-tests --test reverse_proxy -- --ignored
   ```
 
   Requires Docker and covers L4/L7 TLS modes, CRL/OCSP revocation, and proxy-specific flows.
@@ -317,14 +317,13 @@ cargo nextest run --all-features
 
 ### Reverse proxy integration tests
 
-Docker-based integration tests in `crates/core/controller/tests/reverse_proxy/` validate that the controller's
-middleware correctly extracts `ServiceIdentity` (unified identity extractor, replacing the former `AgentIdentity` and
-`MqttServiceIdentity`) from forwarded headers when behind real reverse proxies. Each test uses `testcontainers` to spin
-up a Docker container.
+Docker-based integration tests in `crates/core/integration-tests/tests/reverse_proxy/` validate that the controller's
+middleware correctly extracts `ServiceIdentity` from forwarded headers when behind real reverse proxies. Each test uses
+`testcontainers` to spin up a Docker container.
 
 ```text
-crates/core/controller/tests/
-  reverse_proxy.rs              -- test binary entry point
+crates/core/integration-tests/tests/
+  reverse_proxy.rs              -- test binary entry point (mod reverse_proxy { ... })
   reverse_proxy/
     pki.rs                      -- TestPki: CA + server cert + agent cert generation (rcgen)
     server.rs                   -- TestServer: lightweight Axum HTTPS server with real middleware
@@ -344,10 +343,10 @@ All tests are `#[ignore]` with descriptive messages and never run in normal `car
 
 ```sh
 # Run all reverse proxy tests
-cargo test -p uptrakit-controller reverse_proxy -- --ignored
+cargo test -p uptrakit-integration-tests --test reverse_proxy -- --ignored
 
-# Run a single proxy test
-cargo test -p uptrakit-controller reverse_proxy::nginx -- --ignored
+# Run a single proxy test (by name substring)
+cargo test -p uptrakit-integration-tests --test reverse_proxy nginx -- --ignored
 ```
 
 A dedicated `reverse-proxy-tests` CI job runs these on `ubuntu-latest` (Docker pre-installed).
