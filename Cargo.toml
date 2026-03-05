@@ -65,11 +65,11 @@ bollard = { version = "0.20", default-features = false, features = ["http", "pip
 tempfile = "3"
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect"] }
 zeroize = { version = "1", features = ["derive"] }
-async-nats = "0.46"
+async-nats = { version = "0.46", default-features = false, features = ["server_2_10", "server_2_11", "server_2_12", "aws-lc-rs", "jetstream"] }
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 cron = "0.15"
-rumqttc = { version = "0.25.1" }
+rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls-no-provider"] }
 serde_yaml_ng = "0.10"
 uptrakit-backoff = { path = "crates/shared/backoff" }
 uptrakit-shared-macros = { path = "crates/shared/macros" }
