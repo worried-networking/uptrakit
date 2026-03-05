@@ -5,6 +5,8 @@ pub mod ca_snapshot;
 pub mod cert_signer;
 pub mod error_response;
 pub mod event_delivery;
+pub mod extension_proxy;
+pub mod extension_registry;
 pub mod extract;
 pub mod middleware;
 pub mod mqtt_client_store;
@@ -210,6 +212,8 @@ mod tests {
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::NoopBackend,
             )),
+            extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(vec![])),
+            extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
         })
     }
 

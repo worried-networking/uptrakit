@@ -109,6 +109,14 @@ pub trait PluginOps: Send + Sync + 'static {
     /// Serializes the `Default` implementation of the plugin's config type.
     /// Returns an empty JSON object `{}` for unknown plugin types.
     fn sample_config_for_str(&self, plugin_type: &str) -> serde_json::Value;
+
+    /// Returns UI extension manifests provided by all registered plugins.
+    ///
+    /// Default returns empty — no plugin provides extensions yet. Override
+    /// when a plugin declares compile-time UI extensions.
+    fn extension_manifests(&self) -> Vec<uptrakit_internal_wire::extension::ExtensionManifest> {
+        vec![]
+    }
 }
 
 impl PluginOps for PluginRegistry {

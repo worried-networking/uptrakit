@@ -6810,6 +6810,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
+ "uptrakit-internal-wire",
  "uptrakit-plugin-discovery-proxmox-helper-scripts",
  "uptrakit-plugin-generic-shell",
  "uptrakit-plugin-infrastructure-core",

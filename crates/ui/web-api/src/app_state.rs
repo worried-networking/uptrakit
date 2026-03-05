@@ -13,6 +13,8 @@ use crate::auth::oidc_state::{
 };
 use crate::auth::rate_limit::RateLimitStore;
 use crate::ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
+use crate::extension_proxy::ExtensionProxy;
+use crate::extension_registry::ExtensionRegistry;
 use crate::notification_service::NotificationService;
 use crate::service_connections::ServiceConnectionRegistry;
 use crate::settings::Settings;
@@ -114,6 +116,10 @@ pub struct AppState {
     pub audit_log_filter: uptrakit_audit_log::AuditFilter,
     /// Audit log dispatcher for fire-and-forget entry persistence.
     pub audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher,
+    /// Registry tracking which plugin/service extensions are available.
+    pub extension_registry: Arc<ExtensionRegistry>,
+    /// Request/response proxy for extension action invocations.
+    pub extension_proxy: Arc<ExtensionProxy>,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -169,6 +175,8 @@ pub struct AppStateBuilder {
     external_scheduler_connected: Option<Arc<AtomicBool>>,
     audit_log_filter: Option<uptrakit_audit_log::AuditFilter>,
     audit_log_dispatcher: Option<uptrakit_audit_log::AuditLogDispatcher>,
+    extension_registry: Option<Arc<ExtensionRegistry>>,
+    extension_proxy: Option<Arc<ExtensionProxy>>,
 }
 
 impl AppStateBuilder {
@@ -210,6 +218,8 @@ impl AppStateBuilder {
             external_scheduler_connected: None,
             audit_log_filter: None,
             audit_log_dispatcher: None,
+            extension_registry: None,
+            extension_proxy: None,
         }
     }
 
@@ -411,6 +421,23 @@ impl AppStateBuilder {
         self
     }
 
+    /// Override the extension registry.
+    ///
+    /// Optional — defaults to an empty registry (no plugin extensions).
+    /// The registry is initialized from `plugin_ops.extension_manifests()`.
+    pub fn extension_registry(mut self, v: Arc<ExtensionRegistry>) -> Self {
+        self.extension_registry = Some(v);
+        self
+    }
+
+    /// Override the extension proxy.
+    ///
+    /// Optional — defaults to an empty proxy with no pending requests.
+    pub fn extension_proxy(mut self, v: Arc<ExtensionProxy>) -> Self {
+        self.extension_proxy = Some(v);
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -500,6 +527,12 @@ impl AppStateBuilder {
                     uptrakit_audit_log::NoopBackend,
                 ))
             }),
+            extension_registry: self
+                .extension_registry
+                .unwrap_or_else(|| Arc::new(ExtensionRegistry::new(vec![]))),
+            extension_proxy: self
+                .extension_proxy
+                .unwrap_or_else(|| Arc::new(ExtensionProxy::new())),
         })
     }
 }
