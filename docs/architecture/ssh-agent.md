@@ -614,6 +614,42 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 | `send_update_output()` | Sends an `update_output` message to the controller |
 | `send_update_result()` | Sends an `update_result` message to the controller |
 
+## Connection Resilience
+
+The WebSocket connection from agent-ssh to the controller is protected by two complementary mechanisms implemented in `uptrakit-service-sdk`:
+
+### Write timeout (`SEND_TIMEOUT`)
+
+Every `conn.send()` call is wrapped in a 30-second `tokio::time::timeout`. If the controller stops
+consuming data (e.g. after an unclean restart), the TCP send buffer fills and the write would
+otherwise block indefinitely — as observed in the 85-minute freeze bug. After 30 seconds, `send()`
+returns `ProtocolError::SendTimeout`, which is classified as a transient error
+(`is_transient_network() == true`) and triggers reconnect.
+
+This bounds the worst-case Ctrl+C delay to 30 seconds (vs. ~85 minutes with the OS-level TCP
+retransmit timeout).
+
+Ping send failures (arm 2 of the event loop) are handled gracefully: instead of propagating as a
+fatal error, a warn log is emitted and the outcome is set to `LoopOutcome::Disconnected`, triggering
+a reconnect cycle.
+
+### TCP keepalive
+
+After the TCP connection is established (before TLS), `SockRef::set_tcp_keepalive()` from the
+`socket2` crate configures:
+
+- **Idle time**: 30 seconds — keepalive probes begin after 30 seconds of inactivity.
+- **Probe interval**: 10 seconds — probes are sent every 10 seconds until a reply arrives or the
+  OS gives up.
+
+Without keepalive, OS defaults (macOS: 2 hours, Linux: ~2 hours) apply during idle `recv()` periods,
+allowing a dead connection to go undetected for hours. With these settings, a dead connection is
+detected in ≤ 30 s + 10 s × (OS retry count) ≈ 120–150 s, well before the next ping or the next
+send would time out anyway.
+
+See `crates/shared/service-sdk/src/ws.rs` (`connect_ws`) and
+`crates/shared/service-sdk/src/connection.rs` for the implementation.
+
 ## Related Documentation
 
 - [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for CLI host management, including dynamic reload behaviour
