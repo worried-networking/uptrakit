@@ -7,18 +7,37 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-[dependencies]
-# These are regular dependencies (not dev-only) because the lib module
-# provides test helpers consumed by the `tests/` integration test binaries.
-tokio = { workspace = true, features = ["time"] }
+[dev-dependencies]
+# System integration test helpers (containers, API client)
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 testcontainers = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 
-[dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+# Reverse proxy integration test helpers
+uptrakit-web-api = { workspace = true, features = ["db-sqlite"] }
+uptrakit-notification-channels = { workspace = true, features = ["webhook"] }
+uptrakit-crypto = { workspace = true, features = ["testing"] }
+axum = { workspace = true }
+axum-server = { workspace = true }
+rustls = { workspace = true }
+rcgen = { workspace = true }
+x509-parser = { workspace = true }
+time = { workspace = true }
+ipnet = { workspace = true }
+zeroize = { workspace = true }
+sea-orm = { workspace = true }
+async-trait = { workspace = true }
+tempfile = { workspace = true }
+base64 = { workspace = true }
+aws-lc-rs = { workspace = true }
+der = { workspace = true }
+spki = { workspace = true }
+x509-ocsp = { workspace = true }
+const-oid = { workspace = true }
+rootcause = { workspace = true }
 
 [lints]
 workspace = true

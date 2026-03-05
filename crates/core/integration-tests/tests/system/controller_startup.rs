@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use uptrakit_integration_tests::api_client::ApiClient;
-use uptrakit_integration_tests::containers::{ControllerContainer, test_network_name};
+use crate::helpers::api_client::ApiClient;
+use crate::helpers::containers::{ControllerContainer, test_network_name};
 
 /// Verify that the controller starts and serves the health check endpoint.
 #[tokio::test]

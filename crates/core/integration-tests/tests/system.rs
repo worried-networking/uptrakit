@@ -1,3 +1,5 @@
+mod helpers;
+
 mod system {
     mod agent_enrollment;
     mod agent_ssh_enrollment;

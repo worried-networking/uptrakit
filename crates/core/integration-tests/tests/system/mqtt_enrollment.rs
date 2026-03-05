@@ -1,9 +1,7 @@
 use std::time::Duration;
 
-use uptrakit_integration_tests::api_client::ApiClient;
-use uptrakit_integration_tests::containers::{
-    ControllerContainer, ServiceContainer, test_network_name,
-};
+use crate::helpers::api_client::ApiClient;
+use crate::helpers::containers::{ControllerContainer, ServiceContainer, test_network_name};
 
 /// Verify that the MQTT service enrolls as a system service.
 #[tokio::test]
