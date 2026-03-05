@@ -21,7 +21,7 @@
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission, PluginCapability } from '$lib/types';
 	import type {
@@ -319,19 +319,6 @@
 	}
 </script>
 
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') {
-			if (showConfigModal) closeConfigModal();
-			else if (showIgnoreModal) closeIgnoreModal();
-			else if (showAllowlistModal) closeAllowlistModal();
-			else if (configDeleteConfirm) configDeleteConfirm = null;
-			else if (ignoreDeleteConfirm) ignoreDeleteConfirm = null;
-			else if (allowlistDeleteConfirm) allowlistDeleteConfirm = null;
-		}
-	}}
-/>
-
 {#if getUser()}
 	<h1 class="h1 mb-4">Plugin Configs</h1>
 
@@ -552,96 +539,84 @@
 
 <!-- Plugin config modal -->
 {#if showConfigModal}
-	<ModalBackdrop onclose={closeConfigModal}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl space-y-4 max-h-[90vh] overflow-y-auto p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">{editingConfig ? 'Edit Plugin Config' : 'Add Plugin Config'}</h3>
+	<Modal
+		title={editingConfig ? 'Edit Plugin Config' : 'Add Plugin Config'}
+		onclose={closeConfigModal}
+		maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
+	>
+		<label class="label">
+			<span>Name</span>
+			<input class="input" type="text" bind:value={configForm.name} />
+		</label>
 
+		{#if !editingConfig}
 			<label class="label">
-				<span>Name</span>
-				<input class="input" type="text" bind:value={configForm.name} />
+				<span>Plugin Type</span>
+				<select
+					class="select"
+					bind:value={configForm.plugin_type}
+					onchange={() => (configForm.config = sampleConfigJson(configForm.plugin_type))}
+				>
+					{#each pluginTypes as t (t.plugin_type)}
+						<option value={t.plugin_type}>{t.display_name}</option>
+					{/each}
+				</select>
 			</label>
+		{/if}
 
-			{#if !editingConfig}
-				<label class="label">
-					<span>Plugin Type</span>
-					<select
-						class="select"
-						bind:value={configForm.plugin_type}
-						onchange={() => (configForm.config = sampleConfigJson(configForm.plugin_type))}
-					>
-						{#each pluginTypes as t (t.plugin_type)}
-							<option value={t.plugin_type}>{t.display_name}</option>
-						{/each}
-					</select>
-				</label>
-			{/if}
+		<label class="label">
+			<span>Config (JSON)</span>
+			<textarea class="textarea font-mono text-sm" rows="6" bind:value={configForm.config}></textarea>
+		</label>
 
-			<label class="label">
-				<span>Config (JSON)</span>
-				<textarea class="textarea font-mono text-sm" rows="6" bind:value={configForm.config}></textarea>
-			</label>
+		<label class="flex items-center gap-3">
+			<input class="checkbox" type="checkbox" bind:checked={configForm.enabled} />
+			<span>Enabled</span>
+		</label>
 
-			<label class="flex items-center gap-3">
-				<input class="checkbox" type="checkbox" bind:checked={configForm.enabled} />
-				<span>Enabled</span>
-			</label>
-
-			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={closeConfigModal}>Cancel</button>
-				<button class="btn preset-filled-primary-500" onclick={saveConfig}>
-					{editingConfig ? 'Update' : 'Create'}
-				</button>
-			</div>
-		</div>
-	</ModalBackdrop>
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={closeConfigModal}>Cancel</button>
+			<button class="btn preset-filled-primary-500" onclick={saveConfig}>
+				{editingConfig ? 'Update' : 'Create'}
+			</button>
+		{/snippet}
+	</Modal>
 {/if}
 
 <!-- Ignore rule modal -->
 {#if showIgnoreModal}
-	<ModalBackdrop onclose={closeIgnoreModal}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">Add Ignore Rule</h3>
+	<Modal title="Add Ignore Rule" onclose={closeIgnoreModal}>
+		<label class="label">
+			<span>Plugin Config</span>
+			<select class="select" bind:value={ignoreForm.plugin_config_id}>
+				<option value="">— select —</option>
+				{#each configs as config (config.id)}
+					<option value={config.id}>{config.name} ({config.plugin_type})</option>
+				{/each}
+			</select>
+		</label>
 
-			<label class="label">
-				<span>Plugin Config</span>
-				<select class="select" bind:value={ignoreForm.plugin_config_id}>
-					<option value="">— select —</option>
-					{#each configs as config (config.id)}
-						<option value={config.id}>{config.name} ({config.plugin_type})</option>
-					{/each}
-				</select>
-			</label>
+		<label class="label">
+			<span>Package Identifier</span>
+			<input
+				class="input"
+				type="text"
+				placeholder="e.g. owner/repo or image:tag"
+				bind:value={ignoreForm.package_identifier}
+			/>
+		</label>
 
-			<label class="label">
-				<span>Package Identifier</span>
-				<input
-					class="input"
-					type="text"
-					placeholder="e.g. owner/repo or image:tag"
-					bind:value={ignoreForm.package_identifier}
-				/>
-			</label>
-
-			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={closeIgnoreModal}>Cancel</button>
-				<button
-					class="btn preset-filled-primary-500"
-					onclick={saveIgnore}
-					disabled={!ignoreForm.plugin_config_id || !ignoreForm.package_identifier.trim()}
-				>
-					Create
-				</button>
-			</div>
-		</div>
-	</ModalBackdrop>
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={closeIgnoreModal}>Cancel</button>
+			<button
+				class="btn preset-filled-primary-500"
+				onclick={saveIgnore}
+				disabled={!ignoreForm.plugin_config_id || !ignoreForm.package_identifier.trim()}
+			>
+				Create
+			</button>
+		{/snippet}
+	</Modal>
 {/if}
 
 <!-- Delete confirm dialogs -->
@@ -671,29 +646,21 @@
 
 <!-- Discovery allowlist modal -->
 {#if showAllowlistModal}
-	<ModalBackdrop onclose={closeAllowlistModal}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">Add Discovery Plugin Type</h3>
+	<Modal title="Add Discovery Plugin Type" onclose={closeAllowlistModal}>
+		<label class="label">
+			<span>Plugin Type</span>
+			<select class="select" bind:value={allowlistForm.plugin_type}>
+				{#each discoveryPluginTypes as t (t.plugin_type)}
+					<option value={t.plugin_type}>{t.display_name}</option>
+				{/each}
+			</select>
+		</label>
 
-			<label class="label">
-				<span>Plugin Type</span>
-				<select class="select" bind:value={allowlistForm.plugin_type}>
-					{#each discoveryPluginTypes as t (t.plugin_type)}
-						<option value={t.plugin_type}>{t.display_name}</option>
-					{/each}
-				</select>
-			</label>
-
-			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
-				<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
-			</div>
-		</div>
-	</ModalBackdrop>
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
+			<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
+		{/snippet}
+	</Modal>
 {/if}
 
 {#if allowlistDeleteConfirm}

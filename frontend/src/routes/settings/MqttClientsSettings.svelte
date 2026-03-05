@@ -7,7 +7,7 @@
 		type UpdateMqttClient
 	} from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 
 	let {
@@ -191,15 +191,6 @@
 	}
 </script>
 
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') {
-			if (showMqttModal) closeMqttModal();
-			else if (mqttDeleteConfirm) mqttDeleteConfirm = null;
-		}
-	}}
-/>
-
 <div class="card mb-6 p-6">
 	<div class="mb-4 flex items-center justify-between">
 		<h2 class="h3">MQTT Clients</h2>
@@ -317,100 +308,96 @@
 {/if}
 
 {#if showMqttModal}
-	<ModalBackdrop onclose={closeMqttModal}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">{editingMqttClient ? 'Edit MQTT Client' : 'Add MQTT Client'}</h3>
+	<Modal
+		title={editingMqttClient ? 'Edit MQTT Client' : 'Add MQTT Client'}
+		onclose={closeMqttModal}
+		maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
+	>
+		<label class="flex items-center gap-3">
+			<input class="checkbox" type="checkbox" bind:checked={mqttForm.enabled} />
+			<span>Enabled</span>
+		</label>
 
-			<label class="flex items-center gap-3">
-				<input class="checkbox" type="checkbox" bind:checked={mqttForm.enabled} />
-				<span>Enabled</span>
-			</label>
+		<label class="label">
+			<span>Broker URL</span>
+			<input class="input" type="text" placeholder="e.g. mqtt://broker:1883" bind:value={mqttForm.url} />
+		</label>
 
+		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 			<label class="label">
-				<span>Broker URL</span>
-				<input class="input" type="text" placeholder="e.g. mqtt://broker:1883" bind:value={mqttForm.url} />
+				<span>Client ID</span>
+				<input class="input" type="text" bind:value={mqttForm.client_id} />
 			</label>
+			<label class="label">
+				<span>Topic Prefix</span>
+				<input class="input" type="text" bind:value={mqttForm.topic_prefix} />
+			</label>
+		</div>
 
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-				<label class="label">
-					<span>Client ID</span>
-					<input class="input" type="text" bind:value={mqttForm.client_id} />
-				</label>
-				<label class="label">
-					<span>Topic Prefix</span>
-					<input class="input" type="text" bind:value={mqttForm.topic_prefix} />
-				</label>
-			</div>
-
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-				<label class="label">
-					<span>Username</span>
-					<input class="input" type="text" placeholder="(optional)" bind:value={mqttForm.username} />
-				</label>
-				<label class="label">
-					<span>
-						Password
-						<!-- has_password (not has_client_secret) matches the backend MqttClientResponse type,
-						     which uses the MQTT-idiomatic term "password" rather than the OAuth term "secret". -->
-						{#if editingMqttClient?.has_password}
-							<span class="badge preset-filled-success-500 ml-2 text-xs">Password set</span>
-						{/if}
-					</span>
-					<input
-						class="input"
-						type="password"
-						placeholder={editingMqttClient ? 'Leave blank to keep current' : '(optional)'}
-						bind:value={mqttForm.password}
-					/>
-				</label>
-			</div>
-
+		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+			<label class="label">
+				<span>Username</span>
+				<input class="input" type="text" placeholder="(optional)" bind:value={mqttForm.username} />
+			</label>
 			<label class="label">
 				<span>
-					CA Certificate (PEM)
-					{#if editingMqttClient?.has_ca_cert}
-						<span class="badge preset-filled-success-500 ml-2 text-xs">CA cert set</span>
+					Password
+					<!-- has_password (not has_client_secret) matches the backend MqttClientResponse type,
+					     which uses the MQTT-idiomatic term "password" rather than the OAuth term "secret". -->
+					{#if editingMqttClient?.has_password}
+						<span class="badge preset-filled-success-500 ml-2 text-xs">Password set</span>
 					{/if}
 				</span>
-				<textarea
-					class="textarea font-mono text-sm"
-					rows="4"
-					placeholder={editingMqttClient
-						? 'Leave blank to keep current'
-						: '(optional) Paste PEM-encoded CA certificate for private brokers'}
-					bind:value={mqttForm.ca_pem}
-				></textarea>
+				<input
+					class="input"
+					type="password"
+					placeholder={editingMqttClient ? 'Leave blank to keep current' : '(optional)'}
+					bind:value={mqttForm.password}
+				/>
 			</label>
-
-			<div class="rounded-container-token border border-surface-200 p-4 dark:border-surface-700">
-				<p class="mb-3 font-medium">Home Assistant Integration</p>
-				<label class="flex cursor-pointer items-center gap-3">
-					<input class="checkbox" type="checkbox" bind:checked={mqttForm.ha_discovery} />
-					<span>Enable Home Assistant Discovery</span>
-				</label>
-				{#if mqttForm.ha_discovery}
-					<label class="label mt-3">
-						<span>Discovery Prefix</span>
-						<input class="input" type="text" placeholder="homeassistant" bind:value={mqttForm.ha_discovery_prefix} />
-						<p class="text-surface-500 dark:text-surface-400 mt-1 text-sm">
-							Must match the MQTT discovery prefix configured in Home Assistant (default:
-							<code>homeassistant</code>).
-						</p>
-					</label>
-				{/if}
-			</div>
-
-			<div class="flex justify-end gap-2 items-center">
-				{#if !getIsOnline()}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
-				<button class="btn preset-tonal-surface" onclick={closeMqttModal}>Cancel</button>
-				<button class="btn preset-filled-primary-500" onclick={saveMqttClient} disabled={!getIsOnline()}>
-					{editingMqttClient ? 'Update' : 'Create'}
-				</button>
-			</div>
 		</div>
-	</ModalBackdrop>
+
+		<label class="label">
+			<span>
+				CA Certificate (PEM)
+				{#if editingMqttClient?.has_ca_cert}
+					<span class="badge preset-filled-success-500 ml-2 text-xs">CA cert set</span>
+				{/if}
+			</span>
+			<textarea
+				class="textarea font-mono text-sm"
+				rows="4"
+				placeholder={editingMqttClient
+					? 'Leave blank to keep current'
+					: '(optional) Paste PEM-encoded CA certificate for private brokers'}
+				bind:value={mqttForm.ca_pem}
+			></textarea>
+		</label>
+
+		<div class="rounded-container-token border border-surface-200 p-4 dark:border-surface-700">
+			<p class="mb-3 font-medium">Home Assistant Integration</p>
+			<label class="flex cursor-pointer items-center gap-3">
+				<input class="checkbox" type="checkbox" bind:checked={mqttForm.ha_discovery} />
+				<span>Enable Home Assistant Discovery</span>
+			</label>
+			{#if mqttForm.ha_discovery}
+				<label class="label mt-3">
+					<span>Discovery Prefix</span>
+					<input class="input" type="text" placeholder="homeassistant" bind:value={mqttForm.ha_discovery_prefix} />
+					<p class="text-surface-500 dark:text-surface-400 mt-1 text-sm">
+						Must match the MQTT discovery prefix configured in Home Assistant (default:
+						<code>homeassistant</code>).
+					</p>
+				</label>
+			{/if}
+		</div>
+
+		<div class="flex justify-end gap-2 items-center">
+			{#if !getIsOnline()}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
+			<button class="btn preset-tonal-surface" onclick={closeMqttModal}>Cancel</button>
+			<button class="btn preset-filled-primary-500" onclick={saveMqttClient} disabled={!getIsOnline()}>
+				{editingMqttClient ? 'Update' : 'Create'}
+			</button>
+		</div>
+	</Modal>
 {/if}

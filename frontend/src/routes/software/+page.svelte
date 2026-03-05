@@ -20,7 +20,7 @@
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import type { SoftwareItemResponse, SoftwareItemDetailResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
 
@@ -265,16 +265,7 @@
 	}
 </script>
 
-<svelte:window
-	onclick={handleWindowClick}
-	onkeydown={(e) => {
-		if (e.key === 'Escape') {
-			if (confirmDelete) confirmDelete = null;
-			else if (editItem) editItem = null;
-			else if (updateModalItem) updateModalItem = null;
-		}
-	}}
-/>
+<svelte:window onclick={handleWindowClick} />
 
 {#if getUser()}
 	<h1 class="h1 mb-4">Software</h1>
@@ -540,94 +531,78 @@
 {/if}
 
 {#if updateModalItem}
-	<ModalBackdrop onclose={() => (updateModalItem = null)}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-lg space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">Trigger Update — {updateModalItem.name}</h3>
-
-			{#if updateModalLoading}
-				<p class="text-sm text-surface-500">Loading hosts…</p>
-			{:else if updateModalDetail}
-				<p class="text-sm text-surface-500 mb-2">
-					Select the hosts to update. Hosts that are already up to date cannot be selected.
-				</p>
-				<ul class="space-y-2">
-					{#each updateModalDetail.hosts as host (host.host_id)}
-						{@const upToDate = !host.update_available}
-						<li class="flex items-start gap-3 {upToDate ? 'opacity-50' : ''}">
-							<input
-								type="checkbox"
-								class="checkbox mt-0.5"
-								disabled={upToDate}
-								checked={selectedHostIds.has(host.host_id)}
-								onchange={(e) => {
-									const next = new Set(selectedHostIds);
-									if ((e.target as HTMLInputElement).checked) {
-										next.add(host.host_id);
-									} else {
-										next.delete(host.host_id);
-									}
-									selectedHostIds = next;
-								}}
-							/>
-							<div class="flex-1 min-w-0">
-								<p class="text-sm font-medium truncate">
-									{host.friendly_name || host.hostname}
+	<Modal title="Trigger Update — {updateModalItem.name}" onclose={() => (updateModalItem = null)} maxWidth="max-w-lg">
+		{#if updateModalLoading}
+			<p class="text-sm text-surface-500">Loading hosts…</p>
+		{:else if updateModalDetail}
+			<p class="text-sm text-surface-500 mb-2">
+				Select the hosts to update. Hosts that are already up to date cannot be selected.
+			</p>
+			<ul class="space-y-2">
+				{#each updateModalDetail.hosts as host (host.host_id)}
+					{@const upToDate = !host.update_available}
+					<li class="flex items-start gap-3 {upToDate ? 'opacity-50' : ''}">
+						<input
+							type="checkbox"
+							class="checkbox mt-0.5"
+							disabled={upToDate}
+							checked={selectedHostIds.has(host.host_id)}
+							onchange={(e) => {
+								const next = new Set(selectedHostIds);
+								if ((e.target as HTMLInputElement).checked) {
+									next.add(host.host_id);
+								} else {
+									next.delete(host.host_id);
+								}
+								selectedHostIds = next;
+							}}
+						/>
+						<div class="flex-1 min-w-0">
+							<p class="text-sm font-medium truncate">
+								{host.friendly_name || host.hostname}
+							</p>
+							{#if upToDate}
+								<p class="text-xs text-surface-400">Already up to date</p>
+							{:else}
+								<p class="text-xs text-surface-500">
+									{host.installed_version ?? 'unknown'} → {host.latest_version}
 								</p>
-								{#if upToDate}
-									<p class="text-xs text-surface-400">Already up to date</p>
-								{:else}
-									<p class="text-xs text-surface-500">
-										{host.installed_version ?? 'unknown'} → {host.latest_version}
-									</p>
-								{/if}
-							</div>
-						</li>
-					{/each}
-				</ul>
-				<div class="flex justify-end gap-2 pt-2">
-					<button class="btn preset-tonal-surface" onclick={() => (updateModalItem = null)}> Cancel </button>
-					<button
-						class="btn preset-filled-primary-500"
-						disabled={selectedHostIds.size === 0 || triggeringUpdate}
-						onclick={executeUpdate}
-					>
-						{triggeringUpdate ? 'Triggering…' : `Update ${selectedHostIds.size} host(s)`}
-					</button>
-				</div>
-			{/if}
-		</div>
-	</ModalBackdrop>
+							{/if}
+						</div>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={() => (updateModalItem = null)}> Cancel </button>
+			<button
+				class="btn preset-filled-primary-500"
+				disabled={selectedHostIds.size === 0 || triggeringUpdate}
+				onclick={executeUpdate}
+			>
+				{triggeringUpdate ? 'Triggering…' : `Update ${selectedHostIds.size} host(s)`}
+			</button>
+		{/snippet}
+	</Modal>
 {/if}
 
 {#if editItem}
-	<ModalBackdrop onclose={() => (editItem = null)}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">Edit Software Item</h3>
+	<Modal title="Edit Software Item" onclose={() => (editItem = null)}>
+		<label class="label">
+			<span>Name</span>
+			<input class="input" type="text" bind:value={editForm.name} />
+		</label>
 
-			<label class="label">
-				<span>Name</span>
-				<input class="input" type="text" bind:value={editForm.name} />
-			</label>
+		<label class="flex items-center gap-3">
+			<input class="checkbox" type="checkbox" bind:checked={editForm.enabled} />
+			<span>Enabled</span>
+		</label>
 
-			<label class="flex items-center gap-3">
-				<input class="checkbox" type="checkbox" bind:checked={editForm.enabled} />
-				<span>Enabled</span>
-			</label>
-
-			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={() => (editItem = null)}>Cancel</button>
-				<button class="btn preset-filled-primary-500" onclick={executeEdit} disabled={editSubmitting}>
-					{editSubmitting ? 'Saving...' : 'Save'}
-				</button>
-			</div>
-		</div>
-	</ModalBackdrop>
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={() => (editItem = null)}>Cancel</button>
+			<button class="btn preset-filled-primary-500" onclick={executeEdit} disabled={editSubmitting}>
+				{editSubmitting ? 'Saving...' : 'Save'}
+			</button>
+		{/snippet}
+	</Modal>
 {/if}

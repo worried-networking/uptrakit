@@ -10,7 +10,7 @@
 	} from '$lib/api';
 	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import { connectOutputStream } from '$lib/sse';
 	import type { SseConnectionState } from '$lib/sse';
@@ -216,20 +216,6 @@
 	}
 </script>
 
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') {
-			if (liveModal) {
-				closeLiveModal();
-			} else if (releaseNotesModal) {
-				releaseNotesModal = null;
-			} else if (updateModal) {
-				updateModal = null;
-			}
-		}
-	}}
-/>
-
 {#if getUser()}
 	<div class="mb-4">
 		<a href="/software" class="text-sm text-surface-500 hover:underline">← Back to Software</a>
@@ -374,140 +360,117 @@
 {/if}
 
 {#if updateModal}
-	<ModalBackdrop onclose={() => (updateModal = null)}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">Confirm Update</h3>
-
-			<p class="text-sm">
-				Update <strong>{item?.name}</strong> on <strong>{updateModal.host.hostname}</strong>?
-			</p>
-			<div class="grid grid-cols-2 gap-4 text-sm">
-				<div>
-					<p class="text-surface-500">From</p>
-					<p class="font-medium" title={updateModal.host.installed_version ?? undefined}>
-						{formatVersion(updateModal.host.installed_version, 'unknown')}
-					</p>
-				</div>
-				<div>
-					<p class="text-surface-500">To</p>
-					<p class="font-medium" title={updateModal.toVersion}>{formatVersion(updateModal.toVersion)}</p>
-				</div>
+	<Modal title="Confirm Update" onclose={() => (updateModal = null)}>
+		<p class="text-sm">
+			Update <strong>{item?.name}</strong> on <strong>{updateModal.host.hostname}</strong>?
+		</p>
+		<div class="grid grid-cols-2 gap-4 text-sm">
+			<div>
+				<p class="text-surface-500">From</p>
+				<p class="font-medium" title={updateModal.host.installed_version ?? undefined}>
+					{formatVersion(updateModal.host.installed_version, 'unknown')}
+				</p>
 			</div>
-
-			{#if updateModal}
-				{@const meta = getReleaseMeta(updateModal.host)}
-				{#if meta?.release_url}
-					<p class="text-sm">
-						<a
-							href={meta.release_url}
-							target="_blank"
-							rel="noopener noreferrer"
-							class="text-primary-500 hover:underline">View release page ↗</a
-						>
-					</p>
-				{/if}
-				{#if meta?.release_notes}
-					<details class="text-sm">
-						<summary class="cursor-pointer text-surface-500 hover:text-surface-700">Release notes</summary>
-						<pre class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs">{meta.release_notes}</pre>
-					</details>
-				{/if}
-				{#if meta?.attestation_status === 'NotFound'}
-					<aside class="rounded-lg p-3 preset-filled-warning-500 text-sm" role="alert">
-						<strong>Warning:</strong> No GitHub Actions attestation was found for this release. The artifacts may not have
-						been produced by the official GitHub Actions workflow.
-					</aside>
-				{:else if meta?.attestation_status === 'Verified'}
-					<p class="text-sm text-success-600 dark:text-success-400">&#10003; GitHub Actions attestation verified</p>
-				{/if}
-			{/if}
-
-			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={() => (updateModal = null)}>Cancel</button>
-				<button class="btn preset-filled-warning-500" onclick={executeUpdate} disabled={updateTriggering}>
-					{updateTriggering ? 'Triggering…' : 'Trigger Update'}
-				</button>
+			<div>
+				<p class="text-surface-500">To</p>
+				<p class="font-medium" title={updateModal.toVersion}>{formatVersion(updateModal.toVersion)}</p>
 			</div>
 		</div>
-	</ModalBackdrop>
+
+		{#if updateModal}
+			{@const meta = getReleaseMeta(updateModal.host)}
+			{#if meta?.release_url}
+				<p class="text-sm">
+					<a href={meta.release_url} target="_blank" rel="noopener noreferrer" class="text-primary-500 hover:underline"
+						>View release page ↗</a
+					>
+				</p>
+			{/if}
+			{#if meta?.release_notes}
+				<details class="text-sm">
+					<summary class="cursor-pointer text-surface-500 hover:text-surface-700">Release notes</summary>
+					<pre class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs">{meta.release_notes}</pre>
+				</details>
+			{/if}
+			{#if meta?.attestation_status === 'NotFound'}
+				<aside class="rounded-lg p-3 preset-filled-warning-500 text-sm" role="alert">
+					<strong>Warning:</strong> No GitHub Actions attestation was found for this release. The artifacts may not have been
+					produced by the official GitHub Actions workflow.
+				</aside>
+			{:else if meta?.attestation_status === 'Verified'}
+				<p class="text-sm text-success-600 dark:text-success-400">&#10003; GitHub Actions attestation verified</p>
+			{/if}
+		{/if}
+
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={() => (updateModal = null)}>Cancel</button>
+			<button class="btn preset-filled-warning-500" onclick={executeUpdate} disabled={updateTriggering}>
+				{updateTriggering ? 'Triggering…' : 'Trigger Update'}
+			</button>
+		{/snippet}
+	</Modal>
 {/if}
 
 {#if releaseNotesModal}
-	<ModalBackdrop onclose={() => (releaseNotesModal = null)}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<div class="flex items-start justify-between gap-4">
-				<div>
-					<h3 class="h3">{releaseNotesModal.softwareName}</h3>
-					<p class="text-sm text-surface-500">
-						{releaseNotesModal.meta.tag ?? ''} on {releaseNotesModal.hostName}
-						{#if releaseNotesModal.meta.published_at}
-							· {formatDate(releaseNotesModal.meta.published_at)}
-						{/if}
-					</p>
-				</div>
-				{#if releaseNotesModal.meta.release_url}
-					<a
-						href={releaseNotesModal.meta.release_url}
-						target="_blank"
-						rel="noopener noreferrer"
-						class="btn btn-sm preset-tonal-surface shrink-0">View on GitHub ↗</a
-					>
-				{/if}
+	<Modal onclose={() => (releaseNotesModal = null)} maxWidth="max-w-2xl">
+		<div class="flex items-start justify-between gap-4">
+			<div>
+				<h3 class="h3">{releaseNotesModal.softwareName}</h3>
+				<p class="text-sm text-surface-500">
+					{releaseNotesModal.meta.tag ?? ''} on {releaseNotesModal.hostName}
+					{#if releaseNotesModal.meta.published_at}
+						· {formatDate(releaseNotesModal.meta.published_at)}
+					{/if}
+				</p>
 			</div>
-
-			{#if releaseNotesModal.meta.release_notes}
-				<div class="overflow-y-auto max-h-96">
-					<pre class="whitespace-pre-wrap text-sm leading-relaxed">{releaseNotesModal.meta.release_notes}</pre>
-				</div>
-			{:else}
-				<p class="text-surface-500 text-sm">No release notes available.</p>
+			{#if releaseNotesModal.meta.release_url}
+				<a
+					href={releaseNotesModal.meta.release_url}
+					target="_blank"
+					rel="noopener noreferrer"
+					class="btn btn-sm preset-tonal-surface shrink-0">View on GitHub ↗</a
+				>
 			{/if}
-
-			<div class="flex justify-end">
-				<button class="btn preset-tonal-surface" onclick={() => (releaseNotesModal = null)}>Close</button>
-			</div>
 		</div>
-	</ModalBackdrop>
+
+		{#if releaseNotesModal.meta.release_notes}
+			<div class="overflow-y-auto max-h-96">
+				<pre class="whitespace-pre-wrap text-sm leading-relaxed">{releaseNotesModal.meta.release_notes}</pre>
+			</div>
+		{:else}
+			<p class="text-surface-500 text-sm">No release notes available.</p>
+		{/if}
+
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={() => (releaseNotesModal = null)}>Close</button>
+		{/snippet}
+	</Modal>
 {/if}
 
 {#if liveModal}
-	<ModalBackdrop onclose={closeLiveModal}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-3xl space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<div class="flex items-center justify-between">
-				<div class="flex items-center gap-2">
-					<h3 class="h3">Update Output</h3>
-					{#if liveStreamState === 'streaming'}
-						<span class="badge preset-filled-success-500 text-xs animate-pulse">Live</span>
-					{:else if liveStreamState === 'connecting'}
-						<span class="badge preset-tonal text-xs">Connecting…</span>
-					{:else if liveStreamState === 'completed'}
-						<span class="badge preset-filled-success-500 text-xs">Completed</span>
-					{:else if liveStreamState === 'error'}
-						<span class="badge preset-filled-error-500 text-xs">Error</span>
-					{/if}
-				</div>
-				<p class="text-sm text-surface-500">{liveModal.hostName}</p>
+	<Modal onclose={closeLiveModal} maxWidth="max-w-3xl">
+		<div class="flex items-center justify-between">
+			<div class="flex items-center gap-2">
+				<h3 class="h3">Update Output</h3>
+				{#if liveStreamState === 'streaming'}
+					<span class="badge preset-filled-success-500 text-xs animate-pulse">Live</span>
+				{:else if liveStreamState === 'connecting'}
+					<span class="badge preset-tonal text-xs">Connecting…</span>
+				{:else if liveStreamState === 'completed'}
+					<span class="badge preset-filled-success-500 text-xs">Completed</span>
+				{:else if liveStreamState === 'error'}
+					<span class="badge preset-filled-error-500 text-xs">Error</span>
+				{/if}
 			</div>
-
-			<TerminalOutput bind:this={liveTerminalRef} class="h-96" />
-
-			<div class="flex justify-end">
-				<button class="btn preset-tonal-surface" onclick={closeLiveModal}>
-					{liveStreamState === 'streaming' || liveStreamState === 'connecting' ? 'Close (update continues)' : 'Close'}
-				</button>
-			</div>
+			<p class="text-sm text-surface-500">{liveModal.hostName}</p>
 		</div>
-	</ModalBackdrop>
+
+		<TerminalOutput bind:this={liveTerminalRef} class="h-96" />
+
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={closeLiveModal}>
+				{liveStreamState === 'streaming' || liveStreamState === 'connecting' ? 'Close (update continues)' : 'Close'}
+			</button>
+		{/snippet}
+	</Modal>
 {/if}

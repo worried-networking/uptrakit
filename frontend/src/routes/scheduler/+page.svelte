@@ -3,7 +3,7 @@
 	import { getUser } from '$lib/auth.svelte';
 	import { listSchedulerTasks, updateSchedulerTask, triggerSchedulerTask } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import { formatDate } from '$lib/utils';
 	import { Permission } from '$lib/types';
 	import type { ScheduledTaskResponse } from '$lib/types';
@@ -80,12 +80,6 @@
 		}
 	}
 </script>
-
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape' && editingTask) closeEdit();
-	}}
-/>
 
 {#if getUser()}
 	<h1 class="h1 mb-4">Scheduler</h1>
@@ -165,30 +159,22 @@
 {/if}
 
 {#if editingTask}
-	<ModalBackdrop onclose={closeEdit}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">Edit Task: {editingTask.label}</h3>
+	<Modal title="Edit Task: {editingTask.label}" onclose={closeEdit}>
+		<label class="label">
+			<span>Cron Expression</span>
+			<input class="input font-mono" type="text" bind:value={editCron} />
+		</label>
 
-			<label class="label">
-				<span>Cron Expression</span>
-				<input class="input font-mono" type="text" bind:value={editCron} />
-			</label>
+		<label class="flex items-center gap-3">
+			<input class="checkbox" type="checkbox" bind:checked={editEnabled} />
+			<span>Enabled</span>
+		</label>
 
-			<label class="flex items-center gap-3">
-				<input class="checkbox" type="checkbox" bind:checked={editEnabled} />
-				<span>Enabled</span>
-			</label>
-
-			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={closeEdit}>Cancel</button>
-				<button class="btn preset-filled-primary-500" onclick={saveEdit} disabled={saving}>
-					{saving ? 'Saving...' : 'Save'}
-				</button>
-			</div>
-		</div>
-	</ModalBackdrop>
+		{#snippet footer()}
+			<button class="btn preset-tonal-surface" onclick={closeEdit}>Cancel</button>
+			<button class="btn preset-filled-primary-500" onclick={saveEdit} disabled={saving}>
+				{saving ? 'Saving...' : 'Save'}
+			</button>
+		{/snippet}
+	</Modal>
 {/if}

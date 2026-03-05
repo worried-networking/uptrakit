@@ -10,7 +10,7 @@
 	import type { OidcProviderResponse, CreateOidcProviderRequest, UpdateOidcProviderRequest } from '$lib/types';
 	import { isValidLogoUrl } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 
 	let {
@@ -186,15 +186,6 @@
 	}
 </script>
 
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') {
-			if (showOidcModal) closeOidcModal();
-			else if (deleteConfirm) deleteConfirm = null;
-		}
-	}}
-/>
-
 <div class="card mb-6 p-6">
 	<div class="mb-4 flex items-center justify-between">
 		<h2 class="h3">OIDC Providers</h2>
@@ -265,93 +256,89 @@
 {/if}
 
 {#if showOidcModal}
-	<ModalBackdrop onclose={closeOidcModal}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">{editingProvider ? 'Edit OIDC Provider' : 'Add OIDC Provider'}</h3>
-
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-				<label class="label">
-					<span>Name</span>
-					<input class="input" type="text" bind:value={oidcForm.name} oninput={onOidcNameInput} />
-				</label>
-				<label class="label">
-					<span>Slug</span>
-					<input
-						class="input"
-						type="text"
-						bind:value={oidcForm.slug}
-						oninput={() => {
-							slugTouched = true;
-						}}
-					/>
-				</label>
-			</div>
-
+	<Modal
+		title={editingProvider ? 'Edit OIDC Provider' : 'Add OIDC Provider'}
+		onclose={closeOidcModal}
+		maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
+	>
+		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 			<label class="label">
-				<span>Logo URL</span>
-				<input class="input" type="url" placeholder="https://..." bind:value={oidcForm.logo_url} />
-				{#if oidcForm.logo_url && !isValidLogoUrl(oidcForm.logo_url)}
-					<small class="text-error-500">Logo URL must use HTTPS</small>
-				{/if}
+				<span>Name</span>
+				<input class="input" type="text" bind:value={oidcForm.name} oninput={onOidcNameInput} />
 			</label>
-
 			<label class="label">
-				<span>Issuer URL</span>
-				<input class="input" type="text" bind:value={oidcForm.issuer_url} />
+				<span>Slug</span>
+				<input
+					class="input"
+					type="text"
+					bind:value={oidcForm.slug}
+					oninput={() => {
+						slugTouched = true;
+					}}
+				/>
 			</label>
-
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-				<label class="label">
-					<span>Client ID</span>
-					<input class="input" type="text" bind:value={oidcForm.client_id} />
-				</label>
-				<label class="label">
-					<span>Client Secret</span>
-					<input
-						class="input"
-						type="password"
-						placeholder={editingProvider ? 'Leave blank to keep current' : ''}
-						bind:value={oidcForm.client_secret}
-					/>
-				</label>
-			</div>
-
-			<label class="label">
-				<span>Scopes</span>
-				<input class="input" type="text" bind:value={oidcForm.scopes} />
-			</label>
-
-			<label class="flex items-center gap-3">
-				<input class="checkbox" type="checkbox" bind:checked={oidcForm.auto_create_users} />
-				<span>Auto-create users on first login</span>
-			</label>
-
-			<label class="label">
-				<span>Role Claim Path</span>
-				<input class="input" type="text" placeholder="e.g. groups" bind:value={oidcForm.role_claim_path} />
-			</label>
-
-			<label class="label">
-				<span>Role Mapping (JSON)</span>
-				<textarea
-					class="textarea"
-					rows="3"
-					placeholder={'{"oidc_value": "local_role"}'}
-					bind:value={oidcForm.role_mapping_json}
-				></textarea>
-			</label>
-
-			<div class="flex justify-end gap-2 items-center">
-				{#if !getIsOnline()}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
-				<button class="btn preset-tonal-surface" onclick={closeOidcModal}>Cancel</button>
-				<button class="btn preset-filled-primary-500" onclick={saveOidcProvider} disabled={!getIsOnline()}>
-					{editingProvider ? 'Update' : 'Create'}
-				</button>
-			</div>
 		</div>
-	</ModalBackdrop>
+
+		<label class="label">
+			<span>Logo URL</span>
+			<input class="input" type="url" placeholder="https://..." bind:value={oidcForm.logo_url} />
+			{#if oidcForm.logo_url && !isValidLogoUrl(oidcForm.logo_url)}
+				<small class="text-error-500">Logo URL must use HTTPS</small>
+			{/if}
+		</label>
+
+		<label class="label">
+			<span>Issuer URL</span>
+			<input class="input" type="text" bind:value={oidcForm.issuer_url} />
+		</label>
+
+		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+			<label class="label">
+				<span>Client ID</span>
+				<input class="input" type="text" bind:value={oidcForm.client_id} />
+			</label>
+			<label class="label">
+				<span>Client Secret</span>
+				<input
+					class="input"
+					type="password"
+					placeholder={editingProvider ? 'Leave blank to keep current' : ''}
+					bind:value={oidcForm.client_secret}
+				/>
+			</label>
+		</div>
+
+		<label class="label">
+			<span>Scopes</span>
+			<input class="input" type="text" bind:value={oidcForm.scopes} />
+		</label>
+
+		<label class="flex items-center gap-3">
+			<input class="checkbox" type="checkbox" bind:checked={oidcForm.auto_create_users} />
+			<span>Auto-create users on first login</span>
+		</label>
+
+		<label class="label">
+			<span>Role Claim Path</span>
+			<input class="input" type="text" placeholder="e.g. groups" bind:value={oidcForm.role_claim_path} />
+		</label>
+
+		<label class="label">
+			<span>Role Mapping (JSON)</span>
+			<textarea
+				class="textarea"
+				rows="3"
+				placeholder={'{"oidc_value": "local_role"}'}
+				bind:value={oidcForm.role_mapping_json}
+			></textarea>
+		</label>
+
+		<div class="flex justify-end gap-2 items-center">
+			{#if !getIsOnline()}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
+			<button class="btn preset-tonal-surface" onclick={closeOidcModal}>Cancel</button>
+			<button class="btn preset-filled-primary-500" onclick={saveOidcProvider} disabled={!getIsOnline()}>
+				{editingProvider ? 'Update' : 'Create'}
+			</button>
+		</div>
+	</Modal>
 {/if}

@@ -9,7 +9,7 @@
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 
 	const CAPABILITY_FILTER_VALUES = ['all', 'software_discovery', 'ssh_remote'] as const;
@@ -239,16 +239,7 @@
 	} as const;
 </script>
 
-<svelte:window
-	onclick={handleWindowClick}
-	onkeydown={(e) => {
-		if (e.key === 'Escape') {
-			if (confirmAction) cancelConfirm();
-			else if (mergeSource) cancelMerge();
-			else if (editPingService) cancelPingEdit();
-		}
-	}}
-/>
+<svelte:window onclick={handleWindowClick} />
 
 {#if getUser()}
 	<h1 class="h1 mb-4">Services</h1>
@@ -427,59 +418,45 @@
 	{/if}
 
 	{#if mergeSource}
-		<ModalBackdrop onclose={cancelMerge}>
-			<div
-				class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-				role="dialog"
-				aria-modal="true"
-			>
-				<h3 class="h3">Merge Service</h3>
-				<p>
-					Merge <strong>{mergeSource.name}</strong> into an existing service. The source service's enrollment will be transferred
-					to the target, preserving the target's history.
-				</p>
-				<label class="label">
-					<span>Select target service</span>
-					<select class="select" bind:value={mergeTargetId}>
-						<option value={null}>-- Select a service --</option>
-						{#each services.filter((s) => s.status === 'approved' && s.capabilities.includes('software_discovery') && s.id !== mergeSource?.id) as target (target.id)}
-							<option value={target.id}>{target.friendly_name} ({target.hostname})</option>
-						{/each}
-					</select>
-				</label>
-				<div class="flex justify-end gap-2">
-					<button class="btn preset-tonal-surface" onclick={cancelMerge}>Cancel</button>
-					<button class="btn preset-filled-primary-500" disabled={!mergeTargetId || submitting} onclick={executeMerge}>
-						{submitting ? 'Merging...' : 'Merge'}
-					</button>
-				</div>
-			</div>
-		</ModalBackdrop>
+		<Modal title="Merge Service" onclose={cancelMerge}>
+			<p>
+				Merge <strong>{mergeSource.name}</strong> into an existing service. The source service's enrollment will be transferred
+				to the target, preserving the target's history.
+			</p>
+			<label class="label">
+				<span>Select target service</span>
+				<select class="select" bind:value={mergeTargetId}>
+					<option value={null}>-- Select a service --</option>
+					{#each services.filter((s) => s.status === 'approved' && s.capabilities.includes('software_discovery') && s.id !== mergeSource?.id) as target (target.id)}
+						<option value={target.id}>{target.friendly_name} ({target.hostname})</option>
+					{/each}
+				</select>
+			</label>
+			{#snippet footer()}
+				<button class="btn preset-tonal-surface" onclick={cancelMerge}>Cancel</button>
+				<button class="btn preset-filled-primary-500" disabled={!mergeTargetId || submitting} onclick={executeMerge}>
+					{submitting ? 'Merging...' : 'Merge'}
+				</button>
+			{/snippet}
+		</Modal>
 	{/if}
 
 	{#if editPingService}
-		<ModalBackdrop onclose={cancelPingEdit}>
-			<div
-				class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
-				role="dialog"
-				aria-modal="true"
-			>
-				<h3 class="h3">Edit Ping Interval</h3>
-				<p>
-					Set a custom ping interval for <strong>{editPingService.name}</strong>. Leave empty to use the service-profile
-					default.
-				</p>
-				<label class="label">
-					<span>Ping interval (seconds)</span>
-					<input class="input" type="number" min="0" placeholder="Default" bind:value={editPingService.pingInterval} />
-				</label>
-				<div class="flex justify-end gap-2">
-					<button class="btn preset-tonal-surface" onclick={cancelPingEdit}>Cancel</button>
-					<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executePingEdit}>
-						{submitting ? 'Saving...' : 'Save'}
-					</button>
-				</div>
-			</div>
-		</ModalBackdrop>
+		<Modal title="Edit Ping Interval" onclose={cancelPingEdit}>
+			<p>
+				Set a custom ping interval for <strong>{editPingService.name}</strong>. Leave empty to use the service-profile
+				default.
+			</p>
+			<label class="label">
+				<span>Ping interval (seconds)</span>
+				<input class="input" type="number" min="0" placeholder="Default" bind:value={editPingService.pingInterval} />
+			</label>
+			{#snippet footer()}
+				<button class="btn preset-tonal-surface" onclick={cancelPingEdit}>Cancel</button>
+				<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executePingEdit}>
+					{submitting ? 'Saving...' : 'Save'}
+				</button>
+			{/snippet}
+		</Modal>
 	{/if}
 {/if}

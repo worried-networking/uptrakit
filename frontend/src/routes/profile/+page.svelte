@@ -4,7 +4,7 @@
 	import { listApiTokens, createApiToken, revokeApiToken } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import { formatDate } from '$lib/utils';
 	import type { ApiTokenResponse } from '$lib/types';
 
@@ -89,15 +89,6 @@
 		}
 	}
 </script>
-
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape') {
-			if (showCreateModal) closeCreateModal();
-			else if (revokeConfirm) revokeConfirm = null;
-		}
-	}}
-/>
 
 {#if getUser()}
 	<h1 class="h1 mb-6">Profile</h1>
@@ -187,50 +178,42 @@
 {/if}
 
 {#if showCreateModal}
-	<ModalBackdrop onclose={closeCreateModal}>
-		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-lg space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="h3">New API Token</h3>
-
-			{#if createdToken}
-				<aside class="rounded-lg p-4 preset-filled-warning-500">
-					<p class="mb-2 font-semibold">Save this token now — it will not be shown again.</p>
-				</aside>
-				<div class="relative">
-					<pre
-						class="rounded-md bg-surface-100 dark:bg-surface-800 p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
-				</div>
-				<div class="flex justify-end gap-2">
-					<button class="btn preset-tonal-surface" onclick={() => copyToken(createdToken!)}>Copy</button>
-					<button class="btn preset-filled-primary-500" onclick={closeCreateModal}>Done</button>
-				</div>
-			{:else}
-				<label class="label">
-					<span>Token Name</span>
-					<input
-						class="input"
-						type="text"
-						placeholder="e.g. CI Pipeline"
-						bind:value={newTokenName}
-						onkeydown={(e) => {
-							if (e.key === 'Enter') handleCreate();
-						}}
-					/>
-				</label>
-				<div class="flex justify-end gap-2">
-					<button class="btn preset-tonal-surface" onclick={closeCreateModal}>Cancel</button>
-					<button
-						class="btn preset-filled-primary-500"
-						onclick={handleCreate}
-						disabled={!newTokenName.trim() || creating}
-					>
-						{creating ? 'Creating...' : 'Create'}
-					</button>
-				</div>
-			{/if}
-		</div>
-	</ModalBackdrop>
+	<Modal title="New API Token" onclose={closeCreateModal} maxWidth="max-w-lg">
+		{#if createdToken}
+			<aside class="rounded-lg p-4 preset-filled-warning-500">
+				<p class="mb-2 font-semibold">Save this token now — it will not be shown again.</p>
+			</aside>
+			<div class="relative">
+				<pre
+					class="rounded-md bg-surface-100 dark:bg-surface-800 p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
+			</div>
+			<div class="flex justify-end gap-2">
+				<button class="btn preset-tonal-surface" onclick={() => copyToken(createdToken!)}>Copy</button>
+				<button class="btn preset-filled-primary-500" onclick={closeCreateModal}>Done</button>
+			</div>
+		{:else}
+			<label class="label">
+				<span>Token Name</span>
+				<input
+					class="input"
+					type="text"
+					placeholder="e.g. CI Pipeline"
+					bind:value={newTokenName}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') handleCreate();
+					}}
+				/>
+			</label>
+			<div class="flex justify-end gap-2">
+				<button class="btn preset-tonal-surface" onclick={closeCreateModal}>Cancel</button>
+				<button
+					class="btn preset-filled-primary-500"
+					onclick={handleCreate}
+					disabled={!newTokenName.trim() || creating}
+				>
+					{creating ? 'Creating...' : 'Create'}
+				</button>
+			</div>
+		{/if}
+	</Modal>
 {/if}
