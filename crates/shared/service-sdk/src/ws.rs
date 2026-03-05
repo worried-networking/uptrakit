@@ -127,7 +127,10 @@ pub async fn send_enroll(
 ) -> Result<EnrolledPayload> {
     tracing::trace!("sending Enroll message");
     let msg = ServiceMessage::Enroll(payload);
-    let json = serde_json::to_string(&out_seq.wrap_service(msg)).context_to::<EnrollmentError>()?;
+    let json = serde_json::to_string(
+        &out_seq.wrap_service(msg, uptrakit_internal_wire::current_trace_context()),
+    )
+    .context_to::<EnrollmentError>()?;
     ws.send(Message::Text(json.into()))
         .await
         .context_to::<EnrollmentError>()?;
@@ -277,7 +280,10 @@ pub async fn request_certificate_ws(
     let msg = ServiceMessage::RequestCertificate(RequestCertificatePayload {
         csr_pem: csr_pem.to_string(),
     });
-    let json = serde_json::to_string(&out_seq.wrap_service(msg)).context_to::<EnrollmentError>()?;
+    let json = serde_json::to_string(
+        &out_seq.wrap_service(msg, uptrakit_internal_wire::current_trace_context()),
+    )
+    .context_to::<EnrollmentError>()?;
     ws.send(Message::Text(json.into()))
         .await
         .context_to::<EnrollmentError>()?;

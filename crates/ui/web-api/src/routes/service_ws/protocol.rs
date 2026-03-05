@@ -140,7 +140,7 @@ pub(crate) fn serialize_controller_msg(
     out_seq: &mut OutgoingSeq,
     msg: ControllerMessage,
 ) -> Option<String> {
-    let envelope = out_seq.wrap_controller(msg);
+    let envelope = out_seq.wrap_controller(msg, uptrakit_internal_wire::current_trace_context());
     match serde_json::to_string(&envelope) {
         Ok(json) => Some(json),
         Err(e) => {

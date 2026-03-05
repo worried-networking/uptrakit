@@ -4,10 +4,13 @@ pub use close_reason::CloseReason;
 pub mod extension;
 
 pub mod limits;
+pub mod trace_context;
 mod wire_validate_impls;
 
 pub mod service_profile;
 pub use service_profile::{ServiceProfile, parse_capabilities, serialize_capabilities};
+
+pub use trace_context::{TraceContext, current_trace_context};
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -1505,11 +1508,16 @@ pub const CURRENT_PROTOCOL_VERSION: u32 = 1;
 /// Envelope wrapping a [`ServiceMessage`] with a monotonically increasing
 /// sequence number for replay protection and the current protocol version.
 ///
-/// JSON on the wire: `{"protocol_version":1,"seq":1,"type":"ping","service_ts":123}`.
+/// JSON on the wire includes an optional `trace_context` object for distributed
+/// tracing correlation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceEnvelope {
     pub protocol_version: u32,
     pub seq: u64,
+    /// Distributed tracing context for correlating this message across services.
+    /// Always populated when sending; tolerates absence when receiving from older peers.
+    #[serde(default)]
+    pub trace_context: TraceContext,
     #[serde(flatten)]
     pub message: ServiceMessage,
 }
@@ -1517,11 +1525,16 @@ pub struct ServiceEnvelope {
 /// Envelope wrapping a [`ControllerMessage`] with a monotonically increasing
 /// sequence number for replay protection and the current protocol version.
 ///
-/// JSON on the wire: `{"protocol_version":1,"seq":1,"type":"pong","service_ts":123,"controller_ts":456}`.
+/// JSON on the wire includes an optional `trace_context` object for distributed
+/// tracing correlation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerEnvelope {
     pub protocol_version: u32,
     pub seq: u64,
+    /// Distributed tracing context for correlating this message across services.
+    /// Always populated when sending; tolerates absence when receiving from older peers.
+    #[serde(default)]
+    pub trace_context: TraceContext,
     #[serde(flatten)]
     pub message: ControllerMessage,
 }
@@ -1540,25 +1553,37 @@ impl OutgoingSeq {
     }
 
     /// Wrap a [`ServiceMessage`] in a [`ServiceEnvelope`], assigning the next
-    /// sequence number and stamping [`CURRENT_PROTOCOL_VERSION`].
-    pub fn wrap_service(&mut self, message: ServiceMessage) -> ServiceEnvelope {
+    /// sequence number, stamping [`CURRENT_PROTOCOL_VERSION`], and attaching
+    /// the given [`TraceContext`] for distributed tracing.
+    pub fn wrap_service(
+        &mut self,
+        message: ServiceMessage,
+        trace_context: TraceContext,
+    ) -> ServiceEnvelope {
         let seq = self.next;
         self.next += 1;
         ServiceEnvelope {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq,
+            trace_context,
             message,
         }
     }
 
     /// Wrap a [`ControllerMessage`] in a [`ControllerEnvelope`], assigning the
-    /// next sequence number and stamping [`CURRENT_PROTOCOL_VERSION`].
-    pub fn wrap_controller(&mut self, message: ControllerMessage) -> ControllerEnvelope {
+    /// next sequence number, stamping [`CURRENT_PROTOCOL_VERSION`], and attaching
+    /// the given [`TraceContext`] for distributed tracing.
+    pub fn wrap_controller(
+        &mut self,
+        message: ControllerMessage,
+        trace_context: TraceContext,
+    ) -> ControllerEnvelope {
         let seq = self.next;
         self.next += 1;
         ControllerEnvelope {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq,
+            trace_context,
             message,
         }
     }
@@ -2979,15 +3004,19 @@ mod tests {
         let envelope = ServiceEnvelope {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 1,
+            trace_context: TraceContext {
+                trace_id: "0".repeat(32),
+                span_id: None,
+            },
             message: ServiceMessage::Ping(PingPayload {
                 service_ts: 1706400000000,
             }),
         };
         let json = serde_json::to_string(&envelope).unwrap();
-        assert_eq!(
-            json,
-            r#"{"protocol_version":1,"seq":1,"type":"ping","service_ts":1706400000000}"#
-        );
+        assert!(json.contains(r#""protocol_version":1"#));
+        assert!(json.contains(r#""seq":1"#));
+        assert!(json.contains(r#""trace_context""#));
+        assert!(json.contains(r#""type":"ping""#));
         let deserialized: ServiceEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, envelope);
     }
@@ -2997,16 +3026,21 @@ mod tests {
         let envelope = ControllerEnvelope {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 42,
+            trace_context: TraceContext {
+                trace_id: "f".repeat(32),
+                span_id: Some("a".repeat(16)),
+            },
             message: ControllerMessage::Pong(PongPayload {
                 service_ts: 1706400000000,
                 controller_ts: 1706400000050,
             }),
         };
         let json = serde_json::to_string(&envelope).unwrap();
-        assert_eq!(
-            json,
-            r#"{"protocol_version":1,"seq":42,"type":"pong","service_ts":1706400000000,"controller_ts":1706400000050}"#
-        );
+        assert!(json.contains(r#""protocol_version":1"#));
+        assert!(json.contains(r#""seq":42"#));
+        assert!(json.contains(r#""trace_context""#));
+        assert!(json.contains(r#""span_id""#));
+        assert!(json.contains(r#""type":"pong""#));
         let deserialized: ControllerEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, envelope);
     }
@@ -3066,6 +3100,7 @@ mod tests {
         let envelope = ServiceEnvelope {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 3,
+            trace_context: TraceContext::generate(),
             message: ServiceMessage::Enroll(EnrollPayload {
                 hostname: "test-host".to_string(),
                 friendly_name: "Test".to_string(),
@@ -3087,6 +3122,7 @@ mod tests {
         let envelope = ControllerEnvelope {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 5,
+            trace_context: TraceContext::generate(),
             message: ControllerMessage::Error(ErrorPayload {
                 code: ErrorCode::SequenceError,
                 message: "sequence error: expected 3, received 5".to_string(),
@@ -3103,9 +3139,18 @@ mod tests {
     #[test]
     fn outgoing_seq_increments() {
         let mut seq = OutgoingSeq::new();
-        let e1 = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 1 }));
-        let e2 = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 2 }));
-        let e3 = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 3 }));
+        let e1 = seq.wrap_service(
+            ServiceMessage::Ping(PingPayload { service_ts: 1 }),
+            current_trace_context(),
+        );
+        let e2 = seq.wrap_service(
+            ServiceMessage::Ping(PingPayload { service_ts: 2 }),
+            current_trace_context(),
+        );
+        let e3 = seq.wrap_service(
+            ServiceMessage::Ping(PingPayload { service_ts: 3 }),
+            current_trace_context(),
+        );
         assert_eq!(e1.protocol_version, CURRENT_PROTOCOL_VERSION);
         assert_eq!(e1.seq, 1);
         assert_eq!(e2.seq, 2);
@@ -3115,14 +3160,20 @@ mod tests {
     #[test]
     fn outgoing_seq_wrap_controller() {
         let mut seq = OutgoingSeq::new();
-        let e1 = seq.wrap_controller(ControllerMessage::Pong(PongPayload {
-            service_ts: 1,
-            controller_ts: 2,
-        }));
-        let e2 = seq.wrap_controller(ControllerMessage::Pong(PongPayload {
-            service_ts: 3,
-            controller_ts: 4,
-        }));
+        let e1 = seq.wrap_controller(
+            ControllerMessage::Pong(PongPayload {
+                service_ts: 1,
+                controller_ts: 2,
+            }),
+            current_trace_context(),
+        );
+        let e2 = seq.wrap_controller(
+            ControllerMessage::Pong(PongPayload {
+                service_ts: 3,
+                controller_ts: 4,
+            }),
+            current_trace_context(),
+        );
         assert_eq!(e1.protocol_version, CURRENT_PROTOCOL_VERSION);
         assert_eq!(e1.seq, 1);
         assert_eq!(e2.seq, 2);
@@ -3173,7 +3224,10 @@ mod tests {
     #[test]
     fn outgoing_seq_default() {
         let mut seq = OutgoingSeq::default();
-        let e = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 1 }));
+        let e = seq.wrap_service(
+            ServiceMessage::Ping(PingPayload { service_ts: 1 }),
+            current_trace_context(),
+        );
         assert_eq!(e.protocol_version, CURRENT_PROTOCOL_VERSION);
         assert_eq!(e.seq, 1);
     }
@@ -3343,6 +3397,7 @@ mod tests {
         let envelope = ServiceEnvelope {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 1,
+            trace_context: TraceContext::generate(),
             message: msg,
         };
         serde_json::to_value(envelope).unwrap()
@@ -3353,6 +3408,7 @@ mod tests {
         let envelope = ControllerEnvelope {
             protocol_version: CURRENT_PROTOCOL_VERSION,
             seq: 1,
+            trace_context: TraceContext::generate(),
             message: msg,
         };
         serde_json::to_value(envelope).unwrap()

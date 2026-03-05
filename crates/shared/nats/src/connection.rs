@@ -155,6 +155,7 @@ impl NatsConnection {
             source_controller_id,
             target_service_id,
             target_capability: target_capability.map(ToString::to_string),
+            trace_context: uptrakit_internal_wire::current_trace_context(),
             message: msg,
             created_at: OffsetDateTime::now_utc(),
         };

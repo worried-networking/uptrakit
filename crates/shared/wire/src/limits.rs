@@ -115,6 +115,14 @@ pub const MAX_EXTENSION_PARAMS_LEN: usize = 65_536;
 /// Maximum byte length of extension action response JSON.
 pub const MAX_EXTENSION_RESPONSE_LEN: usize = 1_048_576;
 
+// ── Trace context limits ────────────────────────────────────────────────────
+
+/// Maximum length of a trace ID (32 hex chars for 128-bit W3C trace ID).
+pub const MAX_TRACE_ID_LEN: usize = 32;
+
+/// Maximum length of a span ID (16 hex chars for 64-bit W3C span ID).
+pub const MAX_SPAN_ID_LEN: usize = 16;
+
 // ── String length limits ──────────────────────────────────────────────────────
 
 /// Maximum length for short strings (identifiers, names, versions).

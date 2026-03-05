@@ -315,6 +315,7 @@ mod tests {
             source_controller_id: Uuid::nil(),
             target_service_id: Some(Uuid::nil()),
             target_capability: Some("mqtt_bridge".to_string()),
+            trace_context: uptrakit_internal_wire::current_trace_context(),
             message: ControllerMessage::CaBundleUpdated(
                 uptrakit_internal_wire::CaBundleUpdatedPayload {
                     ca_bundle_pem: "pem-data".to_string(),

@@ -63,6 +63,17 @@ info:
     log the mismatch. There is no backwards-compatibility: both peers must speak the
     same protocol version.
 
+    ## Distributed Tracing
+
+    Every message envelope may carry an optional `trace_context` object for
+    distributed tracing correlation. When present it contains:
+    - `trace_id` (string, 32 hex chars): 128-bit W3C trace identifier
+    - `span_id` (string, 16 hex chars, optional): 64-bit W3C span identifier
+
+    Senders always populate `trace_context` with a random trace ID when no
+    OpenTelemetry context is available. Receivers must tolerate its absence
+    for forward compatibility with older peers.
+
     ## Replay Protection
 
     Every message on the wire is wrapped in an envelope containing a monotonically
@@ -3765,6 +3776,7 @@ components:
           const: request_crl_renewal
           description: Message type discriminator
 
+<<<<<<< HEAD
     extensionRegisterPayload:
       type: object
       required:
@@ -3941,3 +3953,26 @@ components:
           description: Whether actions are routed to any instance or a specific one
         ui:
           description: Schema-driven UI definition (DataTable, Form, KeyValue, or Actions)
+
+    traceContext:
+      type: object
+      description: |
+        Distributed tracing context for correlating messages across service boundaries.
+        Carried as an optional `trace_context` field on every message envelope.
+        When OpenTelemetry is enabled, trace and span IDs are extracted from the
+        current span context; otherwise random trace IDs are generated.
+      required:
+        - trace_id
+      properties:
+        trace_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+          description: 128-bit trace identifier as 32 lowercase hex characters
+          examples:
+            - "0123456789abcdef0123456789abcdef"
+        span_id:
+          type: string
+          pattern: "^[0-9a-f]{16}$"
+          description: 64-bit span identifier as 16 lowercase hex characters (optional)
+          examples:
+            - "fedcba9876543210"

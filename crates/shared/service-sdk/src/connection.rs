@@ -83,7 +83,9 @@ impl ControllerConnection {
         use tokio_tungstenite::tungstenite::Message;
 
         tracing::trace!("sending message to controller");
-        let envelope = self.out_seq.wrap_service(msg);
+        let envelope = self
+            .out_seq
+            .wrap_service(msg, uptrakit_internal_wire::current_trace_context());
         let json = serde_json::to_string(&envelope).context_to::<EnrollmentError>()?;
         tokio::time::timeout(SEND_TIMEOUT, self.ws.send(Message::Text(json.into())))
             .await
