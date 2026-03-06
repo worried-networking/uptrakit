@@ -4,7 +4,8 @@ This directory contains a structured threat analysis of the Uptrakit codebase.
 Each document describes a realistic attack scenario, assesses severity, documents
 existing mitigations, identifies residual risk, and suggests improvements.
 
-**This is a documentation-only analysis. No code changes or fixes are included.**
+Each document tracks both existing mitigations and implemented fixes.
+Resolved items are marked with ~~strikethrough~~ and a **Fixed/Done** label.
 
 ## Severity Table
 

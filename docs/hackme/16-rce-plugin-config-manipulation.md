@@ -154,15 +154,25 @@ code execution on managed hosts via plugin configuration manipulation.
   precede a shell interpreter in pipe-to-shell patterns (e.g.,
   `curl ... | sudo bash`, `wget ... | env -i sh`).
 
+- **Configurable dangerous command rejection.** *(Implemented)* The
+  `--reject-dangerous-commands` CLI flag (or `UPTRAKIT_REJECT_DANGEROUS_COMMANDS`
+  env var) upgrades dangerous pattern detection from advisory-only to blocking.
+  When enabled, plugin config create/update requests containing patterns such as
+  `curl|bash`, `rm -rf /`, fork bombs, or bash network sockets are rejected with
+  HTTP 400 before the DB write. The flag is off by default for backward
+  compatibility. See `crates/ui/web-api/src/routes/plugin_configs.rs`
+  (`collect_dangerous_patterns`, `format_dangerous_pattern_rejection`).
+
 ## Residual risk
 
 - **`manage_commands` still equals RCE.** The permission separation reduces the blast
   radius (fewer users can modify command-bearing fields), but users with
   `manage_commands` retain full effective RCE on all assigned hosts. Assigning this
   permission should be treated with the same care as granting `root` access.
-- **No command content blocking.** Dangerous pattern detection is advisory only
-  (warnings, not rejections). Commands are length-limited but content is not
-  blocked. There is no allowlist or blocklist.
+- **Command content blocking is opt-in.** The `--reject-dangerous-commands` flag must
+  be explicitly enabled by the operator. Without it, dangerous pattern detection
+  remains advisory only (warnings, not rejections). There is no allowlist or
+  blocklist beyond the built-in pattern set.
 - **No change approval workflow.** Plugin config modifications take effect immediately
   on the next scheduled check or triggered update. There is no second-admin approval,
   delay, or review step.

@@ -77,18 +77,22 @@
 - **Cross-instance delay without NATS.** Without NATS, CRL rebuilds on remote
   instances happen only on the periodic schedule (every 4 hours by default). The
   revoking instance updates immediately, but other instances lag.
-- **No connection-level revocation for existing sessions.** The software-level
-  revocation check runs on WebSocket connect, not on every message. An already-
-  established session is not forcibly disconnected when a certificate is revoked;
-  the agent must reconnect for the check to fire.
+- ~~No connection-level revocation for existing sessions.~~ **Fixed.**
+  `ServiceConnectionRegistry::force_disconnect()` cancels the session's
+  `CancellationToken` and removes the connection entry, causing the WebSocket
+  handler's `tokio::select!` loop to exit immediately. This is called from the
+  deactivate, reject, and merge service routes, as well as the corresponding
+  system service routes. Active sessions are terminated at the moment of
+  revocation, not deferred to reconnection.
 - **CRL size growth.** Over time, the CRL grows as more certificates are revoked.
   Large CRLs increase download time and may cause proxy-side parsing delays, though
   in practice the 7-day default certificate lifetime limits CRL size.
 
 ## Recommended improvements
 
-- Add an active session termination mechanism that forcibly closes existing WebSocket
-  connections when a certificate is revoked, rather than waiting for reconnection.
+- ~~Add an active session termination mechanism that forcibly closes existing WebSocket
+  connections when a certificate is revoked, rather than waiting for reconnection.~~
+  **Done.** `force_disconnect()` immediately cancels the session token.
 - Reduce the default CRL rebuild interval from 4 hours to 1 hour, or make it
   configurable with a recommended production value of 15-30 minutes.
 - Publish a recommended CRL refresh script/cron configuration in the deployment

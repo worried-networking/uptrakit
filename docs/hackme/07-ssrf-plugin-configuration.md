@@ -64,10 +64,10 @@ requests to cloud metadata endpoints.
   IPv6 ULA (`fc00::/7`) and link-local (`fe80::/10`) addresses.
 - ~~CGNAT range not blocked.~~ **Fixed.** `is_private_host()` now blocks the
   `100.64.0.0/10` (Carrier-Grade NAT) range.
-- **Docker registry has no private-host check.** The Docker plugin's
-  `validate_identifier()` only checks for non-empty, no whitespace/control characters.
-  The registry hostname extracted from the Docker image reference is not validated
-  against private hosts.
+- ~~Docker registry has no private-host check.~~ **Fixed.** `validate_identifier()`
+  now strips the port from the registry hostname and validates it against
+  `is_private_host()`, rejecting private registries like `localhost`, `10.0.0.1`,
+  `192.168.1.1:5000`, and `169.254.169.254`.
 - **Error message information leakage.** Connection errors from SSRF attempts may
   include internal IP addresses, port numbers, or service banners in error messages
   returned to the API caller or logged in version check results.
@@ -80,7 +80,8 @@ requests to cloud metadata endpoints.
 - Implement DNS resolution validation at connection time (not just at config
   validation time) by using a custom `reqwest` DNS resolver that rejects private IP
   addresses. This prevents DNS rebinding attacks.
-- Add `is_private_host()` validation to the Docker plugin's registry hostname.
+- ~~Add `is_private_host()` validation to the Docker plugin's registry hostname.~~
+  **Done.** `validate_identifier()` now checks the registry hostname.
 - ~~Block IPv6 ULA, link-local, and CGNAT ranges~~ — **Done.** Consolidated shared
   `is_private_host()` in `uptrakit_shared_types::network` covers all ranges.
 - ~~Disable HTTP redirect following in plugin HTTP clients~~ — **Done.** All plugin

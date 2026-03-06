@@ -64,10 +64,9 @@
 
 ## Residual risk
 
-- **`is_valid_gh_component()` is minimal.** The validation only checks for `/` and
-  `..`. An owner/repo containing characters like `@`, `%`, `#`, or spaces could
-  manipulate the URL path when interpolated into
-  `{base}/repos/{owner}/{repo}/releases`.
+- ~~`is_valid_gh_component()` is minimal.~~ **Fixed.** The validation now enforces a
+  strict character allowlist (`[a-zA-Z0-9._-]`), a 100-character length limit, rejects
+  empty strings and `..`, matching GitHub's actual naming rules.
 - **Local host compromise is prerequisite.** If the attacker can modify
   `/usr/bin/update`, they likely already have significant access to the host,
   reducing the incremental value of this attack. However, the attack's value lies
@@ -83,8 +82,8 @@
 
 ## Recommended improvements
 
-- Strengthen `is_valid_gh_component()` to enforce a strict character allowlist (e.g.,
-  `[a-zA-Z0-9._-]+`) matching GitHub's actual username and repository naming rules.
+- ~~Strengthen `is_valid_gh_component()` to enforce a strict character allowlist~~ —
+  **Done.** Now uses `[a-zA-Z0-9._-]+` with length and `..` checks.
 - Add a warning indicator in the UI for software items created by auto-discovery,
   especially those pointing to repositories outside the expected organizations.
 - Consider requiring explicit admin approval for all auto-created plugin configs, even
