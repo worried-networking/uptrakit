@@ -29,6 +29,8 @@ pub(crate) mod auth {
     pub(crate) const DEVICE_POLL: &str = "/api/v1/auth/device/poll";
     /// `POST /api/v1/auth/device/approve`
     pub(crate) const DEVICE_APPROVE: &str = "/api/v1/auth/device/approve";
+    /// `GET /api/v1/auth/device/stream`
+    pub(crate) const DEVICE_STREAM: &str = "/api/v1/auth/device/stream";
 }
 
 pub(crate) mod api_tokens {

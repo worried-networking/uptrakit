@@ -6517,6 +6517,7 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tokio",
+ "tracing",
  "tracing-subscriber",
  "uptrakit-build-info",
  "uptrakit-directories",

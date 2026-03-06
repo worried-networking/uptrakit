@@ -2,11 +2,13 @@ use crate::client::{UptrakitClient, resolve_server_and_token};
 use crate::config::{Config, Credentials, load_config, save_config, save_credentials};
 use crate::error::{CliError, Result};
 use crate::output::HumanOutput;
+use futures_util::StreamExt;
 use rootcause::prelude::*;
 use serde::Serialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
+use uptrakit_openapi_client::device_auth_stream::DeviceAuthSseEvent;
 use uptrakit_openapi_client::types::api_tokens::CreateApiTokenRequest;
 use uptrakit_openapi_client::types::device_auth::{DeviceAuthPollRequest, DeviceAuthStartRequest};
 
@@ -183,8 +185,79 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
 
     eprintln!("  Waiting for authorization...");
 
-    // Poll for completion
-    let poll_client = UptrakitClient::new(&server, None, insecure, None).context_to()?;
+    // Try SSE first for instant notification, fall back to polling
+    match try_sse_login(&server, &start_resp.device_code, &client_name, insecure).await {
+        Ok(()) => return Ok(()),
+        Err(e) => {
+            tracing::debug!("SSE unavailable, falling back to polling: {e}");
+        }
+    }
+
+    // Fall back to polling
+    poll_for_authorization(&server, &start_resp, &client_name, insecure).await
+}
+
+/// Try to login via SSE stream. Returns `Ok(())` on success, `Err` if SSE is
+/// unavailable or fails (caller should fall back to polling).
+async fn try_sse_login(
+    server: &str,
+    device_code: &str,
+    client_name: &str,
+    insecure: bool,
+) -> Result<()> {
+    let sse_client = UptrakitClient::new(server, None, insecure, None).context_to()?;
+    let stream = sse_client
+        .stream_device_auth(device_code)
+        .await
+        .context_to()?;
+    tokio::pin!(stream);
+
+    // The stream's filter_map only yields terminal events (authorized/expired),
+    // so we only need the first event.
+    match stream.next().await {
+        Some(Ok(DeviceAuthSseEvent::Authorized { token, token_name })) => {
+            let name = if token_name.is_empty() {
+                client_name.to_string()
+            } else {
+                token_name
+            };
+
+            save_config(&Config {
+                server: Some(server.to_string()),
+            })
+            .await?;
+            save_credentials(&Credentials { token: Some(token) }).await?;
+
+            eprintln!();
+            println!("Logged in to {} successfully.", server);
+            println!("API token stored locally (name: {}).", name);
+
+            Ok(())
+        }
+        Some(Ok(DeviceAuthSseEvent::Expired)) => {
+            bail!(CliError::Other("Device authorization expired".into()));
+        }
+        Some(Err(e)) => {
+            // Stream error — return Err to trigger poll fallback
+            bail!(CliError::Other(format!("SSE stream error: {e}")));
+        }
+        None => {
+            // Stream ended without a terminal event
+            bail!(CliError::Other(
+                "SSE stream closed without authorization".into(),
+            ))
+        }
+    }
+}
+
+/// Poll-based device authorization (fallback when SSE is unavailable).
+async fn poll_for_authorization(
+    server: &str,
+    start_resp: &uptrakit_openapi_client::types::device_auth::DeviceAuthStartResponse,
+    client_name: &str,
+    insecure: bool,
+) -> Result<()> {
+    let poll_client = UptrakitClient::new(server, None, insecure, None).context_to()?;
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(start_resp.expires_in);
     let interval = start_resp.interval;
@@ -236,11 +309,10 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
                 let api_token = poll_resp
                     .token
                     .ok_or_else(|| report!(CliError::Other("No token in response".into())))?;
-                let token_name = poll_resp.token_name.as_deref().unwrap_or(&client_name);
+                let token_name = poll_resp.token_name.as_deref().unwrap_or(client_name);
 
-                // Store config and credentials
                 save_config(&Config {
-                    server: Some(server.clone()),
+                    server: Some(server.to_string()),
                 })
                 .await?;
                 save_credentials(&Credentials {

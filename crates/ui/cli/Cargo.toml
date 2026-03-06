@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
 futures-util = { workspace = true }
 serde = { workspace = true }

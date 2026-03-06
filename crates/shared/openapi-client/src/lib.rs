@@ -8,6 +8,7 @@ pub mod audit_logs;
 pub mod auth;
 pub mod autodiscovery;
 pub mod batch_progress_stream;
+pub mod device_auth_stream;
 pub mod discovery_allowlist;
 pub mod enrollment_tokens;
 pub mod error;
