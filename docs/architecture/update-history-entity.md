@@ -14,7 +14,7 @@ Records are immutable — once created they are not modified or soft-deleted.
 | `software_item_id` | UUID FK → `software_items.id` | ON DELETE CASCADE |
 | `from_version` | TEXT | Nullable; version before update |
 | `to_version` | TEXT | NOT NULL; target version |
-| `status` | TEXT | String-backed enum: `pending`, `in_progress`, `completed`, `failed` |
+| `status` | TEXT | String-backed enum: `queued`, `pending`, `in_progress`, `completed`, `failed` |
 | `output` | TEXT | NOT NULL; full command output |
 | `actor_type` | TEXT | NOT NULL; `"user"`, `"mqtt"`, `"scheduler"`, or `"legacy"` |
 | `actor_id` | TEXT | NOT NULL; user UUID, MQTT client UUID, or empty string |
@@ -26,7 +26,7 @@ Records are immutable — once created they are not modified or soft-deleted.
 
 Indexes: `idx_update_history_host_id`, `idx_update_history_software_item_id`,
 `idx_update_history_status`, `idx_update_history_host_software_item` (composite),
-`idx_uh_batch_id`.
+`idx_uh_batch_id`, `uix_update_history_host_active` (unique partial on `host_id WHERE status IN ('pending','in_progress')`).
 
 ### `update_batches`
 
@@ -52,10 +52,48 @@ transitions to a terminal state. This avoids expensive subqueries in the list en
 The `UpdateStatus` enum is defined in two places:
 
 - **Entity level** (`crates/shared/db/src/entity/update_history.rs`): `DeriveActiveEnum` with
-  `sea_orm(rs_type = "String")`. Variants: `Pending`, `InProgress`, `Completed`, `Failed`.
+  `sea_orm(rs_type = "String")`. Variants: `Queued`, `Pending`, `InProgress`, `Completed`, `Failed`.
 - **API level** (`crates/shared/web-api-types/src/update_history.rs`): `serde(rename_all = "snake_case")` with
   `as_str()` / `from_str()` methods. Conversion between DB and API enums happens in the route handler's
   `db_status_to_api` helper.
+
+| Variant | String | Meaning | Terminal? | Active lock? |
+| :------ | :----- | :------ | :-------: | :----------: |
+| `Queued` | `queued` | Batch item waiting for preceding host item to complete | No | No |
+| `Pending` | `pending` | Dispatched; agent not yet started | No | **Yes** |
+| `InProgress` | `in_progress` | Agent executing the update | No | **Yes** |
+| `Completed` | `completed` | Update succeeded | Yes | No |
+| `Failed` | `failed` | Update failed | Yes | No |
+
+**Active lock** means the row counts toward the per-host lock (i.e. no further update may be triggered
+for that host while such a row exists). The partial unique index `uix_update_history_host_active`
+covers exactly these two statuses.
+
+## Per-host update locking
+
+At most one active (`Pending` or `InProgress`) software-item update may run on a host at any time.
+The same invariant is also cross-table: a `Pending`/`InProgress` row in `host_package_update_history`
+also blocks a new software-item update trigger, and vice versa.
+
+Enforcement layers:
+
+1. **Application check** — `validate_update_preconditions` counts active rows in both
+   `update_history` and `host_package_update_history` before inserting a new record. Returns
+   `TriggerUpdateError::HostUpdateInProgress` (HTTP 409) if either count is non-zero.
+2. **DB constraint** — the partial unique index `uix_update_history_host_active` on
+   `(host_id) WHERE status IN ('pending', 'in_progress')` rejects a concurrent INSERT that
+   races past the application check (multi-controller deployments).
+
+### Batch sequential dispatch
+
+When a batch contains multiple items for the same host:
+
+- The **first item** per host is inserted as `Pending` and dispatched immediately.
+- **Subsequent items** are inserted as `Queued` (excluded from the unique index) so the INSERT
+  succeeds without violating the per-host constraint.
+- When the preceding item completes, `dispatch_next_in_batch` promotes the next `Queued` row to
+  `Pending` using a CAS UPDATE: `WHERE id = ? AND status = 'queued'`. If another controller
+  already promoted the row, `rows_affected == 0` and dispatch is skipped — preventing double-dispatch.
 
 ## Tenant scoping
 
@@ -98,6 +136,7 @@ See [Batch Update Endpoints](../api/http-web-api.md#batch-update-endpoints) for 
 | `crates/shared/db/src/migration/m20260209_000001_initial.rs` | DB migration (initial) |
 | `crates/shared/db/src/migration/m20260301_000001_update_category.rs` | Migration: update_category column |
 | `crates/shared/db/src/migration/m20260301_000002_update_batches.rs` | Migration: update_batches table, batch_id FK |
+| `crates/shared/db/src/migration/m20260313_000001_per_host_update_locking.rs` | Migration: partial unique index `uix_update_history_host_active` |
 | `crates/shared/web-api-types/src/update_history.rs` | API types (response, query, status enum) |
 | `crates/shared/web-api-types/src/update_batches.rs` | Batch API types (requests, responses) |
 | `crates/ui/web-api/src/routes/update_history.rs` | Route handlers + unit tests |

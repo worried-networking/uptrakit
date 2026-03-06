@@ -553,7 +553,20 @@ See [Audit Logs API Reference](audit-logs.md) for the full specification.
 - `/api/v1/agents/{id}/execute-update`: send `execute_update` (requires `ManageSoftware`).
 - `/api/v1/mqtt/tenants`: manage MQTT tenant assignments (requires `ManageSettings`).
 
-Update history records each attempt (`status`: `pending`, `in_progress`, `completed`, `failed`) and stores the full command output for auditing.
+Update history records each attempt and stores the full command output for auditing.
+
+**`UpdateStatus` values** in history responses:
+
+| Value | Meaning |
+| :---- | :------ |
+| `queued` | Batch item waiting for a preceding item on the same host to complete. Counts as `update_in_progress` in MQTT state. |
+| `pending` | Dispatched to the agent; not yet started. Holds the per-host active lock. |
+| `in_progress` | Agent is executing the update. Holds the per-host active lock. |
+| `completed` | Update succeeded (terminal). |
+| `failed` | Update failed (terminal). |
+
+Triggers return **HTTP 409** if another update (`pending` or `in_progress`) already exists for the target host,
+across both software-item updates and host-package batches.
 
 ## Software Item Version Check Endpoints
 

@@ -297,8 +297,10 @@ Main functionality that delivers the core value proposition.
 
 ### Concurrency Control
 
-- [ ] Implement update locking mechanism
-  - [ ] Per-host update locks
+- [x] Implement update locking mechanism
+  - [x] Per-host update locks — combined cross-table check (`update_history` + `host_package_update_history`),
+        partial unique index on `update_history(host_id) WHERE status IN ('pending','in_progress')`,
+        and CAS promotion for batch sequential dispatch
   - [ ] Global concurrent update limits
   - [ ] Lock timeout handling
 - [ ] Add update queue management
@@ -473,7 +475,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 - [ ] Run plugin detection commands on the remote host over SSH and parse output locally
 - [ ] Execute updates via sudo on the remote host (same sudo allowlist model as the regular agent)
 - [x] Stream command output back for progress reporting
-- [ ] Enforce per-host update locking (no concurrent updates to the same host)
+- [x] Enforce per-host update locking (no concurrent updates to the same host) — implemented via combined cross-table check and partial unique DB index
 - [ ] Timeout and kill long-running remote commands
 - [ ] Handle connection drops mid-command gracefully (report failure, do not leave orphan processes)
 

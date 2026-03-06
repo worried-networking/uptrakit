@@ -283,8 +283,19 @@ These are non-negotiable design constraints. Do not violate them.
    [Secrets Handling](docs/security/secrets-and-encryption.md).
 1. **Logging goes to journald or stdout.** No internal log storage. Full command output is not captured internally --
    only high-level summaries are retained for display.
-1. **No overlapping update actions per host.** The scheduler must ensure that two update operations for the same host
-   never run concurrently.
+1. **No overlapping update actions per host.** At most one active (`Pending` or `InProgress`) update may run on a
+   host at any time, across ALL update types (software-item updates in `update_history` AND host-package batches in
+   `host_package_update_history`). This is enforced by:
+   - **Application-layer check** — `validate_update_preconditions` (REST/MQTT) and
+     `trigger_all_host_package_updates_for_host` (MQTT) each query both tables and return
+     `TriggerUpdateError::HostUpdateInProgress` (HTTP 409) if any active row exists.
+   - **DB-layer constraint** — a partial unique index `uix_update_history_host_active` on
+     `update_history(host_id) WHERE status IN ('pending', 'in_progress')` prevents duplicate active rows
+     even under concurrent controller processes (belt-and-suspenders against the application-layer check).
+   - **Batch sequential dispatch** — batch items beyond the first per host are inserted as `Queued` (excluded from
+     the unique index). `dispatch_next_in_batch` promotes them to `Pending` via a CAS UPDATE (`WHERE status =
+     'queued'`), so two controllers cannot double-dispatch the same item. `UpdateStatus::Queued` is NOT a terminal
+     state; terminal states are `Completed` and `Failed`.
 1. **No raw SQL.** Use the structures and methods provided by Sea ORM and sea_query builders everywhere, including
    migrations. Partial unique indexes use `Index::create().and_where()`, composite foreign keys use
    `ForeignKey::create().from_tbl().from_col().to_col()`, and `INSERT...SELECT` uses `Query::insert().select_from()`.
