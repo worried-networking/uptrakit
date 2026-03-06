@@ -139,9 +139,16 @@ pub trait ServiceHandler: Send {
     /// Called after the SDK processes shared `ServiceSettings` fields.
     ///
     /// The SDK already handles capability negotiation, renewal schedule,
-    /// shutdown timeout, and CA staleness. Override this for additional
-    /// service-specific settings processing.
-    async fn on_settings(&mut self, _settings: &ServiceSettingsPayload) {}
+    /// shutdown timeout, and CA staleness. Override this to send capability-
+    /// dependent messages (e.g. `ExtensionRegister` when `UiExtensions` is in
+    /// `conn.agreed_capabilities()`) or for additional service-specific
+    /// settings processing.
+    async fn on_settings(
+        &mut self,
+        _settings: &ServiceSettingsPayload,
+        _conn: &mut ControllerConnection,
+    ) {
+    }
 
     /// Returns the set of capabilities this service supports.
     ///

@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 
 use uptrakit_internal_wire::{
     Capability, CloseReason, ControllerMessage, PingPayload, ServiceMessage,
-    ServiceSettingsPayload, now_millis,
+    ServiceSettingsPayload, UpdateCapabilitiesPayload, now_millis,
 };
 
 use rootcause::prelude::*;
@@ -170,7 +170,21 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                             identity,
                             ctx,
                         ).await;
-                        handler.on_settings(&settings).await;
+                        // Announce the service's full capability set so the
+                        // controller can persist it and refresh gating flags
+                        // for the current session. This handles services that
+                        // gain or drop capabilities across version upgrades
+                        // without requiring re-enrollment.
+                        let caps_payload = UpdateCapabilitiesPayload {
+                            capabilities: handler.capabilities(),
+                        };
+                        if let Err(e) = conn
+                            .send(ServiceMessage::UpdateCapabilities(caps_payload))
+                            .await
+                        {
+                            tracing::warn!(error = %e, "failed to send UpdateCapabilities");
+                        }
+                        handler.on_settings(&settings, &mut conn).await;
                     }
                     Some(ControllerMessage::CaBundleUpdated(payload)) => {
                         cert_handler.handle_ca_bundle_updated(identity, &payload).await;

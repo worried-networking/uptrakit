@@ -99,6 +99,10 @@ struct SshAgentHandler {
     /// PKCS#8 DER-encoded P-256 private key for ECIES decryption of sensitive
     /// extension parameters. Populated in `on_connected` from the identity.
     private_key_der: Option<Vec<u8>>,
+    /// Base64-encoded uncompressed P-256 public key for the `ExtensionRegister`
+    /// payload. Populated in `on_connected` and sent in `on_settings` after
+    /// capability negotiation confirms `UiExtensions` is in the agreed set.
+    encryption_public_key: Option<String>,
     /// Path to the operator-controlled freeze file.
     ///
     /// When this file exists, the agent rejects all `ExecuteUpdate` and
@@ -202,20 +206,12 @@ impl ServiceHandler for SshAgentHandler {
         self.service_id = identity.service_id();
         self.private_key_der = identity.private_key_pkcs8_der();
 
-        // Register UI extensions.
-        let encryption_public_key = identity.public_key_raw().map(|bytes| {
+        // Store the encryption public key; the actual ExtensionRegister message
+        // is sent from on_settings once the agreed capabilities are known.
+        self.encryption_public_key = identity.public_key_raw().map(|bytes| {
             use base64::Engine as _;
             base64::engine::general_purpose::STANDARD.encode(&bytes)
         });
-        let register_payload = extension::build_register_payload(encryption_public_key);
-        if let Err(e) = conn
-            .send(uptrakit_internal_wire::ServiceMessage::ExtensionRegister(
-                register_payload,
-            ))
-            .await
-        {
-            tracing::warn!(error = %e, "failed to register UI extensions");
-        }
 
         // DB is initialized at startup (in main) before the event loop starts.
         let local_db = self.local_db.as_ref().ok_or_else(|| {
@@ -426,6 +422,32 @@ impl ServiceHandler for SshAgentHandler {
 
     fn capabilities(&self) -> BTreeSet<Capability> {
         client::ssh_agent_capabilities()
+    }
+
+    async fn on_settings(
+        &mut self,
+        _settings: &uptrakit_internal_wire::ServiceSettingsPayload,
+        conn: &mut ControllerConnection,
+    ) {
+        // Register UI extensions only when the agreed capability set includes
+        // UiExtensions. The SDK sends UpdateCapabilities before calling
+        // on_settings, so the controller has already refreshed its gating flags
+        // by the time ExtensionRegister is received.
+        if conn
+            .agreed_capabilities()
+            .contains(&Capability::UiExtensions)
+        {
+            let register_payload =
+                extension::build_register_payload(self.encryption_public_key.clone());
+            if let Err(e) = conn
+                .send(uptrakit_internal_wire::ServiceMessage::ExtensionRegister(
+                    register_payload,
+                ))
+                .await
+            {
+                tracing::warn!(error = %e, "failed to register UI extensions");
+            }
+        }
     }
 
     async fn on_extension_request(
@@ -1158,6 +1180,7 @@ async fn main() {
         state_dir: state_dir.to_path_buf(),
         service_id: None,
         private_key_der: None,
+        encryption_public_key: None,
         freeze_file_path,
         in_flight_updates: HashMap::new(),
         aggregate_rx,
