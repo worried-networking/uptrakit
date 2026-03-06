@@ -6418,6 +6418,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uptrakit-backoff",
  "uptrakit-command",
  "uptrakit-directories",
  "uptrakit-internal-wire",

@@ -48,5 +48,23 @@ pub enum PluginError {
     PluginInternal(String),
 }
 
+impl PluginError {
+    /// Whether this error is likely transient and worth retrying.
+    ///
+    /// Returns `true` for errors caused by subprocess failures, timeouts,
+    /// or internal plugin issues that may resolve on a subsequent attempt.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::CommandSpawn(_)
+                | Self::CommandFailed(_)
+                | Self::CommandWait(_)
+                | Self::TimedOut
+                | Self::CaptureFailed(_)
+                | Self::PluginInternal(_)
+        )
+    }
+}
+
 /// Result type alias for plugin operations.
 pub type Result<T> = std::result::Result<T, Report<PluginError>>;

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures_util::future::join_all;
+use uptrakit_backoff::Backoff;
 use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
     PluginAssignment, PluginType, UpdateCategory, VersionCheckAssignment, VersionCheckResult,
@@ -10,6 +12,13 @@ use uptrakit_plugin_infrastructure_core::{BatchDetectItem, BatchFetchItem};
 use uptrakit_plugin_infrastructure_registry::{PluginCapability, PluginRegistry};
 
 use crate::connection_context::ConnectionContext;
+
+/// Base delay between retry attempts for transient version check errors.
+const RETRY_BASE_DELAY: Duration = Duration::from_secs(5);
+/// Maximum delay between retry attempts.
+const RETRY_MAX_DELAY: Duration = Duration::from_secs(20);
+/// Maximum number of retries (3 total attempts).
+const MAX_RETRIES: u32 = 2;
 
 /// Result of a version check for a single software item.
 pub struct VersionCheckOutcome {
@@ -384,6 +393,9 @@ pub async fn batch_check_versions(
 }
 
 /// Detect the installed version using a specific plugin assignment.
+///
+/// Retries up to [`MAX_RETRIES`] times when the error is transient
+/// (see [`PluginError::is_retryable`]).
 async fn detect_installed(
     assignment: &PluginAssignment,
     executor: Arc<dyn CommandExecutor>,
@@ -398,30 +410,59 @@ async fn detect_installed(
     let mut effective_config = assignment.config.clone();
     ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
+    // Plugin creation is not retried — config/instantiation errors aren't transient.
     let plugin =
         PluginRegistry::create_plugin(assignment.plugin_type.clone(), &effective_config, executor)
             .await
             .map_err(|e| e.to_string())?;
 
-    match plugin
-        .detect_installed_version(&assignment.package_identifier)
-        .await
-    {
-        Ok(Some(version)) => {
-            tracing::debug!(version = %version, "installed version detected");
-            Ok(Some(version.to_string()))
+    let mut backoff = Backoff::new(RETRY_BASE_DELAY, RETRY_MAX_DELAY);
+    let mut last_error = None;
+
+    for attempt in 0..=MAX_RETRIES {
+        match plugin
+            .detect_installed_version(&assignment.package_identifier)
+            .await
+        {
+            Ok(Some(version)) => {
+                tracing::debug!(version = %version, "installed version detected");
+                return Ok(Some(version.to_string()));
+            }
+            Ok(None) => {
+                tracing::debug!("no installed version detected");
+                return Ok(None);
+            }
+            Err(e) => {
+                let retryable = e.current_context().is_retryable() && attempt < MAX_RETRIES;
+                if retryable {
+                    let delay = backoff.next_delay();
+                    tracing::debug!(
+                        attempt = attempt + 1,
+                        max_retries = MAX_RETRIES,
+                        delay_ms = delay.as_millis() as u64,
+                        error = %e,
+                        "transient detect error, retrying"
+                    );
+                    tokio::time::sleep(delay).await;
+                    last_error = Some(e);
+                    continue;
+                }
+                return Err(format!("detection failed: {e}"));
+            }
         }
-        Ok(None) => {
-            tracing::debug!("no installed version detected");
-            Ok(None)
-        }
-        Err(e) => Err(format!("detection failed: {e}")),
+    }
+
+    match last_error {
+        Some(e) => Err(format!("detection failed: {e}")),
+        None => Err("detection failed: unknown error".to_string()),
     }
 }
 
 /// Fetch the latest available version using a specific plugin assignment.
 ///
 /// Returns `Ok(Some((version_string, category)))` when a release is found.
+/// Retries up to [`MAX_RETRIES`] times when the error is transient
+/// (see [`PluginError::is_retryable`]).
 async fn fetch_latest(
     assignment: &PluginAssignment,
     executor: Arc<dyn CommandExecutor>,
@@ -436,23 +477,48 @@ async fn fetch_latest(
     let mut effective_config = assignment.config.clone();
     ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
+    // Plugin creation is not retried — config/instantiation errors aren't transient.
     let plugin =
         PluginRegistry::create_plugin(assignment.plugin_type.clone(), &effective_config, executor)
             .await
             .map_err(|e| e.to_string())?;
 
-    match plugin.fetch_releases(&assignment.package_identifier).await {
-        Ok(releases) => {
-            tracing::debug!(count = releases.len(), "releases fetched");
-            Ok(releases.first().map(|r| {
-                let category = r.category.clone().unwrap_or_default();
-                (r.version.to_string(), category)
-            }))
+    let mut backoff = Backoff::new(RETRY_BASE_DELAY, RETRY_MAX_DELAY);
+    let mut last_error = None;
+
+    for attempt in 0..=MAX_RETRIES {
+        match plugin.fetch_releases(&assignment.package_identifier).await {
+            Ok(releases) => {
+                tracing::debug!(count = releases.len(), "releases fetched");
+                return Ok(releases.first().map(|r| {
+                    let category = r.category.clone().unwrap_or_default();
+                    (r.version.to_string(), category)
+                }));
+            }
+            Err(e) => {
+                let retryable = e.current_context().is_retryable() && attempt < MAX_RETRIES;
+                if retryable {
+                    let delay = backoff.next_delay();
+                    tracing::debug!(
+                        attempt = attempt + 1,
+                        max_retries = MAX_RETRIES,
+                        delay_ms = delay.as_millis() as u64,
+                        error = %e,
+                        "transient fetch error, retrying"
+                    );
+                    tokio::time::sleep(delay).await;
+                    last_error = Some(e);
+                    continue;
+                }
+                tracing::debug!(error = %e, "failed to fetch latest version from plugin");
+                return Err(format!("fetch_releases failed: {e}"));
+            }
         }
-        Err(e) => {
-            tracing::debug!(error = %e, "failed to fetch latest version from plugin");
-            Err(format!("fetch_releases failed: {e}"))
-        }
+    }
+
+    match last_error {
+        Some(e) => Err(format!("fetch_releases failed: {e}")),
+        None => Err("fetch_releases failed: unknown error".to_string()),
     }
 }
 
