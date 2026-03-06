@@ -25,7 +25,7 @@ pub struct ExtensionManifest {
     pub label: String,
     /// Where this extension appears in the UI.
     pub placement: ExtensionPlacement,
-    /// Permission required to see and use this extension (e.g., `"manage_hosts"`).
+    /// Permission required to see and use this extension (e.g., `Permission::ManageHosts`).
     ///
     /// Empty string means no permission required beyond authentication.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -148,6 +148,173 @@ pub struct ExtensionColumn {
 
 // ── UI definitions ──────────────────────────────────────────────────────────
 
+/// Source for context selector options.
+///
+/// Determines how the frontend populates the dropdown that appears above a
+/// `DataTable` when `context_selector` is set.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContextSelectorSource {
+    /// Call an extension action to populate options.
+    ///
+    /// The action must return a JSON array of `{ "value": "...", "label": "..." }` objects.
+    Action {
+        /// The action ID to invoke.
+        action_id: String,
+    },
+    /// Fetch plugin configurations of a specific type via the REST API.
+    ///
+    /// The frontend calls `GET /api/v1/plugin-configs`, filters by `plugin_type`,
+    /// and maps each result to `{ value: id, label: name }`. No extension action is needed.
+    PluginConfigs {
+        /// Plugin type string to filter by (e.g., `"infrastructure_proxmox"`).
+        plugin_type: String,
+    },
+}
+
+/// Context selector shown above a `DataTable` UI.
+///
+/// When present, the user must choose a context value (e.g., a plugin config)
+/// before table data loads. The selected value is automatically injected into
+/// every action invocation (data load, primary actions, row actions) under
+/// `param_key`.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextSelectorDef {
+    /// Parameter key injected into all action params when a value is selected.
+    pub param_key: String,
+    /// Label for the selector dropdown.
+    pub label: String,
+    /// How to populate the selector options.
+    pub source: ContextSelectorSource,
+    /// Optional action shown as a "Create" button next to the selector.
+    ///
+    /// The action may route through the extension proxy (no `api_submit`) or call
+    /// an existing REST API directly (with `api_submit` set). After the action
+    /// completes the options list refreshes and the new item is auto-selected if
+    /// the response includes the field named by
+    /// `ActionDef::api_submit.response_id_field`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub add_action: Option<ActionDef>,
+    /// Message shown when no options are available and no `add_action` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub empty_message: Option<String>,
+}
+
+impl ContextSelectorDef {
+    /// Create a new context selector.
+    pub fn new(
+        param_key: impl Into<String>,
+        label: impl Into<String>,
+        source: ContextSelectorSource,
+    ) -> Self {
+        Self {
+            param_key: param_key.into(),
+            label: label.into(),
+            source,
+            add_action: None,
+            empty_message: None,
+        }
+    }
+
+    /// Set an action shown as a "Create" button.
+    pub fn with_add_action(mut self, action: ActionDef) -> Self {
+        self.add_action = Some(action);
+        self
+    }
+
+    /// Set the message shown when no options are available.
+    pub fn with_empty_message(mut self, message: impl Into<String>) -> Self {
+        self.empty_message = Some(message.into());
+        self
+    }
+}
+
+/// Describes a direct REST API call as the submit target for a form action.
+///
+/// When `ActionDef::api_submit` is set, form submission bypasses the extension
+/// proxy and calls the specified REST API endpoint instead. This allows
+/// extensions to expose existing API operations as first-class actions without
+/// duplicating server-side logic in an extension handler.
+///
+/// ## Body template syntax
+///
+/// `body` is a JSON value tree. Any string leaf matching `{{field_name}}` or
+/// `{{field_name:coercion}}` is replaced with the corresponding form-field value,
+/// with optional type coercion:
+///
+/// | Syntax | Coercion |
+/// |--------|----------|
+/// | `{{name}}` | String (default) |
+/// | `{{enabled:bool}}` | Converts `"true"` → `true`, anything else → `false` |
+/// | `{{tags:csv_array}}` | Splits on `,`, trims whitespace, drops empty strings → JSON array |
+/// | `{{count:number}}` | Converts the string to a JSON number |
+///
+/// ## Example — create a plugin config
+///
+/// ```json
+/// {
+///   "name": "{{name}}",
+///   "plugin_type": "infrastructure_proxmox",
+///   "enabled": true,
+///   "config": {
+///     "api_url": "{{api_url}}",
+///     "api_token": "{{api_token}}",
+///     "verify_tls": "{{verify_tls:bool}}",
+///     "node_filter": "{{node_filter:csv_array}}"
+///   }
+/// }
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiSubmitDef {
+    /// HTTP method (e.g., `"POST"`, `"PUT"`, `"PATCH"`, `"DELETE"`).
+    pub method: String,
+    /// API path relative to the controller base URL (e.g., `"/api/v1/plugin-configs"`).
+    pub path: String,
+    /// JSON body template (see struct-level documentation for template syntax).
+    pub body: serde_json::Value,
+    /// Field in the JSON response containing the new item's identifier.
+    ///
+    /// When set, this value is returned to the caller (e.g., context selector) so
+    /// the new item can be auto-selected after creation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_id_field: Option<String>,
+    /// Field in the JSON response containing the new item's display label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_label_field: Option<String>,
+}
+
+impl ApiSubmitDef {
+    /// Create a new API submit definition.
+    pub fn new(
+        method: impl Into<String>,
+        path: impl Into<String>,
+        body: serde_json::Value,
+    ) -> Self {
+        Self {
+            method: method.into(),
+            path: path.into(),
+            body,
+            response_id_field: None,
+            response_label_field: None,
+        }
+    }
+
+    /// Set the response field containing the item's ID.
+    pub fn with_response_id_field(mut self, field: impl Into<String>) -> Self {
+        self.response_id_field = Some(field.into());
+        self
+    }
+
+    /// Set the response field containing the item's display label.
+    pub fn with_response_label_field(mut self, field: impl Into<String>) -> Self {
+        self.response_label_field = Some(field.into());
+        self
+    }
+}
+
 /// Schema-driven UI definition for an extension.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +332,12 @@ pub enum ExtensionUi {
         /// Primary actions (buttons above the table).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         primary_actions: Vec<ActionDef>,
+        /// Optional context selector shown above the table.
+        ///
+        /// When set, the user must select a value before data loads. The selection
+        /// is injected into all action params under `context_selector.param_key`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_selector: Option<Box<ContextSelectorDef>>,
     },
     /// Input form.
     Form(FormDef),
@@ -230,6 +403,11 @@ pub struct ActionDef {
     /// Timeout in seconds for the action invocation. `None` uses the default (30s).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u32>,
+    /// When set, form submission calls this REST API endpoint directly instead of
+    /// routing through the extension proxy. Allows extensions to use existing API
+    /// operations without duplicating server-side handler logic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_submit: Option<Box<ApiSubmitDef>>,
 }
 
 impl ActionDef {
@@ -242,6 +420,7 @@ impl ActionDef {
             permission: String::new(),
             destructive: false,
             timeout_seconds: None,
+            api_submit: None,
         }
     }
 
@@ -266,6 +445,12 @@ impl ActionDef {
     /// Set the timeout in seconds.
     pub fn with_timeout(mut self, seconds: u32) -> Self {
         self.timeout_seconds = Some(seconds);
+        self
+    }
+
+    /// Set the REST API submit target (bypasses extension proxy on form submission).
+    pub fn with_api_submit(mut self, api_submit: ApiSubmitDef) -> Self {
+        self.api_submit = Some(Box::new(api_submit));
         self
     }
 }
@@ -388,6 +573,12 @@ impl FieldDef {
         self.placeholder = Some(placeholder.into());
         self
     }
+
+    /// Set help text displayed below the field.
+    pub fn with_help_text(mut self, help_text: impl Into<String>) -> Self {
+        self.help_text = Some(help_text.into());
+        self
+    }
 }
 
 /// Input field type.
@@ -488,6 +679,7 @@ pub struct ExtensionResponsePayload {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_shared_types::Permission;
 
     #[test]
     fn extension_manifest_roundtrip_page() {
@@ -498,7 +690,7 @@ mod tests {
                 nav_section: "management".to_string(),
                 icon: Some("server".to_string()),
             },
-            required_permission: "manage_hosts".to_string(),
+            required_permission: Permission::ManageHosts.into(),
             targeting: ExtensionTargeting::Targeted,
             ui: ExtensionUi::DataTable {
                 columns: vec![TableColumn {
@@ -509,6 +701,7 @@ mod tests {
                 data_action: "list-hosts".to_string(),
                 row_actions: vec![],
                 primary_actions: vec![],
+                context_selector: None,
             },
         };
 
@@ -569,6 +762,7 @@ mod tests {
                     permission: String::new(),
                     destructive: false,
                     timeout_seconds: Some(60),
+                    api_submit: None,
                 }],
             },
         };
@@ -759,9 +953,10 @@ mod tests {
             action_id: "delete-all".to_string(),
             label: "Delete All".to_string(),
             ui: None,
-            permission: "manage_hosts".to_string(),
+            permission: Permission::ManageHosts.into(),
             destructive: true,
             timeout_seconds: None,
+            api_submit: None,
         };
 
         let json = serde_json::to_string(&action).unwrap();

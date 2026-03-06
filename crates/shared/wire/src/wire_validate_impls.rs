@@ -356,6 +356,49 @@ impl WireValidate for extension::ExtensionColumn {
     }
 }
 
+impl WireValidate for extension::ContextSelectorSource {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        match self {
+            extension::ContextSelectorSource::Action { action_id } => {
+                check_string_len(
+                    action_id,
+                    MAX_SHORT_STRING_LEN,
+                    "context_selector.action_id",
+                )?;
+            }
+            extension::ContextSelectorSource::PluginConfigs { plugin_type } => {
+                check_string_len(
+                    plugin_type,
+                    MAX_SHORT_STRING_LEN,
+                    "context_selector.plugin_type",
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::ContextSelectorDef {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(
+            &self.param_key,
+            MAX_SHORT_STRING_LEN,
+            "context_selector.param_key",
+        )?;
+        check_string_len(&self.label, MAX_SHORT_STRING_LEN, "context_selector.label")?;
+        self.source.wire_validate()?;
+        if let Some(add_action) = &self.add_action {
+            add_action.wire_validate()?;
+        }
+        check_opt_string_len(
+            &self.empty_message,
+            MAX_SHORT_STRING_LEN,
+            "context_selector.empty_message",
+        )?;
+        Ok(())
+    }
+}
+
 impl WireValidate for extension::ExtensionUi {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         match self {
@@ -364,6 +407,7 @@ impl WireValidate for extension::ExtensionUi {
                 data_action,
                 row_actions,
                 primary_actions,
+                context_selector,
             } => {
                 check_vec_len(columns, MAX_EXTENSION_COLUMNS, "ui.columns")?;
                 check_string_len(data_action, MAX_SHORT_STRING_LEN, "ui.data_action")?;
@@ -377,6 +421,9 @@ impl WireValidate for extension::ExtensionUi {
                 }
                 for action in primary_actions {
                     action.wire_validate()?;
+                }
+                if let Some(cs) = context_selector {
+                    cs.wire_validate()?;
                 }
             }
             extension::ExtensionUi::Form(form) => {
@@ -404,13 +451,34 @@ impl WireValidate for extension::TableColumn {
     }
 }
 
+impl WireValidate for extension::ApiSubmitDef {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.method, MAX_SHORT_STRING_LEN, "api_submit.method")?;
+        check_string_len(&self.path, MAX_SHORT_STRING_LEN, "api_submit.path")?;
+        check_opt_string_len(
+            &self.response_id_field,
+            MAX_SHORT_STRING_LEN,
+            "api_submit.response_id_field",
+        )?;
+        check_opt_string_len(
+            &self.response_label_field,
+            MAX_SHORT_STRING_LEN,
+            "api_submit.response_label_field",
+        )?;
+        Ok(())
+    }
+}
+
 impl WireValidate for extension::ActionDef {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.action_id, MAX_SHORT_STRING_LEN, "action.action_id")?;
         check_string_len(&self.label, MAX_SHORT_STRING_LEN, "action.label")?;
         check_string_len(&self.permission, MAX_SHORT_STRING_LEN, "action.permission")?;
-        if let Some(ref ui) = self.ui {
+        if let Some(ui) = &self.ui {
             ui.wire_validate()?;
+        }
+        if let Some(api_submit) = &self.api_submit {
+            api_submit.wire_validate()?;
         }
         Ok(())
     }
