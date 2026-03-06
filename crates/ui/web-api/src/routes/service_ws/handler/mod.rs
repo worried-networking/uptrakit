@@ -32,6 +32,7 @@ use thiserror::Error;
 use rootcause::prelude::*;
 use sea_orm::EntityTrait;
 
+use uptrakit_internal_wire::limits::WireValidate;
 use uptrakit_internal_wire::{
     ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage, ErrorCode,
     ErrorPayload, IncomingSeq, MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq,
@@ -129,28 +130,29 @@ pub(crate) async fn handle_authenticated_loop(
         in_seq,
     } = ctx;
 
-    // Load service from DB, derive capabilities.
-    let capabilities: BTreeSet<Capability> = if is_system {
+    // Load service from DB, derive capabilities and app name.
+    let (capabilities, service_app_name): (BTreeSet<Capability>, Option<String>) = if is_system {
         match sys_svc_entity::Entity::find_by_id(service_id)
             .one(state.db())
             .await
         {
-            Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
-            _ => BTreeSet::new(),
+            Ok(Some(svc)) => (parse_capabilities(&svc.capabilities), svc.service_app_name),
+            _ => (BTreeSet::new(), None),
         }
     } else {
         match service::Entity::find_by_id(service_id)
             .one(state.db())
             .await
         {
-            Ok(Some(svc)) => parse_capabilities(&svc.capabilities),
-            _ => BTreeSet::new(),
+            Ok(Some(svc)) => (parse_capabilities(&svc.capabilities), svc.service_app_name),
+            _ => (BTreeSet::new(), None),
         }
     };
 
     let is_mqtt = capabilities.contains(&Capability::MqttBridge);
     let has_software_discovery = capabilities.contains(&Capability::SoftwareDiscovery);
     let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
+    let has_ui_extensions = capabilities.contains(&Capability::UiExtensions);
 
     let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
     let mut consecutive_unknown: u32 = 0;
@@ -508,6 +510,60 @@ pub(crate) async fn handle_authenticated_loop(
                             }
 
                             // -------------------------------------------------
+                            // ExtensionRegister (requires UiExtensions)
+                            // -------------------------------------------------
+                            ServiceMessage::ExtensionRegister(payload) if has_ui_extensions => {
+                                if let Err(e) = payload.wire_validate() {
+                                    tracing::warn!(
+                                        %service_id,
+                                        error = %e,
+                                        "invalid ExtensionRegister payload"
+                                    );
+                                    let err = ControllerMessage::Error(ErrorPayload {
+                                        code: ErrorCode::BadRequest,
+                                        message: format!("invalid extension manifests: {e}"),
+                                    });
+                                    if let Some(json) = serialize_controller_msg(out_seq, err) {
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                    }
+                                } else {
+                                    let app_name = service_app_name.as_deref().unwrap_or("unknown");
+                                    if let Err(e) = state.extension_registry.register_service(
+                                        service_id,
+                                        app_name,
+                                        payload.manifests,
+                                    ) {
+                                        tracing::warn!(
+                                            %service_id,
+                                            error = %e,
+                                            "extension registration rejected"
+                                        );
+                                        let err = ControllerMessage::Error(ErrorPayload {
+                                            code: ErrorCode::BadRequest,
+                                            message: e.to_string(),
+                                        });
+                                        if let Some(json) = serialize_controller_msg(out_seq, err) {
+                                            let _ = sink.send(Message::Text(json.into())).await;
+                                        }
+                                    } else {
+                                        tracing::info!(
+                                            %service_id,
+                                            app_name,
+                                            "registered UI extensions"
+                                        );
+                                    }
+                                }
+                            }
+
+                            // -------------------------------------------------
+                            // ExtensionResponse (requires UiExtensions)
+                            // -------------------------------------------------
+                            ServiceMessage::ExtensionResponse(payload) if has_ui_extensions => {
+                                let request_id = payload.request_id.clone();
+                                state.extension_proxy.complete(&request_id, payload);
+                            }
+
+                            // -------------------------------------------------
                             // Disconnecting (all capabilities)
                             // -------------------------------------------------
                             ServiceMessage::Disconnecting(payload) => {
@@ -599,6 +655,12 @@ pub(crate) async fn handle_authenticated_loop(
     // ------------------------------------------------------------------
     // Cleanup
     // ------------------------------------------------------------------
+
+    // Unregister UI extensions before connection teardown.
+    if has_ui_extensions {
+        state.extension_registry.unregister_service(&service_id);
+    }
+
     if let Some(ref lc) = lease_coordinator
         && let Err(e) = lc.release_all_for_service(&service_id).await
     {

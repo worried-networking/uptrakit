@@ -376,6 +376,19 @@ pub(crate) mod host_packages {
     }
 }
 
+pub(crate) mod extensions {
+    /// `GET /api/v1/extensions`
+    pub(crate) const BASE: &str = "/api/v1/extensions";
+    /// `GET /api/v1/extensions/{extension_id}/providers`
+    pub(crate) fn providers(extension_id: &str) -> String {
+        format!("/api/v1/extensions/{extension_id}/providers")
+    }
+    /// `POST /api/v1/extensions/{extension_id}/actions/{action_id}`
+    pub(crate) fn action(extension_id: &str, action_id: &str) -> String {
+        format!("/api/v1/extensions/{extension_id}/actions/{action_id}")
+    }
+}
+
 pub(crate) mod audit_logs {
     /// `GET /api/v1/audit-logs`
     pub(crate) const BASE: &str = "/api/v1/audit-logs";

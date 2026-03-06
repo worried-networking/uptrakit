@@ -7260,6 +7260,7 @@ dependencies = [
  "strum",
  "thiserror 2.0.18",
  "time",
+ "uptrakit-internal-wire",
  "uptrakit-shared-types",
  "utoipa",
  "uuid",

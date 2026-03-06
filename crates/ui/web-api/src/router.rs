@@ -610,6 +610,21 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::audit_logs::list_audit_logs))
         .routes(routes!(crate::routes::audit_logs::list_system_audit_logs));
 
+    // Extension endpoints — plain axum routes (no OpenAPI annotations).
+    let auth_routes = auth_routes
+        .route(
+            "/api/v1/extensions",
+            axum::routing::get(crate::routes::extensions::list_extensions),
+        )
+        .route(
+            "/api/v1/extensions/{extension_id}/providers",
+            axum::routing::get(crate::routes::extensions::list_extension_providers),
+        )
+        .route(
+            "/api/v1/extensions/{extension_id}/actions/{action_id}",
+            axum::routing::post(crate::routes::extensions::invoke_action),
+        );
+
     // NATS settings
     #[cfg(feature = "nats")]
     let auth_routes = auth_routes.routes(routes!(

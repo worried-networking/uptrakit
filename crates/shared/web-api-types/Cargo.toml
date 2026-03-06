@@ -16,6 +16,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 utoipa = { workspace = true, optional = true }

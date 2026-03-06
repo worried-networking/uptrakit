@@ -11,6 +11,7 @@ pub mod batch_progress_stream;
 pub mod discovery_allowlist;
 pub mod enrollment_tokens;
 pub mod error;
+pub mod extensions;
 pub mod health;
 pub mod host_packages;
 pub mod hosts;

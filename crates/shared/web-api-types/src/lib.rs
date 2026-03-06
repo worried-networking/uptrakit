@@ -16,6 +16,7 @@ pub mod device_auth;
 pub mod discovery_allowlist;
 pub mod enrollment_tokens;
 pub mod error;
+pub mod extensions;
 pub mod host_packages;
 pub mod hosts;
 pub mod masked_url;
