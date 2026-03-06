@@ -33,6 +33,7 @@ use crate::routes::service_ws::protocol::serialize_controller_msg;
 // ---------------------------------------------------------------------------
 
 /// Load the set of host IDs linked to the given service.
+#[tracing::instrument(skip_all, fields(%service_id))]
 pub(super) async fn load_linked_host_ids(
     db: &sea_orm::DatabaseConnection,
     service_id: uuid::Uuid,
@@ -53,6 +54,7 @@ pub(super) async fn load_linked_host_ids(
 /// Validate that an `update_history` record belongs to a host linked to the
 /// current service. Returns the record on success, logs a warning and returns
 /// an error if the service does not own the record.
+#[tracing::instrument(skip_all, fields(%service_id, %update_history_id))]
 pub(super) async fn validate_update_ownership(
     db: &sea_orm::DatabaseConnection,
     service_id: uuid::Uuid,
@@ -96,6 +98,7 @@ pub(super) async fn validate_update_ownership(
 ///
 /// All auxiliary data (software items, hosts, plugin assignments, plugin configs)
 /// is loaded in four batched queries and joined in memory to avoid N+1 round-trips.
+#[tracing::instrument(skip_all, fields(%service_id))]
 pub(super) async fn deliver_pending_updates(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -325,6 +328,7 @@ pub(super) async fn deliver_pending_updates(
 
 /// Handle an `UpdateStarted` message: validate ownership, set status to
 /// `InProgress`, clear previous output lines.
+#[tracing::instrument(skip_all, fields(%service_id, update_id = %payload.update_history_id))]
 pub(super) async fn handle_update_started(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -417,6 +421,7 @@ pub(super) async fn handle_update_started(
 
 /// Handle an `UpdateOutput` message: validate ownership, append output line
 /// (capped at `MAX_UPDATE_OUTPUT_BYTES`).
+#[tracing::instrument(skip_all, fields(%service_id, update_id = %payload.update_history_id))]
 pub(super) async fn handle_update_output(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -508,6 +513,7 @@ pub(super) async fn handle_update_output(
 
 /// Handle an `UpdateResult` message: validate ownership, set final status,
 /// store output, update installed version on success, push software states.
+#[tracing::instrument(skip_all, fields(%service_id, update_id = %payload.update_history_id, status = ?payload.status))]
 pub(super) async fn handle_update_result(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -909,6 +915,7 @@ async fn resolve_host_name(state: &Arc<AppState>, host_id: uuid::Uuid) -> String
 /// Handle a `BatchHostPackageUpdateResult` message: update per-package
 /// `host_package_update_history` rows and `host_package.installed_version`
 /// for successful packages.
+#[tracing::instrument(skip_all, fields(%service_id, batch_id = %payload.batch_id))]
 pub(super) async fn handle_batch_host_package_update_result(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,

@@ -126,6 +126,7 @@ impl_report_conversion!(sea_orm::DbErr => HandlerError::Database);
 /// Called by [`super::service_ws`] after certificate validation, service status
 /// check, and sending `ServiceSettings`. Dispatches incoming messages based on
 /// the service's capability set.
+#[tracing::instrument(skip_all, fields(service_id = %ctx.service_id))]
 pub(crate) async fn handle_authenticated_loop(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
@@ -847,6 +848,7 @@ async fn upgrade_service_capabilities(
 ///
 /// Handles Ping, RequestCertificate, and polls for approval changes at a
 /// fixed interval (decoupled from client-controlled ping frequency).
+#[tracing::instrument(skip_all, fields(%service_id, is_system))]
 pub(crate) async fn handle_enrolled_loop(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,

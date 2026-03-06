@@ -49,6 +49,7 @@ impl NotificationService {
     /// Messages that contain credentials (`TenantAssignments`, `TenantConfigUpdated`,
     /// `TenantRevoked`, `ServiceCredentials`) are delivered locally but **not**
     /// published to NATS to prevent credential leakage.
+    #[tracing::instrument(skip_all, fields(%service_id))]
     pub async fn send(&self, service_id: &Uuid, msg: ControllerMessage) -> bool {
         let local = self.registry.send(service_id, msg.clone()).await;
         if msg.is_nats_publishable() {
@@ -61,6 +62,7 @@ impl NotificationService {
     ///
     /// Messages that contain credentials are delivered locally but **not**
     /// published to NATS (see [`Self::send`] doc comment).
+    #[tracing::instrument(skip_all)]
     pub async fn broadcast(&self, msg: ControllerMessage) {
         self.registry.broadcast(msg.clone()).await;
         if msg.is_nats_publishable() {
@@ -73,6 +75,7 @@ impl NotificationService {
     /// When NATS is available, the message is published to the controller
     /// subject. When NATS is not configured, this is a no-op (single-controller
     /// mode means the local controller already handled the event).
+    #[tracing::instrument(skip_all)]
     pub async fn publish_controller_event(&self, msg: ControllerMessage) {
         self.maybe_publish_nats(None, Some("controller"), msg).await;
     }
@@ -81,6 +84,7 @@ impl NotificationService {
     ///
     /// The `capability_str` is the wire-format capability name (e.g. `"mqtt_bridge"`).
     /// It is parsed to a [`Capability`] for local delivery via the registry.
+    #[tracing::instrument(skip_all, fields(capability_str))]
     pub async fn send_by_capability(&self, capability_str: &str, msg: ControllerMessage) {
         let cap: Capability = capability_str.parse().unwrap_or_else(|_| {
             // Should never happen — parse() always succeeds via Other fallback.
@@ -105,6 +109,7 @@ impl NotificationService {
     ///
     /// Loads both software-item states and host-package host states in two
     /// independent bulk queries, then delivers the merged payload.
+    #[tracing::instrument(skip_all, fields(%tenant_id))]
     pub async fn push_software_states_for_tenant(
         &self,
         db: &sea_orm::DatabaseConnection,
@@ -152,6 +157,7 @@ impl NotificationService {
     ///
     /// Used by `ControllerSchedulerNotifier` to avoid re-loading an already-loaded
     /// payload through the ORM layer.
+    #[tracing::instrument(skip_all)]
     pub async fn deliver_software_states(&self, payload: MqttSoftwareStatesPayload) {
         let msg = ControllerMessage::SoftwareStates(payload);
         // Deliver to locally connected MQTT services immediately.

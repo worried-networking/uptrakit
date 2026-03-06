@@ -42,6 +42,7 @@ use crate::routes::service_ws::protocol::{
 // ---------------------------------------------------------------------------
 
 /// Handle a `Ping` message: send pong, record activity, optional MQTT heartbeat.
+#[tracing::instrument(skip_all, fields(%service_id))]
 pub(super) async fn handle_ping(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
@@ -85,6 +86,7 @@ pub(super) async fn handle_ping(
 
 /// Handle a `RenewCertificate` message: verify approved, sign renewal CSR,
 /// revoke old cert.
+#[tracing::instrument(skip_all, fields(%service_id, is_system))]
 pub(super) async fn handle_renew_certificate(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
@@ -274,6 +276,7 @@ pub(super) async fn handle_renew_certificate(
 
 /// Handle a `ReportHosts` message: update `client_version`, find/create hosts,
 /// trigger discovery, refresh `linked_host_ids`.
+#[tracing::instrument(skip_all, fields(%service_id, host_count = payload.hosts.len()))]
 pub(super) async fn handle_report_hosts(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
@@ -366,6 +369,7 @@ pub(super) async fn handle_report_hosts(
 
 /// Handle a `VersionCheckResults` message: update installed versions, upsert
 /// available versions, batch update `last_checked_at`, push software states.
+#[tracing::instrument(skip_all, fields(%service_id, result_count = payload.results.len()))]
 pub(super) async fn handle_version_check_results(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -585,6 +589,7 @@ pub(super) async fn handle_version_check_results(
 // ---------------------------------------------------------------------------
 
 /// Handle a `DiscoveryResults` message: find host, process results.
+#[tracing::instrument(skip_all, fields(%service_id, host_machine_id = %payload.host_machine_id))]
 pub(super) async fn handle_discovery_results(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
