@@ -37,6 +37,7 @@ use uptrakit_internal_wire::{
     ApprovedPayload, Capability, CertificatePayload, CloseReason, ControllerMessage, ErrorCode,
     ErrorPayload, IncomingSeq, MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq,
     PingPayload, RejectedPayload, ServiceCredentialsPayload, ServiceMessage,
+    UpdateCapabilitiesPayload,
 };
 use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
 use uptrakit_shared_macros::impl_report_conversion;
@@ -161,7 +162,9 @@ pub(crate) async fn handle_authenticated_loop(
     let is_mqtt = capabilities.contains(&Capability::MqttBridge);
     let has_software_discovery = capabilities.contains(&Capability::SoftwareDiscovery);
     let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
-    let has_ui_extensions = capabilities.contains(&Capability::UiExtensions);
+    // Mutable: upgraded lazily when a service sends `ExtensionRegister` but
+    // its stored capabilities pre-date the `UiExtensions` capability variant.
+    let mut has_ui_extensions = capabilities.contains(&Capability::UiExtensions);
 
     let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
     let mut consecutive_unknown: u32 = 0;
@@ -519,6 +522,27 @@ pub(crate) async fn handle_authenticated_loop(
                             }
 
                             // -------------------------------------------------
+                            // UpdateCapabilities (all capabilities)
+                            //
+                            // Sent automatically by the SDK on every reconnect
+                            // so the controller can persist the service's
+                            // current capability set and refresh in-session
+                            // gating flags. Handles services that gain or drop
+                            // capabilities across version upgrades without
+                            // requiring re-enrollment.
+                            // -------------------------------------------------
+                            ServiceMessage::UpdateCapabilities(payload) => {
+                                upgrade_service_capabilities(
+                                    state.db(),
+                                    service_id,
+                                    is_system,
+                                    payload,
+                                    &mut has_ui_extensions,
+                                )
+                                .await;
+                            }
+
+                            // -------------------------------------------------
                             // ExtensionRegister (requires UiExtensions)
                             // -------------------------------------------------
                             ServiceMessage::ExtensionRegister(payload) if has_ui_extensions => {
@@ -709,6 +733,78 @@ pub(crate) async fn handle_authenticated_loop(
         state.service_connections.unregister(&service_id).await;
     }
     tracing::debug!(%service_id, "authenticated service disconnected");
+}
+
+// ---------------------------------------------------------------------------
+// upgrade_service_capabilities
+// ---------------------------------------------------------------------------
+
+/// Persist the service's current capability set to the database and refresh
+/// in-session gating flags.
+///
+/// Called when `ServiceMessage::UpdateCapabilities` is received. The service
+/// sends this automatically on every reconnect (via the SDK event loop) so
+/// the stored capabilities stay in sync with the installed binary version.
+/// This handles services that gain or drop capabilities across upgrades
+/// without requiring re-enrollment.
+///
+/// Only `has_ui_extensions` is refreshed in-session because the other flags
+/// (`is_mqtt`, `has_software_discovery`, `has_update_hooks`) drive pre-loop
+/// state that cannot safely change mid-connection.
+async fn upgrade_service_capabilities(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    payload: UpdateCapabilitiesPayload,
+    has_ui_extensions: &mut bool,
+) {
+    use sea_orm::{ActiveModelTrait, Set};
+    use uptrakit_internal_wire::service_profile::serialize_capabilities;
+
+    let new_caps_json = serialize_capabilities(&payload.capabilities);
+    let had_ui_extensions = *has_ui_extensions;
+    *has_ui_extensions = payload.capabilities.contains(&Capability::UiExtensions);
+
+    if had_ui_extensions != *has_ui_extensions {
+        tracing::info!(
+            %service_id,
+            ui_extensions = *has_ui_extensions,
+            "service UiExtensions capability changed in-session",
+        );
+    }
+
+    let persist_result = if is_system {
+        sys_svc_entity::ActiveModel {
+            id: Set(service_id),
+            capabilities: Set(new_caps_json),
+            ..Default::default()
+        }
+        .update(db)
+        .await
+        .map(|_| ())
+    } else {
+        service::ActiveModel {
+            id: Set(service_id),
+            capabilities: Set(new_caps_json),
+            ..Default::default()
+        }
+        .update(db)
+        .await
+        .map(|_| ())
+    };
+
+    match persist_result {
+        Ok(()) => {
+            tracing::debug!(%service_id, "persisted updated service capabilities");
+        }
+        Err(e) => {
+            tracing::warn!(
+                %service_id,
+                error = %e,
+                "failed to persist updated service capabilities"
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
