@@ -447,6 +447,21 @@ impl ServiceHandler for SshAgentHandler {
             {
                 tracing::warn!(error = %e, "failed to register UI extensions");
             }
+
+            // Register the action library (separate from manifests).
+            let actions_payload: uptrakit_internal_wire::extension::ExtensionActionsPayload =
+                serde_json::from_value(extension::build_actions_json())
+                    .expect("actions JSON should be valid");
+            if let Err(e) = conn
+                .send(
+                    uptrakit_internal_wire::ServiceMessage::ExtensionActionsRegister(
+                        actions_payload,
+                    ),
+                )
+                .await
+            {
+                tracing::warn!(error = %e, "failed to register extension actions");
+            }
         }
     }
 

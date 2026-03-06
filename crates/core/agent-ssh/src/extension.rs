@@ -2,7 +2,8 @@
 //!
 //! Provides:
 //! - Extension manifest describing the `ssh-agent.hosts` data table
-//! - Action handlers for `list-hosts`, `bootstrap`, `remove-host`
+//! - Action library with `list-hosts`, `bootstrap`, `remove-host` definitions
+//! - Action handlers for each action
 //! - ECIES decryption of sensitive parameters (auth password, private key)
 
 use base64::Engine as _;
@@ -31,11 +32,15 @@ pub const EXTENSION_ID: &str = "ssh-agent.hosts";
 ///
 /// Uses JSON deserialization because all extension types are `#[non_exhaustive]`
 /// and cannot be constructed with struct literals from external crates.
+///
+/// Action fields (`row_actions`, `primary_actions`) contain action ID strings
+/// that reference entries in the action library returned by [`build_actions_json`].
 pub fn build_manifest() -> ExtensionManifest {
     let manage_hosts = Permission::ManageHosts.as_str();
     serde_json::from_value(json!({
         "id": EXTENSION_ID,
         "label": "SSH Hosts",
+        "priority": 450,
         "placement": {
             "type": "page",
             "nav_section": "management",
@@ -53,102 +58,8 @@ pub fn build_manifest() -> ExtensionManifest {
                 { "key": "username", "label": "Username" }
             ],
             "data_action": "list-hosts",
-            "row_actions": [
-                {
-                    "action_id": "remove-host",
-                    "label": "Remove Host",
-                    "permission": manage_hosts,
-                    "destructive": true,
-                    "timeout_seconds": 30
-                }
-            ],
-            "primary_actions": [
-                {
-                    "action_id": "bootstrap",
-                    "label": "Bootstrap Host",
-                    "permission": manage_hosts,
-                    "timeout_seconds": 120,
-                    "ui": {
-                        "type": "form",
-                        "fields": [
-                            {
-                                "key": "target",
-                                "label": "SSH Target",
-                                "field_type": "text",
-                                "required": true,
-                                "placeholder": "[user@]host[:port]",
-                                "help_text": "SSH target in [user@]host[:port] format. Default user: root, port: 22."
-                            },
-                            {
-                                "key": "name",
-                                "label": "Host Name",
-                                "field_type": "text",
-                                "required": true,
-                                "placeholder": "my-server",
-                                "help_text": "Friendly name for identification."
-                            },
-                            {
-                                "key": "auth_method",
-                                "label": "Auth Method",
-                                "field_type": "select",
-                                "required": true,
-                                "default_value": "password",
-                                "options": [
-                                    { "value": "password", "label": "Password" },
-                                    { "value": "private_key", "label": "Private Key" }
-                                ]
-                            },
-                            {
-                                "key": "auth_password",
-                                "label": "SSH Password",
-                                "field_type": "password",
-                                "help_text": "Required when auth method is 'password'.",
-                                "sensitive": true
-                            },
-                            {
-                                "key": "auth_private_key",
-                                "label": "SSH Private Key",
-                                "field_type": "textarea",
-                                "placeholder": "-----BEGIN OPENSSH PRIVATE KEY-----",
-                                "help_text": "PEM-encoded private key. Required when auth method is 'private_key'.",
-                                "sensitive": true
-                            },
-                            {
-                                "key": "target_username",
-                                "label": "Target Username",
-                                "field_type": "text",
-                                "help_text": "User to create/use on the remote host.",
-                                "default_value": "uptrakit"
-                            },
-                            {
-                                "key": "host_key_fingerprint",
-                                "label": "Host Key Fingerprint",
-                                "field_type": "text",
-                                "placeholder": "SHA256:...",
-                                "help_text": "Expected SHA-256 fingerprint of the host key."
-                            },
-                            {
-                                "key": "strict_host_key_checking",
-                                "label": "Strict Host Key Checking",
-                                "field_type": "toggle",
-                                "help_text": "Require fingerprint match (disables TOFU)."
-                            },
-                            {
-                                "key": "allow_all",
-                                "label": "Allow All (NOPASSWD: ALL)",
-                                "field_type": "toggle",
-                                "help_text": "Use NOPASSWD: ALL in sudoers (less secure)."
-                            },
-                            {
-                                "key": "remove_stale_keys",
-                                "label": "Remove Stale Keys",
-                                "field_type": "toggle",
-                                "help_text": "Remove existing Uptrakit-managed keys before writing new ones."
-                            }
-                        ]
-                    }
-                }
-            ]
+            "row_actions": ["remove-host"],
+            "primary_actions": ["bootstrap"]
         }
     }))
     .expect("SSH agent extension manifest JSON should be valid")
@@ -166,6 +77,109 @@ pub fn build_register_payload(encryption_public_key: Option<String>) -> Extensio
         payload["encryption_public_key"] = serde_json::Value::String(key);
     }
     serde_json::from_value(payload).expect("register payload JSON should be valid")
+}
+
+/// Build the action library JSON for registration via `ExtensionActionsRegister`.
+///
+/// Returns a JSON value that can be deserialized into `ExtensionActionsPayload`.
+pub fn build_actions_json() -> serde_json::Value {
+    let manage_hosts = Permission::ManageHosts.as_str();
+    json!({
+        "actions": [
+            {
+                "action_id": "remove-host",
+                "label": "Remove Host",
+                "permission": manage_hosts,
+                "destructive": true,
+                "timeout_seconds": 30
+            },
+            {
+                "action_id": "bootstrap",
+                "label": "Bootstrap Host",
+                "permission": manage_hosts,
+                "timeout_seconds": 120,
+                "ui": {
+                    "type": "form",
+                    "fields": [
+                        {
+                            "key": "target",
+                            "label": "SSH Target",
+                            "field_type": "text",
+                            "required": true,
+                            "placeholder": "[user@]host[:port]",
+                            "help_text": "SSH target in [user@]host[:port] format. Default user: root, port: 22."
+                        },
+                        {
+                            "key": "name",
+                            "label": "Host Name",
+                            "field_type": "text",
+                            "required": true,
+                            "placeholder": "my-server",
+                            "help_text": "Friendly name for identification."
+                        },
+                        {
+                            "key": "auth_method",
+                            "label": "Auth Method",
+                            "field_type": "select",
+                            "required": true,
+                            "default_value": "password",
+                            "options": [
+                                { "value": "password", "label": "Password" },
+                                { "value": "private_key", "label": "Private Key" }
+                            ]
+                        },
+                        {
+                            "key": "auth_password",
+                            "label": "SSH Password",
+                            "field_type": "password",
+                            "help_text": "Required when auth method is 'password'.",
+                            "sensitive": true
+                        },
+                        {
+                            "key": "auth_private_key",
+                            "label": "SSH Private Key",
+                            "field_type": "textarea",
+                            "placeholder": "-----BEGIN OPENSSH PRIVATE KEY-----",
+                            "help_text": "PEM-encoded private key. Required when auth method is 'private_key'.",
+                            "sensitive": true
+                        },
+                        {
+                            "key": "target_username",
+                            "label": "Target Username",
+                            "field_type": "text",
+                            "help_text": "User to create/use on the remote host.",
+                            "default_value": "uptrakit"
+                        },
+                        {
+                            "key": "host_key_fingerprint",
+                            "label": "Host Key Fingerprint",
+                            "field_type": "text",
+                            "placeholder": "SHA256:...",
+                            "help_text": "Expected SHA-256 fingerprint of the host key."
+                        },
+                        {
+                            "key": "strict_host_key_checking",
+                            "label": "Strict Host Key Checking",
+                            "field_type": "toggle",
+                            "help_text": "Require fingerprint match (disables TOFU)."
+                        },
+                        {
+                            "key": "allow_all",
+                            "label": "Allow All (NOPASSWD: ALL)",
+                            "field_type": "toggle",
+                            "help_text": "Use NOPASSWD: ALL in sudoers (less secure)."
+                        },
+                        {
+                            "key": "remove_stale_keys",
+                            "label": "Remove Stale Keys",
+                            "field_type": "toggle",
+                            "help_text": "Remove existing Uptrakit-managed keys before writing new ones."
+                        }
+                    ]
+                }
+            }
+        ]
+    })
 }
 
 // ── Action dispatch ──────────────────────────────────────────────────
