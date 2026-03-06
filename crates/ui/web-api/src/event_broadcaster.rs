@@ -48,6 +48,7 @@ impl EventBroadcaster {
     /// Send an event to all subscribers of the given tenant.
     ///
     /// Fire-and-forget: no-op if no subscribers are connected for this tenant.
+    #[tracing::instrument(skip_all, fields(%tenant_id))]
     pub async fn send(&self, tenant_id: Uuid, event: AdminEvent) {
         let channels = self.channels.read().await;
         if let Some(entry) = channels.get(&tenant_id) {
@@ -58,6 +59,7 @@ impl EventBroadcaster {
     /// Send an event to all active tenant channels (for system-wide events).
     ///
     /// Fire-and-forget: iterates all tenant channels and sends to each.
+    #[tracing::instrument(skip_all)]
     pub async fn send_global(&self, event: AdminEvent) {
         let channels = self.channels.read().await;
         for entry in channels.values() {
@@ -69,6 +71,7 @@ impl EventBroadcaster {
     ///
     /// Creates the channel lazily on first subscribe, increments the subscriber
     /// count on subsequent subscribes.
+    #[tracing::instrument(skip_all, fields(%tenant_id))]
     pub async fn subscribe(&self, tenant_id: Uuid) -> broadcast::Receiver<AdminEvent> {
         let mut channels = self.channels.write().await;
         let entry = channels.entry(tenant_id).or_insert_with(|| {
@@ -85,6 +88,7 @@ impl EventBroadcaster {
     /// Decrement the subscriber count for the given tenant.
     ///
     /// When the count reaches zero, the channel is removed to free memory.
+    #[tracing::instrument(skip_all, fields(%tenant_id))]
     pub async fn unsubscribe(&self, tenant_id: Uuid) {
         let mut channels = self.channels.write().await;
         let remove = if let Some(entry) = channels.get_mut(&tenant_id) {

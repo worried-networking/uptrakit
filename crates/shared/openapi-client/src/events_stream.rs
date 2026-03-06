@@ -79,6 +79,7 @@ impl UptrakitClient {
     /// needed.
     ///
     /// Uses an 86400s (24h) timeout, matching other long-lived SSE connections.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn stream_events(
         &self,
     ) -> Result<impl futures_util::Stream<Item = std::result::Result<AdminSseEvent, StreamError>>>

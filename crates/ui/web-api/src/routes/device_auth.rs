@@ -262,6 +262,7 @@ pub struct DeviceAuthStreamQuery {
 ///
 /// - `authorized` — contains the API token and token name.
 /// - `expired` — the device flow expired before approval.
+#[tracing::instrument(skip_all)]
 pub async fn device_auth_stream(
     State(state): State<Arc<AppState>>,
     Query(query): Query<DeviceAuthStreamQuery>,

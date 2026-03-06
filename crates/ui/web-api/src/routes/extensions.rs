@@ -51,6 +51,7 @@ const DEFAULT_ACTION_TIMEOUT_SECS: u64 = 30;
 // ── Endpoints ───────────────────────────────────────────────────────────────
 
 /// List all active extension manifests.
+#[tracing::instrument(skip_all)]
 pub async fn list_extensions(State(state): State<Arc<AppState>>) -> Response {
     let manifests = state.extension_registry.all_manifests();
     let items: Vec<ExtensionListItem> = manifests
@@ -68,6 +69,7 @@ pub async fn list_extensions(State(state): State<Arc<AppState>>) -> Response {
 }
 
 /// List connected service instances that provide a specific extension.
+#[tracing::instrument(skip_all)]
 pub async fn list_extension_providers(
     State(state): State<Arc<AppState>>,
     Path(extension_id): Path<String>,
@@ -121,6 +123,7 @@ pub async fn list_extension_providers(
 }
 
 /// Invoke an extension action, proxying the request to a connected service.
+#[tracing::instrument(skip_all)]
 pub async fn invoke_action(
     State(state): State<Arc<AppState>>,
     Path((extension_id, action_id)): Path<(String, String)>,

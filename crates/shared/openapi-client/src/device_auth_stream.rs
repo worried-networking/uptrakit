@@ -36,6 +36,7 @@ impl UptrakitClient {
     ///
     /// This is an unauthenticated endpoint (same as device auth poll).
     /// Uses a 700s timeout (slightly beyond the 600s flow TTL).
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn stream_device_auth(
         &self,
         device_code: &str,

@@ -28,7 +28,7 @@ uptrakit-shared-macros = { workspace = true }
 thiserror = { workspace = true }
 hostname = { workspace = true }
 time = { workspace = true }
-uptrakit-openapi-client = { workspace = true }
+uptrakit-openapi-client = { workspace = true, features = ["tracing"] }
 uuid = { workspace = true }
 serde_yaml_ng = { workspace = true }
 uptrakit-build-info = { workspace = true }

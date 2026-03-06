@@ -50,6 +50,7 @@ pub fn parse_capability_str(s: &str) -> Option<Capability> {
 ///
 /// Returns `true` if the message was delivered (or the target is not on
 /// this controller), `false` if delivery failed (channel full / send error).
+#[tracing::instrument(skip_all)]
 pub async fn deliver_event(
     registry: &ServiceConnectionRegistry,
     db: &DatabaseConnection,
@@ -98,6 +99,7 @@ pub async fn deliver_event(
 ///
 /// Returns `true` if delivery succeeded or the target is not on this
 /// controller.
+#[tracing::instrument(skip_all)]
 pub async fn deliver_mqtt_event(
     registry: &ServiceConnectionRegistry,
     msg: ControllerMessage,
@@ -140,6 +142,7 @@ pub async fn deliver_mqtt_event(
 /// `TokenRevoked`).
 ///
 /// Returns `true` on success, `false` on transient failure.
+#[tracing::instrument(skip_all)]
 pub async fn deliver_controller_event(
     db: &DatabaseConnection,
     registry: &ServiceConnectionRegistry,

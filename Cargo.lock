@@ -6745,6 +6745,7 @@ dependencies = [
  "serde_urlencoded",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-web-api-types",

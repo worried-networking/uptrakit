@@ -25,6 +25,7 @@ pub enum UpdateEvent {
 }
 
 /// Send an update output message to the controller.
+#[tracing::instrument(skip_all, fields(%update_history_id))]
 pub async fn send_update_output(
     conn: &mut ControllerConnection,
     update_history_id: uuid::Uuid,
@@ -44,6 +45,7 @@ pub async fn send_update_output(
 /// reason to terminate the connection so the reconnect loop re-establishes the
 /// session; otherwise the controller has no signal to close the in-progress
 /// update record.
+#[tracing::instrument(skip_all, fields(%update_history_id))]
 pub async fn send_update_result(
     conn: &mut ControllerConnection,
     update_history_id: uuid::Uuid,
@@ -85,6 +87,7 @@ pub async fn send_update_result(
 }
 
 /// Handle graceful shutdown: drain in-flight update, send Disconnecting.
+#[tracing::instrument(skip_all)]
 pub async fn handle_graceful_shutdown(
     conn: &mut ControllerConnection,
     in_flight_update: Option<InFlightUpdate>,
@@ -161,6 +164,7 @@ pub async fn handle_graceful_shutdown(
 /// Callers that need to run version checks in a background task (e.g. the SSH
 /// agent) use this function and forward the returned message to the controller
 /// through a channel.
+#[tracing::instrument(skip_all, fields(assignment_count = payload.assignments.len()))]
 pub async fn run_check_versions(
     payload: uptrakit_internal_wire::CheckVersionsPayload,
     executor: Arc<dyn CommandExecutor>,
@@ -215,6 +219,7 @@ pub async fn handle_check_versions(
 /// the single-host agent, which holds a global `Option<InFlightUpdate>`) and
 /// `handle_execute_update_ssh` in the SSH agent (which holds a per-host
 /// `HashMap<String, SshInFlightUpdate>`).
+#[tracing::instrument(skip_all, fields(update_history_id = %payload.update_history_id))]
 pub async fn start_update(
     payload: uptrakit_internal_wire::ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
@@ -314,6 +319,7 @@ pub async fn handle_execute_update(
 /// Callers that need to run batch updates in a background task (e.g. the SSH
 /// agent) use this function and forward the returned message to the controller
 /// through a channel.
+#[tracing::instrument(skip_all, fields(batch_id = %payload.batch_id, plugin_type = %payload.plugin_type))]
 pub async fn run_execute_batch_host_package_update(
     payload: ExecuteBatchHostPackageUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
@@ -531,6 +537,7 @@ async fn batch_host_package_update_inner(
 /// Callers that need to run discovery in a background task (e.g. the SSH agent)
 /// use this function and forward the returned message to the controller through
 /// a channel.
+#[tracing::instrument(skip_all, fields(plugin_count = payload.plugins.len()))]
 pub async fn run_discover_software(
     payload: DiscoverSoftwarePayload,
     executor: Arc<dyn CommandExecutor>,

@@ -20,6 +20,7 @@ use crate::middleware::tenant_context::TenantContext;
 /// Event names correspond to [`AdminEvent`](uptrakit_web_api_types::events::AdminEvent)
 /// variant names (snake_case). The `data:` field contains the variant's inner
 /// fields as JSON.
+#[tracing::instrument(skip_all)]
 pub async fn stream_events(
     State(state): State<Arc<AppState>>,
     CanViewAgents(_auth_user): CanViewAgents,

@@ -11,6 +11,8 @@ description = "Typed HTTP client for the Uptrakit web API"
 ## Enables `MockApiServer` and `MockEndpoint` for use in tests of downstream crates.
 ## Activate with `features = ["mock"]` in `[dev-dependencies]`.
 mock = ["dep:httpmock"]
+## Enables `#[tracing::instrument]` spans on async methods.
+tracing = ["dep:tracing"]
 
 [dependencies]
 reqwest = { workspace = true, features = ["query"] }
@@ -23,6 +25,7 @@ tokio = { workspace = true, features = ["time"] }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-web-api-types = { workspace = true }
+tracing = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde"] }
 httpmock = { workspace = true, optional = true }
 
