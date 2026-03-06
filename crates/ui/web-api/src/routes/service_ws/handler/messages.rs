@@ -13,8 +13,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use uptrakit_internal_wire::{
     CertificatePayload, CloseReason, ControllerMessage, DiscoveryResultsPayload, ErrorCode,
-    ErrorPayload, OutgoingSeq, ReportHostsPayload, RequestCrlRenewalPayload,
-    VersionCheckResultsPayload,
+    ErrorPayload, OutgoingSeq, ReportHostsPayload, ReportPluginConfigPayload,
+    ReportPluginConfigResponsePayload, RequestCrlRenewalPayload, VersionCheckResultsPayload,
 };
 use uptrakit_shared_db::entity::{
     host, host_package, host_software_item, service, service_host, software_item,
@@ -672,6 +672,118 @@ pub(super) async fn handle_discovery_results(
             host_machine_id = %payload.host_machine_id,
             "received DiscoveryResults for unknown host machine_id"
         );
+    }
+
+    LoopAction::Continue
+}
+
+// ---------------------------------------------------------------------------
+// handle_report_plugin_config
+// ---------------------------------------------------------------------------
+
+/// Handle a `ReportPluginConfig` message: find or create a plugin config and
+/// send the response back to the service.
+///
+/// Idempotent: if a config with the same `(tenant_id, plugin_type, name)`
+/// already exists, the existing ID is returned without creating a duplicate.
+pub(super) async fn handle_report_plugin_config(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    payload: &ReportPluginConfigPayload,
+) -> LoopAction {
+    let request_id = payload.request_id.clone();
+
+    // Validate the plugin type is known
+    if let Err(e) = state
+        .plugin_ops
+        .validate_config_str(&payload.plugin_type, &payload.config)
+    {
+        tracing::warn!(
+            %service_id,
+            plugin_type = %payload.plugin_type,
+            error = %e,
+            "ReportPluginConfig: invalid config"
+        );
+        let resp_payload: ReportPluginConfigResponsePayload =
+            serde_json::from_value(serde_json::json!({
+                "request_id": request_id,
+                "success": false,
+                "error": format!("invalid plugin config: {e}"),
+            }))
+            .expect("ReportPluginConfigResponsePayload JSON is always valid");
+        let resp = ControllerMessage::ReportPluginConfigResponse(resp_payload);
+        if let Some(json) = serialize_controller_msg(out_seq, resp) {
+            let _ = sink.send(Message::Text(json.into())).await;
+        }
+        return LoopAction::Continue;
+    }
+
+    // Resolve tenant_id from the service
+    let tenant_id = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => svc.tenant_id,
+        Ok(None) => {
+            tracing::warn!(%service_id, "ReportPluginConfig: service not found");
+            return LoopAction::Continue;
+        }
+        Err(e) => {
+            tracing::warn!(%service_id, error = %e, "ReportPluginConfig: DB error");
+            return LoopAction::Continue;
+        }
+    };
+
+    // Find or create the plugin config
+    let result = crate::queries::autodiscovery::find_or_create_default_plugin_config(
+        state.db(),
+        tenant_id,
+        &payload.plugin_type,
+        &payload.config,
+        &payload.name,
+    )
+    .await;
+
+    let resp = match result {
+        Ok(config_id) => {
+            tracing::info!(
+                %service_id,
+                %config_id,
+                plugin_type = %payload.plugin_type,
+                name = %payload.name,
+                "ReportPluginConfig: config created/found"
+            );
+            // Use JSON deserialization because the payload is `#[non_exhaustive]`.
+            let resp_payload: ReportPluginConfigResponsePayload =
+                serde_json::from_value(serde_json::json!({
+                    "request_id": request_id,
+                    "success": true,
+                    "plugin_config_id": config_id,
+                }))
+                .expect("ReportPluginConfigResponsePayload JSON is always valid");
+            ControllerMessage::ReportPluginConfigResponse(resp_payload)
+        }
+        Err(e) => {
+            tracing::warn!(
+                %service_id,
+                error = %e,
+                "ReportPluginConfig: failed to create/find config"
+            );
+            let resp_payload: ReportPluginConfigResponsePayload =
+                serde_json::from_value(serde_json::json!({
+                    "request_id": request_id,
+                    "success": false,
+                    "error": format!("failed to create plugin config: {e}"),
+                }))
+                .expect("ReportPluginConfigResponsePayload JSON is always valid");
+            ControllerMessage::ReportPluginConfigResponse(resp_payload)
+        }
+    };
+
+    if let Some(json) = serialize_controller_msg(out_seq, resp) {
+        let _ = sink.send(Message::Text(json.into())).await;
     }
 
     LoopAction::Continue

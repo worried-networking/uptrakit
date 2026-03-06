@@ -481,7 +481,8 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
         remove_stale_keys: p.remove_stale_keys,
     };
 
-    bootstrap::run_bootstrap(p.state_dir, params).await
+    bootstrap::run_bootstrap(p.state_dir, params).await?;
+    Ok(())
 }
 
 /// Resolve the auth username from: target string > SSH config > system $USER.

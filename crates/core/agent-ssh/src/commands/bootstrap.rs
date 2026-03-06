@@ -11,12 +11,15 @@ use sea_orm::DatabaseConnection;
 use uptrakit_crypto::EncryptedString;
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
+use uptrakit_plugin_infrastructure_proxmox::pve_setup;
+
 use crate::commands::sudoers::{
     ResolvedSudoCommand, SudoersContent, detect_is_root, install_helper_script,
     resolve_command_path, write_sudoers_file,
 };
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
+use crate::remote_exec::SshRemoteExecutor;
 use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_key;
 use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
@@ -62,10 +65,18 @@ pub struct BootstrapParams {
     pub remove_stale_keys: bool,
 }
 
+/// Result of a successful bootstrap, carrying metadata for the event loop.
+pub struct BootstrapResult {
+    /// Whether the bootstrapped host is a Proxmox VE node.
+    pub is_pve_node: bool,
+    /// PVE API credentials (api_url, api_token) if auto-created.
+    pub pve_credentials: Option<pve_setup::PveCredentials>,
+}
+
 // ── Main orchestrator ────────────────────────────────────────────────
 
 /// Run the full bootstrap workflow.
-pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<()> {
+pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<BootstrapResult> {
     // 1. VALIDATE INPUTS
     if params.strict_host_key_checking && params.host_key_fingerprint.is_none() {
         bail!(Error::InvalidInput(
@@ -163,8 +174,11 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         println!("Host key (TOFU): {observed_fp}");
     }
 
+    // Build a RemoteExecutor for the sudoers/detection functions.
+    let executor = SshRemoteExecutor::new(Arc::clone(&session));
+
     // 4. Detect if auth user is root
-    let is_root = detect_is_root(&session).await?;
+    let is_root = detect_is_root(&executor).await?;
     let use_sudo = !is_root;
 
     if use_sudo {
@@ -400,14 +414,14 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
                 // Install the helper script then use its known path directly
                 // as the sudoers command — no `command -v` resolution needed.
                 println!("  Installing helper script '{}'...", helper.install_path);
-                install_helper_script(&session, helper, use_sudo).await?;
+                install_helper_script(&executor, helper, use_sudo).await?;
                 resolved.push(ResolvedSudoCommand {
                     command_path: helper.install_path.to_string(),
                     explanation: entry.explanation.clone(),
                     needs_setenv: entry.needs_setenv,
                 });
             } else {
-                match resolve_command_path(&session, &entry.command).await? {
+                match resolve_command_path(&executor, &entry.command).await? {
                     Some(path) => {
                         tracing::debug!(command = %entry.command, path = %path, "resolved command path");
                         resolved.push(ResolvedSudoCommand {
@@ -441,8 +455,42 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     };
 
     if let Some(ref content) = sudoers_content {
-        write_sudoers_file(&session, &params.target_username, content, use_sudo).await?;
+        write_sudoers_file(&executor, &params.target_username, content, use_sudo).await?;
     }
+
+    // 5b. DETECT PVE NODE
+    let is_pve_node = match pve_setup::detect_pve_node(&executor).await {
+        Ok(detected) => {
+            if detected {
+                println!("Detected Proxmox VE node.");
+            }
+            detected
+        }
+        Err(e) => {
+            tracing::debug!(error = %e, "PVE detection failed, treating as non-PVE host");
+            false
+        }
+    };
+
+    // 5c. CREATE PVE API CREDENTIALS (if PVE node detected)
+    let pve_credentials = if is_pve_node {
+        println!("Creating PVE API credentials...");
+        match pve_setup::create_pve_api_credentials(&executor, "uptrakit").await {
+            Ok(creds) => {
+                println!("  API URL: {}", creds.api_url);
+                println!("  API token created for uptrakit@pve");
+                Some(creds)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to create PVE API credentials");
+                println!("  Warning: could not create PVE API credentials automatically: {e}");
+                println!("  You can configure them manually in the Proxmox plugin settings.");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // 6. DISCONNECT auth session.
     SshSession::disconnect_shared(session).await;
@@ -491,6 +539,14 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     )
     .await?;
 
+    // 8b. Update PVE state if detected.
+    if is_pve_node
+        && let Err(e) =
+            host_ops::update_host_pve_state(&db, &params.host_id.to_string(), true, None).await
+    {
+        tracing::warn!(error = %e, "failed to persist PVE state for host");
+    }
+
     // 9. OUTPUT
     println!();
     println!("Bootstrap complete for host '{}'.", params.name);
@@ -498,6 +554,9 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     println!("  Target user: {}", params.target_username);
     println!("  Key type: {key_type}");
     println!("  Host key: {observed_fp}");
+    if is_pve_node {
+        println!("  PVE node: yes");
+    }
 
     if generated_key {
         println!();
@@ -528,7 +587,10 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         );
     }
 
-    Ok(())
+    Ok(BootstrapResult {
+        is_pve_node,
+        pve_credentials,
+    })
 }
 
 // ── Verification ─────────────────────────────────────────────────────

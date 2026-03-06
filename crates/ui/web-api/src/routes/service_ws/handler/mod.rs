@@ -487,6 +487,15 @@ pub(crate) async fn handle_authenticated_loop(
                             }
 
                             // -------------------------------------------------
+                            // ReportPluginConfig (all capabilities)
+                            // -------------------------------------------------
+                            ServiceMessage::ReportPluginConfig(payload) => {
+                                if messages::handle_report_plugin_config(sink, out_seq, state, service_id, &payload).await.is_break() {
+                                    break;
+                                }
+                            }
+
+                            // -------------------------------------------------
                             // ReleaseTenants (requires MqttBridge)
                             // -------------------------------------------------
                             ServiceMessage::ReleaseTenants(payload) if is_mqtt => {
