@@ -51,13 +51,29 @@
 	async function loadSelectSourceOptions(fieldKey: string, path: string, valueField: string, labelField: string) {
 		loadingOptions = { ...loadingOptions, [fieldKey]: true };
 		try {
-			const result = await apiGet<unknown>(path);
-			const arr: unknown[] = Array.isArray(result)
-				? result
-				: (((result as Record<string, unknown>)?.items as unknown[]) ?? []);
+			const allItems: unknown[] = [];
+			let page = 1;
+			let totalPages = 1;
+
+			do {
+				const sep = path.includes('?') ? '&' : '?';
+				const result = await apiGet<unknown>(`${path}${sep}page=${page}&per_page=1000`);
+
+				if (Array.isArray(result)) {
+					allItems.push(...result);
+					break;
+				}
+
+				const obj = result as Record<string, unknown>;
+				const items = (obj.items as unknown[]) ?? [];
+				allItems.push(...items);
+				totalPages = (obj.total_pages as number) ?? 1;
+				page++;
+			} while (page <= totalPages);
+
 			dynamicOptions = {
 				...dynamicOptions,
-				[fieldKey]: arr.map((item) => {
+				[fieldKey]: allItems.map((item) => {
 					const i = item as Record<string, unknown>;
 					return {
 						value: String(i[valueField] ?? ''),
