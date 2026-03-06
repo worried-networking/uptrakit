@@ -284,6 +284,21 @@ An in-process `UpdateOutputBroadcaster` (`crates/ui/web-api/src/update_output_br
 out to both the database and any SSE subscribers. The SSE handler replays stored lines on connect and then streams new
 lines in real time. The frontend renders output in an xterm.js terminal with full ANSI color support.
 
+## Admin events SSE
+
+The controller pushes lightweight admin events to the frontend via `GET /api/v1/events/stream`.
+An `EventBroadcaster` (`crates/ui/web-api/src/event_broadcaster.rs`) maintains per-tenant
+`tokio::sync::broadcast` channels (capacity 512). Route handlers and WebSocket message processors
+fire events after state mutations; the broadcaster is fire-and-forget (no-op when no subscribers).
+Frontend pages subscribe to relevant event types and refetch data on demand, replacing the
+previous 30–60s polling intervals with a 5-minute safety-net fallback.
+
+A similar `DeviceFlowBroadcaster` provides SSE delivery for device authorization
+(`GET /api/v1/auth/device/stream`), enabling the CLI to receive tokens instantly on approval
+instead of polling every 5 seconds.
+
+See [SSE Events — Developer Guide](docs/development/sse-events.md) for implementation details.
+
 ## Web-API crate split
 
 The HTTP API is composed of three independent crates under `crates/ui/`:

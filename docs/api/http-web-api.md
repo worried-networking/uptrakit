@@ -29,6 +29,8 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
   (`pending`, `authorized`, `expired`) defined in `uptrakit-shared-types`. Returns the API token once status is
   `authorized`.
 - `POST /api/v1/auth/device/approve`: browser-side approval using Bearer token.
+- `GET /api/v1/auth/device/stream?device_code=<code>`: SSE stream for device auth status updates. Returns `authorized` (with
+  API token) or `expired` events. See [SSE Events API](sse-events.md#device-auth-sse).
 - `POST /api/v1/auth/token`: exchange credentials for tokens (when allowed).
 
 Access tokens are short-lived, refresh tokens rotate on each use, and logout adds entries to the in-memory `TokenDenylist`.
@@ -936,3 +938,14 @@ without an existing query struct, use `Query<PaginationParams>` as a new extract
 | --- | --- |
 | `crates/shared/web-api-types/src/pagination.rs` | `PaginationParams`, `ResolvedPagination`, `PaginatedResponse<T>` |
 | `crates/shared/web-api-types/src/prelude.rs` | Convenience re-exports of ~35 commonly used request/response types (`use uptrakit_web_api_types::prelude::*`) |
+
+## SSE Endpoints
+
+Two SSE (Server-Sent Events) endpoints provide real-time push notifications:
+
+- `GET /api/v1/auth/device/stream?device_code=<code>` — Unauthenticated. Pushes `authorized` or `expired` events
+  for the device authorization flow.
+- `GET /api/v1/events/stream` — Authenticated (requires `ViewAgents` permission). Pushes admin events for the
+  user's tenant (host/service/software changes, version checks, updates, discovery).
+
+See [SSE Events API](sse-events.md) for full event format documentation.

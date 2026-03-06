@@ -39,6 +39,8 @@ variables, which take precedence over stored configuration.
 ## Authentication
 
 Before using most commands you must authenticate. The CLI uses a device authorization flow (RFC 8628).
+When the user approves in the browser, the CLI receives the token instantly via SSE. If SSE is
+unavailable (e.g. older server), it falls back to polling every 5 seconds.
 
 ```sh
 # Log in via browser

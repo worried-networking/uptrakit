@@ -20,7 +20,9 @@ authenticate even when password auth is disabled (OIDC-only environments).
    `verification_url`, `expires_in` (600s), and `interval` (5s).
 1. CLI opens `verification_url` in the user's browser and displays the `user_code`.
 1. User logs in via the browser (password or OIDC) and approves the device code at `/device?code=XXXX-XXXX`.
-1. CLI polls `POST /api/v1/auth/device/poll` with the `device_code` every `interval` seconds.
+1. CLI connects to `GET /api/v1/auth/device/stream?device_code=<code>` (SSE). On approval, receives an
+   `authorized` event with the API token immediately. Falls back to polling if SSE is unavailable.
+1. Fallback: CLI polls `POST /api/v1/auth/device/poll` with the `device_code` every `interval` seconds.
 1. On approval, the poll response contains an API token. The CLI stores it locally.
 
 ### Endpoints
@@ -28,7 +30,8 @@ authenticate even when password auth is disabled (OIDC-only environments).
 | Endpoint | Auth | Purpose |
 | --- | --- | --- |
 | `POST /api/v1/auth/device` | Public | Start device flow, get device code + user code |
-| `POST /api/v1/auth/device/poll` | Public | Poll for authorization status |
+| `GET /api/v1/auth/device/stream` | Public | SSE stream for real-time approval notification (preferred) |
+| `POST /api/v1/auth/device/poll` | Public | Poll for authorization status (fallback) |
 | `POST /api/v1/auth/device/approve` | Bearer (JWT or API token) | Approve a device code (browser-side) |
 
 ### Security

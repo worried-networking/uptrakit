@@ -616,9 +616,12 @@ Polish and additional capabilities for production use.
   for live-tailing update command output in the browser and CLI. In-process `UpdateOutputBroadcaster`
   fans out lines to SSE subscribers. Frontend uses xterm.js with full ANSI color support. CLI supports
   `--follow` and `history tail`.
-- [ ] **Real-time software/host state updates** — Add SSE or WebSocket endpoint for the admin UI
-  so service status changes, MQTT connection status, and version check completions are
-  pushed to the browser without manual polling (replaces current `setInterval` polling).
+- [x] **Real-time software/host state updates** — SSE endpoint (`GET /api/v1/events/stream`)
+  pushes lightweight admin events (host/service/software changes, version checks, updates,
+  discovery) to authenticated subscribers. Per-tenant `EventBroadcaster` fans out events.
+  Frontend replaces 30-60s polling with SSE subscriptions (5-minute safety-net fallback).
+  Typed `AdminSseEvent` client in `openapi-client`. CLI device auth uses SSE-first with
+  poll fallback (`GET /api/v1/auth/device/stream`).
 
 ### Notification System
 

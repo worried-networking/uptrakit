@@ -67,7 +67,9 @@ crates/shared/openapi-client/
     ├── system_alerts.rs    # System alerts
     ├── update_history.rs   # Update history list/get
     ├── sse.rs              # Lightweight SSE protocol parser (parse_sse_stream)
-    └── update_output_stream.rs  # Typed SSE streaming (stream_update_output)
+    ├── update_output_stream.rs  # Typed SSE streaming (stream_update_output)
+    ├── device_auth_stream.rs    # Typed SSE streaming for device auth (stream_device_auth)
+    └── events_stream.rs         # Typed SSE streaming for admin events (stream_events)
 ```
 
 ## Client usage
