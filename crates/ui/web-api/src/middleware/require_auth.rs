@@ -329,6 +329,7 @@ mod tests {
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
             credential_sources: ServiceCredentialSources::default(),
+            device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(),
             update_output_broadcaster:
                 crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
             batch_progress_broadcaster:

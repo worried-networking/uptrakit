@@ -204,6 +204,22 @@ impl DeviceFlowStore {
         Ok((user_id, client_name))
     }
 
+    /// Look up the device code hash for a given user code.
+    ///
+    /// Used by the device auth SSE broadcaster to notify the correct channel
+    /// when a flow is approved via user code.
+    pub async fn get_device_code_hash_by_user_code(&self, user_code: &str) -> Result<String> {
+        let normalized = user_code.replace('-', "").to_uppercase();
+        let flow = PendingDeviceFlow::find()
+            .filter(pending_device_flow::Column::UserCode.eq(&normalized))
+            .one(&self.db)
+            .await
+            .context_to()?
+            .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
+
+        Ok(flow.device_code_hash)
+    }
+
     /// Remove expired device flows.
     pub async fn cleanup_expired(&self) {
         let now = OffsetDateTime::now_utc();

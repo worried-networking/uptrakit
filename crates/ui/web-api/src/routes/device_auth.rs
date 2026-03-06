@@ -1,18 +1,23 @@
+use std::convert::Infallible;
+use std::sync::Arc;
+
+use axum::Json;
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
+use serde::Deserialize;
+use uptrakit_shared_types::DeviceAuthStatus;
+use uptrakit_web_api_types::SecretString;
+use uptrakit_web_api_types::device_auth::{DeviceAuthAuthorizedSse, DeviceAuthExpiredSse};
+
 use crate::AppState;
 use crate::auth::api_token::ApiTokenService;
 use crate::auth::device_flow::{DeviceFlowError, DeviceFlowStatus};
+use crate::auth::token::hash_token;
+use crate::device_flow_broadcaster::DeviceFlowEvent;
 use crate::error_response::error_response;
 use crate::middleware::permission::CanViewAgents;
-use axum::http::HeaderMap;
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
-use std::sync::Arc;
-use uptrakit_shared_types::DeviceAuthStatus;
-use uptrakit_web_api_types::SecretString;
 
 pub use uptrakit_web_api_types::device_auth::{
     DeviceAuthApproveRequest, DeviceAuthApproveResponse, DeviceAuthPollRequest,
@@ -43,6 +48,13 @@ pub async fn device_auth_start(
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
+
+    // Create a broadcaster channel for SSE subscribers.
+    let device_code_hash = hash_token(&device_code);
+    state
+        .device_flow_broadcaster
+        .create_channel(&device_code_hash)
+        .await;
 
     // Derive verification URL: prefer ExternalBaseUrl, then Origin, then Host
     let host = external_base_url
@@ -196,13 +208,26 @@ pub async fn device_auth_approve(
         .approve(&normalized, auth_user.user_id)
         .await
     {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(DeviceAuthApproveResponse {
-                message: "Device authorized".into(),
-            }),
-        )
-            .into_response(),
+        Ok(()) => {
+            // Notify SSE subscribers that the flow was approved.
+            if let Ok(hash) = state
+                .device_flow_store
+                .get_device_code_hash_by_user_code(&normalized)
+                .await
+            {
+                state
+                    .device_flow_broadcaster
+                    .notify_status_changed(&hash)
+                    .await;
+            }
+            (
+                StatusCode::OK,
+                Json(DeviceAuthApproveResponse {
+                    message: "Device authorized".into(),
+                }),
+            )
+                .into_response()
+        }
         Err(e) => match e.current_context() {
             DeviceFlowError::NotFound => {
                 error_response(StatusCode::NOT_FOUND, "Device flow not found or expired")
@@ -215,5 +240,161 @@ pub async fn device_auth_approve(
                 error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
         },
+    }
+}
+
+/// Query parameters for the device auth SSE stream.
+#[derive(Debug, Deserialize)]
+pub struct DeviceAuthStreamQuery {
+    pub device_code: String,
+}
+
+/// SSE stream for device authorization status.
+///
+/// Unauthenticated endpoint (same as poll). The CLI connects here instead of
+/// polling and receives the token immediately when the user approves in the
+/// browser.
+///
+/// # Events
+///
+/// - `authorized` — contains the API token and token name.
+/// - `expired` — the device flow expired before approval.
+pub async fn device_auth_stream(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<DeviceAuthStreamQuery>,
+) -> Response {
+    let device_code = query.device_code;
+    let device_code_hash = hash_token(&device_code);
+    let shutdown_token = state.shutdown_token.clone();
+
+    // Subscribe to the broadcaster for live notifications.
+    let broadcast_rx = state
+        .device_flow_broadcaster
+        .subscribe(&device_code_hash)
+        .await;
+
+    // Check current status in the DB.
+    let current_status = match state.device_flow_store.get_status(&device_code).await {
+        Ok(s) => s,
+        Err(e) => match e.current_context() {
+            DeviceFlowError::NotFound => {
+                return error_response(StatusCode::NOT_FOUND, "Device flow not found or expired");
+            }
+            _ => {
+                tracing::error!("Device flow status check failed: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        },
+    };
+
+    let stream = async_stream::stream! {
+        match current_status {
+            DeviceFlowStatus::Authorized { .. } => {
+                // Already authorized — consume and yield token immediately.
+                if let Some(event) = consume_and_yield(&state, &device_code).await {
+                    yield Ok::<_, Infallible>(event);
+                }
+                state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                return;
+            }
+            DeviceFlowStatus::Expired => {
+                let payload = DeviceAuthExpiredSse {
+                    message: "Device flow expired".to_string(),
+                };
+                if let Ok(json) = serde_json::to_string(&payload) {
+                    yield Ok::<_, Infallible>(Event::default().event("expired").data(json));
+                }
+                state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                return;
+            }
+            DeviceFlowStatus::Pending => {
+                // Fall through to wait on broadcast channel.
+            }
+        }
+
+        // Wait for broadcast events.
+        if let Some(mut rx) = broadcast_rx {
+            let timeout = tokio::time::sleep(std::time::Duration::from_secs(600));
+            tokio::pin!(timeout);
+
+            loop {
+                tokio::select! {
+                    ev = rx.recv() => {
+                        match ev {
+                            Ok(DeviceFlowEvent::StatusChanged) => {
+                                if let Some(event) = consume_and_yield(&state, &device_code).await {
+                                    yield Ok::<_, Infallible>(event);
+                                }
+                                state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                                return;
+                            }
+                            Ok(DeviceFlowEvent::Expired) => {
+                                let payload = DeviceAuthExpiredSse {
+                                    message: "Device flow expired".to_string(),
+                                };
+                                if let Ok(json) = serde_json::to_string(&payload) {
+                                    yield Ok::<_, Infallible>(Event::default().event("expired").data(json));
+                                }
+                                state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                                return;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                continue;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                return;
+                            }
+                        }
+                    }
+                    _ = &mut timeout => {
+                        let payload = DeviceAuthExpiredSse {
+                            message: "Device flow expired".to_string(),
+                        };
+                        if let Ok(json) = serde_json::to_string(&payload) {
+                            yield Ok::<_, Infallible>(Event::default().event("expired").data(json));
+                        }
+                        state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                        return;
+                    }
+                    _ = shutdown_token.cancelled() => {
+                        state.device_flow_broadcaster.remove_channel(&device_code_hash).await;
+                        return;
+                    }
+                }
+            }
+        }
+    };
+
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default().interval(std::time::Duration::from_secs(15)))
+        .into_response()
+}
+
+/// Consume the device flow and return an SSE `authorized` event with the token.
+async fn consume_and_yield(state: &AppState, device_code: &str) -> Option<Event> {
+    let (user_id, client_name) = match state.device_flow_store.consume(device_code).await {
+        Ok(result) => result,
+        Err(e) => {
+            tracing::error!("Device flow consume failed during SSE: {e}");
+            return None;
+        }
+    };
+
+    let token_name = client_name.unwrap_or_else(|| "cli-device-auth".into());
+    let service = ApiTokenService::new(state.db().clone());
+    match service.create_token(user_id, &token_name).await {
+        Ok(created) => {
+            let payload = DeviceAuthAuthorizedSse {
+                token: SecretString::new(created.plaintext_token),
+                token_name,
+            };
+            serde_json::to_string(&payload)
+                .ok()
+                .map(|json| Event::default().event("authorized").data(json))
+        }
+        Err(e) => {
+            tracing::error!("Failed to create API token during SSE: {e:?}");
+            None
+        }
     }
 }

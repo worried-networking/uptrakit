@@ -3,6 +3,7 @@ pub use uptrakit_web_api_auth::auth;
 pub mod batch_progress_broadcaster;
 pub mod ca_snapshot;
 pub mod cert_signer;
+pub mod device_flow_broadcaster;
 pub mod error_response;
 pub mod event_delivery;
 pub mod extension_proxy;
@@ -202,6 +203,7 @@ mod tests {
             plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
             db,
             credential_sources: ServiceCredentialSources::default(),
+            device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(),
             update_output_broadcaster:
                 crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
             batch_progress_broadcaster:

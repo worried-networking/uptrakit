@@ -99,6 +99,8 @@ pub struct AppState {
     pub plugin_ops: Arc<dyn PluginOps>,
     /// Credential sources for services with credential capabilities.
     pub credential_sources: ServiceCredentialSources,
+    /// Per-device-flow broadcast channels for real-time device auth SSE delivery.
+    pub device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster,
     /// Per-update broadcast channels for real-time output streaming via SSE.
     pub update_output_broadcaster: crate::update_output_broadcaster::UpdateOutputBroadcaster,
     /// Per-batch broadcast channels for real-time batch progress streaming via SSE.
@@ -169,6 +171,7 @@ pub struct AppStateBuilder {
     token_denylist: Option<Arc<crate::auth::token_denylist::TokenDenylist>>,
     plugin_ops: Option<Arc<dyn PluginOps>>,
     credential_sources: Option<ServiceCredentialSources>,
+    device_flow_broadcaster: Option<crate::device_flow_broadcaster::DeviceFlowBroadcaster>,
     update_output_broadcaster: Option<crate::update_output_broadcaster::UpdateOutputBroadcaster>,
     batch_progress_broadcaster: Option<crate::batch_progress_broadcaster::BatchProgressBroadcaster>,
     shutdown_token: Option<CancellationToken>,
@@ -212,6 +215,7 @@ impl AppStateBuilder {
             token_denylist: None,
             plugin_ops: None,
             credential_sources: None,
+            device_flow_broadcaster: None,
             update_output_broadcaster: None,
             batch_progress_broadcaster: None,
             shutdown_token: None,
@@ -515,6 +519,7 @@ impl AppStateBuilder {
                 Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry)
             }),
             credential_sources: self.credential_sources.unwrap_or_default(),
+            device_flow_broadcaster: self.device_flow_broadcaster.unwrap_or_default(),
             update_output_broadcaster: self.update_output_broadcaster.unwrap_or_default(),
             batch_progress_broadcaster: self.batch_progress_broadcaster.unwrap_or_default(),
             shutdown_token: self.shutdown_token.unwrap_or_default(),

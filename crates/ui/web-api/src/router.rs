@@ -696,7 +696,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::auth::refresh))
         .routes(routes!(crate::routes::device_auth::device_auth_start))
         .routes(routes!(crate::routes::device_auth::device_auth_poll))
-        .merge(auth_routes);
+        .merge(auth_routes)
+        .route(
+            "/api/v1/auth/device/stream",
+            get(crate::routes::device_auth::device_auth_stream),
+        );
 
     #[cfg(feature = "oidc")]
     let base_router = base_router
