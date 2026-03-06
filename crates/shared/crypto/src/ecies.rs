@@ -79,7 +79,7 @@ pub fn sealed_box_encrypt(plaintext: &[u8], recipient_public_key: &[u8]) -> Resu
     let peer_public = UnparsedPublicKey::new(&agreement::ECDH_P256, recipient_public_key);
     let shared_secret: Zeroizing<[u8; 32]> = agreement::agree_ephemeral(
         ephemeral_private,
-        &peer_public,
+        peer_public,
         CryptoError::Encryption("ECDH agreement failed".into()),
         |secret| {
             let mut key = Zeroizing::new([0u8; 32]);
@@ -146,7 +146,7 @@ pub fn sealed_box_decrypt(sealed: &[u8], private_key_pkcs8_der: &[u8]) -> Result
 
     let shared_secret: Zeroizing<[u8; 32]> = agreement::agree(
         &private_key,
-        &peer_public,
+        peer_public,
         CryptoError::Decryption("ECDH agreement failed".into()),
         |secret| {
             let mut key = Zeroizing::new([0u8; 32]);
