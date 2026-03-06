@@ -6,6 +6,7 @@ pub mod batch_update;
 pub mod check;
 pub mod discovery_allowlist;
 pub mod enrollment_tokens;
+pub mod extensions;
 pub mod history;
 pub mod host_packages;
 pub mod hosts;

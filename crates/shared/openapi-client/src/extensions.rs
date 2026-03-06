@@ -32,13 +32,11 @@ impl UptrakitClient {
         let path = crate::paths::extensions::action(extension_id, action_id);
         let url = format!("{}{}", self.base_url, path);
 
-        let body = serde_json::json!({ "params": params });
-
         let mut req = self
             .http
             .post(&url)
             .bearer_auth(self.token_or_err()?)
-            .json(&body);
+            .json(params);
 
         if let Some(sid) = service_id {
             req = req.query(&[("service_id", sid.to_string())]);

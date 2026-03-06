@@ -155,6 +155,11 @@ enum Commands {
         #[command(subcommand)]
         command: AuditLogsCommands,
     },
+    /// Manage UI extensions provided by connected services
+    Extensions {
+        #[command(subcommand)]
+        command: ExtensionsCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -751,6 +756,30 @@ enum AuditLogsSystemCommands {
         /// Items per page
         #[arg(long)]
         per_page: Option<u64>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ExtensionsCommands {
+    /// List all registered UI extensions
+    List,
+    /// List connected service instances providing an extension
+    Providers {
+        /// Extension ID (e.g. "ssh-agent.host-management")
+        extension_id: String,
+    },
+    /// Invoke an extension action
+    Invoke {
+        /// Extension ID
+        extension_id: String,
+        /// Action ID to invoke
+        action_id: String,
+        /// JSON parameters to pass to the action
+        #[arg(long, default_value = "{}")]
+        params: String,
+        /// Route to a specific service instance (required for targeted extensions)
+        #[arg(long)]
+        service_id: Option<Uuid>,
     },
 }
 
@@ -3581,6 +3610,49 @@ async fn run(cli: Cli) -> error::Result<()> {
                     output::print_output(format, &resp)?;
                 }
             },
+        },
+        Commands::Extensions { command } => match command {
+            ExtensionsCommands::List => {
+                let resp = commands::extensions::list(commands::extensions::ListParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            ExtensionsCommands::Providers { extension_id } => {
+                let resp = commands::extensions::providers(commands::extensions::ProvidersParams {
+                    extension_id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            ExtensionsCommands::Invoke {
+                extension_id,
+                action_id,
+                params,
+                service_id,
+            } => {
+                let params_value: serde_json::Value = serde_json::from_str(&params).context_to()?;
+                let resp = commands::extensions::invoke(commands::extensions::InvokeParams {
+                    extension_id,
+                    action_id,
+                    params: params_value,
+                    service_id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
         },
     }
     Ok(())
