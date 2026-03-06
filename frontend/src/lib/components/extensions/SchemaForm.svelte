@@ -33,8 +33,13 @@
 
 	$effect(() => {
 		const initial: Record<string, string> = {};
+		const rowData = extraParams._row as Record<string, unknown> | undefined;
 		for (const f of fields) {
-			initial[f.key] = f.default_value ?? '';
+			if (f.field_type === 'hidden' && rowData && rowData[f.key] != null) {
+				initial[f.key] = String(rowData[f.key]);
+			} else {
+				initial[f.key] = f.default_value ?? '';
+			}
 		}
 		values = initial;
 	});

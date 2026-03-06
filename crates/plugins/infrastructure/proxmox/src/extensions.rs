@@ -241,6 +241,7 @@ async fn handle_list(
         .map(|m| {
             serde_json::json!({
                 "id": m.id.to_string(),
+                "mapping_id": m.id.to_string(),
                 "name": m.proxmox_name,
                 "node": m.proxmox_node,
                 "vmid": m.proxmox_vmid,
