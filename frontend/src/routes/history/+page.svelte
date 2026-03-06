@@ -17,6 +17,7 @@
 	type StatusFilter = 'all' | UpdateHistoryStatus;
 	const STATUS_FILTER_VALUES = [
 		'all',
+		'queued',
 		'pending',
 		'in_progress',
 		'completed',
@@ -100,7 +101,7 @@
 	}
 
 	function isLiveStatus(status: UpdateHistoryStatus): boolean {
-		return status === 'pending' || status === 'in_progress';
+		return status === 'queued' || status === 'pending' || status === 'in_progress';
 	}
 
 	function toggleExpand(id: string) {
@@ -159,6 +160,8 @@
 
 	function statusBadgeClass(status: UpdateHistoryStatus): string {
 		switch (status) {
+			case 'queued':
+				return 'preset-tonal-surface';
 			case 'pending':
 				return 'preset-tonal';
 			case 'in_progress':

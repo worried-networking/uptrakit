@@ -489,7 +489,7 @@ export interface UpdateSoftwareItemRequest {
 	enabled?: boolean;
 }
 
-export type UpdateHistoryStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+export type UpdateHistoryStatus = 'queued' | 'pending' | 'in_progress' | 'completed' | 'failed';
 
 export interface UpdateHistoryResponse {
 	id: string;
