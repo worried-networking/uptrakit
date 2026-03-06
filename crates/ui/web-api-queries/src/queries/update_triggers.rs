@@ -14,14 +14,14 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    Set,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait,
+    PaginatorTrait, QueryFilter, Set,
 };
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{AttestationStatus, ControllerMessage, PluginAssignment, ReleaseInfo};
 use uptrakit_shared_db::entity::{
-    host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
-    service_host, software_item, update_history,
+    host, host_package_update_history, host_software_item, host_software_item_plugin,
+    plugin_config, prelude::*, service, service_host, software_item, update_history,
 };
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
@@ -57,9 +57,14 @@ pub enum TriggerUpdateError {
     #[error("agent is not approved")]
     AgentNotApproved,
     /// A `Pending` or `InProgress` update already exists for this
-    /// (host_id, software_item_id) pair.
+    /// (host_id, software_item_id) pair. This is the belt-and-suspenders path
+    /// when the partial unique DB index rejects a concurrent INSERT.
     #[error("an update is already pending or in progress")]
     UpdateAlreadyActive,
+    /// Another update (software-item or host-package batch) is already running
+    /// for this host. Wait for it to complete before triggering another.
+    #[error("another update is already in progress for this host")]
+    HostUpdateInProgress,
     /// The plugin config referenced by the role assignment was not found.
     #[error("plugin config not found")]
     PluginConfigNotFound,
@@ -137,6 +142,11 @@ pub struct CreateUpdateRecordParams<'a> {
     pub update_category: &'a str,
     /// Set when the update belongs to a batch.
     pub batch_id: Option<Uuid>,
+    /// Initial status of the record. Non-batch callers always use
+    /// [`update_history::UpdateStatus::Pending`]. Batch callers use
+    /// [`update_history::UpdateStatus::Queued`] for non-first items on a
+    /// host so that only one active record exists per host at a time.
+    pub initial_status: update_history::UpdateStatus,
 }
 
 /// Parameters for [`dispatch_update_to_agent`].
@@ -204,19 +214,21 @@ fn build_plugin_assignment(
 // Layer 1: Validate preconditions
 // ---------------------------------------------------------------------------
 
-/// Validates all preconditions for triggering an update on a single
-/// (host, software_item) pair:
+/// Loads all data needed for dispatch without performing the per-host lock check.
 ///
-/// - Software item exists and is active.
-/// - Host exists, is active, and belongs to the tenant.
-/// - Host is assigned to the software item.
-/// - An agent is linked to the host and is approved.
-/// - No pending/in-progress update exists for this pair.
-/// - The execute_update role plugin is assigned.
+/// Used by [`dispatch_next_in_batch`](super::update_batches::dispatch_next_in_batch)
+/// which performs the CAS transition instead, and by
+/// [`validate_update_preconditions`] which calls this and then adds the lock check.
 ///
-/// Returns a [`ValidatedUpdateTarget`] containing all loaded data needed for
-/// the subsequent record creation and dispatch steps.
-pub async fn validate_update_preconditions(
+/// Steps:
+/// 1. Verify software item exists and is active.
+/// 2. Verify host exists, is active, and belongs to the tenant.
+/// 3. Verify host is assigned to the software item.
+/// 4. Find the agent linked to this host.
+/// 5. Verify agent exists, belongs to the tenant, and is approved.
+/// 6. Load role-specific plugin assignments (`execute_update`, `detect_version`,
+///    `fetch_releases`).
+pub(crate) async fn load_target_for_dispatch(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,
@@ -264,23 +276,7 @@ pub async fn validate_update_preconditions(
         bail!(TriggerUpdateError::AgentNotApproved);
     }
 
-    // 6. Check for pending/in_progress updates for this (host_id, software_item_id).
-    let existing_update = UpdateHistory::find()
-        .filter(update_history::Column::HostId.eq(host_id))
-        .filter(update_history::Column::SoftwareItemId.eq(item_id))
-        .filter(update_history::Column::Status.is_in([
-            update_history::UpdateStatus::Pending,
-            update_history::UpdateStatus::InProgress,
-        ]))
-        .one(db)
-        .await
-        .context_to()?;
-
-    if existing_update.is_some() {
-        bail!(TriggerUpdateError::UpdateAlreadyActive);
-    }
-
-    // 7. Load role-specific plugin assignments.
+    // 6. Load role-specific plugin assignments.
     let execute_update_data = load_role_plugin(db, host_id, item_id, "execute_update")
         .await?
         .ok_or_else(|| report!(TriggerUpdateError::NoExecuteUpdatePlugin))?;
@@ -306,14 +302,75 @@ pub async fn validate_update_preconditions(
     })
 }
 
+/// Validates all preconditions for triggering an update on a single
+/// (host, software_item) pair:
+///
+/// - Software item exists and is active.
+/// - Host exists, is active, and belongs to the tenant.
+/// - Host is assigned to the software item.
+/// - An agent is linked to the host and is approved.
+/// - **No pending/in-progress update exists for this host** (across all update
+///   types: software items and host-package batches).
+/// - The execute_update role plugin is assigned.
+///
+/// Returns a [`ValidatedUpdateTarget`] containing all loaded data needed for
+/// the subsequent record creation and dispatch steps.
+pub async fn validate_update_preconditions(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    item_id: Uuid,
+) -> Result<ValidatedUpdateTarget> {
+    // Steps 1–5 and 7 (data loading, no lock check).
+    let target = load_target_for_dispatch(db, tenant_id, host_id, item_id).await?;
+
+    // 6. Combined per-host lock check: reject if any active update exists for
+    //    this host in either `update_history` (software items) OR
+    //    `host_package_update_history` (host package batches).
+    //    This enforces the invariant: at most one update runs per host at a time.
+    let sw_active = UpdateHistory::find()
+        .filter(update_history::Column::HostId.eq(host_id))
+        .filter(update_history::Column::Status.is_in([
+            update_history::UpdateStatus::Pending,
+            update_history::UpdateStatus::InProgress,
+        ]))
+        .count(db)
+        .await
+        .context_to()?;
+
+    if sw_active > 0 {
+        bail!(TriggerUpdateError::HostUpdateInProgress);
+    }
+
+    let pkg_active = HostPackageUpdateHistory::find()
+        .filter(host_package_update_history::Column::HostId.eq(host_id))
+        .filter(
+            Condition::any()
+                .add(host_package_update_history::Column::Status.eq("pending"))
+                .add(host_package_update_history::Column::Status.eq("in_progress")),
+        )
+        .count(db)
+        .await
+        .context_to()?;
+
+    if pkg_active > 0 {
+        bail!(TriggerUpdateError::HostUpdateInProgress);
+    }
+
+    Ok(target)
+}
+
 // ---------------------------------------------------------------------------
 // Layer 2: Create update_history record
 // ---------------------------------------------------------------------------
 
-/// Inserts a Pending `update_history` row and returns its ID.
+/// Inserts an `update_history` row with the given `initial_status` and returns its ID.
 ///
 /// If `batch_id` is `Some`, the record is associated with a batch for
 /// sequential per-host dispatch.
+///
+/// Non-batch callers pass `initial_status: UpdateStatus::Pending`. Batch
+/// callers pass `UpdateStatus::Queued` for non-first items on a host.
 ///
 /// Accepts any `ConnectionTrait` implementor (bare `DatabaseConnection` or a
 /// SeaORM transaction) so callers can run this inside or outside a transaction.
@@ -329,7 +386,7 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         software_item_id: Set(params.item_id),
         from_version: Set(params.from_version.clone()),
         to_version: Set(params.to_version.to_string()),
-        status: Set(update_history::UpdateStatus::Pending),
+        status: Set(params.initial_status),
         output: Set(String::new()),
         output_bytes: Set(0),
         actor_type: Set(params.actor_type.as_str().to_string()),
@@ -451,6 +508,7 @@ pub async fn trigger_update_for_host(
             actor_id: params.actor_id,
             update_category: &target.hsi_link.update_category,
             batch_id: None,
+            initial_status: update_history::UpdateStatus::Pending,
         },
     )
     .await?;
@@ -549,8 +607,9 @@ mod tests {
     };
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{
-        host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
-        software_item, tenant, update_history,
+        host, host_package, host_package_update_history, host_software_item,
+        host_software_item_plugin, plugin_config, service, service_host, software_item, tenant,
+        update_history,
     };
     use uptrakit_shared_types::ServiceStatus;
     use uuid::Uuid;
@@ -862,7 +921,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn validate_preconditions_update_already_active() {
+    async fn validate_preconditions_update_already_active_same_item() {
+        // A Pending update for the same (host, item) pair must be rejected.
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
         let now = OffsetDateTime::now_utc();
@@ -889,7 +949,125 @@ mod tests {
         let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
         assert!(matches!(
             result.unwrap_err().current_context(),
-            TriggerUpdateError::UpdateAlreadyActive
+            TriggerUpdateError::HostUpdateInProgress
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_host_update_in_progress_different_item() {
+        // A Pending update for a DIFFERENT item on the same host must also be rejected.
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+
+        // Insert a second software item (not assigned to the host — that doesn't
+        // matter for the lock check which is host-scoped).
+        let other_item_id = Uuid::now_v7();
+        uptrakit_shared_db::entity::software_item::ActiveModel {
+            id: Set(other_item_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set("other-app".to_string()),
+            enabled: Set(true),
+            discovery_state: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Insert a Pending update_history row for the OTHER item on the same host.
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(f.host_id),
+            software_item_id: Set(other_item_id),
+            from_version: Set(None),
+            to_version: Set("2.0.0".to_string()),
+            status: Set(update_history::UpdateStatus::Pending),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            started_at: Set(now),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("feature".to_string()),
+            batch_id: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Triggering an update for f.item_id on the same host must be rejected.
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::HostUpdateInProgress
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_preconditions_host_package_update_blocks_sw_item() {
+        // An active host-package batch update must block a software-item update.
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+
+        // Insert a host_package row (required by FK on host_package_update_history).
+        let pkg_id = Uuid::now_v7();
+        host_package::ActiveModel {
+            id: Set(pkg_id),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            plugin_config_id: Set(f.plugin_config_id),
+            package_identifier: Set("curl".to_string()),
+            name: Set("curl".to_string()),
+            installed_version: Set(Some("7.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            latest_version: Set(Some("8.0.0".to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            update_category: Set("security".to_string()),
+            enabled: Set(true),
+            last_checked_at: Set(None),
+            last_updated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Insert a pending host_package_update_history row for the same host.
+        host_package_update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            host_package_id: Set(pkg_id),
+            from_version: Set(Some("7.0.0".to_string())),
+            to_version: Set(Some("8.0.0".to_string())),
+            status: Set("pending".to_string()),
+            output: Set(None),
+            output_bytes: Set(0),
+            actor_type: Set("mqtt".to_string()),
+            actor_id: Set(String::new()),
+            update_category: Set("security".to_string()),
+            started_at: Set(None),
+            completed_at: Set(None),
+            created_at: Set(now),
+            batch_id: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let result = validate_update_preconditions(&db, f.tenant_id, f.host_id, f.item_id).await;
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::HostUpdateInProgress
         ));
     }
 
