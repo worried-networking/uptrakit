@@ -45,7 +45,13 @@ fn add_config_action() -> ActionDef {
                 .with_type(FieldType::Password)
                 .required()
                 .with_placeholder("user@realm!tokenid=secret")
-                .with_help_text("PVE API token in USER@REALM!TOKENID=SECRET format."),
+                .with_help_text(
+                    "PVE API token in USER@REALM!TOKENID=SECRET format. \
+                     The token requires Sys.Audit (to list nodes) and VM.Audit \
+                     (to list and read VM/CT config). Grant these via the built-in \
+                     PVEAuditor role on path /. VM.Monitor on /vms is optional — \
+                     it enables IP discovery through the QEMU guest agent.",
+                ),
             FieldDef::new("verify_tls", "Verify TLS Certificate")
                 .with_type(FieldType::Toggle)
                 .with_help_text("Disable if your Proxmox VE uses a self-signed certificate."),
