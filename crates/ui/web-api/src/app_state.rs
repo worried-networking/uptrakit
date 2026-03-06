@@ -124,6 +124,11 @@ pub struct AppState {
     pub extension_registry: Arc<ExtensionRegistry>,
     /// Request/response proxy for extension action invocations.
     pub extension_proxy: Arc<ExtensionProxy>,
+    /// When `true`, plugin config create/update requests that contain dangerous
+    /// command patterns (e.g. `curl|bash`, `rm -rf /`) are rejected with HTTP 400
+    /// instead of the default advisory-only warning. Set via
+    /// `--reject-dangerous-commands` CLI flag.
+    pub reject_dangerous_commands: bool,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -183,6 +188,7 @@ pub struct AppStateBuilder {
     audit_log_dispatcher: Option<uptrakit_audit_log::AuditLogDispatcher>,
     extension_registry: Option<Arc<ExtensionRegistry>>,
     extension_proxy: Option<Arc<ExtensionProxy>>,
+    reject_dangerous_commands: bool,
 }
 
 impl AppStateBuilder {
@@ -228,6 +234,7 @@ impl AppStateBuilder {
             audit_log_dispatcher: None,
             extension_registry: None,
             extension_proxy: None,
+            reject_dangerous_commands: false,
         }
     }
 
@@ -446,6 +453,16 @@ impl AppStateBuilder {
         self
     }
 
+    /// Enable dangerous command pattern rejection.
+    ///
+    /// When `true`, plugin config create/update requests containing dangerous
+    /// patterns (e.g. `curl|bash`, `rm -rf /`) are rejected with HTTP 400.
+    /// Default: `false` (advisory-only warnings).
+    pub fn reject_dangerous_commands(mut self, v: bool) -> Self {
+        self.reject_dangerous_commands = v;
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -543,6 +560,7 @@ impl AppStateBuilder {
             extension_proxy: self
                 .extension_proxy
                 .unwrap_or_else(|| Arc::new(ExtensionProxy::new())),
+            reject_dangerous_commands: self.reject_dangerous_commands,
         })
     }
 }
