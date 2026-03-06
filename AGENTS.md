@@ -833,6 +833,8 @@ The `ServiceHandler::SERVICE_TYPE` constant has been removed from the service SD
 
 `service_connections.rs` provides a single `register()` method (replacing `register_agent()`,
 `register_ssh_agent()`, `register_mqtt()`) and `broadcast_by_capability()` (replacing `broadcast_by_type()`).
+`force_disconnect()` cancels the session's `CancellationToken` and removes the connection entry,
+used by deactivate/reject/merge routes for immediate WebSocket session termination.
 
 #### Controller events
 
@@ -1238,6 +1240,12 @@ let auth_routes = auth_routes
 
 `AppState` uses `unwrap_or_else` defaults: `AuditFilter::default()` and
 `AuditLogDispatcher::new(Arc::new(NoopBackend))`. Existing tests require zero changes.
+
+### `reject_dangerous_commands` flag
+
+`AppState.reject_dangerous_commands: bool` — set via `--reject-dangerous-commands` CLI flag
+or `UPTRAKIT_REJECT_DANGEROUS_COMMANDS` env var. When `true`, plugin config create/update
+requests containing dangerous command patterns are rejected with HTTP 400. Default: `false`.
 
 ### Design decisions
 
