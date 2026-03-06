@@ -1007,11 +1007,16 @@ export async function invokeExtensionAction(
 /**
  * Calls an arbitrary authenticated REST API endpoint and returns the parsed JSON response.
  * Used by extension actions with `api_submit` to bypass the extension proxy.
+ *
+ * The path may be fully-qualified (e.g. `/api/v1/plugin-configs`) or relative
+ * to the API base (e.g. `/plugin-configs`). The leading BASE prefix is stripped
+ * before passing to `request()` which re-adds it via `authenticatedFetch`.
  */
 export function apiSubmitRequest(
 	path: string,
 	method: string,
 	body: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
-	return request<Record<string, unknown>>(path, { method, body: JSON.stringify(body) });
+	const relativePath = path.startsWith(BASE) ? path.slice(BASE.length) : path;
+	return request<Record<string, unknown>>(relativePath, { method, body: JSON.stringify(body) });
 }
