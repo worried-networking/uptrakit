@@ -276,6 +276,32 @@ in the `GET /api/v1/extensions/{id}/providers` response via `ExtensionProviderIn
 The controller passes the encrypted `sensitive_params` through opaquely — it cannot decrypt.
 Only the target service instance can decrypt using its mTLS private key.
 
+#### Frontend implementation
+
+The frontend implements the matching ECIES sealed-box algorithm in `sealedBoxEncrypt` (in
+`frontend/src/lib/api.ts`) using the Web Crypto API. The algorithm mirrors the Rust
+`sealed_box_encrypt_base64` implementation exactly:
+
+1. Import recipient's P-256 public key from the `encryption_public_key` field in the
+   provider list response.
+2. Generate an ephemeral P-256 keypair.
+3. ECDH: derive the 32-byte X-coordinate shared secret (`crypto.subtle.deriveBits`).
+4. Key derivation: SHA-256 of the shared secret → AES-256 key.
+5. AES-256-GCM encrypt with a random 12-byte nonce; the ephemeral public key bytes are
+   the AAD (binds the ciphertext to this specific exchange).
+6. Output: `[ephemeral pubkey (65 B)] [nonce (12 B)] [ciphertext + GCM tag (N+16 B)]`,
+   base64-encoded (standard, non-URL-safe).
+
+When `ActionButton` invokes an action, it inspects `action.ui.fields` to identify fields
+with `sensitive: true`, separates them from regular params, and passes them as
+`sensitiveParams` to `invokeExtensionAction`. The function encrypts them with
+`sealedBoxEncrypt` and includes the ciphertext as `sensitive_params` in the request body.
+If sensitive params are present but no encryption key is available (untargeted or no
+`encryption_public_key`), the invocation fails with an error rather than leaking credentials.
+
+For targeted extensions, `ServiceSelector` tracks the selected service's encryption key
+(bound via `selectedEncryptionKey`) and propagates it through `SchemaTable` and `ActionButton`.
+
 See [Extensions Security](../security/extensions.md) for the full trust model.
 
 ### `WizardStep`
@@ -598,7 +624,11 @@ a provider automatically or handles it directly (for plugins).
 | `crates/plugins/infrastructure/registry/src/lib.rs` | `PluginOps::extension_manifests` |
 | `crates/ui/cli/src/commands/extensions.rs` | CLI `extensions` subcommand (static + dynamic) |
 | `crates/core/agent-ssh/src/extension.rs` | SSH agent extension implementation (reference) |
-| `crates/shared/crypto/src/ecies.rs` | ECIES sealed-box encryption/decryption |
+| `crates/shared/crypto/src/ecies.rs` | ECIES sealed-box encryption/decryption (Rust, backend) |
+| `frontend/src/lib/api.ts` | `sealedBoxEncrypt` — Web Crypto API ECIES (frontend) |
+| `frontend/src/lib/components/extensions/ServiceSelector.svelte` | Service selector; exposes `selectedEncryptionKey` bindable |
+| `frontend/src/lib/components/extensions/ActionButton.svelte` | Sensitive field separation and encryption before invocation |
+| `frontend/src/lib/components/extensions/SchemaTable.svelte` | Propagates `encryptionPublicKey` to child `ActionButton` |
 
 ## Cross-references
 

@@ -12,6 +12,7 @@
 	let extension: ExtensionResponse | undefined = $derived(getExtensions().find((e) => e.id === extensionId));
 
 	let selectedServiceId: string | undefined = $state(undefined);
+	let selectedEncryptionKey: string | undefined = $state(undefined);
 	let serviceLoaded: boolean = $state(false);
 
 	let isTargeted = $derived(extension?.targeting === 'targeted');
@@ -41,7 +42,12 @@
 		<div class="flex items-center justify-between">
 			<h1 class="h3">{extension.label}</h1>
 			{#if isTargeted}
-				<ServiceSelector extensionId={extension.id} bind:selectedServiceId bind:loaded={serviceLoaded} />
+				<ServiceSelector
+					extensionId={extension.id}
+					bind:selectedServiceId
+					bind:selectedEncryptionKey
+					bind:loaded={serviceLoaded}
+				/>
 			{/if}
 		</div>
 
@@ -57,6 +63,7 @@
 				ui={extension.ui}
 				actions={extension.actions ?? []}
 				serviceId={selectedServiceId}
+				encryptionPublicKey={selectedEncryptionKey}
 			/>
 		{:else if extension.ui.type === 'form'}
 			<SchemaForm fields={extension.ui.fields} onsubmit={async () => {}} />
@@ -67,7 +74,12 @@
 				{#each extension.ui.actions as actionId (actionId)}
 					{@const action = resolveAction(actionId)}
 					{#if action}
-						<ActionButton extensionId={extension.id} {action} serviceId={selectedServiceId} />
+						<ActionButton
+							extensionId={extension.id}
+							{action}
+							serviceId={selectedServiceId}
+							encryptionPublicKey={selectedEncryptionKey}
+						/>
 					{/if}
 				{/each}
 			</div>

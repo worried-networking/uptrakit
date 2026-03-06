@@ -8,12 +8,14 @@
 		extensionId,
 		ui,
 		actions = [],
-		serviceId
+		serviceId,
+		encryptionPublicKey
 	}: {
 		extensionId: string;
 		ui: Extract<ExtensionUi, { type: 'data_table' }>;
 		actions: ActionDef[];
 		serviceId?: string;
+		encryptionPublicKey?: string;
 	} = $props();
 
 	/** Resolve an action ID to its ActionDef from the action library. */
@@ -143,7 +145,14 @@
 			{/if}
 
 			{#if addAction}
-				<ActionButton {extensionId} action={addAction} {serviceId} size="sm" onComplete={handleAddActionComplete} />
+				<ActionButton
+					{extensionId}
+					action={addAction}
+					{serviceId}
+					{encryptionPublicKey}
+					size="sm"
+					onComplete={handleAddActionComplete}
+				/>
 			{/if}
 		</div>
 	{/if}
@@ -156,7 +165,14 @@
 				{#each ui.primary_actions as actionId (actionId)}
 					{@const action = resolveAction(actionId)}
 					{#if action}
-						<ActionButton {extensionId} {action} {serviceId} extraParams={contextParams} onComplete={loadData} />
+						<ActionButton
+							{extensionId}
+							{action}
+							{serviceId}
+							{encryptionPublicKey}
+							extraParams={contextParams}
+							onComplete={loadData}
+						/>
 					{/if}
 				{/each}
 			</div>
@@ -195,6 +211,7 @@
 														{extensionId}
 														{action}
 														{serviceId}
+														{encryptionPublicKey}
 														extraParams={{ ...contextParams, _row: row }}
 														size="sm"
 														onComplete={loadData}

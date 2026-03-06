@@ -33,9 +33,10 @@ describe('ModalBackdrop', () => {
 	it('calls onclose when the backdrop overlay is clicked directly', () => {
 		const onclose = vi.fn();
 		const { container } = render(ModalBackdrop, { onclose, children: makeContent() });
-		const backdrop = container.firstElementChild as HTMLElement;
-		// Clicking the outer backdrop (currentTarget === target)
-		fireEvent.click(backdrop, { target: backdrop });
+		// The inner flex-wrapper fills the viewport and holds the onclick handler.
+		// Clicking it directly (not a child element) simulates a click on the dark backdrop area.
+		const innerWrapper = container.firstElementChild!.firstElementChild as HTMLElement;
+		fireEvent.click(innerWrapper);
 		expect(onclose).toHaveBeenCalledOnce();
 	});
 
