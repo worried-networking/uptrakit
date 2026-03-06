@@ -213,6 +213,7 @@ pub async fn build_test_state(
         plugin_ops: Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry),
         db,
         credential_sources: ServiceCredentialSources::default(),
+        event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),
         device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(),
         update_output_broadcaster: crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
         batch_progress_broadcaster:
