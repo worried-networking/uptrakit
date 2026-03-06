@@ -995,7 +995,7 @@ export async function invokeExtensionAction(
 	const resp = await authenticatedFetch(path, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(params)
+		body: JSON.stringify({ params })
 	});
 	if (!resp.ok) {
 		const msg = await extractErrorMessage(resp);
