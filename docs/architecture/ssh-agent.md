@@ -338,9 +338,45 @@ For usage details, see [Command Executor](../development/command-executor.md).
 
 ## Version Check and Update Execution
 
-The SSH agent handles `CheckVersions` and `ExecuteUpdate` messages from the controller using the shared
-`uptrakit-agent-core` crate. The core crate provides `handle_check_versions()`, `handle_execute_update()`, and
-`handle_graceful_shutdown()`, which contain the logic common to both the regular agent and the SSH agent.
+The SSH agent handles `CheckVersions`, `DiscoverSoftware`, `ExecuteBatchHostPackageUpdate`, and `ExecuteUpdate`
+messages from the controller using the shared `uptrakit-agent-core` crate. The core crate provides both
+compute-only `run_*` functions (return `ServiceMessage` without needing a connection) and thin `handle_*`
+wrappers (compute + send) for common version-check, discovery, and update logic.
+
+### Background Task Spawning
+
+Long-running operations (`CheckVersions`, `DiscoverSoftware`, `ExecuteBatchHostPackageUpdate`) are executed
+as background tokio tasks rather than inline in the `on_message` handler. This prevents a slow or stuck SSH
+operation from blocking the event loop, which would make the agent unresponsive to pings, signals, and other
+controller messages.
+
+The pattern uses a dedicated `bg_tx`/`bg_rx` mpsc channel (capacity 64):
+
+```text
+on_message(CheckVersions)
+    │
+    ├── spawn_check_versions_ssh(payload, db, pool, bg_tx)
+    │       │
+    │       └── tokio::spawn ──► run_check_versions_ssh()
+    │                                    │
+    │                                    └── bg_tx.send(ServiceMessage)
+    │
+    └── return Ok(None)   ◄── event loop continues immediately
+
+poll_service_event()
+    │
+    ├── bg_rx.recv() ──► SshAgentEvent::BackgroundResult(msg)
+    │
+    └── on_service_event() ──► conn.send(msg)
+```
+
+The `run_*_ssh` functions in `client.rs` perform host lookup, SSH session acquisition, executor creation,
+and delegate to `uptrakit_agent_core::run_*` which returns a `ServiceMessage`. The `spawn_*_ssh` wrappers
+clone the necessary state, spawn a tokio task, and send the result through `bg_tx`. The event loop picks
+up results via `bg_rx` in `poll_service_event` and sends them to the controller.
+
+`ExecuteUpdate` continues to use the existing forwarder-task pattern (streaming output through the
+aggregate channel) because it requires real-time output forwarding rather than a single result message.
 
 ### SSH Session Model
 
@@ -382,12 +418,12 @@ specification.
 1. Controller sends `CheckVersions` with `host_machine_id` and a list of `VersionCheckAssignment` items.
    Each assignment carries role-based `PluginAssignment` entries (`detect_version` and optionally
    `fetch_releases`).
-2. SSH agent looks up the matching host in `ssh_hosts`.
-3. A session is acquired from `SshConnectionPool` (reusing an existing connection when available) and
-   an `SshCommandExecutor` is constructed (wrapped with `SudoAwareCommandExecutor` for privilege elevation).
-4. `uptrakit_agent_core::handle_check_versions()` is called with the executor; it dispatches to the
-   `detect_version` plugin for installed version detection and the `fetch_releases` plugin (if present)
-   for agent-side latest version resolution, then sends `version_check_results` back to the controller.
+2. `on_message` calls `spawn_check_versions_ssh()`, which spawns a background tokio task.
+3. The background task looks up the matching host in `ssh_hosts`, acquires a session from
+   `SshConnectionPool`, constructs an `SshCommandExecutor` (wrapped with `SudoAwareCommandExecutor`),
+   and calls `uptrakit_agent_core::run_check_versions()`.
+4. The result (`ServiceMessage::VersionCheckResults`) is sent through `bg_tx` to the event loop,
+   which forwards it to the controller via `conn.send()`.
 5. The caller's `Arc<SshSession>` clone is dropped; the pool retains its own clone for future reuse.
 
 ### Updates
@@ -497,6 +533,7 @@ The ticker is implemented as `SshAgentEvent::HostConfigChanged`, an arm in the s
 ```rust
 enum SshAgentEvent {
     Update(String, client::UpdateEvent),  // (host_machine_id, event) from aggregate channel
+    BackgroundResult(ServiceMessage),     // result from background check/discovery/batch task
     HostConfigChanged,                    // reload tick fired
 }
 ```
@@ -558,12 +595,14 @@ crates/core/agent-ssh/
 ├── build.rs
 └── src/
     ├── main.rs          # SshAgentHandler (ServiceHandler impl, in_flight_updates HashMap,
-    │                    # aggregate_rx/tx channel, reload_ticker, host_snapshot),
-    │                    # SshAgentEvent enum, poll_updates(), diff_host_snapshots(),
+    │                    # aggregate_rx/tx channel, bg_rx/bg_tx channel, reload_ticker,
+    │                    # host_snapshot), SshAgentEvent enum (Update, BackgroundResult,
+    │                    # HostConfigChanged), poll_updates(), diff_host_snapshots(),
     │                    # entry point, master key init
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
-    ├── client.rs        # Authenticated loop; handle_check_versions_ssh(), handle_execute_update_ssh()
-    │                    # (per-host guard + forwarder task), handle_discover_software_ssh(),
+    ├── client.rs        # Authenticated loop; spawn_check_versions_ssh(), spawn_discover_software_ssh(),
+    │                    # spawn_execute_batch_host_package_update_ssh() (background-spawned),
+    │                    # handle_execute_update_ssh() (per-host guard + forwarder task),
     │                    # SshInFlightUpdate struct, build_reload_host_infos(),
     │                    # report_hosts_after_config_change() — all wrap SshCommandExecutor with
     │                    # SudoAwareCommandExecutor
@@ -605,7 +644,12 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 | --- | --- |
 | `check_version(plugin_assignment, executor)` | Runs a single version check for a role-based plugin assignment using the given executor |
 | `execute_update(payload, executor, output_tx)` | Executes an update using role-based plugin assignments and streams output lines |
-| `handle_check_versions(payload, executor, conn)` | Refreshes package indexes, runs version checks, sends `version_check_results` |
+| `run_check_versions(payload, executor)` | Compute-only: runs version checks, returns `ServiceMessage::VersionCheckResults` |
+| `run_discover_software(payload, executor)` | Compute-only: runs discovery, returns `ServiceMessage::DiscoveryResults` |
+| `run_execute_batch_host_package_update(payload, executor)` | Compute-only: runs batch host package update, returns `ServiceMessage::BatchHostPackageUpdateResult` |
+| `handle_check_versions(payload, executor, conn)` | Thin wrapper: calls `run_check_versions()` then `conn.send()` |
+| `handle_discover_software(payload, executor, conn)` | Thin wrapper: calls `run_discover_software()` then `conn.send()` |
+| `handle_execute_batch_host_package_update(payload, executor, conn)` | Thin wrapper: calls `run_execute_batch_host_package_update()` then `conn.send()` |
 | `start_update(payload, executor, conn, ctx)` | Applies ctx overrides, spawns update task, sends `UpdateStarted`, returns `InFlightUpdate` |
 | `handle_execute_update(payload, executor, in_flight, conn)` | Rejects if update already in flight (global guard for single-host agent); delegates to `start_update()` |
 | `handle_graceful_shutdown(conn, in_flight, timeout, reason, outcome)` | Drains a single in-flight update before disconnecting (used by the regular agent) |
@@ -613,6 +657,11 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 | `UpdateEvent` | Enum of events emitted by an in-flight update (output line, completion) |
 | `send_update_output()` | Sends an `update_output` message to the controller |
 | `send_update_result()` | Sends an `update_result` message to the controller |
+
+The `run_*` functions are designed for background spawning: they take owned data (no `&mut conn`
+reference), perform all computation, and return a `ServiceMessage` that the caller can send through
+any channel. The `handle_*` functions are thin wrappers for callers that want compute + send in one step
+(used by the regular agent which processes messages inline).
 
 ## Connection Resilience
 
@@ -647,8 +696,15 @@ allowing a dead connection to go undetected for hours. With these settings, a de
 detected in ≤ 30 s + 10 s × (OS retry count) ≈ 120–150 s, well before the next ping or the next
 send would time out anyway.
 
-See `crates/shared/service-sdk/src/ws.rs` (`connect_ws`) and
-`crates/shared/service-sdk/src/connection.rs` for the implementation.
+### Close timeout (`CLOSE_TIMEOUT`)
+
+After the event loop exits (shutdown or disconnect), the SDK sends a WebSocket close frame with a
+5-second timeout. Without this, the `conn.close()` call can block indefinitely when the controller
+is unresponsive (e.g. during its own shutdown), preventing the service process from exiting.
+
+See `crates/shared/service-sdk/src/ws.rs` (`connect_ws`),
+`crates/shared/service-sdk/src/connection.rs`, and
+`crates/shared/service-sdk/src/event_loop.rs` for the implementation.
 
 ## Related Documentation
 

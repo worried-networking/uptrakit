@@ -154,6 +154,10 @@ biased priority order):
 1. **Controller messages** (`conn.recv()`) — dispatched to SDK handlers or `handler.on_message()`
 1. **OS signals** (`signals.recv()`) — `handler.on_shutdown()`
 
+After the event loop exits, the SDK attempts a clean WebSocket close with a **5-second timeout**
+(`CLOSE_TIMEOUT`). If the controller is unresponsive, the close times out and the connection is
+dropped without waiting for the TCP stack to give up (which can take minutes).
+
 ### Conditional ping timer
 
 The ping timer starts as `None` (no pings are sent). When a `ServiceSettings` message arrives, the SDK
