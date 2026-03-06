@@ -13,7 +13,7 @@ use uptrakit_internal_wire::{
     ServiceMessage, UpdateCategory, UpdateFinalStatus, UpdateResultPayload, VersionCheckResult,
     VersionCheckResultsPayload,
 };
-use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
+use uptrakit_service_sdk::ControllerConnection;
 
 use crate::db::entity::ssh_host::Model;
 use crate::host_info::collect_remote_host_info;
@@ -363,91 +363,6 @@ pub(crate) fn ssh_agent_capabilities() -> BTreeSet<Capability> {
     .collect()
 }
 
-// ── CheckVersions ─────────────────────────────────────────────────────────────
-
-/// Handle a `CheckVersions` message for the SSH agent.
-///
-/// Looks up the SSH host by `host_machine_id`, acquires a pooled session, and
-/// delegates to the shared `uptrakit_agent_core::handle_check_versions()`.
-///
-/// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
-pub(crate) async fn handle_check_versions_ssh(
-    payload: CheckVersionsPayload,
-    db: &sea_orm::DatabaseConnection,
-    conn: &mut ControllerConnection,
-    pool: &SshConnectionPool,
-) -> Option<LoopOutcome> {
-    let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
-        Ok(Some(h)) => h,
-        Ok(None) => {
-            tracing::warn!(
-                host_machine_id = %payload.host_machine_id,
-                "no SSH host found for CheckVersions host_machine_id; returning errors"
-            );
-            let results = error_results_for_check(
-                &payload,
-                &format!(
-                    "SSH host with machine_id '{}' not found",
-                    payload.host_machine_id
-                ),
-            );
-            conn.send_best_effort(ServiceMessage::VersionCheckResults(
-                VersionCheckResultsPayload { results },
-            ))
-            .await;
-            return None;
-        }
-        Err(e) => {
-            tracing::error!(
-                host_machine_id = %payload.host_machine_id,
-                error = %e,
-                "DB error looking up SSH host for CheckVersions"
-            );
-            let results = error_results_for_check(&payload, &format!("DB error: {e}"));
-            conn.send_best_effort(ServiceMessage::VersionCheckResults(
-                VersionCheckResultsPayload { results },
-            ))
-            .await;
-            return None;
-        }
-    };
-
-    let session = match pool.acquire(&host).await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(
-                host_name = %host.name,
-                error = %e,
-                "failed to acquire SSH session for CheckVersions"
-            );
-            pool.evict(&host.id).await;
-            let results = error_results_for_check(&payload, &format!("SSH connection failed: {e}"));
-            conn.send_best_effort(ServiceMessage::VersionCheckResults(
-                VersionCheckResultsPayload { results },
-            ))
-            .await;
-            return None;
-        }
-    };
-
-    let ctx = build_connection_context();
-    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
-    let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
-        raw,
-        host.resolved_sudo_context(),
-    ));
-
-    tracing::debug!(
-        host_name = %host.name,
-        hostname = %host.hostname,
-        "running version check on SSH host"
-    );
-    // The session Arc is returned to the pool (it stays alive via the pool's own Arc).
-    // If a channel-open error occurred during version checks, the session may be stale;
-    // the pool will detect this on the next acquire via TTL.
-    uptrakit_agent_core::handle_check_versions(payload, executor, conn, &ctx).await
-}
-
 // ── ExecuteUpdate ─────────────────────────────────────────────────────────────
 
 /// Handle an `ExecuteUpdate` message for the SSH agent.
@@ -617,21 +532,207 @@ pub(crate) async fn handle_execute_update_ssh(
     );
 }
 
-// ── ExecuteBatchHostPackageUpdate ─────────────────────────────────────────────
+// ── Background-spawned operations ─────────────────────────────────────────────
+//
+// These functions spawn long-running operations (discovery, version checks,
+// batch updates) as background tokio tasks so the event loop remains
+// responsive for pings, signals, and other controller messages.
+//
+// Each function resolves the SSH host and session on the calling task (quick),
+// then spawns the actual work. The completed `ServiceMessage` is sent through
+// `bg_tx` for the event loop to forward to the controller.
 
-/// Handle an `ExecuteBatchHostPackageUpdate` message for the SSH agent.
-///
-/// Looks up the SSH host by `host_machine_id`, acquires a pooled session, and
-/// delegates to the shared
-/// `uptrakit_agent_core::handle_execute_batch_host_package_update()`.
-///
-/// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
-pub(crate) async fn handle_execute_batch_host_package_update_ssh(
+/// Spawn a `CheckVersions` operation as a background task.
+pub(crate) fn spawn_check_versions_ssh(
+    payload: CheckVersionsPayload,
+    db: &sea_orm::DatabaseConnection,
+    pool: &SshConnectionPool,
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+) {
+    let db = db.clone();
+    let pool = pool.clone();
+    let bg_tx = bg_tx.clone();
+    tokio::spawn(async move {
+        let msg = run_check_versions_ssh(payload, &db, &pool).await;
+        let _ = bg_tx.send(msg).await;
+    });
+}
+
+/// Run `CheckVersions` for an SSH host, returning the result as a
+/// [`ServiceMessage`].
+async fn run_check_versions_ssh(
+    payload: CheckVersionsPayload,
+    db: &sea_orm::DatabaseConnection,
+    pool: &SshConnectionPool,
+) -> ServiceMessage {
+    let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
+        Ok(Some(h)) => h,
+        Ok(None) => {
+            tracing::warn!(
+                host_machine_id = %payload.host_machine_id,
+                "no SSH host found for CheckVersions host_machine_id; returning errors"
+            );
+            let results = error_results_for_check(
+                &payload,
+                &format!(
+                    "SSH host with machine_id '{}' not found",
+                    payload.host_machine_id
+                ),
+            );
+            return ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results });
+        }
+        Err(e) => {
+            tracing::error!(
+                host_machine_id = %payload.host_machine_id,
+                error = %e,
+                "DB error looking up SSH host for CheckVersions"
+            );
+            let results = error_results_for_check(&payload, &format!("DB error: {e}"));
+            return ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results });
+        }
+    };
+
+    let session = match pool.acquire(&host).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(
+                host_name = %host.name,
+                error = %e,
+                "failed to acquire SSH session for CheckVersions"
+            );
+            pool.evict(&host.id).await;
+            let results = error_results_for_check(&payload, &format!("SSH connection failed: {e}"));
+            return ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results });
+        }
+    };
+
+    let ctx = build_connection_context();
+    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+    let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
+        raw,
+        host.resolved_sudo_context(),
+    ));
+
+    tracing::debug!(
+        host_name = %host.name,
+        hostname = %host.hostname,
+        "running version check on SSH host"
+    );
+    uptrakit_agent_core::run_check_versions(payload, executor, &ctx).await
+}
+
+/// Spawn a `DiscoverSoftware` operation as a background task.
+pub(crate) fn spawn_discover_software_ssh(
+    payload: DiscoverSoftwarePayload,
+    db: &sea_orm::DatabaseConnection,
+    pool: &SshConnectionPool,
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+) {
+    let db = db.clone();
+    let pool = pool.clone();
+    let bg_tx = bg_tx.clone();
+    tokio::spawn(async move {
+        let msg = run_discover_software_ssh(payload, &db, &pool).await;
+        let _ = bg_tx.send(msg).await;
+    });
+}
+
+/// Run `DiscoverSoftware` for an SSH host, returning the result as a
+/// [`ServiceMessage`].
+async fn run_discover_software_ssh(
+    payload: DiscoverSoftwarePayload,
+    db: &sea_orm::DatabaseConnection,
+    pool: &SshConnectionPool,
+) -> ServiceMessage {
+    let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
+        Ok(Some(h)) => h,
+        Ok(None) => {
+            tracing::warn!(
+                host_machine_id = %payload.host_machine_id,
+                "no SSH host found for DiscoverSoftware host_machine_id; returning errors"
+            );
+            let results = error_results_for_discovery(
+                &payload,
+                &format!(
+                    "SSH host with machine_id '{}' not found",
+                    payload.host_machine_id
+                ),
+            );
+            return ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+                host_machine_id: payload.host_machine_id,
+                results,
+            });
+        }
+        Err(e) => {
+            tracing::error!(
+                host_machine_id = %payload.host_machine_id,
+                error = %e,
+                "DB error looking up SSH host for DiscoverSoftware"
+            );
+            let results = error_results_for_discovery(&payload, &format!("DB error: {e}"));
+            return ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+                host_machine_id: payload.host_machine_id,
+                results,
+            });
+        }
+    };
+
+    let session = match pool.acquire(&host).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(
+                host_name = %host.name,
+                error = %e,
+                "failed to acquire SSH session for DiscoverSoftware"
+            );
+            pool.evict(&host.id).await;
+            let results =
+                error_results_for_discovery(&payload, &format!("SSH connection failed: {e}"));
+            return ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+                host_machine_id: payload.host_machine_id,
+                results,
+            });
+        }
+    };
+
+    let ctx = build_connection_context();
+    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+    let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
+        raw,
+        host.resolved_sudo_context(),
+    ));
+
+    tracing::debug!(
+        host_name = %host.name,
+        hostname = %host.hostname,
+        "running discovery on SSH host"
+    );
+    uptrakit_agent_core::run_discover_software(payload, executor, &ctx).await
+}
+
+/// Spawn an `ExecuteBatchHostPackageUpdate` operation as a background task.
+pub(crate) fn spawn_execute_batch_host_package_update_ssh(
     payload: ExecuteBatchHostPackageUpdatePayload,
     db: &sea_orm::DatabaseConnection,
-    conn: &mut ControllerConnection,
     pool: &SshConnectionPool,
-) -> Option<LoopOutcome> {
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+) {
+    let db = db.clone();
+    let pool = pool.clone();
+    let bg_tx = bg_tx.clone();
+    tokio::spawn(async move {
+        let msg = run_execute_batch_host_package_update_ssh(payload, &db, &pool).await;
+        let _ = bg_tx.send(msg).await;
+    });
+}
+
+/// Run `ExecuteBatchHostPackageUpdate` for an SSH host, returning the result
+/// as a [`ServiceMessage`].
+async fn run_execute_batch_host_package_update_ssh(
+    payload: ExecuteBatchHostPackageUpdatePayload,
+    db: &sea_orm::DatabaseConnection,
+    pool: &SshConnectionPool,
+) -> ServiceMessage {
     let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
         Ok(Some(h)) => h,
         Ok(None) => {
@@ -655,14 +756,12 @@ pub(crate) async fn handle_execute_batch_host_package_update_ssh(
                     )),
                 })
                 .collect();
-            conn.send_best_effort(ServiceMessage::BatchHostPackageUpdateResult(
+            return ServiceMessage::BatchHostPackageUpdateResult(
                 BatchHostPackageUpdateResultPayload {
                     batch_id: payload.batch_id,
                     results,
                 },
-            ))
-            .await;
-            return None;
+            );
         }
         Err(e) => {
             tracing::error!(
@@ -683,14 +782,12 @@ pub(crate) async fn handle_execute_batch_host_package_update_ssh(
                     error: Some(format!("DB error: {e}")),
                 })
                 .collect();
-            conn.send_best_effort(ServiceMessage::BatchHostPackageUpdateResult(
+            return ServiceMessage::BatchHostPackageUpdateResult(
                 BatchHostPackageUpdateResultPayload {
                     batch_id: payload.batch_id,
                     results,
                 },
-            ))
-            .await;
-            return None;
+            );
         }
     };
 
@@ -716,14 +813,12 @@ pub(crate) async fn handle_execute_batch_host_package_update_ssh(
                     error: Some(format!("SSH connection failed: {e}")),
                 })
                 .collect();
-            conn.send_best_effort(ServiceMessage::BatchHostPackageUpdateResult(
+            return ServiceMessage::BatchHostPackageUpdateResult(
                 BatchHostPackageUpdateResultPayload {
                     batch_id: payload.batch_id,
                     results,
                 },
-            ))
-            .await;
-            return None;
+            );
         }
     };
 
@@ -740,94 +835,7 @@ pub(crate) async fn handle_execute_batch_host_package_update_ssh(
         batch_id = %payload.batch_id,
         "running batch host package update on SSH host"
     );
-    uptrakit_agent_core::handle_execute_batch_host_package_update(payload, executor, conn, &ctx)
-        .await
-}
-
-// ── DiscoverSoftware ──────────────────────────────────────────────────────────
-
-/// Handle a `DiscoverSoftware` message for the SSH agent.
-///
-/// Looks up the SSH host by `host_machine_id`, acquires a pooled session, and
-/// delegates to the shared `uptrakit_agent_core::handle_discover_software()`.
-///
-/// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
-pub(crate) async fn handle_discover_software_ssh(
-    payload: DiscoverSoftwarePayload,
-    db: &sea_orm::DatabaseConnection,
-    conn: &mut ControllerConnection,
-    pool: &SshConnectionPool,
-) -> Option<LoopOutcome> {
-    let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
-        Ok(Some(h)) => h,
-        Ok(None) => {
-            tracing::warn!(
-                host_machine_id = %payload.host_machine_id,
-                "no SSH host found for DiscoverSoftware host_machine_id; returning errors"
-            );
-            let results = error_results_for_discovery(
-                &payload,
-                &format!(
-                    "SSH host with machine_id '{}' not found",
-                    payload.host_machine_id
-                ),
-            );
-            conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
-                host_machine_id: payload.host_machine_id,
-                results,
-            }))
-            .await;
-            return None;
-        }
-        Err(e) => {
-            tracing::error!(
-                host_machine_id = %payload.host_machine_id,
-                error = %e,
-                "DB error looking up SSH host for DiscoverSoftware"
-            );
-            let results = error_results_for_discovery(&payload, &format!("DB error: {e}"));
-            conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
-                host_machine_id: payload.host_machine_id,
-                results,
-            }))
-            .await;
-            return None;
-        }
-    };
-
-    let session = match pool.acquire(&host).await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(
-                host_name = %host.name,
-                error = %e,
-                "failed to acquire SSH session for DiscoverSoftware"
-            );
-            pool.evict(&host.id).await;
-            let results =
-                error_results_for_discovery(&payload, &format!("SSH connection failed: {e}"));
-            conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
-                host_machine_id: payload.host_machine_id,
-                results,
-            }))
-            .await;
-            return None;
-        }
-    };
-
-    let ctx = build_connection_context();
-    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
-    let executor: Arc<dyn CommandExecutor> = Arc::new(SudoAwareCommandExecutor::new(
-        raw,
-        host.resolved_sudo_context(),
-    ));
-
-    tracing::debug!(
-        host_name = %host.name,
-        hostname = %host.hostname,
-        "running discovery on SSH host"
-    );
-    uptrakit_agent_core::handle_discover_software(payload, executor, conn, &ctx).await
+    uptrakit_agent_core::run_execute_batch_host_package_update(payload, executor, &ctx).await
 }
 
 // ── Shared re-exports ─────────────────────────────────────────────────────────

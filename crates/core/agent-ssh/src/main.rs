@@ -75,6 +75,14 @@ enum SshAgentEvent {
     /// The host-config reload ticker fired; the handler will diff the DB
     /// snapshot and send `ReportHosts` if anything changed.
     HostConfigChanged,
+    /// A background operation (discovery, version check, batch update)
+    /// completed and produced a [`ServiceMessage`] that should be forwarded to
+    /// the controller.
+    ///
+    /// Long-running operations are spawned as tokio tasks so they do not block
+    /// the event loop. This variant delivers the result back into the loop for
+    /// sending.
+    BackgroundResult(uptrakit_internal_wire::ServiceMessage),
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +130,15 @@ struct SshAgentHandler {
     /// Per-host timestamp of the last accepted update execution, for rate
     /// limiting. Keyed by `host_machine_id`.
     last_update_per_host: HashMap<String, std::time::Instant>,
+    /// Receiving end of the background-result channel.
+    ///
+    /// Background tasks (discovery, version checks, batch updates) send their
+    /// completed [`ServiceMessage`] here so the event loop can forward them to
+    /// the controller without blocking on long-running SSH operations.
+    bg_rx: tokio::sync::mpsc::Receiver<uptrakit_internal_wire::ServiceMessage>,
+    /// Sending end of the background-result channel, cloned into each spawned
+    /// background task.
+    bg_tx: tokio::sync::mpsc::Sender<uptrakit_internal_wire::ServiceMessage>,
 }
 
 impl SshAgentHandler {
@@ -221,7 +238,8 @@ impl ServiceHandler for SshAgentHandler {
         })?;
         match msg {
             ControllerMessage::CheckVersions(payload) => {
-                Ok(client::handle_check_versions_ssh(payload, db, conn, &self.pool).await)
+                client::spawn_check_versions_ssh(payload, db, &self.pool, &self.bg_tx);
+                Ok(None)
             }
             ControllerMessage::ExecuteUpdate(payload) => {
                 if tokio::fs::try_exists(&self.freeze_file_path)
@@ -284,13 +302,17 @@ impl ServiceHandler for SshAgentHandler {
                 }
                 self.last_update_per_host
                     .insert(payload.host_machine_id.clone(), std::time::Instant::now());
-                Ok(client::handle_execute_batch_host_package_update_ssh(
-                    *payload, db, conn, &self.pool,
-                )
-                .await)
+                client::spawn_execute_batch_host_package_update_ssh(
+                    *payload,
+                    db,
+                    &self.pool,
+                    &self.bg_tx,
+                );
+                Ok(None)
             }
             ControllerMessage::DiscoverSoftware(payload) => {
-                Ok(client::handle_discover_software_ssh(payload, db, conn, &self.pool).await)
+                client::spawn_discover_software_ssh(payload, db, &self.pool, &self.bg_tx);
+                Ok(None)
             }
             ControllerMessage::SetUpdateFreeze(payload) => {
                 handle_set_update_freeze(&self.freeze_file_path, payload).await;
@@ -305,7 +327,7 @@ impl ServiceHandler for SshAgentHandler {
 
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {
         // Borrow separate fields by name — Rust's field-projection rules allow
-        // all three borrows simultaneously, sidestepping a double-borrow of `self`.
+        // all borrows simultaneously, sidestepping a double-borrow of `self`.
         tokio::select! {
             biased;
             (host_machine_id, event) = Self::poll_updates(
@@ -313,6 +335,9 @@ impl ServiceHandler for SshAgentHandler {
                 &self.in_flight_updates,
             ) => {
                 SshAgentEvent::Update(host_machine_id, event)
+            }
+            Some(msg) = self.bg_rx.recv() => {
+                SshAgentEvent::BackgroundResult(msg)
             }
             _ = Self::poll_reload_tick(&mut self.reload_ticker) => {
                 SshAgentEvent::HostConfigChanged
@@ -356,6 +381,17 @@ impl ServiceHandler for SshAgentHandler {
 
             SshAgentEvent::HostConfigChanged => {
                 self.handle_host_config_changed(conn).await;
+                Ok(None)
+            }
+
+            SshAgentEvent::BackgroundResult(msg) => {
+                if let Err(e) = conn.send(msg).await {
+                    tracing::error!(
+                        error = %e,
+                        "failed to send background operation result; disconnecting"
+                    );
+                    return Ok(Some(LoopOutcome::Disconnected));
+                }
                 Ok(None)
             }
         }
@@ -1060,6 +1096,7 @@ async fn main() {
 
     let (aggregate_tx, aggregate_rx) =
         tokio::sync::mpsc::channel::<(String, client::UpdateEvent)>(256);
+    let (bg_tx, bg_rx) = tokio::sync::mpsc::channel::<uptrakit_internal_wire::ServiceMessage>(64);
 
     let freeze_file_path = state_dir.join("update-freeze");
 
@@ -1073,6 +1110,8 @@ async fn main() {
         reload_ticker: None,
         host_snapshot: Vec::new(),
         last_update_per_host: HashMap::new(),
+        bg_rx,
+        bg_tx,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent-ssh",
