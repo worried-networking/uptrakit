@@ -25,6 +25,12 @@
 	let dynamicOptions: Record<string, SelectOption[]> = $state({});
 	let loadingOptions: Record<string, boolean> = $state({});
 
+	// Non-reactive plain object: tracks which field keys have already had a load
+	// initiated. Prevents the $effect from issuing duplicate requests on every
+	// re-render. A plain object is used (not Set/Map) to avoid the
+	// svelte/prefer-svelte-reactivity lint rule while keeping this non-reactive.
+	const initiatedKeys: Record<string, true> = {};
+
 	$effect(() => {
 		const initial: Record<string, string> = {};
 		for (const f of fields) {
@@ -35,7 +41,8 @@
 
 	$effect(() => {
 		for (const f of fields) {
-			if (f.field_type === 'select' && f.select_source?.type === 'rest_api') {
+			if (f.field_type === 'select' && f.select_source?.type === 'rest_api' && !initiatedKeys[f.key]) {
+				initiatedKeys[f.key] = true;
 				loadSelectSourceOptions(f.key, f.select_source.path, f.select_source.value_field, f.select_source.label_field);
 			}
 		}
