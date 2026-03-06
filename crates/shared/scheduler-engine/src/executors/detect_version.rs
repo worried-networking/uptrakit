@@ -52,8 +52,15 @@ impl DetectVersionExecutor {
         let rows = query_agent_assignment_rows(&self.db, tenant_id, &["detect_version"]).await?;
         let hp_rows = query_host_package_assignment_rows(&self.db, tenant_id).await?;
 
+        tracing::debug!(
+            %tenant_id,
+            software_item_rows = rows.len(),
+            host_package_rows = hp_rows.len(),
+            "detect_version: queried assignment rows"
+        );
+
         if rows.is_empty() && hp_rows.is_empty() {
-            tracing::debug!("no items assigned to agents for detect_version");
+            tracing::debug!(%tenant_id, "no items assigned to agents for detect_version");
             return Ok(());
         }
 
@@ -148,10 +155,11 @@ impl DetectVersionExecutor {
             self.notifier.send_to_service(&service_id, msg).await;
         }
 
-        tracing::debug!(
+        tracing::info!(
+            %tenant_id,
             messages = msg_count,
             items = item_count,
-            "sent detect_version requests"
+            "sent detect_version requests to agents"
         );
         Ok(())
     }

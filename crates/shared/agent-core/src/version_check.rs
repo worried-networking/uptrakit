@@ -157,6 +157,11 @@ pub async fn batch_check_versions(
     let detect_futs: Vec<_> = detect_groups
         .into_values()
         .map(|group| {
+            tracing::trace!(
+                plugin_type = %group.plugin_type,
+                item_count = group.items.len(),
+                "queuing detect_installed_version batch group"
+            );
             let executor = Arc::clone(&executor);
             async move {
                 let batch_items: Vec<BatchDetectItem> = group
@@ -270,6 +275,11 @@ pub async fn batch_check_versions(
     let fetch_futs: Vec<_> = fetch_groups
         .into_values()
         .map(|group| {
+            tracing::trace!(
+                plugin_type = %group.plugin_type,
+                item_count = group.items.len(),
+                "queuing fetch_releases batch group"
+            );
             let executor = Arc::clone(&executor);
             async move {
                 let batch_items: Vec<BatchFetchItem> = group

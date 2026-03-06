@@ -145,7 +145,15 @@ impl FetchReleasesExecutor {
         tenant_id: Uuid,
     ) -> crate::error::Result<()> {
         let rows = self.query_controller_fetch_releases_rows(tenant_id).await?;
+
+        tracing::debug!(
+            %tenant_id,
+            row_count = rows.len(),
+            "controller-side fetch_releases: queried eligible rows"
+        );
+
         if rows.is_empty() {
+            tracing::debug!(%tenant_id, "no controller-side fetch_releases items; skipping");
             return Ok(());
         }
 
@@ -222,8 +230,15 @@ impl FetchReleasesExecutor {
         }
 
         if jobs.is_empty() {
+            tracing::debug!(%tenant_id, "no controller-side fetch jobs after capability filter; skipping");
             return Ok(());
         }
+
+        tracing::info!(
+            %tenant_id,
+            job_count = jobs.len(),
+            "running controller-side fetch_releases jobs"
+        );
 
         // ── 3. Spawn all jobs into a JoinSet with semaphore ───────────────
         // The semaphore bounds peak concurrency to avoid hammering rate-limited APIs.
@@ -360,6 +375,12 @@ impl FetchReleasesExecutor {
             }
         }
 
+        tracing::info!(
+            %tenant_id,
+            updated_count = updated_item_ids.len(),
+            "controller-side fetch_releases: updated host_software_items"
+        );
+
         if !updated_item_ids.is_empty() {
             // Batch-update software_item.last_checked_at for all items with successful fetches.
             let item_ids: Vec<Uuid> = updated_item_ids.into_iter().collect();
@@ -472,8 +493,15 @@ impl FetchReleasesExecutor {
         let rows = query_agent_assignment_rows(&self.db, tenant_id, &["fetch_releases"]).await?;
         let hp_rows = query_host_package_assignment_rows(&self.db, tenant_id).await?;
 
+        tracing::debug!(
+            %tenant_id,
+            software_item_rows = rows.len(),
+            host_package_rows = hp_rows.len(),
+            "agent-side fetch_releases: queried assignment rows"
+        );
+
         if rows.is_empty() && hp_rows.is_empty() {
-            tracing::debug!("no agent-side fetch_releases items");
+            tracing::debug!(%tenant_id, "no agent-side fetch_releases items");
             return Ok(());
         }
 
@@ -593,7 +621,8 @@ impl FetchReleasesExecutor {
             self.notifier.send_to_service(&service_id, msg).await;
         }
 
-        tracing::debug!(
+        tracing::info!(
+            %tenant_id,
             messages = msg_count,
             items = item_count,
             "sent fetch_releases requests to agents"

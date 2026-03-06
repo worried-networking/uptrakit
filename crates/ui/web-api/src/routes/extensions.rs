@@ -147,10 +147,17 @@ pub async fn invoke_action(
     Query(query): Query<InvokeActionQuery>,
     Json(body): Json<InvokeExtensionActionRequest>,
 ) -> Response {
+    tracing::debug!(
+        extension_id = %extension_id,
+        action_id = %action_id,
+        "invoking extension action"
+    );
+
     let owner = state.extension_registry.find_owner(&extension_id);
 
     match owner {
         ExtensionOwner::NotFound => {
+            tracing::debug!(extension_id = %extension_id, "extension not found");
             return error_response_with_code(
                 StatusCode::NOT_FOUND,
                 "Extension not found",
@@ -158,6 +165,11 @@ pub async fn invoke_action(
             );
         }
         ExtensionOwner::Plugin => {
+            tracing::debug!(
+                extension_id = %extension_id,
+                action_id = %action_id,
+                "dispatching to plugin-backed extension handler"
+            );
             let ctx = ExtensionActionContext {
                 db: state.db(),
                 tenant_id: Some(tenant_ctx.tenant_id),
@@ -169,12 +181,22 @@ pub async fn invoke_action(
             {
                 Ok(data) => (StatusCode::OK, Json(data)).into_response(),
                 Err(msg) => {
+                    tracing::debug!(
+                        extension_id = %extension_id,
+                        action_id = %action_id,
+                        error = %msg,
+                        "plugin-backed extension action returned error"
+                    );
                     error_response_with_code(StatusCode::UNPROCESSABLE_ENTITY, msg, "action_failed")
                 }
             };
         }
         ExtensionOwner::Service { .. } => {
-            // Proceed below.
+            tracing::debug!(
+                extension_id = %extension_id,
+                action_id = %action_id,
+                "dispatching to service-backed extension handler"
+            );
         }
     }
 
