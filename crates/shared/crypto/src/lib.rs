@@ -181,9 +181,13 @@ impl DataKeyRing {
 /// Must be called once at startup after DEKs have been loaded and unwrapped
 /// from the database.  Returns `Err` if the ring has already been initialized.
 pub fn init_data_key_ring(ring: DataKeyRing) -> Result<()> {
+    let active_key_id = ring.active_key_id().to_string();
+    let key_count = ring.keys.len();
     DATA_KEY_RING
         .set(ring)
-        .map_err(|_| report!(CryptoError::AlreadyInitialized))
+        .map_err(|_| report!(CryptoError::AlreadyInitialized))?;
+    tracing::debug!(active_key_id, key_count, "data key ring initialized");
+    Ok(())
 }
 
 /// Returns `true` if the data key ring has been initialized.
@@ -214,6 +218,7 @@ pub fn generate_data_key() -> Result<DataKey> {
     let mut key_bytes = Zeroizing::new([0u8; 32]);
     rand::rng().fill_bytes(key_bytes.as_mut_slice());
     let key_id = compute_key_id(&key_bytes);
+    tracing::debug!(key_id, "generated new data encryption key");
     Ok(DataKey {
         key_id,
         key: key_bytes,
@@ -229,7 +234,9 @@ pub fn wrap_data_key(dek: &DataKey) -> Result<String> {
     let kek = MASTER_KEY
         .get()
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
-    wrap_data_key_with(kek, dek)
+    let result = wrap_data_key_with(kek, dek)?;
+    tracing::debug!(key_id = dek.key_id, "wrapped data encryption key");
+    Ok(result)
 }
 
 /// Wrap (encrypt) a DEK with an explicit KEK.
@@ -267,7 +274,9 @@ pub fn unwrap_data_key(wrapped_hex: &str, key_id: &str) -> Result<DataKey> {
     let kek = MASTER_KEY
         .get()
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
-    unwrap_data_key_with(kek, wrapped_hex, key_id)
+    let result = unwrap_data_key_with(kek, wrapped_hex, key_id)?;
+    tracing::debug!(key_id, "unwrapped data encryption key");
+    Ok(result)
 }
 
 /// Unwrap (decrypt) a DEK using an explicit KEK.
@@ -414,7 +423,9 @@ fn column_aad(column_name: &str) -> Option<&str> {
 pub fn init_master_key(key: Zeroizing<[u8; 32]>) -> Result<()> {
     MASTER_KEY
         .set(key)
-        .map_err(|_| report!(CryptoError::AlreadyInitialized))
+        .map_err(|_| report!(CryptoError::AlreadyInitialized))?;
+    tracing::debug!("master encryption key initialized");
+    Ok(())
 }
 
 /// Enable plaintext mode for development use.

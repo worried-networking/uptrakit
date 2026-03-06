@@ -12,6 +12,7 @@ directories = { workspace = true }
 rootcause.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "rt"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

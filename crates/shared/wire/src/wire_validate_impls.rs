@@ -33,7 +33,12 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::ExtensionActionsRegister(p) => p.wire_validate(),
             ServiceMessage::ExtensionResponse(p) => p.wire_validate(),
             // Forward-compatible: unknown variants from newer peers pass validation.
-            _ => Ok(()),
+            _ => {
+                tracing::debug!(
+                    "received unknown ServiceMessage variant from peer; skipping validation"
+                );
+                Ok(())
+            }
         }
     }
 }
@@ -70,7 +75,12 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::RequestCrlRenewal(_) => Ok(()),
             ControllerMessage::TokenRevoked(_) => Ok(()),
             // Forward-compatible: unknown variants from newer peers pass validation.
-            _ => Ok(()),
+            _ => {
+                tracing::debug!(
+                    "received unknown ControllerMessage variant from peer; skipping validation"
+                );
+                Ok(())
+            }
         }
     }
 }

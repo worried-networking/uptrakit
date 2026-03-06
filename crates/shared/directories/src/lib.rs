@@ -133,6 +133,15 @@ impl AppDirs {
             }
         };
 
+        tracing::debug!(
+            app = app_name,
+            config_dir = %config.display(),
+            state_dir = %state.display(),
+            config_override = config_override.is_some(),
+            state_override = state_override.is_some(),
+            "resolved application directories"
+        );
+
         Ok(Self { config, state })
     }
 
@@ -253,6 +262,7 @@ fn home_dir() -> Option<PathBuf> {
 /// also have `0o700` (the stdlib `DirBuilder::recursive(true)` only applies
 /// the mode to the leaf). Creates parent directories as needed.
 pub async fn create_secure_dir(path: &Path) -> Result<()> {
+    tracing::debug!(path = %path.display(), "creating secure directory (0o700)");
     #[cfg(unix)]
     {
         // Find the deepest ancestor that already exists before creating anything.
@@ -318,6 +328,7 @@ pub async fn create_secure_dir(path: &Path) -> Result<()> {
 /// via `OpenOptionsExt` so it is never world-readable.
 /// Creates parent directories as needed with 700 permissions.
 pub async fn write_secure_file(path: &Path, data: &[u8]) -> Result<()> {
+    tracing::debug!(path = %path.display(), size = data.len(), "writing secure file (0o600)");
     if let Some(parent) = path.parent() {
         create_secure_dir(parent).await?;
     }

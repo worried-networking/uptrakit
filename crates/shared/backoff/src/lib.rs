@@ -39,11 +39,20 @@ impl Backoff {
             Duration::ZERO
         };
 
-        delay + jitter
+        let total = delay + jitter;
+        tracing::trace!(
+            delay_ms = total.as_millis() as u64,
+            base_ms = delay.as_millis() as u64,
+            jitter_ms = jitter.as_millis() as u64,
+            next_ms = self.current.as_millis() as u64,
+            "backoff delay computed"
+        );
+        total
     }
 
     /// Reset to the base delay after a successful connection.
     pub fn reset(&mut self) {
+        tracing::trace!(base_ms = self.base.as_millis() as u64, "backoff reset");
         self.current = self.base;
     }
 }

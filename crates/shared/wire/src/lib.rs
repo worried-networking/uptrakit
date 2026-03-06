@@ -197,7 +197,10 @@ impl FromStr for Capability {
             "ca_management" => Self::CaManagement,
             "system_service" => Self::SystemService,
             "ui_extensions" => Self::UiExtensions,
-            other => Self::Other(other.to_string()),
+            other => {
+                tracing::debug!(capability = other, "received unknown capability from peer");
+                Self::Other(other.to_string())
+            }
         })
     }
 }
@@ -262,7 +265,10 @@ impl From<String> for EnrollmentStatus {
         match s.as_str() {
             "pending" => Self::Pending,
             "approved" => Self::Approved,
-            _ => Self::Other(s),
+            _ => {
+                tracing::debug!(status = s, "received unknown enrollment status from peer");
+                Self::Other(s)
+            }
         }
     }
 }
@@ -752,7 +758,10 @@ impl From<String> for ErrorCode {
             "certificate_error" => Self::CertificateError,
             "internal_error" => Self::InternalError,
             "sequence_error" => Self::SequenceError,
-            _ => Self::Other(s),
+            _ => {
+                tracing::debug!(error_code = s, "received unknown error code from peer");
+                Self::Other(s)
+            }
         }
     }
 }

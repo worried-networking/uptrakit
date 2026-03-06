@@ -6497,6 +6497,7 @@ name = "uptrakit-backoff"
 version = "0.0.1"
 dependencies = [
  "rand 0.9.2",
+ "tracing",
 ]
 
 [[package]]
@@ -6620,6 +6621,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -6665,6 +6667,7 @@ dependencies = [
  "strum",
  "thiserror 2.0.18",
  "time",
+ "tracing",
  "uptrakit-shared-types",
  "uuid",
 ]
