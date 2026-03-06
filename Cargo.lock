@@ -6803,11 +6803,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-plugin-infrastructure-proxmox"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "reqwest",
+ "rootcause",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uptrakit-internal-wire",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-db",
+ "uptrakit-shared-macros",
+ "uptrakit-shared-types",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-plugin-infrastructure-registry"
 version = "0.0.1"
 dependencies = [
  "futures-util",
  "rootcause",
+ "sea-orm",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -6817,6 +6841,7 @@ dependencies = [
  "uptrakit-plugin-discovery-proxmox-helper-scripts",
  "uptrakit-plugin-generic-shell",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-plugin-infrastructure-proxmox",
  "uptrakit-plugin-package-manager-apt",
  "uptrakit-plugin-package-manager-homebrew",
  "uptrakit-plugin-package-manager-mas",
@@ -6827,6 +6852,7 @@ dependencies = [
  "uptrakit-plugin-releases-gitlab",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uuid",
 ]
 
 [[package]]

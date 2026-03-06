@@ -1,0 +1,32 @@
+[package]
+name = "uptrakit-plugin-infrastructure-proxmox"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-shared-types = { workspace = true }
+uptrakit-shared-db = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
+reqwest = { workspace = true }
+rootcause = { workspace = true }
+sea-orm = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+time = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
