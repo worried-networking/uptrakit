@@ -33,6 +33,7 @@ uuid = { workspace = true }
 serde_yaml_ng = { workspace = true }
 uptrakit-build-info = { workspace = true }
 uptrakit-directories = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 
 [dev-dependencies]

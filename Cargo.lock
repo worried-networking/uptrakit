@@ -6524,6 +6524,7 @@ dependencies = [
  "tracing-subscriber",
  "uptrakit-build-info",
  "uptrakit-directories",
+ "uptrakit-internal-wire",
  "uptrakit-openapi-client",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",

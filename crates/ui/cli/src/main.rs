@@ -2,6 +2,7 @@ use uptrakit_cli::{commands, error, output};
 
 use clap::{CommandFactory, Parser, Subcommand};
 use rootcause::prelude::*;
+use std::ffi::OsString;
 use tracing_subscriber::EnvFilter;
 use uptrakit_build_info::BuildInfo;
 use uptrakit_cli::output::OutputFormat;
@@ -768,7 +769,7 @@ enum ExtensionsCommands {
         /// Extension ID (e.g. "ssh-agent.host-management")
         extension_id: String,
     },
-    /// Invoke an extension action
+    /// Invoke an extension action (raw JSON params)
     Invoke {
         /// Extension ID
         extension_id: String,
@@ -781,6 +782,9 @@ enum ExtensionsCommands {
         #[arg(long)]
         service_id: Option<Uuid>,
     },
+    /// Dynamic extension subcommand (e.g., `extensions ssh-agent.hosts list-hosts`)
+    #[command(external_subcommand)]
+    Dynamic(Vec<OsString>),
 }
 
 #[derive(Debug, Subcommand)]
@@ -3650,6 +3654,17 @@ async fn run(cli: Cli) -> error::Result<()> {
                     insecure,
                     request_timeout,
                 })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            ExtensionsCommands::Dynamic(args) => {
+                let resp = commands::extensions::dynamic_invoke(
+                    args,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
                 .await?;
                 output::print_output(format, &resp)?;
             }
