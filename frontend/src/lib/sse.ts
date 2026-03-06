@@ -178,6 +178,153 @@ interface ParsedSseEvent {
 	data: string;
 }
 
+// ── Admin event stream ────────────────────────────────────────────────
+
+/** Known admin event types pushed by `GET /api/v1/events/stream`. */
+export type AdminEventType =
+	| 'host_updated'
+	| 'host_created'
+	| 'host_deleted'
+	| 'service_status_changed'
+	| 'software_item_updated'
+	| 'software_item_created'
+	| 'version_check_completed'
+	| 'update_started'
+	| 'update_completed'
+	| 'discovery_completed'
+	| 'host_packages_changed'
+	| 'batch_host_package_update_completed'
+	| 'system_service_status_changed'
+	| 'scheduler_task_completed';
+
+/** Callbacks for the admin event SSE connection. */
+export interface AdminEventCallbacks {
+	onEvent?: (eventType: AdminEventType, data: Record<string, unknown>) => void;
+	onStateChange?: (state: SseConnectionState) => void;
+	onError?: (error: string) => void;
+}
+
+/**
+ * Connect to the admin events SSE stream.
+ *
+ * Returns a `disconnect` function that cleanly closes the connection.
+ * The stream reconnects automatically with exponential backoff on errors.
+ * Unlike the output stream, there is no terminal event — the connection
+ * stays open until explicitly disconnected or all reconnection attempts
+ * are exhausted.
+ */
+export function connectEventStream(callbacks: AdminEventCallbacks, options?: SseOptions): () => void {
+	const maxAttempts = options?.maxReconnectAttempts ?? Infinity;
+	let abortController: AbortController | null = null;
+	let disconnected = false;
+	let attempt = 0;
+
+	function connect() {
+		if (disconnected) return;
+
+		abortController = new AbortController();
+		callbacks.onStateChange?.('connecting');
+
+		const token = getAccessToken();
+		const headers: Record<string, string> = {
+			Accept: 'text/event-stream'
+		};
+		if (token) {
+			headers['Authorization'] = `Bearer ${token}`;
+		}
+
+		fetch(`${BASE}/events/stream`, {
+			headers,
+			credentials: 'same-origin',
+			signal: abortController.signal
+		})
+			.then((response) => {
+				if (!response.ok) {
+					throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+				}
+				if (!response.body) {
+					throw new Error('Response body is null');
+				}
+
+				callbacks.onStateChange?.('streaming');
+				attempt = 0;
+
+				return readAdminEventStream(response.body, callbacks);
+			})
+			.then(() => {
+				// Stream ended normally (server closed). Reconnect.
+				if (!disconnected) {
+					attempt++;
+					const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+					callbacks.onStateChange?.('connecting');
+					setTimeout(connect, delay);
+				}
+			})
+			.catch((err: unknown) => {
+				if (disconnected || (err instanceof DOMException && err.name === 'AbortError')) {
+					return;
+				}
+
+				const message = err instanceof Error ? err.message : 'Connection failed';
+				callbacks.onError?.(message);
+
+				attempt++;
+				if (attempt <= maxAttempts) {
+					const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+					callbacks.onStateChange?.('connecting');
+					setTimeout(connect, delay);
+				} else {
+					callbacks.onStateChange?.('error');
+				}
+			});
+	}
+
+	connect();
+
+	return () => {
+		disconnected = true;
+		abortController?.abort();
+		callbacks.onStateChange?.('disconnected');
+	};
+}
+
+/**
+ * Read the admin event SSE stream, dispatching each event to the callback.
+ * Resolves when the stream ends (server closes).
+ */
+async function readAdminEventStream(body: ReadableStream<Uint8Array>, callbacks: AdminEventCallbacks): Promise<void> {
+	const reader = body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = '';
+
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+
+			buffer += decoder.decode(value, { stream: true });
+
+			let boundaryIndex: number;
+			while ((boundaryIndex = buffer.indexOf('\n\n')) !== -1) {
+				const eventText = buffer.slice(0, boundaryIndex);
+				buffer = buffer.slice(boundaryIndex + 2);
+
+				const event = parseSseEvent(eventText);
+				if (!event) continue;
+
+				try {
+					const data: Record<string, unknown> = JSON.parse(event.data);
+					callbacks.onEvent?.(event.type as AdminEventType, data);
+				} catch {
+					// Skip malformed events.
+				}
+			}
+		}
+	} finally {
+		reader.releaseLock();
+	}
+}
+
 /** Parse a single SSE event block into type + data. */
 function parseSseEvent(text: string): ParsedSseEvent | null {
 	let type = 'message';

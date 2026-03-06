@@ -10,6 +10,7 @@
 	} from '$lib/api';
 	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
+	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import { connectOutputStream } from '$lib/sse';
@@ -53,17 +54,30 @@
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let unsubscribers: (() => void)[] = [];
 
 	onMount(() => {
 		if (canView) {
 			loadItem();
+			unsubscribers.push(
+				subscribeToEvent('software_item_updated', (data) => {
+					if (data.id === id) loadItem(true);
+				}),
+				subscribeToEvent('version_check_completed', (data) => {
+					if (data.software_item_id === id) loadItem(true);
+				}),
+				subscribeToEvent('update_completed', (data) => {
+					if (data.software_item_id === id) loadItem(true);
+				})
+			);
 			refreshInterval = setInterval(() => {
 				if (document.visibilityState === 'visible') loadItem(true);
-			}, 30_000);
+			}, 300_000);
 		}
 	});
 
 	onDestroy(() => {
+		for (const unsub of unsubscribers) unsub();
 		if (refreshInterval) clearInterval(refreshInterval);
 		closeLiveModal();
 	});

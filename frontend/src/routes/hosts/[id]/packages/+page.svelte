@@ -6,6 +6,7 @@
 	import { getHost, listHostPackages, updateHostPackage, deleteHostPackage, promoteHostPackage } from '$lib/api';
 	import { formatDate, formatVersion, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
+	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { Permission } from '$lib/types';
 	import type { HostResponse, HostPackageResponse } from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -42,15 +43,25 @@
 	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let unsubscribers: (() => void)[] = [];
 
 	onMount(() => {
 		loadData();
+		unsubscribers.push(
+			subscribeToEvent('host_packages_changed', (data) => {
+				if (data.host_id === id) loadPackages(currentPage, true);
+			}),
+			subscribeToEvent('batch_host_package_update_completed', (data) => {
+				if (data.host_id === id) loadPackages(currentPage, true);
+			})
+		);
 		refreshInterval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadPackages(currentPage, true);
-		}, 30_000);
+		}, 300_000);
 	});
 
 	onDestroy(() => {
+		for (const unsub of unsubscribers) unsub();
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 

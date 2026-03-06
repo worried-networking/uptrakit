@@ -15,6 +15,7 @@
 	} from '$lib/api';
 	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
+	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import AddSoftwareModal from '$lib/components/AddSoftwareModal.svelte';
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
@@ -56,6 +57,7 @@
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let unsubscribers: (() => void)[] = [];
 
 	$effect(() => {
 		const parts: string[] = [];
@@ -72,9 +74,14 @@
 	onMount(() => {
 		if (canView) {
 			loadAll(currentPage);
+			unsubscribers.push(
+				subscribeToEvent('software_item_updated', () => loadAll(currentPage, true)),
+				subscribeToEvent('software_item_created', () => loadAll(currentPage, true)),
+				subscribeToEvent('version_check_completed', () => loadAll(currentPage, true))
+			);
 			refreshInterval = setInterval(() => {
 				if (document.visibilityState === 'visible') loadAll(currentPage, true);
-			}, 60_000);
+			}, 300_000);
 		}
 		listPluginTypes()
 			.then((types) => {
@@ -86,6 +93,7 @@
 	});
 
 	onDestroy(() => {
+		for (const unsub of unsubscribers) unsub();
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 

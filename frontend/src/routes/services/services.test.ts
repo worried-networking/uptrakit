@@ -14,7 +14,12 @@ vi.mock('$lib/api', () => ({
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
-	getUser: vi.fn(() => null)
+	getUser: vi.fn(() => null),
+	getAccessToken: vi.fn(() => null)
+}));
+
+vi.mock('$lib/stores/events.svelte', () => ({
+	subscribeToEvent: vi.fn(() => () => {})
 }));
 
 import ServicesPage from './+page.svelte';

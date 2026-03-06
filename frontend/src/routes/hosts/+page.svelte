@@ -8,6 +8,7 @@
 	import { Permission } from '$lib/types';
 	import { formatDate, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
+	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -26,6 +27,7 @@
 	let discoveringHostIds: Set<string> = $state(new Set());
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let unsubscribers: (() => void)[] = [];
 
 	$effect(() => {
 		const search = currentPage > 1 ? `page=${currentPage}` : '';
@@ -38,12 +40,19 @@
 
 	onMount(() => {
 		loadHosts(currentPage);
+		unsubscribers.push(
+			subscribeToEvent('host_updated', () => loadHosts(currentPage, true)),
+			subscribeToEvent('host_created', () => loadHosts(currentPage, true)),
+			subscribeToEvent('host_deleted', () => loadHosts(currentPage, true)),
+			subscribeToEvent('discovery_completed', () => loadHosts(currentPage, true))
+		);
 		refreshInterval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadHosts(currentPage, true);
-		}, 60_000);
+		}, 300_000);
 	});
 
 	onDestroy(() => {
+		for (const unsub of unsubscribers) unsub();
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 

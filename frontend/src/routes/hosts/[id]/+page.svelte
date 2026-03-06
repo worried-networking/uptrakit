@@ -16,6 +16,7 @@
 	} from '$lib/api';
 	import { formatDate, formatVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
+	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { Permission, PluginCapability } from '$lib/types';
@@ -58,6 +59,7 @@
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let unsubscribers: (() => void)[] = [];
 
 	onMount(() => {
 		loadData();
@@ -65,12 +67,24 @@
 			loadPluginTypes();
 			loadHostAllowlist();
 		}
+		unsubscribers.push(
+			subscribeToEvent('host_updated', (data) => {
+				if (data.id === id) loadData(true);
+			}),
+			subscribeToEvent('discovery_completed', (data) => {
+				if (data.host_id === id) loadData(true);
+			}),
+			subscribeToEvent('update_completed', (data) => {
+				if (data.host_id === id) loadData(true);
+			})
+		);
 		refreshInterval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadData(true);
-		}, 30_000);
+		}, 300_000);
 	});
 
 	onDestroy(() => {
+		for (const unsub of unsubscribers) unsub();
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
@@ -225,6 +239,7 @@
 				return 'preset-filled-error-500';
 			case 'in_progress':
 				return 'preset-filled-warning-500';
+			case 'queued':
 			case 'pending':
 				return 'preset-tonal';
 		}
@@ -238,6 +253,8 @@
 				return 'Failed';
 			case 'in_progress':
 				return 'Running';
+			case 'queued':
+				return 'Queued';
 			case 'pending':
 				return 'Pending';
 		}

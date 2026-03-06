@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
@@ -7,6 +7,7 @@
 	import type { ServiceResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
 	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
+	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -38,6 +39,7 @@
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageAgents) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let unsubscribers: (() => void)[] = [];
 
 	$effect(() => {
 		const parts: string[] = [];
@@ -57,14 +59,19 @@
 
 		refreshInterval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadServices(currentPage, true);
-		}, 60_000);
+		}, 300_000);
 
 		return () => {
 			if (refreshInterval) clearInterval(refreshInterval);
 		};
 	});
 
+	onMount(() => {
+		unsubscribers.push(subscribeToEvent('service_status_changed', () => loadServices(currentPage, true)));
+	});
+
 	onDestroy(() => {
+		for (const unsub of unsubscribers) unsub();
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
