@@ -101,7 +101,21 @@
 
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
-		await onsubmit({ ...extraParams, ...values });
+		// Coerce values to the correct types expected by the backend:
+		// - toggles → boolean (values map stores "true" / "" as strings)
+		// - empty text/textarea/password fields → omit entirely (absent = unset)
+		// - all other fields → pass through as strings
+		const coerced: Record<string, unknown> = {};
+		for (const f of fields) {
+			const raw = values[f.key];
+			if (f.field_type === 'toggle') {
+				coerced[f.key] = raw === 'true';
+			} else if (raw !== '') {
+				coerced[f.key] = raw;
+			}
+			// Empty optional text fields are intentionally omitted.
+		}
+		await onsubmit({ ...extraParams, ...coerced });
 	}
 </script>
 

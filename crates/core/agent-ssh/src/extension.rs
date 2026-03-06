@@ -483,10 +483,7 @@ async fn run_bootstrap_proxmox_action(
         .unwrap_or("uptrakit")
         .to_string();
 
-    let allow_all = params
-        .get("allow_all")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let allow_all = param_bool(params, "allow_all");
 
     let host_id = uuid::Uuid::now_v7();
 
@@ -520,6 +517,19 @@ async fn run_bootstrap_proxmox_action(
             tracing::error!(error = %e, "Proxmox guest bootstrap failed");
             make_error_response(request_id, &format!("bootstrap failed: {e}"))
         }
+    }
+}
+
+/// Extract a boolean parameter from an extension params object.
+///
+/// Accepts both JSON booleans (`true`/`false`) and the string representations
+/// `"true"`/`"false"` that form-based UIs may emit when all field values are
+/// carried as strings. Returns `false` for absent or unrecognised values.
+fn param_bool(params: &serde_json::Value, key: &str) -> bool {
+    match params.get(key) {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => s == "true",
+        _ => false,
     }
 }
 
@@ -591,22 +601,12 @@ async fn run_bootstrap_action(
     let host_key_fingerprint = params
         .get("host_key_fingerprint")
         .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
-    let strict_host_key_checking = params
-        .get("strict_host_key_checking")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let allow_all = params
-        .get("allow_all")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let remove_stale_keys = params
-        .get("remove_stale_keys")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let strict_host_key_checking = param_bool(params, "strict_host_key_checking");
+    let allow_all = param_bool(params, "allow_all");
+    let remove_stale_keys = param_bool(params, "remove_stale_keys");
 
     let host_id = uuid::Uuid::now_v7();
 
