@@ -361,12 +361,19 @@ impl FieldDef {
             help_text: None,
             default_value: None,
             options: vec![],
+            sensitive: false,
         }
     }
 
     /// Set the field type.
     pub fn with_type(mut self, field_type: FieldType) -> Self {
         self.field_type = field_type;
+        self
+    }
+
+    /// Mark this field as sensitive (encrypted client-side via ECIES).
+    pub fn sensitive(mut self) -> Self {
+        self.sensitive = true;
         self
     }
 
