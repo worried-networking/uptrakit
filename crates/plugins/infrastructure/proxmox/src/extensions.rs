@@ -47,10 +47,14 @@ fn add_config_action() -> ActionDef {
                 .with_placeholder("user@realm!tokenid=secret")
                 .with_help_text(
                     "PVE API token in USER@REALM!TOKENID=SECRET format. \
-                     The token requires Sys.Audit (to list nodes) and VM.Audit \
-                     (to list and read VM/CT config). Grant these via the built-in \
-                     PVEAuditor role on path /. VM.Monitor on /vms is optional — \
-                     it enables IP discovery through the QEMU guest agent.",
+                     Required privileges: Sys.Audit (list nodes) and VM.Audit \
+                     (list and read VM/CT config); the built-in PVEAuditor role \
+                     covers both. VM.Monitor on /vms is optional and enables IP \
+                     discovery via the QEMU guest agent. \
+                     Without privilege separation: assign PVEAuditor on / to the user. \
+                     With privilege separation: assign PVEAuditor on / to the token \
+                     directly (Datacenter → Permissions → API Token Permissions, or \
+                     pveum acl modify / --tokens USER@REALM!TOKENID --roles PVEAuditor).",
                 ),
             FieldDef::new("verify_tls", "Verify TLS Certificate")
                 .with_type(FieldType::Toggle)
