@@ -154,7 +154,9 @@ pub async fn execute_update(
 
         // Attestation gate — abort if policy requires a verified attestation
         // and none was found.
+        tracing::debug!("checking attestation gate");
         check_attestation_gate(payload.release_info.as_ref(), &output_tx).await?;
+        tracing::debug!("attestation gate passed");
 
         // Execute actual update based on plugin type
         send_output(
@@ -295,6 +297,7 @@ pub async fn execute_update(
 /// Detect the current version of a software item by delegating to the plugin registry.
 ///
 /// Uses the `detect_version_plugin` from the payload if available.
+#[tracing::instrument(skip_all, fields(software_item = %payload.software_item_name))]
 async fn detect_current_version(
     payload: &ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
@@ -383,6 +386,10 @@ async fn execute_plugin_update(
         let _ = bridge_handle.await;
 
         let pre_result = pre_result?;
+        tracing::debug!(
+            should_proceed = pre_result.should_proceed,
+            "plugin pre_update_hook completed"
+        );
         if !pre_result.should_proceed {
             let reason = pre_result
                 .abort_reason
@@ -424,11 +431,12 @@ async fn execute_plugin_update(
         drop(plugin_tx);
         let _ = bridge_handle.await;
 
-        if let Err(e) = post_result {
-            tracing::warn!(
+        match &post_result {
+            Ok(_) => tracing::debug!("plugin post_update_hook completed successfully"),
+            Err(e) => tracing::warn!(
                 error = %e,
                 "plugin post_update_hook failed (non-fatal); continuing"
-            );
+            ),
         }
     }
 
@@ -538,6 +546,7 @@ async fn run_hook_command_inner(
 /// exit code, and returns an error if non-zero.
 ///
 /// Each hook is wrapped in [`HOOK_TIMEOUT`].
+#[tracing::instrument(skip_all, fields(hook = ?hook_cmd))]
 pub(crate) async fn run_hook_for_batch(hook_cmd: &HookCommand) -> UpdateResult<()> {
     match tokio::time::timeout(HOOK_TIMEOUT, run_hook_for_batch_inner(hook_cmd)).await {
         Ok(result) => result,
@@ -663,6 +672,7 @@ fn parse_github_owner_repo(url: &str) -> Option<(String, String)> {
 /// - [`AttestationStatus::Verified`] if one or more attestations are found.
 /// - [`AttestationStatus::NotFound`] if the API returns 404 or an empty list.
 /// - [`AttestationStatus::Unverified`] on any network or parse error.
+#[tracing::instrument(skip_all, fields(%owner, %repo))]
 async fn independently_verify_attestation(
     owner: &str,
     repo: &str,

@@ -193,6 +193,12 @@ pub async fn batch_check_versions(
                 let results = match plugin.batch_detect_installed_version(&batch_items).await {
                     Ok(r) => r,
                     Err(e) => {
+                        tracing::warn!(
+                            plugin_type = %group.plugin_type,
+                            item_count = group.items.len(),
+                            error = %e,
+                            "batch detect_installed_version failed"
+                        );
                         let err = format!("detection failed: {e}");
                         return group
                             .items
@@ -316,6 +322,12 @@ pub async fn batch_check_versions(
                 let results = match plugin.batch_fetch_releases(&batch_items).await {
                     Ok(r) => r,
                     Err(e) => {
+                        tracing::warn!(
+                            plugin_type = %group.plugin_type,
+                            item_count = group.items.len(),
+                            error = %e,
+                            "batch fetch_releases failed"
+                        );
                         let err = format!("fetch_releases failed: {e}");
                         return group
                             .items

@@ -354,7 +354,7 @@ pub async fn run_execute_batch_host_package_update(
 /// config before instantiation.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(batch_id = %payload.batch_id, plugin_type = %payload.plugin_type))]
 pub async fn handle_execute_batch_host_package_update(
     payload: ExecuteBatchHostPackageUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
@@ -568,7 +568,7 @@ pub async fn run_discover_software(
 /// Docker host for the SSH agent) into each plugin config before creation.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if sending the response fails.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(plugin_count = payload.plugins.len()))]
 pub async fn handle_discover_software(
     payload: DiscoverSoftwarePayload,
     executor: Arc<dyn CommandExecutor>,
