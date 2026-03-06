@@ -3776,7 +3776,6 @@ components:
           const: request_crl_renewal
           description: Message type discriminator
 
-<<<<<<< HEAD
     extensionRegisterPayload:
       type: object
       required:
