@@ -4,6 +4,7 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use uptrakit_internal_wire::extension::*;
+use uptrakit_shared_types::Permission;
 
 use crate::client::ProxmoxClient;
 use crate::config::ProxmoxConfig;
@@ -13,16 +14,52 @@ pub fn extension_manifests() -> Vec<ExtensionManifest> {
     vec![hosts_page_manifest(), host_info_panel_manifest()]
 }
 
-/// Helper: build a plugin-config-id select field.
-fn plugin_config_field() -> FieldDef {
-    FieldDef::new("plugin_config_id", "Plugin Configuration")
-        .with_type(FieldType::Select)
-        .required()
-        .with_placeholder("Select a Proxmox configuration")
-}
-
 /// Full-page extension: Proxmox Hosts data table.
 fn hosts_page_manifest() -> ExtensionManifest {
+    let add_config_action = ActionDef::new("add-config", "Add Configuration")
+        .with_permission(Permission::ManageHosts)
+        .with_ui(ActionUi::Form(FormDef::new(vec![
+            FieldDef::new("name", "Configuration Name")
+                .required()
+                .with_placeholder("My Proxmox Cluster"),
+            FieldDef::new("api_url", "Proxmox VE URL")
+                .required()
+                .with_placeholder("https://pve.example.com:8006")
+                .with_help_text("HTTPS URL to your Proxmox VE API (port 8006 by default)."),
+            FieldDef::new("api_token", "API Token")
+                .with_type(FieldType::Password)
+                .required()
+                .with_placeholder("user@realm!tokenid=secret")
+                .with_help_text("PVE API token in USER@REALM!TOKENID=SECRET format."),
+            FieldDef::new("verify_tls", "Verify TLS Certificate")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Disable if your Proxmox VE uses a self-signed certificate."),
+            FieldDef::new("node_filter", "Node Filter")
+                .with_placeholder("pve1,pve2")
+                .with_help_text(
+                    "Comma-separated list of node names to include. Leave blank for all nodes.",
+                ),
+        ])))
+        .with_api_submit(
+            ApiSubmitDef::new(
+                "POST",
+                "/api/v1/plugin-configs",
+                serde_json::json!({
+                    "name": "{{name}}",
+                    "plugin_type": "infrastructure_proxmox",
+                    "enabled": true,
+                    "config": {
+                        "api_url": "{{api_url}}",
+                        "api_token": "{{api_token}}",
+                        "verify_tls": "{{verify_tls:bool}}",
+                        "node_filter": "{{node_filter:csv_array}}"
+                    }
+                }),
+            )
+            .with_response_id_field("id")
+            .with_response_label_field("name"),
+        );
+
     ExtensionManifest::new(
         "proxmox.hosts",
         "Proxmox VE Hosts",
@@ -52,24 +89,33 @@ fn hosts_page_manifest() -> ExtensionManifest {
                             .required()
                             .with_placeholder("Select a host"),
                     ])))
-                    .with_permission("manage_hosts"),
+                    .with_permission(Permission::ManageHosts),
                 ActionDef::new("unmatch", "Remove Match")
-                    .with_permission("manage_hosts")
+                    .with_permission(Permission::ManageHosts)
                     .destructive(),
             ],
             primary_actions: vec![
                 ActionDef::new("discover", "Discover")
-                    .with_ui(ActionUi::Form(FormDef::new(vec![plugin_config_field()])))
-                    .with_permission("manage_hosts")
+                    .with_permission(Permission::ManageHosts)
                     .with_timeout(120),
                 ActionDef::new("test-connection", "Test Connection")
-                    .with_ui(ActionUi::Form(FormDef::new(vec![plugin_config_field()])))
-                    .with_permission("manage_hosts")
+                    .with_permission(Permission::ManageHosts)
                     .with_timeout(30),
             ],
+            context_selector: Some(Box::new(
+                ContextSelectorDef::new(
+                    "plugin_config_id",
+                    "Configuration",
+                    ContextSelectorSource::PluginConfigs {
+                        plugin_type: "infrastructure_proxmox".to_string(),
+                    },
+                )
+                .with_add_action(add_config_action)
+                .with_empty_message("No Proxmox VE configurations found. Add one to get started."),
+            )),
         },
     )
-    .with_permission("manage_hosts")
+    .with_permission(Permission::ManageHosts)
 }
 
 /// Panel extension: Proxmox host info on host detail page.
@@ -322,6 +368,50 @@ mod tests {
             manifest.placement,
             ExtensionPlacement::Page { .. }
         ));
+    }
+
+    #[test]
+    fn hosts_page_has_context_selector() {
+        let manifest = hosts_page_manifest();
+        if let ExtensionUi::DataTable {
+            context_selector, ..
+        } = &manifest.ui
+        {
+            let cs = context_selector
+                .as_ref()
+                .expect("context_selector should be set");
+            assert_eq!(cs.param_key, "plugin_config_id");
+            assert!(matches!(
+                cs.source,
+                ContextSelectorSource::PluginConfigs { .. }
+            ));
+            assert!(
+                cs.add_action.is_some(),
+                "add_action should be set for config creation"
+            );
+        } else {
+            panic!("expected DataTable UI");
+        }
+    }
+
+    #[test]
+    fn hosts_page_primary_actions_do_not_require_config_field() {
+        let manifest = hosts_page_manifest();
+        if let ExtensionUi::DataTable {
+            primary_actions, ..
+        } = &manifest.ui
+        {
+            for action in primary_actions {
+                if let Some(ActionUi::Form(form)) = &action.ui {
+                    let has_config_field = form.fields.iter().any(|f| f.key == "plugin_config_id");
+                    assert!(
+                        !has_config_field,
+                        "primary action '{}' should not have plugin_config_id field (injected by context selector)",
+                        action.action_id
+                    );
+                }
+            }
+        }
     }
 
     #[test]
