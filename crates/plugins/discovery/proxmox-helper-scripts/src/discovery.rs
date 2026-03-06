@@ -689,7 +689,11 @@ fn slug_matches(key: &str, slug: &str) -> bool {
 /// Validate a GitHub `owner` or `repo` component: must be non-empty and must
 /// not contain `/` or `..` (path traversal guards).
 fn is_valid_gh_component(s: &str) -> bool {
-    !s.is_empty() && !s.contains('/') && !s.contains("..")
+    !s.is_empty()
+        && s.len() <= 100
+        && !s.contains("..")
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
 
 /// Validate a Debian package name: `^[a-z0-9][a-z0-9+.-]+$`.
@@ -1594,5 +1598,50 @@ npm install -g n8n
         // checks npm first, so it would emit an npm target, not APT.
         let candidates = extract_apt_package_candidates(content);
         assert!(candidates.contains(&"somepackage".to_string()));
+    }
+
+    // ── is_valid_gh_component ───────────────────────────────────────
+
+    #[test]
+    fn gh_component_accepts_valid_names() {
+        assert!(is_valid_gh_component("owner"));
+        assert!(is_valid_gh_component("my-repo"));
+        assert!(is_valid_gh_component("My_Repo.v2"));
+        assert!(is_valid_gh_component("a"));
+        assert!(is_valid_gh_component("123"));
+    }
+
+    #[test]
+    fn gh_component_rejects_empty() {
+        assert!(!is_valid_gh_component(""));
+    }
+
+    #[test]
+    fn gh_component_rejects_slash() {
+        assert!(!is_valid_gh_component("owner/repo"));
+    }
+
+    #[test]
+    fn gh_component_rejects_path_traversal() {
+        assert!(!is_valid_gh_component(".."));
+        assert!(!is_valid_gh_component("a..b"));
+    }
+
+    #[test]
+    fn gh_component_rejects_special_characters() {
+        assert!(!is_valid_gh_component("owner@repo"));
+        assert!(!is_valid_gh_component("owner%repo"));
+        assert!(!is_valid_gh_component("owner#repo"));
+        assert!(!is_valid_gh_component("owner repo"));
+        assert!(!is_valid_gh_component("owner\trepo"));
+    }
+
+    #[test]
+    fn gh_component_rejects_overly_long_names() {
+        let long_name = "a".repeat(101);
+        assert!(!is_valid_gh_component(&long_name));
+        // At limit is fine
+        let at_limit = "a".repeat(100);
+        assert!(is_valid_gh_component(&at_limit));
     }
 }

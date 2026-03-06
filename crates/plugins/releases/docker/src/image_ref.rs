@@ -117,15 +117,30 @@ impl ImageRef {
 
 /// Validate an image identifier string.
 ///
-/// Returns `Ok(())` when the string is a valid Docker image reference,
+/// Returns `Ok(())` when the string is a valid Docker image reference
+/// whose registry hostname does not point to a private/internal network,
 /// or an error message string on failure.
 ///
 /// Used by the plugin registry to validate `package_identifier` values
 /// for the Docker plugin.
 pub fn validate_identifier(id: &str) -> std::result::Result<(), String> {
-    id.parse::<ImageRef>()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    let image_ref = id.parse::<ImageRef>().map_err(|e| e.to_string())?;
+
+    // Strip port from registry hostname before checking (e.g. "host:5000" → "host").
+    let registry_host = image_ref
+        .registry
+        .split(':')
+        .next()
+        .unwrap_or(&image_ref.registry);
+
+    if uptrakit_shared_types::network::is_private_host(registry_host) {
+        return Err(format!(
+            "registry hostname '{}' resolves to a private/internal address",
+            registry_host
+        ));
+    }
+
+    Ok(())
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
@@ -354,5 +369,56 @@ mod tests {
         assert!(validate_identifier("").is_err());
         assert!(validate_identifier("nginx latest").is_err());
         assert!(validate_identifier("ghcr.io//app").is_err());
+    }
+
+    // ── SSRF: private registry hostname rejection ────────────────────────
+
+    #[test]
+    fn validate_identifier_rejects_localhost_registry() {
+        let err = validate_identifier("localhost/myapp:latest").unwrap_err();
+        assert!(err.contains("private"), "error: {err}");
+    }
+
+    #[test]
+    fn validate_identifier_rejects_private_ip_registry() {
+        let err = validate_identifier("10.0.0.1/myapp:latest").unwrap_err();
+        assert!(err.contains("private"), "error: {err}");
+
+        let err = validate_identifier("192.168.1.1/myapp:latest").unwrap_err();
+        assert!(err.contains("private"), "error: {err}");
+
+        let err = validate_identifier("172.16.0.1/myapp:latest").unwrap_err();
+        assert!(err.contains("private"), "error: {err}");
+    }
+
+    #[test]
+    fn validate_identifier_rejects_link_local_registry() {
+        let err = validate_identifier("169.254.169.254/latest/meta-data:v1").unwrap_err();
+        assert!(err.contains("private"), "error: {err}");
+    }
+
+    #[test]
+    fn validate_identifier_rejects_loopback_registry() {
+        let err = validate_identifier("127.0.0.1/myapp:latest").unwrap_err();
+        assert!(err.contains("private"), "error: {err}");
+    }
+
+    #[test]
+    fn validate_identifier_rejects_private_ip_with_port() {
+        let err = validate_identifier("192.168.1.1:5000/myapp:latest").unwrap_err();
+        assert!(err.contains("private"), "error: {err}");
+    }
+
+    #[test]
+    fn validate_identifier_allows_public_registry() {
+        assert!(validate_identifier("registry.example.com/myapp:latest").is_ok());
+        assert!(validate_identifier("ghcr.io/owner/app:v1").is_ok());
+    }
+
+    #[test]
+    fn validate_identifier_allows_docker_hub() {
+        // Docker Hub default registry is not private
+        assert!(validate_identifier("nginx").is_ok());
+        assert!(validate_identifier("myuser/myapp:latest").is_ok());
     }
 }
