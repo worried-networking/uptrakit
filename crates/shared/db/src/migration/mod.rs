@@ -27,6 +27,7 @@ mod m20260311_000001_update_history_status_index;
 mod m20260311_000002_audit_log_permissions;
 mod m20260312_000001_system_enrollment_tokens;
 mod m20260312_000002_discover_host_packages_task;
+mod m20260313_000001_per_host_update_locking;
 
 pub struct Migrator;
 
@@ -60,6 +61,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260311_000002_audit_log_permissions::Migration),
             Box::new(m20260312_000001_system_enrollment_tokens::Migration),
             Box::new(m20260312_000002_discover_host_packages_task::Migration),
+            Box::new(m20260313_000001_per_host_update_locking::Migration),
         ]
     }
 }
