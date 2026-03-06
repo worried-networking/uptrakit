@@ -204,6 +204,8 @@ channels:
         $ref: "#/components/messages/updateCapabilities"
       extensionRegister:
         $ref: "#/components/messages/extensionRegister"
+      extensionActionsRegister:
+        $ref: "#/components/messages/extensionActionsRegister"
       extensionRequest:
         $ref: "#/components/messages/extensionRequest"
       extensionResponse:
@@ -800,6 +802,20 @@ operations:
       registry. If the same extension ID is already registered by a different
       `service_app_name`, the registration is rejected with `ErrorCode::BadRequest`.
 
+  sendExtensionActionsRegister:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/extensionActionsRegister"
+    summary: Service registers its action library
+    description: |
+      Sent by a service with the `UiExtensions` capability. Contains a flat
+      catalogue of `ActionDef` entries that can be referenced by `action_id`
+      from any extension manifest registered by the same source (app_name).
+      Can be sent independently of `ExtensionRegister` and in any order.
+      Subsequent sends replace the previous action set for this app_name.
+
   receiveExtensionRequest:
     action: receive
     channel:
@@ -1236,6 +1252,20 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/extensionRegisterPayload"
+
+    extensionActionsRegister:
+      name: extension_actions_register
+      title: Extension Actions Register Message
+      summary: Service registers its action library (catalogue of ActionDefs)
+      description: |
+        Sent by a service with the `UiExtensions` capability. Contains a flat
+        catalogue of action definitions referenced by `action_id` from extension
+        manifests. The controller validates limits via `WireValidate` (max 200
+        actions per message) and stores the catalogue keyed by the service's
+        `app_name`. Subsequent sends replace the previous set.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/extensionActionsRegisterPayload"
 
     extensionRequest:
       name: extension_request
@@ -3953,11 +3983,71 @@ components:
           type: string
           description: Error message when success is false
 
+    extensionActionsRegisterPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - actions
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Wire protocol version
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number
+        type:
+          type: string
+          const: extension_actions_register
+          description: Message type discriminator
+        actions:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/extensionActionDef"
+          description: |
+            Action library — flat catalogue of action definitions that can be
+            referenced by `action_id` from any extension manifest of the same
+            source (service app_name). Maximum 200 actions per message.
+
+    extensionActionDef:
+      type: object
+      required:
+        - action_id
+        - label
+      properties:
+        action_id:
+          type: string
+          description: Action identifier (unique within the source's action library)
+        label:
+          type: string
+          description: Human-readable label for the action button/menu item
+        ui:
+          description: Optional UI shown before the action is invoked (form or wizard)
+        permission:
+          type: string
+          description: Permission required to invoke this action
+        destructive:
+          type: boolean
+          description: Whether this action is destructive (shown with warning styling)
+        timeout_seconds:
+          type: integer
+          format: int32
+          description: Timeout in seconds for the action invocation
+        api_submit:
+          description: When set, form submission calls this REST API endpoint directly
+
     extensionManifest:
       type: object
       required:
         - id
         - label
+        - priority
         - placement
         - required_permission
         - targeting
@@ -3969,6 +4059,13 @@ components:
         label:
           type: string
           description: Human-readable display name
+        priority:
+          type: integer
+          format: int32
+          description: |
+            Ordering priority — lower values appear first. Items with equal
+            priority are sorted alphabetically by label. Built-in menu items
+            use 100-point gaps (Home=100, Services=200, etc.).
         placement:
           description: Where the extension appears in the UI
           oneOf:
