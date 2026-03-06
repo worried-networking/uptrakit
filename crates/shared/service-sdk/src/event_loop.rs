@@ -230,8 +230,22 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
         }
     };
 
-    // Best-effort close — the peer may have already disconnected.
-    let _ = conn.close().await;
+    // Best-effort close with timeout — the peer may have already disconnected
+    // or may have stopped reading, which would cause close() to block
+    // indefinitely waiting for the TCP send buffer to drain.
+    const CLOSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+    match tokio::time::timeout(CLOSE_TIMEOUT, conn.close()).await {
+        Ok(Err(e)) => {
+            tracing::debug!(error = %e, "websocket close failed (best-effort)");
+        }
+        Err(_) => {
+            tracing::warn!(
+                "websocket close timed out after {}s, dropping connection",
+                CLOSE_TIMEOUT.as_secs()
+            );
+        }
+        Ok(Ok(())) => {}
+    }
 
     Ok(outcome)
 }

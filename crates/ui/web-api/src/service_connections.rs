@@ -265,7 +265,18 @@ impl ServiceConnectionRegistry {
                 tokio::time::sleep(delay).await;
                 let guard = inner.read().await;
                 if let Some(conn) = guard.connections.get(&service_id) {
-                    let _ = conn.sender.send(msg_clone).await;
+                    // Use the same send timeout as broadcast()/send_parallel() to
+                    // prevent a single unresponsive service from blocking the
+                    // entire shutdown sequence.
+                    if tokio::time::timeout(BROADCAST_SEND_TIMEOUT, conn.sender.send(msg_clone))
+                        .await
+                        .is_err()
+                    {
+                        tracing::warn!(
+                            %service_id,
+                            "ServerRestarting send timed out for service"
+                        );
+                    }
                 }
             });
         }

@@ -64,6 +64,15 @@ const MAX_UPDATE_OUTPUT_BYTES: usize = 1_048_576;
 /// Interval between approval-status DB polls in enrolled loops.
 const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Maximum time to wait for a WebSocket write (`sink.send()`) to complete.
+///
+/// If a service stops reading from the WebSocket, the OS TCP send buffer fills
+/// and `sink.send()` blocks indefinitely. This timeout bounds the hang so that
+/// the handler loop can break and clean up the connection. Kept deliberately
+/// shorter than the agent-side `SEND_TIMEOUT` (30 s) so the controller detects
+/// the stuck connection first.
+const WS_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Maximum consecutive unknown messages before closing the connection.
 ///
 /// Prevents a misbehaving or fuzzing client from keeping a connection alive
@@ -633,8 +642,20 @@ pub(crate) async fn handle_authenticated_loop(
             push = push_rx.recv() => {
                 let Some(msg) = push else { break };
                 let Some(json) = serialize_controller_msg(out_seq, msg) else { break };
-                if sink.send(Message::Text(json.into())).await.is_err() {
-                    break;
+                match tokio::time::timeout(
+                    WS_WRITE_TIMEOUT,
+                    sink.send(Message::Text(json.into())),
+                ).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => break,
+                    Err(_) => {
+                        tracing::warn!(
+                            %service_id,
+                            "WebSocket write timed out after {}s, dropping connection",
+                            WS_WRITE_TIMEOUT.as_secs(),
+                        );
+                        break;
+                    }
                 }
             }
             _ = cancel_token.cancelled() => {
@@ -1016,8 +1037,20 @@ pub(crate) async fn handle_enrolled_loop(
                 }
 
                 let Some(json) = serialize_controller_msg(out_seq, msg) else { break };
-                if sink.send(Message::Text(json.into())).await.is_err() {
-                    break;
+                match tokio::time::timeout(
+                    WS_WRITE_TIMEOUT,
+                    sink.send(Message::Text(json.into())),
+                ).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => break,
+                    Err(_) => {
+                        tracing::warn!(
+                            %service_id,
+                            "WebSocket write timed out after {}s during enrollment, dropping connection",
+                            WS_WRITE_TIMEOUT.as_secs(),
+                        );
+                        break;
+                    }
                 }
                 if is_rejected {
                     break;
