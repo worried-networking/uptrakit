@@ -1,6 +1,7 @@
 # Code Review: uptrakit-web-api
 
 - **Review date**: 2026-03-06
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -122,9 +123,20 @@ All remaining modules should become `pub(crate)` once the controller → web-api
 inversion is resolved via crate extraction. The over-broad visibility also makes it
 difficult to distinguish stable public API from internal wiring in IDE navigation.
 
-**[HIGH]** `src/app_state.rs:37-96` -- `AppState` has 26 public fields. Most have `pub`
-visibility. PKI, notification, and credential fields should have restricted visibility with
-accessor methods.
+**[HIGH]** `src/app_state.rs:37-96` -- `AppState` has 26 public fields (32+ including builder
+fields). Most have `pub` visibility. PKI, notification, and credential fields should have
+restricted visibility with accessor methods. The builder has 32 `Option<T>` fields with
+runtime `.ok_or()` checks -- no compile-time safety for missing fields. Consider grouping
+related fields into sub-structs (e.g., `PkiState`, `AuthState`, `NotificationState`,
+`SseBroadcasters`) to improve readability and allow partial injection in tests.
+*Confirmed by parallel architecture review (2026-03-06).*
+
+**[MEDIUM]** `src/routes/` -- Route module count is high (40+ files). The `settings_*` modules
+(7 separate files: `settings.rs`, `settings_agent_certs.rs`, `settings_auth.rs`,
+`settings_ca.rs`, `settings_combined.rs`, `settings_global_combined.rs`, `settings_mqtt.rs`,
+`settings_nats.rs`, `settings_network.rs`, `settings_smtp.rs`) could be consolidated into a
+`settings/` subdirectory with a shared module pattern, similar to how `service_ws/` is
+organized. *Found in parallel architecture review (2026-03-06).*
 
 **[MEDIUM]** `src/router.rs:17-209` -- OpenAPI `#[openapi(...)]` lists every path and schema
 explicitly (~200 lines). Adding a new endpoint requires modifying three places: route module,
@@ -229,6 +241,29 @@ reduce duplication.
 **[MEDIUM]** `oidc_callback` has no unit tests despite 413 lines and 7 code paths. All seven
 `OidcUserResolution` branches are untested at the unit level.
 
+**[MEDIUM]** `src/routes/update_history.rs:169` -- DB error silently swallowed in SSE handler.
+The `.all(tenant_db.db()).await.unwrap_or_default()` converts a database error into an empty
+vector. This is within an SSE stream handler (not an auth path), but it is the primary data
+being requested -- a transient DB failure would silently return zero output lines, making
+completed updates appear to have no output. Should match on the result, log the DB error, and
+emit an SSE error event so the client knows the replay failed. *Found in parallel code quality
+review (2026-03-06).*
+
+**[MEDIUM]** `src/routes/update_history.rs:128-140` -- `stream_update_output` bypasses
+`TenantDb` for initial record load. The SSE streaming handler loads the `update_history` record
+via `update_history::Entity::find_by_id(record_id).one(tenant_db.db())` without tenant
+filtering, then performs a separate tenant check by looking up the record's `host_id`. The
+initial load reads the full record (including potentially sensitive `output` text) before
+verifying tenant scope. *Found in parallel consistency review (2026-03-06).*
+
+**[INFO]** `src/settings.rs:154` -- `tokio::sync::Mutex` usage is justified. The
+`write_mutex: tokio::sync::Mutex<()>` deviates from the `parking_lot::Mutex` standard, but
+examination of the 16 call sites shows every lock guard is held across `.await` points (DB
+writes followed by snapshot publish). This is a legitimate exception. A brief comment like
+`// tokio::sync::Mutex because guard is held across .await (DB write + publish)` should be
+added to prevent future refactoring attempts. *Found in parallel code quality review
+(2026-03-06).*
+
 **[LOW]** `src/notification_service.rs:46-63` -- `msg.clone()` on every `send()` and
 `broadcast()` call. Could compute serialized JSON first.
 
@@ -302,6 +337,17 @@ different updates.
 **[LOW]** `src/notification_service.rs:107-177` -- Backlog delivery replays up to 500 events
 sequentially with no timeout.
 
+**[LOW]** `src/service_connections.rs` -- Push channel capacity is bounded at 32
+(`PUSH_CHANNEL_CAPACITY`), but `broadcast()` uses a 5-second per-send timeout. With many
+connected services, a slow consumer could block broadcasts for others. *Found in parallel HA
+review (2026-03-06).*
+
+**[INFO]** No backpressure from agent to controller on `CheckVersions`. The controller can
+send check-versions requests to agents, but there is no mechanism for the agent to signal
+"busy" or "overloaded." If the controller sends a large batch of assignments while the agent
+is already processing a previous batch, both run concurrently. *Found in parallel HA review
+(2026-03-06).*
+
 ## Coding Standards
 
 ### Strengths
@@ -316,7 +362,26 @@ sequentially with no timeout.
 
 ### Issues
 
-No coding standards issues found.
+**[HIGH]** `src/extension_proxy.rs:114` -- `#[allow(clippy::too_many_arguments)]` on the
+`invoke` method (8 parameters excluding `&self`). No Clippy suppression is approved in this
+codebase per AGENTS.md invariant 13. Per the "Parameter Struct Pattern" standard, a named
+struct should be introduced to batch related parameters. *Found in parallel coding standards
+review (2026-03-06).*
+
+**[HIGH]** `src/batch_progress_broadcaster.rs:114` and
+`src/routes/settings_global_combined.rs:76` -- `#[cfg(not(feature = "nats"))]` violates the
+additive-only feature flag rule. These should be converted to the approved `cfg!()` macro
+pattern or `if cfg!(feature = "...")` blocks. *Found in parallel coding standards review
+(2026-03-06).*
+
+**[LOW]** `src/test_harness/mod.rs:23` -- `#[allow(dead_code)]` on `TestApp` struct. While
+test-only code, the `#[allow]` is unnecessary if the fields are used by integration test
+modules. *Found in parallel coding standards review (2026-03-06).*
+
+**[LOW]** `src/routes/service_ws/protocol.rs:93` -- `#[allow(dead_code)]` on a `#[cfg(test)]`
+method. The comment says "Used by tests in mod.rs" -- if it is used, the allow is incorrect;
+if it is not used, it should be removed. *Found in parallel coding standards review
+(2026-03-06).*
 
 ## Extensibility
 
@@ -336,6 +401,19 @@ No coding standards issues found.
 **[MEDIUM]** `src/routes/oidc_auth.rs:873` -- `fake_claims` reverse-role-mapping ignores nested
 claim paths. If `role_claim_path = "realm.roles"`, reconstruction places values at `realm` not
 `realm.roles`.
+
+**[MEDIUM]** `src/extension_registry.rs` -- Five separate `Mutex` locks in
+`ExtensionRegistry` (`service_extensions`, `service_index`, `encryption_keys`,
+`service_app_names`, and one more). Operations like `register_service` acquire multiple locks
+sequentially. With `parking_lot::Mutex` and short critical sections this is fine for current
+scale, but if contention increases, consolidating into fewer locks (or a single state struct
+under one lock) would reduce lock acquisition overhead. *Found in parallel extensibility
+review (2026-03-06).*
+
+**[LOW]** `src/extension_registry.rs` -- No rate limiting or size limits on extension
+registration. A misbehaving service could register an unbounded number of extension manifests
+or actions. There is no maximum count enforced. *Found in parallel extensibility review
+(2026-03-06).*
 
 **[LOW]** `src/routes/oidc_auth.rs` -- No mechanism to add custom OIDC scopes beyond the
 `scopes` column. No documented path for operators to add custom claims processors without code
@@ -574,6 +652,17 @@ pagination, bare `Json(resp)` without explicit `StatusCode::OK`.
 
 ### Issues
 
+**[MEDIUM]** `src/routes/hosts.rs:217-227` -- `discover_host` handler uses
+`ServiceHost::find()` without tenant isolation. The `service_host` table has no `tenant_id`
+column, and per the project's documented pattern, queries on it must use
+`tenant_db.find_via_tenant_join()`. While the host was already verified as tenant-scoped, the
+subsequent `ServiceHost::find()` query could theoretically return links to services from other
+tenants. *Found in parallel consistency review (2026-03-06).*
+
+**[MEDIUM]** `src/routes/software_items.rs:1131` -- `ServiceHost::find()` without tenant
+join. Same pattern as `hosts.rs:217-227` above. *Found in parallel consistency review
+(2026-03-06).*
+
 **[LOW]** `src/queries/update_history.rs:213-255` -- `get_update_history` performs three
 sequential awaited queries: `UpdateHistory::find_by_id`, `tenant_db.find_by_id::<host::Entity>`,
 and `SoftwareItem::find_by_id`. The first two are necessary (the second enforces tenant scope),
@@ -770,3 +859,14 @@ Recommended tests:
 - Both empty: all discovery types dispatched
 - Plugin type with no active configs gets a default empty-config assignment
 - All types filtered out: no `DiscoverSoftware` message sent
+
+**[MEDIUM]** No integration tests exist for the following endpoint groups: host packages,
+update history, update batches, scheduler, audit logs, system services, system enrollment
+tokens, discovery allowlist, and autodiscovery endpoints. *Confirmed by parallel tests review
+(2026-03-06).*
+
+**[MEDIUM]** `src/routes/services.rs:484-654` -- Inline `test_state()` at line 509 manually
+constructs `AppState` with ~50 fields, duplicating the `TestApp` harness. The inline test also
+calls `.unwrap()` extensively (lines 557, 558, 560, 566, 568, 691, 712). Should use the
+shared `test_harness::TestApp` instead. *Confirmed by parallel consistency review
+(2026-03-06).*

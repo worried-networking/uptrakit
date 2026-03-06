@@ -1,6 +1,7 @@
 # Code Review: uptrakit-plugin-releases-docker
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -153,6 +154,11 @@ No extensibility issues found.
 - `src/docker_client.rs:614-653` -- Six tests cover `format_progress_line` with all combinations
   of present/absent id, status, and progress.
 - `src/error.rs:56-139` -- 11 tests cover all `DockerError` variants for `Display` correctness.
+  **Note (parallel review 2026-03-06):** These 10 tests that verify `#[error("...")]`
+  formatting are `thiserror` Display format tests and violate the project testing philosophy
+  documented in `docs/development/testing.md`. They test upstream crate behavior, not
+  application logic, and should be removed. See umbrella `plugins/CODEREVIEW.md` for full
+  cross-plugin finding.
 - `src/registry.rs:151-155` -- Client creation test verifies `RegistryClient::new(None)` succeeds.
 - `src/api_types.rs:29-103` -- Seven tests cover `TokenResponse` deserialization (with `token`,
   `access_token` alias, no expiry, extra fields) and `RegistryErrorResponse` deserialization.

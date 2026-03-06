@@ -146,8 +146,30 @@ test would still pass. Adding an assertion on the deserialized message variant
 - `src/connection.rs:16-20` -- `NatsConnection` derives `Clone`, enabling
   cheap sharing across tasks via `Arc`-free patterns (both `async_nats::Client`
   and `jetstream::Context` are internally arc-wrapped).
+- `src/connection.rs:52-78` -- Startup retry with backoff (10 retries, 1s-30s). Handles
+  transient NATS unavailability at startup.
+  *(2026-03-06 parallel review -- HA)*
+- `src/connection.rs:131-163` -- Credential protection: `publish()` defensively blocks
+  credential-bearing messages from reaching NATS, with both a runtime check and a debug
+  assertion.
+  *(2026-03-06 parallel review -- HA, security)*
 
 ### Issues
+
+**[MEDIUM]** *(HA-7)* `src/connection.rs` -- No runtime reconnection handling or monitoring
+for NATS after initial connection. The `NatsConnection` wraps `async_nats::Client` which has
+built-in reconnection, but there is no explicit monitoring or health checking of the NATS
+connection state. If NATS goes down after initial connection, `publish_envelope()` will
+silently fail (fire-and-forget semantics), and no alert is raised. Connected services that
+should receive updates via NATS will simply not receive them. The system should emit metrics
+or health-check signals when NATS publishes consistently fail.
+*(2026-03-06 parallel review -- HA)*
+
+**[LOW]** *(HA-8)* Batch progress uses ephemeral NATS subjects (not JetStream). If a
+subscriber disconnects momentarily during a batch operation, progress events are lost. This
+is acceptable for UI live-streaming but means cross-controller batch progress synchronization
+is lossy.
+*(2026-03-06 parallel review -- HA)*
 
 **[LOW]** `src/connection.rs:67-69` -- When `js.publish()` fails, the error is
 logged at `warn` level but the message is silently dropped with no retry and no

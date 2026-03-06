@@ -1,8 +1,9 @@
 # Code Review: uptrakit-web-api-queries
 
 - **Review date**: 2026-03-06
-- **Reviewer**: AI coverage analysis (cargo-llvm-cov)
-- **Branch**: docs/test-coverage
+- **Parallel review date**: 2026-03-06
+- **Reviewer**: AI coverage analysis (cargo-llvm-cov), AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database)
+- **Branch**: docs/test-coverage, docs/codereview-backend
 
 ## Test Coverage Analysis
 
@@ -133,3 +134,117 @@ variant added in a future release will match this arm and silently apply a `Pend
 instead of failing loudly. The conversion should return `Option<SystemServiceStatus>` (or
 use `#[deny(unreachable_patterns)]` after a exhaustive match) so callers can decide how to
 handle unrecognised variants rather than receiving misleading query results.
+
+## Tenant Isolation
+
+### Issues
+
+**[MEDIUM] DB-1:** `queries/hosts.rs:123` -- `ServiceHost::find()` in `list_hosts` bypasses
+`find_via_tenant_join`. The query loads `service_host` rows without any tenant filter. Although
+the `host_ids` were already tenant-filtered from the previous query, and the subsequent
+services fetch re-applies tenant filtering, this violates the stated convention. The
+single-host helper `load_host_agents` on line 43 correctly uses `find_via_tenant_join`.
+*Found in parallel database review (2026-03-06).*
+
+**[LOW] DB-2:** `queries/software_items.rs:237,255,269,284` -- `load_item_hosts` helper takes
+a raw `&DatabaseConnection` rather than `&TenantDb` and queries `HostSoftwareItem::find()`,
+`Host::find()`, `HostSoftwareItemPlugin::find()`, and `PluginConfig::find()` without tenant
+filters. While the upstream caller has already scoped the `software_item_id` to the tenant,
+any host from any tenant that happens to be linked to this item would appear in results.
+*Found in parallel database review (2026-03-06).*
+
+**[LOW] DB-3:** `queries/host_packages.rs:435` -- `find_or_create_host_package` omits
+`tenant_id` filter. `host_package` is `TenantScoped` but the function receives a raw
+`&DatabaseConnection`. The `host_id` uniqueness likely prevents cross-tenant data leakage,
+but this is a defense-in-depth gap. The same pattern repeats at line 485 (race condition
+recovery path). *Found in parallel database review (2026-03-06).*
+
+**[LOW] DB-4:** `queries/software_items.rs:824` -- `assign_hosts` host existence check uses
+`Host::find_by_id(host_id)` without `TenantId` filter. A user in tenant A could theoretically
+assign a host belonging to tenant B. The `host_id` is provided by the caller in
+`AssignHostsRequest`. *Found in parallel database review (2026-03-06).*
+
+## N+1 Query Patterns
+
+### Issues
+
+**[LOW] DB-5:** `queries/services.rs:386-407` -- Per-row INSERT in `merge_service` for host
+links. Each source link generates a separate INSERT. For a small number of host links per
+service (typically 1-3), this is acceptable. A bulk INSERT with `insert_many` would be more
+efficient but is not critical. *Found in parallel database review (2026-03-06).*
+
+**[LOW] DB-6:** `queries/update_batches.rs:1025-1046` -- Per-row INSERT in batch creation.
+Each `host_package_update_history` record is inserted individually inside a loop within a
+transaction. For large batch updates this could be slow. `insert_many` would reduce
+round-trips. *Found in parallel database review (2026-03-06).*
+
+**[LOW] DB-11:** Multiple paginated list functions (e.g., `hosts.rs:109`,
+`services.rs:97-101`) clone the full query builder to get the count and then re-execute for
+the page. This results in two database round-trips with identical WHERE clauses. This is a
+common SeaORM pattern and not easily avoidable without raw SQL window functions.
+*Found in parallel database review (2026-03-06).*
+
+**[LOW] DB-12:** `queries/software_items.rs:550-681` -- `list_software_items` executes 5-6
+queries for a single page: COUNT, SELECT items, GROUP BY host counts, JOIN plugin types,
+SELECT installed versions, plus `bulk_load_latest_versions`. Each is individually efficient,
+but acceptable for the page sizes involved (20-100 items). *Found in parallel database review
+(2026-03-06).*
+
+## Transaction Safety
+
+### Issues
+
+**[LOW] DB-7:** `queries/host_packages.rs:188-228` -- `deactivate_host_package` lacks
+transaction for ignore + deactivate. When `create_ignore` is true, the function first inserts
+an ignore rule (line 216), then updates the host package (line 226). These are two separate
+statements without a transaction. If the second statement fails, the ignore rule is orphaned.
+*Found in parallel database review (2026-03-06).*
+
+**[MEDIUM] DB-8:** `queries/host_packages.rs:645-776` -- `promote_host_package` performs
+cross-function mutations without wrapping transaction. Calls `create_software_item` (its own
+transaction), then `assign_hosts` (another transaction), then `HostSoftwareItem::update_many`
+(no transaction). If the version copy fails after `assign_hosts` succeeds, the software item
+exists without version data. These should be wrapped in a single encompassing transaction.
+*Found in parallel database review (2026-03-06).*
+
+## Multi-Backend Compatibility
+
+### Issues
+
+**[LOW] DB-13:** `queries/services.rs:89` -- LIKE for capability filtering in
+`list_services`. `.contains()` generates a `LIKE '%value%'` query on a JSON text column. A
+capability named `"ssh"` would match `"ssh_remote"`. This is a semantic issue rather than a
+backend compatibility issue. *Found in parallel database review (2026-03-06).*
+
+## Soft-Delete
+
+### Issues
+
+**[INFO] DB-14:** `queries/hosts.rs:261-277` -- `deactivate_host` does not cascade to
+related join tables. When a host is soft-deleted, the `service_host`, `host_software_item`,
+and `host_software_item_plugin` rows remain active. Queries on these tables filter via joins,
+so deactivated hosts are excluded from results. However, orphaned rows accumulate. This is a
+known trade-off of soft-deletes and is likely acceptable. *Found in parallel database review
+(2026-03-06).*
+
+## Architecture
+
+### Issues
+
+**[MEDIUM]** `queries/autodiscovery.rs` -- At 2,129 lines, the largest query file. Handles
+discovery for targeted items, host packages, ignore rules, and target-based vs config-ID-based
+processing. Given the complexity of the discovery subsystem (PHS, Docker, APT, Homebrew all
+have different target emission strategies), this module could benefit from sub-module
+extraction into a `queries/autodiscovery/` directory. *Found in parallel architecture review
+(2026-03-06).*
+
+## Tests
+
+### Issues
+
+**[HIGH]** 7 query modules with zero tests totaling 2,659 lines: `notifications.rs` (521),
+`host_packages.rs` (793), `services.rs` (412), `plugin_configs.rs` (356),
+`enrollment_tokens.rs` (206), `scheduled_tasks.rs` (170), `audit_logs.rs` (201). Some may be
+exercised indirectly by `web-api` integration tests, but `host_packages`, `audit_logs`, and
+`scheduled_tasks` have no corresponding integration test files either. *Found in parallel
+tests review (2026-03-06).*

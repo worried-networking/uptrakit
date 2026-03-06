@@ -6,7 +6,7 @@
 - **Branch**: docs/codereview-backend
 
 **Crates covered:** `uptrakit-backoff`, `uptrakit-build-info`, `uptrakit-shared-macros`,
-`uptrakit-directories`, `uptrakit-update-hooks`
+`uptrakit-directories`, `uptrakit-update-hooks`, `uptrakit-command`
 
 These five crates are small utility crates (105-768 lines each) and are covered in this umbrella
 review. Non-trivial shared crates have individual `CODEREVIEW.md` files in their respective
@@ -14,17 +14,28 @@ directories.
 
 ## Summary
 
-These five utility crates form the lowest layer of the workspace dependency graph. The overall
+These utility crates form the lowest layer of the workspace dependency graph. The overall
 quality is high: `uptrakit-build-info` provides deterministic compile-time/runtime separation,
 `uptrakit-shared-macros` exports a single well-documented macro, `uptrakit-directories` provides
 async-first directory management with platform permission hardening, `uptrakit-update-hooks`
-defines the hook execution model with both legacy and structured formats, and `uptrakit-backoff`
-provides a clean synchronous exponential backoff with jitter. No Critical or High issues apply.
+defines the hook execution model with both legacy and structured formats, `uptrakit-backoff`
+provides a clean synchronous exponential backoff with jitter, and `uptrakit-command` provides
+shell-escaped command execution with fail-early settings and resource limits. No Critical or
+High issues apply.
 
 The `uptrakit-update-hooks` crate has grown to 768 lines with comprehensive test coverage for
 predefined hook resolution (systemd, docker-compose) and legacy merge behavior. The
 `uptrakit-backoff` crate is a well-tested 105-line single-file crate that is a candidate for
 merging into `service-sdk` or `agent-core` if the crate count becomes a maintenance concern.
+
+**Note on sibling shared crates (2026-03-06 parallel review):** `uptrakit-shared-types` is a
+grab-bag containing many unrelated types (`PluginType`, `ServiceStatus`, `MqttTransport`,
+`SecretString`, `ReleaseInfo`, `DiscoveryTarget`, etc.). Almost every crate in the workspace
+depends on it, meaning any change triggers widespread recompilation. Types used only in the
+plugin subsystem (e.g., `DiscoveryTarget`, `DiscoveredSoftware`) could live in
+`plugin-infrastructure-core`. Similarly, `uptrakit-shared-db` contains 55 entity modules --
+the largest compilation unit in terms of generated code (SeaORM entities produce substantial
+derive macro output). Splitting is non-trivial due to cross-entity foreign key relationships.
 
 ## Architecture
 
@@ -46,6 +57,11 @@ merging into `service-sdk` or `agent-core` if the crate count becomes a maintena
   (`HooksConfig` with predefined templates) take precedence, falling back to legacy
   `pre_update_commands` / `post_update_commands` arrays. Override completely replaces base
   when present, avoiding merge ambiguity.
+- `crates/shared/command/src/command.rs` -- `shell_escape()` wraps values in single quotes with
+  embedded single-quote escaping (`'\''`). Fail-early shell settings (`set -euo pipefail` for
+  bash, `set -eu` for sh, `$ErrorActionPreference = 'Stop'` for PowerShell) prevent partial
+  execution. `kill_on_drop(true)` prevents orphaned processes. `stdin(Stdio::null())` prevents
+  interactive prompts. 10 MB output limit prevents OOM from runaway commands.
 
 ### Issues
 
@@ -63,7 +79,13 @@ No architectural issues found.
 - `crates/shared/update-hooks/src/lib.rs:143-156` -- Unknown `PredefinedHook` variants are
   handled with `tracing::warn!` and a no-op `HookCommand::Exec { program: "true", .. }`,
   following the `#[non_exhaustive]` wildcard convention.
-- Zero `unsafe` in production code across all five crates.
+- `crates/shared/command/src/command.rs:334` -- Injection prevention test verifies
+  `"2.0.0'; echo 'MARKER"` passes through safely via `shell_escape()`.
+- `crates/shared/command/src/sudo.rs` -- `SudoContext` determines sudo usage based on
+  runtime state (root status, sudo availability, policy). Shell-mode commands are explicitly
+  excluded from sudo transformation with a warning. Environment variables forwarded as inline
+  `NAME=VALUE` assignments (not via `/usr/bin/env`).
+- Zero `unsafe` in production code across all covered crates.
 
 ### Issues
 
@@ -71,7 +93,10 @@ No architectural issues found.
 (`std::env::remove_var("HOME")` / `std::env::set_var("HOME", val)`) creates data-race risk.
 Rust's test harness runs tests on multiple threads. Mutating environment variables without
 synchronization is undefined behavior. Fix: use `#[serial_test::serial]` or acquire a shared
-mutex before calling `remove_var`/`set_var`.
+mutex before calling `remove_var`/`set_var`. *Note (2026-03-06 parallel review -- security and
+coding standards):* `set_var`/`remove_var` are `unsafe` in Rust 2024 edition due to thread-safety
+concerns. The `unsafe` usage is acceptable in test context but reinforces the need for
+serialization.
 
 ## Code Quality
 
@@ -220,3 +245,12 @@ Rust's proc-macro compilation model. This is not a refactoring opportunity.
 **[INFO]** `crates/shared/build-info/` -- At 216 lines with a distinct `build.rs`
 compilation concern, this crate is reasonable to keep separate. The compile-time/runtime split
 requires an independent compilation unit.
+
+---
+
+*Parallel review notes (2026-03-06): Findings from architecture, security, code quality,
+coding standards, extensibility, consistency, maintainability, HA, tests, and database reviews
+have been merged into this file where specific to umbrella crates. The `command` crate coverage
+was added (shell escape, fail-early settings, kill_on_drop, output limit, sudo context). The
+`shared-types` recompilation concern and `shared-db` entity module count are noted in the
+Summary section.*

@@ -109,6 +109,27 @@ No coding standards issues found.
 
 ### Issues
 
+**[MEDIUM]** `src/plugin_types.rs` -- `PluginType` has high modification cost. Adding a single
+variant requires touching six separate `match` arms across `as_str()`, `display_name()`,
+`FromStr`, `From<String>`, `From<PluginType> for String`, and `Serialize/Deserialize`. This is
+a manual, error-prone enumeration that violates DRY. A macro or strum-like derivation (adapted
+for the `Other(String)` pattern) could reduce this to a single declaration per variant.
+*(2026-03-06 parallel review -- extensibility)*
+
+**[LOW]** `src/plugin_types.rs` -- `AttestationStatus` is `#[non_exhaustive]` but lacks
+`Other(String)` despite crossing the wire in `ReleaseInfo` (via `ExecuteUpdatePayload`). If
+new attestation status values are added by a newer controller, an older agent would fail to
+deserialize them. This is a latent deserialization risk.
+*(2026-03-06 parallel review -- extensibility)*
+
+**[INFO]** `src/plugin_capability.rs` -- `PluginCapability` intentionally lacks `Other(String)`
+due to the `Copy` constraint. This is documented as intentional for first-party-only plugins.
+If capabilities are ever persisted in the database or sent between controller and agent (they
+appear in discovery messages via `static_capabilities`), unknown capability strings will fail
+to deserialize. Adding `Other(String)` would break `Copy` -- this is a genuine design tension
+documented as a future risk.
+*(2026-03-06 parallel review -- extensibility)*
+
 ## Tests
 
 ### Strengths

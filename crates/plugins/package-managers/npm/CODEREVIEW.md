@@ -1,6 +1,7 @@
 # Code Review: uptrakit-plugin-package-manager-npm
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -219,7 +220,15 @@ streamed would mirror the pattern used by the APT plugin's `execute_update` test
 
 ### Issues
 
-No consistency issues found.
+**[MEDIUM]** The npm plugin does not define a dedicated `NpmError` enum. It uses
+`PluginError` from infrastructure-core directly, unlike the six other plugins (GitHub,
+Docker, GitLab, Forgejo, Homebrew, APT) that each define a `<PluginName>Error`. This means
+npm errors cannot carry plugin-specific context variants and cannot be individually matched
+by consumers. The preferred pattern is to introduce an `NpmError` enum consistent with all
+other plugins, even if it initially mirrors `PluginError`. This also makes
+`impl_report_conversion!` usage uniform. See `infrastructure/registry/CODEREVIEW.md`
+Consistency section for the full cross-plugin finding. (Confirmed by Consistency parallel
+review.)
 
 ## Maintainability
 

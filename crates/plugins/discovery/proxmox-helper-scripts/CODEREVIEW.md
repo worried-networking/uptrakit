@@ -1,6 +1,7 @@
 # Code Review: uptrakit-plugin-discovery-proxmox-helper-scripts
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -176,7 +177,13 @@ construction and output parsing without requiring a Proxmox host.
 
 ### Issues
 
-No consistency issues found.
+**[MEDIUM]** The Proxmox Helper Scripts plugin does not define a dedicated
+`ProxmoxHelperScriptsError` enum. Like the npm plugin, it uses `PluginError` from
+infrastructure-core directly, unlike the six other plugins that each define a
+`<PluginName>Error`. The preferred pattern is to introduce a dedicated error enum consistent
+with all other plugins, even if it initially mirrors `PluginError`. See
+`infrastructure/registry/CODEREVIEW.md` Consistency section for the full cross-plugin finding.
+(Confirmed by Consistency parallel review.)
 
 ## Maintainability
 

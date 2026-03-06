@@ -1,6 +1,7 @@
 # Code Review: uptrakit-controller
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -73,6 +74,24 @@ web-api internal types (`OidcFlowStore`, `DeviceFlowStore`, `RateLimitStore` at
 **[LOW]** `src/main.rs:324-379` -- Embedded scheduler block directly imports executor types and
 manually registers each task type. This registration should be encapsulated in the
 scheduler-engine crate via a `register_all_executors` function.
+
+**[MEDIUM]** (2026-03-06 parallel review) `startup.rs` (1,678 lines) + `main.rs` (734 lines) =
+2,400+ lines of startup orchestration. The phased approach (`ReconciledSettings` ->
+`ValidatedConfig` -> `PkiRuntime`) is sound, but the sheer volume indicates the controller
+binary is doing significant work that might belong in library code. The startup sequence has
+many interdependent phases whose relationships are only visible by reading both files
+end-to-end.
+
+**[LOW]** (2026-03-06 parallel review) System services share a single global enrollment token
+stored in the `settings` table. Unlike tenant services which have multiple named tokens with
+usage limits and TTL, all system service types (scheduler, MQTT) authenticate with one shared
+token. If this token is compromised, all system service types are affected. Consider supporting
+named system enrollment tokens with capability scoping, mirroring the tenant token model.
+
+**[LOW]** (2026-03-06 parallel review) `AppStateBuilder` has no compile-time safety for its 32
+`Option` fields. All fields are checked at runtime via `.ok_or()` in `build()`. If a field is
+forgotten, the error is discovered at controller startup, not at compile time. A typestate
+builder pattern or macro-generated builder would catch missing fields at compile time.
 
 ## Security and Safety
 
@@ -186,7 +205,9 @@ and the bind.
   10 minutes. Bounds the worst-case re-execution delay after an unclean shutdown.
 - `src/tasks.rs:69-91` -- `broadcast_server_restarting_scattered` spreads notifications across
   a configurable window (`RESTART_NOTIFICATION_SCATTER`) so agents do not all reconnect
-  simultaneously after a controller restart.
+  simultaneously after a controller restart. (Confirmed by 2026-03-06 parallel HA review:
+  controller shutdown is well-orchestrated with disciplined stop-scatter-cancel-abort-await
+  sequence.)
 - `src/tasks.rs` -- `spawn_settings_reload` skips first tick, preventing a redundant reload of
   settings that were just loaded during startup.
 - Cross-instance CA update propagation via version counter. `spawn_ca_reload` polls
@@ -216,6 +237,20 @@ appears completed. No mechanism to detect and restart a failed NATS consumer at 
 transient NATS error during consumer creation silently leaves the controller without event
 delivery.
 
+**[MEDIUM]** (2026-03-06 parallel review) `src/db/mod.rs:24` -- DB connection pool
+`idle_timeout` of 8 seconds is aggressively short (HA-5). Under bursty load patterns (e.g., a
+scheduled task wakes up every 5 minutes and runs many queries), connections will be constantly
+created and destroyed rather than reused. Consider increasing to 60-300 seconds for production
+workloads. The `min_connections(1)` partially mitigates this by keeping at least one warm
+connection.
+
+**[MEDIUM]** (2026-03-06 parallel review) No retry logic for transient DB errors in the web
+API layer (HA-4). HTTP route handlers and WebSocket message handlers propagate DB errors
+directly to the caller. A momentary DB hiccup (e.g., PostgreSQL failover, connection pool
+exhaustion) returns a 500 error rather than retrying. For write-heavy operations like
+`dispatch_next_in_batch`, a single transient DB error could leave a batch item in `Queued`
+state indefinitely until the next trigger event.
+
 **[LOW]** `src/main.rs:451-457` -- PKI HTTP server registered with `track_abort`, meaning
 in-flight OCSP/CRL requests are terminated mid-response on shutdown.
 
@@ -239,6 +274,15 @@ in-flight OCSP/CRL requests are terminated mid-response on shutdown.
 - Well-organized build metadata handling via `build.rs`.
 
 ### Issues
+
+**[HIGH]** (2026-03-06 parallel review) `src/main.rs:94` -- `#[cfg(not(feature = "journald"))]`
+violates the additive-only feature flag rule. The coding standard prohibits
+`#[cfg(not(feature = ...))]`. This should use the `cfg!()` macro pattern:
+`let wants_journald = cfg!(feature = "journald") && args.audit_log_backend.contains(...)`.
+
+**[HIGH]** (2026-03-06 parallel review) `src/main.rs:304` -- `#[cfg(not(feature = "nats"))]`
+violates the same additive-only feature flag rule. Should be converted to the approved `cfg!()`
+macro pattern or `if cfg!(feature = "...")` block as documented in the coding standards.
 
 **[MEDIUM]** `src/pki.rs:700` -- `unwrap_or(0)` on CA version query. While the `None` case is
 intentional (default to 0 for new systems), it would benefit from a clarifying comment.
@@ -430,6 +474,16 @@ boilerplate and reduce the chance of mis-wiring a field.
 knowledge already present in `durations.rs` for all other timing constants. A reader looking
 for tunable timeouts will find it only if they inspect `scheduler/mod.rs` separately. Move to
 `durations.rs` as a typed `Duration` constant, consistent with the rest of the module.
+
+**[MEDIUM]** (2026-03-06 parallel review) 261 `.unwrap()` calls across 30 non-test source
+files. While many may be justified (e.g., `parking_lot::Mutex::lock()` which returns directly),
+the project policy is "no `unwrap()` in production code." A systematic audit of `.unwrap()`
+calls outside `#[cfg(test)]` blocks would help identify remaining violations.
+
+**[LOW]** (2026-03-06 parallel review) `Cargo.toml` -- SeaORM pinned at `2.0.0-rc.35` (release
+candidate). The entire data layer depends on a pre-release ORM. Risk of breaking changes
+between RC releases requiring migration rework, and ecosystem lag where other libraries may not
+keep pace with RC API changes. Plan a verification pass when SeaORM 2.0 GA ships.
 
 ## Database
 

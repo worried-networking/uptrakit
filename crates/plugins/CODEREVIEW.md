@@ -1,6 +1,7 @@
 # Code Review: Plugins (Umbrella)
 
 - **Review date**: 2026-03-06
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -29,7 +30,13 @@ patterns established by `uptrakit-plugin-infrastructure-core`.
 
 ### Issues
 
-No architectural issues found.
+No architectural issues found for `generic-shell`.
+
+**[LOW]** Plugin config validation across all plugins happens via a JSON round-trip pattern:
+`mask_secrets_for<T>` in the registry deserializes config from `serde_json::Value`, calls
+`with_secrets_masked()`, then re-serializes. This double serialization occurs on every API
+response that includes plugin configs. While not a hot path, it is architecturally wasteful.
+(Confirmed by Architecture and Extensibility parallel reviews.)
 
 ## Security and Safety
 
@@ -38,6 +45,11 @@ No architectural issues found.
 - Command execution delegated entirely to `CommandExecutor` with shell escaping.
 - `SecretMasking` default (no-op) is correct -- no secrets in configuration.
 - No `unsafe` blocks.
+- All plugins building `reqwest::Client` set `.connect_timeout(10s)` and `.timeout(60s)`,
+  satisfying the workspace HTTP client requirement. (Confirmed by Security parallel review.)
+- Plugin SSRF protection is sound: GitHub enforces HTTPS-only and rejects private hosts,
+  Docker checks the registry host against `is_private_host()`, GitLab and Forgejo enforce
+  HTTPS and reject private/loopback addresses. (Confirmed by Security parallel review.)
 
 ### Issues
 
@@ -68,11 +80,21 @@ No high availability issues found.
 ### Strengths
 
 - Consistent with workspace patterns: `bail!`, `report!`, `thiserror`-derived errors.
-- Zero `#[allow(clippy::...)]` suppressions.
+- Zero `#[allow(clippy::...)]` suppressions across most plugins.
 
 ### Issues
 
-No coding standards issues found.
+**[MEDIUM]** `crates/plugins/package-managers/mas/src/plugin.rs:143` -- `#[allow(dead_code)]`
+on the `config` field of `MasPlugin`. The comment says "never read after construction." Per the
+project coding standard, no `#[allow(clippy::...)]` or `#[allow(dead_code)]` suppressions are
+approved. The field should be removed, prefixed with `_config`, or given a trivial accessor
+method to eliminate the suppression. (Confirmed by Coding Standards parallel review, finding #6.)
+
+**[LOW]** `crates/plugins/infrastructure/proxmox/src/client.rs:73` -- `.as_u16()` used in a
+`tracing::trace!` structured field (`status = status.as_u16()`). The coding standard approves
+`.as_u16()` only inside serde serialization helpers. Tracing structured fields should use
+`status = %status` or `status = ?status` instead. (Confirmed by Coding Standards parallel
+review, finding #9.)
 
 ## Extensibility
 
@@ -101,6 +123,23 @@ relies on `CommandExecutor` dependency injection, making it straightforward to t
 `FixedOutputExecutor` mock (as used in the npm plugin). At minimum, a test verifying that the
 configured command string is passed correctly to the executor would prevent regressions if
 command-building logic changes.
+
+**[MEDIUM]** 22+ `thiserror` Display format tests across plugin error modules violate the
+project testing philosophy documented in `docs/development/testing.md`. These tests construct
+an error variant with known input and assert the `to_string()` output matches the
+`#[error("...")]` format string. They test `thiserror`'s formatting behavior, not application
+logic. Affected files:
+
+- `crates/plugins/releases/docker/src/error.rs` (lines 60-138) -- 10 tests
+- `crates/plugins/releases/github/src/error.rs` (lines 46-68) -- 3 tests
+- `crates/plugins/releases/gitlab/src/error.rs` (lines 46-64) -- 3 tests
+- `crates/plugins/releases/forgejo/src/error.rs` (lines 46-64) -- 3 tests
+- `crates/plugins/infrastructure/proxmox/src/error.rs` (lines 44-54) -- 2 tests
+
+Per the testing philosophy, these tests should be removed because they test upstream crate
+behavior (`thiserror` formatting), not application logic. Tests for custom `Display`
+implementations (where `Display` delegates to hand-written `as_str()` matches) are internal
+logic tests and correctly remain. (Confirmed by Tests parallel review, finding 2.1.)
 
 ---
 

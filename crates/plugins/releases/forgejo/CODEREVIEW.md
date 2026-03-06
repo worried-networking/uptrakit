@@ -1,6 +1,7 @@
 # Code Review: uptrakit-plugin-releases-forgejo
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -206,6 +207,12 @@ are correct -- `new()` is `async`. However, several tests such as `url_construct
 `convert_normal_release` also could be synchronous if `test_plugin()` were refactored to
 construct the plugin synchronously (since `new()` does no I/O). This is a minor style issue
 with no correctness impact.
+
+**[LOW]** `src/error.rs:46-64` -- 3 tests verify `#[error("...")]` Display formatting on
+`ForgejoError` variants. These are `thiserror` Display format tests that test upstream crate
+behavior, not application logic, violating the project testing philosophy documented in
+`docs/development/testing.md`. They should be removed. See umbrella `plugins/CODEREVIEW.md`
+for the full cross-plugin finding. (Confirmed by Tests parallel review, finding 2.1.)
 
 ## Consistency
 

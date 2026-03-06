@@ -1,8 +1,9 @@
 # Code Review: uptrakit-web-api-auth
 
 - **Review date**: 2026-03-05
-- **Reviewer**: AI coverage analysis (cargo-llvm-cov)
-- **Branch**: docs/test-coverage
+- **Parallel review date**: 2026-03-06
+- **Reviewer**: AI coverage analysis (cargo-llvm-cov), AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database)
+- **Branch**: docs/test-coverage, docs/codereview-backend
 
 ## Test Coverage Analysis
 
@@ -68,3 +69,43 @@ Recommended tests:
 - `load_settings_snapshot` with partial settings merges correctly
 - `generate_or_load_jwt_key` creates key on first call, loads on second
 - `save_setting` + `load_setting` round-trip for encrypted values
+
+## Security
+
+### Strengths
+
+All auth mechanisms rated as GOOD by the parallel security review (2026-03-06):
+
+- **JWT**: Short-lived tokens (15 min), validates `exp`/`iss`/`aud`, HMAC signing via
+  `jsonwebtoken`, signing key stored encrypted in DB with column-specific AAD.
+- **Password hashing**: Argon2id with OWASP parameters (19 MiB, 2 iterations), random salt,
+  constant-time verification, password length validation (8-1024 chars).
+- **Sessions**: Refresh tokens stored as SHA-256 hashes, 7-day expiry, atomic rotation in DB
+  transaction (HA-safe), revocation checks before rotation, DB CHECK constraint for OIDC
+  session integrity.
+- **Cookies**: HttpOnly, Secure, SameSite=Strict, path-scoped to `/api/v1/auth`.
+- **Token denylist**: Per-JTI and per-user revocation, monotonic `iat_cutoff`, DB-backed with
+  in-memory cache, cross-instance propagation via NATS.
+- **Rate limiting**: DB-backed sliding-window counter using atomic SQL upsert, HA-safe,
+  TOCTOU-resistant, fully parameterized raw SQL.
+
+### Issues
+
+No security issues found.
+
+## Tests
+
+### Issues
+
+**[HIGH]** `settings_store.rs` -- 580 lines, 7 `OffsetDateTime::now_utc()` calls, zero
+tests. Contains `generate_or_load_jwt_key`, `load_settings_snapshot`, and setting
+reconciliation logic. *Found in parallel tests review (2026-03-06).*
+
+**[MEDIUM]** DB row backdating in `auth/oidc_state.rs` (7+ instances at lines 628-639,
+669-679, 702-712, 838, 916) and `auth/device_flow.rs` (1 instance at lines 236-255) violates
+the documented testing philosophy. `docs/development/testing.md` explicitly states: "Do not
+backdate database rows directly." These stores (`OidcFlowStore`, `AccountLinkStore`,
+`OidcTokenExchangeStore`, `DeviceFlowStore`) all use `OffsetDateTime::now_utc()` in
+production code without clock injection. The correct fix per the canonical pattern would be to
+add `with_clock` constructors (like `RateLimitStore`) and advance the injected clock in tests.
+*Found in parallel tests review (2026-03-06).*

@@ -104,6 +104,19 @@ exercising signal delivery. Does not test signal dispatch path.
 - `src/lifecycle.rs:217-249` -- Certificate expiry detected before attempting mTLS. If on-disk
   certificate is expired, clears enrollment state and falls through to fresh enrollment.
 - mTLS TLS connector rebuilt each reconnect iteration from `ServiceIdentityState`.
+- `src/ws.rs:76-84` -- TCP keepalive configured (30s idle, 10s probes) via `socket2`, preventing
+  the default 2-hour OS keepalive from masking dead connections.
+  *(2026-03-06 parallel review -- HA)*
+- `src/connection.rs:28-29,91-94` -- Send timeout (30s) prevents indefinite hangs. If the
+  controller stops consuming data and the TCP send buffer fills, the agent detects the dead
+  connection within 30 seconds.
+  *(2026-03-06 parallel review -- HA)*
+- `src/lifecycle.rs:337-356` -- Enrollment has its own backoff loop. Transient enrollment
+  errors trigger retry with backoff rather than fatal exit. Identity reloaded on each attempt.
+  *(2026-03-06 parallel review -- HA)*
+- `src/event_loop.rs:251-263` -- Connection cleanup with 5-second timeout. `conn.close()`
+  wrapped in a timeout to prevent indefinite blocking on a stale peer.
+  *(2026-03-06 parallel review -- code quality)*
 
 ### Issues
 
@@ -114,6 +127,23 @@ and certificate renewal arms will be starved until the event burst subsides. A m
 causes the controller to consider the service dead and may trigger unnecessary failover.
 Consider moving `poll_service_event` to a lower-priority arm or adding a yield point after
 processing N consecutive service events.
+
+**[MEDIUM]** *(HA-10)* `src/ca.rs` -- CA rotation can leave offline services unable to
+reconnect if the old CA expires before they fetch the new one. If a service is offline when
+`CaBundleUpdated` is sent, it discovers the stale CA on its next connection attempt via
+`check_ca_staleness()`. However, if the old CA has already been revoked/expired by then, the
+TLS handshake fails with the old CA and the service cannot reach the controller to fetch the
+new one. The `--pki-addr` flag provides an escape hatch (fetch CA from a separate PKI endpoint
+using system trust), but services not configured with `--pki-addr` would need manual
+intervention.
+*(2026-03-06 parallel review -- HA)*
+
+**[LOW]** *(HA-3)* `src/event_loop.rs:85` -- Ping timer never initialized if
+`ServiceSettings` is never received (controller bug or partial connection). The agent would
+rely solely on TCP keepalive (30s + 9 probes x 10s = ~2min) to detect a dead connection
+where the controller accepted the TCP/TLS connection but never sent any application-level
+message.
+*(2026-03-06 parallel review -- HA)*
 
 ## Coding Standards
 
@@ -127,7 +157,12 @@ processing N consecutive service events.
 
 ### Issues
 
-No coding standards issues found.
+**[LOW]** `src/error.rs:76-92+169-186` -- Dual `#[from]` + `impl_report_conversion!` on
+multiple `EnrollmentError` variants. The `#[from]` attributes generate unused `From` impls when
+callers use `.context_to()?`. The inner enum `TlsError` also has `#[from]` variants
+(lines 13-17) paired with conversion closures at lines 181-186. Remove `#[from]` from all
+variants that have a corresponding `impl_report_conversion!`.
+*(2026-03-06 parallel review -- code quality, coding standards)*
 
 ## Extensibility
 

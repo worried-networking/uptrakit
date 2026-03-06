@@ -1,13 +1,15 @@
 # Code Review: uptrakit-cli
 
 - **Review date**: 2026-03-06
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture | security | quality | HA | standards |
   extensibility | tests | consistency | maintainability | database | crate-structure)
 - **Branch**: docs/codereview-backend
 
 ## Summary
 
-`uptrakit-cli` is the operator-facing CLI binary at ~11,343 LoC. It depends on
+`uptrakit-cli` is the operator-facing CLI binary at ~11,343 LoC (14,977 lines total including
+tests and generated code). It depends on
 `uptrakit-openapi-client` (not `uptrakit-web-api`) for a clean dependency boundary. All thirteen
 command namespaces (including the recently added batch update commands) are implemented with typed
 returns via the `HumanOutput` trait. The crate demonstrates good design decisions: `SecretString` at
@@ -383,7 +385,7 @@ is a step toward solving this but is not shared across modules.
 (~1,500 lines). This makes navigation, code review, and merge conflict resolution difficult.
 Recommended split: (1) move command enum definitions to `src/commands.rs` or `src/cli.rs`,
 (2) move parse tests to `tests/cli_parsing.rs`, (3) split the dispatch `match` into
-per-namespace helper functions.
+per-namespace helper functions. *Confirmed by parallel maintainability review (2026-03-06).*
 
 ---
 

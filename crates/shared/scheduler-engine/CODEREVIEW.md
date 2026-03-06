@@ -71,12 +71,27 @@ doc comment. Promote to a typed `Duration` constant with documentation, matching
   named constant with a doc comment.
 - `src/scheduler.rs` -- `release_all_claims` is called in the `cancelled()` arm of the shutdown
   loop, ensuring clean shutdown does not leave locks that block the 600 s stale window.
+- `src/scheduler.rs` -- Cancellation-aware with `biased` select priority. Spawned tasks observe
+  `CancellationToken` ensuring shutdown requests are honoured promptly and claims are released.
+  *(2026-03-06 parallel review -- HA)*
+- `src/claim.rs:161-173` -- `find_due_tasks` filters by known `ScheduledTaskType` variants via
+  `IS IN (...)`. Unknown task types (written by a newer controller during rolling upgrades) are
+  excluded at the query level rather than causing deserialization failures.
+  *(2026-03-06 parallel review -- HA)*
 
 ### Issues
 
 **[LOW]** `src/scheduler.rs` -- The shutdown sequence sends the shutdown signal before awaiting
 the in-progress task's `JoinHandle`. This creates a window where the task's `release_claim`
 DB write may be abandoned mid-execution. Await the handle before propagating shutdown.
+
+**[LOW]** *(HA-9)* `src/scheduler.rs:170-179` -- Race window between external scheduler
+disconnect and embedded scheduler noticing. The `external_scheduler_connected` flag is an
+`AtomicBool` set by the WebSocket connection handler. If the external scheduler disconnects
+between poll cycles (15-second default interval), there is up to a 15-second window where
+external tasks are neither executed by the (now-disconnected) external scheduler nor by the
+embedded scheduler (which still sees the flag as `true`).
+*(2026-03-06 parallel review -- HA)*
 
 ## Coding Standards
 
@@ -87,7 +102,11 @@ DB write may be abandoned mid-execution. Await the handle before propagating shu
 
 ### Issues
 
-No coding standards issues found.
+**[LOW]** `src/error.rs:9+18` -- Dual `#[from]` + `impl_report_conversion!` on
+`SchedulerError::Database`. The `#[from]` generates an unused `From<sea_orm::DbErr>` impl
+when callers use `.context_to()?`. Remove `#[from]` to align with the project's documented
+guidance.
+*(2026-03-06 parallel review -- code quality, coding standards)*
 
 ## Extensibility
 

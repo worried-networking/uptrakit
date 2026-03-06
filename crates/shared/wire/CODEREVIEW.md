@@ -234,6 +234,30 @@ needed), or all as `std::time::Duration` with `#[serde(with = "duration_seconds"
 type-safe). The `duration_seconds` module is already well-tested and available; the bare-u32
 fields are legacy.
 
+## Extensibility -- Additional Findings (2026-03-06)
+
+**[LOW]** No explicit protocol version handshake. The system relies entirely on the `Unknown`
+catch-all and `#[serde(default)]` for forward compatibility. This works well for additive
+changes but provides no mechanism for breaking changes (field type modifications, removed
+fields, semantic changes). The capability negotiation serves a similar purpose but tests feature
+availability rather than protocol version.
+*(2026-03-06 parallel review -- extensibility, architecture)*
+
+**[INFO]** Capability intersection excludes `Other` variants. When computing the agreed
+capability set, `Other` variants are dropped. If a newer agent advertises a capability the
+controller does not yet recognize, that capability is silently ignored. This is correct for
+safety but means capability negotiation is always constrained to the older peer's vocabulary.
+Consider logging a summary of dropped capabilities at `info` level so operators can see when a
+version mismatch is causing feature degradation.
+*(2026-03-06 parallel review -- architecture)*
+
+**[INFO]** `AttestationStatus` (in `crates/shared/types/src/plugin_types.rs`) is
+`#[non_exhaustive]` but lacks `Other(String)` for wire safety. `AttestationStatus` is sent in
+`ReleaseInfo` over the wire (`ExecuteUpdatePayload`). If new attestation status values are
+added by a newer controller, an older agent would fail to deserialize them. This is a latent
+deserialization risk.
+*(2026-03-06 parallel review -- extensibility)*
+
 ## Maintainability
 
 ### Strengths
@@ -275,4 +299,3 @@ without a lint warning. The comment at lines 102–106 explains that `Capability
 declares `type Err = std::convert::Infallible` directly, making the struct redundant. The fix
 is either to remove the struct or to annotate it `#[deprecated = "Use std::convert::Infallible
 directly"]` to signal intent to future readers.
-

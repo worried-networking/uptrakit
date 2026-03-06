@@ -1,6 +1,7 @@
 # Code Review: uptrakit-scheduler
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -83,6 +84,20 @@ a bounded task-pool (`tokio::task::JoinSet` with concurrency cap) for parallel e
 `sea_orm::DatabaseConnection` as a parameter, leaking the ORM type into what should be a clean
 notification interface. Replace with a boxed async closure or a simpler trait.
 
+**[MEDIUM]** (2026-03-06 parallel review, HA-9) Race window between external scheduler
+disconnect and embedded scheduler noticing. The `external_scheduler_connected` flag is an
+`AtomicBool` set by the WebSocket connection handler. If the external scheduler disconnects
+between poll cycles (15-second default interval), there is up to a 15-second window where
+external tasks are neither executed by the (now-disconnected) external scheduler nor by the
+embedded scheduler (which still sees the flag as `true`). In practice the flag is likely
+cleared promptly on disconnect, but the worst case is a single missed poll cycle.
+
+**[LOW]** (2026-03-06 parallel review, HA-2) Scheduler claim release on shutdown is
+best-effort. In `scheduler-engine/src/scheduler.rs:113-122`, the `release_all_claims` call
+during shutdown only logs a warning on failure. If the DB connection is lost at shutdown time,
+claims remain locked until the 10-minute stale claim recovery window passes. The stale claim
+recovery mechanism adequately handles this, but the window is longer than ideal.
+
 ## Coding Standards
 
 ### Strengths
@@ -96,6 +111,12 @@ notification interface. Replace with a boxed async closure or a simpler trait.
 module-private `const u64` inside `scheduler-engine/src/scheduler.rs` without documentation.
 Move to a centralized constants file as a typed `Duration` with a doc-comment, consistent with
 how all other timing constants in the workspace are handled.
+
+**[LOW]** (2026-03-06 parallel review) Inherited from `scheduler-engine` --
+`std::sync::Mutex` used in scheduler-engine tests at `scheduler.rs:539-540` for a
+`BlockingExecutor` struct. While technically in `#[cfg(test)]` code, the project standard
+mandates `parking_lot::Mutex` everywhere. The practical risk is low, but this is inconsistent
+with the stated convention.
 
 ## Extensibility
 

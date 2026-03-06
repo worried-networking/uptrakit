@@ -1,6 +1,7 @@
 # Code Review: uptrakit-agent
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -115,6 +116,42 @@ the most important correctness property owned by this crate (the machine-ID mism
 - `Signal::Hangup` maps to `LoopOutcome::Restart`, enabling zero-downtime certificate rotation.
 
 ### Issues
+
+**[CRITICAL]** (2026-03-06 parallel review, HA-11) No crash recovery for in-flight updates. If
+an agent crashes while executing an update (`execute_update` in `agent-core/src/update.rs`),
+the `update_history` row remains in `InProgress` status. There is no scheduled task or timeout
+mechanism that transitions stale `InProgress` updates to `Failed`. The partial unique index on
+`host_id` then blocks any new updates for that host until manual cleanup. **This is the most
+significant HA gap identified across the codebase.** Recommended mitigation: add a scheduled
+task (e.g., `StaleUpdateCleanup`) that transitions `InProgress` updates older than
+`TASK_EXECUTION_TIMEOUT` (2 hours) to `Failed` status.
+
+**[HIGH]** (2026-03-06 parallel review, HA-1) In-flight update executions are not drained on
+agent shutdown. The `on_shutdown` callback receives a `shutdown_timeout_seconds` parameter, but
+from the `ServiceHandler` trait definition in `lifecycle.rs:207-218`, there is no mechanism to
+wait for an in-flight `execute_update` to complete before the WebSocket closes. If an agent
+receives SIGTERM while executing an update, the update will be left in `InProgress` status in
+the database with no completion report.
+
+**[MEDIUM]** (2026-03-06 parallel review, HA-3) Ping timer never initialized if
+`ServiceSettings` is never received. Ping/pong is controller-driven (the agent sends pings on a
+timer set by `ServiceSettings`), but if `ServiceSettings` never arrives (controller bug or
+partial connection), the `ping_timer` stays `None` in `event_loop.rs:85`. The agent would rely
+solely on TCP keepalive (30s + 9 probes x 10s = ~2min) to detect a dead connection where the
+controller accepted the TCP/TLS connection but never sent any application-level message.
+
+**[MEDIUM]** (2026-03-06 parallel review, HA-13) No concurrency limit on parallel
+version-check subprocess invocations. In `batch_check_versions()` in
+`agent-core/src/version_check.rs:155-233`, all detect groups are run in parallel via
+`join_all()`. With many plugin groups, this could spawn many concurrent subprocess calls
+(`dpkg-query`, `brew info`, `npm list`, etc.) simultaneously, causing resource exhaustion. A
+`tokio::sync::Semaphore`-based concurrency limit (e.g., 4-8 parallel groups) would be prudent.
+
+**[LOW]** (2026-03-06 parallel review, HA-14) No agent-side backpressure for version check
+requests from the controller. If the controller sends a large batch of assignments while the
+agent is already processing a previous batch, both run concurrently. The controller-side
+scheduling (15-second poll interval) somewhat mitigates this, but under high load or with
+overlapping cron schedules, agents could be overwhelmed.
 
 **[LOW]** Inherited -- `uptrakit-service-sdk/src/lifecycle.rs:263-275` -- Enrollment retry does
 not catch transient network errors. DNS failures, TCP timeouts, and TLS handshake errors during

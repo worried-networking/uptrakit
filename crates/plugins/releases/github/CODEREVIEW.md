@@ -1,6 +1,7 @@
 # Code Review: uptrakit-plugin-releases-github
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -127,3 +128,9 @@ response with `x-ratelimit-remaining: 0`, 404 not-found, or invalid JSON body. T
 `uptrakit-openapi-client` and npm plugin both use `httpmock` for this pattern; this plugin
 should follow suit. A mock returning a fixture JSON array would verify the asset filter
 path, the date-parse path, and the pre-release exclusion path end-to-end.
+
+**[LOW]** `src/error.rs:46-68` -- 3 tests verify `#[error("...")]` Display formatting on
+`GitHubError` variants. These are `thiserror` Display format tests that test upstream crate
+behavior, not application logic, violating the project testing philosophy documented in
+`docs/development/testing.md`. They should be removed. See umbrella `plugins/CODEREVIEW.md`
+for the full cross-plugin finding. (Confirmed by Tests parallel review, finding 2.1.)

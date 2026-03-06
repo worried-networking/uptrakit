@@ -2,6 +2,8 @@
 
 - **Review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
+- **Parallel review date**: 2026-03-06
+- **Parallel reviewers**: 10 AI agents (architecture, security, code quality, tests, HA, database, coding standards, extensibility, consistency, maintainability)
 - **Branch**: docs/codereview-backend
 
 ## Summary
@@ -236,8 +238,14 @@ controller binary. Only `AppState`, `build_router`, `build_pki_router`, `api_not
 upward dependency is resolved via crate extraction. See per-crate review in
 `crates/ui/web-api/CODEREVIEW.md`.
 
-**[HIGH]** `crates/ui/web-api/src/app_state.rs:37-96` -- `AppState` has 26 public fields, most
-with `pub` visibility.
+**[HIGH]** `crates/ui/web-api/src/app_state.rs:37-96` -- `AppState` has 32+ public fields, most
+with `pub` visibility. The struct spans PKI, auth, database, notifications, extensions, OIDC
+stores, SSE broadcasters, audit logging, and configuration. Consider grouping related fields
+into sub-structs (e.g., `PkiState`, `AuthState`, `NotificationState`, `SseBroadcasters`) to
+improve readability and allow partial injection in tests. The builder has 32 optional fields
+with runtime `.ok_or()` checks -- a typestate builder pattern would catch missing fields at
+compile time. *Note: 2026-03-06 parallel review confirmed 32+ fields, up from 26 reported
+previously.*
 
 **[MEDIUM]** `crates/shared/db/src/entity/oidc_provider.rs:89` -- Soft-delete column named
 `deleted_at` instead of `deactivated_at`. All other 7 soft-deletable entities use
@@ -252,6 +260,26 @@ SQL in migration seed uses `CURRENT_TIMESTAMP` which behaves differently across 
 
 **[LOW]** `Cargo.toml` (workspace root) -- No `rust-version` MSRV declared. Without an MSRV
 declaration, edition-2024 features may silently break older toolchains.
+
+**[HIGH]** `crates/ui/web-api-queries/Cargo.toml:37` and
+`crates/ui/web-api-queries/src/queries/software_items.rs:8` -- `web-api-queries` depends on
+`uptrakit-plugin-infrastructure-registry`, which transitively pulls in all 11 plugin crates
+(GitHub, Docker, APT, Homebrew, npm, MAS, GitLab, Forgejo, Proxmox, PHS, Shell). The queries
+crate uses `PluginRegistry` only for `validate_config`, `mask_config_secrets`,
+`restore_config_secrets`, and `PluginOps` trait methods. Any change to any plugin crate triggers
+recompilation of the entire queries layer. Consider extracting the `PluginOps` trait into
+`plugin-infrastructure-core` and having `web-api-queries` depend only on `core`, not `registry`.
+The registry can provide the concrete implementation via `Arc<dyn PluginOps>` injection. The
+same concern applies to `scheduler-engine` (`Cargo.toml:30`), which depends on
+`plugin-infrastructure-registry` but only needs `create_plugin` and `validate_config` for
+`FetchReleasesExecutor`. *(2026-03-06 parallel review: architecture + maintainability agents)*
+
+**[MEDIUM]** `Cargo.toml` (workspace root) -- `sea-orm` and `sea-orm-migration` are pinned at
+`2.0.0-rc.35`, a release candidate. The project's entire data layer (29 migrations, 55 entity
+modules) depends on a pre-release ORM. Breaking changes between RC releases can require migration
+rework, and ecosystem libraries may not keep pace with RC API changes. The workspace-wide pin
+mitigates version skew, but a verification pass should be planned when SeaORM 2.0 stable ships.
+*(2026-03-06 parallel review: maintainability + architecture agents)*
 
 **[LOW]** `api_tokens` table -- No `expires_at` column. API tokens valid indefinitely once
 issued.
@@ -286,6 +314,26 @@ issued.
 **[MEDIUM]** `crates/shared/service-sdk/src/tls.rs` -- TOFU TLS verifier accepts any server
 certificate during initial CA fetch. MITM window during initial enrollment.
 
+**[LOW]** `crates/shared/types/src/network.rs` -- DNS rebinding risk in SSRF validation.
+`is_private_host()` validates the hostname/IP at configuration time, not at DNS resolution time.
+A DNS name that resolves to a public IP at validation time could be rebound to a private IP at
+request time. Mitigating factors: (1) webhook channel disables redirects; (2) reqwest's default
+DNS resolver does not re-resolve during the same connection; (3) blocked DNS patterns catch
+common rebinding names (`*.localhost`, `*.internal`, `*.local`). Residual risk: a custom domain
+that passes validation but later resolves to 127.0.0.1 at delivery time could reach internal
+services. Consider adding a custom DNS resolver or `reqwest` connection callback that validates
+the resolved IP address at connection time. *(2026-03-06 parallel review: security agent)*
+
+**[LOW]** `crates/shared/crypto/src/lib.rs:151-154,170` -- `DataKeyRing::new` uses `assert!` to
+validate that `active_key_id` is present in the `keys` map, and `active_key()` at line 170 uses
+`.expect("active key must exist in ring")`. The coding standard prohibits `unwrap()`, `expect()`,
+and `panic!()` in production code. While documented with `# Panics`, this is production crypto
+code where a startup failure should return `Result<Self, Report<CryptoError>>` rather than panic.
+The `assert!` compiles in release builds. Add a `MissingActiveKey` variant to `CryptoError` and
+convert `new` to return `Result`. The `active_key()` method can remain as-is since it is only
+reachable after `new` succeeds and the ring is immutable. *(2026-03-06 parallel review: code
+quality + security agents)*
+
 **[LOW]** `crates/shared/directories/src/lib.rs:829,837`
  -- Test-only `unsafe` uses unguarded
 `std::env::set_var` in potentially parallel tests. Data race under `cargo nextest`.
@@ -297,7 +345,8 @@ certificate during initial CA fetch. MITM window during initial enrollment.
 - Consistent `rootcause` + `thiserror` + `impl_report_conversion!` error handling across all 35
   crates. Every crate with errors defines a custom error type with `#[derive(Debug, Error)]`.
 - 2,363 test functions across 217 files with meaningful assertions and realistic scenarios.
-- Zero `#[allow(dead_code)]` annotations. Zero `#[allow(clippy::...)]` suppressions.
+- ~~Zero `#[allow(dead_code)]` annotations. Zero `#[allow(clippy::...)]` suppressions.~~
+  *Corrected 2026-03-06: 5 `#[allow()]` instances found; see Coding Standards Issues below.*
 - 76% of files have doc comments. All public traits, errors, and wire protocol types documented.
 - `Zeroizing` wrapper used consistently for key material in the crypto crate.
 - `CaKeyStore` `Debug` implementation manually redacts all key fields to `[REDACTED]` -- verified
@@ -316,8 +365,12 @@ certificate during initial CA fetch. MITM window during initial enrollment.
 
 ### Issues
 
-**[HIGH]** `crates/ui/cli/src/main.rs` -- At 4,793 lines (including ~1,500 lines of tests),
-this is the largest single file.
+**[HIGH]** `crates/ui/cli/src/main.rs` -- At 5,894 lines (including ~1,500 lines of tests),
+this is the largest single file. The file defines the entire CLI command tree (clap structs,
+subcommands, argument parsing, and dispatch). The commands themselves are extracted into
+`commands/` modules, but the top-level `main.rs` contains all clap enum definitions. Splitting
+the `Commands` enum and its subcommand enums into `args.rs` or `args/mod.rs` would improve
+readability. *(Updated 2026-03-06: line count increased from 4,793 to 5,894.)*
 
 **[HIGH]** Route handlers in `crates/ui/web-api/src/routes/` -- Multiple handlers have no
 inline unit tests. `hosts.rs`, `agents.rs`, `settings_ca.rs`, `settings_mqtt.rs`,
@@ -337,6 +390,34 @@ remain untested.
 
 **[MEDIUM]** `crates/shared/openapi-client/src/lib.rs:687-885` -- Retry-backoff tests do not
 verify delay durations. Eight tests assert only eventual success, not backoff timing.
+
+**[MEDIUM]** Dual `#[from]` + `impl_report_conversion!` in 5 files -- The error-handling docs
+state: "Having both `#[from]` and `impl_report_conversion!` on the same variant is dead code:
+the `From` impl is never called." When callers use `.context_to()?` (the prescribed pattern),
+only `impl_report_conversion!` is exercised. Remove `#[from]` from all variants that have a
+corresponding `impl_report_conversion!`. Affected files:
+  - `crates/shared/agent-core/src/error.rs:31+36-38` -- `AgentCoreError::Io`
+  - `crates/shared/scheduler-engine/src/error.rs:9+18` -- `SchedulerError::Database`
+  - `crates/shared/openapi-client/src/error.rs:8-11+37-40` -- `ClientError::Http` and `ClientError::Json`
+  - `crates/shared/crypto/src/lib.rs:63,72+89-92` -- `CryptoError::HexDecode` and `CryptoError::InvalidUtf8`
+  - `crates/shared/service-sdk/src/error.rs:76-92+169-186` -- `EnrollmentError` variants and `TlsError` variants
+*(2026-03-06 parallel review: code quality agent)*
+
+**[MEDIUM]** Missing `Validate` implementations on several request types -- The project standard
+states all HTTP request types implement `Validate` and route handlers call `.validate()`.
+Several request types lack `Validate` implementations:
+  - `UpdateHostRequest` (`web-api-types/src/hosts.rs`) -- no length/content validation on `friendly_name`. Route handler at `hosts.rs:119` does not call `body.validate()`.
+  - `UpdateSoftwareItemRequest` -- validation exists in the query layer (`EmptyName`), but not via the `Validate` trait at the API boundary.
+  - `UpdatePluginConfigRequest` -- no `Validate` impl; empty name could be set.
+  - `AssignHostsRequest` -- no `Validate` impl; no check for empty `host_assignments` or empty `plugins` per assignment.
+  - `TriggerUpdateRequest` -- no `Validate` impl; `to_version` could be an empty string.
+*(2026-03-06 parallel review: consistency agent)*
+
+**[LOW]** `crates/ui/web-api/src/routes/update_history.rs:169` -- DB error silently swallowed
+in SSE handler. `.all(tenant_db.db()).await.unwrap_or_default()` converts a database error
+into an empty vector. A transient DB failure would silently return zero output lines, making
+completed updates appear to have no output. Match on the result, log the DB error, and emit
+an SSE error event. *(2026-03-06 parallel review: code quality agent)*
 
 ## High Availability
 
@@ -396,6 +477,32 @@ retry uses fixed 1-second delay with no exponential backoff or jitter.~~
 **[MEDIUM]** `crates/shared/service-sdk/src/event_loop.rs:244-246` -- `tick().await` inside
 `handle_service_settings` suspends the event loop, blocking incoming WebSocket reads and pings.
 
+**[CRITICAL]** No crash recovery for in-flight updates (HA-11) -- If an agent crashes while
+executing an update (`execute_update` in `agent-core/src/update.rs`), the `update_history` row
+remains in `InProgress` status. There is no scheduled task or timeout mechanism that transitions
+stale `InProgress` updates to `Failed`. The partial unique index `uix_update_history_host_active`
+on `host_id` (from `m20260313_000001_per_host_update_locking.rs`) then blocks any new updates for
+that host until manual cleanup. This is the most significant HA gap identified. **Recommended
+mitigation:** Add a scheduled task (e.g., `StaleUpdateCleanup`) that transitions `InProgress`
+updates older than `TASK_EXECUTION_TIMEOUT` (e.g., 2 hours) to `Failed` status.
+*(2026-03-06 parallel review: HA agent)*
+
+**[HIGH]** In-flight update executions not drained on agent shutdown (HA-1) -- The `on_shutdown`
+callback in `ServiceHandler` (`service-sdk/src/lifecycle.rs:207-218`) receives a
+`shutdown_timeout_seconds` parameter, but there is no mechanism to wait for an in-flight
+`execute_update` to complete before the WebSocket closes. If an agent receives SIGTERM while
+executing an update, the update is left in `InProgress` status. Implement update execution
+draining in `on_shutdown()` by waiting (up to `shutdown_timeout_seconds`) for any in-flight
+update to complete before returning `LoopOutcome`.
+*(2026-03-06 parallel review: HA agent)*
+
+**[MEDIUM]** No concurrency limit on parallel version-check subprocess invocations per agent
+(HA-13) -- In `batch_check_versions()` at `agent-core/src/version_check.rs:155-233`, all detect
+groups are run in parallel via `join_all()`. With many plugin groups, this could spawn many
+concurrent subprocess calls (`dpkg-query`, `brew info`, `npm list`, etc.) simultaneously. A
+`tokio::sync::Semaphore` limiting concurrent invocations to 4-8 parallel groups would prevent
+resource exhaustion. *(2026-03-06 parallel review: HA agent)*
+
 ## Coding Standards
 
 ### Strengths
@@ -415,7 +522,29 @@ retry uses fixed 1-second delay with no exponential backoff or jitter.~~
 
 ### Issues
 
-No coding standards issues found.
+**[HIGH]** Four `#[cfg(not(feature = ...))]` violations -- The coding standard prohibits
+`#[cfg(not(feature = "X"))]` (additive-only feature flags). Four instances found:
+  1. `crates/core/controller/src/main.rs:94` -- `#[cfg(not(feature = "journald"))]` should use `cfg!()` macro pattern
+  2. `crates/core/controller/src/main.rs:304` -- `#[cfg(not(feature = "nats"))]`
+  3. `crates/ui/web-api/src/batch_progress_broadcaster.rs:114` -- `#[cfg(not(feature = "nats"))]`
+  4. `crates/ui/web-api/src/routes/settings_global_combined.rs:76` -- `#[cfg(not(feature = "nats"))]`
+
+All should be converted to the approved `cfg!()` macro pattern or `if cfg!(feature = "...")`
+blocks. While the current usage provides fallback values (not subtracting behavior), maintaining
+a bright-line rule against `#[cfg(not(...))]` prevents future misuse. These span controller and
+web-api crates, making this a cross-cutting concern.
+*(2026-03-06 parallel review: coding standards + architecture agents)*
+
+**[HIGH]** Five `#[allow()]` violations -- The standard states no Clippy suppression is approved
+(AGENTS.md invariant 13):
+  1. `crates/ui/web-api/src/extension_proxy.rs:114` -- `#[allow(clippy::too_many_arguments)]` on `invoke` method with 8 parameters. Use a parameter struct per the "Parameter Struct Pattern" standard.
+  2. `crates/plugins/package-managers/mas/src/plugin.rs:143` -- `#[allow(dead_code)]` on `config` field. Remove unused field or add a trivial accessor.
+  3. `crates/core/agent-ssh/src/remote_exec.rs:49,60` -- `#[allow(dead_code)]` on `PveGuestExecutor` struct and `new()`. Pre-committed dead code for Phase 6 should be behind a feature flag or removed until needed.
+  4. `crates/ui/web-api/src/test_harness/mod.rs:23` -- `#[allow(dead_code)]` on `TestApp` struct (unnecessary if fields are used by integration tests).
+  5. `crates/ui/web-api/src/routes/service_ws/protocol.rs:93` -- `#[allow(dead_code)]` on a `#[cfg(test)]` method.
+
+These span web-api, plugins, and agent-ssh crates. The previously reported "zero `#[allow()]`
+suppressions" was incorrect. *(2026-03-06 parallel review: coding standards agent)*
 
 ## Extensibility
 
@@ -443,6 +572,26 @@ No coding standards issues found.
 
 **[MEDIUM]** `crates/shared/service-sdk/src/lifecycle.rs:79,89` -- `ServiceHandler` is not
 object-safe due to associated constants. No documentation or `where Self: Sized` guards.
+
+**[MEDIUM]** `crates/shared/types/src/plugin_types.rs` -- `PluginType` requires 6 match-arm
+updates per new variant (`as_str()`, `display_name()`, `FromStr`, `From<String>`,
+`From<PluginType> for String`, `Serialize/Deserialize`). This is manual and error-prone. A
+declarative macro or strum-like derivation (adapted for the `Other(String)` pattern) could
+reduce this to a single declaration per variant. *(2026-03-06 parallel review: extensibility
+agent)*
+
+**[LOW]** `crates/shared/types/src/plugin_types.rs` -- `AttestationStatus` is
+`#[non_exhaustive]` but lacks `Other(String)` for wire safety. If attestation status values are
+added by a newer controller, an older agent would fail to deserialize them. Given that
+`AttestationStatus` is sent in `ReleaseInfo` over the wire (`ExecuteUpdatePayload`), this is
+a latent deserialization risk. *(2026-03-06 parallel review: extensibility agent)*
+
+**[LOW]** `crates/shared/audit-log/src/entry.rs` -- `AuditEntry` struct is not
+`#[non_exhaustive]`. Adding fields would require updating all constructors in consuming crates.
+Since the audit-log crate is used across the workspace, this is inconsistent with the project's
+conventions. Similarly, `AuditActorType` in the same file lacks `#[non_exhaustive]` and could
+gain new variants (e.g., `ServiceAccount`, `System`) as the auth model evolves.
+*(2026-03-06 parallel review: extensibility agent)*
 
 ## Crate Structure
 
@@ -833,3 +982,117 @@ These files demonstrate excellent test discipline:
 - `agent-ssh/host_ops.rs` (679 lines, 95.1%) - SSH host operations
 - `command/src/command.rs` (478 lines, 95.6%) - command executor
 - `update-hooks/src/lib.rs` (475 lines, 98.7%) - update hooks
+
+---
+
+## Cross-Cutting Test Quality Issues
+
+*(2026-03-06 parallel review: tests agent)*
+
+**[HIGH]** `thiserror` Display format tests violating testing philosophy -- Per
+`docs/development/testing.md`, tests that verify `thiserror` `#[error("...")]` Display output
+are upstream testing and should be removed. At least 22 such tests exist across plugin error
+modules, all constructing an error variant and asserting `to_string()` matches the format
+string. This tests `thiserror`'s formatting behavior, not application logic. Affected files:
+  - `crates/plugins/releases/docker/src/error.rs:60-138` (10 tests)
+  - `crates/plugins/releases/github/src/error.rs:46-68` (3 tests)
+  - `crates/plugins/releases/gitlab/src/error.rs:46-64` (3 tests)
+  - `crates/plugins/releases/forgejo/src/error.rs:46-64` (3 tests)
+  - `crates/plugins/infrastructure/proxmox/src/error.rs:44-54` (2 tests)
+  - Additional parse error Display tests in `web-api-types/src/notifications.rs:531-533,597-599,663-665`, `registration.rs:183`, `types/src/plugin_types.rs:545`, `plugin_role.rs:271`, `update_status.rs:134`
+
+Note: Tests for custom `Display` implementations that delegate to hand-written `as_str()` match
+arms (e.g., `PluginType::display()`, `AlertSeverity::display_all_variants()`) are internal logic
+tests and are correctly included.
+
+**[HIGH]** DB row backdating violates documented testing rules -- `docs/development/testing.md`
+states: "Do not backdate database rows directly (fragile: column rename silently breaks the test
+and does not exercise the production code path)." Multiple test modules use direct DB backdating:
+  - `crates/ui/web-api-auth/src/auth/oidc_state.rs:628-639,669-679,702-712,838,916` (at least 7 instances) -- `Expr::value(OffsetDateTime::now_utc() - time::Duration::hours(1))` to backdate `expires_at`
+  - `crates/ui/web-api-auth/src/auth/device_flow.rs:236-255` -- `expire_flow()` test helper backdates `expires_at`
+
+These stores (`OidcFlowStore`, `AccountLinkStore`, `OidcTokenExchangeStore`, `DeviceFlowStore`)
+use `OffsetDateTime::now_utc()` in production code without clock injection. The correct fix per
+the documented `with_clock` pattern (already implemented in `RateLimitStore`) is to add
+`with_clock` constructors and advance the injected clock in tests.
+
+**[MEDIUM]** 7 query modules totaling 2,659 lines have zero test coverage --
+`notifications.rs` (521 lines), `host_packages.rs` (793 lines), `services.rs` (412 lines),
+`plugin_configs.rs` (356 lines), `enrollment_tokens.rs` (206 lines), `scheduled_tasks.rs` (170
+lines), and `audit_logs.rs` (201 lines) in `crates/ui/web-api-queries/src/queries/` have no
+`#[cfg(test)]` module. Some may be exercised indirectly by integration tests, but
+`host_packages`, `audit_logs`, and `scheduled_tasks` have no corresponding integration test
+files either.
+
+**[MEDIUM]** `crates/ui/web-api-auth/src/settings_store.rs` (580 lines) has zero test coverage
+despite containing 7 `OffsetDateTime::now_utc()` calls and handling encrypted setting storage.
+
+---
+
+## Cross-Cutting Consistency Issues
+
+*(2026-03-06 parallel review: consistency agent)*
+
+**[LOW]** Error variant naming inconsistency for DB-wrapping variants across query error types:
+  - `ServiceQueryError::Db(sea_orm::DbErr)` at `services.rs:44`
+  - `SoftwareItemQueryError::Db(sea_orm::DbErr)` at `software_items.rs:61`
+  - `TriggerUpdateError::Database(sea_orm::DbErr)` at `update_triggers.rs:76`
+  - `PluginConfigError::Db(sea_orm::DbErr)` in `plugin_configs.rs`
+
+All should use one name (`Db` or `Database`) consistently. This is cosmetic but breaks
+`grep`-based consistency checks.
+
+**[LOW]** `Option` serialization inconsistency across response types --
+`ServiceResponse` uses `#[serde(skip_serializing_if = "Option::is_none")]` on optional fields
+(omitting keys when `None`), while `HostResponse` does NOT use `skip_serializing_if` on any
+`Option` fields (serializing as `null`). Within `SoftwareItemResponse`, some `Option` fields
+use `skip_serializing_if` and others do not. This means different response types have different
+JSON contracts for `None` values, which could confuse API consumers.
+
+**[LOW]** `hosts.rs` query module (`web-api-queries/src/queries/hosts.rs:101`) returns
+`Result<..., sea_orm::DbErr>` directly, deviating from the pattern used by every other query
+module which defines a domain-specific error enum wrapping `sea_orm::DbErr` in a
+`rootcause::Report`. The lack of a typed error prevents future extension (e.g., adding a
+`DuplicateHostname` variant) without a breaking change.
+
+---
+
+## Cross-Cutting Maintainability Issues
+
+*(2026-03-06 parallel review: maintainability agent)*
+
+**[MEDIUM]** No migration registration check -- There is no automated check that the migration
+vector in `crates/shared/db/src/migration/mod.rs` matches the file list in the directory. A
+future contributor could add a migration file but forget to register it. A compile-time or
+test-time assertion that all `m20*_*.rs` files in the directory appear in the
+`Migrator::migrations()` vector would prevent silent omission. Additionally, the migration vector
+does not follow chronological file-name order (documented and intentional for FK dependency
+reasons), but a comment at the top of the `migrations()` function would help prevent
+well-intentioned "cleanup" by new contributors.
+
+**[LOW]** `crates/shared/agent-core/src/version_check.rs` -- Detect/fetch retry logic duplicated.
+`detect_installed` (lines 421-481) and `fetch_latest` (lines 488-545) share nearly identical
+retry-with-backoff logic (~50 lines each). A shared generic retry helper would eliminate
+approximately 100 lines of duplicated control flow. Similarly, batch group processing (detect
+lines 157-233, fetch lines 281-376) follows the same structural pattern and could use a generic
+`run_batch_group` function.
+
+---
+
+## Cross-Cutting Database Issues
+
+*(2026-03-06 parallel review: database agent)*
+
+**[MEDIUM]** `crates/ui/web-api-queries/src/queries/host_packages.rs:645-776` --
+`promote_host_package` performs cross-function mutations without a wrapping transaction. It calls
+`si_queries::create_software_item` (own transaction), then `si_queries::assign_hosts` (another
+transaction), then `HostSoftwareItem::update_many` (line 739, no transaction). If the version
+copy at step 5 fails after assign_hosts succeeds, the software item exists without version data.
+These should be wrapped in a single encompassing transaction.
+
+**[LOW]** Multiple internal helper functions accept raw `DatabaseConnection` instead of
+`TenantDb` and rely on upstream callers to have already filtered by tenant. Defense-in-depth gaps:
+  - `software_items.rs:237,255,269,284` -- `load_item_hosts` queries `Host::find()` without tenant filter
+  - `software_items.rs:824` -- `assign_hosts` host existence check lacks tenant filter (user-provided `host_id`)
+  - `host_packages.rs:435,485` -- `find_or_create_host_package` omits `tenant_id` filter on `HostPackage::find()`
+These are mitigated by upstream tenant scoping but violate the defense-in-depth convention.

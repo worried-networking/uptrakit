@@ -1,6 +1,7 @@
 # Code Review: uptrakit-mqtt
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -103,6 +104,8 @@ computation, not manager-level lifecycle behavior.
 - `src/mqtt_client.rs:63-79` -- Clean shutdown publishes `offline` before disconnecting.
   Ordered sequence: publish offline, disconnect, wait.
 - `src/mqtt_client.rs:267-289` -- Shutdown abort path bounded by `SHUTDOWN_TIMEOUT` (5 seconds).
+  (Confirmed by 2026-03-06 parallel review as a HA strength: MQTT client shutdown is properly
+  bounded, preventing indefinite hangs during service teardown.)
 - `src/tenant_manager.rs:81-94` -- `shutdown_all` uses `FuturesUnordered` for parallel client
   shutdown.
 - `src/tenant_manager.rs:165-177` -- Config change detection uses hash comparison.
@@ -115,6 +118,20 @@ computation, not manager-level lifecycle behavior.
 **[HIGH]** `src/tenant_manager.rs:81-93` -- In `shutdown_all`, `self.clients` is consumed via
 `std::mem::take` at line 82, then `report_status` at line 90 uses `self.event_tx`. If the
 receiver has already been dropped, status reports are silently lost.
+
+**[MEDIUM]** (2026-03-06 parallel review, HA-12) 60-second stale lease threshold may cause
+premature lease revocation. The `STALE_AFTER_SECS = 60` in
+`scheduler-engine/src/executors/stale_lease_cleanup.rs:11` combined with the scheduler's poll
+interval means leases must heartbeat more frequently than once per minute. If an MQTT service
+experiences a brief network partition lasting 60+ seconds, its leases will be deleted and
+reassigned to another instance, causing unnecessary client churn and potential duplicate
+messages during the reassignment window.
+
+**[LOW]** (2026-03-06 parallel review, HA-8) Batch progress uses ephemeral NATS subjects (not
+JetStream). `batch_progress()` in `nats/src/subjects.rs:14-26` uses core NATS
+publish/subscribe without persistence. If a subscriber disconnects momentarily during a batch
+operation, progress events are lost. This is acceptable for UI live-streaming but means that
+cross-controller batch progress synchronization is lossy.
 
 ## Coding Standards
 

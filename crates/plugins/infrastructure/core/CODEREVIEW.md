@@ -1,6 +1,7 @@
 # Code Review: uptrakit-plugin-infrastructure-core
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -89,7 +90,20 @@ No coding standards issues found.
 
 **[LOW]** `src/types.rs:18-25` -- `PluginCapability` has `#[non_exhaustive]` but no
 `Other(String)` variant unlike its wire counterpart `Capability`. New capabilities require
-synchronized recompilation of all agents.
+synchronized recompilation of all agents. This is intentional: `PluginCapability` derives
+`Copy`, and adding `Other(String)` would break `Copy`. The design note in
+`crates/shared/types/src/plugin_capability.rs` explicitly acknowledges this closed-enum
+tradeoff for first-party-only plugins. However, if capabilities are ever persisted in the
+database or sent between controller and agent (they appear in discovery messages via
+`static_capabilities`), unknown capability strings will fail to deserialize. This is a latent
+forward-compatibility gap worth documenting as a future risk. (Confirmed by Extensibility
+parallel review.)
+
+**[LOW]** Plugin constructor signature is rigid: all plugins accept
+`(Config, Arc<dyn CommandExecutor>)`. Plugins that need additional dependencies (e.g., HTTP
+clients, database connections) must build them internally during `new()`. This is acceptable
+for first-party plugins but would be a barrier if the system ever needed dependency injection
+beyond command execution. (Noted in Extensibility parallel review.)
 
 ## Consistency
 

@@ -282,3 +282,53 @@ inserted, and invalid values are only caught at application-level parsing. Unlik
 namespace. If two `mqtt_client` rows for the same tenant share a `client_id`, the second
 connection attempt will evict the first from the broker, causing a disconnect loop. A unique
 constraint on `(tenant_id, client_id)` would prevent this misconfiguration at the DB layer.
+
+## Database -- Additional Findings (2026-03-06)
+
+### Migration Quality
+
+**[INFO]** `src/migration/mod.rs` -- Migration ordering in the `migrations()` vector does not
+match chronological file naming. For example, `m20260302_000002_host_packages` (file date 0302)
+appears after `m20260303_000001_global_settings` (file date 0303). This was intentional
+(migrations reordered to resolve FK dependencies) but a comment at the top of the `migrations()`
+function explaining this would prevent future contributors from "fixing" the order.
+*(2026-03-06 parallel review -- maintainability, database)*
+
+**[INFO]** No automated check that migration files are registered in `Migrator::migrations()`.
+A future contributor could add a migration file but forget to register it. A compile-time or
+test-time assertion that all `m20*` files in the directory appear in the vector would be a
+useful guardrail.
+*(2026-03-06 parallel review -- maintainability)*
+
+**[LOW]** `src/migration/m20260312_000001_system_enrollment_tokens.rs:81` -- Raw SQL
+`DELETE FROM global_settings WHERE key = 'system_services.enrollment_token'` could be expressed
+with `Query::delete()` from sea_query. Per the migration standards, plain DML should use the
+builder API when possible.
+*(2026-03-06 parallel review -- database)*
+
+### Tenant Isolation
+
+**[INFO]** Two entities with `tenant_id` are missing `TenantScoped` impl:
+`autodiscovery_ignore` (`src/entity/autodiscovery_ignore.rs:9`) and `mqtt_lease`
+(`src/entity/mqtt_lease.rs:9`). For `mqtt_lease`, direct `Entity::find()` calls are used
+extensively in `mqtt_lease_coordinator.rs` (19 occurrences). While some may be system-level
+operations, this bypasses the compile-time tenant isolation guardrail. At minimum,
+`autodiscovery_ignore` should implement `TenantScoped` since it is directly involved in
+per-tenant discovery operations.
+*(2026-03-06 parallel review -- architecture, database)*
+
+**[INFO]** `TenantDb::db()` is public. While documented as intentional (needed for raw
+`DatabaseConnection` operations), `tenant_db.db()` returns an unscoped connection. Any code
+path using `Entity::find().all(tenant_db.db())` silently bypasses tenant isolation. Consider
+renaming to `db_unscoped()` or adding a lint comment pattern to flag intentional usage.
+*(2026-03-06 parallel review -- architecture)*
+
+### Positive Findings (2026-03-06)
+
+- `src/migration/m20260302_000003_host_packages_has_update.rs` -- Exemplary migration: handles
+  all three partial-run states for crash recovery, uses the approved SQLite table-recreation
+  pattern, includes proper down migration, and adds covering indexes.
+  *(2026-03-06 parallel review -- database)*
+- 29 migrations with both `up()` and `down()`. Irreversible migrations (UUID repair, datetime
+  repair) have explicit no-op `down()` methods with comments.
+  *(2026-03-06 parallel review -- maintainability)*

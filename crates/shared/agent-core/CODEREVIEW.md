@@ -61,7 +61,40 @@ No security issues found.
 
 ### Issues
 
-No code quality issues found.
+**[MEDIUM]** `src/version_check.rs` -- Retry logic duplicated between `detect_installed`
+(lines 421-481) and `fetch_latest` (lines 488-545). Both share nearly identical
+retry-with-backoff logic: plugin creation, backoff loop, transient error check, sleep, and
+final error formatting. The only differences are the plugin method called and the return type
+shape. A shared generic retry helper (e.g., `retry_with_backoff<T>(|| plugin_op(), ...)`)
+would eliminate approximately 50 lines of duplicated control flow.
+*(2026-03-06 parallel review -- code quality)*
+
+**[MEDIUM]** `src/version_check.rs:157-233,281-376` -- Batch group processing has structural
+duplication. The detect group processing and fetch group processing follow the same structural
+pattern: build `BatchItem` vec, create plugin, call batch method, build result map, zip back
+to indices. A generic `run_batch_group` function parameterized on the batch item type and method
+would reduce ~200 lines to approximately 80.
+*(2026-03-06 parallel review -- code quality)*
+
+**[LOW]** `src/version_check.rs:77-82,398-403` -- Error merging pattern (combining
+`detect_error` and `fetch_error` into a single `Option<String>`) appears twice, once in
+`check_version` and once in `batch_check_versions`. Could be a shared helper function.
+*(2026-03-06 parallel review -- code quality)*
+
+**[LOW]** `src/version_check.rs:244-277` -- Plugin creation called twice per fetch group in
+`batch_check_versions`. Step 3 creates a plugin instance for `RefreshPackageIndex`, then Step 4
+creates another instance for `batch_fetch_releases`. The plugin for the same (type, config) is
+instantiated twice. Minor since plugin creation is typically lightweight, but caching the
+instance would avoid the redundant allocation.
+*(2026-03-06 parallel review -- code quality)*
+
+**[LOW]** `src/connection_context.rs:47-52` -- `ConnectionContext::apply_to_config` is a
+documented no-op "retained for forward compatibility." Called in 4 places in
+`version_check.rs`. The calls add visual noise and unnecessary `.clone()` operations on
+configs (since `apply_to_config` mutates nothing). The comment is clear enough to justify
+retention, but the unnecessary `effective_config.clone()` calls that precede each invocation
+could be deferred.
+*(2026-03-06 parallel review -- code quality)*
 
 ## High Availability
 
@@ -86,7 +119,18 @@ No high availability issues found.
 
 ### Issues
 
-No coding standards issues found.
+**[LOW]** `src/error.rs:31+36-38` -- Dual `#[from]` + `impl_report_conversion!` on
+`AgentCoreError::Io`. The error-handling docs state: "Having both `#[from]` and
+`impl_report_conversion!` on the same variant is dead code: the `From` impl is never called."
+When callers use `.context_to()?` (the prescribed pattern), only the `impl_report_conversion!`
+is exercised. Remove `#[from]` from `AgentCoreError::Io`.
+*(2026-03-06 parallel review -- code quality, coding standards)*
+
+**[LOW]** `src/error.rs:10,13` -- Error message casing inconsistency. `"Pre-update hook failed:
+{0}"` and `"Post-update hook failed: {0}"` use uppercase first letter. The error-handling docs
+prescribe lowercase first letter for `#[error("...")]` messages. Should be `"pre-update hook
+failed: {0}"` and `"post-update hook failed: {0}"`.
+*(2026-03-06 parallel review -- code quality)*
 
 ## Extensibility
 

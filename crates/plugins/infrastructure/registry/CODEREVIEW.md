@@ -1,6 +1,7 @@
 # Code Review: uptrakit-plugin-infrastructure-registry
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -29,7 +30,20 @@ dispatch table coverage.
 
 ### Issues
 
-No architectural issues found.
+**[MEDIUM]** `src/registry.rs` (approximately line 510) -- `handle_extension_action()` uses
+hardcoded string prefix routing (`extension_id.starts_with("proxmox.")`) to dispatch extension
+actions to specific plugins. This is a hidden coupling point that does not participate in the
+`register_plugins!` macro. Adding a new plugin with extension support requires manually adding
+an `if` branch here, which is easy to forget and contradicts the macro-driven design. The
+routing should be declarative (e.g., an extension prefix field in the `register_plugins!`
+invocation) or derived from plugin metadata. (Confirmed by Extensibility parallel review.)
+
+**[LOW]** All 11 plugin crates compile into the single `plugin-infrastructure-registry` crate
+unconditionally. There is no way to build a controller with only a subset of plugins. For
+deployments that only use GitHub + APT, the Docker, npm, Homebrew, Forgejo, GitLab, MAS, and
+Proxmox plugin code is still compiled and linked. Feature-gating individual plugins would
+reduce binary size and compile time for specialized deployments, though this adds configuration
+complexity. (Confirmed by Architecture parallel review.)
 
 ## Security and Safety
 
@@ -41,7 +55,13 @@ No architectural issues found.
 
 ### Issues
 
-No security issues found.
+**[LOW]** `src/registry.rs:17-39` -- `mask_secrets_for<T>` deserializes config from
+`serde_json::Value`, calls `with_secrets_masked()`, then re-serializes back to
+`serde_json::Value`. This double serialization happens on every API response that includes
+plugin configs. While functionally correct and ensuring masking never diverges from the
+serialized form, it is architecturally wasteful. A typed approach where `PluginOps` methods
+accept/return strongly-typed configs would avoid the round-trip. (Confirmed by Architecture
+parallel review.)
 
 ## Code Quality
 
@@ -94,6 +114,13 @@ No coding standards issues found.
 `Ok(())` for unknown plugin types. Asymmetry with config validation which fails for unknown
 types. A new plugin type added to the `PluginType` enum but not yet registered in
 `register_plugins!` would pass identifier validation without any actual check.
+
+**[MEDIUM]** `crates/shared/types/src/plugin_types.rs` -- `PluginType` has high modification
+cost: adding a single variant requires touching six separate `match` arms across `as_str()`,
+`display_name()`, `FromStr`, `From<String>`, `From<PluginType> for String`, and
+`Serialize/Deserialize`. This is manual and error-prone. A macro or strum-like derivation
+adapted for the `Other(String)` pattern could reduce this to a single declaration per variant.
+(Confirmed by Extensibility parallel review.)
 
 ## Consistency
 

@@ -1,6 +1,7 @@
 # Code Review: uptrakit-agent-ssh
 
 - **Review date**: 2026-03-02
+- **Parallel review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -224,6 +225,12 @@ blocked for 30 seconds each.
 While architecturally correct (local SQLite, not multi-tenant), a comment explaining why no
 tenant filter is needed would improve clarity.
 
+**[MEDIUM]** (2026-03-06 parallel review) `src/remote_exec.rs:49,60` -- `#[allow(dead_code)]`
+on `PveGuestExecutor` struct and `new()` method. The comment says "Used by bootstrap-proxmox
+action (Phase 6)." This is pre-committed dead code awaiting a future feature, which should
+either be behind a feature flag or removed until the feature is ready. The project standard
+states no Clippy suppression is approved in this codebase (AGENTS.md invariant 13).
+
 ## Extensibility
 
 ### Strengths
@@ -252,7 +259,8 @@ No extensibility issues found.
 - `src/ssh_pool.rs:235-310` -- `is_expired` extracted as a free function and tested with
   `#[tokio::test(start_paused = true)]` correctly: three tests use `tokio::time::advance`, which
   is a Tokio time API, justifying `start_paused`. Four additional non-time pool tests use plain
-  `#[tokio::test]` without `start_paused`, which is correct per AGENTS.md rule 1.
+  `#[tokio::test]` without `start_paused`, which is correct per AGENTS.md rule 1. (Confirmed by
+  2026-03-06 parallel review: `start_paused` compliance across agent-ssh is correct.)
 - `src/commands/bootstrap.rs:516-597` -- Command builder tests cover all nine steps of the
   provisioning sequence; injection prevention test verifies `user'; rm -rf /; echo '` is
   correctly escaped via `shell_escape`.
