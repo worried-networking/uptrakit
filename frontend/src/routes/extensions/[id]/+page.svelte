@@ -12,8 +12,12 @@
 	let extension: ExtensionResponse | undefined = $derived(getExtensions().find((e) => e.id === extensionId));
 
 	let selectedServiceId: string | undefined = $state(undefined);
+	let serviceLoaded: boolean = $state(false);
 
-	let needsServiceSelector = $derived(extension?.targeting === 'targeted' && (extension?.provider_count ?? 0) > 0);
+	let isTargeted = $derived(extension?.targeting === 'targeted');
+	// For targeted extensions, content should only render once we know the service state.
+	// ServiceSelector sets selectedServiceId automatically when there is exactly one provider.
+	let contentReady = $derived(!isTargeted || serviceLoaded);
 </script>
 
 <svelte:head>
@@ -31,12 +35,18 @@
 	<div class="space-y-4">
 		<div class="flex items-center justify-between">
 			<h1 class="h3">{extension.label}</h1>
-			{#if needsServiceSelector}
-				<ServiceSelector extensionId={extension.id} bind:selectedServiceId />
+			{#if isTargeted}
+				<ServiceSelector extensionId={extension.id} bind:selectedServiceId bind:loaded={serviceLoaded} />
 			{/if}
 		</div>
 
-		{#if extension.ui.type === 'data_table'}
+		{#if !contentReady}
+			<p class="py-8 text-center text-surface-500">Loading...</p>
+		{:else if isTargeted && !selectedServiceId}
+			<div class="card p-8 text-center">
+				<p class="text-surface-500">No service is currently connected for this extension.</p>
+			</div>
+		{:else if extension.ui.type === 'data_table'}
 			<SchemaTable extensionId={extension.id} ui={extension.ui} serviceId={selectedServiceId} />
 		{:else if extension.ui.type === 'form'}
 			<SchemaForm fields={extension.ui.fields} onsubmit={async () => {}} />

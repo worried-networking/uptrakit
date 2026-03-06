@@ -1003,3 +1003,15 @@ export async function invokeExtensionAction(
 	}
 	return resp.json();
 }
+
+/**
+ * Calls an arbitrary authenticated REST API endpoint and returns the parsed JSON response.
+ * Used by extension actions with `api_submit` to bypass the extension proxy.
+ */
+export function apiSubmitRequest(
+	path: string,
+	method: string,
+	body: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+	return request<Record<string, unknown>>(path, { method, body: JSON.stringify(body) });
+}

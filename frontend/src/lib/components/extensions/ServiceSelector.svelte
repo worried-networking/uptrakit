@@ -4,10 +4,12 @@
 
 	let {
 		extensionId,
-		selectedServiceId = $bindable(undefined)
+		selectedServiceId = $bindable(undefined),
+		loaded = $bindable(false)
 	}: {
 		extensionId: string;
 		selectedServiceId: string | undefined;
+		loaded: boolean;
 	} = $props();
 
 	let providers: ExtensionProviderInfo[] = $state([]);
@@ -20,11 +22,13 @@
 			}
 		} catch {
 			providers = [];
+		} finally {
+			loaded = true;
 		}
 	}
 
 	$effect(() => {
-		void load();
+		if (!loaded) void load();
 	});
 </script>
 

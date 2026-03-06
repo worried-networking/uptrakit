@@ -11,8 +11,11 @@ export enum Permission {
 	ManageGlobalSettings = 'manage_global_settings',
 	ViewSoftware = 'view_software',
 	ManageSoftware = 'manage_software',
+	ManageCommands = 'manage_commands',
 	ViewHosts = 'view_hosts',
 	ManageHosts = 'manage_hosts',
+	ViewNotifications = 'view_notifications',
+	ManageNotifications = 'manage_notifications',
 	ViewSystemServices = 'view_system_services',
 	ManageSystemServices = 'manage_system_services',
 	ViewAuditLogs = 'view_audit_logs',
@@ -811,6 +814,20 @@ export interface WizardStep {
 
 export type ActionUi = { type: 'form'; fields: FieldDef[] } | { type: 'wizard'; steps: WizardStep[] };
 
+/** Describes a direct REST API call as the submit target for an action form. */
+export interface ApiSubmitDef {
+	/** HTTP method, e.g. `"POST"`. */
+	method: string;
+	/** API path relative to the base URL, e.g. `"/api/v1/plugin-configs"`. */
+	path: string;
+	/** JSON body template — string leaves matching `{{field_name}}` or `{{field_name:coercion}}` are substituted. */
+	body: Record<string, unknown>;
+	/** Field in the JSON response containing the new item's ID (used for auto-selection). */
+	response_id_field?: string;
+	/** Field in the JSON response containing the new item's display label. */
+	response_label_field?: string;
+}
+
 export interface ActionDef {
 	action_id: string;
 	label: string;
@@ -818,6 +835,22 @@ export interface ActionDef {
 	permission?: string;
 	destructive: boolean;
 	timeout_seconds?: number;
+	/** When set, form submission calls this REST API endpoint directly instead of routing through the extension proxy. */
+	api_submit?: ApiSubmitDef;
+}
+
+export type ContextSelectorSource =
+	| { type: 'action'; action_id: string }
+	| { type: 'plugin_configs'; plugin_type: string };
+
+export interface ContextSelectorDef {
+	param_key: string;
+	label: string;
+	source: ContextSelectorSource;
+	/** When set, a "Add" button appears next to the selector. The action may call the extension proxy or a REST API directly (via `api_submit`). */
+	add_action?: ActionDef;
+	/** Message shown when no options exist and no add_action is set. */
+	empty_message?: string;
 }
 
 export type ExtensionUi =
@@ -827,6 +860,7 @@ export type ExtensionUi =
 			data_action: string;
 			row_actions: ActionDef[];
 			primary_actions: ActionDef[];
+			context_selector?: ContextSelectorDef;
 	  }
 	| { type: 'form'; fields: FieldDef[] }
 	| { type: 'key_value'; data_action: string }
