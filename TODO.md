@@ -2,8 +2,7 @@
 
 ## About This Document
 
-This roadmap tracks the development of Uptrakit, a self-hosted software update monitoring and management system. It organizes planned work into
-logical phases with clear priorities and dependencies.
+This roadmap tracks the development of Uptrakit, a self-hosted software update monitoring and management system.
 
 **Current Status**: Early MVP stage with foundational infrastructure in place.
 
@@ -15,1029 +14,804 @@ logical phases with clear priorities and dependencies.
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Development setup and contribution guidelines
 - [docs/README.md](docs/README.md) - Documentation catalogue
 
-**How to Use This Roadmap**:
-
-- Items are organized by priority and dependencies
-- Check off items as they're completed
-- Review regularly to adjust priorities based on project needs
-- Foundation items should generally be completed before moving to higher-level features
+**Legend**: Each pending item includes metadata —
+**Category** (e.g. security, UI, plugins), **Impact** (Low / Medium / High),
+**Effort** (Low / Medium / High).
 
 ______________________________________________________________________
 
-## Phase 1: Foundation Layer (Priority 1)
+## Phase 1: Foundation Layer — COMPLETE
 
-Essential infrastructure needed before feature development.
+All foundation work is done. Summary of what was delivered:
 
-### Database & Persistence
-
-- [x] Select and integrate database solution (SQLite for simplicity, PostgreSQL for production)
-- [x] Design core database schema
-  - [x] Hosts table (machine_id, hostname, OS info, architecture, last seen, linked agents)
-  - [x] Software items table (plugin config, package identifier, config override, host assignments)
-  - [x] ~~Available versions table~~ (removed; per-host latest version now tracked on `host_software_items`)
-  - [x] Update history table (host ID, software item ID, from/to version, status, output, actor_type, actor_id)
-  - [x] Scheduled checks table (software item ID, schedule, last run, next run)
-- [x] Implement database migrations system
-- [x] Create database access layer with connection pooling
-- [x] Add database initialization on controller startup
-
-### Core Data Models
-
-- [x] Define Rust structs for core entities
-  - [x] Host model with serialization
-  - [x] SoftwareItem model with plugin-specific fields
-  - [x] Version model with comparison and ordering
-  - [x] UpdateRecord model for tracking history
-- [x] Implement version comparison logic (semver, custom formats)
-- [x] Create repositories/DAOs for each entity
-- [x] Add validation logic for data models
-- [x] Store JSON encoded strings as settings values
-
-### User Authentication & Authorization
-
-- [x] Password-based authentication with Argon2id hashing
-  - [x] User model (email, first/last name, password hash, active status)
-  - [x] Argon2id with OWASP-recommended parameters (19 MiB, 2 iterations)
-  - [x] Stateful session tokens (SHA-256 hashed, 7-day expiry, 30-min sliding window)
-  - [x] Bearer token authentication via Authorization header
-- [x] RBAC foundation
-  - [x] Roles and permissions tables with seeded admin role
-  - [x] User-role and role-permission junction tables
-  - [x] First registered user automatically gets admin role
-  - [x] Permission enum (9 variants: `ViewSettings`, `ManageSettings`, `ViewAgents`, `ManageAgents`,
-    `ManageGlobalSettings`, `ViewSoftware`, `ManageSoftware`, `ViewHosts`, `ManageHosts`)
-  - [x] `admin` role (all permissions) and `user` role (`view_agents` only)
-  - [x] JWT and API responses expose resolved permissions instead of raw role names
-  - [x] Permission-based authorization checks on all protected routes
-  - [x] Non-first users automatically assigned `user` role
-- [x] Auth API endpoints
-  - [x] POST /api/v1/auth/register
-  - [x] POST /api/v1/auth/login
-  - [x] POST /api/v1/auth/logout
-  - [x] GET /api/v1/auth/me
-- [x] Auth middleware (require_auth with user injection)
-- [x] OpenAPI documentation with Swagger UI (optional feature flag)
-- [x] Full RBAC permission checking in middleware
-- [x] OIDC integration
-- [x] Rate limiting on login endpoint
-- [x] Audit logging for security events
-- [x] Use JWT token
-
-### Agent Authentication & Security
-
-- [x] Implement mTLS for agent-controller communication
-  - [x] Generate client certificates for agents during enrollment
-  - [x] Add certificate-based authentication middleware
-  - [x] Extract agent identity from client certificates
-  - [x] Implement certificate validation on controller
-- [x] CA certificate persistence on agents
-  - [x] Secure storage location for CA certificate
-  - [x] CA certificate pinning to prevent MITM attacks
-  - [x] Verification of controller certificate against pinned CA
-  - [ ] Fallback handling for CA certificate issues
-- [x] CA rotation support
-  - [x] Dual-CA validation (active + previous CA in trust bundle)
-  - [x] CA bundle update endpoint (`GET /api/v1/pki/ca.crt` returns full bundle)
-  - [x] Agent CA update workflow (via `CaBundleUpdated` wire message + hash-based staleness check)
-  - [x] Rotation state tracking in database (`ca_fingerprint` column on `agent_certificates` and `service_certificates`)
-  - [x] Automatic rotation when managed CA enters 6-month expiry window
-  - [x] Background rotation task (24h check interval)
-  - [x] Partitioned CRL generation (each CA signs its own CRL)
-- [x] Certificate lifecycle management
-  - [x] Certificate expiration monitoring (system alerts API + admin UI banners)
-  - [x] Automated certificate renewal for agents
-  - [x] Server certificate auto-renewal (90-day lifetime, 30-day renewal window)
-  - [x] Manual server cert renewal endpoint (`POST /api/v1/settings/renew-server-certificate`)
-  - [x] Certificate revocation mechanism (CRL)
-  - [x] Revoked certificate checking on each connection
-
-### Wire Protocol
-
-- [x] Design message types beyond ping/pong
-  - [x] Agent registration message
-  - [x] Software inventory report message (DiscoveryResults)
-  - [x] Version check request/response
-  - [x] Update command message (ExecuteUpdate, UpdateStarted, UpdateOutput, UpdateResult)
-  - [x] Status update message (VersionCheckResults, UpdateResult)
-  - [x] Error reporting message
-- [x] Implement message serialization/deserialization
-- [x] Add message routing in controller
-- [x] Implement message handling in agent
-- [x] Add protocol versioning for future compatibility (`CURRENT_PROTOCOL_VERSION`, `protocol_version` on all envelopes)
-
-### Agent Registration & Discovery
-
-- [x] Design agent enrollment flow
-  - [x] Initial registration request from agent
-  - [x] Controller approval mechanism (auto or manual)
-  - [x] Client certificate issuance
-  - [x] Agent ID assignment
-- [x] Implement agent registration endpoint
-- [x] Create agent inventory tracking (ReportHosts, VersionCheckResults, DiscoveryResults)
-- [x] Add agent heartbeat mechanism
-- [x] Implement agent status monitoring (online/offline)
-- [x] Add agent metadata collection (OS, architecture, machine_id via HostInfo)
-
-### Plugin Trait System
-
-- [x] Refine Plugin trait definition
-  - [x] Methods for version detection
-  - [x] Methods for version checking
-  - [x] Methods for update execution
-  - [x] Error handling patterns
-  - [x] `detect_host_compatibility()` method — `DetectHostCompatibility` capability
-  - [x] `pre_update_hook()` method — `PreUpdateHook` capability (can abort update)
-  - [x] `post_update_hook()` method — `PostUpdateHook` capability (non-fatal)
-- [x] Create plugin registry system (`PluginRegistry`, `register_plugins!` macro)
-- [x] Implement plugin configuration mechanism (`plugin_configs` table, `plugin_type` column)
-- [x] Add plugin capability discovery (`PluginCapability` enum, 5 variants)
-- [x] Design plugin-specific configuration storage
-- [x] Rename: `Provider` → `Plugin`, `ProviderType` → `PluginType`, `ProviderCapability` → `PluginCapability`
-- [x] Rename: `crates/providers/*` → `crates/plugins/*`
-- [x] Rename: DB table `provider_configs` → `plugin_configs`, column `provider_type` → `plugin_type`
-- [x] Rename: HTTP routes `/api/v1/provider-configs` → `/api/v1/plugin-configs`
-- [x] Rename: CLI subcommand `provider-configs` → `plugin-configs`
-- [x] Rename: Wire protocol fields `provider_type` → `plugin_type`, `provider_config` → `plugin_config`
-- [x] AptPlugin: implement `DetectHostCompatibility` (checks `which apt-get`)
-- [x] AptPlugin: implement `PostUpdateHook` (checks `/var/run/reboot-required`)
-- [x] HomebrewPlugin: implement `DetectHostCompatibility` (checks `which brew`)
-
-### Role-Based Plugin Assignment
-
-- [x] `host_software_item_plugins` table with per-role plugin assignments (`detect_version`, `fetch_releases`, `execute_update`)
-- [x] `PluginRole` enum in `crates/shared/types/src/plugin_role.rs` with wire forward-compatibility (`Other(String)`)
-- [x] `execution_site` column (`auto` | `agent` | `controller`) on plugin assignments
-- [x] `ControllerSideFetchReleases` plugin capability for controller-side fetch_releases (GitHub, Docker)
-- [x] Per-host latest version tracking on `host_software_items` (replaced centralised `available_versions` table)
-- [x] Controller-side `fetch_releases` execution for API-based plugins
-- [x] Agent-side `fetch_releases` for local package-index plugins (APT, Homebrew)
+- **Database & Persistence** — SQLite + PostgreSQL, SeaORM migrations, connection pooling, JSON
+  settings store.
+- **Core Data Models** — Host, SoftwareItem, Version (semver + custom), UpdateRecord, validation,
+  repositories/DAOs.
+- **User Authentication & Authorization** — Argon2id passwords, JWT + session tokens, full RBAC
+  (9 permissions, admin/user roles), OIDC, rate limiting, audit logging. Auth API (register, login,
+  logout, me). OpenAPI/Swagger docs.
+- **Agent Authentication & Security** — mTLS with auto-issued client certificates, CA pinning,
+  dual-CA rotation (6-month window, 24h check), partitioned CRLs, OCSP, certificate expiration
+  monitoring, automated renewal (agent + server certs), revocation checking.
+- **Wire Protocol** — Full message set (registration, discovery, version check, update commands,
+  status, errors), serialization, routing, protocol versioning.
+- **Agent Registration & Discovery** — Enrollment flow (auto/manual approval), certificate
+  issuance, inventory tracking, heartbeat, status monitoring, metadata collection.
+- **Plugin Trait System** — Plugin trait (detect, check, update, pre/post hooks, host
+  compatibility), `PluginRegistry` + `register_plugins!` macro, capability discovery
+  (`PluginCapability`, 5 variants), configuration storage (`plugin_configs` table).
+- **Role-Based Plugin Assignment** — `host_software_item_plugins` table with per-role assignments
+  (`detect_version`, `fetch_releases`, `execute_update`), `execution_site` column, per-host latest
+  version tracking, controller-side and agent-side `fetch_releases`.
 
 ### Plugin System: Follow-up Items
 
 - [ ] Wire compatibility detection results to controller for dashboard display
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Low-Medium
+  - Compatibility detection runs on agents but results are not yet sent to the controller. Wire a
+    new message type or extend `DiscoveryResults` so the dashboard can show per-host plugin
+    compatibility status.
 - [ ] Add `RebootRequired` wire message / post-update event system for APT plugin
+  - **Category**: Plugins / Wire | **Impact**: Medium | **Effort**: Medium
+  - APT's `PostUpdateHook` already detects `/var/run/reboot-required`, but the result stays local.
+    Add a wire message so the controller can display reboot-needed status and optionally trigger
+    notifications.
 - [ ] "Run arbitrary commands" plugin type (custom script plugin)
-- [x] Plugin system: role-based multi-plugin assignment per host-software-item pair (replaces monolithic plugin reference)
+  - **Category**: Plugins | **Impact**: High | **Effort**: Medium
+  - Allow users to define custom version-detect / update scripts without writing a Rust plugin.
+    Needs a script definition format, output parsing conventions, and sandboxing considerations.
+    The `CommandExecutor` trait already abstracts execution.
 - [ ] Plugin compatibility status visible in Hosts UI per host
+  - **Category**: UI / Plugins | **Impact**: Medium | **Effort**: Low-Medium
+  - Once compatibility results are wired to the controller (above), add a column or badge to the
+    Hosts page showing which plugins are compatible on each host.
 
 ______________________________________________________________________
 
-## Phase 2: Core Features (Priority 2)
+## Phase 2: Core Features
 
 Main functionality that delivers the core value proposition.
 
-### Version Detection (Agent-Side)
+### Completed
 
-- [ ] Implement plugin-specific version detection
-  - [x] GitHub releases plugin (controller-side `fetch_releases`)
-  - [x] System package managers (APT `detect_installed_version` + `fetch_releases`; Homebrew; npm)
-  - [x] Docker container plugin
-  - [x] Proxmox Helper Scripts plugin
-  - [ ] yum/dnf, pacman plugins (not yet implemented)
-- [ ] Add caching for detected versions
-- [x] Implement periodic inventory scanning (scheduler: `DetectVersion`, `DiscoverHostPackages` executors)
-- [x] Send version inventory to controller (`VersionCheckResults` and `DiscoveryResults` wire messages)
-- [x] Handle detection errors gracefully (errors reported per-item via VersionCheckResult.error field)
+- **Version Detection (Agent-Side)** — GitHub releases, APT, Homebrew, npm, Docker, Proxmox Helper
+  Scripts plugins all implemented. Periodic inventory scanning via scheduler. Error reporting
+  per-item.
+- **Version Checking (Controller-Side)** — All plugin-specific checking implemented (GitHub,
+  APT/Homebrew/npm, Docker registry with semver + digest, Proxmox). Version comparison logic, API
+  rate-limit handling.
+- **Plugin Implementations** — GitHub releases (assets, release notes, pre-releases), Docker
+  (semver tag filtering, OCI auth, multi-registry), Proxmox Helper Scripts (detection, update,
+  discovery).
+- **Update Execution** — State machine (Pending → In Progress → Completed/Failed), progress
+  reporting (UpdateOutput streaming), update logging, timeout handling.
+- **Scheduling System** — Cron expressions, schedule persistence, background task runner, shared
+  `uptrakit-scheduler-engine` crate, external scheduler binary with service enrollment, embedded
+  scheduler feature, credential delivery, shared NATS crate.
+- **Software Autodiscovery** — Event-driven trigger, `discovery_state` field, ignore table,
+  `DiscoverSoftware` / `DiscoveryResults` wire messages, agent-core shared implementation,
+  plugin-driven `DiscoveryTarget`, REST API (approve, discover, ignore), version check excludes
+  pending items.
 
-### Version Checking (Controller-Side)
+### Pending
 
-- [x] Implement plugin-specific version checking
-  - [x] GitHub releases API integration
-  - [x] Package repository API integration (APT via `apt-cache madison`, Homebrew via `brew info --json`, npm via registry API)
-  - [x] Docker registry API integration (semver tag filtering + digest tracking)
-  - [x] Proxmox Helper Scripts repository check
-- [x] Add version comparison logic per plugin
-- [ ] Implement channel support (stable, beta, nightly)
-- [ ] Cache latest version responses with TTL (per-host latest version is now on `host_software_items`)
-- [x] Handle API rate limiting
-- [x] Add retry logic for failed checks
-
-### Plugin Implementations
-
-- [x] Complete GitHub releases plugin
-  - [x] Asset detection and selection
-  - [x] Release notes extraction
-  - [x] Pre-release handling
-- [ ] Implement Proxmox Helper Scripts plugin
-  - [x] Script version detection
-  - [x] Script update mechanism
-  - [x] Software discovery (`discover_software()`)
-  - [ ] Script integrity verification (deferred)
-- [ ] Add system package manager plugin
-  - [ ] Support for multiple package managers
-  - [ ] Package dependency handling
-- [x] Create Docker container plugin
-  - [x] Image version checking (semver tag filtering + digest change detection)
-  - [x] Registry authentication (anonymous, basic, bearer with OCI token flow)
-  - [x] Multi-registry support (Docker Hub, GHCR, any OCI-compliant registry)
-
-### Update Execution
-
-- [ ] Design update execution framework
-  - [x] Pre-update hooks (from plugin config + config_override)
-  - [x] Update steps execution (plugin-specific via ExecuteUpdate message)
-  - [x] Post-update hooks (from plugin config + config_override)
-  - [ ] Rollback triggers
-- [x] Implement update state machine
-  - [x] Pending → In Progress → Completed/Failed
-  - [x] State persistence (update_history table)
-- [x] Add update progress reporting (UpdateOutput streaming)
-- [x] Implement update logging (output accumulated in update_history)
-- [ ] Handle update failures and retries (retry logic not implemented; relies on manual re-trigger)
-- [x] Add update timeout handling (configurable per-update)
-- [ ] Support updating agent and controller
-
-### Scheduling System
-
-- [x] Design scheduling architecture
-  - [x] Cron-like schedule expressions
-  - [x] Next run time calculation
-  - [x] Schedule persistence
-- [x] Implement scheduler service
-  - [x] Background task runner
-  - [x] Scheduled check execution
-  - [x] Schedule conflict resolution
-- [x] Extract scheduler engine into shared crate (`uptrakit-scheduler-engine`)
-- [x] External scheduler binary (`uptrakit-scheduler`) with service enrollment
-- [x] Embedded scheduler feature (`embedded-scheduler`) with internal/external task deferral on external connect
-- [x] Credential delivery (`ServiceCredentials`) for services with `database_access`, `nats_access`, `master_key_access`
-- [x] Shared NATS crate (`uptrakit-nats`) for envelope, subjects, connection
-- [ ] Add per-software-item schedule configuration
-- [x] Implement global schedule defaults
-- [x] Add schedule enable/disable functionality
-- [x] Support manual trigger overrides
-
-### Software Autodiscovery
-
-- [x] Design autodiscovery architecture
-  - [x] Event-driven trigger on new host registration
-  - [x] `discovery_state` field on `software_items` (`pending` / `approved` / null)
-  - [x] `autodiscovery_ignores` table for permanent suppression
-  - [x] Partial unique index on `plugin_configs(tenant_id, name)` for race-safe auto-creation
-- [x] Implement `DiscoverSoftware` / `DiscoveryResults` wire messages
-- [x] Agent-core `handle_discover_software()` shared implementation
-- [x] Regular agent and SSH agent support for `DiscoverSoftware`
-- [x] Controller `DiscoveryResults` handler with auto-creation of `PluginConfig` records
-- [x] Plugin capability check via `PluginCapability::DiscoverLocalSoftware`
-- [x] Homebrew: discover all (formulae + casks) when `package_type = None`; emit `DiscoveryTarget` per item
-- [x] Proxmox Helper Scripts: move synthesis responsibility into plugins via `DiscoveryTarget`
-  - [x] Plugin discovery response declares final tracking target (`DiscoveryTarget` with plugin type, config, roles)
-  - [x] Web API autodiscovery consumer processes targets generically instead of plugin-specific synthesis logic
-  - [x] Removed controller-side PHS-specific synthesis branching (`process_phs_results`, `process_homebrew_default`)
-- [x] REST API for autodiscovery
-  - [x] `POST /api/v1/software-items/{id}/approve`
-  - [x] `POST /api/v1/hosts/{id}/discover`
-  - [x] `DELETE /api/v1/hosts/{id}/discovered`
-  - [x] `POST /api/v1/plugin-configs/{id}/discover`
-  - [x] `DELETE /api/v1/plugin-configs/{id}/discovered`
-  - [x] `GET /api/v1/autodiscovery/ignores`
-  - [x] `POST /api/v1/autodiscovery/ignores`
-  - [x] `DELETE /api/v1/autodiscovery/ignores/{id}`
-  - [x] `DELETE /api/v1/software-items/{id}?ignore=true`
-- [x] Version check scheduler excludes `pending` items
+- [ ] yum/dnf and pacman plugins
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
+  - Add package-manager plugins for Red Hat / Fedora (yum/dnf) and Arch Linux (pacman). Follow the
+    existing APT plugin pattern: `detect_installed_version`, `fetch_releases`,
+    `execute_update`, `DetectHostCompatibility`.
+- [ ] Version caching with TTL
+  - **Category**: Core / Performance | **Impact**: Medium | **Effort**: Low-Medium
+  - Cache `fetch_releases` responses with a configurable TTL to reduce API calls and speed up
+    repeated checks. Per-host latest version is already on `host_software_items`; this adds
+    upstream response caching.
+- [ ] Channel support (stable, beta, nightly)
+  - **Category**: Core | **Impact**: Medium | **Effort**: Medium-High
+  - Allow software items to track a specific release channel. Affects version comparison,
+    `fetch_releases` filtering, and UI/API.
+- [ ] Retry logic for failed version checks
+  - **Category**: Core / Reliability | **Impact**: Medium | **Effort**: Low-Medium
+  - Automatic retry with exponential backoff when `fetch_releases` or `detect_version` fails.
+    The `uptrakit-backoff` crate already exists. Currently relies on the next scheduled run.
+- [ ] Proxmox Helper Scripts: script integrity verification
+  - **Category**: Plugins / Security | **Impact**: Medium | **Effort**: Medium
+  - Verify script checksums or signatures before execution to prevent tampered update scripts.
+- [ ] Update rollback triggers
+  - **Category**: Core | **Impact**: High | **Effort**: High
+  - Define conditions under which an update is automatically rolled back (exit code, health check
+    failure). Requires snapshot/rollback mechanism (see Phase 6).
+- [ ] Update failure retries
+  - **Category**: Core / Reliability | **Impact**: Medium | **Effort**: Low-Medium
+  - Automatic retry for transient update failures with configurable max attempts. Currently
+    requires manual re-trigger.
+- [ ] Self-update: support updating agent and controller binaries
+  - **Category**: Core | **Impact**: High | **Effort**: High
+  - Allow the system to update its own binaries. Needs careful orchestration to avoid downtime
+    (graceful restart infrastructure already exists).
 
 ### Concurrency Control
 
-- [x] Implement update locking mechanism
-  - [x] Per-host update locks — combined cross-table check (`update_history` + `host_package_update_history`),
-        partial unique index on `update_history(host_id) WHERE status IN ('pending','in_progress')`,
-        and CAS promotion for batch sequential dispatch
-  - [ ] Global concurrent update limits
-  - [ ] Lock timeout handling
-- [ ] Add update queue management
-- [ ] Implement priority queue for updates
-- [x] Handle concurrent version checks efficiently
-- [ ] Add resource-based throttling
+Completed: per-host update locks (cross-table check, partial unique index, CAS promotion),
+concurrent version check handling.
 
-### User convenience
+- [ ] Global concurrent update limits
+  - **Category**: Core / Reliability | **Impact**: Medium | **Effort**: Medium
+  - Cap the total number of simultaneous updates across all hosts to prevent resource exhaustion
+    on the controller and network.
+- [ ] Lock timeout handling
+  - **Category**: Core / Reliability | **Impact**: Medium | **Effort**: Low-Medium
+  - Automatically release stale update locks after a configurable timeout to prevent deadlocks
+    from crashed agents or lost connections.
+- [ ] Update queue management
+  - **Category**: Core | **Impact**: Medium | **Effort**: Medium
+  - Queue updates that exceed concurrency limits and dispatch them in order as slots free up.
+- [ ] Priority queue for updates
+  - **Category**: Core | **Impact**: Low-Medium | **Effort**: Medium
+  - Allow security updates or user-flagged items to jump the queue ahead of routine updates.
+- [ ] Resource-based throttling
+  - **Category**: Core / Performance | **Impact**: Low-Medium | **Effort**: Medium
+  - Throttle updates based on host CPU/memory/disk to avoid overloading targets during updates.
 
-- [x] Reverse proxy support and documentation
-  - [x] Agent identity forwarded via headers (info + PEM) with CA verification
-  - [x] Header stripping for non-proxy clients
-  - [x] External base URL resolution for OIDC/device auth redirects
-  - [x] Agent-id-only lookup when cert serial unavailable
-  - [x] Deployment guides for Traefik, Caddy, Nginx, NPM, Envoy, HAProxy
-- [x] SIGHUP support for graceful restart (agent and MQTT service exit cleanly for external restart)
-- [ ] SIGHUP support for graceful reloading (controller)
-  - [ ] All possible settings are reloaded
-  - [ ] Agents should not be disconnected during reload (but there should be a "please reconnect" message)
-- [x] Add support for a graceful restart (via `SO_REUSEPORT`)
-  - [x] `--reuseport` flag enables `SO_REUSEPORT` socket option
-  - [x] `--takeover-from <PID>` signals old process to begin graceful shutdown
-  - [x] `--shutdown-timeout-secs` configures drain timeout (default: 30)
-  - [x] `ServerRestarting` wire message notifies agents (scattered to avoid thundering herd)
-  - [x] Background tasks support `CancellationToken` for clean shutdown
-- [x] Embedded frontend (`embed-frontend` feature): compile the SvelteKit SPA into the controller binary via `rust-embed` for single-binary deployment
-- [ ] Certificate renewal on the controller through API must enable that certificate for new connections
+### User Convenience
 
-______________________________________________________________________
+Completed: reverse proxy support (Traefik, Caddy, Nginx, NPM, Envoy, HAProxy), SIGHUP agent/MQTT
+exit, graceful restart (`SO_REUSEPORT`, `--takeover-from`, `ServerRestarting` message), embedded
+frontend (`embed-frontend`).
 
-## Phase 3: User Interfaces (Priority 3)
-
-Ways users interact with the system.
-
-### Web API
-
-- [ ] Expand REST API beyond MQTT connection status
-  - [x] List hosts endpoint
-  - [x] List software items endpoint
-  - [x] Get software item details endpoint
-  - [x] Trigger version check endpoint (per-item and per-item-per-host)
-  - [x] Trigger update endpoint (POST /api/v1/software-items/{id}/hosts/{host_id}/update)
-  - [x] Get update history endpoint
-  - [ ] Get system status endpoint (beyond `/healthz`)
-- [x] Add API authentication
-- [x] Implement API rate limiting
-- [x] Add API documentation (OpenAPI/Swagger)
-- [x] Add WebSocket endpoint for real-time updates
-
-### Web UI
-
-- [x] Create basic web UI framework
-  - [x] Choose framework (Svelte, React, Vue)
-  - [x] Set up build system
-  - [x] Implement API client
-- [ ] Build dashboard view
-  - [ ] System overview statistics
-  - [ ] Recent update activity
-  - [ ] Alert/notification display
-- [ ] Implement host list view
-  - [ ] Sortable/filterable table (pagination exists, no column sorting)
-  - [x] Host detail drill-down (`/hosts/[id]` page with system info, history, allowlist)
-  - [x] Host status indicators
-- [ ] Create software list view
-  - [ ] Grouped by host or plugin (shows plugin column, not grouped view)
-  - [x] Current vs. available version display
-  - [x] Update action buttons (context menu)
-- [x] Add update trigger UI
-  - [x] Manual update initiation (modal with host selection)
-  - [x] Update confirmation dialogs
-  - [x] Progress indicators (SSE streaming to xterm.js terminal)
-- [ ] Implement schedule configuration UI
-  - [ ] Visual schedule builder (text-based cron input only)
-  - [x] Enable/disable schedules
-  - [x] Trigger scheduled tasks manually
-- [ ] Add settings/configuration UI
-  - [x] Plugin configurations (`/plugin-configs` page)
-  - [x] Global settings (`/settings` and `/settings/global` pages)
-  - [ ] User management (no dedicated user admin UI)
-
-### CLI Tool
-
-- [x] Device authorization login flow (RFC 8628-style)
-  - [x] CLI requests device code from controller
-  - [x] Opens browser for user approval
-  - [x] Polls for authorization completion
-  - [x] Stores API token locally on success
-- [x] Auth status and API token management (`auth status`, `auth token create/list/revoke`)
-- [x] Design CLI command structure
-  - [x] `uptrakit hosts` - list and show hosts
-  - [x] `uptrakit software-items` - list and show software items
-  - [x] `uptrakit check` - trigger version checks (all, item)
-  - [x] `uptrakit update` - trigger update
-  - [x] `uptrakit history` - view update history (list with filters, show)
-  - [x] `uptrakit services` - list, show, approve, reject, remove, merge, update services
-  - [x] `uptrakit scheduler` - list, show, and trigger scheduled tasks
-  - [x] `uptrakit settings` - settings management
-  - [ ] `uptrakit status` - system status
-  - [ ] `uptrakit agent` - various commands proxied to the agent. Plus
-    `uptrakit agent install` to install the agent locally
-  - [ ] `uptrakit controller` - various commands proxied to the controller. Plus
-    `uptrakit agent install` to install the agent locally
-- [x] Implement CLI commands (hosts, software-items, check, update, history, scheduler)
-- [x] Add output formatting (table, JSON, YAML)
-- [x] Implement filtering and query options (history filters by host, software item, status)
-- [x] Add interactive mode for confirmations (prompt-based input for login flow and server URL)
-- [x] Support configuration file for CLI (`config.json` + `credentials.json` with secure storage)
-
-### MQTT/Home Assistant Integration
-
-- [x] Separate MQTT binary with multi-instance support and lease-based tenant distribution
-- [x] MQTT service communicates with controller via WebSocket/mTLS (no direct DB access)
-  - [x] Wire protocol messages (`ServiceMessage`, `ControllerMessage` — unified for all service types)
-  - [x] MQTT service enrollment flow (TOFU CA pinning, anonymous enrollment, certificate issuance)
-  - [x] Controller WebSocket endpoint (`/api/v1/ws/service`) with 3-state handler
-  - [x] Controller-side lease coordinator (centralized tenant assignment)
-  - [x] Unified ServiceConnectionRegistry (track connected service instances)
-  - [x] Push-based tenant config (controller pushes config changes to instances)
-  - [x] Multiple named enrollment tokens with capability scoping, usage limits, and TTL (`/api/v1/enrollment-tokens`)
-  - [x] Unified REST API for service management (`/api/v1/services` — list, approve, reject, deactivate)
-  - [x] Enrollment token audit trail (`enrollment_token_id` FK on services table)
-  - [x] Unified database entity (`services` table with `capabilities` JSON column, `service_certificates`)
-- [x] Implement MQTT auto-discovery for Home Assistant
-  - [x] HA `update` entity discovery per `(software item, host)` pair
-  - [x] Discovery republished on reconnect and HA restart (birth message)
-- [x] Publish software version sensors
-  - [x] Installed version (state topic, retained)
-  - [x] Latest version (latest_version topic, retained)
-  - [x] Update available (derived by HA from installed vs latest)
-- [x] Implement update command handling via MQTT
-  - [x] Listen to Home Assistant Install commands (command topic per entity)
-  - [x] Trigger update via controller (`MqttTriggerUpdate` wire message)
-  - [x] Update status pushed after completion (via `SoftwareStates` push)
-- [x] Add configurable MQTT topics (topic_prefix per MQTT client)
-- [x] Implement MQTT connection resilience
-- [x] Add MQTT authentication support (username/password via SecretString, encrypted at rest)
+- [ ] CA certificate fallback handling
+  - **Category**: Security / Reliability | **Impact**: Medium | **Effort**: Medium
+  - Graceful recovery when the agent's pinned CA certificate becomes invalid (e.g. file
+    corruption, accidental deletion). Currently the agent cannot reconnect.
+- [ ] Per-software-item schedule configuration
+  - **Category**: Core / UI | **Impact**: Medium-High | **Effort**: Medium
+  - Allow different check/update schedules per software item instead of only global defaults.
+    Schema change (`scheduled_tasks` per-item override) + settings UI.
+- [ ] SIGHUP controller reload
+  - **Category**: Core / Operations | **Impact**: Medium-High | **Effort**: Medium-High
+  - Reload all reloadable settings on SIGHUP without disconnecting agents. Requires careful
+    state management for TLS, DB pools, and in-flight requests. Send a "please reconnect" message
+    if TLS config changes.
+- [ ] Certificate renewal via API must activate for new connections
+  - **Category**: Security / Operations | **Impact**: Medium | **Effort**: Medium
+  - `POST /api/v1/settings/renew-server-certificate` generates a new cert but the listening
+    socket still serves the old one until restart. Hot-swap the TLS acceptor.
 
 ______________________________________________________________________
 
-## Phase 4: SSH Agent (Priority 3)
+## Phase 3: User Interfaces
 
-A new agent type that communicates with the controller over WebSocket (like the regular agent) but executes version detection and updates on remote
-hosts over SSH instead of locally. This is a separate crate (`crates/core/agent-ssh/`) — not integrated into the existing agent or the controller.
+### Completed
 
-Use case: managing hosts where installing a persistent daemon is impractical (appliances, locked-down systems, minimal containers, or environments
-where outbound-only WebSocket is not feasible but inbound SSH is available).
+- **Web API** — Full REST API (hosts, software items, version checks, updates, history, schedules,
+  settings, plugin configs, autodiscovery, notifications, audit logs, services, system services,
+  enrollment tokens). Auth, rate limiting, OpenAPI/Swagger, WebSocket for real-time updates.
+- **CLI Tool** — Device auth login (RFC 8628-style), auth/token management, hosts, software-items,
+  check, update, history, services, system-services, scheduler, settings, host-packages,
+  notifications, autodiscovery ignores. Table/JSON/YAML output, filtering, interactive mode,
+  config/credentials storage.
+- **MQTT/Home Assistant Integration** — Separate MQTT binary with multi-instance lease-based
+  tenant distribution, HA `update` entity discovery, version sensors, update command handling,
+  configurable topics, connection resilience, auth support (encrypted at rest). Unified service
+  enrollment and management.
 
-### New Crate & Architecture
+### Web API — Pending
 
-- [x] Create `crates/core/agent-ssh/` crate (`uptrakit-agent-ssh` binary)
-- [x] Reuse the existing wire protocol and WebSocket transport to the controller
-- [x] The SSH agent manages one or more remote hosts — each appears as a separate host in the controller
-- [x] CLI subcommands for local SSH host management (`host add/list/show/update/remove/bootstrap`)
-- [ ] Configuration file defines target hosts (hostname, port, username, key path, sudo setup)
-- [x] Clearly separate SSH transport logic from plugin execution logic so plugins remain transport-agnostic (`CommandExecutor` trait abstraction)
+- [ ] System status endpoint
+  - **Category**: API | **Impact**: Medium-High | **Effort**: Low
+  - `GET /api/v1/status` returning DB health, connected agent/service counts, CA certificate
+    expiry, scheduler status. Extends the existing `/healthz` and `/readyz` with richer data.
 
-### SSH Transport Layer
+### Web UI — Pending
 
-- [x] Password and key-based authentication (password auth supported for bootstrap; key-based for ongoing use)
-- [x] SSH agent forwarding support (automatic `SSH_AUTH_SOCK` detection as fallback when no explicit auth is given)
-- [x] Dual-mode `--auth-password` (accepts optional inline value or prompts interactively)
-- [x] Support Ed25519 (preferred), RSA, and ECDSA keys (auto-detection from PEM content)
-- [x] Strict host key verification (TOFU with persisted fingerprints, or pre-seeded fingerprints)
-- [x] Reject connections on host key mismatch — never silently accept
-- [x] Connection pooling and multiplexing (`SshConnectionPool` with 300s idle TTL, concurrent channels per session)
-- [x] Configurable connection and command timeouts (30s default for bootstrap)
-- [ ] Jump host / bastion support for reaching hosts behind NAT or firewalls
-- [x] Support for custom SSH ports per host (configurable via `--port` in `host add/update`, or via the target string in `host bootstrap`)
+- [ ] Dashboard view
+  - **Category**: UI | **Impact**: High | **Effort**: Medium
+  - System overview page: host count, pending updates, recent activity feed, alert/notification
+    display. Data is available via existing APIs; this is primarily frontend work.
+- [ ] Host list: sortable/filterable columns
+  - **Category**: UI | **Impact**: Medium | **Effort**: Low-Medium
+  - The host list has pagination but no column sorting or advanced filtering. Add client-side or
+    server-side sort by name, last-seen, OS, update count.
+- [ ] Software list: grouped view by host or plugin
+  - **Category**: UI | **Impact**: Medium | **Effort**: Medium
+  - Software items show a plugin column but lack a grouped/tree view. Add collapsible groups by
+    host or by plugin type.
+- [ ] Schedule configuration UI: visual schedule builder
+  - **Category**: UI | **Impact**: Medium | **Effort**: Medium
+  - Replace the text-based cron input with a visual picker (day-of-week, hour, interval). Enable/
+    disable and manual trigger already work.
+- [ ] Settings UI: user management
+  - **Category**: UI / Security | **Impact**: Medium-High | **Effort**: Medium
+  - No dedicated user admin page exists. Add user list, create/deactivate users, role assignment,
+    password reset.
+- [ ] Notification configuration UI
+  - **Category**: UI | **Impact**: Medium-High | **Effort**: Medium
+  - Frontend page for managing notification channels and rules. The backend REST API is already
+    complete; this is purely frontend work.
+- [ ] Batch update UI
+  - **Category**: UI | **Impact**: Medium | **Effort**: Medium
+  - Visual interface for creating and monitoring host-wide and item-wide batch updates. SSE
+    streaming and CLI support already exist.
 
-### Remote Execution
+### CLI — Pending
 
-- [x] Run plugin detection commands on the remote host over SSH and parse output locally (`run_check_versions_ssh` via `SshCommandExecutor`)
-- [x] Execute updates via sudo on the remote host (`start_update` via `SshCommandExecutor`)
-- [x] Stream command output back for progress reporting
-- [x] Enforce per-host update locking (no concurrent updates to the same host) — implemented via combined cross-table check and partial unique DB index
+- [ ] `uptrakit status` command
+  - **Category**: CLI | **Impact**: Medium | **Effort**: Low
+  - Quick system health summary in the terminal. Depends on the system status API endpoint.
+- [ ] `uptrakit agent` subcommand group
+  - **Category**: CLI | **Impact**: Medium | **Effort**: Medium
+  - Commands proxied to a specific agent, plus `uptrakit agent install` for local agent setup.
+- [ ] `uptrakit controller` subcommand group
+  - **Category**: CLI | **Impact**: Medium | **Effort**: Medium
+  - Commands proxied to the controller (diagnostics, config dump), plus install helper.
+
+______________________________________________________________________
+
+## Phase 4: SSH Agent
+
+Completed: `crates/core/agent-ssh/` crate, wire protocol reuse, multi-host management, CLI host
+management (`host add/list/show/update/remove/bootstrap`), `CommandExecutor` trait abstraction,
+password + key-based auth (Ed25519/RSA/ECDSA), SSH agent forwarding, TOFU host key verification,
+connection pooling (300s TTL), custom SSH ports, remote plugin execution (`SshCommandExecutor`),
+update streaming, per-host update locking, least-privilege user creation (bootstrap), shell
+injection prevention (`shell_escape()`), encrypted SSH key storage.
+
+### Pending
+
+- [ ] Jump host / bastion support
+  - **Category**: SSH / Networking | **Impact**: Medium | **Effort**: Medium-High
+  - Allow reaching hosts behind NAT or firewalls via an intermediate bastion host. Needs
+    `ProxyJump`-style config in `russh`.
 - [ ] Timeout and kill long-running remote commands
-- [ ] Handle connection drops mid-command gracefully (report failure, do not leave orphan processes)
-
-### Plugin Compatibility
-
-- [x] All agent-side plugins must work over SSH (all plugins use `CommandExecutor` trait; `SshCommandExecutor` implements it)
-- [x] Plugin trait uses a transport abstraction (`CommandExecutor`) so the same plugin logic works for both local and SSH execution
-- [x] Implement `SshCommandExecutor` that executes commands over SSH connections
-- [ ] Plugin-level capability flag indicating SSH compatibility
-
-### Security Considerations
-
-- [x] Least-privilege SSH user on each managed host (e.g. `uptrakit`, created by bootstrap; mirrors the regular agent model)
-- [ ] Sudo allowlist identical to regular agent: only specific update commands, NOPASSWD, no shell access
-  (bootstrap creates `NOPASSWD: ALL` — manual restriction recommended)
-- [x] No shell injection: remote commands constructed from validated inputs using `shell_escape()`, never string-interpolated
-- [x] SSH private keys stored on the machine running the SSH agent — never sent to the controller or exposed in API responses (encrypted at rest via `EncryptedString`)
-- [ ] Audit trail: log every SSH session (host, user, command, timestamp, exit code) without capturing secrets or key material
-- [ ] Limit concurrent SSH sessions per host and globally to prevent resource exhaustion on both the SSH agent and the remote hosts
-- [ ] Host key fingerprints should be verifiable through the controller UI (display, not edit)
-
-### Configuration & Management
-
-- [ ] Config file format for defining target hosts and their SSH credentials
-- [ ] CLI flags for overrides (key path, known_hosts path, concurrency limits)
-- [ ] Health checks: periodic SSH connectivity test to each managed host, reported to controller
-- [ ] Controller UI and API: SSH-managed hosts appear alongside regular agents with a transport type indicator
-- [x] MQTT/Home Assistant entities work identically regardless of agent transport (MQTT operates on `SoftwareStates`, transport-agnostic)
+  - **Category**: SSH / Reliability | **Impact**: Medium | **Effort**: Medium
+  - Enforce per-command timeouts over SSH and send SIGTERM/SIGKILL to the remote process.
+    Currently commands can run indefinitely.
+- [ ] Handle connection drops mid-command gracefully
+  - **Category**: SSH / Reliability | **Impact**: Medium | **Effort**: Medium
+  - Detect SSH disconnects during update execution, report failure to controller, and avoid
+    leaving orphan processes on the remote host.
+- [ ] Plugin-level SSH compatibility flag
+  - **Category**: Plugins / SSH | **Impact**: Low-Medium | **Effort**: Low
+  - Add a `PluginCapability::SshCompatible` flag so the registry can filter plugins that are
+    safe to run over SSH.
+- [ ] Sudo allowlist for SSH-managed hosts
+  - **Category**: SSH / Security | **Impact**: High | **Effort**: Medium
+  - Bootstrap currently creates `NOPASSWD: ALL`. Restrict to specific update commands only
+    (matching the regular agent sudoers policy).
+- [ ] SSH session audit trail
+  - **Category**: SSH / Security | **Impact**: Medium | **Effort**: Medium
+  - Log every SSH session (host, user, command, timestamp, exit code) without capturing secrets.
+    Feed into the existing audit log infrastructure.
+- [ ] Concurrent SSH session limits
+  - **Category**: SSH / Reliability | **Impact**: Medium | **Effort**: Low-Medium
+  - Cap concurrent SSH sessions per host and globally to prevent resource exhaustion on both the
+    SSH agent and remote hosts.
+- [ ] Host key fingerprint display in controller UI
+  - **Category**: SSH / UI | **Impact**: Low-Medium | **Effort**: Low
+  - Show (read-only) host key fingerprints in the controller web UI for verification.
+- [ ] Config file format for SSH target hosts
+  - **Category**: SSH / Operations | **Impact**: Medium | **Effort**: Medium
+  - Declarative config file (TOML/YAML) defining target hosts, SSH credentials, and per-host
+    overrides, as an alternative to CLI `host add`.
+- [ ] CLI flags for SSH overrides
+  - **Category**: SSH / CLI | **Impact**: Low-Medium | **Effort**: Low
+  - Override key path, known_hosts path, and concurrency limits from the command line.
+- [ ] SSH health checks
+  - **Category**: SSH / Reliability | **Impact**: Medium | **Effort**: Low-Medium
+  - Periodic SSH connectivity test to each managed host, with status reported to the controller.
+    Connection pool already exists; just needs a scheduled ping + status field.
+- [ ] SSH-managed hosts in controller UI and API
+  - **Category**: SSH / UI | **Impact**: Medium | **Effort**: Medium
+  - Show SSH-managed hosts alongside regular agents with a transport type indicator (badge/icon).
 
 ______________________________________________________________________
 
-## Phase 5: Plugin Ecosystem (Priority 3-4)
+## Phase 5: Plugin Ecosystem
 
-Expanding the plugin system with more integrations.
+Completed: npm plugin, Homebrew plugin, role-based multi-plugin assignment, plugin development
+guide, plugin system architecture docs.
 
 ### Additional Plugins
 
-- [ ] Implement custom script plugin ("run arbitrary commands" plugin type)
-  - [ ] Script definition format
-  - [ ] Script execution sandbox
-  - [ ] Script output parsing
-- [ ] Add pip/PyPI plugin
-- [x] Add npm/Node.js plugin (`crates/plugins/package-managers/npm/`)
-- [ ] Add Cargo/Rust plugin
-- [ ] Add Flatpak plugin
-- [ ] Add Snap plugin
-- [ ] Add AppImage plugin
-- [x] Add Homebrew plugin (macOS)
-- [ ] Add Chocolatey plugin (Windows)
+- [ ] Custom script plugin
+  - **Category**: Plugins | **Impact**: High | **Effort**: Medium
+  - "Run arbitrary commands" plugin type with user-defined scripts for version detection, checking,
+    and update execution. Needs script definition format, output parsing, and sandboxing.
+- [ ] pip/PyPI plugin
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
+  - Python package manager plugin using `pip list --outdated` and PyPI JSON API.
+- [ ] Cargo/Rust plugin
+  - **Category**: Plugins | **Impact**: Low | **Effort**: Medium
+  - Track Rust toolchain and `cargo install`-ed binaries via crates.io API.
+- [ ] Flatpak plugin
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
+  - Flatpak app tracking and updates via `flatpak list` / `flatpak update`.
+- [ ] Snap plugin
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
+  - Snap package tracking via `snap list` / `snap refresh`.
+- [ ] AppImage plugin
+  - **Category**: Plugins | **Impact**: Low | **Effort**: Medium-High
+  - AppImage version tracking. No standard package manager; needs custom detection and update
+    mechanism (e.g. AppImageUpdate or GitHub releases).
+- [ ] Chocolatey plugin (Windows)
+  - **Category**: Plugins | **Impact**: Medium | **Effort**: Medium
+  - Windows package manager plugin using `choco list` / `choco upgrade`.
 
 ### Plugin Framework
 
-- [ ] Create plugin testing framework
-  - [ ] Mock version sources
-  - [ ] Test harness for plugins
-- [ ] Add plugin validation tools
-- [ ] Implement plugin hot-reloading
-- [ ] Create plugin marketplace/registry concept
-- [ ] Add plugin versioning
-- [x] Role-based multi-plugin assignment per host-software-item pair
-
-### Documentation
-
-- [x] Write plugin development guide ([docs/development/plugin-guidelines.md](docs/development/plugin-guidelines.md))
-  - [x] Trait implementation conventions
-  - [x] Capability declarations
-  - [x] Testing guidelines (mock executor pattern)
-- [x] Plugin system architecture ([docs/development/plugin-system.md](docs/development/plugin-system.md))
-- [ ] Create plugin examples
-  - [ ] Simple plugin template
-  - [ ] Complex plugin example
-- [ ] Document plugin API reference
-- [ ] Add troubleshooting guide for plugins
+- [ ] Plugin testing framework
+  - **Category**: Plugins / Testing | **Impact**: Medium | **Effort**: Medium
+  - Shared test harness with mock version sources, mock `CommandExecutor`, and assertion helpers
+    for plugin authors.
+- [ ] Plugin validation tools
+  - **Category**: Plugins / DX | **Impact**: Low-Medium | **Effort**: Medium
+  - CLI tool or `cargo test` integration that validates a plugin's trait implementation,
+    capability declarations, and config schema.
+- [ ] Plugin hot-reloading
+  - **Category**: Plugins / Architecture | **Impact**: Low | **Effort**: High
+  - Dynamic plugin loading without agent/controller restart. Requires ABI-stable plugin interface
+    (e.g. `libloading` or WASM).
+- [ ] Plugin marketplace/registry concept
+  - **Category**: Plugins / Architecture | **Impact**: Low | **Effort**: High
+  - Central registry for discovering and installing community plugins. Needs versioning, signing,
+    and distribution infrastructure.
+- [ ] Plugin versioning
+  - **Category**: Plugins / Architecture | **Impact**: Low-Medium | **Effort**: Medium
+  - Track plugin versions independently from the main binary. Enables independent plugin updates
+    and compatibility matrices.
+- [ ] Plugin examples and templates
+  - **Category**: Plugins / Docs | **Impact**: Medium | **Effort**: Low-Medium
+  - Simple plugin template (single detect/check/update) and complex plugin example
+    (multi-capability, config schema, SSH-compatible).
+- [ ] Plugin API reference docs
+  - **Category**: Plugins / Docs | **Impact**: Medium | **Effort**: Low-Medium
+  - Generated API reference for the Plugin trait, `PluginCapability`, `CommandExecutor`, and
+    registry macros.
+- [ ] Plugin troubleshooting guide
+  - **Category**: Plugins / Docs | **Impact**: Low-Medium | **Effort**: Low
+  - Common issues (capability mismatch, execution site, SSH incompatibility) and solutions.
 
 ______________________________________________________________________
 
-## Phase 6: Advanced Features (Priority 4)
-
-Polish and additional capabilities for production use.
+## Phase 6: Advanced Features
 
 ### Multi-Channel Support
 
-- [ ] Implement channel abstraction
-  - [ ] Stable, beta, nightly, custom channels
-  - [ ] Per-software-item channel selection
-  - [ ] Channel switching rules
-- [ ] Add channel-aware version checking
-- [ ] Implement channel migration workflows
-- [ ] Add channel configuration UI
+- [ ] Release channel abstraction
+  - **Category**: Core / Architecture | **Impact**: Medium | **Effort**: Medium-High
+  - Stable, beta, nightly, and custom channels. Per-software-item channel selection, channel-aware
+    version checking, channel switching rules, migration workflows, and configuration UI.
 
 ### Rollback Capabilities
 
-- [ ] Design rollback mechanism
-  - [ ] Snapshot creation before updates
-  - [ ] Rollback trigger conditions
-  - [ ] Rollback execution
-- [ ] Implement rollback for supported plugins
-- [ ] Add rollback history tracking
-- [ ] Create rollback UI
-- [ ] Add automatic rollback on failure
+- [ ] Rollback mechanism
+  - **Category**: Core | **Impact**: High | **Effort**: High
+  - Snapshot creation before updates, configurable rollback trigger conditions (exit code, health
+    check), rollback execution via plugin trait method, history tracking, UI, and automatic
+    rollback on failure.
 
 ### Update Batching & Orchestration
 
-- [x] Design batch update system
-  - [x] Batch definition (groups of updates) — `update_batches` table with `host_update` and
-    `item_rollout` types
-  - [x] Batch execution strategies (sequential) — per-host sequential dispatch managed by
-    the controller; parallel strategies deferred
-  - [x] Batch failure handling — soft-skip items with active updates; `partially_completed`
-    status when some items fail
-- [x] **Update category classification** — `UpdateCategory` enum (`security`, `bugfix`,
-  `feature`, `unknown`) stored on `host_software_items` and `update_history`. APT plugin
-  detects security updates from `*-security` repositories. Batch updates can filter by category.
-- [x] **Host-wide batch update** — `POST /api/v1/hosts/{host_id}/batch-update` with optional
-  category filter and exclude list. CLI: `uptrakit update batch-host`.
-- [x] **Item-wide batch update** — `POST /api/v1/software-items/{id}/batch-update` to roll out
-  a version to all/selected hosts. CLI: `uptrakit update batch-item`.
-- [x] **Batch progress tracking** — SSE endpoint (`GET /api/v1/update-batches/{id}/stream`),
-  in-process `BatchProgressBroadcaster`, CLI `update-batches follow` and `--follow` flag.
-- [x] **Batch notification events** — `batch_update_completed` and
-  `batch_update_partially_completed` notification event types.
-- [ ] Implement update dependencies
-  - [ ] Update A must complete before update B
-  - [ ] Cross-host dependencies
-- [ ] Create batch update UI
-- [x] **Host packages tracking system** — per-host package tracking separate from targeted software items.
-  `TrackingSystem` enum routes discovery results. Database tables: `host_packages`, `host_package_ignores`,
-  `host_package_update_history`. Plugin `execute_batch_update()` trait method with APT pin-priority, Homebrew,
-  and npm implementations. Wire protocol messages: `ExecuteBatchHostPackageUpdate`,
-  `BatchHostPackageUpdateResult`. REST API, CLI (`host-packages`), and frontend (update counts on hosts list,
-  packages sub-page) all implemented.
-- [ ] Implement canary deployment patterns
-- [ ] Rolling strategies (N-at-a-time, failure thresholds)
+Completed: batch update system (host-wide + item-wide), update category classification, batch
+progress tracking (SSE), batch notification events, host packages tracking system.
 
-### Real-Time Frontend Updates
-
-- [x] **Real-time update output streaming** — SSE endpoint (`GET /api/v1/update-history/{id}/output/stream`)
-  for live-tailing update command output in the browser and CLI. In-process `UpdateOutputBroadcaster`
-  fans out lines to SSE subscribers. Frontend uses xterm.js with full ANSI color support. CLI supports
-  `--follow` and `history tail`.
-- [x] **Real-time software/host state updates** — SSE endpoint (`GET /api/v1/events/stream`)
-  pushes lightweight admin events (host/service/software changes, version checks, updates,
-  discovery) to authenticated subscribers. Per-tenant `EventBroadcaster` fans out events.
-  Frontend replaces 30-60s polling with SSE subscriptions (5-minute safety-net fallback).
-  Typed `AdminSseEvent` client in `openapi-client`. CLI device auth uses SSE-first with
-  poll fallback (`GET /api/v1/auth/device/stream`).
+- [ ] Update dependencies
+  - **Category**: Core / Orchestration | **Impact**: Medium | **Effort**: High
+  - Define ordering constraints: update A must complete before update B starts. Support cross-host
+    dependencies for coordinated rollouts.
+- [ ] Canary deployment patterns
+  - **Category**: Core / Orchestration | **Impact**: Medium | **Effort**: High
+  - Roll out to a small subset of hosts first, verify health, then proceed to the rest. Needs
+    health check integration and automatic promotion/rollback.
+- [ ] Rolling update strategies
+  - **Category**: Core / Orchestration | **Impact**: Medium | **Effort**: Medium-High
+  - N-at-a-time parallel execution with configurable failure thresholds. Currently batches run
+    sequentially per-host.
 
 ### Notification System
 
-- [x] Design notification architecture
-  - [x] Channel-agnostic dispatcher with pluggable channels
-  - [x] Event types: update_available, update_completed, update_failed, new_software_discovered,
-    new_service_enrolled, ca_rotated
-  - [x] Scope-based rule matching (tenant, host, software item, plugin type)
-- [x] Implement notification channels
-  - [x] Generic Webhook (HMAC-SHA256 signed, always compiled)
-  - [x] Telegram (feature-gated, inline keyboard buttons for actionable notifications)
-  - [x] Email notifications (via `lettre`, feature-gated `notifications-email`, SMTP settings with encrypted password)
-  - [ ] Slack integration (via `slack-morphism`)
-  - [ ] Discord integration (via `twilight-http`)
-  - [ ] Pushover integration
-  - [ ] Gotify integration
-  - [ ] ntfy integration
-  - [ ] Matrix integration
-  - [ ] Microsoft Teams integration
-  - [ ] PagerDuty integration
-- [ ] Add notification configuration UI
-- [x] Implement notification filtering/preferences (rule-based scope filters)
-- [x] Add notification history (delivery log with status tracking)
-- [x] Support actionable notifications (Telegram inline keyboard → update trigger)
-- [x] REST API for channels, rules, and delivery log
-- [x] CLI commands for notification management
-- [x] OpenAPI client methods
-- [ ] Add Telegram callback rate limiting
+Completed: channel-agnostic dispatcher, webhook + Telegram + email channels, scope-based rule
+matching, notification history, actionable notifications, REST API, CLI, OpenAPI client.
+
+- [ ] Slack notification channel
+  - **Category**: Notifications | **Impact**: Medium-High | **Effort**: Medium
+  - Slack integration via `slack-morphism` or Incoming Webhooks. Follow the existing channel trait
+    pattern.
+- [ ] Discord notification channel
+  - **Category**: Notifications | **Impact**: Medium | **Effort**: Medium
+  - Discord bot or webhook integration via `twilight-http` or simple HTTP POST.
+- [ ] Pushover notification channel
+  - **Category**: Notifications | **Impact**: Low-Medium | **Effort**: Low
+  - Simple HTTP POST to Pushover API. Minimal implementation effort.
+- [ ] Gotify notification channel
+  - **Category**: Notifications | **Impact**: Low-Medium | **Effort**: Low
+  - Simple HTTP POST to self-hosted Gotify server. Popular in the self-hosted community.
+- [ ] ntfy notification channel
+  - **Category**: Notifications | **Impact**: Medium | **Effort**: Low
+  - Simple HTTP POST to ntfy.sh or self-hosted ntfy. Very popular self-hosted choice, minimal
+    code needed.
+- [ ] Matrix notification channel
+  - **Category**: Notifications | **Impact**: Low-Medium | **Effort**: Medium
+  - Matrix room notifications via the Matrix client-server API.
+- [ ] Microsoft Teams notification channel
+  - **Category**: Notifications | **Impact**: Medium | **Effort**: Medium
+  - Teams Incoming Webhook or Workflow integration.
+- [ ] PagerDuty notification channel
+  - **Category**: Notifications | **Impact**: Low-Medium | **Effort**: Medium
+  - PagerDuty Events API v2 integration for incident-based alerting on update failures.
+- [ ] Telegram callback rate limiting
+  - **Category**: Notifications / Security | **Impact**: Low-Medium | **Effort**: Low
+  - Rate-limit incoming Telegram inline keyboard callbacks to prevent abuse. The callback handler
+    exists but has no per-user or global throttle.
 
 ### Update Windows
 
-- [ ] Implement maintenance window concept
-  - [ ] Time-based windows
-  - [ ] Day-of-week restrictions
-  - [ ] Blackout periods
-- [ ] Add window validation for scheduled updates
-- [ ] Implement update queuing outside windows
-- [ ] Create window configuration UI
-- [ ] Support timezone handling
+- [ ] Maintenance window concept
+  - **Category**: Core / Operations | **Impact**: Medium-High | **Effort**: Medium-High
+  - Time-based windows, day-of-week restrictions, blackout periods, timezone handling. Updates
+    triggered outside a window get queued until it opens. Window validation for scheduled updates.
+    Configuration UI.
 
 ______________________________________________________________________
 
-## Phase 7: Security Enhancements (Priority 2-3)
+## Phase 7: Security Enhancements
 
-Comprehensive security hardening.
+### Completed
 
-### mTLS Implementation Details
+- **mTLS** — Automated certificate issuance (CSR → CA signing → delivery), CRL + OCSP revocation,
+  expiration monitoring + automated renewal.
+- **CA Management** — Rotation automation (6-month window, cron-based), multi-CA validation
+  (active + previous CA bundle, gradual migration).
+- **Agent Authentication** — Certificate-based identity extraction/mapping/persistence, secure
+  enrollment flow (token generation, expiration, approval workflow).
+- **Audit Logging Infrastructure** — HTTP request logging, pluggable backends (DB, journald, noop),
+  multiplex, fire-and-forget dispatcher, global/per-tenant filter modes, separate audit DB, immutable
+  storage, 90-day retention, read API.
+- **Additional Security** — Rate limiting, brute force protection, security headers, input
+  validation, secrets management (AES-256-GCM, envelope encryption v3, master key rotation).
 
-- [x] Automated client certificate issuance
-  - [x] Certificate signing request (CSR) handling
-  - [x] Automated CA signing
-  - [x] Certificate delivery to agents
-- [x] Certificate revocation mechanism
-  - [x] CRL generation and distribution (per-CA partitioned CRLs)
-  - [x] OCSP responder implementation
-  - [x] Revocation checking on agent connections
-- [x] Certificate expiration handling
-  - [x] Expiration monitoring (system alerts API for admin UI)
-  - [x] Automated renewal workflow (agent certs + server cert auto-renewal)
-  - [x] Pre-expiration notifications (admin alert banners)
-
-### CA Management
+### CA Management — Pending
 
 - [ ] CA certificate backup and recovery
-  - [ ] Automated CA backup
-  - [ ] Secure backup storage
-  - [ ] Recovery procedures documentation
-- [x] CA rotation automation
-  - [x] Rotation scheduling system (centralised scheduler, cron-based)
-  - [x] Automated rotation execution (6-month window before expiry)
-  - [ ] Rollback capability for failed rotations
-- [x] Multi-CA validation support
-  - [x] Trust store management (active + previous CA bundle)
-  - [x] CA priority handling (active CA signs new certs; both CAs trusted)
-  - [x] Gradual CA migration (agents auto-fetch updated bundle)
+  - **Category**: Security / Operations | **Impact**: High | **Effort**: Medium-High
+  - Automated CA backup to a secure location with documented recovery procedures. Critical for
+    disaster recovery — losing the CA key means all agent certificates become unverifiable.
+- [ ] Rollback capability for failed CA rotations
+  - **Category**: Security / Reliability | **Impact**: Medium | **Effort**: Medium
+  - If rotation fails mid-way (e.g. agents can't reach the new CA bundle), automatically revert
+    to the previous CA as the active signer.
 
-### Agent Authentication
+### Agent Authorization — Pending
 
-- [x] Certificate-based agent identity
-  - [x] Identity extraction from certificates
-  - [x] Identity-to-agent mapping
-  - [x] Identity persistence
 - [ ] Agent authorization policies
-  - [ ] Role-based access control
-  - [ ] Per-agent permissions
-  - [ ] Policy enforcement points
-- [x] Secure agent enrollment flow
-  - [x] Enrollment token generation
-  - [x] Token expiration and validation
-  - [x] Enrollment approval workflow
+  - **Category**: Security | **Impact**: Medium-High | **Effort**: Medium-High
+  - Role-based access control for agents (e.g. "this agent can only update packages X, Y, Z"),
+    per-agent permissions, and policy enforcement points in the wire protocol handler.
 
-### Audit Logging
+### Audit Logging — Pending
 
-- [x] Infrastructure
-  - [x] Authenticated HTTP request logging (method, path, status, actor, IP, duration)
-  - [x] Pluggable backends: database, journald (feature-gated), noop
-  - [x] Multiple concurrent backends via `MultiplexBackend`
-  - [x] Fire-and-forget dispatcher (zero handler latency)
-  - [x] Global filter mode: `all` / `mutations` / `none`
-  - [x] Per-tenant filter override via `audit_log.filter` setting key
-  - [x] Separate audit database support (`--audit-log-db-url`)
-  - [x] Immutable log storage (write-once, no FK on `tenant_id` for compliance)
-  - [x] Log retention policies (90-day default via `AuditLogCleanupExecutor`)
-- [ ] Authentication events (unauthenticated — outside `require_auth` middleware)
-  - [ ] Failed login attempts (invalid credentials, deactivated user, missing password hash) — `routes/auth.rs`
-  - [ ] Failed API token attempts (invalid token, revoked token) — `middleware/require_auth.rs`
-  - [ ] Failed JWT validation (malformed, expired, revoked, invalid subject) — `middleware/require_auth.rs`
-  - [ ] Token refresh failures (expired refresh token, deactivated user) — `routes/auth.rs`
-  - [ ] Registration attempts (success/failure, token validation) — `routes/auth.rs`
-- [ ] OIDC auth flow (unauthenticated — public routes)
-  - [ ] OIDC authorize initiation (provider, PKCE flow) — `routes/oidc_auth.rs`
-  - [ ] OIDC callback completion (success/failure, token exchange) — `routes/oidc_auth.rs`
-  - [ ] OIDC account linking (link flow completion) — `routes/oidc_auth.rs`
-  - [ ] OIDC token exchange (API token issuance) — `routes/oidc_auth.rs`
-  - [ ] OIDC registration completion — `routes/oidc_auth.rs`
-  - [ ] OIDC auth failures (provider not found, inactive, discovery failure) — `routes/oidc_auth.rs`
-- [ ] Device auth flow (unauthenticated — public routes)
-  - [ ] Device auth initiation (device code creation) — `routes/device_auth.rs`
-  - [ ] Device auth polling (status checks) — `routes/device_auth.rs`
-  - [ ] Device auth approval/denial — `routes/device_auth.rs`
-  - [ ] Device flow expiration and consumption — `routes/device_auth.rs`
-- [ ] WebSocket service operations (outside HTTP audit middleware)
-  - [ ] Service WebSocket connection (anonymous, bearer secret, mTLS) — `routes/service_ws/mod.rs`
-  - [ ] Service enrollment (pending, approved, completed) — `routes/service_ws/handler/mod.rs`
-  - [ ] Service certificate operations (CSR submission, certificate delivery) — `routes/service_ws/handler/mod.rs`
-  - [ ] Service discovery reporting (ReportHosts, DiscoveryResults) — `routes/service_ws/handler/messages.rs`
-  - [ ] Version check result processing — `routes/service_ws/handler/messages.rs`
-  - [ ] Update lifecycle (started, output, completed, failed) — `routes/service_ws/handler/updates.rs`
-  - [ ] Batch host package update completion — `routes/service_ws/handler/updates.rs`
-  - [ ] Certificate renewal requests — `routes/service_ws/handler/renewal.rs`
-- [ ] MQTT operations (WebSocket-based, outside HTTP audit middleware)
-  - [ ] MQTT registration handshake — `routes/service_ws/handler/mqtt.rs`
-  - [ ] MQTT tenant assignment/release — `routes/service_ws/handler/mqtt.rs`
-  - [ ] MQTT client status heartbeats — `routes/service_ws/handler/mqtt.rs`
-  - [ ] MQTT-triggered software updates — `routes/service_ws/handler/mqtt.rs`
-  - [ ] MQTT-triggered host package updates — `routes/service_ws/handler/mqtt.rs`
-- [ ] System service operations (WebSocket-based, outside HTTP audit middleware)
-  - [ ] System service enrollment completion — `routes/service_ws/handler/mod.rs`
-  - [ ] Credential delivery to system services (DB URL, NATS URL, master key) — `routes/service_ws/handler/mod.rs`
-- [ ] CA and PKI operations
-  - [ ] CA rotation triggering and broadcast — `routes/settings_ca.rs`
-  - [ ] Certificate issuance (during service enrollment) — `routes/service_ws/handler/mod.rs`
-  - [ ] Certificate revocation — CA management
-  - [ ] CRL generation and renewal — `executors/crl_renewal.rs`
-  - [ ] Public PKI endpoint access (CA cert download, CRL access, OCSP queries) — `routes/ca.rs`, `routes/ocsp.rs`
-- [ ] Scheduler background tasks (automatic, no HTTP request)
-  - [ ] Auth cleanup execution (expired OIDC flows, device flows, rate limits) — `executors/auth_cleanup.rs`
-  - [ ] Service certificate check and renewal broadcast — `executors/service_cert_check.rs`
-  - [ ] CRL renewal trigger and broadcast — `executors/crl_renewal.rs`
-  - [ ] Stale MQTT lease cleanup — `executors/stale_lease_cleanup.rs`
-  - [ ] Audit log retention cleanup execution — `executors/audit_log_cleanup.rs`
-  - [ ] Version detection execution — `executors/detect_version.rs`
-  - [ ] Release fetch execution — `executors/fetch_releases.rs`
-- [ ] Semantic operation logging (authenticated routes — HTTP request logged, but not the operation meaning)
-  - [ ] Settings changes with old/new values (network, SMTP, registration mode, etc.)
-  - [ ] User creation, deactivation, role assignment changes
-  - [ ] OIDC provider creation, update, activation, deactivation, deletion
-  - [ ] Enrollment token creation and revocation
-  - [ ] Notification channel creation, update, deletion, test delivery
-  - [ ] Notification rule creation, update, deletion
-  - [ ] Service approval, rejection, deactivation
-  - [ ] System service approval, rejection, deactivation
-  - [ ] Software item creation, update, deletion
-  - [ ] Plugin config creation, update, deletion
-  - [ ] Host package ignore/unignore
-  - [ ] Autodiscovery ignore creation and deletion
-  - [ ] MQTT client creation, update, deletion
-  - [ ] Batch update initiation
-- [ ] Public callback endpoints (unauthenticated — outside `require_auth` middleware)
-  - [ ] Telegram webhook callback execution (action token, secret verification) — `routes/notifications.rs`
+- [ ] Authentication event logging
+  - **Category**: Security / Audit | **Impact**: High | **Effort**: Medium
+  - Log failed logins, failed API token/JWT attempts, token refresh failures, and registration
+    attempts. These occur outside `require_auth` middleware and need explicit audit calls in
+    `routes/auth.rs` and `middleware/require_auth.rs`.
+- [ ] OIDC auth flow logging
+  - **Category**: Security / Audit | **Impact**: Medium | **Effort**: Medium
+  - Log OIDC authorize initiation, callback completion, account linking, token exchange,
+    registration, and auth failures in `routes/oidc_auth.rs`.
+- [ ] Device auth flow logging
+  - **Category**: Security / Audit | **Impact**: Medium | **Effort**: Low-Medium
+  - Log device code creation, polling, approval/denial, expiration in `routes/device_auth.rs`.
+- [ ] WebSocket service operation logging
+  - **Category**: Security / Audit | **Impact**: Medium-High | **Effort**: Medium-High
+  - Log service WS connections, enrollment lifecycle, certificate operations, discovery reporting,
+    version check processing, update lifecycle, batch updates, and certificate renewal requests.
+    These bypass HTTP audit middleware entirely.
+- [ ] MQTT operation logging
+  - **Category**: Security / Audit | **Impact**: Medium | **Effort**: Medium
+  - Log MQTT registration, tenant assignment/release, heartbeats, and MQTT-triggered updates
+    in `routes/service_ws/handler/mqtt.rs`.
+- [ ] System service operation logging
+  - **Category**: Security / Audit | **Impact**: Medium | **Effort**: Low-Medium
+  - Log system service enrollment completion and credential delivery in
+    `routes/service_ws/handler/mod.rs`.
+- [ ] CA and PKI operation logging
+  - **Category**: Security / Audit | **Impact**: High | **Effort**: Medium
+  - Log CA rotation triggering/broadcast, certificate issuance, revocation, CRL generation, and
+    public PKI endpoint access.
+- [ ] Scheduler background task logging
+  - **Category**: Security / Audit | **Impact**: Medium | **Effort**: Medium
+  - Log execution of auth cleanup, cert checks, CRL renewal, stale lease cleanup, audit log
+    retention, version detection, and release fetch.
+- [ ] Semantic operation logging
+  - **Category**: Security / Audit | **Impact**: High | **Effort**: Medium-High
+  - Beyond raw HTTP request logging: log the semantic meaning of operations (settings changes with
+    old/new values, user CRUD, OIDC provider management, enrollment token lifecycle, notification
+    channel/rule CRUD, service approval/rejection, software/plugin/host-package management, batch
+    update initiation).
+- [ ] Public callback endpoint logging
+  - **Category**: Security / Audit | **Impact**: Low-Medium | **Effort**: Low
+  - Log Telegram webhook callback execution (action token verification) in
+    `routes/notifications.rs`.
 - [ ] Tamper-evident log storage
-  - [ ] Log signing
-  - [ ] Log integrity verification
-- [ ] Log management enhancements
-  - [ ] Per-tenant retention overrides (`audit_log.retention_days` — key defined, executor pending)
-  - [ ] Log archival
-  - [ ] Log search and analysis
-  - [x] Audit log read API (`GET /api/v1/audit-logs`, `GET /api/v1/system-audit-logs` with filter/pagination)
+  - **Category**: Security / Audit | **Impact**: Medium | **Effort**: High
+  - Log signing and integrity verification to detect tampering of audit records.
+- [ ] Per-tenant retention overrides
+  - **Category**: Security / Audit | **Impact**: Low-Medium | **Effort**: Low
+  - The `audit_log.retention_days` setting key is defined but the cleanup executor doesn't read
+    per-tenant overrides yet.
+- [ ] Log archival and search
+  - **Category**: Security / Audit | **Impact**: Medium | **Effort**: Medium-High
+  - Archive old logs to cold storage and add full-text search/analysis capabilities.
 
-### Additional Security
+### Additional Security — Pending
 
-- [x] Implement rate limiting for all endpoints
-- [x] Add brute force protection
-- [x] Implement security headers
-- [x] Add input validation and sanitization
-- [x] Implement secrets management
-  - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory in production; dev-only `--allow-plaintext-secrets`
-    available)
-  - [x] Context-bound `ENC:v3:` ciphertext format with envelope encryption (KEK wraps DEKs; AAD prevents ciphertext relocation attacks)
-  - [x] **Envelope encryption with automatic v3 migration** — all `EncryptedString`-typed columns and encrypted settings use `ENC:v3:<key_id>:<hex>`
-    format with per-column AAD and data encryption keys (DEKs). Migration from plaintext, `ENC:v1:`, and `ENC:v2:` to `ENC:v3:` runs automatically
-    on every startup (no CLI flag needed). See [Secrets and Encryption](docs/security/secrets-and-encryption.md) for details.
-  - [x] **Master key rotation** — `--rotate-master-key-file` re-wraps all DEKs with a new KEK in O(1) time. See
-    [Key Rotation](docs/security/key-rotation.md).
-  - [ ] Credential rotation
-  - [ ] Vault integration
-- [ ] Add security scanning to CI/CD
-  - [ ] Dependency vulnerability scanning
-  - [ ] Static code analysis
-  - [ ] Container image scanning
+- [ ] Credential rotation
+  - **Category**: Security | **Impact**: Medium | **Effort**: Medium
+  - Automated rotation of stored credentials (MQTT passwords, SMTP credentials, plugin API keys)
+    with zero-downtime switchover.
+- [ ] Vault integration
+  - **Category**: Security | **Impact**: Medium | **Effort**: Medium-High
+  - Optional HashiCorp Vault (or compatible) backend for secrets storage instead of local
+    AES-256-GCM encryption.
+- [ ] Security scanning in CI/CD
+  - **Category**: Security / CI | **Impact**: Medium-High | **Effort**: Medium
+  - Add `cargo-audit` for dependency vulnerability scanning, SAST tools for static analysis, and
+    container image scanning to the CI pipeline.
 
 ______________________________________________________________________
 
-## Phase 8: Quality & Reliability (Ongoing)
+## Phase 8: Quality & Reliability
 
-Ensuring robustness and maintainability.
+### Completed
 
-### Testing
+- **Integration Tests** — REST API, WebSocket, system integration (Docker/testcontainers),
+  OCSP/CRL revocation checking with reverse proxies.
+- **Error Recovery** — Connection retry with exponential backoff, automatic transient error
+  recovery.
+- **Reliability** — Health check endpoints (`/healthz` + `/readyz` with DB and CA checks),
+  graceful shutdown (agent waits for in-flight updates).
 
-- [ ] Expand unit test coverage
-  - [ ] Target 80%+ coverage for core logic
-  - [ ] Test error handling paths
-  - [ ] Test edge cases
-- [x] Add integration tests
-  - [x] REST API integration tests (auth, services, hosts, software items, enrollment tokens, settings, notifications, plugin configs, error cases)
-  - [x] WebSocket integration tests (enrollment, reconnection, registry send/broadcast)
-  - [x] System integration tests (Docker-based, testcontainers): controller startup,
-    agent/scheduler/mqtt/agent-ssh enrollment, concurrent multi-service enrollment
-  - [ ] Agent-controller communication (message exchange beyond enrollment)
-  - [ ] Database operations
-  - [ ] Plugin implementations
-  - [ ] End-to-end update workflows
-  - [x] OCSP revocation checking with reverse proxies (Nginx `ssl_ocsp leaf`). Uses a standalone test OCSP responder (`ocsp_responder.rs`) reachable
-    from Docker via `host.docker.internal`. CRL tests exist for Nginx, HAProxy, and Envoy; OCSP test covers Nginx.
-- [ ] Implement load testing
-  - [ ] Many agents scenario
-  - [ ] Concurrent update scenario
-  - [ ] High-frequency check scenario
-- [ ] Add chaos testing
-  - [ ] Network failure scenarios
-  - [ ] Database failure scenarios
-  - [ ] Agent crash scenarios
-- [ ] Create test fixtures and mocks
-  - [ ] Mock plugins
-  - [ ] Mock version sources
-  - [ ] Test data generators
+### Testing — Pending
 
-### Error Recovery
+- [ ] Expand unit test coverage to 80%+
+  - **Category**: Testing | **Impact**: High | **Effort**: High
+  - Target 80%+ coverage for core logic. Focus on error handling paths and edge cases.
+- [ ] Integration tests: agent-controller message exchange
+  - **Category**: Testing | **Impact**: Medium-High | **Effort**: Medium
+  - Test full message exchange beyond enrollment (version checks, update commands, discovery
+    results).
+- [ ] Integration tests: database operations
+  - **Category**: Testing | **Impact**: Medium | **Effort**: Medium
+  - Dedicated tests for complex query patterns (tenant isolation, join tables, batch operations).
+- [ ] Integration tests: plugin implementations
+  - **Category**: Testing | **Impact**: Medium | **Effort**: Medium
+  - Test each plugin against real or mocked package managers / registries.
+- [ ] Integration tests: end-to-end update workflows
+  - **Category**: Testing | **Impact**: High | **Effort**: Medium-High
+  - Full update cycle from version detection through execution to completion, including batch
+    updates and failure recovery.
+- [ ] Load testing
+  - **Category**: Testing / Performance | **Impact**: Medium | **Effort**: Medium-High
+  - Many-agents, concurrent-updates, and high-frequency-checks scenarios to find bottlenecks.
+- [ ] Chaos testing
+  - **Category**: Testing / Reliability | **Impact**: Medium | **Effort**: High
+  - Network failure, database failure, and agent crash scenarios to verify graceful degradation.
+- [ ] Test fixtures and mocks
+  - **Category**: Testing / DX | **Impact**: Medium | **Effort**: Medium
+  - Shared mock plugins, mock version sources, and test data generators for use across crates.
 
-- [x] Implement connection retry logic with exponential backoff
-- [ ] Add graceful degradation for partial failures
-- [ ] Implement circuit breaker pattern for external services
-- [x] Add automatic recovery from transient errors
-- [ ] Implement idempotent operations
-- [ ] Add operation replay capabilities
+### Error Recovery — Pending
 
-### Performance Optimization
+- [ ] Graceful degradation for partial failures
+  - **Category**: Reliability | **Impact**: Medium | **Effort**: Medium
+  - Continue operating with reduced functionality when subsystems fail (e.g. notification
+    delivery failure shouldn't block updates).
+- [ ] Circuit breaker pattern for external services
+  - **Category**: Reliability | **Impact**: Medium | **Effort**: Medium
+  - Stop calling external APIs (GitHub, Docker Hub, package registries) after repeated failures,
+    with automatic recovery after a cooldown.
+- [ ] Idempotent operations
+  - **Category**: Reliability / Architecture | **Impact**: Medium | **Effort**: Medium-High
+  - Ensure all state-changing operations can be safely retried without side effects (important
+    for HA and network partitions).
+- [ ] Operation replay capabilities
+  - **Category**: Reliability | **Impact**: Low-Medium | **Effort**: High
+  - Record and replay failed operations for debugging and recovery.
+
+### Performance Optimization — Pending
 
 - [ ] Profile and optimize hot paths
-- [ ] Implement efficient caching strategies
-- [ ] Optimize database queries
-  - [ ] Add indexes
-  - [ ] Query optimization
-  - [ ] Connection pooling tuning
-- [ ] Reduce memory footprint
-- [ ] Optimize agent-controller communication
-  - [ ] Message batching
-  - [ ] Compression
-- [ ] Add performance monitoring
-  - [ ] Request timing
-  - [ ] Database query timing
-  - [ ] Resource usage metrics
+  - **Category**: Performance | **Impact**: Medium | **Effort**: Medium
+  - Use `perf` / `flamegraph` to identify and optimize CPU-intensive code paths.
+- [ ] Caching strategies
+  - **Category**: Performance | **Impact**: Medium | **Effort**: Medium
+  - In-memory caches for frequently accessed data (settings, plugin configs, host metadata) with
+    invalidation.
+- [ ] Database query optimization
+  - **Category**: Performance | **Impact**: Medium | **Effort**: Medium
+  - Add missing indexes, optimize N+1 queries, tune connection pool sizes.
+- [ ] Memory footprint reduction
+  - **Category**: Performance | **Impact**: Low-Medium | **Effort**: Medium
+  - Profile heap usage and reduce allocations in hot paths (wire message handling, SSE
+    broadcasting).
+- [ ] Agent-controller communication optimization
+  - **Category**: Performance | **Impact**: Medium | **Effort**: Medium-High
+  - Message batching and optional compression for high-frequency message paths.
+- [ ] Performance monitoring
+  - **Category**: Performance / Observability | **Impact**: Medium | **Effort**: Medium
+  - Request timing, database query timing, and resource usage metrics exposed via an endpoint
+    or logs.
 
-### Reliability
+### Reliability — Pending
 
-- [x] Implement health check endpoints (`/healthz` liveness + `/readyz` readiness with DB and CA checks)
-- [x] Add readiness probes
-- [x] Implement graceful shutdown (agent waits for in-flight updates before disconnecting)
-- [ ] Add state recovery on restart
-- [ ] Implement data integrity checks
-- [ ] Add automatic backup and restore
-
-______________________________________________________________________
-
-## Phase 9: Documentation & Operations (Ongoing)
-
-Making the system usable and maintainable.
-
-### API Documentation
-
-- [x] Generate OpenAPI/Swagger specification (utoipa auto-generated, served at `/api/openapi.json`)
-- [x] Document all REST endpoints (`docs/api/http-web-api.md`, 150+ endpoints)
-- [ ] Add request/response examples (schemas documented, few curl examples)
-- [x] Document WebSocket messages (`docs/api/wire-protocol.md`, 50KB)
-- [x] Create API client libraries
-  - [x] `uptrakit-openapi-client` typed HTTP client crate (used by CLI)
-
-### User Documentation
-
-- [ ] Write getting started guide
-- [ ] Create installation guide
-  - [ ] Controller installation
-  - [ ] Agent installation
-  - [ ] Configuration walkthrough
-- [ ] Write user manual
-  - [ ] Web UI guide
-  - [x] CLI guide (`docs/end-user/cli-usage.md`)
-  - [x] MQTT/Home Assistant integration guide (`docs/end-user/home-assistant-mqtt.md`)
-- [ ] Create FAQ
-- [ ] Add troubleshooting guide
-- [ ] Record video tutorials
-
-### Security Documentation
-
-- [ ] Write mTLS setup guide
-  - [ ] CA certificate generation
-  - [ ] Agent certificate provisioning
-  - [ ] Certificate renewal procedures
-- [ ] Document CA rotation procedures
-  - [ ] Pre-rotation checklist
-  - [ ] Rotation execution steps
-  - [ ] Post-rotation verification
-  - [ ] Rollback procedures
-- [x] Create certificate management guide
-  - [x] Certificate lifecycle overview
-  - [x] Revocation procedures
-  - [ ] Backup and recovery
-- [ ] Document agent authentication
-  - [ ] Enrollment workflow
-  - [ ] Identity management
-  - [ ] Authorization policies
-- [x] Write security best practices guide
-  - [x] Secure deployment recommendations
-  - [x] Network security
-  - [x] Secret management
-  - [x] Audit logging configuration
-
-### Deployment Documentation
-
-- [ ] Write deployment guide
-  - [ ] System requirements
-  - [ ] Network requirements
-  - [ ] Security considerations
-- [x] Create Docker deployment guide
-- [ ] Create Kubernetes deployment guide
-- [ ] Document systemd service setup
-- [ ] Add upgrade guide
-- [ ] Create backup and restore guide
-
-### Contributor Documentation
-
-- [x] Write [CONTRIBUTING.md](CONTRIBUTING.md)
-- [x] Document development setup
-- [x] Create architecture documentation
-- [x] Document testing strategy (`docs/development/testing.md`)
-- [ ] Create PR template and guidelines
+- [ ] State recovery on restart
+  - **Category**: Reliability | **Impact**: Medium | **Effort**: Medium
+  - Recover in-progress updates, pending batches, and scheduled task state after a controller
+    crash and restart.
+- [ ] Data integrity checks
+  - **Category**: Reliability | **Impact**: Medium | **Effort**: Medium
+  - Periodic consistency checks (orphaned records, FK integrity, encryption health).
+- [ ] Automatic backup and restore
+  - **Category**: Reliability / Operations | **Impact**: Medium-High | **Effort**: Medium-High
+  - Scheduled database backups with documented restore procedure. Critical for production
+    deployments.
 
 ______________________________________________________________________
 
-## Phase 10: Project Infrastructure (Ongoing)
+## Phase 9: Documentation & Operations
 
-Development and release automation.
+### Completed
 
-### CI/CD
+- **API Documentation** — OpenAPI/Swagger spec, REST endpoint docs (150+), WebSocket/wire protocol
+  docs (50KB), `uptrakit-openapi-client` typed client crate.
+- **User Documentation** — CLI guide, MQTT/Home Assistant integration guide.
+- **Security Documentation** — Certificate management guide (lifecycle, revocation), security best
+  practices guide (deployment, network, secrets, audit logging).
+- **Deployment Documentation** — Docker deployment guide.
+- **Contributor Documentation** — CONTRIBUTING.md, development setup, architecture docs, testing
+  strategy.
 
-- [ ] Expand GitHub Actions workflows
-  - [x] Multi-platform builds (x86_64 + aarch64, Linux + macOS)
-  - [x] Cross-compilation (Cross.toml for ARM64 Linux)
-  - [x] Test execution (ci.yml: clippy, tests, integration tests, frontend checks)
-  - [ ] Coverage reporting
-- [ ] Add automated security scanning
-  - [ ] cargo-audit integration
-  - [x] cargo-deny integration (CI job `backend-deny` runs `cargo deny check`)
-  - [ ] SAST tools
-- [x] Implement automated dependency updates (Dependabot configured for Cargo + npm)
-- [x] Add automated changelog generation (release-please from conventional commits)
-- [x] Implement semantic versioning automation (release-please auto-determines version bumps)
+### Pending
 
-### Release Automation
+- [ ] API request/response examples
+  - **Category**: Docs / API | **Impact**: Medium | **Effort**: Low-Medium
+  - Add curl examples for common API operations. Schemas are documented but practical examples
+    are sparse.
+- [ ] Getting started guide
+  - **Category**: Docs / End-User | **Impact**: High | **Effort**: Low-Medium
+  - Step-by-step guide from installation to first monitored software item. Critical for adoption.
+- [ ] Installation guide
+  - **Category**: Docs / End-User | **Impact**: High | **Effort**: Medium
+  - Controller installation, agent installation, and configuration walkthrough for supported
+    platforms.
+- [ ] Web UI user guide
+  - **Category**: Docs / End-User | **Impact**: Medium | **Effort**: Medium
+  - Walkthrough of all UI pages with screenshots and common workflows.
+- [ ] FAQ
+  - **Category**: Docs / End-User | **Impact**: Medium | **Effort**: Low
+  - Answers to common questions (supported plugins, HA setup, agent enrollment, MQTT setup).
+- [ ] Troubleshooting guide
+  - **Category**: Docs / End-User | **Impact**: Medium-High | **Effort**: Medium
+  - Common issues and solutions: agent won't connect, certificate errors, update failures, MQTT
+    discovery not working.
+- [ ] Video tutorials
+  - **Category**: Docs / End-User | **Impact**: Medium | **Effort**: High
+  - Recorded walkthroughs for installation, configuration, and common workflows.
+- [ ] mTLS setup guide
+  - **Category**: Docs / Security | **Impact**: Medium-High | **Effort**: Medium
+  - CA certificate generation, agent certificate provisioning, and renewal procedures for users
+    bringing their own CA.
+- [ ] CA rotation procedures documentation
+  - **Category**: Docs / Security | **Impact**: Medium | **Effort**: Medium
+  - Pre-rotation checklist, execution steps, post-rotation verification, rollback procedures.
+- [ ] Certificate backup and recovery documentation
+  - **Category**: Docs / Security | **Impact**: Medium | **Effort**: Low-Medium
+  - Procedures for backing up and restoring CA certificates and keys.
+- [ ] Agent authentication documentation
+  - **Category**: Docs / Security | **Impact**: Medium | **Effort**: Medium
+  - Enrollment workflow, identity management, and authorization policies explained for operators.
+- [ ] Deployment guide
+  - **Category**: Docs / Operations | **Impact**: High | **Effort**: Medium
+  - System requirements, network requirements, security considerations for production deployments.
+- [ ] Kubernetes deployment guide
+  - **Category**: Docs / Operations | **Impact**: Medium-High | **Effort**: Medium
+  - Helm chart or raw manifests, ConfigMap/Secret management, readiness/liveness probes, scaling.
+- [ ] Systemd service setup documentation
+  - **Category**: Docs / Operations | **Impact**: Medium-High | **Effort**: Low-Medium
+  - Unit files for controller, agent, scheduler, MQTT service. Hardening options (`ProtectSystem`,
+    `NoNewPrivileges`, etc.).
+- [ ] Upgrade guide
+  - **Category**: Docs / Operations | **Impact**: Medium-High | **Effort**: Medium
+  - Version-to-version upgrade steps, migration notes, breaking change handling.
+- [ ] Backup and restore guide
+  - **Category**: Docs / Operations | **Impact**: Medium-High | **Effort**: Medium
+  - Database backup, CA key backup, configuration backup, and tested restore procedures.
+- [ ] PR template and guidelines
+  - **Category**: Docs / Contributing | **Impact**: Low-Medium | **Effort**: Low
+  - GitHub PR template with checklist (tests, docs, migration, clippy, deny).
 
-- [x] Automate binary releases (release-please workflow)
-  - [x] Multi-platform binaries (7 binaries x 4 targets)
-  - [x] Attestation (GitHub artifact attestation)
-- [x] Automate container image builds
-  - [x] Multi-arch images
-  - [ ] Image scanning
-  - [x] Registry publishing
-- [ ] Create release checklist
-- [x] Automate release notes generation (release-please)
-- [x] Implement version bumping automation (release-please)
+______________________________________________________________________
 
-### Monitoring & Observability
+## Phase 10: Project Infrastructure
 
-- [ ] Implement structured logging
-  - [ ] JSON log output
-  - [x] Log levels
-  - [x] Correlation IDs (request-id middleware, TraceContext on wire protocol)
-- [ ] Add metrics collection
-  - [ ] Prometheus metrics
-  - [ ] Custom metrics
-  - [ ] Metric dashboards
-- [x] Implement tracing spans (`#[instrument]` on all critical code paths)
-  - [x] Distributed tracing preparation (TraceContext, request IDs, registry-based subscriber)
-  - [ ] OpenTelemetry integration (add `tracing-opentelemetry` exporter layer)
-- [ ] Create monitoring dashboards
-  - [ ] System health dashboard
-  - [ ] Performance dashboard
-  - [ ] Security dashboard
-- [ ] Add alerting
-  - [ ] Certificate expiration alerts
-  - [ ] CA rotation status alerts
-  - [ ] Agent authentication failure alerts
-  - [ ] Update failure alerts
-  - [ ] System health alerts
+### Completed
 
-### Developer Experience
+- **CI/CD** — Multi-platform builds (x86_64 + aarch64, Linux + macOS), cross-compilation, test
+  execution (clippy, tests, integration tests, frontend checks), cargo-deny, Dependabot,
+  release-please (changelog, semver, conventional commits).
+- **Release Automation** — Multi-platform binary releases (7 binaries x 4 targets), GitHub artifact
+  attestation, multi-arch container images, registry publishing, release notes.
+- **Observability** — Log levels, correlation IDs (request-id middleware, TraceContext), tracing
+  spans (`#[instrument]`), distributed tracing preparation.
 
-- [ ] Improve local development setup
-  - [ ] Development containers
-  - [ ] Mock services
-  - [ ] Hot reloading
-- [ ] Create debugging tools
-- [ ] Add development documentation
-- [ ] Implement consistent error messages
-- [ ] Add development helpers and scripts
+### CI/CD — Pending
+
+- [ ] Coverage reporting
+  - **Category**: CI | **Impact**: Medium | **Effort**: Medium
+  - Add `cargo-llvm-cov` or `tarpaulin` to CI and publish coverage reports (e.g. Codecov).
+- [ ] cargo-audit integration
+  - **Category**: CI / Security | **Impact**: Medium-High | **Effort**: Low
+  - Add `cargo audit` to CI pipeline for known vulnerability detection in dependencies. Quick
+    win alongside existing `cargo deny`.
+- [ ] SAST tools
+  - **Category**: CI / Security | **Impact**: Medium | **Effort**: Medium
+  - Static application security testing (e.g. `cargo-geiger` for unsafe usage, custom lint rules).
+- [ ] Container image scanning
+  - **Category**: CI / Security | **Impact**: Medium | **Effort**: Low-Medium
+  - Scan published container images for known vulnerabilities (Trivy, Grype, or similar).
+
+### Release Automation — Pending
+
+- [ ] Release checklist
+  - **Category**: Operations | **Impact**: Low-Medium | **Effort**: Low
+  - Documented pre-release and post-release checklist for manual verification steps.
+
+### Monitoring & Observability — Pending
+
+- [ ] JSON structured logging
+  - **Category**: Observability | **Impact**: High | **Effort**: Low
+  - Add a `--log-format json` flag to all binaries. Most of the tracing infra is already in place;
+    just needs a `tracing-subscriber` JSON layer toggle. Critical for log aggregation (ELK, Loki).
+- [ ] Prometheus metrics
+  - **Category**: Observability | **Impact**: Medium-High | **Effort**: Medium
+  - Expose Prometheus-compatible metrics endpoint (`/metrics`): request latencies, update counts,
+    agent connection gauge, error rates. Use `metrics` + `metrics-exporter-prometheus`.
+- [ ] OpenTelemetry integration
+  - **Category**: Observability | **Impact**: Medium-High | **Effort**: Medium
+  - Add `tracing-opentelemetry` exporter layer for distributed tracing. All spans and instruments
+    are already in place; just wire up the subscriber layer and OTLP exporter.
+- [ ] Monitoring dashboards
+  - **Category**: Observability | **Impact**: Medium | **Effort**: Medium
+  - Grafana dashboard templates for system health, performance, and security metrics.
+- [ ] Alerting rules
+  - **Category**: Observability | **Impact**: Medium | **Effort**: Medium
+  - Prometheus alerting rules or notification system integration for certificate expiration, CA
+    rotation failures, agent auth failures, update failures, and system health.
+
+### Developer Experience — Pending
+
+- [ ] Development containers
+  - **Category**: DX | **Impact**: Medium | **Effort**: Medium
+  - Devcontainer config for VS Code / Codespaces with all build dependencies pre-installed.
+- [ ] Mock services for local development
+  - **Category**: DX | **Impact**: Medium | **Effort**: Medium
+  - Mock MQTT broker, mock package registry, and mock GitHub API for local end-to-end testing
+    without external dependencies.
+- [ ] Hot reloading for development
+  - **Category**: DX | **Impact**: Medium | **Effort**: Medium
+  - `cargo-watch` config or similar for automatic rebuild on code changes during development.
+- [ ] Debugging tools
+  - **Category**: DX | **Impact**: Low-Medium | **Effort**: Medium
+  - Diagnostic endpoints, debug logging presets, and state dump commands.
+- [ ] Consistent error messages
+  - **Category**: DX / UX | **Impact**: Medium | **Effort**: Medium
+  - Standardize error message format across all binaries and API responses with error codes and
+    actionable guidance.
+- [ ] Development helper scripts
+  - **Category**: DX | **Impact**: Medium | **Effort**: Low-Medium
+  - Scripts for common tasks: seed test data, reset DB, generate test certificates, run all
+    quality gates.
 
 ______________________________________________________________________
 
@@ -1045,56 +819,38 @@ ______________________________________________________________________
 
 Items to consider for future versions but not currently prioritized:
 
-- [x] Multi-tenant support (database infrastructure, single-tenant mode)
-  - [x] Tenants table with default tenant seeding
-  - [x] `tenant_id` FK on all scoped tables (agents, services, hosts, plugin_configs, software_items, oidc_providers, user_roles, settings)
-  - [x] TenantContext extractor (X-Tenant-Id header with default tenant fallback)
-  - [x] Global vs tenant-scoped settings (SettingKey::is_global())
-  - [x] All route handlers updated for tenant awareness
-  - [ ] Tenant management API (CRUD)
-  - [ ] Multi-tenant JWT (per-tenant permissions)
-  - [x] Tenant-aware MQTT (separate `uptrakit-mqtt` binary with per-tenant lease-based distribution via unified `/api/v1/ws/service` WebSocket
-    endpoint)
-  - [x] Tenant-agnostic system services (`system_services` table, no `tenant_id`): MQTT bridge and external
-    scheduler enroll via `system_service` capability; dedicated `/api/v1/system-services` REST surface;
-    `view_system_services` / `manage_system_services` permissions; enrollment token in settings; separate
-    `/system-services` UI page; CLI `system-services` command group
-  - [ ] Tenant switching UI
-  - [ ] API token scoping per tenant
-- [ ] Agent clustering
-- [ ] High availability for controller (auth flow stores are now DB-backed and HA-ready; settings cache uses version-gated periodic reload for
-  cross-instance consistency; CRL rebuilds propagate cross-instance via `revocation_version` polling; cross-controller push notification delivery via
-  NATS JetStream is implemented (feature-gated `nats`); JWT signing key is DB-backed and shared across instances; master key mismatch detection via
-  startup verification token is implemented; token denylist is per-instance — DB-backed HA sync deferred; external scheduler binary supports HA via
-  DB-level optimistic locking)
-- [ ] Update preview/dry-run mode
-- [ ] Cost tracking for cloud-based updates
-- [ ] Compliance reporting (update audit trails)
-- [ ] Mobile app
-- [ ] Browser extensions for quick status checks
-- [ ] Terraform/Ansible provider integrations
-- [ ] GitOps integration for configuration
-- [ ] Machine learning for update risk prediction
-- [ ] A/B testing framework for updates
-- [ ] Custom metrics and alerting DSL
+- **Multi-tenant enhancements** — Tenant management API (CRUD), multi-tenant JWT (per-tenant
+  permissions), tenant switching UI, API token scoping per tenant. Foundation is complete (tenants
+  table, `tenant_id` FK, TenantContext extractor, tenant-aware MQTT, tenant-agnostic system
+  services).
+- **High availability** — Partial HA groundwork is done (DB-backed auth flows, version-gated
+  settings cache, CRL cross-instance propagation, NATS JetStream push notifications, DB-backed
+  JWT signing key, master key mismatch detection, external scheduler with optimistic locking).
+  Remaining: token denylist HA sync, full active-active controller support.
+- **Agent clustering** — Multiple agents cooperating on a single host or agent pools.
+- **Update preview / dry-run mode** — Simulate an update without executing it.
+- **Compliance reporting** — Export update audit trails for compliance frameworks.
+- **Terraform / Ansible provider integrations** — Infrastructure-as-code for Uptrakit config.
+- **GitOps integration** — Declarative configuration management via Git repositories.
+- **Mobile app** — Native mobile app for monitoring and approving updates.
+- **Browser extension** — Quick status checks from the browser toolbar.
 
 ______________________________________________________________________
 
 ## Deferred Dependency Upgrades
 
-Dependencies that could not be upgraded in the current pass and require upstream changes before they can move forward.
+Dependencies blocked by upstream and requiring external changes before they can move forward.
 
-- [ ] **`strum` 0.27 → 0.28** — blocked by `sea-orm rc.x`, which pins `strum = "^0.27"` (excludes 0.28.x). Workspace crates that
-  derive both `strum::EnumIter` and `sea_orm::DeriveActiveEnum` would have two incompatible `Iterable` trait versions. Revisit once
-  sea-orm ships a release that moves its own strum pin to `^0.28`.
+- [ ] **`strum` 0.27 → 0.28** — blocked by `sea-orm rc.x`, which pins `strum = "^0.27"`. Revisit
+  once sea-orm ships a release that accepts `strum ^0.28`.
 
-- [ ] **`rand` 0.9 → 0.10** — blocked by `russh`, `rsa`, and `crypto-bigint`, which depend on `rand_core = "0.10.0-rc-3"`. Cargo
-  cannot unify this pre-release with the stable `rand_core ^0.10.0` that `rand 0.10.0` requires. Revisit once the russh/RustCrypto
-  stack stabilises on a non-RC release of `rand_core 0.10`.
+- [ ] **`rand` 0.9 → 0.10** — blocked by `russh`, `rsa`, and `crypto-bigint` depending on
+  `rand_core = "0.10.0-rc-3"`. Revisit once the russh/RustCrypto stack stabilises on stable
+  `rand_core 0.10`.
 
-- [ ] **`der` 0.7 / `const-oid` 0.9 / `spki` 0.7 / `x509-cert` 0.2 / `x509-ocsp` 0.2** — blocked by `rcgen 0.14` and `x509-ocsp 0.2`,
-  which both require `der ^0.7`. Bumping `der` to 0.8 while they remain on 0.7 introduces two incompatible versions and causes type
-  collisions in the PKI/OCSP code. Revisit once `rcgen` and `x509-ocsp` release versions compatible with `der ^0.8`.
+- [ ] **`der` 0.7 / `const-oid` 0.9 / `spki` 0.7 / `x509-cert` 0.2 / `x509-ocsp` 0.2** —
+  blocked by `rcgen 0.14` and `x509-ocsp 0.2` requiring `der ^0.7`. Revisit once `rcgen` and
+  `x509-ocsp` release versions compatible with `der ^0.8`.
 
 ______________________________________________________________________
 
