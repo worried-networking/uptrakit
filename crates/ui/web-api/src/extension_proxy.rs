@@ -215,6 +215,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "id": id,
             "label": format!("Test {id}"),
+            "priority": 0,
             "placement": {
                 "type": "page",
                 "nav_section": "test"
@@ -230,7 +231,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn invoke_succeeds_when_complete_is_called() {
-        let registry = ExtensionRegistry::new(vec![]);
+        let registry = ExtensionRegistry::new(vec![], vec![]);
         let service_connections = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
 
@@ -289,7 +290,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn invoke_times_out() {
         let proxy = ExtensionProxy::new();
-        let registry = ExtensionRegistry::new(vec![]);
+        let registry = ExtensionRegistry::new(vec![], vec![]);
         let service_connections = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
 
@@ -349,7 +350,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn invoke_returns_no_provider_when_extension_not_registered() {
         let proxy = ExtensionProxy::new();
-        let registry = ExtensionRegistry::new(vec![]);
+        let registry = ExtensionRegistry::new(vec![], vec![]);
         let service_connections = ServiceConnectionRegistry::new();
 
         let result = proxy
@@ -374,7 +375,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn invoke_returns_invalid_provider_for_wrong_override() {
         let proxy = ExtensionProxy::new();
-        let registry = ExtensionRegistry::new(vec![]);
+        let registry = ExtensionRegistry::new(vec![], vec![]);
         let service_connections = ServiceConnectionRegistry::new();
 
         let real_svc = Uuid::now_v7();
@@ -406,7 +407,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn invoke_returns_send_failed_when_service_not_connected() {
         let proxy = ExtensionProxy::new();
-        let registry = ExtensionRegistry::new(vec![]);
+        let registry = ExtensionRegistry::new(vec![], vec![]);
         let service_connections = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
 
@@ -440,7 +441,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn invoke_returns_service_disconnected_when_sender_dropped() {
         let proxy = std::sync::Arc::new(ExtensionProxy::new());
-        let registry = ExtensionRegistry::new(vec![]);
+        let registry = ExtensionRegistry::new(vec![], vec![]);
         let service_connections = ServiceConnectionRegistry::new();
         let service_id = Uuid::now_v7();
 

@@ -187,8 +187,8 @@ pub async fn dynamic_invoke(
             )))
         })?;
 
-    // Build a clap Command from the manifest.
-    let cmd = build_extension_command(&ext.manifest);
+    // Build a clap Command from the manifest and its resolved actions.
+    let cmd = build_extension_command(&ext.manifest, &ext.actions);
 
     // Parse the remaining args (everything after extension_id).
     // clap's try_get_matches_from handles --help by printing and exiting.
@@ -210,8 +210,7 @@ pub async fn dynamic_invoke(
     })?;
 
     // Extract params from the action matches.
-    let actions = collect_actions(&ext.manifest.ui);
-    let action_def = actions.iter().find(|a| a.action_id == action_id);
+    let action_def = ext.actions.iter().find(|a| a.action_id == action_id);
     let params = extract_params_from_matches(action_matches, action_def);
 
     // Invoke the action.
@@ -222,12 +221,12 @@ pub async fn dynamic_invoke(
     Ok(InvokeOutput(result))
 }
 
-/// Build a `clap::Command` from an extension manifest.
+/// Build a `clap::Command` from an extension manifest and its action catalogue.
 ///
 /// The top-level command has `--service-id` (only for targeted extensions)
 /// and one subcommand per action. Each action's arguments are built from
 /// its form fields.
-fn build_extension_command(manifest: &ExtensionManifest) -> clap::Command {
+fn build_extension_command(manifest: &ExtensionManifest, actions: &[ActionDef]) -> clap::Command {
     let mut cmd = clap::Command::new(manifest.id.clone())
         .about(manifest.label.clone())
         .subcommand_required(true);
@@ -243,10 +242,15 @@ fn build_extension_command(manifest: &ExtensionManifest) -> clap::Command {
         );
     }
 
-    // Collect all actions from the manifest UI.
-    let actions = collect_actions(&manifest.ui);
+    // Collect action IDs referenced by the UI.
+    let referenced_ids = collect_action_ids(&manifest.ui);
 
-    for action in &actions {
+    for action in actions {
+        // Only include actions referenced by this extension's UI.
+        if !referenced_ids.contains(&action.action_id.as_str()) {
+            continue;
+        }
+
         let mut subcmd = clap::Command::new(action.action_id.clone()).about(action.label.clone());
 
         // Add form field args if the action has a form UI.
@@ -257,7 +261,7 @@ fn build_extension_command(manifest: &ExtensionManifest) -> clap::Command {
         }
 
         // Row actions get a positional `id` argument.
-        if is_row_action(action, &manifest.ui) {
+        if is_row_action(&action.action_id, &manifest.ui) {
             subcmd = subcmd.arg(
                 clap::Arg::new("id")
                     .help("Row identifier")
@@ -350,7 +354,7 @@ fn build_arg_from_field(field: &FieldDef) -> clap::Arg {
 /// Extract action parameters from clap matches into a JSON Value.
 fn extract_params_from_matches(
     matches: &clap::ArgMatches,
-    action_def: Option<&&ActionDef>,
+    action_def: Option<&ActionDef>,
 ) -> serde_json::Value {
     let mut params = serde_json::Map::new();
 
@@ -389,8 +393,8 @@ fn extract_params_from_matches(
 
 // ── Helpers for manifest introspection ─────────────────────────────────────
 
-/// Collect all actions from an extension UI definition.
-fn collect_actions(ui: &ExtensionUi) -> Vec<&ActionDef> {
+/// Collect all action ID strings referenced from an extension UI definition.
+fn collect_action_ids(ui: &ExtensionUi) -> Vec<&str> {
     match ui {
         ExtensionUi::DataTable {
             row_actions,
@@ -398,15 +402,19 @@ fn collect_actions(ui: &ExtensionUi) -> Vec<&ActionDef> {
             context_selector,
             ..
         } => {
-            let mut v: Vec<&ActionDef> = row_actions.iter().chain(primary_actions.iter()).collect();
+            let mut ids: Vec<&str> = row_actions
+                .iter()
+                .chain(primary_actions.iter())
+                .map(String::as_str)
+                .collect();
             if let Some(cs) = context_selector
                 && let Some(add_action) = &cs.add_action
             {
-                v.push(add_action);
+                ids.push(add_action.as_str());
             }
-            v
+            ids
         }
-        ExtensionUi::Actions { actions, .. } => actions.iter().collect(),
+        ExtensionUi::Actions { actions, .. } => actions.iter().map(String::as_str).collect(),
         ExtensionUi::Form(_) | ExtensionUi::KeyValue { .. } => vec![],
         _ => vec![],
     }
@@ -429,12 +437,10 @@ fn action_form_fields(action: &ActionDef) -> Option<&[FieldDef]> {
     }
 }
 
-/// Check if an action is a row action (appears in `row_actions`).
-fn is_row_action(action: &ActionDef, ui: &ExtensionUi) -> bool {
+/// Check if an action ID is a row action (appears in `row_actions`).
+fn is_row_action(action_id: &str, ui: &ExtensionUi) -> bool {
     match ui {
-        ExtensionUi::DataTable { row_actions, .. } => {
-            row_actions.iter().any(|a| a.action_id == action.action_id)
-        }
+        ExtensionUi::DataTable { row_actions, .. } => row_actions.iter().any(|a| a == action_id),
         _ => false,
     }
 }

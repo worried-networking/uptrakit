@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_internal_wire::extension::ExtensionManifest;
+use uptrakit_internal_wire::extension::{ActionDef, ExtensionManifest};
 use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
@@ -9,6 +9,9 @@ pub struct ExtensionResponse {
     /// The extension manifest.
     #[serde(flatten)]
     pub manifest: ExtensionManifest,
+    /// Resolved action catalogue for this extension's source.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ActionDef>,
     /// Number of connected service instances providing this extension.
     pub provider_count: usize,
 }

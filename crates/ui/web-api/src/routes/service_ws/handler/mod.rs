@@ -590,6 +590,38 @@ pub(crate) async fn handle_authenticated_loop(
                             }
 
                             // -------------------------------------------------
+                            // ExtensionActionsRegister (requires UiExtensions)
+                            // -------------------------------------------------
+                            ServiceMessage::ExtensionActionsRegister(payload) if has_ui_extensions => {
+                                if let Err(e) = payload.wire_validate() {
+                                    tracing::warn!(
+                                        %service_id,
+                                        error = %e,
+                                        "invalid ExtensionActionsRegister payload"
+                                    );
+                                    let err = ControllerMessage::Error(ErrorPayload {
+                                        code: ErrorCode::BadRequest,
+                                        message: format!("invalid extension actions: {e}"),
+                                    });
+                                    if let Some(json) = serialize_controller_msg(out_seq, err) {
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                    }
+                                } else {
+                                    let app_name = service_app_name.as_deref().unwrap_or("unknown");
+                                    state.extension_registry.register_actions(
+                                        service_id,
+                                        app_name,
+                                        payload.actions,
+                                    );
+                                    tracing::info!(
+                                        %service_id,
+                                        app_name,
+                                        "registered extension actions"
+                                    );
+                                }
+                            }
+
+                            // -------------------------------------------------
                             // ExtensionResponse (requires UiExtensions)
                             // -------------------------------------------------
                             ServiceMessage::ExtensionResponse(payload) if has_ui_extensions => {

@@ -11,7 +11,7 @@ use sea_orm::EntityTrait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use uptrakit_internal_wire::extension::ExtensionManifest;
+use uptrakit_internal_wire::extension::ActionDef;
 use uptrakit_plugin_infrastructure_registry::ExtensionActionContext;
 use uptrakit_web_api_types::extensions::InvokeExtensionActionRequest;
 
@@ -28,7 +28,10 @@ use crate::middleware::tenant_context::TenantContext;
 pub struct ExtensionListItem {
     /// The full extension manifest.
     #[serde(flatten)]
-    pub manifest: ExtensionManifest,
+    pub manifest: uptrakit_internal_wire::extension::ExtensionManifest,
+    /// Resolved action catalogue for this extension's source.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ActionDef>,
     /// Number of connected service instances providing this extension.
     pub provider_count: usize,
 }
@@ -56,16 +59,17 @@ const DEFAULT_ACTION_TIMEOUT_SECS: u64 = 30;
 
 // ── Endpoints ───────────────────────────────────────────────────────────────
 
-/// List all active extension manifests.
+/// List all active extension manifests with their resolved action catalogues.
 #[tracing::instrument(skip_all)]
 pub async fn list_extensions(State(state): State<Arc<AppState>>) -> Response {
-    let manifests = state.extension_registry.all_manifests();
-    let items: Vec<ExtensionListItem> = manifests
+    let resolved = state.extension_registry.all_manifests_with_actions();
+    let items: Vec<ExtensionListItem> = resolved
         .into_iter()
-        .map(|manifest| {
-            let provider_count = state.extension_registry.providers(&manifest.id).len();
+        .map(|ext| {
+            let provider_count = state.extension_registry.providers(&ext.manifest.id).len();
             ExtensionListItem {
-                manifest,
+                manifest: ext.manifest,
+                actions: ext.actions,
                 provider_count,
             }
         })
@@ -174,7 +178,7 @@ pub async fn invoke_action(
         }
     }
 
-    // Determine timeout from the manifest's action definition, or use default.
+    // Determine timeout from the extension's action catalogue.
     let timeout = resolve_action_timeout(&state, &extension_id, &action_id);
 
     // For targeted extensions, a service_id query param is required.
@@ -244,55 +248,18 @@ pub async fn invoke_action(
 
 /// Resolves the timeout for an action invocation.
 ///
-/// Searches the manifest for an `ActionDef` matching `action_id` and uses its
-/// `timeout_seconds` if present. Otherwise returns the default 30-second timeout.
+/// Searches the extension's action catalogue for an `ActionDef` matching
+/// `action_id` and uses its `timeout_seconds` if present. Otherwise returns
+/// the default 30-second timeout.
 fn resolve_action_timeout(state: &AppState, extension_id: &str, action_id: &str) -> Duration {
-    let manifests = state.extension_registry.all_manifests();
-    let manifest = match manifests.iter().find(|m| m.id == extension_id) {
-        Some(m) => m,
-        None => return Duration::from_secs(DEFAULT_ACTION_TIMEOUT_SECS),
-    };
+    let actions = state.extension_registry.actions_for_extension(extension_id);
 
-    let timeout_secs =
-        find_action_timeout(&manifest.ui, action_id).unwrap_or(DEFAULT_ACTION_TIMEOUT_SECS);
-
-    Duration::from_secs(timeout_secs)
-}
-
-/// Searches an `ExtensionUi` for an `ActionDef` with the given `action_id`
-/// and returns its `timeout_seconds` if set.
-fn find_action_timeout(
-    ui: &uptrakit_internal_wire::extension::ExtensionUi,
-    action_id: &str,
-) -> Option<u64> {
-    use uptrakit_internal_wire::extension::ExtensionUi;
-
-    let actions: Vec<&uptrakit_internal_wire::extension::ActionDef> = match ui {
-        ExtensionUi::DataTable {
-            row_actions,
-            primary_actions,
-            context_selector,
-            ..
-        } => {
-            let mut v: Vec<&uptrakit_internal_wire::extension::ActionDef> =
-                row_actions.iter().chain(primary_actions.iter()).collect();
-            if let Some(cs) = context_selector
-                && let Some(add_action) = &cs.add_action
-            {
-                v.push(add_action);
-            }
-            v
-        }
-        ExtensionUi::Actions { actions } => actions.iter().collect(),
-        _ => {
-            tracing::warn!("Unknown ExtensionUi variant when resolving action timeout");
-            return None;
-        }
-    };
-
-    actions
-        .into_iter()
+    let timeout_secs = actions
+        .iter()
         .find(|a| a.action_id == action_id)
         .and_then(|a| a.timeout_seconds)
         .map(u64::from)
+        .unwrap_or(DEFAULT_ACTION_TIMEOUT_SECS);
+
+    Duration::from_secs(timeout_secs)
 }
