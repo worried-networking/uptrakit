@@ -811,6 +811,58 @@ uptrakit notifications log --page 1 --per-page 50
 
 See also: [Notifications Guide](notifications.md), [Notifications API](../api/notifications.md).
 
+## Extensions
+
+Extensions are dynamic UI elements contributed by plugins (built-in) or connected
+services. The CLI exposes them through the `extensions` command group.
+
+### Listing extensions
+
+```sh
+# List all registered extensions.
+uptrakit extensions list
+
+# List connected service instances providing an extension.
+uptrakit extensions providers <EXTENSION_ID>
+```
+
+### Raw invocation
+
+```sh
+# Invoke an action with raw JSON params.
+uptrakit extensions invoke <EXTENSION_ID> <ACTION_ID> --params '{"key":"value"}'
+
+# Targeted extensions require --service-id.
+uptrakit extensions invoke ssh-agent.hosts list-hosts --service-id <UUID>
+```
+
+### Dynamic (manifest-driven) invocation
+
+Extensions register a manifest describing their UI, actions, and form fields.
+The CLI builds subcommands dynamically from this manifest so you can invoke
+actions with typed arguments instead of raw JSON.
+
+```sh
+# Dynamic invocation — the CLI fetches the manifest and builds args.
+uptrakit extensions <EXTENSION_ID> <ACTION_ID> [--arg value ...]
+
+# Example: Proxmox VE discovery with a specific plugin config.
+uptrakit extensions proxmox.hosts discover --plugin-config-id <UUID>
+
+# Example: list Proxmox VE hosts.
+uptrakit extensions proxmox.hosts list --plugin-config-id <UUID>
+```
+
+Extensions with a **context selector** (e.g., a dropdown in the web UI to pick a
+plugin configuration) expose it as a global `--<param>` flag. The selected value
+is injected into every action's params automatically.
+
+Actions that define an `api_submit` target (e.g., "Add Configuration") call the
+REST API directly instead of routing through the extension proxy.
+
+See also: [Extensions Guide](extensions.md),
+[Extensions Development](../development/extensions.md).
+
 ## Raw API Access
 
 For advanced use, the `api` command lets you call any REST endpoint directly.

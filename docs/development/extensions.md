@@ -532,6 +532,54 @@ All extension payloads are validated via `WireValidate` after deserialization:
 String lengths use the standard wire limits (`MAX_SHORT_STRING_LEN` = 1024,
 `MAX_MEDIUM_STRING_LEN` = 4096).
 
+## CLI integration
+
+The CLI supports both static commands (`extensions list`, `extensions invoke`)
+and **dynamic manifest-driven invocation** (`extensions <id> <action> [--args]`).
+
+### Dynamic command building
+
+When the user runs `extensions <extension_id> <action>`, the CLI:
+
+1. Fetches the extension list from the server via `list_extensions()`.
+2. Finds the matching manifest and its resolved action catalogue.
+3. Builds a `clap::Command` dynamically from the manifest's UI definition.
+4. Parses the remaining args against the generated command.
+5. Dispatches the action (see below).
+
+### Context selector injection
+
+Extensions with a `context_selector` on their `DataTable` UI (e.g., the
+Proxmox plugin's `plugin_config_id` selector) expose the selector's `param_key`
+as a global CLI flag. The key is converted to kebab-case for the CLI
+(e.g., `plugin_config_id` becomes `--plugin-config-id`). The value is injected
+into every action's params automatically.
+
+### `api_submit` dispatch
+
+Actions with an `api_submit` target are designed for direct REST API calls
+rather than the extension proxy. The CLI detects `api_submit` on the matched
+`ActionDef` and calls `UptrakitClient::raw_request()` with a rendered body
+template instead of routing through `invoke_extension_action()`.
+
+The template substitution supports four coercion types:
+
+| Syntax | Effect |
+| --- | --- |
+| `{{key}}` | String (default) |
+| `{{key:bool}}` | `"true"` becomes `true`, anything else `false` |
+| `{{key:csv_array}}` | Split on `,`, trim whitespace, drop empties, produce JSON array |
+| `{{key:number}}` | Parse as JSON number (`i64` first, then `f64`) |
+
+Non-template strings and non-string JSON leaves pass through unchanged.
+
+### Targeted vs Universal extensions
+
+For `Targeted` extensions, the CLI adds a global `--service-id <UUID>` flag
+and validates its presence before dispatch. For `Universal` extensions (including
+all plugin-backed extensions), no `--service-id` is needed — the server selects
+a provider automatically or handles it directly (for plugins).
+
 ## Key files
 
 | File | Purpose |
