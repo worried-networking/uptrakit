@@ -1,6 +1,6 @@
 # Code Review: uptrakit-cli
 
-- **Review date**: 2026-03-02
+- **Review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture | security | quality | HA | standards |
   extensibility | tests | consistency | maintainability | database | crate-structure)
 - **Branch**: docs/codereview-backend
@@ -14,7 +14,7 @@ returns via the `HumanOutput` trait. The crate demonstrates good design decision
 credential boundaries, URL scheme validation before browser open, `lib` + `bin` split for
 testability, and comprehensive CLI argument tests.
 
-The main concerns are the plaintext API token storage, `main.rs` at 4,793 lines (including ~1,500
+The main concerns are the plaintext API token storage, `main.rs` at 5,894 lines (including ~1,500
 lines of tests) needing splitting, a UTF-8 safety issue in `truncate()`, and incomplete integration
 test coverage (only 3 of 13 namespaces covered by `MockApiServer` tests). The batch update commands
 are well-structured with `*Params` structs and follow existing CLI patterns. The `--status` filter
@@ -136,7 +136,7 @@ an approved site. Function lacks inline comment justifying the exception.
 
 ### Issues
 
-**[HIGH]** `src/main.rs` -- At 4,793 lines (including ~1,500 lines of tests), this is the
+**[HIGH]** `src/main.rs` -- At 5,894 lines (including ~1,500 lines of tests), this is the
 largest single file in the workspace. The `run()` function is now ~1,730 lines. Command enum
 definitions (~900 lines), main dispatch, and tests should be split into separate modules.
 The recent addition of batch update command definitions and 8 new parse tests further
@@ -378,7 +378,7 @@ is a step toward solving this but is not shared across modules.
 
 ### Issues
 
-**[HIGH]** `src/main.rs` -- At 4,793 lines, this file combines CLI argument enum definitions
+**[HIGH]** `src/main.rs` -- At 5,894 lines, this file combines CLI argument enum definitions
 (~900 lines), the main dispatch function (~1,730 lines), utility functions, and parse tests
 (~1,500 lines). This makes navigation, code review, and merge conflict resolution difficult.
 Recommended split: (1) move command enum definitions to `src/commands.rs` or `src/cli.rs`,

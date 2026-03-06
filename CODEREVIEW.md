@@ -1,6 +1,6 @@
 # Code Review: Workspace (Root)
 
-- **Review date**: 2026-03-02
+- **Review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -27,6 +27,23 @@ streaming, sequential per-host dispatch), the update category feature (security 
 detection in APT plugin, `update_category` column on `host_software_items` and
 `update_history`), and the refactored update trigger pipeline (`trigger_update_for_host`
 split into three composable layers: validate, create_record, dispatch).
+
+Updated on 2026-03-06 with findings from a fresh 11-dimension parallel review pass. The
+exponential backoff fix for the NATS consumer (`ad2e9cf2`), agent-core batch unit tests
+(`b83bc361`), `system_enrollment_tokens` / `system_services` query tests (`07ae7922`), and
+`software_items` HTTP edge-case tests (`db21ea8f`) are reflected. New **critical** finding:
+`notifications/dispatcher.rs` uses `mpsc::unbounded_channel()` with no capacity bound, creating
+unbounded memory growth risk under cascading failure or high event volume — should be replaced
+with a bounded channel. New **high** finding: `TenantManager::shutdown_all()` in the MQTT service
+has a final-status delivery race during graceful shutdown (receiver may be dropped before `Offline`
+status is sent). New **high** architectural finding: `uptrakit-web-api/src/lib.rs` publicly exposes
+24+ internal modules (all `routes::*`, all `middleware::*`, broadcasters, extractors) that should
+be `pub(crate)` — only the router factory functions and `AppState` need `pub` visibility. Additional
+list-endpoint consistency gaps identified: `discovery_allowlist`, `host_packages` ignore-rules, and
+scheduler task endpoints all return flat `Vec<T>` instead of the project-standard
+`PaginatedResponse<T>`. The npm plugin hardcodes the registry URL (preventing private registry use)
+and has no HTTP retry logic for transient failures. The `ServiceHandler` trait is non-object-safe
+due to associated constants but carries no documenting comment warning future implementors.
 
 The dependency graph is a clean DAG with no circular dependencies. Feature flags are used
 judiciously for database backends, OIDC, NATS, and embedded components. The plugin system is
@@ -206,6 +223,19 @@ and update output broadcasting.
 **[HIGH]** `crates/shared/wire/src/lib.rs` -- At 3,798 lines in a single file, the entire wire
 protocol definition lives in one module. Should be decomposed into domain modules.
 
+**[HIGH]** `crates/ui/web-api/src/lib.rs:1-34` -- Twenty-four modules are declared `pub` at the
+crate root (`app_state`, `batch_progress_broadcaster`, `ca_snapshot`, `cert_signer`,
+`device_flow_broadcaster`, `error_response`, `event_broadcaster`, `event_delivery`,
+`extension_proxy`, `extension_registry`, `extract`, `middleware`, `mqtt_client_store`,
+`mqtt_lease_coordinator`, `nats_transport`, `notification_service`, `notifications`, `ocsp`,
+`pki_utils`, `router`, `routes`, `service_connections`, `settings`, `tenant_db`,
+`update_output_broadcaster`). All are internal implementation details consumed only by the
+controller binary. Only `AppState`, `build_router`, `build_pki_router`, `api_not_found`,
+`SettingKey`, `CaKeyStoreRef`, `CaSnapshotReceiver`, and `ServiceCredentialSources` warrant
+`pub` exports. The remaining modules should be `pub(crate)` once the controller → web-api
+upward dependency is resolved via crate extraction. See per-crate review in
+`crates/ui/web-api/CODEREVIEW.md`.
+
 **[HIGH]** `crates/ui/web-api/src/app_state.rs:37-96` -- `AppState` has 26 public fields, most
 with `pub` visibility.
 
@@ -332,6 +362,22 @@ verify delay durations. Eight tests assert only eventual success, not backoff ti
   messages to specific MQTT service instance.
 
 ### Issues
+
+**[CRITICAL]** `crates/ui/web-api/src/notifications/dispatcher.rs:30` --
+`NotificationDispatcher` uses `mpsc::unbounded_channel()` with no capacity bound. Under
+sustained high event volume or cascading failures (e.g., a burst of update events when many
+agents reconnect simultaneously), the MPSC queue grows without bound, risking OOM. Replace
+with `mpsc::channel(N)` and a named capacity constant. On send failure emit `tracing::warn!`
+and drop the message, making backpressure explicit rather than implicit heap growth. See
+per-crate review in `crates/ui/web-api/CODEREVIEW.md`.
+
+**[HIGH]** `crates/core/mqtt/src/tenant_manager.rs:81-93` -- `TenantManager::shutdown_all()`
+races with the event channel receiver. `std::mem::take` at line 82 drains `self.clients`
+before `report_status` at line 90 attempts to send `Offline` status via `self.event_tx`. If
+the `MqttHandler` receiver has already been torn down, the final `Offline` delivery is
+silently lost. In contrast, `stop_client` (line 70) calls `report_status` while the channel
+is live. The divergent delivery guarantees across the two shutdown paths are undocumented. See
+per-crate review in `crates/core/mqtt/CODEREVIEW.md`.
 
 **[HIGH]** `crates/ui/web-api/src/batch_progress_broadcaster.rs` -- Instance-local only. In a
 multi-instance deployment, SSE clients connected to instance A receive no live events for

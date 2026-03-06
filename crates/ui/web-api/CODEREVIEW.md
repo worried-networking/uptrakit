@@ -1,6 +1,6 @@
 # Code Review: uptrakit-web-api
 
-- **Review date**: 2026-03-02
+- **Review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -106,10 +106,21 @@ index).
 
 ### Issues
 
-**[HIGH]** `src/lib.rs:1-24` -- At ~38K LoC, this crate contains auth, middleware, routes,
+**[HIGH]** `src/lib.rs:1-34` -- At ~38K LoC, this crate contains auth, middleware, routes,
 queries, settings, MQTT coordination, NATS transport, OCSP, PKI, notifications, and update
 output broadcasting. Consider extracting auth, settings, and MQTT coordination into shared
 crates.
+
+**[HIGH]** `src/lib.rs:1-34` -- Twenty-four modules are declared `pub` at the crate root,
+making the full internal implementation surface globally visible. The controller binary (the
+sole consumer) accesses internal types via `uptrakit_web_api::auth::oidc_state::OidcFlowStore`,
+`uptrakit_web_api::nats_transport::NatsTransport`, `uptrakit_web_api::notifications::dispatcher`,
+`uptrakit_web_api::batch_progress_broadcaster::BatchProgressBroadcaster`, and 20+ similar paths.
+Only `AppState`, `build_router`, `build_pki_router`, `api_not_found`, `SettingKey`,
+`CaKeyStoreRef`, `CaSnapshotReceiver`, and `ServiceCredentialSources` need `pub` exports.
+All remaining modules should become `pub(crate)` once the controller → web-api layering
+inversion is resolved via crate extraction. The over-broad visibility also makes it
+difficult to distinguish stable public API from internal wiring in IDE navigation.
 
 **[HIGH]** `src/app_state.rs:37-96` -- `AppState` has 26 public fields. Most have `pub`
 visibility. PKI, notification, and credential fields should have restricted visibility with
@@ -261,6 +272,16 @@ does NOT write to the outbox.
 - `broadcast_server_restarting_scattered` spreads notifications over jitter window.
 
 ### Issues
+
+**[CRITICAL]** `src/notifications/dispatcher.rs:30` -- `NotificationDispatcher::new()` creates
+a `mpsc::unbounded_channel()`. Under sustained high event volume or cascading failures (e.g.,
+a bulk update completion burst when many agents reconnect simultaneously), the sender-side
+queue grows without any bound, risking OOM. The `notification_service.rs` watch channel
+already provides the correct bounded-snapshot pattern; the dispatcher should follow the same
+discipline. Fix: replace with `mpsc::channel(N)` where `N` is a named capacity constant
+(e.g., `const DISPATCHER_CHANNEL_CAPACITY: usize = 4096`). On `try_send` failure emit
+`tracing::warn!(dropped = true, ...)` and discard the message so backpressure is observable
+in logs rather than silently absorbed into heap.
 
 ~~**[MEDIUM]** `src/nats_transport.rs:162-164` -- Fixed 1-second NATS retry without jitter or
 backoff.~~
@@ -496,6 +517,19 @@ messages (`"Host not found"`, `"Service not found"`, `"Enrollment token not foun
 message makes client-side error disambiguation harder when multiple request parameters could
 independently cause a 404. Preferred pattern: `"MQTT client not found"` to match the rest of
 the API.
+
+**[MEDIUM]** `src/routes/discovery_allowlist.rs:45,165` -- `list_tenant_allowlist` and
+`list_host_allowlist` return flat `Vec<T>` (`Vec<TenantDiscoveryAllowlistEntry>` and
+`Vec<HostDiscoveryAllowlistEntry>`) with no pagination. Both endpoints are tenant-scoped but
+have no upper bound on result count. Consistent with all other unbounded collection endpoints
+in the crate, these should return `PaginatedResponse<T>`.
+
+**[MEDIUM]** `src/routes/host_packages.rs:292` -- `list_ignore_rules` returns
+`Vec<HostPackageIgnoreResponse>` (flat array) while `list_host_packages` on the same route
+file uses `PaginatedResponse<HostPackageResponse>`. Two list endpoints within the same module
+use different response shapes without a documented rationale. The ignore-rule list is
+realistically bounded per host, but the API inconsistency is visible in the OpenAPI schema
+and forces client code to handle two response shapes.
 
 **[MEDIUM]** `src/routes/scheduler.rs` -- All four endpoints diverge from established patterns:
 `"Failed to ..."` error messages (not `"Internal server error"`), flat `Vec<T>` without

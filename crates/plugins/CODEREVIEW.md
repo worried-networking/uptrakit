@@ -1,6 +1,6 @@
 # Code Review: Plugins (Umbrella)
 
-- **Review date**: 2026-03-02
+- **Review date**: 2026-03-06
 - **Reviewer**: AI code review (architecture|security|quality|HA|standards|extensibility|tests|consistency|maintainability|database|crate-structure)
 - **Branch**: docs/codereview-backend
 
@@ -101,6 +101,27 @@ relies on `CommandExecutor` dependency injection, making it straightforward to t
 `FixedOutputExecutor` mock (as used in the npm plugin). At minimum, a test verifying that the
 configured command string is passed correctly to the executor would prevent regressions if
 command-building logic changes.
+
+---
+
+## Cross-Cutting HTTP Reliability
+
+### Issues
+
+**[MEDIUM]** `crates/plugins/package-managers/npm/src/plugin.rs:411-421` -- The npm plugin
+has no retry logic for transient HTTP failures (network timeout, 429 rate limit, 5xx server
+error). A single failed request to the npm registry causes the entire release fetch to fail.
+The same gap exists at [LOW] severity in the release plugins: `releases/github`, `releases/forgejo`,
+and `releases/gitlab` all make HTTP calls with no retry on `is_connect()` or `is_timeout()`
+errors. The workspace `uptrakit-backoff` crate provides the `Backoff` primitive needed for
+a consistent retry implementation. Per-crate details are in the respective `CODEREVIEW.md`
+files (`npm`: [MEDIUM], `github`/`forgejo`/`gitlab`: [LOW]).
+
+**[MEDIUM]** `crates/plugins/package-managers/npm/src/plugin.rs:134-142` -- The npm plugin
+hardcodes the registry URL to `https://registry.npmjs.org`, preventing use with private
+registries (Verdaccio, GitHub Packages, Artifactory). The URL should be an optional
+`NpmConfig` field defaulting to the public registry. Per-crate detail in
+`crates/plugins/package-managers/npm/CODEREVIEW.md`.
 
 ---
 

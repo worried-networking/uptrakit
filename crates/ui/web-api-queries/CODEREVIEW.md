@@ -1,6 +1,6 @@
 # Code Review: uptrakit-web-api-queries
 
-- **Review date**: 2026-03-05
+- **Review date**: 2026-03-06
 - **Reviewer**: AI coverage analysis (cargo-llvm-cov)
 - **Branch**: docs/test-coverage
 
@@ -107,3 +107,29 @@ Recommended tests:
 - `dispatch_next_in_batch` sends to the correct host's agent
 - Batch with all items completed transitions to `Completed` status
 - Batch with a failed item still completes remaining items
+
+## Coding Standards
+
+### Issues
+
+**[MEDIUM]** `queries/system_enrollment_tokens.rs:39,61,85,99,118,144,160` -- All seven public
+functions return `Result<T, sea_orm::DbErr>` instead of the crate-local `Result<T>` alias
+(which resolves to `Result<T, rootcause::Report>`). Every other query module in the workspace
+uses the `rootcause` error propagation pattern with `context_to` / `bail!` / `report!`
+conventions. Leaking `sea_orm::DbErr` through the public API boundary forces callers to handle
+ORM-specific errors directly and bypasses the structured error context chain provided by
+`rootcause::Report`. Fix: define a `SystemEnrollmentTokenError` enum or use the crate-local
+`Result<T>` alias with `context_to` on every DB call, consistent with the pattern in
+`queries/system_services.rs` and `queries/host_packages.rs`.
+
+## Database
+
+### Issues
+
+**[MEDIUM]** `queries/system_services.rs:48-60` -- `service_status_to_db_status` has a
+wildcard `_ =>` arm that silently maps unknown `ServiceStatus` variants to
+`SystemServiceStatus::Pending`. Because `ServiceStatus` is `#[non_exhaustive]`, any new
+variant added in a future release will match this arm and silently apply a `Pending` filter
+instead of failing loudly. The conversion should return `Option<SystemServiceStatus>` (or
+use `#[deny(unreachable_patterns)]` after a exhaustive match) so callers can decide how to
+handle unrecognised variants rather than receiving misleading query results.
