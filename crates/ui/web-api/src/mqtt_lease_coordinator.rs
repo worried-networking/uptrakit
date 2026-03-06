@@ -67,6 +67,7 @@ impl MqttLeaseCoordinator {
     ///
     /// This is called when a service sends a Register message with its capacity.
     /// Returns the list of MQTT client configurations assigned to the service.
+    #[tracing::instrument(skip_all, fields(%service_id))]
     pub async fn assign_available_tenants(
         &self,
         service_id: Uuid,
@@ -183,10 +184,16 @@ impl MqttLeaseCoordinator {
             assigned_configs.push(model_to_config(client));
         }
 
+        tracing::debug!(
+            count = assigned_configs.len(),
+            "assigned MQTT tenants to service"
+        );
+
         Ok(assigned_configs)
     }
 
     /// Attempt to lease a newly created MQTT client to the least busy local service.
+    #[tracing::instrument(skip_all, fields(mqtt_client_id = %client.id))]
     pub async fn lease_new_client_to_least_busy(
         &self,
         client: &mqtt_client::Model,
@@ -219,6 +226,7 @@ impl MqttLeaseCoordinator {
     }
 
     /// Attempt to lease a client by ID (used by outbox events).
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     pub async fn lease_client_by_id(&self, mqtt_client_id: Uuid) -> Result<LeaseOutcome> {
         let client = mqtt_client::Entity::find_by_id(mqtt_client_id)
             .one(&self.db)
@@ -234,6 +242,7 @@ impl MqttLeaseCoordinator {
     /// Release specific MQTT clients from a service.
     ///
     /// Called when a service sends ReleaseTenants message or disconnects.
+    #[tracing::instrument(skip_all, fields(%service_id))]
     pub async fn release_mqtt_clients(
         &self,
         service_id: &Uuid,
@@ -271,6 +280,7 @@ impl MqttLeaseCoordinator {
     /// Release all MQTT clients held by a service (on disconnect).
     ///
     /// Returns the MQTT client IDs that were released.
+    #[tracing::instrument(skip_all, fields(%service_id))]
     pub async fn release_all_for_service(&self, service_id: &Uuid) -> Result<HashSet<Uuid>> {
         // Get mqtt_client_ids from registry
         let mqtt_client_ids = self
@@ -311,6 +321,7 @@ impl MqttLeaseCoordinator {
     ///
     /// Called when a service sends Ping. Updates the `heartbeat_at` timestamp
     /// for all leases matching the service's `instance_id`.
+    #[tracing::instrument(skip_all, fields(%service_id))]
     pub async fn record_heartbeat(&self, service_id: &Uuid) -> Result<()> {
         // Update connection registry heartbeat
         self.connections.record_heartbeat(service_id).await;
@@ -342,6 +353,7 @@ impl MqttLeaseCoordinator {
     ///
     /// Called when MQTT settings are updated via REST API.
     /// Uses the notification service for cross-controller delivery.
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     pub async fn push_mqtt_client_config_update(&self, mqtt_client_id: Uuid) -> Result<bool> {
         // Load current config from database
         let client = mqtt_client::Entity::find_by_id(mqtt_client_id)
@@ -382,6 +394,7 @@ impl MqttLeaseCoordinator {
     /// Called when MQTT settings are disabled/deleted via REST API.
     /// MQTT credential-bearing messages are never written to the outbox.
     /// The MQTT service reconciles state from the DB on reconnect.
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     pub async fn revoke_mqtt_client(&self, mqtt_client_id: Uuid, reason: &str) -> Result<bool> {
         // Delete lease from database regardless
         mqtt_lease::Entity::delete_many()
@@ -432,6 +445,7 @@ impl MqttLeaseCoordinator {
     /// Clean up stale leases (no heartbeat within timeout).
     ///
     /// Called periodically by a background task.
+    #[tracing::instrument(skip_all)]
     pub async fn cleanup_stale_leases(&self, timeout: Duration) -> Result<usize> {
         let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(timeout.as_secs() as i64);
 
@@ -443,12 +457,18 @@ impl MqttLeaseCoordinator {
                 "failed to delete stale leases".into(),
             ))?;
 
-        Ok(deleted.rows_affected as usize)
+        let count = deleted.rows_affected as usize;
+        if count > 0 {
+            tracing::debug!(count, "cleaned up stale MQTT leases");
+        }
+
+        Ok(count)
     }
 
     /// Get MQTT client configs for a set of MQTT client IDs.
     ///
     /// Used during reconnection to rebuild state.
+    #[tracing::instrument(skip_all)]
     pub async fn get_mqtt_client_configs(
         &self,
         mqtt_client_ids: &[Uuid],
@@ -473,6 +493,7 @@ impl MqttLeaseCoordinator {
     /// Called when a service reconnects and sends Register with its current
     /// active_mqtt_clients list. Verifies that leases exist for claimed clients,
     /// or re-creates them if they were cleaned up.
+    #[tracing::instrument(skip_all, fields(%service_id))]
     pub async fn reconcile_mqtt_clients(
         &self,
         service_id: Uuid,
