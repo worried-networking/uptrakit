@@ -45,10 +45,7 @@ impl NotificationDispatcher {
     #[tracing::instrument(skip_all)]
     pub fn dispatch(&self, event: NotificationEvent) {
         if let Err(e) = self.tx.send(event) {
-            tracing::warn!(
-                "notification dispatcher channel closed, dropping event: {}",
-                e
-            );
+            tracing::warn!(error = %e, "notification dispatcher channel closed, dropping event");
         }
     }
 }

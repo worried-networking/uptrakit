@@ -145,7 +145,7 @@ pub fn resolve_predefined_hook(hook: &PredefinedHook) -> HookCommand {
         PredefinedHook::SystemdService(systemd) => resolve_systemd_hook(systemd),
         PredefinedHook::DockerCompose(compose) => resolve_docker_compose_hook(compose),
         _ => {
-            tracing::warn!("unknown PredefinedHook variant; skipping hook (no-op)");
+            tracing::warn!(hook = ?hook, "unknown PredefinedHook variant; skipping hook (no-op)");
             HookCommand::Exec {
                 program: "true".to_string(),
                 args: vec![],

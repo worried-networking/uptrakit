@@ -77,7 +77,7 @@ pub async fn create_channel(
                 error_response(StatusCode::BAD_REQUEST, format!("Invalid config: {msg}"))
             }
             ChannelQueryError::Db(_) => {
-                tracing::error!("Failed to create notification channel: {}", report);
+                tracing::error!(error = ?report, "failed to create notification channel");
                 error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
         },
@@ -111,7 +111,7 @@ pub async fn list_channels(
     match notif_queries::list_channels(&tenant_db, &params, &state.channel_registry).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
-            tracing::error!("Failed to list notification channels: {}", e);
+            tracing::error!(error = ?e, "failed to list notification channels");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -145,7 +145,7 @@ pub async fn get_channel(
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Channel not found"),
         Err(e) => {
-            tracing::error!("DB error: {}", e);
+            tracing::error!(error = ?e, "failed to get notification channel");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -196,7 +196,7 @@ pub async fn update_channel(
                 error_response(StatusCode::BAD_REQUEST, format!("Invalid config: {msg}"))
             }
             ChannelQueryError::Db(_) => {
-                tracing::error!("Failed to update notification channel: {}", report);
+                tracing::error!(error = ?report, "failed to update notification channel");
                 error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
         },
@@ -230,7 +230,7 @@ pub async fn delete_channel(
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Channel not found"),
         Err(e) => {
-            tracing::error!("Failed to delete notification channel: {}", e);
+            tracing::error!(error = ?e, "failed to delete notification channel");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -269,7 +269,7 @@ pub async fn test_channel(
         Ok(Some(ch)) => ch,
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "Channel not found"),
         Err(e) => {
-            tracing::error!("DB error loading channel for test: {}", e);
+            tracing::error!(error = ?e, "failed to load channel for test");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -279,7 +279,7 @@ pub async fn test_channel(
         match serde_json::from_str(channel_model.config.expose_secret()) {
             Ok(v) => v,
             Err(e) => {
-                tracing::error!("Failed to parse channel config: {}", e);
+                tracing::error!(error = ?e, "failed to parse channel config");
                 return error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to parse channel config",
@@ -377,7 +377,7 @@ pub async fn create_rule(
                 error_response(StatusCode::NOT_FOUND, "Channel not found")
             }
             RuleQueryError::Db(_) => {
-                tracing::error!("Failed to create notification rule: {}", report);
+                tracing::error!(error = ?report, "failed to create notification rule");
                 error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
             RuleQueryError::InvalidField(field) => error_response(
@@ -428,7 +428,7 @@ pub async fn list_rules(
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
-            tracing::error!("Failed to list notification rules: {}", e);
+            tracing::error!(error = ?e, "failed to list notification rules");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -461,7 +461,7 @@ pub async fn get_rule(
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Rule not found"),
         Err(e) => {
-            tracing::error!("DB error: {}", e);
+            tracing::error!(error = ?e, "failed to get notification rule");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -501,7 +501,7 @@ pub async fn update_rule(
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Rule not found"),
         Err(e) => {
-            tracing::error!("Failed to update notification rule: {}", e);
+            tracing::error!(error = ?e, "failed to update notification rule");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -534,7 +534,7 @@ pub async fn delete_rule(
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Rule not found"),
         Err(e) => {
-            tracing::error!("Failed to delete notification rule: {}", e);
+            tracing::error!(error = ?e, "failed to delete notification rule");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -570,7 +570,7 @@ pub async fn list_log(
     match notif_queries::list_log(&tenant_db, &params).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
-            tracing::error!("Failed to list notification log: {}", e);
+            tracing::error!(error = ?e, "failed to list notification log");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -604,7 +604,7 @@ pub async fn telegram_callback(
         Ok(Some(ch)) => ch,
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "Channel not found"),
         Err(e) => {
-            tracing::error!("DB error loading channel for telegram callback: {}", e);
+            tracing::error!(error = ?e, "failed to load channel for telegram callback");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -614,7 +614,7 @@ pub async fn telegram_callback(
         match serde_json::from_str(channel_model.config.expose_secret()) {
             Ok(v) => v,
             Err(e) => {
-                tracing::error!("Failed to parse channel config: {}", e);
+                tracing::error!(error = ?e, "failed to parse channel config for telegram callback");
                 return error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to parse channel config",
@@ -650,7 +650,7 @@ pub async fn telegram_callback(
     let update: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("Failed to parse Telegram update body: {}", e);
+            tracing::warn!(error = ?e, "failed to parse Telegram update body");
             return error_response(StatusCode::BAD_REQUEST, "Invalid request body");
         }
     };
@@ -671,7 +671,7 @@ pub async fn telegram_callback(
     let action_token: Uuid = match action_token_str.parse() {
         Ok(id) => id,
         Err(_) => {
-            tracing::warn!("Invalid action token UUID in Telegram callback: {action_token_str}");
+            tracing::warn!(action_token = %action_token_str, "invalid action token UUID in Telegram callback");
             return (StatusCode::OK, Json(serde_json::json!({}))).into_response();
         }
     };
@@ -680,11 +680,11 @@ pub async fn telegram_callback(
     let log_entry = match notif_queries::find_log_by_action_token(state.db(), action_token).await {
         Ok(Some(entry)) => entry,
         Ok(None) => {
-            tracing::warn!("No notification log found for action token: {action_token}");
+            tracing::warn!(%action_token, "no notification log found for action token");
             return (StatusCode::OK, Json(serde_json::json!({}))).into_response();
         }
         Err(e) => {
-            tracing::error!("DB error looking up action token: {}", e);
+            tracing::error!(error = ?e, %action_token, "failed to look up action token");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -699,7 +699,7 @@ pub async fn telegram_callback(
     active.action_taken = Set(Some("triggered".to_string()));
 
     if let Err(e) = active.update(state.db()).await {
-        tracing::error!("Failed to update notification log action_taken: {}", e);
+        tracing::error!(error = ?e, "failed to update notification log action_taken");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 

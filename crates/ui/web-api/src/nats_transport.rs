@@ -78,6 +78,7 @@ impl NatsTransport {
     ///
     /// Fails hard on connection or stream setup errors — if NATS is configured,
     /// the user expects it to work.
+    #[tracing::instrument(skip_all, fields(%controller_id, nats_url = %url))]
     pub async fn connect(
         url: &str,
         controller_id: Uuid,
@@ -104,6 +105,7 @@ impl NatsTransport {
     /// Fire-and-forget: errors are logged, not propagated. This matches the
     /// old DB outbox semantics where a write failure was not fatal to the
     /// caller.
+    #[tracing::instrument(skip_all, fields(%source_controller_id, target_service_id = ?target_service_id, target_capability = ?target_capability))]
     pub async fn publish(
         &self,
         source_controller_id: Uuid,
@@ -125,6 +127,7 @@ impl NatsTransport {
     /// messages, deliver via shared routing logic, and ack/nack.
     ///
     /// This loop runs until `cancel` is triggered.
+    #[tracing::instrument(skip_all, fields(controller_id = %self.controller_id))]
     pub async fn run_consumer(
         self,
         registry: ServiceConnectionRegistry,
@@ -235,6 +238,7 @@ impl NatsTransport {
     }
 
     /// Create a durable pull consumer for this controller instance.
+    #[tracing::instrument(skip_all, fields(controller_id = %self.controller_id))]
     async fn create_consumer(&self) -> Result<PullConsumer, Report<NatsTransportError>> {
         let consumer_name = format!("controller-{}", self.controller_id.simple());
         let stream = self
