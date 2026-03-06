@@ -91,6 +91,13 @@ pub const MAX_HOST_PACKAGE_HOST_STATES: usize = 2_000;
 /// Maximum number of active MQTT client IDs.
 pub const MAX_ACTIVE_MQTT_CLIENTS: usize = 500;
 
+/// Maximum number of capabilities in a single `UpdateCapabilities` message.
+///
+/// Bounds the `BTreeSet<Capability>` sent by services, accommodating all known
+/// variants plus a reasonable number of forward-compatibility `Other(String)`
+/// entries.
+pub const MAX_CAPABILITIES_PER_SERVICE: usize = 64;
+
 /// Maximum number of extension manifests in a single `ExtensionRegister` message.
 pub const MAX_EXTENSION_MANIFESTS: usize = 50;
 

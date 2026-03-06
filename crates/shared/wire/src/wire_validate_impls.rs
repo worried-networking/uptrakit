@@ -28,6 +28,7 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::MqttTriggerUpdate(p) => p.wire_validate(),
             ServiceMessage::MqttTriggerHostPackageUpdate(_) => Ok(()),
             ServiceMessage::Disconnecting(p) => p.wire_validate(),
+            ServiceMessage::UpdateCapabilities(p) => p.wire_validate(),
             ServiceMessage::ExtensionRegister(p) => p.wire_validate(),
             ServiceMessage::ExtensionResponse(p) => p.wire_validate(),
             // Forward-compatible: unknown variants from newer peers pass validation.
@@ -256,6 +257,18 @@ impl WireValidate for DisconnectingPayload {
             "active_mqtt_clients",
         )?;
         Ok(())
+    }
+}
+
+// ── Capability management payload impls ──────────────────────────────────────
+
+impl WireValidate for UpdateCapabilitiesPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        // Use check_vec_len via an iterator conversion to bound the set size.
+        // Each `Capability::Other(String)` variant may carry an arbitrary string,
+        // but the set itself must not exceed the known-variants count ceiling.
+        let caps_vec: Vec<&Capability> = self.capabilities.iter().collect();
+        check_vec_len(&caps_vec, MAX_CAPABILITIES_PER_SERVICE, "capabilities")
     }
 }
 

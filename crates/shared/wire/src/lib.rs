@@ -373,6 +373,17 @@ pub enum ServiceMessage {
     /// Sent when a Home Assistant user presses "Install" on a host packages update entity.
     #[serde(rename = "mqtt_trigger_host_package_update")]
     MqttTriggerHostPackageUpdate(MqttTriggerHostPackageUpdatePayload),
+    // -- Capability management --
+    /// Service announces its current capability set to the controller.
+    ///
+    /// Sent automatically by the SDK after `ServiceSettings` is processed.
+    /// The controller persists the new capability set in the database so that
+    /// routing and gating decisions reflect the service's installed version,
+    /// even across upgrades that add or remove capabilities. On the current
+    /// session the controller also refreshes its in-memory capability flags
+    /// so that subsequent messages are gated correctly without requiring a
+    /// reconnect.
+    UpdateCapabilities(UpdateCapabilitiesPayload),
     // -- UI Extensions --
     /// Service declares its UI extensions after connecting.
     ///
@@ -1118,6 +1129,21 @@ impl DisconnectingPayload {
             active_mqtt_clients: Vec::new(),
         }
     }
+}
+
+// =============================================================================
+// Capability Management Payloads
+// =============================================================================
+
+/// Payload for `ServiceMessage::UpdateCapabilities`.
+///
+/// Contains the full set of capabilities declared by the service in its
+/// current installed version. Sent automatically by the SDK after
+/// `ServiceSettings` is received. The controller stores this in the database
+/// and updates in-memory gating flags for the current session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateCapabilitiesPayload {
+    pub capabilities: BTreeSet<Capability>,
 }
 
 // =============================================================================
