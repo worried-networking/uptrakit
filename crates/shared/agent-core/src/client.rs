@@ -154,6 +154,32 @@ pub async fn handle_graceful_shutdown(
     outcome
 }
 
+/// Run version checks and return the result as a [`ServiceMessage`].
+///
+/// This is the compute-only variant of [`handle_check_versions`] — it performs
+/// all version-check work but does not send the result over the connection.
+/// Callers that need to run version checks in a background task (e.g. the SSH
+/// agent) use this function and forward the returned message to the controller
+/// through a channel.
+pub async fn run_check_versions(
+    payload: uptrakit_internal_wire::CheckVersionsPayload,
+    executor: Arc<dyn CommandExecutor>,
+    ctx: &ConnectionContext,
+) -> ServiceMessage {
+    tracing::info!(
+        count = payload.assignments.len(),
+        host_machine_id = %payload.host_machine_id,
+        "received CheckVersions request"
+    );
+
+    let results: Vec<VersionCheckResult> =
+        crate::version_check::batch_check_versions(payload.assignments, Arc::clone(&executor), ctx)
+            .await;
+
+    tracing::debug!("version check complete");
+    ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results })
+}
+
 /// Handle a `CheckVersions` message from the controller.
 ///
 /// The `executor` is provided by the caller — `LocalCommandExecutor` for the
@@ -169,17 +195,7 @@ pub async fn handle_check_versions(
     conn: &mut ControllerConnection,
     ctx: &ConnectionContext,
 ) -> Option<LoopOutcome> {
-    tracing::info!(
-        count = payload.assignments.len(),
-        host_machine_id = %payload.host_machine_id,
-        "received CheckVersions request"
-    );
-
-    let results: Vec<VersionCheckResult> =
-        crate::version_check::batch_check_versions(payload.assignments, Arc::clone(&executor), ctx)
-            .await;
-
-    let response = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results });
+    let response = run_check_versions(payload, executor, ctx).await;
     if let Err(e) = conn.send(response).await {
         tracing::error!(error = %e, "failed to send VersionCheckResults");
         return Some(LoopOutcome::Disconnected);
@@ -289,6 +305,34 @@ pub async fn handle_execute_update(
     *in_flight_update = Some(start_update(payload, executor, conn, ctx).await);
 }
 
+/// Run a batch host package update and return the result as a [`ServiceMessage`].
+///
+/// This is the compute-only variant of [`handle_execute_batch_host_package_update`]
+/// — it performs all update work but does not send the result over the connection.
+/// Callers that need to run batch updates in a background task (e.g. the SSH
+/// agent) use this function and forward the returned message to the controller
+/// through a channel.
+pub async fn run_execute_batch_host_package_update(
+    payload: ExecuteBatchHostPackageUpdatePayload,
+    executor: Arc<dyn CommandExecutor>,
+    ctx: &ConnectionContext,
+) -> ServiceMessage {
+    tracing::info!(
+        batch_id = %payload.batch_id,
+        plugin_type = %payload.plugin_type,
+        count = payload.updates.len(),
+        host_machine_id = %payload.host_machine_id,
+        "received batch host package update request"
+    );
+
+    let results = batch_host_package_update_inner(&payload, executor, ctx).await;
+
+    ServiceMessage::BatchHostPackageUpdateResult(BatchHostPackageUpdateResultPayload {
+        batch_id: payload.batch_id,
+        results,
+    })
+}
+
 /// Handle an `ExecuteBatchHostPackageUpdate` message from the controller.
 ///
 /// Instantiates the plugin for the batch, runs pre-update hooks, calls
@@ -308,14 +352,22 @@ pub async fn handle_execute_batch_host_package_update(
     conn: &mut ControllerConnection,
     ctx: &ConnectionContext,
 ) -> Option<LoopOutcome> {
-    tracing::info!(
-        batch_id = %payload.batch_id,
-        plugin_type = %payload.plugin_type,
-        count = payload.updates.len(),
-        host_machine_id = %payload.host_machine_id,
-        "received batch host package update request"
-    );
+    let response = run_execute_batch_host_package_update(payload, executor, ctx).await;
+    if let Err(e) = conn.send(response).await {
+        tracing::error!(error = %e, "failed to send BatchHostPackageUpdateResult");
+        return Some(LoopOutcome::Disconnected);
+    }
+    tracing::info!("sent BatchHostPackageUpdateResult");
+    None
+}
 
+/// Inner batch-update logic shared by [`run_execute_batch_host_package_update`]
+/// and [`handle_execute_batch_host_package_update`].
+async fn batch_host_package_update_inner(
+    payload: &ExecuteBatchHostPackageUpdatePayload,
+    executor: Arc<dyn CommandExecutor>,
+    ctx: &ConnectionContext,
+) -> Vec<BatchHostPackageUpdateResult> {
     // Build a correlation map: package_identifier → (host_package_id, update_history_id)
     let correlation: std::collections::HashMap<String, (uuid::Uuid, uuid::Uuid)> = payload
         .updates
@@ -399,7 +451,7 @@ pub async fn handle_execute_batch_host_package_update(
     .await;
 
     // Build per-package results
-    let results: Vec<BatchHostPackageUpdateResult> = match batch_results {
+    match batch_results {
         Ok(Ok(plugin_results)) => {
             plugin_results
                 .into_iter()
@@ -466,19 +518,33 @@ pub async fn handle_execute_batch_host_package_update(
                 })
                 .collect()
         }
-    };
-
-    let response =
-        ServiceMessage::BatchHostPackageUpdateResult(BatchHostPackageUpdateResultPayload {
-            batch_id: payload.batch_id,
-            results,
-        });
-    if let Err(e) = conn.send(response).await {
-        tracing::error!(error = %e, "failed to send BatchHostPackageUpdateResult");
-        return Some(LoopOutcome::Disconnected);
     }
-    tracing::info!(batch_id = %payload.batch_id, "sent BatchHostPackageUpdateResult");
-    None
+}
+
+/// Run software discovery and return the result as a [`ServiceMessage`].
+///
+/// This is the compute-only variant of [`handle_discover_software`] — it
+/// performs all discovery work but does not send the result over the connection.
+/// Callers that need to run discovery in a background task (e.g. the SSH agent)
+/// use this function and forward the returned message to the controller through
+/// a channel.
+pub async fn run_discover_software(
+    payload: DiscoverSoftwarePayload,
+    executor: Arc<dyn CommandExecutor>,
+    ctx: &ConnectionContext,
+) -> ServiceMessage {
+    tracing::info!(
+        count = payload.plugins.len(),
+        host_machine_id = %payload.host_machine_id,
+        "received DiscoverSoftware request"
+    );
+
+    let results = discover_software_inner(&payload, executor, ctx).await;
+
+    ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+        host_machine_id: payload.host_machine_id,
+        results,
+    })
 }
 
 /// Handle a `DiscoverSoftware` message from the controller.
@@ -498,15 +564,25 @@ pub async fn handle_discover_software(
     conn: &mut ControllerConnection,
     ctx: &ConnectionContext,
 ) -> Option<LoopOutcome> {
-    tracing::info!(
-        count = payload.plugins.len(),
-        host_machine_id = %payload.host_machine_id,
-        "received DiscoverSoftware request"
-    );
+    let response = run_discover_software(payload, executor, ctx).await;
+    if let Err(e) = conn.send(response).await {
+        tracing::error!(error = %e, "failed to send DiscoveryResults");
+        return Some(LoopOutcome::Disconnected);
+    }
+    tracing::debug!("sent DiscoveryResults");
+    None
+}
 
+/// Inner discovery logic shared by [`run_discover_software`] and
+/// [`handle_discover_software`].
+async fn discover_software_inner(
+    payload: &DiscoverSoftwarePayload,
+    executor: Arc<dyn CommandExecutor>,
+    ctx: &ConnectionContext,
+) -> Vec<DiscoveryPluginResult> {
     let mut results = Vec::with_capacity(payload.plugins.len());
 
-    for assignment in payload.plugins {
+    for assignment in &payload.plugins {
         tracing::debug!(
             plugin_type = %assignment.plugin_type,
             plugin_config_id = ?assignment.plugin_config_id,
@@ -530,7 +606,7 @@ pub async fn handle_discover_software(
                     );
                     DiscoveryPluginResult {
                         plugin_config_id: assignment.plugin_config_id,
-                        plugin_type: assignment.plugin_type,
+                        plugin_type: assignment.plugin_type.clone(),
                         discoveries: vec![],
                         error: Some(e.to_string()),
                     }
@@ -544,7 +620,7 @@ pub async fn handle_discover_software(
                         );
                         DiscoveryPluginResult {
                             plugin_config_id: assignment.plugin_config_id,
-                            plugin_type: assignment.plugin_type,
+                            plugin_type: assignment.plugin_type.clone(),
                             discoveries: vec![],
                             error: Some("plugin does not support software discovery".to_string()),
                         }
@@ -589,7 +665,7 @@ pub async fn handle_discover_software(
                         if !is_compatible {
                             DiscoveryPluginResult {
                                 plugin_config_id: assignment.plugin_config_id,
-                                plugin_type: assignment.plugin_type,
+                                plugin_type: assignment.plugin_type.clone(),
                                 discoveries: vec![],
                                 error: None,
                             }
@@ -603,7 +679,7 @@ pub async fn handle_discover_software(
                                     );
                                     DiscoveryPluginResult {
                                         plugin_config_id: assignment.plugin_config_id,
-                                        plugin_type: assignment.plugin_type,
+                                        plugin_type: assignment.plugin_type.clone(),
                                         discoveries,
                                         error: None,
                                     }
@@ -616,7 +692,7 @@ pub async fn handle_discover_software(
                                     );
                                     DiscoveryPluginResult {
                                         plugin_config_id: assignment.plugin_config_id,
-                                        plugin_type: assignment.plugin_type,
+                                        plugin_type: assignment.plugin_type.clone(),
                                         discoveries: vec![],
                                         error: Some(e.to_string()),
                                     }
@@ -629,14 +705,5 @@ pub async fn handle_discover_software(
         results.push(result);
     }
 
-    let response = ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
-        host_machine_id: payload.host_machine_id,
-        results,
-    });
-    if let Err(e) = conn.send(response).await {
-        tracing::error!(error = %e, "failed to send DiscoveryResults");
-        return Some(LoopOutcome::Disconnected);
-    }
-    tracing::debug!("sent DiscoveryResults");
-    None
+    results
 }
