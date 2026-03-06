@@ -95,7 +95,12 @@ fn match_action() -> ActionDef {
             FieldDef::new("host_id", "Host")
                 .with_type(FieldType::Select)
                 .required()
-                .with_placeholder("Select a host"),
+                .with_placeholder("Select a host")
+                .with_select_source(SelectSource::RestApi {
+                    path: "/api/v1/hosts".to_string(),
+                    value_field: "id".to_string(),
+                    label_field: "friendly_name".to_string(),
+                }),
         ])))
         .with_permission(Permission::ManageHosts)
 }

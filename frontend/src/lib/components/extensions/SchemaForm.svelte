@@ -1,19 +1,29 @@
 <script lang="ts">
-	import type { FieldDef } from '$lib/types';
+	import type { FieldDef, SelectOption } from '$lib/types';
+	import { apiGet } from '$lib/api';
+	import { showError } from '$lib/notifications.svelte';
 
 	let {
 		fields,
 		onsubmit,
 		submitLabel = 'Submit',
-		loading = false
+		loading = false,
+		extensionId: _extensionId,
+		serviceId: _serviceId,
+		extraParams = {}
 	}: {
 		fields: FieldDef[];
 		onsubmit: (values: Record<string, unknown>) => Promise<void>;
 		submitLabel?: string;
 		loading?: boolean;
+		extensionId?: string;
+		serviceId?: string;
+		extraParams?: Record<string, unknown>;
 	} = $props();
 
 	let values: Record<string, string> = $state({});
+	let dynamicOptions: Record<string, SelectOption[]> = $state({});
+	let loadingOptions: Record<string, boolean> = $state({});
 
 	$effect(() => {
 		const initial: Record<string, string> = {};
@@ -23,9 +33,47 @@
 		values = initial;
 	});
 
+	$effect(() => {
+		for (const f of fields) {
+			if (f.field_type === 'select' && f.select_source?.type === 'rest_api') {
+				loadSelectSourceOptions(f.key, f.select_source.path, f.select_source.value_field, f.select_source.label_field);
+			}
+		}
+	});
+
+	async function loadSelectSourceOptions(fieldKey: string, path: string, valueField: string, labelField: string) {
+		loadingOptions = { ...loadingOptions, [fieldKey]: true };
+		try {
+			const result = await apiGet<unknown>(path);
+			const arr: unknown[] = Array.isArray(result)
+				? result
+				: (((result as Record<string, unknown>)?.items as unknown[]) ?? []);
+			dynamicOptions = {
+				...dynamicOptions,
+				[fieldKey]: arr.map((item) => {
+					const i = item as Record<string, unknown>;
+					return {
+						value: String(i[valueField] ?? ''),
+						label: String(i[labelField] ?? '')
+					};
+				})
+			};
+		} catch (e) {
+			showError(e instanceof Error ? e.message : `Failed to load options for ${fieldKey}`);
+			dynamicOptions = { ...dynamicOptions, [fieldKey]: [] };
+		} finally {
+			loadingOptions = { ...loadingOptions, [fieldKey]: false };
+		}
+	}
+
+	function resolvedOptions(field: FieldDef): SelectOption[] {
+		if (dynamicOptions[field.key] !== undefined) return dynamicOptions[field.key];
+		return field.options ?? [];
+	}
+
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
-		await onsubmit(values);
+		await onsubmit({ ...extraParams, ...values });
 	}
 </script>
 
@@ -48,12 +96,16 @@
 						rows="3"
 					></textarea>
 				{:else if field.field_type === 'select'}
-					<select id={field.key} bind:value={values[field.key]} required={field.required} class="select w-full">
-						<option value="">Select...</option>
-						{#each field.options ?? [] as opt (opt.value)}
-							<option value={opt.value}>{opt.label}</option>
-						{/each}
-					</select>
+					{#if loadingOptions[field.key]}
+						<p class="text-sm text-surface-500">Loading options...</p>
+					{:else}
+						<select id={field.key} bind:value={values[field.key]} required={field.required} class="select w-full">
+							<option value="">Select...</option>
+							{#each resolvedOptions(field) as opt (opt.value)}
+								<option value={opt.value}>{opt.label}</option>
+							{/each}
+						</select>
+					{/if}
 				{:else if field.field_type === 'toggle'}
 					<label class="flex items-center gap-2">
 						<input

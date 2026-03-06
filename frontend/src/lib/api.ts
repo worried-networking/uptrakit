@@ -1020,3 +1020,9 @@ export function apiSubmitRequest(
 	const relativePath = path.startsWith(BASE) ? path.slice(BASE.length) : path;
 	return request<Record<string, unknown>>(relativePath, { method, body: JSON.stringify(body) });
 }
+
+/** Performs an authenticated GET request and returns the parsed JSON body. */
+export function apiGet<T = unknown>(path: string): Promise<T> {
+	const relativePath = path.startsWith(BASE) ? path.slice(BASE.length) : path;
+	return request<T>(relativePath);
+}

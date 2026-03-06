@@ -790,6 +790,17 @@ export interface SelectOption {
 	label: string;
 }
 
+/** Dynamic data source for a `Select` field, loaded at form-open time. */
+export type SelectSource = {
+	type: 'rest_api';
+	/** API path relative to the controller base URL (e.g., `"/api/v1/hosts"`). */
+	path: string;
+	/** Field in each response item to use as the submitted option value. */
+	value_field: string;
+	/** Field in each response item to use as the human-readable label. */
+	label_field: string;
+};
+
 export interface FieldDef {
 	key: string;
 	label: string;
@@ -799,6 +810,8 @@ export interface FieldDef {
 	help_text?: string;
 	default_value?: string;
 	options?: SelectOption[];
+	/** When set, options are loaded dynamically from the given source. Takes precedence over `options`. */
+	select_source?: SelectSource;
 }
 
 export interface FormDef {
