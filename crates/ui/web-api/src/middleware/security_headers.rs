@@ -21,9 +21,16 @@ pub async fn security_headers(req: Request, next: Next) -> Response {
         "referrer-policy",
         HeaderValue::from_static("strict-origin-when-cross-origin"),
     );
+    // Only enforce frame-ancestors here. The full CSP (script-src hashes,
+    // style-src, connect-src, etc.) is emitted by SvelteKit at build time
+    // as a <meta http-equiv="content-security-policy"> tag using hash mode,
+    // and the two policies are applied independently by the browser for
+    // distinct directives. frame-ancestors cannot be set via a meta tag so
+    // it must live in the HTTP header. The X-Frame-Options header above
+    // provides the same protection for older browsers.
     headers.insert(
         "content-security-policy",
-        HeaderValue::from_static("default-src 'self'; frame-ancestors 'none'"),
+        HeaderValue::from_static("frame-ancestors 'none'"),
     );
     headers.insert(
         "strict-transport-security",
@@ -78,7 +85,7 @@ mod tests {
         );
         assert_eq!(
             h.get("content-security-policy").unwrap(),
-            "default-src 'self'; frame-ancestors 'none'"
+            "frame-ancestors 'none'"
         );
         assert_eq!(
             h.get("strict-transport-security").unwrap(),
