@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ExtensionUi } from '$lib/types';
+	import type { ActionDef, ExtensionUi } from '$lib/types';
 	import { invokeExtensionAction, getPluginConfigs } from '$lib/api';
 	import { showError } from '$lib/notifications.svelte';
 	import ActionButton from './ActionButton.svelte';
@@ -7,12 +7,19 @@
 	let {
 		extensionId,
 		ui,
+		actions = [],
 		serviceId
 	}: {
 		extensionId: string;
 		ui: Extract<ExtensionUi, { type: 'data_table' }>;
+		actions: ActionDef[];
 		serviceId?: string;
 	} = $props();
+
+	/** Resolve an action ID to its ActionDef from the action library. */
+	function resolveAction(actionId: string): ActionDef | undefined {
+		return actions.find((a) => a.action_id === actionId);
+	}
 
 	interface SelectorOption {
 		value: string;
@@ -20,6 +27,7 @@
 	}
 
 	const cs = $derived(ui.context_selector);
+	const addAction = $derived(cs?.add_action ? resolveAction(cs.add_action) : undefined);
 
 	let contextOptions: SelectorOption[] = $state([]);
 	let contextLoaded: boolean = $state(false);
@@ -86,7 +94,7 @@
 	}
 
 	async function handleAddActionComplete(result?: Record<string, unknown>) {
-		const idField = cs?.add_action?.api_submit?.response_id_field;
+		const idField = addAction?.api_submit?.response_id_field;
 		const newId = idField && result ? String(result[idField] ?? '') : undefined;
 		await loadContextOptions(newId || undefined);
 	}
@@ -134,8 +142,8 @@
 				</select>
 			{/if}
 
-			{#if cs.add_action}
-				<ActionButton {extensionId} action={cs.add_action} {serviceId} size="sm" onComplete={handleAddActionComplete} />
+			{#if addAction}
+				<ActionButton {extensionId} action={addAction} {serviceId} size="sm" onComplete={handleAddActionComplete} />
 			{/if}
 		</div>
 	{/if}
@@ -145,8 +153,11 @@
 	{:else}
 		{#if ui.primary_actions.length > 0}
 			<div class="mb-4 flex flex-wrap gap-2">
-				{#each ui.primary_actions as action (action.action_id)}
-					<ActionButton {extensionId} {action} {serviceId} extraParams={contextParams} onComplete={loadData} />
+				{#each ui.primary_actions as actionId (actionId)}
+					{@const action = resolveAction(actionId)}
+					{#if action}
+						<ActionButton {extensionId} {action} {serviceId} extraParams={contextParams} onComplete={loadData} />
+					{/if}
 				{/each}
 			</div>
 		{/if}
@@ -177,15 +188,18 @@
 								{#if ui.row_actions.length > 0}
 									<td class="px-3 py-2">
 										<div class="flex gap-1">
-											{#each ui.row_actions as action (action.action_id)}
-												<ActionButton
-													{extensionId}
-													{action}
-													{serviceId}
-													extraParams={{ ...contextParams, _row: row }}
-													size="sm"
-													onComplete={loadData}
-												/>
+											{#each ui.row_actions as actionId (actionId)}
+												{@const action = resolveAction(actionId)}
+												{#if action}
+													<ActionButton
+														{extensionId}
+														{action}
+														{serviceId}
+														extraParams={{ ...contextParams, _row: row }}
+														size="sm"
+														onComplete={loadData}
+													/>
+												{/if}
 											{/each}
 										</div>
 									</td>

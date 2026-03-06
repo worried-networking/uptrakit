@@ -79,31 +79,35 @@
 		}
 	});
 
-	const extensionNavItems = $derived(
-		getPageExtensions().map((ext) => ({
-			href: `/extensions/${ext.id}`,
-			label: ext.label
-		}))
-	);
-
 	const publicRoutes = new Set(['/login', '/register', '/device']);
 
-	const allNavItems = [
-		{ href: '/', label: 'Home' },
-		{ href: '/services', label: 'Services' },
-		{ href: '/system-services', label: 'System Services', permission: Permission.ViewSystemServices },
-		{ href: '/software', label: 'Software', permission: Permission.ViewSoftware },
-		{ href: '/history', label: 'History', permission: Permission.ViewSoftware },
-		{ href: '/scheduler', label: 'Scheduler', permission: Permission.ManageSoftware },
-		{ href: '/plugin-configs', label: 'Plugin Configs', permission: Permission.ViewSoftware },
-		{ href: '/hosts', label: 'Hosts' },
-		{ href: '/audit-logs', label: 'Audit Logs', permission: Permission.ViewAuditLogs },
-		{ href: '/settings', label: 'Settings', permission: Permission.ViewSettings },
-		{ href: '/settings/global', label: 'Global Settings', permission: Permission.ManageGlobalSettings }
+	// Built-in nav items with priority values for unified sorting.
+	const builtInNavItems: { href: string; label: string; priority: number; permission?: Permission }[] = [
+		{ href: '/', label: 'Home', priority: 100 },
+		{ href: '/services', label: 'Services', priority: 200 },
+		{ href: '/system-services', label: 'System Services', priority: 300, permission: Permission.ViewSystemServices },
+		{ href: '/hosts', label: 'Hosts', priority: 400 },
+		{ href: '/software', label: 'Software', priority: 500, permission: Permission.ViewSoftware },
+		{ href: '/plugin-configs', label: 'Plugin Configs', priority: 600, permission: Permission.ViewSoftware },
+		{ href: '/scheduler', label: 'Scheduler', priority: 700, permission: Permission.ManageSoftware },
+		{ href: '/history', label: 'History', priority: 800, permission: Permission.ViewSoftware },
+		{ href: '/audit-logs', label: 'Audit Logs', priority: 900, permission: Permission.ViewAuditLogs },
+		{ href: '/settings', label: 'Settings', priority: 1000, permission: Permission.ViewSettings },
+		{ href: '/settings/global', label: 'Global Settings', priority: 1100, permission: Permission.ManageGlobalSettings }
 	];
 
+	// Merge built-in and extension nav items, sorted by priority then label.
 	const navItems = $derived(
-		allNavItems.filter((item) => !item.permission || getUser()?.permissions.includes(item.permission))
+		[
+			...builtInNavItems
+				.filter((item) => !item.permission || getUser()?.permissions.includes(item.permission))
+				.map((item) => ({ href: item.href, label: item.label, priority: item.priority })),
+			...getPageExtensions().map((ext) => ({
+				href: `/extensions/${ext.id}`,
+				label: ext.label,
+				priority: ext.priority
+			}))
+		].sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label))
 	);
 
 	let showSidebar = $derived(getUser() && !publicRoutes.has($page.url.pathname));
@@ -205,18 +209,6 @@
 										(item.href !== '/' &&
 											$page.url.pathname.startsWith(item.href + '/') &&
 											!navItems.some((other) => other.href !== item.href && $page.url.pathname === other.href))
-											? 'preset-tonal-primary'
-											: 'hover:bg-surface-200 dark:hover:bg-surface-800'}"
-									>
-										{item.label}
-									</a>
-								</li>
-							{/each}
-							{#each extensionNavItems as item (item.href)}
-								<li>
-									<a
-										href={item.href}
-										class="block rounded-md px-3 py-2 text-sm font-medium {$page.url.pathname === item.href
 											? 'preset-tonal-primary'
 											: 'hover:bg-surface-200 dark:hover:bg-surface-800'}"
 									>

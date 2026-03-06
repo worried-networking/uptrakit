@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { getExtensions, getExtensionsLoaded } from '$lib/extensions.svelte';
-	import type { ExtensionResponse } from '$lib/types';
+	import type { ExtensionResponse, ActionDef } from '$lib/types';
 	import SchemaTable from '$lib/components/extensions/SchemaTable.svelte';
 	import SchemaForm from '$lib/components/extensions/SchemaForm.svelte';
 	import SchemaKeyValue from '$lib/components/extensions/SchemaKeyValue.svelte';
@@ -18,6 +18,11 @@
 	// For targeted extensions, content should only render once we know the service state.
 	// ServiceSelector sets selectedServiceId automatically when there is exactly one provider.
 	let contentReady = $derived(!isTargeted || serviceLoaded);
+
+	/** Resolve an action ID to its ActionDef from the extension's action library. */
+	function resolveAction(actionId: string): ActionDef | undefined {
+		return extension?.actions?.find((a) => a.action_id === actionId);
+	}
 </script>
 
 <svelte:head>
@@ -47,15 +52,23 @@
 				<p class="text-surface-500">No service is currently connected for this extension.</p>
 			</div>
 		{:else if extension.ui.type === 'data_table'}
-			<SchemaTable extensionId={extension.id} ui={extension.ui} serviceId={selectedServiceId} />
+			<SchemaTable
+				extensionId={extension.id}
+				ui={extension.ui}
+				actions={extension.actions ?? []}
+				serviceId={selectedServiceId}
+			/>
 		{:else if extension.ui.type === 'form'}
 			<SchemaForm fields={extension.ui.fields} onsubmit={async () => {}} />
 		{:else if extension.ui.type === 'key_value'}
 			<SchemaKeyValue extensionId={extension.id} dataAction={extension.ui.data_action} serviceId={selectedServiceId} />
 		{:else if extension.ui.type === 'actions'}
 			<div class="flex flex-wrap gap-2">
-				{#each extension.ui.actions as action (action.action_id)}
-					<ActionButton extensionId={extension.id} {action} serviceId={selectedServiceId} />
+				{#each extension.ui.actions as actionId (actionId)}
+					{@const action = resolveAction(actionId)}
+					{#if action}
+						<ActionButton extensionId={extension.id} {action} serviceId={selectedServiceId} />
+					{/if}
 				{/each}
 			</div>
 		{/if}

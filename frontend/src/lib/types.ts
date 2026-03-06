@@ -847,8 +847,8 @@ export interface ContextSelectorDef {
 	param_key: string;
 	label: string;
 	source: ContextSelectorSource;
-	/** When set, a "Add" button appears next to the selector. The action may call the extension proxy or a REST API directly (via `api_submit`). */
-	add_action?: ActionDef;
+	/** When set, a "Add" button appears next to the selector. References an action_id from the action library. */
+	add_action?: string;
 	/** Message shown when no options exist and no add_action is set. */
 	empty_message?: string;
 }
@@ -858,18 +858,20 @@ export type ExtensionUi =
 			type: 'data_table';
 			columns: TableColumn[];
 			data_action: string;
-			row_actions: ActionDef[];
-			primary_actions: ActionDef[];
+			/** Action ID references (resolved via the action library). */
+			row_actions: string[];
+			/** Action ID references (resolved via the action library). */
+			primary_actions: string[];
 			context_selector?: ContextSelectorDef;
 	  }
 	| { type: 'form'; fields: FieldDef[] }
 	| { type: 'key_value'; data_action: string }
-	| { type: 'actions'; actions: ActionDef[] };
+	| { type: 'actions'; actions: string[] };
 
 export interface ExtensionManifest {
 	id: string;
-	source_type: string;
 	label: string;
+	priority: number;
 	placement: ExtensionPlacement;
 	required_permission?: string;
 	targeting: ExtensionTargeting;
@@ -878,12 +880,14 @@ export interface ExtensionManifest {
 
 export interface ExtensionResponse {
 	id: string;
-	source_type: string;
 	label: string;
+	priority: number;
 	placement: ExtensionPlacement;
 	required_permission?: string;
 	targeting: ExtensionTargeting;
 	ui: ExtensionUi;
+	/** Resolved action catalogue for this extension's source. */
+	actions: ActionDef[];
 	provider_count: number;
 }
 
