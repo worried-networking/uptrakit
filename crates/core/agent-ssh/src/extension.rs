@@ -19,7 +19,10 @@ use uptrakit_internal_wire::extension::{
 use uptrakit_service_sdk::ControllerConnection;
 use uptrakit_shared_types::Permission;
 
+use uptrakit_plugin_infrastructure_proxmox::guest_exec::PveGuestType;
+
 use crate::commands::bootstrap::{self, BootstrapParams};
+use crate::commands::bootstrap_proxmox::{self, ProxmoxBootstrapParams};
 use crate::host_ops;
 use crate::ssh_target::SshTarget;
 
@@ -92,6 +95,12 @@ pub fn build_actions_json() -> serde_json::Value {
                 "permission": manage_hosts,
                 "destructive": true,
                 "timeout_seconds": 30
+            },
+            {
+                "action_id": "list-pve-hosts",
+                "label": "List PVE Hosts",
+                "permission": manage_hosts,
+                "timeout_seconds": 10
             },
             {
                 "action_id": "bootstrap",
@@ -177,6 +186,67 @@ pub fn build_actions_json() -> serde_json::Value {
                         }
                     ]
                 }
+            },
+            {
+                "action_id": "bootstrap-proxmox",
+                "label": "Bootstrap via Proxmox",
+                "permission": manage_hosts,
+                "timeout_seconds": 120,
+                "ui": {
+                    "type": "form",
+                    "fields": [
+                        {
+                            "key": "pve_host_id",
+                            "label": "PVE Host",
+                            "field_type": "select",
+                            "required": true,
+                            "help_text": "PVE node to use as gateway.",
+                            "dynamic_options": {
+                                "action_id": "list-pve-hosts"
+                            }
+                        },
+                        {
+                            "key": "vmid",
+                            "label": "Guest VMID",
+                            "field_type": "text",
+                            "required": true,
+                            "placeholder": "100",
+                            "help_text": "VMID of the target container or virtual machine."
+                        },
+                        {
+                            "key": "guest_type",
+                            "label": "Guest Type",
+                            "field_type": "select",
+                            "required": true,
+                            "default_value": "lxc",
+                            "options": [
+                                { "value": "lxc", "label": "LXC Container" },
+                                { "value": "qemu", "label": "QEMU VM" }
+                            ]
+                        },
+                        {
+                            "key": "name",
+                            "label": "Host Name",
+                            "field_type": "text",
+                            "required": true,
+                            "placeholder": "my-container",
+                            "help_text": "Friendly name for identification."
+                        },
+                        {
+                            "key": "target_username",
+                            "label": "Target Username",
+                            "field_type": "text",
+                            "help_text": "User to create/use in the guest.",
+                            "default_value": "uptrakit"
+                        },
+                        {
+                            "key": "allow_all",
+                            "label": "Allow All (NOPASSWD: ALL)",
+                            "field_type": "toggle",
+                            "help_text": "Use NOPASSWD: ALL in sudoers (less secure)."
+                        },
+                    ]
+                }
             }
         ]
     })
@@ -217,12 +287,19 @@ pub async fn handle_extension_request(
             let response = handle_list_hosts(&request.request_id, db).await;
             send_response(conn, response).await;
         }
+        "list-pve-hosts" => {
+            let response = handle_list_pve_hosts(&request.request_id, db).await;
+            send_response(conn, response).await;
+        }
         "remove-host" => {
             let response = handle_remove_host(&request.request_id, &request.params, db).await;
             send_response(conn, response).await;
         }
         "bootstrap" => {
             spawn_bootstrap(request, state_dir, private_key_der, service_id, bg_tx);
+        }
+        "bootstrap-proxmox" => {
+            spawn_bootstrap_proxmox(request, state_dir, service_id, bg_tx);
         }
         other => {
             tracing::warn!(action = %other, "unknown extension action");
@@ -258,6 +335,31 @@ async fn handle_list_hosts(
         Err(e) => {
             tracing::error!(error = %e, "failed to list hosts");
             make_error_response(request_id, "failed to list hosts")
+        }
+    }
+}
+
+/// List PVE hosts for dynamic select options in bootstrap-proxmox.
+async fn handle_list_pve_hosts(
+    request_id: &str,
+    db: &sea_orm::DatabaseConnection,
+) -> ExtensionResponsePayload {
+    match host_ops::find_pve_hosts(db).await {
+        Ok(hosts) => {
+            let options: Vec<serde_json::Value> = hosts
+                .into_iter()
+                .map(|h| {
+                    json!({
+                        "value": h.id,
+                        "label": format!("{} ({})", h.name, h.hostname),
+                    })
+                })
+                .collect();
+            make_success_response(request_id, json!({ "options": options }))
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "failed to list PVE hosts");
+            make_error_response(request_id, "failed to list PVE hosts")
         }
     }
 }
@@ -306,6 +408,7 @@ fn spawn_bootstrap(
             private_key_der.as_deref(),
             service_id,
             &state_dir,
+            Some(&bg_tx),
         )
         .await;
         let msg = ServiceMessage::ExtensionResponse(response);
@@ -313,6 +416,111 @@ fn spawn_bootstrap(
             tracing::error!("failed to send bootstrap result via bg_tx");
         }
     });
+}
+
+/// Spawn the Proxmox guest bootstrap workflow as a background task.
+fn spawn_bootstrap_proxmox(
+    request: ExtensionRequestPayload,
+    state_dir: &Path,
+    service_id: Option<uuid::Uuid>,
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+) {
+    let state_dir = state_dir.to_path_buf();
+    let bg_tx = bg_tx.clone();
+    let request_id = request.request_id.clone();
+
+    tokio::spawn(async move {
+        let response =
+            run_bootstrap_proxmox_action(&request_id, &request.params, service_id, &state_dir)
+                .await;
+        let msg = ServiceMessage::ExtensionResponse(response);
+        if bg_tx.send(msg).await.is_err() {
+            tracing::error!("failed to send proxmox bootstrap result via bg_tx");
+        }
+    });
+}
+
+/// The actual Proxmox guest bootstrap logic.
+#[tracing::instrument(skip_all, fields(request_id = %request_id))]
+async fn run_bootstrap_proxmox_action(
+    request_id: &str,
+    params: &serde_json::Value,
+    service_id: Option<uuid::Uuid>,
+    state_dir: &Path,
+) -> ExtensionResponsePayload {
+    let pve_host_id = match params.get("pve_host_id").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => return make_error_response(request_id, "missing required field 'pve_host_id'"),
+    };
+
+    let vmid_str = match params.get("vmid").and_then(|v| v.as_str()) {
+        Some(v) => v,
+        None => return make_error_response(request_id, "missing required field 'vmid'"),
+    };
+    let vmid: u32 = match vmid_str.parse() {
+        Ok(v) => v,
+        Err(_) => return make_error_response(request_id, "vmid must be a number"),
+    };
+
+    let guest_type_str = params
+        .get("guest_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("lxc");
+    let guest_type = match guest_type_str {
+        "lxc" => PveGuestType::Lxc,
+        "qemu" => PveGuestType::Qemu,
+        _ => return make_error_response(request_id, "guest_type must be 'lxc' or 'qemu'"),
+    };
+
+    let name = match params.get("name").and_then(|v| v.as_str()) {
+        Some(n) => n.to_string(),
+        None => return make_error_response(request_id, "missing required field 'name'"),
+    };
+
+    let target_username = params
+        .get("target_username")
+        .and_then(|v| v.as_str())
+        .unwrap_or("uptrakit")
+        .to_string();
+
+    let allow_all = params
+        .get("allow_all")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let host_id = uuid::Uuid::now_v7();
+
+    let proxmox_params = ProxmoxBootstrapParams {
+        pve_host_id,
+        vmid,
+        guest_type,
+        name,
+        target_username,
+        allow_all,
+        host_id,
+        service_id,
+    };
+
+    match bootstrap_proxmox::run_proxmox_bootstrap(state_dir, proxmox_params).await {
+        Ok(result) => {
+            tracing::info!(
+                %host_id,
+                guest_ip = %result.guest_ip,
+                "Proxmox guest bootstrap completed successfully"
+            );
+            make_success_response(
+                request_id,
+                json!({
+                    "host_id": host_id.to_string(),
+                    "guest_ip": result.guest_ip,
+                }),
+            )
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Proxmox guest bootstrap failed");
+            make_error_response(request_id, &format!("bootstrap failed: {e}"))
+        }
+    }
 }
 
 /// The actual bootstrap logic, run inside a spawned task.
@@ -324,6 +532,7 @@ async fn run_bootstrap_action(
     private_key_der: Option<&[u8]>,
     service_id: Option<uuid::Uuid>,
     state_dir: &Path,
+    bg_tx: Option<&tokio::sync::mpsc::Sender<ServiceMessage>>,
 ) -> ExtensionResponsePayload {
     // Decrypt sensitive params if present.
     let sensitive: Option<SensitiveBootstrapParams> =
@@ -420,9 +629,41 @@ async fn run_bootstrap_action(
     };
 
     match bootstrap::run_bootstrap(state_dir, bootstrap_params).await {
-        Ok(()) => {
-            tracing::info!(%host_id, "bootstrap completed successfully");
-            make_success_response(request_id, json!({ "host_id": host_id.to_string() }))
+        Ok(result) => {
+            tracing::info!(
+                %host_id,
+                is_pve_node = result.is_pve_node,
+                "bootstrap completed successfully"
+            );
+
+            // If PVE credentials were obtained, send ReportPluginConfig to
+            // the controller so it creates a Proxmox plugin config.
+            if let Some(creds) = &result.pve_credentials
+                && let Some(bg_tx) = bg_tx
+            {
+                let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
+                    serde_json::from_value(json!({
+                        "request_id": uuid::Uuid::now_v7().to_string(),
+                        "plugin_type": "proxmox",
+                        "name": format!("pve-{}", host_id),
+                        "config": {
+                            "api_url": creds.api_url,
+                            "api_token": creds.api_token,
+                            "verify_ssl": true,
+                        },
+                    }))
+                    .expect("ReportPluginConfigPayload JSON is always valid");
+                let msg = ServiceMessage::ReportPluginConfig(payload);
+                if bg_tx.send(msg).await.is_err() {
+                    tracing::error!("failed to send ReportPluginConfig via bg_tx");
+                }
+            }
+
+            let mut data = json!({ "host_id": host_id.to_string() });
+            if result.is_pve_node {
+                data["is_pve_node"] = json!(true);
+            }
+            make_success_response(request_id, data)
         }
         Err(e) => {
             tracing::error!(error = %e, "bootstrap failed");

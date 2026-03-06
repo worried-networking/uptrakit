@@ -1,0 +1,345 @@
+//! Proxmox guest bootstrap: set up an SSH host inside a PVE guest (LXC/QEMU)
+//! by executing commands through the PVE node via `pct exec` / `qm guest exec`.
+
+use std::sync::Arc;
+
+use rootcause::prelude::*;
+use uptrakit_command::RemoteExecutor;
+use uptrakit_crypto::EncryptedString;
+use uptrakit_plugin_infrastructure_proxmox::guest_exec::{self, PveGuestType};
+use uptrakit_plugin_infrastructure_registry::PluginRegistry;
+
+use crate::commands::sudoers::{
+    ResolvedSudoCommand, SudoersContent, install_helper_script, resolve_command_path,
+    write_sudoers_file,
+};
+use crate::db::entity::ssh_host::SshKeyType;
+use crate::error::{Error, Result};
+use crate::host_ops::{self, AddHostParams};
+use crate::remote_exec::{PveGuestExecutor, SshRemoteExecutor};
+use crate::ssh_executor::SshCommandExecutor;
+use crate::ssh_key;
+use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
+
+use std::path::Path;
+use std::time::Duration;
+
+/// Default SSH connect timeout for PVE host.
+const PVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Parameters for the Proxmox guest bootstrap workflow.
+pub struct ProxmoxBootstrapParams {
+    /// Local DB ID of the PVE host to use as gateway.
+    pub pve_host_id: String,
+    /// VMID of the target guest.
+    pub vmid: u32,
+    /// Guest type (LXC or QEMU).
+    pub guest_type: PveGuestType,
+    /// Friendly name for the new host entry.
+    pub name: String,
+    /// Username to create/use on the guest.
+    pub target_username: String,
+    /// Write `NOPASSWD: ALL` instead of specific commands.
+    pub allow_all: bool,
+    /// Pre-generated UUID for the new host DB entry.
+    pub host_id: uuid::Uuid,
+    /// Service UUID for the `authorized_keys` comment.
+    pub service_id: Option<uuid::Uuid>,
+}
+
+/// Result of a successful Proxmox guest bootstrap.
+pub struct ProxmoxBootstrapResult {
+    /// The hostname/IP of the guest (for the DB entry).
+    pub guest_ip: String,
+}
+
+/// Run the Proxmox guest bootstrap workflow.
+///
+/// 1. Load the PVE host from the local DB
+/// 2. Connect to the PVE node via SSH
+/// 3. Create a `PveGuestExecutor` for the target guest
+/// 4. Create user, deploy SSH key, configure sudoers inside the guest
+/// 5. Get the guest's IP address
+/// 6. Verify SSH connectivity to the guest
+/// 7. Save the host to the local DB
+pub async fn run_proxmox_bootstrap(
+    state_dir: &Path,
+    params: ProxmoxBootstrapParams,
+) -> Result<ProxmoxBootstrapResult> {
+    // 1. LOAD PVE HOST
+    let db = crate::db::init_db(state_dir).await.map_err(|e| {
+        report!(Error::Database(sea_orm::DbErr::Custom(format!(
+            "failed to initialize local database: {e}"
+        ))))
+    })?;
+
+    let pve_host = host_ops::find_host(&db, &params.pve_host_id)
+        .await?
+        .ok_or_else(|| {
+            report!(Error::HostNotFound(format!(
+                "PVE host '{}' not found",
+                params.pve_host_id
+            )))
+        })?;
+
+    if !pve_host.is_pve_node {
+        bail!(Error::InvalidInput(format!(
+            "host '{}' is not a PVE node",
+            pve_host.name
+        )));
+    }
+
+    // Check name uniqueness.
+    let existing = host_ops::find_host(&db, &params.name).await?;
+    if existing.is_some() {
+        bail!(Error::HostNameConflict(params.name.clone()));
+    }
+
+    // 2. CONNECT TO PVE NODE
+    let pve_key = pve_host.private_key.expose_secret();
+
+    let port = u16::try_from(pve_host.port).map_err(|_| {
+        report!(Error::InvalidInput(format!(
+            "PVE host port must be 0-65535, got {}",
+            pve_host.port
+        )))
+    })?;
+
+    let config = SshConnectionConfig {
+        hostname: pve_host.hostname.clone(),
+        port,
+        connect_timeout: PVE_CONNECT_TIMEOUT,
+    };
+
+    tracing::info!(
+        pve_host = %pve_host.name,
+        hostname = %pve_host.hostname,
+        vmid = params.vmid,
+        guest_type = ?params.guest_type,
+        "connecting to PVE node for guest bootstrap"
+    );
+
+    let (session, _) = ssh_transport::connect_and_authenticate(
+        &config,
+        &pve_host.username,
+        &AuthMethod::PrivateKey(pve_key),
+        pve_host.host_key_fingerprint.as_deref(),
+    )
+    .await?;
+
+    let session = Arc::new(session);
+    let pve_executor = SshRemoteExecutor::new(Arc::clone(&session));
+
+    // 3. CREATE GUEST EXECUTOR
+    let guest_executor =
+        PveGuestExecutor::new(Arc::clone(&session), params.vmid, params.guest_type);
+
+    // 4. GENERATE KEY MATERIAL
+    let (target_private_pem, target_public_openssh) = ssh_key::generate_ed25519_keypair()?;
+
+    // 5. REMOTE SETUP INSIDE GUEST
+    // Commands inside LXC containers via `pct exec` run as root, so no sudo needed.
+    let use_sudo = false;
+
+    // Create user.
+    let user_check = guest_executor
+        .exec_command(&format!(
+            "id -u {}",
+            uptrakit_command::shell_escape(&params.target_username)
+        ))
+        .await
+        .context_to::<Error>()?;
+
+    if user_check.exit_code != 0 {
+        tracing::info!(username = %params.target_username, "creating user in guest");
+        let create_result = guest_executor
+            .exec_command(&format!(
+                "useradd --create-home --shell /bin/sh {}",
+                uptrakit_command::shell_escape(&params.target_username)
+            ))
+            .await
+            .context_to::<Error>()?;
+        if create_result.exit_code != 0 {
+            bail!(Error::SshCommand(format!(
+                "failed to create user '{}' in guest: {}",
+                params.target_username,
+                create_result.stderr.trim()
+            )));
+        }
+    }
+
+    // Detect home directory.
+    let home_result = guest_executor
+        .exec_command(&format!(
+            "getent passwd {} | cut -d: -f6",
+            uptrakit_command::shell_escape(&params.target_username)
+        ))
+        .await
+        .context_to::<Error>()?;
+    let home_dir = home_result.stdout.trim().to_string();
+    if home_dir.is_empty() {
+        bail!(Error::SshCommand(format!(
+            "could not determine home directory for user '{}' in guest",
+            params.target_username
+        )));
+    }
+
+    // Deploy authorized_keys.
+    let service_comment = match &params.service_id {
+        Some(svc_id) => format!("uptrakit-svc:{svc_id}-host:{}", params.host_id),
+        None => format!("uptrakit-host:{}", params.host_id),
+    };
+
+    let stripped_pubkey = target_public_openssh
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let ak_restrictions = "no-pty,no-agent-forwarding,no-X11-forwarding";
+    let ak_entry = format!("{ak_restrictions} {stripped_pubkey} {service_comment}");
+    let escaped_entry = uptrakit_command::shell_escape(&ak_entry);
+    let escaped_home = uptrakit_command::shell_escape(&home_dir);
+    let escaped_user = uptrakit_command::shell_escape(&params.target_username);
+
+    let ak_cmd = format!(
+        "mkdir -p {escaped_home}/.ssh && \
+         chmod 700 {escaped_home}/.ssh && \
+         echo {escaped_entry} >> {escaped_home}/.ssh/authorized_keys && \
+         chmod 600 {escaped_home}/.ssh/authorized_keys && \
+         chown -R {escaped_user}:{escaped_user} {escaped_home}/.ssh"
+    );
+    let ak_result = guest_executor
+        .exec_command(&ak_cmd)
+        .await
+        .context_to::<Error>()?;
+    if ak_result.exit_code != 0 {
+        bail!(Error::SshCommand(format!(
+            "failed to deploy authorized_keys in guest: {}",
+            ak_result.stderr.trim()
+        )));
+    }
+
+    // Configure sudoers.
+    let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
+        as Arc<dyn uptrakit_command::CommandExecutor>;
+    let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
+    let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
+
+    for (_plugin_type, entries) in &plugin_sudo_cmds {
+        for entry in entries {
+            if let Some(helper) = &entry.helper_script {
+                install_helper_script(&guest_executor, helper, use_sudo).await?;
+                resolved.push(ResolvedSudoCommand {
+                    command_path: helper.install_path.to_string(),
+                    explanation: entry.explanation.clone(),
+                    needs_setenv: entry.needs_setenv,
+                });
+            } else if let Some(path) = resolve_command_path(&guest_executor, &entry.command).await?
+            {
+                resolved.push(ResolvedSudoCommand {
+                    command_path: path,
+                    explanation: entry.explanation.clone(),
+                    needs_setenv: entry.needs_setenv,
+                });
+            }
+        }
+    }
+
+    let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
+        Some(SudoersContent::SpecificCommands(resolved))
+    } else if params.allow_all {
+        Some(SudoersContent::AllCommands)
+    } else {
+        None
+    };
+
+    if let Some(ref content) = sudoers_content {
+        write_sudoers_file(&guest_executor, &params.target_username, content, use_sudo).await?;
+    }
+
+    // Get host key fingerprint from guest.
+    let fp_result = guest_executor
+        .exec_command(
+            "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null || \
+                       ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub 2>/dev/null || true",
+        )
+        .await
+        .context_to::<Error>()?;
+    let host_key_fingerprint = fp_result
+        .stdout
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .map(String::from);
+
+    // 6. GET GUEST IP
+    let guest_ip = guest_exec::get_guest_ip(&pve_executor, params.vmid, params.guest_type)
+        .await
+        .map_err(|e| report!(Error::SshCommand(format!("failed to get guest IP: {e}"))))?;
+
+    tracing::info!(guest_ip = %guest_ip, "resolved guest IP address");
+
+    // 7. VERIFY SSH CONNECTIVITY
+    let verify_config = SshConnectionConfig {
+        hostname: guest_ip.clone(),
+        port: 22,
+        connect_timeout: PVE_CONNECT_TIMEOUT,
+    };
+
+    let (verify_session, observed_fp) = ssh_transport::connect_and_authenticate(
+        &verify_config,
+        &params.target_username,
+        &AuthMethod::PrivateKey(&target_private_pem),
+        host_key_fingerprint.as_deref(),
+    )
+    .await
+    .map_err(|e| {
+        report!(Error::BootstrapVerification(format!(
+            "failed to verify SSH to guest {}: {e}",
+            guest_ip
+        )))
+    })?;
+
+    let whoami = verify_session.exec_command("whoami").await?;
+    if whoami.stdout.trim() != params.target_username {
+        bail!(Error::BootstrapVerification(format!(
+            "whoami returned '{}', expected '{}'",
+            whoami.stdout.trim(),
+            params.target_username
+        )));
+    }
+    verify_session.disconnect().await;
+
+    // Disconnect PVE session.
+    SshSession::disconnect_shared(session).await;
+
+    // 8. SAVE TO DATABASE
+    let encrypted_key =
+        EncryptedString::new(target_private_pem.clone(), "uptrakit:ssh_hosts:private_key")
+            .map_err(|e| report!(Error::Crypto(format!("failed to encrypt private key: {e}"))))?;
+
+    host_ops::add_host(
+        &db,
+        AddHostParams {
+            host_id: params.host_id,
+            name: params.name.clone(),
+            hostname: guest_ip.clone(),
+            port: 22,
+            username: params.target_username.clone(),
+            encrypted_key,
+            key_type: SshKeyType::Ed25519,
+            host_key_fingerprint: Some(observed_fp),
+        },
+    )
+    .await?;
+
+    tracing::info!(
+        host_id = %params.host_id,
+        name = %params.name,
+        guest_ip = %guest_ip,
+        "Proxmox guest bootstrap complete"
+    );
+
+    Ok(ProxmoxBootstrapResult { guest_ip })
+}

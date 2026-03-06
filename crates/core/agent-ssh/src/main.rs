@@ -6,6 +6,7 @@ mod error;
 mod extension;
 mod host_info;
 mod host_ops;
+mod remote_exec;
 mod ssh_config;
 mod ssh_executor;
 mod ssh_key;
@@ -339,6 +340,41 @@ impl ServiceHandler for SshAgentHandler {
             }
             ControllerMessage::SetUpdateFreeze(payload) => {
                 handle_set_update_freeze(&self.freeze_file_path, payload).await;
+                Ok(None)
+            }
+            ControllerMessage::ReportPluginConfigResponse(payload) => {
+                if payload.success {
+                    if let Some(config_id) = &payload.plugin_config_id {
+                        tracing::info!(
+                            request_id = %payload.request_id,
+                            %config_id,
+                            "plugin config reported successfully"
+                        );
+                        // Update the host's pve_plugin_config_id if we can
+                        // find it. The request_id encodes no host reference,
+                        // so we search PVE hosts missing a config id.
+                        if let Ok(pve_hosts) = host_ops::find_pve_hosts(db).await {
+                            for host in pve_hosts {
+                                if host.pve_plugin_config_id.is_none() {
+                                    let _ = host_ops::update_host_pve_state(
+                                        db,
+                                        &host.id,
+                                        true,
+                                        Some(config_id.to_string()),
+                                    )
+                                    .await;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    tracing::warn!(
+                        request_id = %payload.request_id,
+                        error = ?payload.error,
+                        "plugin config report failed"
+                    );
+                }
                 Ok(None)
             }
             _ => {
