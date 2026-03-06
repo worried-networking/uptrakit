@@ -639,17 +639,18 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | `NatsAccess` | `nats_access` | Service requires NATS connection details. Requires `system_service`. |
 | `MasterKeyAccess` | `master_key_access` | Service requires the master encryption key. Requires `system_service`. |
 | `CaManagement` | `ca_management` | Service can request CA certificate rotation. Requires `system_service`. |
+| `UiExtensions` | `ui_extensions` | Service has UI extensions to register via `extension_register`. The controller gates `extension_register` processing on this capability. See [UI Extension Architecture](../architecture/ui-extensions.md). |
 | `Other(String)` | *(any unknown string)* | Forward-compatible catch-all. Never participates in intersection. |
 
 ### Advertised Sets per Component
 
-| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `mqtt_bridge` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — |
-| SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — |
-| MQTT Bridge | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — |
-| External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `mqtt_bridge` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_extensions` |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — | — |
+| SSH Agent | ✓ | ✓ | ✓ | — | ✓ | — | — | — | — | — | — | ✓ |
+| MQTT Bridge | — | — | ✓ | ✓ | — | ✓ | — | — | — | — | — | — |
+| External Scheduler | — | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 
 The controller advertises all known capabilities so every service can compute its agreed set regardless of its type.
 
@@ -670,6 +671,28 @@ stored -- it is always computed from capabilities.
 capabilities in the `services.capabilities` column (JSON array of snake_case strings) and derives
 the `ServiceProfile` at read time. When `system_service` is present in the capability set, the
 enrollment is routed to `system_services` instead (see [System Services Architecture](../architecture/system-services.md)).
+
+### Capability Evolution Across Versions
+
+Services can add or drop capabilities when their binary is upgraded without re-enrollment. To support
+this, the SDK sends an `update_capabilities` message automatically on every authenticated reconnect,
+immediately after processing `service_settings`. The controller replaces the stored capability set
+with the freshly-reported one and refreshes in-session gating flags.
+
+**`update_capabilities` (service → controller)**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `capabilities` | `BTreeSet<Capability>` | The full capability set declared by the current service binary. |
+
+On receipt the controller:
+
+1. Overwrites `services.capabilities` (or `system_services.capabilities`) with the new set.
+2. Re-derives in-session flags such as `has_ui_extensions` without requiring reconnection.
+
+This replaces enrollment-time persistence as the authoritative source of a service's live capability
+set. The enrolled set is only used as a bootstrap value until the first `update_capabilities` message
+arrives in that session.
 
 ## Forward Compatibility
 
