@@ -4,6 +4,14 @@
 //! UI elements (pages, panels, context menu groups, table columns) and expose
 //! actions that the controller proxies to the appropriate service instance.
 //!
+//! ## Action library
+//!
+//! Actions are defined centrally in an **action library** — a flat catalogue of
+//! [`ActionDef`] structs registered via [`ExtensionActionsPayload`]. UI
+//! definitions reference actions by `action_id` string only, never embedding
+//! the full definition inline. This enables action reuse across multiple
+//! extensions from the same source (service or plugin).
+//!
 //! All public types are `#[non_exhaustive]` for forward compatibility.
 
 use serde::{Deserialize, Serialize};
@@ -16,6 +24,10 @@ use uptrakit_shared_types::SecretString;
 /// Each extension is identified by a unique `id` (e.g., `"ssh-agent.host-management"`)
 /// and declares where it should appear in the UI, what permissions are required,
 /// and how actions should be routed.
+///
+/// Actions are **not** embedded in the manifest. Instead, they live in a
+/// separate action library (registered via [`ExtensionActionsPayload`]) and
+/// are referenced by `action_id` strings within the UI definition.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtensionManifest {
@@ -23,6 +35,9 @@ pub struct ExtensionManifest {
     pub id: String,
     /// Human-readable name displayed in the UI.
     pub label: String,
+    /// Ordering priority — lower values appear first. Items with equal
+    /// priority are sorted alphabetically by `label`.
+    pub priority: i32,
     /// Where this extension appears in the UI.
     pub placement: ExtensionPlacement,
     /// Permission required to see and use this extension (e.g., `Permission::ManageHosts`).
@@ -42,12 +57,14 @@ impl ExtensionManifest {
     pub fn new(
         id: impl Into<String>,
         label: impl Into<String>,
+        priority: i32,
         placement: ExtensionPlacement,
         ui: ExtensionUi,
     ) -> Self {
         Self {
             id: id.into(),
             label: label.into(),
+            priority,
             placement,
             required_permission: String::new(),
             targeting: ExtensionTargeting::default(),
@@ -188,15 +205,15 @@ pub struct ContextSelectorDef {
     pub label: String,
     /// How to populate the selector options.
     pub source: ContextSelectorSource,
-    /// Optional action shown as a "Create" button next to the selector.
+    /// Optional action ID for a "Create" button next to the selector.
     ///
-    /// The action may route through the extension proxy (no `api_submit`) or call
-    /// an existing REST API directly (with `api_submit` set). After the action
-    /// completes the options list refreshes and the new item is auto-selected if
-    /// the response includes the field named by
-    /// `ActionDef::api_submit.response_id_field`.
+    /// The referenced action is looked up in the action library. It may route
+    /// through the extension proxy (no `api_submit`) or call an existing REST
+    /// API directly (with `api_submit` set). After the action completes the
+    /// options list refreshes and the new item is auto-selected if the response
+    /// includes the field named by `ActionDef::api_submit.response_id_field`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub add_action: Option<ActionDef>,
+    pub add_action: Option<String>,
     /// Message shown when no options are available and no `add_action` is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub empty_message: Option<String>,
@@ -218,9 +235,9 @@ impl ContextSelectorDef {
         }
     }
 
-    /// Set an action shown as a "Create" button.
-    pub fn with_add_action(mut self, action: ActionDef) -> Self {
-        self.add_action = Some(action);
+    /// Set the action ID for a "Create" button.
+    pub fn with_add_action(mut self, action_id: impl Into<String>) -> Self {
+        self.add_action = Some(action_id.into());
         self
     }
 
@@ -316,6 +333,9 @@ impl ApiSubmitDef {
 }
 
 /// Schema-driven UI definition for an extension.
+///
+/// Action fields (`row_actions`, `primary_actions`, etc.) contain `action_id`
+/// strings that reference entries in the source's action library.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -324,14 +344,14 @@ pub enum ExtensionUi {
     DataTable {
         /// Column definitions.
         columns: Vec<TableColumn>,
-        /// Action to invoke to fetch table data.
+        /// Action ID to invoke to fetch table data.
         data_action: String,
-        /// Actions available for each row (context menu).
+        /// Action IDs available for each row (context menu).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        row_actions: Vec<ActionDef>,
-        /// Primary actions (buttons above the table).
+        row_actions: Vec<String>,
+        /// Action IDs for primary actions (buttons above the table).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        primary_actions: Vec<ActionDef>,
+        primary_actions: Vec<String>,
         /// Optional context selector shown above the table.
         ///
         /// When set, the user must select a value before data loads. The selection
@@ -343,13 +363,13 @@ pub enum ExtensionUi {
     Form(FormDef),
     /// Read-only key-value display.
     KeyValue {
-        /// Action to invoke to fetch data.
+        /// Action ID to invoke to fetch data.
         data_action: String,
     },
-    /// List of actions (used for `ContextMenuGroup` placement).
+    /// List of action IDs (used for `ContextMenuGroup` placement).
     Actions {
-        /// Action definitions.
-        actions: Vec<ActionDef>,
+        /// Action ID references.
+        actions: Vec<String>,
     },
 }
 
@@ -384,10 +404,13 @@ impl TableColumn {
 }
 
 /// Action descriptor exposed by an extension.
+///
+/// Defined in the action library (via [`ExtensionActionsPayload`]) and
+/// referenced by `action_id` from UI definitions.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionDef {
-    /// Action identifier (unique within the extension).
+    /// Action identifier (unique within the source's action library).
     pub action_id: String,
     /// Human-readable label for the action button/menu item.
     pub label: String,
@@ -633,6 +656,15 @@ pub struct ExtensionRegisterPayload {
     pub encryption_public_key: Option<String>,
 }
 
+/// Payload for `ServiceMessage::ExtensionActionsRegister`: a service declares
+/// its action library — a flat catalogue of [`ActionDef`] structs that can be
+/// referenced by `action_id` from any extension manifest of the same source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtensionActionsPayload {
+    /// Action definitions provided by this service.
+    pub actions: Vec<ActionDef>,
+}
+
 /// Payload for `ControllerMessage::ExtensionRequest`: the controller proxies
 /// an action invocation to a service.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -686,6 +718,7 @@ mod tests {
         let manifest = ExtensionManifest {
             id: "ssh-agent.host-management".to_string(),
             label: "SSH Host Management".to_string(),
+            priority: 250,
             placement: ExtensionPlacement::Page {
                 nav_section: "management".to_string(),
                 icon: Some("server".to_string()),
@@ -705,8 +738,9 @@ mod tests {
             },
         };
 
-        let json = serde_json::to_string(&manifest).unwrap();
-        let roundtripped: ExtensionManifest = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&manifest).expect("serialize should succeed");
+        let roundtripped: ExtensionManifest =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(manifest, roundtripped);
     }
 
@@ -715,6 +749,7 @@ mod tests {
         let manifest = ExtensionManifest {
             id: "proxmox.lxc-panel".to_string(),
             label: "LXC Matching".to_string(),
+            priority: 0,
             placement: ExtensionPlacement::Panel {
                 target_page: "hosts".to_string(),
                 position: PanelPosition::Below,
@@ -726,8 +761,9 @@ mod tests {
             },
         };
 
-        let json = serde_json::to_string(&manifest).unwrap();
-        let roundtripped: ExtensionManifest = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&manifest).expect("serialize should succeed");
+        let roundtripped: ExtensionManifest =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(manifest, roundtripped);
     }
 
@@ -736,6 +772,7 @@ mod tests {
         let manifest = ExtensionManifest {
             id: "ssh-agent.host-actions".to_string(),
             label: "SSH Actions".to_string(),
+            priority: 100,
             placement: ExtensionPlacement::ContextMenuGroup {
                 target_entity: "host".to_string(),
                 group_label: "SSH Agent".to_string(),
@@ -743,32 +780,13 @@ mod tests {
             required_permission: String::new(),
             targeting: ExtensionTargeting::Targeted,
             ui: ExtensionUi::Actions {
-                actions: vec![ActionDef {
-                    action_id: "bootstrap".to_string(),
-                    label: "Bootstrap Host".to_string(),
-                    ui: Some(ActionUi::Form(FormDef {
-                        fields: vec![FieldDef {
-                            key: "username".to_string(),
-                            label: "Username".to_string(),
-                            field_type: FieldType::Text,
-                            required: true,
-                            placeholder: Some("root".to_string()),
-                            help_text: None,
-                            default_value: None,
-                            options: vec![],
-                            sensitive: false,
-                        }],
-                    })),
-                    permission: String::new(),
-                    destructive: false,
-                    timeout_seconds: Some(60),
-                    api_submit: None,
-                }],
+                actions: vec!["bootstrap".to_string()],
             },
         };
 
-        let json = serde_json::to_string(&manifest).unwrap();
-        let roundtripped: ExtensionManifest = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&manifest).expect("serialize should succeed");
+        let roundtripped: ExtensionManifest =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(manifest, roundtripped);
     }
 
@@ -777,6 +795,7 @@ mod tests {
         let manifest = ExtensionManifest {
             id: "ssh-agent.host-columns".to_string(),
             label: "SSH Status".to_string(),
+            priority: 50,
             placement: ExtensionPlacement::TableColumns {
                 target_table: "hosts".to_string(),
                 columns: vec![ExtensionColumn {
@@ -790,8 +809,9 @@ mod tests {
             ui: ExtensionUi::Actions { actions: vec![] },
         };
 
-        let json = serde_json::to_string(&manifest).unwrap();
-        let roundtripped: ExtensionManifest = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&manifest).expect("serialize should succeed");
+        let roundtripped: ExtensionManifest =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(manifest, roundtripped);
     }
 
@@ -803,8 +823,9 @@ mod tests {
     #[test]
     fn panel_position_other_roundtrip() {
         let pos = PanelPosition::Other("sidebar".to_string());
-        let json = serde_json::to_string(&pos).unwrap();
-        let roundtripped: PanelPosition = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&pos).expect("serialize should succeed");
+        let roundtripped: PanelPosition =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(pos, roundtripped);
     }
 
@@ -816,8 +837,9 @@ mod tests {
     #[test]
     fn field_type_other_roundtrip() {
         let ft = FieldType::Other("color_picker".to_string());
-        let json = serde_json::to_string(&ft).unwrap();
-        let roundtripped: FieldType = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&ft).expect("serialize should succeed");
+        let roundtripped: FieldType =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(ft, roundtripped);
     }
 
@@ -847,8 +869,9 @@ mod tests {
             submit_action: Some("validate-host".to_string()),
         };
 
-        let json = serde_json::to_string(&step).unwrap();
-        let roundtripped: WizardStep = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&step).expect("serialize should succeed");
+        let roundtripped: WizardStep =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(step, roundtripped);
     }
 
@@ -863,8 +886,9 @@ mod tests {
             }],
         };
 
-        let json = serde_json::to_string(&ui).unwrap();
-        let roundtripped: ActionUi = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&ui).expect("serialize should succeed");
+        let roundtripped: ActionUi =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(ui, roundtripped);
     }
 
@@ -874,8 +898,9 @@ mod tests {
             value: "opt1".to_string(),
             label: "Option 1".to_string(),
         };
-        let json = serde_json::to_string(&opt).unwrap();
-        let roundtripped: SelectOption = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&opt).expect("serialize should succeed");
+        let roundtripped: SelectOption =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(opt, roundtripped);
     }
 
@@ -885,6 +910,7 @@ mod tests {
             manifests: vec![ExtensionManifest {
                 id: "test.ext".to_string(),
                 label: "Test Extension".to_string(),
+                priority: 500,
                 placement: ExtensionPlacement::Page {
                     nav_section: "test".to_string(),
                     icon: None,
@@ -898,8 +924,26 @@ mod tests {
             encryption_public_key: None,
         };
 
-        let json = serde_json::to_string(&payload).unwrap();
-        let roundtripped: ExtensionRegisterPayload = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&payload).expect("serialize should succeed");
+        let roundtripped: ExtensionRegisterPayload =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(payload, roundtripped);
+    }
+
+    #[test]
+    fn extension_actions_payload_roundtrip() {
+        let payload = ExtensionActionsPayload {
+            actions: vec![
+                ActionDef::new("list-hosts", "List Hosts"),
+                ActionDef::new("bootstrap", "Bootstrap Host")
+                    .with_permission(Permission::ManageHosts)
+                    .with_timeout(120),
+            ],
+        };
+
+        let json = serde_json::to_string(&payload).expect("serialize should succeed");
+        let roundtripped: ExtensionActionsPayload =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(payload, roundtripped);
     }
 
@@ -913,8 +957,9 @@ mod tests {
             sensitive_params: None,
         };
 
-        let json = serde_json::to_string(&payload).unwrap();
-        let roundtripped: ExtensionRequestPayload = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&payload).expect("serialize should succeed");
+        let roundtripped: ExtensionRequestPayload =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(payload, roundtripped);
     }
 
@@ -927,9 +972,10 @@ mod tests {
             error: None,
         };
 
-        let json = serde_json::to_string(&payload).unwrap();
+        let json = serde_json::to_string(&payload).expect("serialize should succeed");
         assert!(!json.contains("error"));
-        let roundtripped: ExtensionResponsePayload = serde_json::from_str(&json).unwrap();
+        let roundtripped: ExtensionResponsePayload =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(payload, roundtripped);
     }
 
@@ -942,8 +988,9 @@ mod tests {
             error: Some("action failed".to_string()),
         };
 
-        let json = serde_json::to_string(&payload).unwrap();
-        let roundtripped: ExtensionResponsePayload = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&payload).expect("serialize should succeed");
+        let roundtripped: ExtensionResponsePayload =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(payload, roundtripped);
     }
 
@@ -959,9 +1006,10 @@ mod tests {
             api_submit: None,
         };
 
-        let json = serde_json::to_string(&action).unwrap();
+        let json = serde_json::to_string(&action).expect("serialize should succeed");
         assert!(json.contains(r#""destructive":true"#));
-        let roundtripped: ActionDef = serde_json::from_str(&json).unwrap();
+        let roundtripped: ActionDef =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(action, roundtripped);
     }
 
@@ -970,6 +1018,7 @@ mod tests {
         let manifest = ExtensionManifest {
             id: "test".to_string(),
             label: "Test".to_string(),
+            priority: 0,
             placement: ExtensionPlacement::Page {
                 nav_section: "test".to_string(),
                 icon: None,
@@ -979,7 +1028,7 @@ mod tests {
             ui: ExtensionUi::Actions { actions: vec![] },
         };
 
-        let json = serde_json::to_string(&manifest).unwrap();
+        let json = serde_json::to_string(&manifest).expect("serialize should succeed");
         // required_permission should be omitted when empty
         assert!(!json.contains("required_permission"));
         // icon should be omitted when None
@@ -1011,8 +1060,53 @@ mod tests {
             }],
         };
 
-        let json = serde_json::to_string(&form).unwrap();
-        let roundtripped: FormDef = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&form).expect("serialize should succeed");
+        let roundtripped: FormDef =
+            serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(form, roundtripped);
+    }
+
+    #[test]
+    fn priority_sorting() {
+        let mut items = [("B", 200), ("A", 200), ("C", 100), ("D", 300)];
+        items.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(b.0)));
+        let labels: Vec<&str> = items.iter().map(|(l, _)| *l).collect();
+        assert_eq!(labels, vec!["C", "A", "B", "D"]);
+    }
+
+    #[test]
+    fn ui_action_refs_are_strings() {
+        let ui = ExtensionUi::DataTable {
+            columns: vec![],
+            data_action: "list".to_string(),
+            row_actions: vec!["edit".to_string(), "delete".to_string()],
+            primary_actions: vec!["create".to_string()],
+            context_selector: None,
+        };
+
+        let json = serde_json::to_string(&ui).expect("serialize should succeed");
+        assert!(json.contains(r#""row_actions":["edit","delete"]"#));
+        let roundtripped: ExtensionUi =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(ui, roundtripped);
+    }
+
+    #[test]
+    fn context_selector_add_action_is_string_ref() {
+        let cs = ContextSelectorDef::new(
+            "config_id",
+            "Configuration",
+            ContextSelectorSource::PluginConfigs {
+                plugin_type: "infrastructure_proxmox".to_string(),
+            },
+        )
+        .with_add_action("add-config")
+        .with_empty_message("No configurations found.");
+
+        let json = serde_json::to_string(&cs).expect("serialize should succeed");
+        assert!(json.contains(r#""add_action":"add-config""#));
+        let roundtripped: ContextSelectorDef =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(cs, roundtripped);
     }
 }

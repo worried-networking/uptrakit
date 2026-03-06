@@ -30,6 +30,7 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::Disconnecting(p) => p.wire_validate(),
             ServiceMessage::UpdateCapabilities(p) => p.wire_validate(),
             ServiceMessage::ExtensionRegister(p) => p.wire_validate(),
+            ServiceMessage::ExtensionActionsRegister(p) => p.wire_validate(),
             ServiceMessage::ExtensionResponse(p) => p.wire_validate(),
             // Forward-compatible: unknown variants from newer peers pass validation.
             _ => Ok(()),
@@ -289,6 +290,16 @@ impl WireValidate for extension::ExtensionRegisterPayload {
     }
 }
 
+impl WireValidate for extension::ExtensionActionsPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_vec_len(&self.actions, MAX_EXTENSION_ACTIONS, "actions")?;
+        for action in &self.actions {
+            action.wire_validate()?;
+        }
+        Ok(())
+    }
+}
+
 impl WireValidate for extension::ExtensionManifest {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.id, MAX_SHORT_STRING_LEN, "extension.id")?;
@@ -387,9 +398,11 @@ impl WireValidate for extension::ContextSelectorDef {
         )?;
         check_string_len(&self.label, MAX_SHORT_STRING_LEN, "context_selector.label")?;
         self.source.wire_validate()?;
-        if let Some(add_action) = &self.add_action {
-            add_action.wire_validate()?;
-        }
+        check_opt_string_len(
+            &self.add_action,
+            MAX_SHORT_STRING_LEN,
+            "context_selector.add_action",
+        )?;
         check_opt_string_len(
             &self.empty_message,
             MAX_SHORT_STRING_LEN,
@@ -411,16 +424,20 @@ impl WireValidate for extension::ExtensionUi {
             } => {
                 check_vec_len(columns, MAX_EXTENSION_COLUMNS, "ui.columns")?;
                 check_string_len(data_action, MAX_SHORT_STRING_LEN, "ui.data_action")?;
-                check_vec_len(row_actions, MAX_EXTENSION_ACTIONS, "ui.row_actions")?;
-                check_vec_len(primary_actions, MAX_EXTENSION_ACTIONS, "ui.primary_actions")?;
+                check_vec_len(row_actions, MAX_EXTENSION_ACTION_REFS, "ui.row_actions")?;
+                check_vec_len(
+                    primary_actions,
+                    MAX_EXTENSION_ACTION_REFS,
+                    "ui.primary_actions",
+                )?;
                 for col in columns {
                     col.wire_validate()?;
                 }
-                for action in row_actions {
-                    action.wire_validate()?;
+                for action_id in row_actions {
+                    check_string_len(action_id, MAX_SHORT_STRING_LEN, "ui.row_actions[]")?;
                 }
-                for action in primary_actions {
-                    action.wire_validate()?;
+                for action_id in primary_actions {
+                    check_string_len(action_id, MAX_SHORT_STRING_LEN, "ui.primary_actions[]")?;
                 }
                 if let Some(cs) = context_selector {
                     cs.wire_validate()?;
@@ -433,9 +450,9 @@ impl WireValidate for extension::ExtensionUi {
                 check_string_len(data_action, MAX_SHORT_STRING_LEN, "ui.data_action")?;
             }
             extension::ExtensionUi::Actions { actions } => {
-                check_vec_len(actions, MAX_EXTENSION_ACTIONS, "ui.actions")?;
-                for action in actions {
-                    action.wire_validate()?;
+                check_vec_len(actions, MAX_EXTENSION_ACTION_REFS, "ui.actions")?;
+                for action_id in actions {
+                    check_string_len(action_id, MAX_SHORT_STRING_LEN, "ui.actions[]")?;
                 }
             }
         }
@@ -1232,6 +1249,7 @@ mod tests {
         extension::ExtensionManifest {
             id: "test.ext".to_string(),
             label: "Test".to_string(),
+            priority: 0,
             placement: extension::ExtensionPlacement::Page {
                 nav_section: "test".to_string(),
                 icon: None,

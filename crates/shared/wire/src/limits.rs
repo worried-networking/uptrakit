@@ -104,8 +104,11 @@ pub const MAX_EXTENSION_MANIFESTS: usize = 50;
 /// Maximum number of columns in a `TableColumns` placement or `DataTable` UI.
 pub const MAX_EXTENSION_COLUMNS: usize = 50;
 
-/// Maximum number of actions in an extension UI.
-pub const MAX_EXTENSION_ACTIONS: usize = 50;
+/// Maximum number of action ID references in an extension UI.
+pub const MAX_EXTENSION_ACTION_REFS: usize = 50;
+
+/// Maximum number of actions in an extension actions library.
+pub const MAX_EXTENSION_ACTIONS: usize = 200;
 
 /// Maximum number of fields in a single form.
 pub const MAX_EXTENSION_FIELDS: usize = 100;

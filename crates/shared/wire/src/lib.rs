@@ -391,6 +391,14 @@ pub enum ServiceMessage {
     /// capability. Contains one or more extension manifests that the controller
     /// registers in its in-memory extension registry.
     ExtensionRegister(extension::ExtensionRegisterPayload),
+    /// Registers an action library — a flat catalogue of [`extension::ActionDef`]
+    /// entries that can be referenced by `action_id` from any extension manifest
+    /// of the same source. Requires the `UiExtensions` capability.
+    ///
+    /// Sent independently of `ExtensionRegister` so that actions and manifests
+    /// can be registered in any order. Subsequent sends replace the previous
+    /// action set for this service.
+    ExtensionActionsRegister(extension::ExtensionActionsPayload),
     /// Response to a proxied extension action invocation.
     ///
     /// Sent by the service after processing an `ExtensionRequest` from the
