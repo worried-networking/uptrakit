@@ -644,7 +644,7 @@ async fn run_bootstrap_action(
                 let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
                     serde_json::from_value(json!({
                         "request_id": uuid::Uuid::now_v7().to_string(),
-                        "plugin_type": "proxmox",
+                        "plugin_type": "infrastructure_proxmox",
                         "name": format!("pve-{}", host_id),
                         "config": {
                             "api_url": creds.api_url,
