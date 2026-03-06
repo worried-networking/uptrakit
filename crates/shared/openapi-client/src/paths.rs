@@ -378,6 +378,11 @@ pub(crate) mod host_packages {
     }
 }
 
+pub(crate) mod events {
+    /// `GET /api/v1/events/stream`
+    pub(crate) const STREAM: &str = "/api/v1/events/stream";
+}
+
 pub(crate) mod extensions {
     /// `GET /api/v1/extensions`
     pub(crate) const BASE: &str = "/api/v1/extensions";

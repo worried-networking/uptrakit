@@ -12,6 +12,7 @@ pub mod device_auth_stream;
 pub mod discovery_allowlist;
 pub mod enrollment_tokens;
 pub mod error;
+pub mod events_stream;
 pub mod extensions;
 pub mod health;
 pub mod host_packages;
