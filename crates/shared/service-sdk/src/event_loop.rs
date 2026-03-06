@@ -195,6 +195,9 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                             )
                             .await;
                     }
+                    Some(ControllerMessage::ExtensionRequest(payload)) => {
+                        handler.on_extension_request(payload, &mut conn).await?;
+                    }
                     Some(ControllerMessage::Unknown) => {
                         tracing::warn!(
                             "received unknown controller message type; \

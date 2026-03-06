@@ -12,7 +12,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use rootcause::prelude::*;
-use uptrakit_internal_wire::{Capability, ControllerMessage, ServiceSettingsPayload};
+use uptrakit_internal_wire::{
+    Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload,
+    extension::{ExtensionRequestPayload, ExtensionResponsePayload},
+};
 use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::Backoff;
@@ -167,6 +170,32 @@ pub trait ServiceHandler: Send {
         event: Self::ServiceEvent,
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>>;
+
+    /// Handle an extension action request from the controller.
+    ///
+    /// The default implementation responds with a "not supported" error.
+    /// Services that register UI extensions should override this to handle
+    /// their specific actions.
+    async fn on_extension_request(
+        &mut self,
+        request: ExtensionRequestPayload,
+        conn: &mut ControllerConnection,
+    ) -> LoopResult<()> {
+        let response = ExtensionResponsePayload {
+            request_id: request.request_id,
+            success: false,
+            data: serde_json::Value::Null,
+            error: Some("Extension actions not supported by this service".to_owned()),
+        };
+        conn.send(ServiceMessage::ExtensionResponse(response))
+            .await
+            .map_err(|e| {
+                report!(LoopError::Other(format!(
+                    "failed to send extension response: {e}"
+                )))
+            })?;
+        Ok(())
+    }
 
     /// Graceful shutdown: send `Disconnecting` and drain in-flight work.
     ///
