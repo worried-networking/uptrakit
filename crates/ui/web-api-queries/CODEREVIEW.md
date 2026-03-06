@@ -31,34 +31,19 @@ Overall crate coverage: 4,319 / 7,786 lines (55.5%).
 
 ### Critical Uncovered Paths
 
-**[SECURITY] `system_enrollment_tokens.rs` — active token compound filter (0% coverage)**
+~~**[SECURITY] `system_enrollment_tokens.rs` — active token compound filter (0% coverage)**~~
 
-`find_active_system_tokens` filters by three ANDed conditions: not revoked, not expired, and
-uses remaining. A logic bug in this filter (e.g., OR instead of AND, missing NULL handling)
-would allow enrollment with exhausted or revoked tokens.
+> **Fixed:** Added 6 unit tests in `system_enrollment_tokens.rs` covering: expired token
+> excluded, revoked token excluded, exhausted token excluded, unlimited token included,
+> partially-used token (below max) included, and `revoke_system_enrollment_token` idempotency.
 
-Recommended tests:
+~~**[DATA INTEGRITY] `system_services.rs` — transactional deactivation (0% coverage)**~~
 
-- Expired token (`expires_at` in the past) is excluded
-- Revoked token (`revoked_at IS NOT NULL`) is excluded
-- Exhausted token (`current_uses >= max_uses`) is excluded
-- Unlimited token (`max_uses IS NULL`) is always included
-- `revoke_system_enrollment_token`: first call returns `true`, second returns `false`
-- `increment_system_token_uses` then `find_active_system_tokens`: token no longer active
-
-**[DATA INTEGRITY] `system_services.rs` — transactional deactivation (0% coverage)**
-
-`deactivate_system_service` must atomically mark `deactivated_at` and bulk-revoke all
-non-revoked certificates. Partial state (service deactivated, certs not revoked) would leave
-valid certs in circulation.
-
-Recommended tests:
-
-- Pending service → approved → deactivated with cert revocation in one transaction
-- Already deactivated service returns `Ok(false)`
-- `approve_system_service` on non-pending returns `NotPending`
-- `reject_system_service` sets `deactivated_at` alongside status
-- `update_system_service_settings` with `Some(0)` clears to `NULL`
+> **Fixed:** Added 6 unit tests in `system_services.rs` covering: `deactivate_system_service`
+> atomically sets `deactivated_at` and revokes all certs with `ServiceDeactivated` reason,
+> already-deactivated returns `false`, `approve_system_service` on non-pending returns
+> `NotPending`, `reject_system_service` sets `Rejected` status and `deactivated_at`, and
+> `update_system_service_settings` with `Some(0)` clears columns to `NULL`.
 
 **[BUSINESS] `scheduled_tasks.rs` — cron validation (0% coverage)**
 

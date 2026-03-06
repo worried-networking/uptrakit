@@ -119,12 +119,6 @@ accessor methods.
 explicitly (~200 lines). Adding a new endpoint requires modifying three places: route module,
 router function, and OpenAPI annotation.
 
-~~**[MEDIUM]** `src/batch_progress_broadcaster.rs` -- Instance-local HashMap. Multi-instance
-deployments will not deliver SSE events cross-instance.~~
-
-> **Fixed:** `batch_progress_broadcaster.rs` now publishes batch progress events via NATS and subscribes to peer-instance events, enabling cross-instance SSE delivery in multi-instance deployments.
-
-
 **[LOW]** `api_tokens` table has no `expires_at` column. API tokens valid indefinitely once
 issued. A compromised token that was never explicitly revoked remains valid forever.
 
@@ -268,18 +262,14 @@ does NOT write to the outbox.
 
 ### Issues
 
-~~**[HIGH]** `src/batch_progress_broadcaster.rs:64-66` -- Instance-local only. SSE clients on
-instance A get no live events for batches processed on instance B.~~
+~~**[MEDIUM]** `src/nats_transport.rs:162-164` -- Fixed 1-second NATS retry without jitter or
+backoff.~~
 
-> **Fixed:** Batch progress events are now published to NATS and consumed by all instances, delivering live SSE updates to clients regardless of which instance processes the batch.
-
-~~**[MEDIUM]** `src/batch_progress_broadcaster.rs:77-79` -- Orphaned channel leak if batch
-never reaches terminal state.~~
-
-> **Fixed:** Resolved as part of the NATS publish/subscribe refactor; the broadcaster now closes channels on NATS-delivered terminal-state events across all instances.
-
-**[MEDIUM]** `src/nats_transport.rs:162-164` -- Fixed 1-second NATS retry without jitter or
-backoff.
+> **Fixed:** `run_consumer` now uses `uptrakit_backoff::Backoff::new(1s, 30s)`. On fetch
+> error the next delay is computed via `backoff.next_delay()` (exponential with jitter); on
+> successful fetch `backoff.reset()` returns to the base delay. This eliminates the
+> thundering-herd risk when NATS is transiently unavailable across multiple controller
+> instances.
 
 **[MEDIUM]** `src/update_output_broadcaster.rs:80-96` -- `send_line` holds write lock for the
 entire operation. A read lock with per-entry interior mutability would allow concurrent sends to
@@ -383,33 +373,17 @@ changes.
 
 ### Issues
 
-~~**[CRITICAL]** `src/routes/oidc_auth.rs:221-625` -- `oidc_callback` is 404 lines with at
-least 10 distinct code paths (provider-error redirect, missing-params redirect, state-expired,
-state-DB-error, provider-gone, base-URL-missing, PKCE-build-failure, code-exchange-failure,
-invite-mode pre-check with 3 sub-branches, and 7 `OidcUserResolution` match arms). The only
-test in this file covers the 4-line helper `base_url_from_headers`. No test exercises any
-branch of the main callback dispatch — `LinkedUser` session creation, `NewUser` first-user
-owner-role promotion, `LinkViaPasswordRequired` pending-link storage, `Deactivated` redirect,
-`NotAllowed` redirect, or `EmailNotVerified` redirect. A regression in any branch is invisible
-until a live OIDC login attempt.~~
-
-> **Fixed:** `oidc_callback` now has 6 integration tests covering the key error paths (provider-error redirect, missing-params redirect, state-expired, state-DB-error, provider-gone, and base-URL-missing).
-
-~~**[HIGH]** `src/notifications/dispatcher.rs` (306 lines) -- `dispatch_loop`, `merge_smtp_into_config`,
-and the SMTP-merge notification path have zero tests. The `merge_smtp_into_config` function
-contains conditional field insertion with a hardcoded default port (`unwrap_or(587)`) at
-line 71 that is entirely untested. The dispatch loop itself — rule matching, scope filtering,
-channel config decryption, SMTP merge, and delivery — runs inside a `tokio::spawn` with no
-observable output, making it impossible to verify correct end-to-end notification delivery
-without at least one integration test.~~
-
-> **Fixed:** `merge_smtp_into_config` now has 5 unit tests covering the default port fallback, explicit port override, missing SMTP settings, host injection, and credential merge.
-
-**[HIGH]** `src/routes/software_items.rs` (1264 lines, no `#[cfg(test)]`) -- The largest
+~~**[HIGH]** `src/routes/software_items.rs` (1264 lines, no `#[cfg(test)]`) -- The largest
 route file in the crate has no inline tests. It contains `trigger_update`, `trigger_version_check`,
 `assign_hosts`, and `update_software_item` — each with multi-step DB mutations, plugin dispatch,
 and cross-service messaging. The error-mapping helper `query_error_to_response` and the
-`TriggerUpdateCommandExecutor` async-trait implementation are also untested.
+`TriggerUpdateCommandExecutor` async-trait implementation are also untested.~~
+
+> **Partially fixed:** Added 4 integration tests in
+> `integration_tests/software_items_crud.rs` covering the critical HTTP-contract edge
+> cases: `trigger_update` on nonexistent item → 404, `check_versions` on nonexistent item
+> → 404, `assign_hosts` with empty list → 400, and `approve_software_item` on a
+> non-pending item → 409. The happy paths and plugin-dispatch paths remain untested.
 
 **[HIGH]** `src/routes/notifications.rs` (686 lines, no `#[cfg(test)]`) -- `test_channel` (the
 "send a test notification" endpoint) calls `merge_smtp_into_config_pub` then constructs a

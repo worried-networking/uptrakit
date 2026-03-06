@@ -157,23 +157,6 @@ serialized config at spawn time will be missing during post-update version detec
 same plugin type. The two code paths treat context injection differently: one uses the live
 `ctx`, the other uses a static default.
 
-**[FIXED - RESOLVED]** ~~`src/update.rs:440-458` (unknown `HookCommand` arm) -- The wildcard arm for
-unrecognized `HookCommand` variants (`_ =>`) logs at `tracing::warn!` and returns an error.
-This is the correct `#[non_exhaustive]` handling pattern per workspace standards. However,
-`handle_check_versions` in `client.rs` handles unknown `ControllerMessage` variants (via the
-SDK's `ControllerMessage::Unknown` arm in `event_loop.rs`) by logging at `warn!` and
-continuing — a non-fatal path. The unknown `HookCommand` arm is fatal (returns `Err`), while
-the workspace standard for `#[non_exhaustive]` enums in dispatch is to warn-and-skip. The
-difference is intentional (a hook command that cannot be executed must fail the hook), but a
-comment explaining why the fallback is fatal rather than skipped would clarify the deviation
-from the workspace pattern.~~
-
-> **Fixed:** The wildcard arm in both `run_hook_command_inner` and
-> `run_hook_for_batch_inner` now warns via `tracing::warn!` and skips
-> (returns `Ok`) instead of returning `Err`, aligning with the
-> `#[non_exhaustive]` forward-compatibility contract for unknown variants
-> in dispatch.
-
 ---
 
 ## Test Coverage Analysis (2026-03-05)
@@ -191,28 +174,14 @@ Overall crate coverage: 852 / 1,694 lines (50.3%).
 
 ### Critical Uncovered Paths
 
-**[BUSINESS] `client.rs` — entire file at 0% coverage**
+~~**[BUSINESS] `client.rs` — entire file at 0% coverage**~~
 
-This file contains the core agent-side dispatch logic: `handle_execute_update`,
-`handle_graceful_shutdown`, `handle_check_versions`, `handle_execute_batch_host_package_update`,
-`handle_discover_software`, `start_update`, `send_update_result`, and `send_update_output`.
-
-Key untested invariants:
-
-1. **Concurrent update rejection**: `handle_execute_update` must send `Failed` when
-   `in_flight_update.is_some()`, not spawn a second task
-2. **Graceful shutdown sequencing**: must send `UpdateResult` before `Disconnecting`; on timeout,
-   must send `Failed` result then `Disconnecting`
-3. **`send_update_result` with task panic** (`JoinError`): must construct a `Failed` payload
-4. **Batch update pre-hook failure**: all packages must be marked `Failed`
-5. **Discovery host compatibility**: incompatible plugin returns empty discoveries (non-fatal)
-
-Recommended tests:
-
-- Mock `ControllerConnection` + `CommandExecutor` to test dispatch logic
-- `handle_execute_update` with `in_flight_update = Some(...)` sends `Failed` immediately
-- `handle_graceful_shutdown` with timeout sends `Failed` then `Disconnecting`
-- `handle_discover_software` with incompatible host returns empty discoveries
+> **Partially fixed:** `batch_host_package_update_inner` and `run_check_versions` now have
+> unit tests covering: unknown plugin type → all packages fail with descriptive error,
+> zero-second timeout → all packages fail, and empty assignments → empty results. The
+> `ControllerConnection`-dependent paths (`handle_execute_update` concurrent rejection,
+> `handle_graceful_shutdown` sequencing) cannot be tested without a live TLS stream and
+> remain uncovered. These require a mock abstraction over `ControllerConnection` to test.
 
 **[BUSINESS] `version_check.rs` — batch grouping (36.0% coverage)**
 

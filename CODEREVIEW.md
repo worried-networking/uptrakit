@@ -341,8 +341,11 @@ batches processed by instance B.
 `update_output_broadcaster.rs:48-49` -- Orphaned channel leak. If batch/update never reaches
 terminal state, broadcast channel persists indefinitely.
 
-**[MEDIUM]** `crates/ui/web-api/src/nats_transport.rs:162-164` -- NATS consumer fetch error
-retry uses fixed 1-second delay with no exponential backoff or jitter.
+~~**[MEDIUM]** `crates/ui/web-api/src/nats_transport.rs:162-164` -- NATS consumer fetch error
+retry uses fixed 1-second delay with no exponential backoff or jitter.~~
+
+> **Fixed:** `run_consumer` now uses `uptrakit_backoff::Backoff::new(1s, 30s)` with
+> exponential backoff and jitter. The backoff resets on every successful fetch.
 
 **[MEDIUM]** `crates/shared/service-sdk/src/event_loop.rs:244-246` -- `tick().await` inside
 `handle_service_settings` suspends the event loop, blocking incoming WebSocket reads and pings.
@@ -669,14 +672,12 @@ These files contain zero test-exercised code paths:
 | `controller/src/main.rs` | 497 | Controller binary entry |
 | `service_ws/handler/messages.rs` | 412 | WebSocket message handling |
 | `agent-ssh/src/commands/host.rs` | 393 | SSH host management CLI |
-| `agent-core/src/client.rs` | 372 | Agent client logic |
+| `agent-core/src/client.rs` | 372 | Agent client logic (inner helpers now partially tested) |
 | `service-sdk/src/ws.rs` | 308 | WebSocket SDK |
 | `service_ws/handler/mqtt.rs` | 248 | MQTT trigger via WS |
 | `mqtt_client_store.rs` | 202 | MQTT client store |
 | `commands/update_sudoers.rs` | 179 | Sudoers generation |
-| `queries/system_services.rs` | 175 | System service queries |
 | `queries/audit_logs.rs` | 149 | Audit log queries |
-| `queries/system_enrollment_tokens.rs` | 133 | System enrollment token queries |
 | `service-sdk/src/connection.rs` | 130 | Service connection |
 | `service_ws/handler/renewal.rs` | 119 | Certificate renewal handler |
 | `queries/scheduled_tasks.rs` | 110 | Scheduler task queries |
@@ -702,7 +703,7 @@ These files contain zero test-exercised code paths:
 | `auth/authentication.rs` | 51.7% | OIDC user resolution |
 | `settings_store.rs` | 35.3% | Settings persistence |
 | `queries/enrollment_tokens.rs` | 62.4% | Enrollment token queries |
-| `queries/system_enrollment_tokens.rs` | 0.0% | System enrollment token queries |
+| `queries/system_enrollment_tokens.rs` | ~60% | System enrollment token queries (6 unit tests added) |
 | `ocsp.rs` | 48.6% | OCSP response building |
 | `routes/ocsp.rs` | 0.0% | OCSP route handler |
 | `routes/oidc_auth.rs` | 8.8% | OIDC auth flow |
@@ -725,17 +726,23 @@ These files contain zero test-exercised code paths:
 3. **MQTT trigger tenant assignment** (`handler/mqtt.rs`): `handle_mqtt_trigger_update` and
    `handle_mqtt_trigger_host_package_update` must reject operations for unassigned tenants.
 
-4. **`find_active_system_tokens` compound filter** (`system_enrollment_tokens.rs`): All three
+4. ~~**`find_active_system_tokens` compound filter** (`system_enrollment_tokens.rs`): All three
    conditions (not revoked, not expired, uses remaining) must be ANDed correctly. A logic bug
-   would allow enrollment with exhausted or revoked tokens.
+   would allow enrollment with exhausted or revoked tokens.~~
+
+   > **Fixed:** 6 unit tests added covering expired, revoked, exhausted, unlimited,
+   > partially-used, and null-expiry token cases.
 
 #### Tier 2: Data Integrity (prevent silent corruption)
 
 1. **`handle_update_result` version propagation** (`handler/updates.rs`):
    `installed_version` must be written to `host_software_item` on `Completed`
    status, not on `Failed`.
-1. **`deactivate_system_service` transaction** (`system_services.rs`): Must
-   atomically mark `deactivated_at` and bulk-revoke all certificates.
+1. ~~**`deactivate_system_service` transaction** (`system_services.rs`): Must
+   atomically mark `deactivated_at` and bulk-revoke all certificates.~~
+
+   > **Fixed:** 6 unit tests added covering atomic deactivation, idempotency,
+   > approve/reject state transitions, and `Some(0)` clearing columns to `NULL`.
 1. **`sync_oidc_roles` atomicity** (`authentication.rs`): Must delete all existing
    roles before inserting mapped ones; partial application mixes old and new.
 1. **`deliver_pending_updates` batch deduplication** (`handler/updates.rs`): Must
@@ -749,6 +756,8 @@ These files contain zero test-exercised code paths:
    packages must never be deactivated even when absent from discovery snapshot.
 1. **`handle_graceful_shutdown` sequencing** (`agent-core/client.rs`): Must send
    `UpdateResult` before `Disconnecting`; timeout must send `Failed` result.
+   `batch_host_package_update_inner` and `run_check_versions` inner helpers now have
+   unit tests; the `ControllerConnection`-dependent shutdown path remains untested.
 1. **Cron normalization in `update_scheduled_task`** (`scheduled_tasks.rs`):
    5-field expressions must be prefixed with `0` for seconds field; invalid cron
    must return error.
