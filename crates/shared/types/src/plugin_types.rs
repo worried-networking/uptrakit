@@ -35,6 +35,7 @@ pub enum PluginType {
     PackageManagerNpm,
     PackageManagerMas,
     GenericShell,
+    InfrastructureProxmox,
     /// An unknown plugin type received from a newer peer.
     ///
     /// The inner string is the raw snake_case value as it appeared on the wire.
@@ -59,6 +60,7 @@ impl PluginType {
             Self::PackageManagerNpm => "package_manager_npm",
             Self::PackageManagerMas => "package_manager_mas",
             Self::GenericShell => "generic_shell",
+            Self::InfrastructureProxmox => "infrastructure_proxmox",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -78,6 +80,7 @@ impl PluginType {
             Self::PackageManagerNpm => "npm",
             Self::PackageManagerMas => "Mac App Store",
             Self::GenericShell => "Shell",
+            Self::InfrastructureProxmox => "Proxmox VE",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -113,6 +116,7 @@ impl FromStr for PluginType {
             "package_manager_npm" => Ok(Self::PackageManagerNpm),
             "package_manager_mas" => Ok(Self::PackageManagerMas),
             "generic_shell" => Ok(Self::GenericShell),
+            "infrastructure_proxmox" => Ok(Self::InfrastructureProxmox),
             _ => Err(ParsePluginTypeError::Invalid),
         }
     }
@@ -148,6 +152,7 @@ impl From<String> for PluginType {
             "package_manager_npm" => Self::PackageManagerNpm,
             "package_manager_mas" => Self::PackageManagerMas,
             "generic_shell" => Self::GenericShell,
+            "infrastructure_proxmox" => Self::InfrastructureProxmox,
             _ => Self::Other(s),
         }
     }
@@ -168,6 +173,7 @@ impl From<PluginType> for String {
             PluginType::PackageManagerNpm => "package_manager_npm".to_string(),
             PluginType::PackageManagerMas => "package_manager_mas".to_string(),
             PluginType::GenericShell => "generic_shell".to_string(),
+            PluginType::InfrastructureProxmox => "infrastructure_proxmox".to_string(),
             PluginType::Other(s) => s,
         }
     }
@@ -348,6 +354,16 @@ mod tests {
         assert_eq!(deserialized, shell);
     }
 
+    #[test]
+    fn plugin_type_infrastructure_proxmox_serialization() {
+        let pve = PluginType::InfrastructureProxmox;
+        let json = serde_json::to_string(&pve).expect("serialize");
+        assert_eq!(json, r#""infrastructure_proxmox""#);
+
+        let deserialized: PluginType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, pve);
+    }
+
     /// `Other(String)` must serialize back to its inner string.
     #[test]
     fn plugin_type_other_serializes_to_inner_string() {
@@ -404,6 +420,10 @@ mod tests {
             PluginType::GenericShell
         );
         assert_eq!(
+            PluginType::from("infrastructure_proxmox".to_string()),
+            PluginType::InfrastructureProxmox
+        );
+        assert_eq!(
             PluginType::from("winget".to_string()),
             PluginType::Other("winget".to_string())
         );
@@ -445,6 +465,10 @@ mod tests {
             "package_manager_mas"
         );
         assert_eq!(PluginType::GenericShell.to_string(), "generic_shell");
+        assert_eq!(
+            PluginType::InfrastructureProxmox.to_string(),
+            "infrastructure_proxmox"
+        );
         assert_eq!(
             PluginType::Other("custom_type".to_string()).to_string(),
             "custom_type"
@@ -495,6 +519,10 @@ mod tests {
             "generic_shell".parse::<PluginType>().ok(),
             Some(PluginType::GenericShell)
         );
+        assert_eq!(
+            "infrastructure_proxmox".parse::<PluginType>().ok(),
+            Some(PluginType::InfrastructureProxmox)
+        );
         // Old wire strings must be rejected by FromStr
         assert!("docker_registry".parse::<PluginType>().is_err());
         assert!("github_releases".parse::<PluginType>().is_err());
@@ -542,6 +570,10 @@ mod tests {
             "Mac App Store"
         );
         assert_eq!(PluginType::GenericShell.display_name(), "Shell");
+        assert_eq!(
+            PluginType::InfrastructureProxmox.display_name(),
+            "Proxmox VE"
+        );
     }
 
     #[test]
@@ -563,6 +595,7 @@ mod tests {
             PluginType::PackageManagerNpm,
             PluginType::PackageManagerMas,
             PluginType::GenericShell,
+            PluginType::InfrastructureProxmox,
         ];
         for pt in &variants {
             let s = pt.to_string();
@@ -586,6 +619,7 @@ mod tests {
             PluginType::PackageManagerNpm,
             PluginType::PackageManagerMas,
             PluginType::GenericShell,
+            PluginType::InfrastructureProxmox,
             PluginType::Other("my_plugin".to_string()),
         ];
         for pt in &variants {
