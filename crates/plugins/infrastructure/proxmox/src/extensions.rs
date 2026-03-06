@@ -168,6 +168,7 @@ fn host_info_panel_manifest() -> ExtensionManifest {
 /// Handle an extension action for the Proxmox plugin.
 ///
 /// Dispatches based on `(extension_id, action_id)` to the appropriate handler.
+#[tracing::instrument(skip_all, fields(extension_id, action_id))]
 pub async fn handle_action(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
@@ -175,7 +176,9 @@ pub async fn handle_action(
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
-    match (extension_id, action_id) {
+    tracing::debug!("dispatching Proxmox extension action");
+
+    let result = match (extension_id, action_id) {
         ("proxmox.hosts", "list") => handle_list(db, tenant_id, params).await,
         ("proxmox.hosts", "discover") => handle_discover(db, tenant_id, params).await,
         ("proxmox.hosts", "test-connection") => handle_test_connection(db, params).await,
@@ -185,7 +188,14 @@ pub async fn handle_action(
         _ => Err(format!(
             "unknown action '{action_id}' for extension '{extension_id}'"
         )),
+    };
+
+    match &result {
+        Ok(_) => tracing::debug!("Proxmox extension action succeeded"),
+        Err(e) => tracing::warn!(error = %e, "Proxmox extension action failed"),
     }
+
+    result
 }
 
 /// List all discovered Proxmox host mappings.
@@ -197,6 +207,7 @@ async fn handle_list(
     use uptrakit_shared_db::entity::proxmox_host_mapping;
 
     let plugin_config_id = parse_uuid_param(&params, "plugin_config_id")?;
+    tracing::debug!(%plugin_config_id, "listing Proxmox host mappings");
 
     let mut query = proxmox_host_mapping::Entity::find()
         .filter(proxmox_host_mapping::Column::PluginConfigId.eq(plugin_config_id));
@@ -228,6 +239,7 @@ async fn handle_list(
         })
         .collect();
 
+    tracing::debug!(%plugin_config_id, row_count = rows.len(), "host mappings listed");
     Ok(serde_json::json!({ "rows": rows }))
 }
 
@@ -240,6 +252,8 @@ async fn handle_discover(
     let plugin_config_id = parse_uuid_param(&params, "plugin_config_id")?;
     let tenant_id = tenant_id.ok_or_else(|| "tenant context required for discovery".to_string())?;
 
+    tracing::info!(%plugin_config_id, %tenant_id, "starting Proxmox discovery action");
+
     let config = load_proxmox_config(db, plugin_config_id).await?;
     let client =
         ProxmoxClient::new(&config).map_err(|e| format!("failed to create client: {e}"))?;
@@ -248,10 +262,14 @@ async fn handle_discover(
         .await
         .map_err(|e| format!("discovery failed: {e}"))?;
 
+    tracing::debug!(%plugin_config_id, guest_count = guests.len(), "persisting discovered guests");
+
     let persisted =
         crate::discovery::persist_discovered_guests(db, tenant_id, plugin_config_id, &guests)
             .await
             .map_err(|e| format!("failed to persist discovered guests: {e}"))?;
+
+    tracing::info!(%plugin_config_id, upserted = persisted, "Proxmox discovery action complete");
 
     Ok(serde_json::json!({
         "discovered": persisted,
@@ -264,6 +282,8 @@ async fn handle_test_connection(
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     let plugin_config_id = parse_uuid_param(&params, "plugin_config_id")?;
+    tracing::debug!(%plugin_config_id, "testing Proxmox VE connection");
+
     let config = load_proxmox_config(db, plugin_config_id).await?;
     let client =
         ProxmoxClient::new(&config).map_err(|e| format!("failed to create client: {e}"))?;
@@ -272,6 +292,8 @@ async fn handle_test_connection(
         .test_connection()
         .await
         .map_err(|e| format!("connection test failed: {e}"))?;
+
+    tracing::info!(%plugin_config_id, "Proxmox connection test succeeded");
 
     Ok(serde_json::json!({
         "success": true,
@@ -287,6 +309,8 @@ async fn handle_match(
     let mapping_id = parse_uuid_param(&params, "mapping_id")?;
     let host_id = parse_uuid_param(&params, "host_id")?;
 
+    tracing::info!(%mapping_id, %host_id, "manually matching Proxmox guest to host");
+
     crate::matching::manual_match(db, mapping_id, host_id)
         .await
         .map_err(|e| format!("manual match failed: {e}"))?;
@@ -300,6 +324,8 @@ async fn handle_unmatch(
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     let mapping_id = parse_uuid_param(&params, "mapping_id")?;
+
+    tracing::info!(%mapping_id, "removing Proxmox guest-to-host match");
 
     crate::matching::unmatch(db, mapping_id)
         .await
@@ -317,6 +343,7 @@ async fn handle_get_info(
     use uptrakit_shared_db::entity::proxmox_host_mapping;
 
     let host_id = parse_uuid_param(&params, "host_id")?;
+    tracing::debug!(%host_id, "fetching Proxmox info for host");
 
     let mut query = proxmox_host_mapping::Entity::find()
         .filter(proxmox_host_mapping::Column::HostId.eq(host_id));
@@ -331,18 +358,29 @@ async fn handle_get_info(
         .map_err(|e| format!("database error: {e}"))?;
 
     match mapping {
-        Some(m) => Ok(serde_json::json!({
-            "id": m.id.to_string(),
-            "node": m.proxmox_node,
-            "vmid": m.proxmox_vmid,
-            "type": m.proxmox_type,
-            "name": m.proxmox_name,
-            "status": m.proxmox_status,
-            "hostname": m.hostname,
-            "ip_addresses": m.ip_addresses,
-            "match_method": m.match_method,
-        })),
-        None => Ok(serde_json::json!({ "linked": false })),
+        Some(m) => {
+            tracing::debug!(
+                %host_id,
+                node = %m.proxmox_node,
+                vmid = m.proxmox_vmid,
+                "found Proxmox mapping for host"
+            );
+            Ok(serde_json::json!({
+                "id": m.id.to_string(),
+                "node": m.proxmox_node,
+                "vmid": m.proxmox_vmid,
+                "type": m.proxmox_type,
+                "name": m.proxmox_name,
+                "status": m.proxmox_status,
+                "hostname": m.hostname,
+                "ip_addresses": m.ip_addresses,
+                "match_method": m.match_method,
+            }))
+        }
+        None => {
+            tracing::debug!(%host_id, "no Proxmox mapping found for host");
+            Ok(serde_json::json!({ "linked": false }))
+        }
     }
 }
 
@@ -352,6 +390,8 @@ async fn load_proxmox_config(
     plugin_config_id: Uuid,
 ) -> std::result::Result<ProxmoxConfig, String> {
     use uptrakit_shared_db::entity::plugin_config;
+
+    tracing::trace!(%plugin_config_id, "loading Proxmox plugin config from DB");
 
     let pc = plugin_config::Entity::find_by_id(plugin_config_id)
         .one(db)

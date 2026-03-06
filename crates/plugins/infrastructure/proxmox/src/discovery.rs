@@ -32,11 +32,20 @@ pub struct DiscoveredGuest {
 /// Queries all nodes (or only those matching `node_filter`), then enumerates
 /// QEMU VMs and LXC containers on each node. For running QEMU VMs, attempts
 /// to query the guest agent for IP addresses.
+#[tracing::instrument(skip_all, fields(node_filter_len = node_filter.len()))]
 pub async fn discover_guests(
     client: &ProxmoxClient,
     node_filter: &[String],
 ) -> Result<Vec<DiscoveredGuest>> {
+    tracing::info!(
+        node_filter = ?node_filter,
+        "starting Proxmox guest discovery"
+    );
+
     let nodes = client.get_nodes().await?;
+
+    tracing::debug!(total_nodes = nodes.len(), "queried Proxmox cluster nodes");
+
     let mut guests = Vec::new();
 
     for node in &nodes {
@@ -50,11 +59,22 @@ pub async fn discover_guests(
             continue;
         }
 
+        tracing::debug!(node = %node.node, "discovering guests on node");
+
         // Discover QEMU VMs
         match client.get_qemu_vms(&node.node).await {
             Ok(vms) => {
+                tracing::debug!(node = %node.node, count = vms.len(), "discovered QEMU VMs");
                 for vm in vms {
                     let guest = discover_qemu_guest(client, &node.node, vm).await;
+                    tracing::trace!(
+                        node = %guest.node,
+                        vmid = guest.vmid,
+                        name = ?guest.name,
+                        status = %guest.status,
+                        ip_count = guest.ip_addresses.len(),
+                        "discovered QEMU VM"
+                    );
                     guests.push(guest);
                 }
             }
@@ -66,8 +86,17 @@ pub async fn discover_guests(
         // Discover LXC containers
         match client.get_lxc_containers(&node.node).await {
             Ok(cts) => {
+                tracing::debug!(node = %node.node, count = cts.len(), "discovered LXC containers");
                 for ct in cts {
                     let guest = discover_lxc_guest(client, &node.node, ct).await;
+                    tracing::trace!(
+                        node = %guest.node,
+                        vmid = guest.vmid,
+                        name = ?guest.name,
+                        status = %guest.status,
+                        hostname = ?guest.hostname,
+                        "discovered LXC container"
+                    );
                     guests.push(guest);
                 }
             }
@@ -77,11 +106,18 @@ pub async fn discover_guests(
         }
     }
 
+    tracing::info!(
+        total_guests = guests.len(),
+        "Proxmox guest discovery complete"
+    );
+
     Ok(guests)
 }
 
 /// Build a `DiscoveredGuest` for a QEMU VM, optionally querying the guest agent.
 async fn discover_qemu_guest(client: &ProxmoxClient, node: &str, vm: PveQemuVm) -> DiscoveredGuest {
+    tracing::trace!(node, vmid = vm.vmid, name = ?vm.name, status = %vm.status, "processing QEMU VM");
+
     let hostname = vm.name.clone();
 
     // Try to get IP addresses from guest agent (only for running VMs)
@@ -122,10 +158,15 @@ async fn discover_lxc_guest(
     node: &str,
     ct: PveLxcContainer,
 ) -> DiscoveredGuest {
+    tracing::trace!(node, vmid = ct.vmid, name = ?ct.name, status = %ct.status, "processing LXC container");
+
     // For LXC, the hostname is in the config
     let hostname = match client.get_lxc_config(node, ct.vmid).await {
         Ok(config) => config.hostname.or_else(|| ct.name.clone()),
-        Err(_) => ct.name.clone(),
+        Err(e) => {
+            tracing::debug!(node, vmid = ct.vmid, error = %e, "failed to fetch LXC config; falling back to name");
+            ct.name.clone()
+        }
     };
 
     DiscoveredGuest {
@@ -144,6 +185,10 @@ async fn discover_lxc_guest(
 /// Uses upsert semantics: existing mappings for the same
 /// `(plugin_config_id, node, vmid)` are updated; new ones are inserted.
 /// Returns the number of upserted rows.
+#[tracing::instrument(skip_all, fields(
+    %plugin_config_id,
+    guest_count = guests.len(),
+))]
 pub async fn persist_discovered_guests(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -151,6 +196,8 @@ pub async fn persist_discovered_guests(
     guests: &[DiscoveredGuest],
 ) -> Result<usize> {
     use uptrakit_shared_db::entity::proxmox_host_mapping;
+
+    tracing::debug!(guest_count = guests.len(), "persisting discovered guests");
 
     let now = OffsetDateTime::now_utc();
     let mut count = 0usize;
@@ -177,6 +224,12 @@ pub async fn persist_discovered_guests(
 
         if let Some(existing) = existing {
             // Update existing mapping
+            tracing::trace!(
+                node = %guest.node,
+                vmid = guest.vmid,
+                guest_type = guest.guest_type,
+                "updating existing host mapping"
+            );
             let mut active: proxmox_host_mapping::ActiveModel = existing.into();
             active.proxmox_name = Set(guest.name.clone());
             active.proxmox_status = Set(guest.status.clone());
@@ -190,6 +243,13 @@ pub async fn persist_discovered_guests(
             })?;
         } else {
             // Insert new mapping
+            tracing::debug!(
+                node = %guest.node,
+                vmid = guest.vmid,
+                guest_type = guest.guest_type,
+                name = ?guest.name,
+                "inserting new host mapping"
+            );
             let active = proxmox_host_mapping::ActiveModel {
                 id: Set(Uuid::now_v7()),
                 tenant_id: Set(tenant_id),
@@ -215,6 +275,8 @@ pub async fn persist_discovered_guests(
 
         count += 1;
     }
+
+    tracing::info!(upserted = count, "persisted discovered guests");
 
     Ok(count)
 }

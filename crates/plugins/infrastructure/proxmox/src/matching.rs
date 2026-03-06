@@ -30,6 +30,8 @@ impl MatchMethod {
 pub async fn manual_match(db: &DatabaseConnection, mapping_id: Uuid, host_id: Uuid) -> Result<()> {
     use uptrakit_shared_db::entity::proxmox_host_mapping;
 
+    tracing::debug!(%mapping_id, %host_id, "performing manual Proxmox guest-to-host match");
+
     let mapping = proxmox_host_mapping::Entity::find_by_id(mapping_id)
         .one(db)
         .await
@@ -53,12 +55,16 @@ pub async fn manual_match(db: &DatabaseConnection, mapping_id: Uuid, host_id: Uu
         )))
     })?;
 
+    tracing::info!(%mapping_id, %host_id, "Proxmox guest matched to host");
+
     Ok(())
 }
 
 /// Remove a match from a mapping.
 pub async fn unmatch(db: &DatabaseConnection, mapping_id: Uuid) -> Result<()> {
     use uptrakit_shared_db::entity::proxmox_host_mapping;
+
+    tracing::debug!(%mapping_id, "removing Proxmox guest-to-host match");
 
     let mapping = proxmox_host_mapping::Entity::find_by_id(mapping_id)
         .one(db)
@@ -82,6 +88,8 @@ pub async fn unmatch(db: &DatabaseConnection, mapping_id: Uuid) -> Result<()> {
             "failed to update mapping: {e}"
         )))
     })?;
+
+    tracing::info!(%mapping_id, "Proxmox guest-to-host match removed");
 
     Ok(())
 }
