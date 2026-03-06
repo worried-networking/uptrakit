@@ -522,6 +522,31 @@ impl FormDef {
     }
 }
 
+/// Dynamic data source for `Select` field options.
+///
+/// When a `FieldDef` with `field_type = Select` has `select_source` set, the
+/// frontend calls the specified endpoint at form-open time to populate the
+/// dropdown. Static `options` and `select_source` are mutually exclusive; when
+/// both are present `select_source` takes precedence.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SelectSource {
+    /// Fetch options from an authenticated REST API endpoint via `GET`.
+    ///
+    /// The frontend calls `GET {path}`, then maps each item in the response
+    /// array (or the `items` field of a paginated response) using `value_field`
+    /// as the option value and `label_field` as the option label.
+    RestApi {
+        /// API path relative to the controller base URL (e.g., `"/api/v1/hosts"`).
+        path: String,
+        /// Field in each response item to use as the submitted option value.
+        value_field: String,
+        /// Field in each response item to use as the human-readable label.
+        label_field: String,
+    },
+}
+
 /// A single form field.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -545,9 +570,16 @@ pub struct FieldDef {
     /// Default value for the field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_value: Option<serde_json::Value>,
-    /// Options for `Select` field type.
+    /// Static options for `Select` field type.
+    ///
+    /// Ignored when `select_source` is also set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<SelectOption>,
+    /// Dynamic source for `Select` field options, loaded at form-open time.
+    ///
+    /// Takes precedence over `options` when both are present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select_source: Option<SelectSource>,
     /// Whether this field contains sensitive data (e.g., passwords, private keys).
     ///
     /// Sensitive fields are encrypted client-side using ECIES before submission
@@ -569,6 +601,7 @@ impl FieldDef {
             help_text: None,
             default_value: None,
             options: vec![],
+            select_source: None,
             sensitive: false,
         }
     }
@@ -600,6 +633,15 @@ impl FieldDef {
     /// Set help text displayed below the field.
     pub fn with_help_text(mut self, help_text: impl Into<String>) -> Self {
         self.help_text = Some(help_text.into());
+        self
+    }
+
+    /// Set a dynamic source for `Select` field options.
+    ///
+    /// When set, the frontend loads options at form-open time by calling the
+    /// specified source. Takes precedence over static `options`.
+    pub fn with_select_source(mut self, source: SelectSource) -> Self {
+        self.select_source = Some(source);
         self
     }
 }
@@ -863,6 +905,7 @@ mod tests {
                     help_text: Some("Enter the hostname".to_string()),
                     default_value: Some(serde_json::Value::String("localhost".to_string())),
                     options: vec![],
+                    select_source: None,
                     sensitive: false,
                 }],
             },
@@ -1036,6 +1079,38 @@ mod tests {
     }
 
     #[test]
+    fn select_source_rest_api_roundtrip() {
+        let source = SelectSource::RestApi {
+            path: "/api/v1/hosts".to_string(),
+            value_field: "id".to_string(),
+            label_field: "friendly_name".to_string(),
+        };
+        let json = serde_json::to_string(&source).expect("serialize should succeed");
+        assert!(json.contains(r#""type":"rest_api""#));
+        let roundtripped: SelectSource =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(source, roundtripped);
+    }
+
+    #[test]
+    fn field_def_with_select_source_roundtrip() {
+        let field = FieldDef::new("host_id", "Host")
+            .with_type(FieldType::Select)
+            .required()
+            .with_select_source(SelectSource::RestApi {
+                path: "/api/v1/hosts".to_string(),
+                value_field: "id".to_string(),
+                label_field: "friendly_name".to_string(),
+            });
+        let json = serde_json::to_string(&field).expect("serialize should succeed");
+        assert!(json.contains("select_source"));
+        assert!(!json.contains("\"options\"")); // empty options omitted
+        let roundtripped: FieldDef =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(field, roundtripped);
+    }
+
+    #[test]
     fn form_with_select_field() {
         let form = FormDef {
             fields: vec![FieldDef {
@@ -1056,6 +1131,7 @@ mod tests {
                         label: "EU West".to_string(),
                     },
                 ],
+                select_source: None,
                 sensitive: false,
             }],
         };

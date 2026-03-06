@@ -4015,6 +4015,93 @@ components:
             referenced by `action_id` from any extension manifest of the same
             source (service app_name). Maximum 200 actions per message.
 
+    extensionSelectSource:
+      description: |
+        Dynamic data source for a `Select` field. When set on a `FieldDef`, the
+        frontend loads options at form-open time by calling the specified source.
+        Takes precedence over static `options` when both are present.
+      oneOf:
+        - type: object
+          required:
+            - type
+            - path
+            - value_field
+            - label_field
+          properties:
+            type:
+              type: string
+              const: rest_api
+              description: Fetch options from an authenticated REST `GET` endpoint
+            path:
+              type: string
+              description: API path relative to the controller base URL (e.g. "/api/v1/hosts")
+            value_field:
+              type: string
+              description: Field in each response item used as the submitted option value
+            label_field:
+              type: string
+              description: Field in each response item used as the human-readable label
+
+    extensionFieldDef:
+      type: object
+      required:
+        - key
+        - label
+      properties:
+        key:
+          type: string
+          description: Field key used in form submission
+        label:
+          type: string
+          description: Human-readable field label
+        field_type:
+          type: string
+          enum:
+            - text
+            - password
+            - number
+            - select
+            - textarea
+            - toggle
+            - hidden
+          default: text
+          description: Input field type
+        required:
+          type: boolean
+          default: false
+        placeholder:
+          type: string
+        help_text:
+          type: string
+        default_value:
+          description: Default value for the field
+        options:
+          type: array
+          description: |
+            Static options for `Select` field type. Ignored when `select_source` is set.
+          items:
+            type: object
+            required:
+              - value
+              - label
+            properties:
+              value:
+                type: string
+              label:
+                type: string
+        select_source:
+          $ref: "#/components/schemas/extensionSelectSource"
+          description: |
+            Dynamic source for `Select` field options loaded at form-open time.
+            Takes precedence over static `options` when both are present.
+        sensitive:
+          type: boolean
+          default: false
+          description: |
+            Whether the field contains sensitive data. Sensitive fields are
+            encrypted client-side using ECIES before submission and transmitted
+            in `sensitive_params`. The controller never sees their plaintext.
+
     extensionActionDef:
       type: object
       required:

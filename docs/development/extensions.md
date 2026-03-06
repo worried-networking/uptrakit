@@ -226,8 +226,41 @@ Internally tagged with `"type"`:
 | `placeholder` | string | no | Input placeholder |
 | `help_text` | string | no | Help text below the field |
 | `default_value` | JSON value | no | Default value |
-| `options` | `Vec<SelectOption>` | no | Options for `select` fields |
+| `options` | `Vec<SelectOption>` | no | Static options for `select` fields |
+| `select_source` | `SelectSource` | no | Dynamic options loaded at form-open time; takes precedence over `options` |
 | `sensitive` | bool | no | Field contains sensitive data (encrypted client-side via ECIES) |
+
+#### Dynamic select options (`SelectSource`)
+
+For `select` fields whose options depend on live data (e.g., picking an existing host), use
+`select_source` instead of static `options`. The frontend loads options when the form modal
+opens, before the user interacts with the field.
+
+Currently the only variant is `rest_api`:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `type` | `"rest_api"` | Fetch options from an authenticated REST `GET` endpoint |
+| `path` | string | API path relative to the controller base URL (e.g., `"/api/v1/hosts"`) |
+| `value_field` | string | Field in each response item used as the submitted option value |
+| `label_field` | string | Field in each response item used as the human-readable label |
+
+The frontend calls `GET {path}` with the current user's auth token. The response must be either
+a JSON array, or an object with an `items` array (paginated response). Each item is mapped to
+`{ value: item[value_field], label: item[label_field] }`.
+
+**Example — host picker:**
+
+```rust
+FieldDef::new("host_id", "Host")
+    .with_type(FieldType::Select)
+    .required()
+    .with_select_source(SelectSource::RestApi {
+        path: "/api/v1/hosts".to_string(),
+        value_field: "id".to_string(),
+        label_field: "friendly_name".to_string(),
+    })
+```
 
 ### Sensitive fields and E2E encryption
 

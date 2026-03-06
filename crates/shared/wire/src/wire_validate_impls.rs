@@ -1324,6 +1324,7 @@ mod tests {
                 help_text: None,
                 default_value: None,
                 options: vec![],
+                select_source: None,
                 sensitive: false,
             })
             .collect();
@@ -1364,6 +1365,7 @@ mod tests {
             help_text: None,
             default_value: None,
             options,
+            select_source: None,
             sensitive: false,
         };
         let err = field.wire_validate().unwrap_err();
