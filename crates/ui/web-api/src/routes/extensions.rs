@@ -19,6 +19,7 @@ use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
 use crate::extension_proxy::ExtensionProxyError;
 use crate::extension_registry::ExtensionOwner;
+use crate::middleware::tenant_context::TenantContext;
 
 // ── Response types ──────────────────────────────────────────────────────────
 
@@ -137,6 +138,7 @@ pub async fn list_extension_providers(
 #[tracing::instrument(skip_all)]
 pub async fn invoke_action(
     State(state): State<Arc<AppState>>,
+    tenant_ctx: TenantContext,
     Path((extension_id, action_id)): Path<(String, String)>,
     Query(query): Query<InvokeActionQuery>,
     Json(body): Json<InvokeExtensionActionRequest>,
@@ -154,7 +156,7 @@ pub async fn invoke_action(
         ExtensionOwner::Plugin => {
             let ctx = ExtensionActionContext {
                 db: state.db(),
-                tenant_id: None, // TODO: extract from auth context when tenant-scoped
+                tenant_id: Some(tenant_ctx.tenant_id),
             };
             return match state
                 .plugin_ops
