@@ -16,6 +16,7 @@ use uptrakit_internal_wire::extension::{
     ExtensionManifest, ExtensionRegisterPayload, ExtensionRequestPayload, ExtensionResponsePayload,
 };
 use uptrakit_service_sdk::ControllerConnection;
+use uptrakit_shared_types::Permission;
 
 use crate::commands::bootstrap::{self, BootstrapParams};
 use crate::host_ops;
@@ -31,6 +32,7 @@ pub const EXTENSION_ID: &str = "ssh-agent.hosts";
 /// Uses JSON deserialization because all extension types are `#[non_exhaustive]`
 /// and cannot be constructed with struct literals from external crates.
 pub fn build_manifest() -> ExtensionManifest {
+    let manage_hosts = Permission::ManageHosts.as_str();
     serde_json::from_value(json!({
         "id": EXTENSION_ID,
         "label": "SSH Hosts",
@@ -39,7 +41,7 @@ pub fn build_manifest() -> ExtensionManifest {
             "nav_section": "management",
             "icon": "server"
         },
-        "required_permission": "manage_hosts",
+        "required_permission": manage_hosts,
         "targeting": "targeted",
         "ui": {
             "type": "data_table",
@@ -55,7 +57,7 @@ pub fn build_manifest() -> ExtensionManifest {
                 {
                     "action_id": "remove-host",
                     "label": "Remove Host",
-                    "permission": "manage_hosts",
+                    "permission": manage_hosts,
                     "destructive": true,
                     "timeout_seconds": 30
                 }
@@ -64,7 +66,7 @@ pub fn build_manifest() -> ExtensionManifest {
                 {
                     "action_id": "bootstrap",
                     "label": "Bootstrap Host",
-                    "permission": "manage_hosts",
+                    "permission": manage_hosts,
                     "timeout_seconds": 120,
                     "ui": {
                         "type": "form",
