@@ -1,0 +1,125 @@
+//! Authorization permissions used across extensions, web API routes, and agents.
+
+use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
+
+/// An authorization permission.
+///
+/// Used in extension manifests ([`ActionDef::permission`][^1]) and web API auth
+/// middleware to gate access to actions and endpoints.
+///
+/// All variants serialize to / deserialize from `snake_case` strings.
+///
+/// [^1]: [`ActionDef`] lives in `uptrakit-internal-wire`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum::EnumIter)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Permission {
+    ViewSettings,
+    ManageSettings,
+    ViewAgents,
+    ManageAgents,
+    ManageGlobalSettings,
+    ViewSoftware,
+    ManageSoftware,
+    /// Controls the ability to modify command-bearing plugin config fields
+    /// (shell commands, Docker `post_pull_command`, and custom hook `commands`
+    /// arrays). Granting this permission is equivalent to granting effective
+    /// code-execution authority on all managed hosts assigned to the affected
+    /// software items. Assign with the same care as granting root access.
+    ManageCommands,
+    ViewHosts,
+    ManageHosts,
+    ViewNotifications,
+    ManageNotifications,
+    /// View system services (MQTT bridge, external scheduler).
+    ///
+    /// Controls read access to the `/api/v1/system-services` endpoints.
+    ViewSystemServices,
+    /// Manage system services (approve, reject, deactivate, update settings).
+    ///
+    /// Controls write access to the `/api/v1/system-services` endpoints and
+    /// the `/api/v1/global-settings/system-services` enrollment token endpoint.
+    ManageSystemServices,
+    /// View tenant-scoped audit log entries.
+    ///
+    /// Grants read access to `GET /api/v1/audit-logs`. Granted to the `owner`
+    /// and `admin` roles by default. The `user` role does not receive this
+    /// permission.
+    ViewAuditLogs,
+    /// View system-level audit log entries.
+    ///
+    /// Grants read access to `GET /api/v1/system-audit-logs`, which includes
+    /// entries for CA rotation, global settings changes, and other
+    /// infrastructure-scoped operations. Granted to the `owner` role only.
+    ViewSystemAuditLogs,
+}
+
+impl Permission {
+    /// Returns the canonical `snake_case` string representation.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Permission::ViewSettings => "view_settings",
+            Permission::ManageSettings => "manage_settings",
+            Permission::ViewAgents => "view_agents",
+            Permission::ManageAgents => "manage_agents",
+            Permission::ManageGlobalSettings => "manage_global_settings",
+            Permission::ViewSoftware => "view_software",
+            Permission::ManageSoftware => "manage_software",
+            Permission::ManageCommands => "manage_commands",
+            Permission::ViewHosts => "view_hosts",
+            Permission::ManageHosts => "manage_hosts",
+            Permission::ViewNotifications => "view_notifications",
+            Permission::ManageNotifications => "manage_notifications",
+            Permission::ViewSystemServices => "view_system_services",
+            Permission::ManageSystemServices => "manage_system_services",
+            Permission::ViewAuditLogs => "view_audit_logs",
+            Permission::ViewSystemAuditLogs => "view_system_audit_logs",
+        }
+    }
+}
+
+impl std::fmt::Display for Permission {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<Permission> for String {
+    fn from(p: Permission) -> Self {
+        p.as_str().to_string()
+    }
+}
+
+/// Error returned when parsing an invalid [`Permission`] string.
+#[derive(Debug, thiserror::Error)]
+#[error("invalid permission value")]
+pub struct ParsePermissionError;
+
+impl FromStr for Permission {
+    type Err = ParsePermissionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "view_settings" => Ok(Self::ViewSettings),
+            "manage_settings" => Ok(Self::ManageSettings),
+            "view_agents" => Ok(Self::ViewAgents),
+            "manage_agents" => Ok(Self::ManageAgents),
+            "manage_global_settings" => Ok(Self::ManageGlobalSettings),
+            "view_software" => Ok(Self::ViewSoftware),
+            "manage_software" => Ok(Self::ManageSoftware),
+            "manage_commands" => Ok(Self::ManageCommands),
+            "view_hosts" => Ok(Self::ViewHosts),
+            "manage_hosts" => Ok(Self::ManageHosts),
+            "view_notifications" => Ok(Self::ViewNotifications),
+            "manage_notifications" => Ok(Self::ManageNotifications),
+            "view_system_services" => Ok(Self::ViewSystemServices),
+            "manage_system_services" => Ok(Self::ManageSystemServices),
+            "view_audit_logs" => Ok(Self::ViewAuditLogs),
+            "view_system_audit_logs" => Ok(Self::ViewSystemAuditLogs),
+            _ => Err(ParsePermissionError),
+        }
+    }
+}

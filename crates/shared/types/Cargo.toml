@@ -8,20 +8,19 @@ version.workspace = true
 
 [features]
 default = []
-sea-orm = ["dep:sea-orm", "dep:strum"]
+sea-orm = ["dep:sea-orm"]
 openapi = ["dep:utoipa"]
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+strum = { workspace = true }
 sea-orm = { workspace = true, optional = true }
-strum = { workspace = true, optional = true }
 utoipa = { workspace = true, optional = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-strum = { workspace = true }
 husky-rs = { workspace = true }
 
 [lints]

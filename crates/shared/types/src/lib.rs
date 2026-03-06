@@ -10,6 +10,7 @@ mod mqtt_connection_status;
 mod mqtt_transport;
 pub mod network;
 mod output_stream_type;
+pub mod permissions;
 mod plugin_capability;
 mod plugin_role;
 mod plugin_types;
@@ -32,6 +33,7 @@ pub use mqtt_connection_status::{
 };
 pub use mqtt_transport::{MqttTransport, ParseMqttTransportError};
 pub use output_stream_type::{OutputStreamType, ParseOutputStreamTypeError};
+pub use permissions::{ParsePermissionError, Permission};
 pub use plugin_capability::PluginCapability;
 pub use plugin_role::{ParsePluginRoleError, PluginRole};
 pub use plugin_types::{
