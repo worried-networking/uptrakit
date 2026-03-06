@@ -189,6 +189,12 @@ channels:
         $ref: "#/components/messages/batchHostPackageUpdateResult"
       setUpdateFreeze:
         $ref: "#/components/messages/setUpdateFreeze"
+      extensionRegister:
+        $ref: "#/components/messages/extensionRegister"
+      extensionRequest:
+        $ref: "#/components/messages/extensionRequest"
+      extensionResponse:
+        $ref: "#/components/messages/extensionResponse"
 
   controllerEvents:
     address: uptrakit.events.controller
@@ -752,6 +758,46 @@ operations:
       works, and the freeze persists across agent restarts. The message is safe
       for NATS publication — it contains no credential material.
 
+  sendExtensionRegister:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/extensionRegister"
+    summary: Service registers UI extension manifests
+    description: |
+      Sent by an authenticated service that has negotiated the `UiExtensions`
+      capability. Contains a list of `ExtensionManifest` objects describing the
+      extensions this service provides. The controller validates the manifests
+      via `WireValidate` and adds the service as a provider in the extension
+      registry. If the same extension ID is already registered by a different
+      `service_app_name`, the registration is rejected with `ErrorCode::BadRequest`.
+
+  receiveExtensionRequest:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/extensionRequest"
+    summary: Service receives a proxied extension action invocation
+    description: |
+      Sent by the controller when a REST client (web UI or CLI) invokes an
+      extension action targeting this service instance. The service processes the
+      action and responds with an `ExtensionResponse` message using the same
+      `request_id` for correlation. This message is safe for NATS publication.
+
+  sendExtensionResponse:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/extensionResponse"
+    summary: Service responds to a proxied extension action invocation
+    description: |
+      Sent by the service in response to an `ExtensionRequest`. Contains the
+      `request_id` for correlation, a `success` flag, optional result `data`,
+      and optional `error` message. This message is safe for NATS publication.
+
 components:
   securitySchemes:
     mtls:
@@ -1130,6 +1176,44 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/setUpdateFreezePayload"
+
+    extensionRegister:
+      name: extension_register
+      title: Extension Register Message
+      summary: Service registers UI extension manifests with the controller
+      description: |
+        Sent by a service with the `UiExtensions` capability after authentication.
+        Contains a list of extension manifests. The controller validates limits via
+        `WireValidate` (max 50 manifests per message) and registers the service as
+        a provider for each extension. Duplicate extension IDs from the same
+        `service_app_name` are deduplicated; from different app names are rejected.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/extensionRegisterPayload"
+
+    extensionRequest:
+      name: extension_request
+      title: Extension Request Message
+      summary: Controller proxies an action invocation to a service
+      description: |
+        Sent by the controller when a REST client invokes an extension action.
+        The `request_id` (UUID v7) correlates the request with the response.
+        Safe for NATS publication — contains no credential material.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/extensionRequestPayload"
+
+    extensionResponse:
+      name: extension_response
+      title: Extension Response Message
+      summary: Service responds to a proxied extension action invocation
+      description: |
+        Sent by the service in response to `ExtensionRequest`. The `request_id`
+        must match. `success` indicates whether the action completed successfully.
+        Safe for NATS publication.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/extensionResponsePayload"
 
     serviceCredentials:
       name: service_credentials
@@ -3680,3 +3764,180 @@ components:
           type: string
           const: request_crl_renewal
           description: Message type discriminator
+
+    extensionRegisterPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - manifests
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Wire protocol version
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number
+        type:
+          type: string
+          const: extension_register
+          description: Message type discriminator
+        manifests:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/extensionManifest"
+          description: |
+            List of extension manifests this service provides.
+            Maximum 50 manifests per registration message.
+
+    extensionRequestPayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - request_id
+        - extension_id
+        - action_id
+        - params
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Wire protocol version
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number
+        type:
+          type: string
+          const: extension_request
+          description: Message type discriminator
+        request_id:
+          type: string
+          description: UUID v7 for request/response correlation
+        extension_id:
+          type: string
+          description: Extension being invoked
+        action_id:
+          type: string
+          description: Action to invoke on the extension
+        params:
+          type: object
+          description: Arbitrary JSON parameters forwarded to the action handler
+
+    extensionResponsePayload:
+      type: object
+      required:
+        - protocol_version
+        - seq
+        - type
+        - request_id
+        - success
+        - data
+      properties:
+        protocol_version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Wire protocol version
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number
+        type:
+          type: string
+          const: extension_response
+          description: Message type discriminator
+        request_id:
+          type: string
+          description: Must match the request_id from the ExtensionRequest
+        success:
+          type: boolean
+          description: Whether the action completed successfully
+        data:
+          description: Action result data (arbitrary JSON)
+        error:
+          type: string
+          description: Error message when success is false
+
+    extensionManifest:
+      type: object
+      required:
+        - id
+        - label
+        - placement
+        - required_permission
+        - targeting
+        - ui
+      properties:
+        id:
+          type: string
+          description: Unique extension identifier (e.g. "ssh-agent.host-management")
+        label:
+          type: string
+          description: Human-readable display name
+        placement:
+          description: Where the extension appears in the UI
+          oneOf:
+            - type: object
+              properties:
+                type:
+                  const: page
+                nav_section:
+                  type: string
+                icon:
+                  type: string
+            - type: object
+              properties:
+                type:
+                  const: panel
+                target_page:
+                  type: string
+                position:
+                  type: string
+            - type: object
+              properties:
+                type:
+                  const: context_menu_group
+                target_entity:
+                  type: string
+                group_label:
+                  type: string
+            - type: object
+              properties:
+                type:
+                  const: table_columns
+                target_table:
+                  type: string
+                columns:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                      label:
+                        type: string
+                      data_action:
+                        type: string
+        required_permission:
+          type: string
+          description: Permission required to see and use this extension
+        targeting:
+          type: string
+          enum:
+            - universal
+            - targeted
+          description: Whether actions are routed to any instance or a specific one
+        ui:
+          description: Schema-driven UI definition (DataTable, Form, KeyValue, or Actions)

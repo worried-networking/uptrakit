@@ -1243,6 +1243,45 @@ let auth_routes = auth_routes
 See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md)
 for full details.
 
+## UI Extensions Framework
+
+The extensions framework allows connected services and plugins to dynamically extend the
+web UI, REST API, and CLI with custom functionality. Extensions are described by
+`ExtensionManifest` structs registered at runtime (services) or compile-time (plugins).
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/wire/src/extension.rs` | Wire types: `ExtensionManifest`, `ExtensionUi`, `ActionDef`, etc. |
+| `crates/ui/web-api/src/extension_registry.rs` | Runtime registry: tracks manifests and provider sets |
+| `crates/ui/web-api/src/extension_proxy.rs` | Request/response proxy via oneshot channels |
+| `crates/ui/web-api/src/routes/extensions.rs` | REST endpoints: list, providers, invoke |
+| `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler::on_extension_request` default impl |
+| `crates/shared/service-sdk/src/event_loop.rs` | Dispatches `ExtensionRequest` to handler |
+| `crates/ui/cli/src/commands/extensions.rs` | CLI: `extensions list`, `providers`, `invoke` |
+| `frontend/src/lib/extensions.svelte.ts` | Svelte extension store |
+| `frontend/src/lib/components/extensions/` | Schema-driven UI components |
+
+### Registration rules
+
+- Same extension ID from same `service_app_name`: allowed (providers are deduplicated).
+- Same extension ID from different `service_app_name`: rejected with `ErrorCode::BadRequest`.
+- On disconnect: service removed from provider set; extension removed if no providers remain.
+
+### Targeting model
+
+- **`Universal`**: any connected instance can handle actions (controller picks one).
+- **`Targeted`**: user must select a specific service instance; frontend shows a selector.
+
+### Capability
+
+Extensions require the `UiExtensions` capability. Services without this capability cannot
+register extensions or receive extension requests.
+
+See [Extensions Development](docs/development/extensions.md), [Extensions Architecture](docs/architecture/extensions.md),
+and [Extensions Security](docs/security/extensions.md) for full details.
+
 ## Detailed Documentation References
 
 For more in-depth information on specific topics, refer to the following documents:
@@ -1261,6 +1300,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Sudoers Management](docs/security/sudoers-management.md)
 - [Notifications Security](docs/security/notifications-security.md)
 - [Audit Logs Security](docs/security/audit-logs.md)
+- [Extensions Security](docs/security/extensions.md)
 
 ### End-user Guides
 
@@ -1271,6 +1311,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Autodiscovery](docs/end-user/autodiscovery.md)
 - [Update Workflow](docs/end-user/update-workflow.md)
 - [Home Assistant and MQTT Integration](docs/end-user/home-assistant-mqtt.md)
+- [Extensions](docs/end-user/extensions.md)
 
 ### Development Guidelines
 
@@ -1294,6 +1335,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Notifications](docs/development/notifications.md)
 - [Audit Logs](docs/development/audit-logs.md)
 - [Docker](docs/development/docker.md)
+- [Extensions](docs/development/extensions.md)
 
 ### Architecture
 
@@ -1305,6 +1347,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Scheduler Engine](docs/development/scheduler-engine.md)
 - [External Scheduler Deployment](docs/end-user/deployment/external-scheduler.md)
 - [SSH Agent](docs/architecture/ssh-agent.md)
+- [Extensions](docs/architecture/extensions.md)
 
 ### API and Protocol
 
@@ -1314,3 +1357,4 @@ For more in-depth information on specific topics, refer to the following documen
 - [HTTP Web API](docs/api/http-web-api.md)
 - [Services and Operations](docs/api/services-operations.md)
 - [Autodiscovery](docs/api/autodiscovery.md)
+- [Extensions](docs/api/extensions.md)

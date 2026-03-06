@@ -365,3 +365,27 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
   event loop. Also provides shared renewal timer helpers (`create_renewal_sleep`, `update_renewal_schedule`, `compute_renewal_delay`).
 - **Backoff**: Exponential backoff with jitter for reconnection delays.
 - **CLI**: Common CLI arguments (`--url`, `--config-dir`, `--state-dir`, `--force-enroll`, etc.).
+- **Extension Handling**: The `ServiceHandler` trait includes an `on_extension_request` default method.
+  The event loop dispatches `ControllerMessage::ExtensionRequest` to this callback automatically.
+
+## UI Extensions
+
+The extensions framework enables connected services (and future plugins) to dynamically
+extend the UI with custom pages, panels, context menu actions, and table columns. Each
+extension is described by an `ExtensionManifest` (defined in `crates/shared/wire/src/extension.rs`).
+
+- **Extension Registry** (`crates/ui/web-api/src/extension_registry.rs`): tracks active
+  manifests and their provider sets. Services register extensions via
+  `ServiceMessage::ExtensionRegister` after connecting. Same extension ID from the same
+  `service_app_name` is deduplicated; from different app names is rejected.
+- **Extension Proxy** (`crates/ui/web-api/src/extension_proxy.rs`): proxies action
+  invocations to connected services using request/response correlation via oneshot channels.
+  Supports configurable timeouts per action.
+- **REST API**: Three endpoints under `/api/v1/extensions` — list extensions, list providers,
+  and invoke actions. The frontend and CLI both use these endpoints.
+- **Frontend**: Schema-driven Svelte components render `DataTable`, `Form`, `KeyValue`, and
+  `Actions` UI variants based on the manifest definition. Extension pages appear dynamically
+  in the sidebar navigation.
+- **CLI**: `uptrakit extensions list|providers|invoke` subcommands.
+
+See [Extensions Architecture](docs/architecture/extensions.md) for the detailed design.
