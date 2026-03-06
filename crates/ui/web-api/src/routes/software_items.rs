@@ -27,6 +27,7 @@ use uptrakit_shared_db::entity::{
     service_host, software_item,
 };
 use uptrakit_shared_types::SoftwareDiscoveryState;
+use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -255,6 +256,7 @@ async fn run_controller_fetch_jobs(
     security(("bearer_token" = []))
 )]
 pub async fn create_software_item(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Json(req): Json<CreateSoftwareItemRequest>,
@@ -263,7 +265,16 @@ pub async fn create_software_item(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
     match item_queries::create_software_item(&tenant_db, req).await {
-        Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
+        Ok(resp) => {
+            state
+                .event_broadcaster
+                .send(
+                    tenant_db.tenant_id,
+                    AdminEvent::SoftwareItemCreated { id: resp.id },
+                )
+                .await;
+            (StatusCode::CREATED, Json(resp)).into_response()
+        }
         Err(e) => query_error_to_response(e),
     }
 }
@@ -342,13 +353,23 @@ pub async fn get_software_item(
     security(("bearer_token" = []))
 )]
 pub async fn update_software_item(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Path(item_id): Path<Uuid>,
     Json(req): Json<UpdateSoftwareItemRequest>,
 ) -> Response {
     match item_queries::update_software_item(&tenant_db, item_id, req).await {
-        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(resp) => {
+            state
+                .event_broadcaster
+                .send(
+                    tenant_db.tenant_id,
+                    AdminEvent::SoftwareItemUpdated { id: item_id },
+                )
+                .await;
+            (StatusCode::OK, Json(resp)).into_response()
+        }
         Err(e) => query_error_to_response(e),
     }
 }

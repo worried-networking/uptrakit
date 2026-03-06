@@ -12,6 +12,7 @@ use std::sync::Arc;
 use uptrakit_internal_wire::{
     ApprovedPayload, ControllerMessage, RejectedPayload, RequestCrlRenewalPayload,
 };
+use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -190,6 +191,14 @@ pub async fn approve_system_service(
         )
         .await;
 
+    state
+        .event_broadcaster
+        .send_global(AdminEvent::SystemServiceStatusChanged {
+            id: service_id,
+            status: "approved".to_string(),
+        })
+        .await;
+
     (StatusCode::OK, Json(resp)).into_response()
 }
 
@@ -251,6 +260,14 @@ pub async fn reject_system_service(
     // Terminate active WebSocket connection.
     state.service_connections.unregister(&service_id).await;
 
+    state
+        .event_broadcaster
+        .send_global(AdminEvent::SystemServiceStatusChanged {
+            id: service_id,
+            status: "rejected".to_string(),
+        })
+        .await;
+
     (StatusCode::OK, Json(resp)).into_response()
 }
 
@@ -286,6 +303,13 @@ pub async fn deactivate_system_service(
                 ))
                 .await;
             state.service_connections.unregister(&service_id).await;
+            state
+                .event_broadcaster
+                .send_global(AdminEvent::SystemServiceStatusChanged {
+                    id: service_id,
+                    status: "deactivated".to_string(),
+                })
+                .await;
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "System service not found"),

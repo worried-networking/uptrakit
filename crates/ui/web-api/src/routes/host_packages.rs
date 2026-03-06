@@ -9,18 +9,21 @@
 //! - `POST   /api/v1/hosts/{host_id}/package-ignores`       — create ignore rule
 //! - `DELETE /api/v1/hosts/{host_id}/package-ignores/{id}`  — remove ignore rule
 
+use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
 use crate::queries::host_packages as hp_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, prelude::*};
+use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
@@ -188,6 +191,7 @@ pub async fn get_host_package(
     security(("bearer_token" = []))
 )]
 pub async fn update_host_package(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Path((host_id, package_id)): Path<(Uuid, Uuid)>,
@@ -198,7 +202,16 @@ pub async fn update_host_package(
     }
 
     match hp_queries::update_host_package(&tenant_db, host_id, package_id, body.enabled).await {
-        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(Some(resp)) => {
+            state
+                .event_broadcaster
+                .send(
+                    tenant_db.tenant_id,
+                    AdminEvent::HostPackagesChanged { host_id },
+                )
+                .await;
+            (StatusCode::OK, Json(resp)).into_response()
+        }
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Host package not found"),
         Err(e) => {
             tracing::error!("Failed to update host package: {e}");
@@ -230,6 +243,7 @@ pub async fn update_host_package(
     security(("bearer_token" = []))
 )]
 pub async fn delete_host_package(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Path((host_id, package_id)): Path<(Uuid, Uuid)>,
@@ -243,7 +257,16 @@ pub async fn delete_host_package(
 
     match hp_queries::deactivate_host_package(&tenant_db, host_id, package_id, create_ignore).await
     {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => {
+            state
+                .event_broadcaster
+                .send(
+                    tenant_db.tenant_id,
+                    AdminEvent::HostPackagesChanged { host_id },
+                )
+                .await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Host package not found"),
         Err(e) => {
             tracing::error!("Failed to deactivate host package: {e}");

@@ -14,6 +14,7 @@ use axum::{
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, prelude::*, service_host};
+use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::autodiscovery::{
@@ -108,13 +109,20 @@ pub async fn get_host(
     security(("bearer_token" = []))
 )]
 pub async fn update_host(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageHosts(_user): CanManageHosts,
     Path(host_id): Path<Uuid>,
     Json(body): Json<UpdateHostRequest>,
 ) -> Response {
     match host_queries::update_host(&tenant_db, host_id, &body).await {
-        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(Some(resp)) => {
+            state
+                .event_broadcaster
+                .send(tenant_db.tenant_id, AdminEvent::HostUpdated { id: host_id })
+                .await;
+            (StatusCode::OK, Json(resp)).into_response()
+        }
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
             tracing::error!("Failed to update host: {}", e);
@@ -141,12 +149,19 @@ pub async fn update_host(
     security(("bearer_token" = []))
 )]
 pub async fn deactivate_host(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageHosts(_user): CanManageHosts,
     Path(host_id): Path<Uuid>,
 ) -> Response {
     match host_queries::deactivate_host(&tenant_db, host_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => {
+            state
+                .event_broadcaster
+                .send(tenant_db.tenant_id, AdminEvent::HostDeleted { id: host_id })
+                .await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
             tracing::error!("Failed to deactivate host: {}", e);
