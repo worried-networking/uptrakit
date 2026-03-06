@@ -24,7 +24,8 @@ and their providers.
 ExtensionRegistry
 ├── plugin_extensions: Vec<ExtensionManifest>       (compile-time, immutable)
 ├── service_extensions: Mutex<HashMap<String, ExtensionEntry>>  (runtime, keyed by extension_id)
-└── service_index: Mutex<HashMap<Uuid, Vec<String>>>            (reverse map: service_id -> extension_ids)
+├── service_index: Mutex<HashMap<Uuid, Vec<String>>>            (reverse map: service_id -> extension_ids)
+└── encryption_keys: Mutex<HashMap<Uuid, String>>               (per-instance P-256 public keys for ECIES)
 ```
 
 ### `ExtensionEntry`
@@ -237,7 +238,7 @@ permissions (same pattern as static nav items).
 | Message | Publishable | Reason |
 | --- | --- | --- |
 | `ExtensionRegister` | No | Only relevant to the local controller instance |
-| `ExtensionRequest` | Yes | No secrets in request payload |
+| `ExtensionRequest` | Yes | `sensitive_params` is E2E encrypted (ECIES ciphertext) |
 | `ExtensionResponse` | Yes | No secrets in response payload |
 
 ## Key files

@@ -126,6 +126,23 @@ Internally tagged with `"type"`:
 | `help_text` | string | no | Help text below the field |
 | `default_value` | JSON value | no | Default value |
 | `options` | `Vec<SelectOption>` | no | Options for `select` fields |
+| `sensitive` | bool | no | Field contains sensitive data (encrypted client-side via ECIES) |
+
+### Sensitive fields and E2E encryption
+
+Fields marked `sensitive: true` contain credentials that must not be visible to the controller.
+The client encrypts these fields using the ECIES sealed-box scheme (P-256 + AES-256-GCM) with
+the target service's public key, and sends the ciphertext in
+`ExtensionRequestPayload.sensitive_params` instead of `params`.
+
+The service provides its encryption key via `ExtensionRegisterPayload.encryption_public_key`
+(base64-encoded uncompressed P-256 public key, 65 bytes). The controller surfaces this key
+in the `GET /api/v1/extensions/{id}/providers` response via `ExtensionProviderInfo.encryption_public_key`.
+
+The controller passes the encrypted `sensitive_params` through opaquely — it cannot decrypt.
+Only the target service instance can decrypt using its mTLS private key.
+
+See [Extensions Security](../security/extensions.md) for the full trust model.
 
 ### `WizardStep`
 
@@ -160,6 +177,7 @@ your manifests:
 ```rust
 conn.send(ServiceMessage::ExtensionRegister(ExtensionRegisterPayload {
     manifests: vec![
+        // Use serde_json::from_value(json!({...})) for #[non_exhaustive] types
         ExtensionManifest {
             id: "ssh-agent.host-management".to_string(),
             label: "SSH Host Management".to_string(),
@@ -181,6 +199,7 @@ conn.send(ServiceMessage::ExtensionRegister(ExtensionRegisterPayload {
             },
         },
     ],
+    encryption_public_key: None, // Set to base64-encoded P-256 public key for ECIES
 })).await?;
 ```
 
@@ -356,6 +375,10 @@ Timeout behaviour:
 
 No changes to the controller are needed -- the framework is fully generic.
 
+For a complete implementation example, see the SSH agent's `extension.rs` module
+(`crates/core/agent-ssh/src/extension.rs`) which implements the `ssh-agent.hosts` extension
+with list, bootstrap, and remove actions including ECIES E2E encryption for sensitive parameters.
+
 ## Wire protocol limits
 
 All extension payloads are validated via `WireValidate` after deserialization:
@@ -389,7 +412,9 @@ String lengths use the standard wire limits (`MAX_SHORT_STRING_LEN` = 1024,
 | `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler::on_extension_request` |
 | `crates/shared/service-sdk/src/event_loop.rs` | `ExtensionRequest` dispatch |
 | `crates/plugins/infrastructure/registry/src/lib.rs` | `PluginOps::extension_manifests` |
-| `crates/ui/cli/src/commands/extensions.rs` | CLI `extensions` subcommand |
+| `crates/ui/cli/src/commands/extensions.rs` | CLI `extensions` subcommand (static + dynamic) |
+| `crates/core/agent-ssh/src/extension.rs` | SSH agent extension implementation (reference) |
+| `crates/shared/crypto/src/ecies.rs` | ECIES sealed-box encryption/decryption |
 
 ## Cross-references
 

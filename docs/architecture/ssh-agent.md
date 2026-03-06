@@ -26,7 +26,7 @@ The SSH agent is feature-complete for version checks and updates. The implementa
   `ReportHosts` without requiring a restart (see [Dynamic Host Reload](#dynamic-host-reload))
 - Full version check and update execution over SSH, with in-flight update tracking and graceful shutdown (see [Version Check and Update Execution](#version-check-and-update-execution))
 
-UI configuration beyond the existing services API is not yet implemented.
+Host management (list, bootstrap, remove) is also available via the [UI extension framework](#ui-extension).
 
 ## Architecture Overview
 
@@ -105,6 +105,7 @@ relevant capabilities are:
 | `SoftwareDiscovery` | `software_discovery` | Supports `CheckVersions` / `DiscoverSoftware` flows |
 | `UpdateHooks` | `update_hooks` | Supports pre-/post-update hook commands |
 | `GracefulShutdown` | `graceful_shutdown` | Participates in the graceful-shutdown protocol |
+| `UiExtensions` | `ui_extensions` | Provides UI extensions (host management page) |
 
 Integration points:
 
@@ -606,6 +607,8 @@ crates/core/agent-ssh/
     │                    # SshInFlightUpdate struct, build_reload_host_infos(),
     │                    # report_hosts_after_config_change() — all wrap SshCommandExecutor with
     │                    # SudoAwareCommandExecutor
+    ├── extension.rs     # UI extension: manifest builder, action dispatch (list-hosts, bootstrap,
+    │                    # remove-host), ECIES decryption of sensitive params
     ├── error.rs         # Error types (rootcause + thiserror)
     ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
     ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH, StdioTunnel support)
@@ -705,6 +708,76 @@ is unresponsive (e.g. during its own shutdown), preventing the service process f
 See `crates/shared/service-sdk/src/ws.rs` (`connect_ws`),
 `crates/shared/service-sdk/src/connection.rs`, and
 `crates/shared/service-sdk/src/event_loop.rs` for the implementation.
+
+## UI Extension
+
+The SSH agent registers a `ssh-agent.hosts` UI extension on connect, enabling host management
+from the Web UI and CLI without using the agent's local CLI directly.
+
+### Extension manifest
+
+| Property | Value |
+| --- | --- |
+| ID | `ssh-agent.hosts` |
+| Label | SSH Hosts |
+| Placement | Page (nav_section: `management`, icon: `server`) |
+| Permission | `manage_hosts` |
+| Targeting | Targeted (user selects which SSH agent instance) |
+| UI | DataTable with host columns + row/primary actions |
+
+### Actions
+
+| Action | Type | Timeout | Description |
+| --- | --- | --- | --- |
+| `list-hosts` | data_action | 30s | Query local DB for all SSH hosts |
+| `bootstrap` | primary_action (form) | 120s | Bootstrap a new remote host |
+| `remove-host` | row_action (destructive) | 30s | Remove a host from local DB |
+
+### E2E encryption for sensitive parameters
+
+The bootstrap action accepts sensitive credentials (SSH password, private key) that must not be
+visible to the controller. The SSH agent uses ECIES sealed-box encryption:
+
+1. On connect, the agent base64-encodes its mTLS P-256 public key and includes it in the
+   `ExtensionRegister` payload as `encryption_public_key`.
+2. The controller surfaces this key in the `GET /api/v1/extensions/{id}/providers` response.
+3. Clients encrypt sensitive form fields using the ECIES sealed-box scheme (ephemeral-static
+   ECDH on P-256 + SHA-256 KDF + AES-256-GCM) and send the ciphertext in
+   `ExtensionRequestPayload.sensitive_params`.
+4. The controller passes the ciphertext through opaquely — it cannot decrypt.
+5. The SSH agent decrypts using its mTLS private key and extracts the credentials.
+
+See [Extensions Security](../security/extensions.md) for the trust model and
+[ECIES Sealed-Box](../security/secrets-encryption.md) for the cryptographic details.
+
+### Execution model
+
+- **`list-hosts`** and **`remove-host`**: Handled inline — fast DB operations, response sent
+  immediately from `on_extension_request`.
+- **`bootstrap`**: Spawned as a background task via the `bg_tx` channel. The
+  `ExtensionResponse` is sent asynchronously when the task completes. The extension proxy's
+  120-second timeout handles the case where the task runs too long.
+
+### CLI usage
+
+With the dynamic extension subcommands, the SSH host bootstrap extension can be invoked as:
+
+```sh
+# List hosts
+uptrakit extensions ssh-agent.hosts --service-id <UUID> list-hosts
+
+# Bootstrap a new host
+uptrakit extensions ssh-agent.hosts --service-id <UUID> bootstrap \
+  --target root@192.168.1.100 \
+  --name my-server \
+  --auth-method password
+
+# Remove a host
+uptrakit extensions ssh-agent.hosts --service-id <UUID> remove-host <host-id>
+
+# Show available actions and their arguments
+uptrakit extensions ssh-agent.hosts --service-id <UUID> bootstrap --help
+```
 
 ## Related Documentation
 

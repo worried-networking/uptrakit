@@ -254,7 +254,9 @@ management (`host add/list/show/update/remove/bootstrap`), `CommandExecutor` tra
 password + key-based auth (Ed25519/RSA/ECDSA), SSH agent forwarding, TOFU host key verification,
 connection pooling (300s TTL), custom SSH ports, remote plugin execution (`SshCommandExecutor`),
 update streaming, per-host update locking, least-privilege user creation (bootstrap), shell
-injection prevention (`shell_escape()`), encrypted SSH key storage.
+injection prevention (`shell_escape()`), encrypted SSH key storage, UI extension `ssh-agent.hosts`
+(host management via extensions framework), ECIES sealed-box encryption for sensitive extension
+parameters, dynamic CLI subcommands for extensions (manifest-driven argument parsing).
 
 ### Pending
 
@@ -303,6 +305,10 @@ injection prevention (`shell_escape()`), encrypted SSH key storage.
 - [ ] SSH-managed hosts in controller UI and API
   - **Category**: SSH / UI | **Impact**: Medium | **Effort**: Medium
   - Show SSH-managed hosts alongside regular agents with a transport type indicator (badge/icon).
+- [ ] Frontend ECIES encryption for sensitive extension form fields
+  - **Category**: Extensions / Security | **Impact**: High | **Effort**: Medium
+  - Client-side ECIES encryption in the frontend for fields marked `sensitive: true` in extension
+    manifests. Currently only the CLI path can leverage E2E encryption.
 
 ______________________________________________________________________
 

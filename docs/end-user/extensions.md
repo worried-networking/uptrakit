@@ -88,25 +88,53 @@ uptrakit extensions providers ssh-agent.host-management
 
 Shows all connected service instances that provide the specified extension.
 
-### Invoke an action
+### Invoke an action (raw JSON)
 
 ```sh
-uptrakit extensions invoke ssh-agent.host-management list-hosts
+uptrakit extensions invoke ssh-agent.hosts list-hosts
 ```
 
 For targeted extensions, specify which service instance to use:
 
 ```sh
-uptrakit extensions invoke ssh-agent.host-management list-hosts \
+uptrakit extensions invoke ssh-agent.hosts list-hosts \
   --service-id 019585f4-1234-7000-8000-000000000001
 ```
 
 Pass parameters as JSON:
 
 ```sh
-uptrakit extensions invoke ssh-agent.host-management bootstrap \
-  --params '{"hostname": "web-01.example.com", "username": "root"}'
+uptrakit extensions invoke ssh-agent.hosts bootstrap \
+  --params '{"target": "root@web-01.example.com", "name": "web-01"}'
 ```
+
+### Dynamic extension subcommands
+
+Extensions can also be invoked with typed arguments auto-generated from the extension's
+manifest. This provides `--help`, type validation, and tab completion:
+
+```sh
+# List SSH hosts from an agent
+uptrakit extensions ssh-agent.hosts --service-id <UUID> list-hosts
+
+# Bootstrap a new host with typed arguments
+uptrakit extensions ssh-agent.hosts --service-id <UUID> bootstrap \
+  --target root@192.168.1.100 \
+  --name my-server \
+  --auth-method password
+
+# Remove a host by ID
+uptrakit extensions ssh-agent.hosts --service-id <UUID> remove-host <host-id>
+
+# Show available actions and arguments for an extension
+uptrakit extensions ssh-agent.hosts --service-id <UUID> --help
+
+# Show form fields for a specific action
+uptrakit extensions ssh-agent.hosts --service-id <UUID> bootstrap --help
+```
+
+The `--service-id` flag is only required for targeted extensions (like `ssh-agent.hosts`).
+Universal extensions omit it.
 
 ## Permissions
 
