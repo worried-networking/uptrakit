@@ -43,6 +43,7 @@ uptrakit-web-api-types = { workspace = true, features = ["openapi"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+uptrakit-crypto = { workspace = true, features = ["testing"] }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 
 [lints]

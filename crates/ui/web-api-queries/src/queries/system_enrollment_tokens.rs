@@ -178,3 +178,190 @@ pub async fn count_active_system_tokens(
 
     Ok(count as u32)
 }
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::{Database, DatabaseConnection};
+    use time::OffsetDateTime;
+    use uuid::Uuid;
+
+    use super::*;
+
+    async fn setup_db() -> DatabaseConnection {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .unwrap();
+        db
+    }
+
+    fn make_token_params<'a>(id: Uuid, name: &'a str) -> CreateSystemTokenParams<'a> {
+        CreateSystemTokenParams {
+            id,
+            name,
+            token_hash: "testhash",
+            max_uses: None,
+            expires_at: None,
+            created_by_user_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn expired_token_excluded_from_active() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        let past = OffsetDateTime::now_utc() - time::Duration::hours(1);
+        create_system_enrollment_token(
+            &db,
+            CreateSystemTokenParams {
+                id,
+                name: "expired",
+                token_hash: "h1",
+                max_uses: None,
+                expires_at: Some(past),
+                created_by_user_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let active = find_active_system_tokens(&db).await.unwrap();
+        assert!(
+            active.iter().all(|t| t.id != id),
+            "expired token must not appear in active list"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoked_token_excluded_from_active() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        create_system_enrollment_token(&db, make_token_params(id, "revokable"))
+            .await
+            .unwrap();
+
+        let revoked = revoke_system_enrollment_token(&db, id).await.unwrap();
+        assert!(revoked, "first revocation must return true");
+
+        let active = find_active_system_tokens(&db).await.unwrap();
+        assert!(
+            active.iter().all(|t| t.id != id),
+            "revoked token must not appear in active list"
+        );
+    }
+
+    #[tokio::test]
+    async fn exhausted_token_excluded_from_active() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        create_system_enrollment_token(
+            &db,
+            CreateSystemTokenParams {
+                id,
+                name: "limited",
+                token_hash: "h2",
+                max_uses: Some(1),
+                expires_at: None,
+                created_by_user_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Increment uses to reach max_uses.
+        increment_system_token_uses(&db, id).await.unwrap();
+
+        let active = find_active_system_tokens(&db).await.unwrap();
+        assert!(
+            active.iter().all(|t| t.id != id),
+            "exhausted token must not appear in active list"
+        );
+    }
+
+    #[tokio::test]
+    async fn unlimited_token_always_included() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        create_system_enrollment_token(&db, make_token_params(id, "unlimited"))
+            .await
+            .unwrap();
+
+        let active = find_active_system_tokens(&db).await.unwrap();
+        assert!(
+            active.iter().any(|t| t.id == id),
+            "unlimited token must appear in active list"
+        );
+    }
+
+    #[tokio::test]
+    async fn token_below_max_uses_is_included() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        create_system_enrollment_token(
+            &db,
+            CreateSystemTokenParams {
+                id,
+                name: "partially-used",
+                token_hash: "h3",
+                max_uses: Some(3),
+                expires_at: None,
+                created_by_user_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Use it once — still has 2 remaining.
+        increment_system_token_uses(&db, id).await.unwrap();
+
+        let active = find_active_system_tokens(&db).await.unwrap();
+        assert!(
+            active.iter().any(|t| t.id == id),
+            "token with uses remaining must appear in active list"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_is_idempotent() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        create_system_enrollment_token(&db, make_token_params(id, "idempotent"))
+            .await
+            .unwrap();
+
+        let first = revoke_system_enrollment_token(&db, id).await.unwrap();
+        assert!(first, "first revocation must return true");
+
+        let second = revoke_system_enrollment_token(&db, id).await.unwrap();
+        assert!(
+            !second,
+            "second revocation of already-revoked token must return false"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_expiring_token_included_when_expires_at_is_null() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        // expires_at = None → never expires
+        create_system_enrollment_token(
+            &db,
+            CreateSystemTokenParams {
+                id,
+                name: "no-expiry",
+                token_hash: "h4",
+                max_uses: None,
+                expires_at: None,
+                created_by_user_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let active = find_active_system_tokens(&db).await.unwrap();
+        assert!(
+            active.iter().any(|t| t.id == id),
+            "token with no expiry must appear in active list"
+        );
+    }
+}

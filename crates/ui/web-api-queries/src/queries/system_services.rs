@@ -275,3 +275,255 @@ pub async fn deactivate_system_service(db: &DatabaseConnection, id: Uuid) -> Res
 
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::{
+        ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    };
+    use time::OffsetDateTime;
+    use uuid::Uuid;
+
+    use uptrakit_shared_db::entity::system_service::SystemServiceStatus;
+    use uptrakit_shared_db::entity::system_service_certificate::SystemRevocationReason;
+    use uptrakit_shared_db::entity::{ca_certificate, system_service, system_service_certificate};
+
+    use super::*;
+
+    async fn setup_db() -> DatabaseConnection {
+        uptrakit_crypto::enable_plaintext_mode();
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .unwrap();
+        db
+    }
+
+    /// Insert a minimal CA certificate to satisfy the FK on `system_service_certificates`.
+    async fn insert_ca(db: &DatabaseConnection, fingerprint: &str) {
+        let now = OffsetDateTime::now_utc();
+        ca_certificate::ActiveModel {
+            fingerprint: Set(fingerprint.to_string()),
+            cert_pem: Set("fake-cert-pem".to_string()),
+            key_pem: Set(uptrakit_crypto::EncryptedString::plaintext_for_test(
+                "fake-key-pem".to_string(),
+            )),
+            not_before: Set(now),
+            not_after: Set(now + time::Duration::days(365)),
+            activated_at: Set(now),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_service(
+        db: &DatabaseConnection,
+        id: Uuid,
+        status: SystemServiceStatus,
+    ) -> system_service::Model {
+        let now = OffsetDateTime::now_utc();
+        system_service::ActiveModel {
+            id: Set(id),
+            capabilities: Set(String::new()),
+            hostname: Set("test-host".to_string()),
+            friendly_name: Set("Test Service".to_string()),
+            ip_address: Set(None),
+            status: Set(status),
+            enrollment_secret_hash: Set(format!("hash-{id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            cert_lifetime_hours: Set(None),
+            system_enrollment_token_id: Set(None),
+            service_app_name: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    async fn insert_certificate(
+        db: &DatabaseConnection,
+        service_id: Uuid,
+        ca_fp: &str,
+        serial: &str,
+    ) -> system_service_certificate::Model {
+        let now = OffsetDateTime::now_utc();
+        system_service_certificate::ActiveModel {
+            ca_fingerprint: Set(ca_fp.to_string()),
+            serial_number: Set(serial.to_string()),
+            system_service_id: Set(service_id),
+            not_before: Set(now),
+            not_after: Set(now + time::Duration::days(365)),
+            revoked_at: Set(None),
+            revocation_reason: Set(None),
+            created_at: Set(now),
+            last_seen_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn deactivate_sets_deactivated_at_and_revokes_certs() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        insert_ca(&db, "fp1").await;
+        insert_service(&db, id, SystemServiceStatus::Approved).await;
+        insert_certificate(&db, id, "fp1", "serial1").await;
+        insert_certificate(&db, id, "fp1", "serial2").await;
+
+        let result = deactivate_system_service(&db, id).await.unwrap();
+        assert!(result, "deactivate must return true for an active service");
+
+        // Service must have deactivated_at set.
+        let svc = system_service::Entity::find_by_id(id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            svc.deactivated_at.is_some(),
+            "deactivated_at must be set after deactivation"
+        );
+
+        // All certificates must be revoked.
+        let unrevoked = system_service_certificate::Entity::find()
+            .filter(system_service_certificate::Column::SystemServiceId.eq(id))
+            .filter(system_service_certificate::Column::RevokedAt.is_null())
+            .all(&db)
+            .await
+            .unwrap();
+        assert!(
+            unrevoked.is_empty(),
+            "all certificates must be revoked after service deactivation"
+        );
+
+        // Revocation reason must be ServiceDeactivated.
+        let certs = system_service_certificate::Entity::find()
+            .filter(system_service_certificate::Column::SystemServiceId.eq(id))
+            .all(&db)
+            .await
+            .unwrap();
+        for cert in certs {
+            assert_eq!(
+                cert.revocation_reason,
+                Some(SystemRevocationReason::ServiceDeactivated)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn deactivate_already_deactivated_returns_false() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        insert_service(&db, id, SystemServiceStatus::Approved).await;
+
+        let first = deactivate_system_service(&db, id).await.unwrap();
+        assert!(first);
+
+        let second = deactivate_system_service(&db, id).await.unwrap();
+        assert!(
+            !second,
+            "deactivating an already-deactivated service must return false"
+        );
+    }
+
+    #[tokio::test]
+    async fn approve_non_pending_returns_not_pending() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        insert_service(&db, id, SystemServiceStatus::Approved).await;
+
+        let err = approve_system_service(&db, id).await.unwrap_err();
+        assert!(
+            matches!(err.current_context(), SystemServiceQueryError::NotPending),
+            "approving an already-approved service must return NotPending"
+        );
+    }
+
+    #[tokio::test]
+    async fn reject_pending_sets_rejected_and_deactivated_at() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        insert_service(&db, id, SystemServiceStatus::Pending).await;
+
+        let result = reject_system_service(&db, id).await.unwrap();
+        assert_eq!(
+            result.status,
+            uptrakit_shared_types::ServiceStatus::Rejected
+        );
+
+        let svc = system_service::Entity::find_by_id(id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            svc.deactivated_at.is_some(),
+            "rejected service must have deactivated_at set"
+        );
+    }
+
+    #[tokio::test]
+    async fn reject_already_approved_returns_not_pending() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        insert_service(&db, id, SystemServiceStatus::Approved).await;
+
+        let err = reject_system_service(&db, id).await.unwrap_err();
+        assert!(
+            matches!(err.current_context(), SystemServiceQueryError::NotPending),
+            "rejecting an already-approved service must return NotPending"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_settings_zero_clears_to_null() {
+        let db = setup_db().await;
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        // Insert with non-null values.
+        system_service::ActiveModel {
+            id: Set(id),
+            capabilities: Set(String::new()),
+            hostname: Set("host".to_string()),
+            friendly_name: Set("svc".to_string()),
+            ip_address: Set(None),
+            status: Set(SystemServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("hash-{id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(Some(60)),
+            cert_lifetime_hours: Set(Some(24)),
+            system_enrollment_token_id: Set(None),
+            service_app_name: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let result = update_system_service_settings(&db, id, Some(0), Some(0))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            result.ping_interval_seconds.is_none(),
+            "ping_interval_seconds must be cleared to None when Some(0) is passed"
+        );
+        assert!(
+            result.cert_lifetime_hours.is_none(),
+            "cert_lifetime_hours must be cleared to None when Some(0) is passed"
+        );
+    }
+}
