@@ -212,7 +212,7 @@
 														{action}
 														{serviceId}
 														{encryptionPublicKey}
-														extraParams={{ ...contextParams, _row: row }}
+														extraParams={{ ...contextParams, ...row, _row: row }}
 														size="sm"
 														onComplete={loadData}
 													/>
