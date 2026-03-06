@@ -127,6 +127,48 @@ in your plugin configuration:
 Only nodes listed in the filter will be queried. An empty array (the default)
 means all online nodes are included.
 
+## Bootstrapping Guests via SSH Agent
+
+When the SSH agent bootstraps a Proxmox VE node (via regular SSH bootstrap), it
+automatically detects PVE and creates API credentials. This enables a second
+bootstrap mode: bootstrapping guests (LXC containers and QEMU VMs) directly
+through the PVE node without needing SSH access to the guest.
+
+### How It Works
+
+1. **Bootstrap the PVE node** — Use the regular SSH bootstrap to set up the PVE
+   host. The agent detects PVE automatically and creates an API user/token.
+2. **Bootstrap guests** — Use the "Bootstrap via Proxmox" action in the UI or
+   CLI. The agent SSHs to the PVE node and runs commands inside the guest via
+   `pct exec` (LXC) or `qm guest exec` (QEMU).
+
+### Bootstrap via Proxmox Action
+
+Available in the SSH Hosts extension page when at least one PVE node has been
+bootstrapped.
+
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| PVE Host | Yes | — | PVE node to use as gateway (select from bootstrapped nodes) |
+| Guest VMID | Yes | — | VMID of the target container or VM |
+| Guest Type | Yes | `lxc` | LXC Container or QEMU VM |
+| Host Name | Yes | — | Friendly name for identification |
+| Target Username | No | `uptrakit` | User to create/use in the guest |
+| Allow All | No | `false` | Use NOPASSWD: ALL in sudoers |
+
+### What Happens During Guest Bootstrap
+
+1. Connects to the PVE node via SSH
+2. Creates the target user inside the guest
+3. Deploys an SSH key to the guest's `authorized_keys`
+4. Configures sudoers for the target user
+5. Retrieves the guest's IP address
+6. Verifies direct SSH connectivity to the guest
+7. Saves the host entry to the local database
+
+After bootstrap, the guest is managed like any other SSH host — the agent
+connects directly to it for version checks and updates.
+
 ## Security Considerations
 
 - The API token secret is stored encrypted at rest and masked in API responses

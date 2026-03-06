@@ -435,6 +435,25 @@ configured (user created, key deployed, sudoers written). You can either:
 
 The host entry is **not** saved to the database unless all steps succeed.
 
+## PVE node detection
+
+When bootstrapping a host via SSH, the agent automatically checks whether the
+target is a Proxmox VE node (by looking for `pveversion`). If detected:
+
+1. The agent creates a PVE API user and token (`uptrakit@pve`) with `PVEAuditor`
+   role (read-only access).
+2. The host is marked as a PVE node in the local database.
+3. The agent reports the PVE plugin configuration to the controller.
+
+This enables the **Bootstrap via Proxmox** extension action, which allows
+bootstrapping LXC containers and QEMU VMs through the PVE node without direct
+SSH access. See [Proxmox VE Integration](proxmox.md#bootstrapping-guests-via-ssh-agent)
+for details.
+
+If PVE API credential creation fails (e.g. insufficient permissions), a warning
+is printed and the bootstrap continues normally. You can configure the Proxmox
+plugin manually afterwards.
+
 ## Related documentation
 
 - [SSH Agent Host Management](ssh-agent-host-management.md) — managing existing

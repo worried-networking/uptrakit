@@ -77,7 +77,7 @@ Each assignment carries an `execution_site` column (`auto` | `agent` | `controll
 | `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins; classifies GitHub, npm, and APT-managed containers) |
 | `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
 | `package_manager_npm` | `uptrakit-plugin-package-manager-npm` | Controller (npm registry) | Yes | Globally installed npm packages; upstream versions fetched from `registry.npmjs.org`; `ControllerSideFetchReleases` capability; detects host compatibility; requires `sudo` for updates |
-| `infrastructure_proxmox` | `uptrakit-plugin-infrastructure-proxmox` | Controller (PVE REST API) | No | Proxmox VE infrastructure plugin; discovers QEMU VMs and LXC containers; manual host matching; controller-side only (no agent capabilities); uses Extensions framework for all UI/CLI interaction |
+| `infrastructure_proxmox` | `uptrakit-plugin-infrastructure-proxmox` | Controller (PVE REST API) | No | Proxmox VE infrastructure plugin; discovers QEMU VMs and LXC containers; manual host matching; uses Extensions framework for all UI/CLI interaction; also provides agent-side modules (`pve_setup`, `guest_exec`) for PVE node detection and guest command execution during SSH agent bootstrap |
 
 Plugins with a local package index (`package_manager_homebrew`,
 `discovery_proxmox_helper_scripts`, `package_manager_apt`) resolve both

@@ -13,8 +13,11 @@ See also: [End-user Guide](../end-user/proxmox.md),
 
 ## Architecture
 
-The Proxmox VE plugin is a **controller-side** infrastructure plugin. It has no
-agent-side capabilities — all operations go through the Proxmox VE REST API.
+The Proxmox VE plugin is a **primarily controller-side** infrastructure plugin.
+Most operations go through the Proxmox VE REST API.
+
+The plugin also provides agent-side modules (`pve_setup`, `guest_exec`) used by
+the SSH agent for PVE node detection and guest command execution during bootstrap.
 
 ```text
 Controller
@@ -44,6 +47,8 @@ Controller
 | `discovery.rs` | `discover_guests()` — queries nodes for VMs/CTs |
 | `matching.rs` | `manual_match()` / `unmatch()` — manual-only host matching |
 | `extensions.rs` | Extension manifests + action handler dispatch |
+| `pve_setup.rs` | PVE node detection and API credential creation (agent-side) |
+| `guest_exec.rs` | Guest command execution via `pct exec` / `qm guest exec` (agent-side) |
 
 ## Proxmox API Client
 
@@ -135,6 +140,62 @@ the frontend refreshes the selector options and auto-selects the new configurati
 - `api_url` must be HTTPS with a host (private/loopback hosts allowed)
 - `api_token` must match PVE format: `USER@REALM!TOKENID=SECRET`
 - Secret masking: `api_token` is replaced with `***` in API responses
+
+## Agent-Side Modules
+
+The Proxmox plugin also provides modules used by the SSH agent for PVE node
+detection and guest command execution. These modules have no dependency on the
+Proxmox REST API client — they operate via SSH commands on the PVE node.
+
+### `pve_setup.rs` — PVE Detection and Credential Creation
+
+Used during SSH agent bootstrap to detect and configure PVE nodes.
+
+| Function | Description |
+| --- | --- |
+| `detect_pve_node(executor)` | Runs `command -v pveversion` to detect a PVE node |
+| `create_pve_api_credentials(executor, username)` | Creates a PVE API user and token via `pveum` commands |
+
+`create_pve_api_credentials` performs three steps:
+
+1. `pveum user add {user}@pve` — creates the API user (ignores "already exists")
+2. `pveum user token add {user}@pve uptrakit --privsep=0 --output-format json` — creates a token
+3. `pveum acl modify / --users {user}@pve --roles PVEAuditor` — grants read-only access
+
+Returns `PveCredentials { api_url, api_token }` where `api_url` is derived from
+the PVE node's hostname (`https://{hostname}:8006`).
+
+### `guest_exec.rs` — Guest Command Execution
+
+Provides transport-agnostic guest command execution via PVE CLI tools.
+
+| Function | Description |
+| --- | --- |
+| `exec_in_guest(executor, vmid, guest_type, command)` | Execute a command inside a PVE guest |
+| `get_guest_ip(executor, vmid, guest_type)` | Get the primary IP address of a guest |
+| `list_guests(executor)` | List all guests on the cluster |
+
+**LXC** commands use `pct exec {vmid} -- bash -c '{command}'`.
+
+**QEMU** commands use `qm guest exec {vmid} -- bash -c '{command}'` and parse
+the JSON output for stdout/stderr/exit code.
+
+| Type | Description |
+| --- | --- |
+| `PveGuestType` | Enum: `Lxc`, `Qemu` |
+| `GuestExecResult` | Command output: `stdout`, `stderr`, `exit_code` |
+| `PveGuest` | Guest metadata: `vmid`, `name`, `guest_type`, `status`, `node` |
+
+### `RemoteExecutor` Integration
+
+Both modules accept `&dyn RemoteExecutor` (defined in `uptrakit-command`), making
+them testable with mock executors and usable with any SSH transport. The SSH agent
+provides two implementations:
+
+- `SshRemoteExecutor` — wraps `Arc<SshSession>` for direct SSH commands
+- `PveGuestExecutor` — wraps SSH-to-PVE-node, routes commands through `exec_in_guest()`
+
+These are defined in `crates/core/agent-ssh/src/remote_exec.rs`.
 
 ## Testing
 

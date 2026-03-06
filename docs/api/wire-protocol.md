@@ -1063,6 +1063,37 @@ Reports per-package outcomes after a batch update completes.
 
 See [Host Packages Architecture](../architecture/host-packages.md) for the full entity design.
 
+## `report_plugin_config` / `report_plugin_config_response`
+
+Services can report plugin configurations to the controller at runtime. This is used by the SSH
+agent to register a Proxmox VE plugin configuration after detecting a PVE node during bootstrap.
+
+### `report_plugin_config` (service -> controller)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | Yes | `"report_plugin_config"` |
+| `seq` | integer | Yes | Monotonically increasing sequence number |
+| `request_id` | string | Yes | Unique request ID for correlation (max 64 chars) |
+| `plugin_type` | string | Yes | Plugin type identifier, e.g. `"proxmox"` (max 64 chars) |
+| `name` | string | Yes | Human-readable config name (max 128 chars) |
+| `config` | object | Yes | Plugin-specific configuration (validated by the plugin) |
+
+### `report_plugin_config_response` (controller -> service)
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `type` | string | Yes | `"report_plugin_config_response"` |
+| `seq` | integer | Yes | Monotonically increasing sequence number |
+| `request_id` | string | Yes | Correlates with the original request |
+| `success` | boolean | Yes | Whether the config was created or found |
+| `plugin_config_id` | string | No | ID of the plugin configuration (on success) |
+| `error` | string | No | Error message (on failure) |
+
+The controller validates the config via `PluginOps::validate_config()`, checks for an existing
+config with the same `(tenant_id, plugin_type, name)`, and either returns the existing ID
+(idempotent) or creates a new one.
+
 ## AsyncAPI Specification
 
 The full message schema and payload definitions are published in `crates/shared/wire/asyncapi.yaml`. Use this document

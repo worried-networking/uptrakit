@@ -210,6 +210,10 @@ channels:
         $ref: "#/components/messages/extensionRequest"
       extensionResponse:
         $ref: "#/components/messages/extensionResponse"
+      reportPluginConfig:
+        $ref: "#/components/messages/reportPluginConfig"
+      reportPluginConfigResponse:
+        $ref: "#/components/messages/reportPluginConfigResponse"
 
   controllerEvents:
     address: uptrakit.events.controller
@@ -841,6 +845,30 @@ operations:
       `request_id` for correlation, a `success` flag, optional result `data`,
       and optional `error` message. This message is safe for NATS publication.
 
+  sendReportPluginConfig:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/reportPluginConfig"
+    summary: Service reports a plugin configuration to the controller
+    description: |
+      Sent by a service that has detected infrastructure credentials (e.g. PVE API
+      token during SSH agent bootstrap of a Proxmox VE node). The controller validates
+      the plugin config and either creates a new one or returns an existing match.
+      The response is sent back via `ReportPluginConfigResponse`.
+
+  receiveReportPluginConfigResponse:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/reportPluginConfigResponse"
+    summary: Service receives the result of a plugin config registration
+    description: |
+      Sent by the controller in response to `ReportPluginConfig`. Contains a success
+      flag, optional `plugin_config_id` on success, and optional `error` on failure.
+
 components:
   securitySchemes:
     mtls:
@@ -1290,6 +1318,22 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/extensionResponsePayload"
+
+    reportPluginConfig:
+      name: report_plugin_config
+      title: Report Plugin Config
+      summary: Service reports a plugin configuration for the controller to register
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/ReportPluginConfigPayload"
+
+    reportPluginConfigResponse:
+      name: report_plugin_config_response
+      title: Report Plugin Config Response
+      summary: Controller response to a plugin config registration request
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/ReportPluginConfigResponsePayload"
 
     serviceCredentials:
       name: service_credentials
@@ -3982,6 +4026,66 @@ components:
         error:
           type: string
           description: Error message when success is false
+
+    ReportPluginConfigPayload:
+      type: object
+      required:
+        - type
+        - seq
+        - request_id
+        - plugin_type
+        - name
+        - config
+      properties:
+        type:
+          type: string
+          const: report_plugin_config
+        seq:
+          type: integer
+          description: Monotonically increasing message sequence number
+        request_id:
+          type: string
+          maxLength: 64
+          description: Unique request identifier for correlation
+        plugin_type:
+          type: string
+          maxLength: 64
+          description: Plugin type identifier (e.g. "proxmox")
+        name:
+          type: string
+          maxLength: 128
+          description: Human-readable name for the plugin configuration
+        config:
+          type: object
+          description: Plugin-specific configuration (validated by the plugin)
+
+    ReportPluginConfigResponsePayload:
+      type: object
+      required:
+        - type
+        - seq
+        - request_id
+        - success
+      properties:
+        type:
+          type: string
+          const: report_plugin_config_response
+        seq:
+          type: integer
+          description: Monotonically increasing message sequence number
+        request_id:
+          type: string
+          maxLength: 64
+          description: Correlates with the original ReportPluginConfig request
+        success:
+          type: boolean
+          description: Whether the config was successfully created or found
+        plugin_config_id:
+          type: string
+          description: ID of the created or existing plugin configuration (present on success)
+        error:
+          type: string
+          description: Error message (present on failure)
 
     extensionActionsRegisterPayload:
       type: object

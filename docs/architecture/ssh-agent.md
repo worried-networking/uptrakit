@@ -17,6 +17,8 @@ The SSH agent is feature-complete for version checks and updates. The implementa
 - Ed25519 keypair generation for automated key deployment
 - A `host bootstrap` command that automates remote host setup (user creation, key deployment, sudoers configuration)
 - A `host update-sudoers` command to regenerate minimal per-command sudoers entries as plugins change
+- A `bootstrap-proxmox` extension action that bootstraps SSH hosts inside Proxmox VE guests
+  (LXC/QEMU) via `pct exec`/`qm guest exec` through an already-bootstrapped PVE node
 - Per-host sudo state tracking (`is_root`, `sudo_available`, `sudo_policy`) in the local database
 - Runtime `SudoAwareCommandExecutor` wrapping that applies `sudo` based on stored host context — no hard-coded `sudo` in plugin commands
 - Host reporting via `ReportHosts` — on authenticated connect, the SSH agent collects system info
@@ -85,6 +87,8 @@ The SSH agent uses a local SQLite database (`agent-ssh.db` in the state director
 | `sudo_available` | BOOLEAN | NULL = unknown; TRUE = passwordless sudo works for this host |
 | `is_root` | BOOLEAN | NULL = unknown; TRUE = agent user is UID 0 |
 | `sudo_policy` | TEXT | `"auto"` / `"force_with"` / `"force_without"` — runtime sudo execution policy |
+| `is_pve_node` | BOOLEAN | Whether this host is a Proxmox VE node (default: false) |
+| `pve_plugin_config_id` | TEXT | Plugin config ID for PVE credentials, nullable |
 | `created_at` | INTEGER | Unix timestamp |
 | `updated_at` | INTEGER | Unix timestamp |
 
@@ -227,6 +231,45 @@ prevent shell injection. SSH config parsing uses the `ssh2-config` crate with
 
 For detailed usage and troubleshooting, see
 [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md).
+
+### Proxmox Guest Bootstrap
+
+The `bootstrap-proxmox` extension action bootstraps SSH hosts inside Proxmox VE guests without
+requiring direct SSH access to the guest. Instead, it uses an already-bootstrapped PVE node as
+a gateway.
+
+```text
+1. LOAD PVE HOST from local DB (must be marked is_pve_node = true)
+2. CONNECT TO PVE NODE via SSH (using stored credentials)
+3. CREATE PveGuestExecutor (wraps SSH session + vmid + guest_type)
+4. GENERATE Ed25519 KEYPAIR
+5. REMOTE SETUP INSIDE GUEST (via pct exec / qm guest exec)
+   - Create user (useradd --create-home --shell /bin/sh)
+   - Detect home directory (getent passwd)
+   - Deploy authorized_keys with restrictions
+   - Resolve plugin sudo commands
+   - Write /etc/sudoers.d/uptrakit-<username>
+6. GET GUEST IP (hostname -I for LXC, network-get-interfaces for QEMU)
+7. VERIFY SSH (connect directly to guest IP with deployed key)
+8. SAVE TO DATABASE (hostname = guest IP, port = 22)
+```
+
+The `PveGuestExecutor` implements `RemoteExecutor` (from `uptrakit-command`) and delegates each
+command to `guest_exec::exec_in_guest()`, which builds the appropriate `pct exec` or `qm guest exec`
+invocation and runs it on the PVE node via SSH.
+
+### PVE Detection During SSH Bootstrap
+
+When bootstrapping a host via regular SSH (the `bootstrap` action), the agent automatically
+detects whether the target is a Proxmox VE node by checking for `pveversion`. If detected:
+
+1. Creates a PVE API user and token via `pveum` commands
+2. Marks the host as `is_pve_node = true` in the local DB
+3. Sends `ReportPluginConfig` to the controller to register a Proxmox plugin configuration
+4. The controller creates or finds an existing config and responds with the `plugin_config_id`
+
+This enables the `bootstrap-proxmox` action to appear in the UI with the PVE node available
+as a gateway option.
 
 ## Sudo Context and Dynamic Execution
 
@@ -608,7 +651,7 @@ crates/core/agent-ssh/
     │                    # report_hosts_after_config_change() — all wrap SshCommandExecutor with
     │                    # SudoAwareCommandExecutor
     ├── extension.rs     # UI extension: manifest builder, action dispatch (list-hosts, bootstrap,
-    │                    # remove-host), ECIES decryption of sensitive params
+    │                    # remove-host, bootstrap-proxmox, list-pve-hosts), ECIES decryption of sensitive params
     ├── error.rs         # Error types (rootcause + thiserror)
     ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
     ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH, StdioTunnel support)
@@ -618,13 +661,17 @@ crates/core/agent-ssh/
     ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command, LineBuffer
     ├── host_info.rs     # Remote host info collection over SSH (machine_id, os_type, os_version, architecture, hostname)
     ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove,
-    │                    # update_host_sudo_state, list_host_snapshots, ...)
+    │                    # update_host_sudo_state, update_host_pve_state, find_pve_hosts,
+    │                    # list_host_snapshots, ...)
+    ├── remote_exec.rs   # SshRemoteExecutor, PveGuestExecutor (RemoteExecutor impls)
     ├── commands/
     │   ├── mod.rs         # Command module declarations
     │   ├── host.rs        # Host subcommand handlers (dispatch, SSH config resolution, formatting)
-    │   ├── bootstrap.rs   # Bootstrap workflow (remote setup, verification, DB save; uses sudoers.rs)
+    │   ├── bootstrap.rs   # Bootstrap workflow (remote setup, verification, DB save; PVE detection, BootstrapResult; uses sudoers.rs)
+    │   ├── bootstrap_proxmox.rs  # Proxmox guest bootstrap via PVE exec
     │   ├── sudoers.rs     # Shared sudoers helpers: detect_is_root, detect_sudo_available,
-    │   │                  # resolve_command_path, generate_sudoers_content, write_sudoers_file
+    │   │                  # resolve_command_path, generate_sudoers_content, write_sudoers_file;
+    │   │                  # uses &dyn RemoteExecutor
     │   └── update_sudoers.rs  # update-sudoers command (re-detect, resolve, write, persist)
     └── db/
         ├── mod.rs       # SQLite init (init_db) + tests
@@ -635,7 +682,8 @@ crates/core/agent-ssh/
             ├── mod.rs   # Migration runner
             ├── m20260215_000001_initial.rs         # ssh_hosts table (with UNIQUE index on name)
             ├── m20260222_000002_add_machine_id.rs  # Adds machine_id TEXT NOT NULL DEFAULT ''
-            └── m20260224_000003_add_sudo_columns.rs  # Adds sudo_available, is_root, sudo_policy
+            ├── m20260224_000003_add_sudo_columns.rs  # Adds sudo_available, is_root, sudo_policy
+            └── m20260306_000001_add_pve_columns.rs  # Adds is_pve_node, pve_plugin_config_id
 ```
 
 ## Shared `uptrakit-agent-core` Crate
@@ -732,6 +780,8 @@ from the Web UI and CLI without using the agent's local CLI directly.
 | `list-hosts` | data_action | 30s | Query local DB for all SSH hosts |
 | `bootstrap` | primary_action (form) | 120s | Bootstrap a new remote host |
 | `remove-host` | row_action (destructive) | 30s | Remove a host from local DB |
+| `list-pve-hosts` | dynamic_options | 30s | List PVE-marked hosts for select dropdown |
+| `bootstrap-proxmox` | primary_action (form) | 120s | Bootstrap a guest inside a Proxmox VE node |
 
 ### E2E encryption for sensitive parameters
 
@@ -757,6 +807,9 @@ See [Extensions Security](../security/extensions.md) for the trust model and
 - **`bootstrap`**: Spawned as a background task via the `bg_tx` channel. The
   `ExtensionResponse` is sent asynchronously when the task completes. The extension proxy's
   120-second timeout handles the case where the task runs too long.
+- **`bootstrap-proxmox`**: Spawned as a background task. Connects to the PVE node via SSH,
+  executes commands inside the guest via `pct exec` (LXC) or `qm guest exec` (QEMU), verifies
+  SSH connectivity, and saves the host.
 
 ### CLI usage
 
