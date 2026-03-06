@@ -9,6 +9,7 @@
 		extensionId,
 		action,
 		serviceId,
+		encryptionPublicKey,
 		extraParams = {},
 		size = 'md',
 		onComplete
@@ -16,6 +17,7 @@
 		extensionId: string;
 		action: ActionDef;
 		serviceId?: string;
+		encryptionPublicKey?: string;
 		extraParams?: Record<string, unknown>;
 		size?: 'sm' | 'md';
 		onComplete?: (result?: Record<string, unknown>) => void | Promise<void>;
@@ -49,17 +51,48 @@
 		return template;
 	}
 
+	/**
+	 * Collect the set of field keys marked as `sensitive` in the action's form UI.
+	 * Only `form` type UIs carry field definitions; all other UI types (wizard, none)
+	 * have no sensitive field metadata and return an empty set.
+	 */
+	function sensitiveFieldKeys(): Set<string> {
+		if (action.ui?.type === 'form') {
+			return new Set(action.ui.fields.filter((f) => f.sensitive).map((f) => f.key));
+		}
+		return new Set();
+	}
+
 	async function invoke(params: Record<string, unknown> = {}) {
 		loading = true;
 		try {
 			const merged = { ...extraParams, ...params };
 			let result: Record<string, unknown> | undefined;
 			if (action.api_submit) {
+				// Direct REST submit bypasses the extension proxy; no sensitive param routing.
 				const def: ApiSubmitDef = action.api_submit;
 				const body = applyTemplate(def.body, merged) as Record<string, unknown>;
 				result = await apiSubmitRequest(def.path, def.method, body);
 			} else {
-				await invokeExtensionAction(extensionId, action.action_id, merged, serviceId);
+				// Separate sensitive field values from regular params before sending.
+				const sensitiveKeys = sensitiveFieldKeys();
+				const regularParams: Record<string, unknown> = {};
+				const sensitiveParams: Record<string, unknown> = {};
+				for (const [k, v] of Object.entries(merged)) {
+					if (sensitiveKeys.has(k)) {
+						sensitiveParams[k] = v;
+					} else {
+						regularParams[k] = v;
+					}
+				}
+				await invokeExtensionAction(
+					extensionId,
+					action.action_id,
+					regularParams,
+					serviceId,
+					sensitiveParams,
+					encryptionPublicKey
+				);
 			}
 			showSuccess(`${action.label} completed`);
 			showModal = false;

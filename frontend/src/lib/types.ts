@@ -812,6 +812,8 @@ export interface FieldDef {
 	options?: SelectOption[];
 	/** When set, options are loaded dynamically from the given source. Takes precedence over `options`. */
 	select_source?: SelectSource;
+	/** When true, the field value is encrypted client-side before being sent to the service. */
+	sensitive?: boolean;
 }
 
 export interface FormDef {
@@ -908,4 +910,6 @@ export interface ExtensionProviderInfo {
 	service_id: string;
 	service_label: string;
 	hostname: string | null;
+	/** Base64-encoded uncompressed P-256 public key (65 bytes) used for ECIES sealed-box encryption. */
+	encryption_public_key?: string;
 }
