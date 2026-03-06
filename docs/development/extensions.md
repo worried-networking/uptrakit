@@ -89,10 +89,43 @@ Internally tagged with `"type"`. Four variants:
 
 | Variant | Fields | Description |
 | --- | --- | --- |
-| `data_table` | `columns`, `data_action`, `row_actions`, `primary_actions` | Table with data fetching |
+| `data_table` | `columns`, `data_action`, `row_actions`, `primary_actions`, `context_selector` | Table with data fetching |
 | `form` | `fields` | Input form |
 | `key_value` | `data_action` | Read-only key-value display |
 | `actions` | `actions` | List of actions (used with `context_menu_group` placement) |
+
+#### Context selector
+
+The `data_table` variant accepts an optional `context_selector: Option<Box<ContextSelectorDef>>`.
+When set, the user must choose a value from a dropdown **before** table data loads. The selected
+value is automatically injected into all action invocations (data load, primary actions, row
+actions) under `context_selector.param_key`.
+
+This eliminates the need for a plugin config picker field in every action form. It also blocks
+the data-load request from firing until a value is selected, preventing "missing required
+parameter" errors when the page first opens with no existing configuration.
+
+`ContextSelectorDef` fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `param_key` | string | yes | Key injected into all action params (e.g., `"plugin_config_id"`) |
+| `label` | string | yes | Dropdown label shown in the UI |
+| `source` | `ContextSelectorSource` | yes | How to populate the dropdown options |
+| `add_action` | `ActionDef` | no | "Add" button shown next to the selector |
+| `empty_message` | string | no | Message shown when no options exist |
+
+`ContextSelectorSource` variants:
+
+| Variant | Fields | Description |
+| --- | --- | --- |
+| `action` | `action_id` | Invokes an extension action; response must be `[{ value, label }]` |
+| `plugin_configs` | `plugin_type` | Calls `GET /api/v1/plugin-configs` and filters by `plugin_type`; maps `{ id, name }` |
+
+The `add_action` may carry `api_submit` to route form submission directly to a REST API
+endpoint instead of through the extension proxy. After a successful add, the frontend
+refreshes the options list and auto-selects the newly created item (if the response includes
+the field named by `api_submit.response_id_field`).
 
 ### `ActionDef`
 
@@ -104,6 +137,74 @@ Internally tagged with `"type"`. Four variants:
 | `permission` | string | no | Permission required to invoke |
 | `destructive` | bool | no | Show with warning styling (default: `false`) |
 | `timeout_seconds` | u32 | no | Override the default 30s timeout |
+| `api_submit` | `ApiSubmitDef` | no | Route form submission to a REST API instead of the extension proxy |
+
+#### `ApiSubmitDef` — calling existing REST APIs from extension forms
+
+When `api_submit` is set on an `ActionDef`, the frontend bypasses the extension proxy on
+form submission and calls the specified REST endpoint directly. This allows extensions to
+expose existing API operations (create plugin config, update service settings, etc.) as
+first-class action buttons without duplicating logic in an extension handler.
+
+`ApiSubmitDef` fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `method` | string | yes | HTTP method (`"POST"`, `"PUT"`, `"PATCH"`, `"DELETE"`) |
+| `path` | string | yes | API path relative to the base URL (e.g., `"/api/v1/plugin-configs"`) |
+| `body` | JSON | yes | Body template — string leaves matching `{{field_name}}` are substituted |
+| `response_id_field` | string | no | JSON response field containing the new item's ID |
+| `response_label_field` | string | no | JSON response field containing the new item's label |
+
+**Body template syntax:**
+
+| Placeholder | Coercion | Result |
+| --- | --- | --- |
+| `"{{name}}"` | (none) | String value |
+| `"{{enabled:bool}}"` | `bool` | `"true"` → `true`, anything else → `false` |
+| `"{{count:number}}"` | `number` | String parsed as JSON number |
+| `"{{tags:csv_array}}"` | `csv_array` | Comma-split, trimmed, empty-filtered JSON array |
+
+Example — create a plugin config on form submit:
+
+```rust
+ActionDef::new("add-config", "Add Configuration")
+    .with_permission(Permission::ManageHosts)
+    .with_ui(ActionUi::Form(FormDef::new(vec![
+        FieldDef::new("name", "Name").required(),
+        FieldDef::new("api_url", "API URL").required(),
+    ])))
+    .with_api_submit(
+        ApiSubmitDef::new(
+            "POST",
+            "/api/v1/plugin-configs",
+            serde_json::json!({
+                "name": "{{name}}",
+                "plugin_type": "my_plugin",
+                "enabled": true,
+                "config": { "api_url": "{{api_url}}" }
+            }),
+        )
+        .with_response_id_field("id")
+        .with_response_label_field("name"),
+    )
+```
+
+### `Permission` enum
+
+Use `uptrakit_shared_types::Permission` (not raw strings) when calling `.with_permission()`:
+
+```rust
+use uptrakit_shared_types::Permission;
+
+ActionDef::new("discover", "Discover")
+    .with_permission(Permission::ManageHosts)
+```
+
+`Permission` lives in `uptrakit-shared-types` so it is accessible to plugins (which must not
+depend on `uptrakit-web-api-types`) and to `web-api-types` (which re-exports it). The
+`.with_permission()` builders accept `impl Into<String>`, and `Permission` implements
+`From<Permission> for String`.
 
 ### `ActionUi`
 
@@ -273,9 +374,10 @@ pub fn extension_manifests() -> Vec<ExtensionManifest> {
                 row_actions: vec![],
                 primary_actions: vec![
                     ActionDef::new("discover", "Discover")
-                        .with_permission("manage_hosts")
+                        .with_permission(Permission::ManageHosts)
                         .with_timeout(120),
                 ],
+                context_selector: None,
             },
         )
         .with_permission("manage_hosts"),
@@ -401,7 +503,8 @@ String lengths use the standard wire limits (`MAX_SHORT_STRING_LEN` = 1024,
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/wire/src/extension.rs` | Extension manifest types and wire payloads |
+| `crates/shared/wire/src/extension.rs` | Extension manifest types, wire payloads, `ApiSubmitDef`, `ContextSelectorDef` |
+| `crates/shared/types/src/permissions.rs` | `Permission` enum (shared across plugins and web API) |
 | `crates/shared/wire/src/limits.rs` | Wire validation limits |
 | `crates/shared/wire/src/wire_validate_impls.rs` | `WireValidate` implementations |
 | `crates/ui/web-api/src/extension_registry.rs` | Extension registry (provider tracking) |

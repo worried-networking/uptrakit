@@ -117,6 +117,19 @@ commands or REST routes exist.
 | `proxmox.hosts` | `unmatch` | `mapping_id` | Remove match |
 | `proxmox.host-info` | `get-info` | `host_id` | Get Proxmox info for host |
 
+The `plugin_config_id` parameter is **not included in action forms**. Instead, the
+`proxmox.hosts` data table uses a `context_selector` that asks the user to pick a
+Proxmox VE configuration before any data loads. The selected ID is automatically
+injected into all action invocations by the frontend.
+
+### Adding a configuration from the UI
+
+The `context_selector.add_action` uses `ApiSubmitDef` to route form submission
+directly to `POST /api/v1/plugin-configs`, bypassing the extension proxy. No
+extension-side handler for config creation is needed. After the REST call succeeds,
+the frontend refreshes the selector options and auto-selects the new configuration
+(identified via `response_id_field: "id"`).
+
 ## Configuration Validation
 
 - `api_url` must be HTTPS with a host (private/loopback hosts allowed)
