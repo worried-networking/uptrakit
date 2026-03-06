@@ -7201,6 +7201,7 @@ dependencies = [
  "tower",
  "tracing",
  "uptrakit-audit-log",
+ "uptrakit-backoff",
  "uptrakit-command",
  "uptrakit-crypto",
  "uptrakit-directories",

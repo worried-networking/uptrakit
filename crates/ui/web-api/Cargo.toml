@@ -80,6 +80,7 @@ async-nats = { workspace = true, optional = true }
 uptrakit-nats = { workspace = true, optional = true }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-notification-channels = { workspace = true, features = ["webhook"] }
+uptrakit-backoff = { workspace = true }
 uptrakit-web-api-auth = { workspace = true }
 uptrakit-web-api-queries = { workspace = true }
 

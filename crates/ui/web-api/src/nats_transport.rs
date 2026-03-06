@@ -31,6 +31,7 @@ use sea_orm::DatabaseConnection;
 use thiserror::Error;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
+use uptrakit_backoff::Backoff;
 use uptrakit_internal_wire::ControllerMessage;
 use uptrakit_nats::{NatsConnection, NatsEventEnvelope};
 use uptrakit_shared_macros::impl_report_conversion;
@@ -147,6 +148,8 @@ impl NatsTransport {
 
         tracing::info!("NATS consumer started");
 
+        let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(30));
+
         loop {
             if cancel.is_cancelled() {
                 tracing::info!("NATS consumer shutting down");
@@ -160,10 +163,18 @@ impl NatsTransport {
                 .messages()
                 .await
             {
-                Ok(m) => m,
+                Ok(m) => {
+                    backoff.reset();
+                    m
+                }
                 Err(e) => {
-                    tracing::warn!(error = %e, "NATS consumer fetch error, retrying");
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    let delay = backoff.next_delay();
+                    tracing::warn!(
+                        error = %e,
+                        delay_ms = delay.as_millis(),
+                        "NATS consumer fetch error, retrying with backoff"
+                    );
+                    tokio::time::sleep(delay).await;
                     continue;
                 }
             };
