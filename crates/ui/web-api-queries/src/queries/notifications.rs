@@ -18,6 +18,7 @@ use crate::tenant_db::TenantDb;
 
 // -- Channels -----------------------------------------------------------------
 
+#[tracing::instrument(skip_all)]
 pub async fn create_channel(
     tenant_db: &TenantDb,
     req: &uptrakit_web_api_types::notifications::CreateNotificationChannelRequest,
@@ -63,6 +64,7 @@ pub async fn create_channel(
     Ok(channel_to_response(result, masked_config))
 }
 
+#[tracing::instrument(skip_all)]
 pub async fn list_channels(
     tenant_db: &TenantDb,
     params: &PaginationParams,
@@ -95,6 +97,7 @@ pub async fn list_channels(
     Ok(PaginatedResponse::new(items, total, resolved))
 }
 
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn get_channel(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -112,6 +115,7 @@ pub async fn get_channel(
     }))
 }
 
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn update_channel(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -159,6 +163,7 @@ pub async fn update_channel(
     Ok(Some(channel_to_response(result, masked)))
 }
 
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn delete_channel(tenant_db: &TenantDb, id: Uuid) -> ChannelResult<bool> {
     let result = tenant_db
         .delete_many::<notification_channel::Entity>()
@@ -172,6 +177,7 @@ pub async fn delete_channel(tenant_db: &TenantDb, id: Uuid) -> ChannelResult<boo
 
 // -- Rules --------------------------------------------------------------------
 
+#[tracing::instrument(skip_all)]
 pub async fn create_rule(
     tenant_db: &TenantDb,
     req: &uptrakit_web_api_types::notifications::CreateNotificationRuleRequest,
@@ -206,6 +212,7 @@ pub async fn create_rule(
     Ok(rule_to_response(result))
 }
 
+#[tracing::instrument(skip_all)]
 pub async fn list_rules(
     tenant_db: &TenantDb,
     params: &PaginationParams,
@@ -237,6 +244,7 @@ pub async fn list_rules(
     Ok(PaginatedResponse::new(items, total, resolved))
 }
 
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn get_rule(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -250,6 +258,7 @@ pub async fn get_rule(
     Ok(rule.map(rule_to_response))
 }
 
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn update_rule(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -313,6 +322,7 @@ pub async fn update_rule(
     Ok(Some(rule_to_response(result)))
 }
 
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn delete_rule(tenant_db: &TenantDb, id: Uuid) -> RuleResult<bool> {
     let result = tenant_db
         .delete_many::<notification_rule::Entity>()
@@ -326,6 +336,7 @@ pub async fn delete_rule(tenant_db: &TenantDb, id: Uuid) -> RuleResult<bool> {
 
 // -- Log ----------------------------------------------------------------------
 
+#[tracing::instrument(skip_all)]
 pub async fn list_log(
     tenant_db: &TenantDb,
     params: &PaginationParams,
@@ -364,6 +375,7 @@ pub async fn list_log(
 /// is sufficient proof of legitimacy. The tenant can be derived from the
 /// returned `notification_log::Model::tenant_id` field if needed for
 /// subsequent operations.
+#[tracing::instrument(skip_all)]
 pub async fn find_log_by_action_token(
     db: &sea_orm::DatabaseConnection,
     action_token: Uuid,

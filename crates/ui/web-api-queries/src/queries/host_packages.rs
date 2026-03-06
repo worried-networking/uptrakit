@@ -79,6 +79,7 @@ fn model_to_response(m: host_package::Model) -> HostPackageResponse {
 }
 
 /// List host packages for a given host with filtering and pagination.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn list_host_packages(
     tenant_db: &TenantDb,
     host_id: Uuid,
@@ -139,6 +140,7 @@ pub async fn list_host_packages(
 }
 
 /// Get a single host package by ID.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn get_host_package(
     tenant_db: &TenantDb,
     host_id: Uuid,
@@ -156,6 +158,7 @@ pub async fn get_host_package(
 }
 
 /// Update a host package (enable/disable).
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn update_host_package(
     tenant_db: &TenantDb,
     host_id: Uuid,
@@ -181,6 +184,7 @@ pub async fn update_host_package(
 }
 
 /// Soft-delete a host package. Optionally creates an ignore rule.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn deactivate_host_package(
     tenant_db: &TenantDb,
     host_id: Uuid,
@@ -226,6 +230,7 @@ pub async fn deactivate_host_package(
 // ── Update count aggregation ────────────────────────────────────────────────
 
 /// Compute aggregate update counts for a host from its host_packages.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn compute_update_summary(
     tenant_db: &TenantDb,
     host_id: Uuid,
@@ -257,6 +262,7 @@ pub async fn compute_update_summary(
 }
 
 /// Compute update summaries for multiple hosts in a single query.
+#[tracing::instrument(skip_all)]
 pub async fn compute_update_summaries_batch(
     tenant_db: &TenantDb,
     host_ids: &[Uuid],
@@ -292,6 +298,7 @@ pub async fn compute_update_summaries_batch(
 // ── Host package ignore rules ───────────────────────────────────────────────
 
 /// List host package ignore rules for a host.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn list_host_package_ignores(
     tenant_db: &TenantDb,
     host_id: Uuid,
@@ -317,6 +324,7 @@ pub async fn list_host_package_ignores(
 }
 
 /// Create a host package ignore rule. Returns `true` if created, `false` if already exists.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn create_host_package_ignore(
     tenant_db: &TenantDb,
     host_id: Uuid,
@@ -340,6 +348,7 @@ pub async fn create_host_package_ignore(
 }
 
 /// Delete a host package ignore rule. Returns `true` if deleted.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn delete_host_package_ignore(
     tenant_db: &TenantDb,
     host_id: Uuid,
@@ -362,6 +371,7 @@ pub async fn delete_host_package_ignore(
 }
 
 /// Load the ignore set for `(host_id, plugin_config_id)`.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn load_host_package_ignore_set(
     tenant_db: &TenantDb,
     host_id: Uuid,
@@ -397,6 +407,7 @@ pub struct FindOrCreateHostPackageParams<'a> {
 /// - If active record exists for `(host_id, plugin_config_id, package_identifier)`,
 ///   updates installed_version in place
 /// - Otherwise creates a new enabled host_package
+#[tracing::instrument(skip_all)]
 pub async fn find_or_create_host_package(params: FindOrCreateHostPackageParams<'_>) -> Result<()> {
     let FindOrCreateHostPackageParams {
         db,
@@ -503,6 +514,7 @@ pub async fn find_or_create_host_package(params: FindOrCreateHostPackageParams<'
 /// `ignore_set` — is considered uninstalled and is soft-deleted (`deactivated_at = now`).
 ///
 /// Returns the number of records deactivated.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn deactivate_missing_host_packages(
     tenant_db: &TenantDb,
     host_id: Uuid,
@@ -582,6 +594,7 @@ fn history_to_response(m: host_package_update_history::Model) -> HostPackageUpda
 }
 
 /// Get recent update history for a host package.
+#[tracing::instrument(skip_all, fields(%host_package_id))]
 pub async fn get_host_package_update_history(
     tenant_db: &TenantDb,
     host_package_id: Uuid,
@@ -600,6 +613,7 @@ pub async fn get_host_package_update_history(
 }
 
 /// Get the plugin config associated with a host package.
+#[tracing::instrument(skip_all)]
 pub async fn get_host_package_plugin_config(
     tenant_db: &TenantDb,
     plugin_config_id: Uuid,
@@ -627,6 +641,7 @@ pub async fn get_host_package_plugin_config(
 /// - Returns the full `SoftwareItemDetailResponse`.
 ///
 /// This operation is additive — the host package is never deleted or modified.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn promote_host_package(
     tenant_db: &TenantDb,
     host_id: Uuid,

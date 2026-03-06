@@ -50,6 +50,7 @@ impl_report_conversion!(sea_orm::DbErr => AutodiscoveryError::Db);
 /// Returns `true` if a new rule was inserted, `false` if the rule already
 /// existed (including the case where a concurrent request inserted the same
 /// rule between our call and the DB write).
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn create_or_ignore_ignore_rule(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -72,6 +73,7 @@ pub async fn create_or_ignore_ignore_rule(
 }
 
 /// List autodiscovery ignore rules for a tenant, with optional plugin-config filter.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn list_ignore_rules(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -144,6 +146,7 @@ pub async fn list_ignore_rules(
 ///
 /// Returns `true` if a row was deleted, `false` if the rule was not found
 /// for this tenant.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn delete_ignore_rule(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -167,6 +170,7 @@ pub async fn delete_ignore_rule(
 /// All `host_software_items` links for the discarded items are hard-deleted so that
 /// subsequent discovery runs treat those packages as new discoveries rather than
 /// silently refreshing the version on an orphaned link.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn discard_pending_items(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -295,6 +299,7 @@ pub async fn discard_pending_items(
 /// active config with a given `(tenant_id, name)` pair exists at any time. On a
 /// unique-constraint violation (two concurrent auto-creates racing), the function
 /// re-queries by name and returns the winner's ID.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn find_or_create_default_plugin_config(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -384,6 +389,7 @@ pub async fn find_or_create_default_plugin_config(
 /// 2. **Config-ID-based**: Items with empty `targets` use the pre-existing
 ///    `plugin_config_id` from the result for all three standard roles.
 #[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn process_discovery_results(
     db: &sea_orm::DatabaseConnection,
     agent_id: Uuid,

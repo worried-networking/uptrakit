@@ -38,6 +38,7 @@ struct ActiveUpdateRow {
 /// # Errors
 ///
 /// Returns a [`sea_orm::DbErr`] if any database query fails.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn load_software_states_for_tenant(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -219,6 +220,7 @@ struct HistoryHostIdRow {
 /// # Errors
 ///
 /// Returns a [`sea_orm::DbErr`] if any database query fails.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn load_host_package_host_states_for_tenant(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,

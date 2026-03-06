@@ -63,6 +63,7 @@ fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
 // ── Tenant-wide allowlist ─────────────────────────────────────────────────────
 
 /// List all tenant-wide discovery allowlist entries.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn list_tenant_allowlist(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -89,6 +90,7 @@ pub async fn list_tenant_allowlist(
 /// returns the existing entry. Unique constraint violations from concurrent
 /// inserts are handled gracefully via a follow-up SELECT.
 /// Rejects `Other`/unknown plugin types and types without `DiscoverLocalSoftware`.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn add_tenant_allowlist_entry(
     ops: &dyn PluginOps,
     db: &DatabaseConnection,
@@ -159,6 +161,7 @@ pub async fn add_tenant_allowlist_entry(
 /// Remove a tenant-wide discovery allowlist entry by ID.
 ///
 /// Returns `true` if deleted, `false` if not found.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn remove_tenant_allowlist_entry(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -179,6 +182,7 @@ pub async fn remove_tenant_allowlist_entry(
 /// Returns an empty set when no entries exist (unconfigured → all allowed).
 /// On database failure, logs a warning and falls back to an empty set so that
 /// discovery proceeds unfiltered rather than silently failing.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn load_tenant_allowlist_set(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -202,6 +206,7 @@ pub async fn load_tenant_allowlist_set(
 ///
 /// `tenant_id` is used for access scoping — only entries belonging to that tenant
 /// are returned.
+#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn list_host_allowlist(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -231,6 +236,7 @@ pub async fn list_host_allowlist(
 /// returns the existing entry. Unique constraint violations from concurrent
 /// inserts are handled gracefully via a follow-up SELECT.
 /// Rejects `Other`/unknown plugin types and types without `DiscoverLocalSoftware`.
+#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn add_host_allowlist_entry(
     ops: &dyn PluginOps,
     db: &DatabaseConnection,
@@ -309,6 +315,7 @@ pub async fn add_host_allowlist_entry(
 ///
 /// `tenant_id` and `host_id` are used for access scoping.
 /// Returns `true` if deleted, `false` if not found.
+#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn remove_host_allowlist_entry(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -331,6 +338,7 @@ pub async fn remove_host_allowlist_entry(
 /// Returns an empty set when no entries exist.
 /// On database failure, logs a warning and falls back to an empty set so that
 /// discovery proceeds unfiltered rather than silently failing.
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn load_host_allowlist_set(db: &DatabaseConnection, host_id: Uuid) -> HashSet<String> {
     match host_discovery_allowlist::Entity::find()
         .filter(host_discovery_allowlist::Column::HostId.eq(host_id))

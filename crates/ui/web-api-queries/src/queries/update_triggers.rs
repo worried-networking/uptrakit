@@ -229,6 +229,7 @@ fn build_plugin_assignment(
 /// 6. Load role-specific plugin assignments (`execute_update`, `detect_version`,
 ///    `fetch_releases`).
 #[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub(crate) async fn load_target_for_dispatch(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -317,6 +318,7 @@ pub(crate) async fn load_target_for_dispatch(
 /// Returns a [`ValidatedUpdateTarget`] containing all loaded data needed for
 /// the subsequent record creation and dispatch steps.
 #[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn validate_update_preconditions(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -377,6 +379,7 @@ pub async fn validate_update_preconditions(
 /// Accepts any `ConnectionTrait` implementor (bare `DatabaseConnection` or a
 /// SeaORM transaction) so callers can run this inside or outside a transaction.
 #[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all)]
 pub async fn create_update_history_record<C: ConnectionTrait>(
     db: &C,
     params: &CreateUpdateRecordParams<'_>,
@@ -414,6 +417,7 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
 /// to the agent via `NotificationService`.
 ///
 /// Returns `true` if the agent was locally connected at dispatch time.
+#[tracing::instrument(skip_all)]
 #[tracing::instrument(skip_all)]
 pub async fn dispatch_update_to_agent(
     notifier: &dyn ServiceNotifier,
@@ -493,6 +497,7 @@ pub async fn dispatch_update_to_agent(
 ///
 /// Returns a [`TriggerUpdateError`] describing the first validation failure or
 /// database error encountered.
+#[tracing::instrument(skip_all)]
 #[tracing::instrument(skip_all)]
 pub async fn trigger_update_for_host(
     db: &DatabaseConnection,

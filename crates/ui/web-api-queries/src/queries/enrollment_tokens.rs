@@ -41,6 +41,7 @@ fn model_to_response(m: enrollment_token::Model) -> EnrollmentTokenResponse {
 }
 
 /// Insert a new enrollment token and return the model.
+#[tracing::instrument(skip_all)]
 pub async fn create_enrollment_token(
     tenant_db: &TenantDb,
     params: CreateTokenParams<'_>,
@@ -73,6 +74,7 @@ pub async fn create_enrollment_token(
 }
 
 /// List enrollment tokens for this tenant, ordered by `created_at` desc.
+#[tracing::instrument(skip_all)]
 pub async fn list_enrollment_tokens(
     tenant_db: &TenantDb,
     pagination: &uptrakit_web_api_types::pagination::PaginationParams,
@@ -96,6 +98,7 @@ pub async fn list_enrollment_tokens(
 }
 
 /// Get a single enrollment token by ID.
+#[tracing::instrument(skip_all)]
 pub async fn get_enrollment_token(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -110,6 +113,7 @@ pub async fn get_enrollment_token(
 
 /// Soft-revoke a token by setting `revoked_at = now()`.
 /// Returns `true` if a token was found and revoked.
+#[tracing::instrument(skip_all)]
 pub async fn revoke_enrollment_token(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -130,6 +134,7 @@ pub async fn revoke_enrollment_token(
 
 /// Find all active tokens for a tenant: not revoked, not expired, uses remaining.
 /// Used during enrollment to verify a provided token against all active tokens.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn find_active_tokens(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -156,6 +161,7 @@ pub async fn find_active_tokens(
 }
 
 /// Atomically increment `current_uses` on a token.
+#[tracing::instrument(skip_all, fields(%token_id))]
 pub async fn increment_token_uses(
     db: &sea_orm::DatabaseConnection,
     token_id: Uuid,
@@ -172,6 +178,7 @@ pub async fn increment_token_uses(
 }
 
 /// Count active tokens for a tenant (for the combined settings summary).
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn count_active_tokens(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,

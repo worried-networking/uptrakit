@@ -162,6 +162,7 @@ pub fn validate_hooks_internal(
 
 /// Find a non-deactivated plugin config by ID, scoped to a tenant.
 /// Returns the raw model — intended for use when the secrets must remain unmasked.
+#[tracing::instrument(skip_all)]
 pub async fn find_raw_active_config(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -176,6 +177,7 @@ pub async fn find_raw_active_config(
 
 /// Same as [`find_raw_active_config`] but accepts an arbitrary `ConnectionTrait`
 /// so it can be called inside transactions.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub(crate) async fn find_raw_active_config_txn(
     db: &impl ConnectionTrait,
     tenant_id: Uuid,
@@ -194,6 +196,7 @@ pub(crate) async fn find_raw_active_config_txn(
 
 /// Create a new plugin configuration and return the masked response.
 /// Validation (name, plugin-specific config, hooks) is the caller's responsibility.
+#[tracing::instrument(skip_all)]
 pub async fn create_plugin_config(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
@@ -226,6 +229,7 @@ pub async fn create_plugin_config(
     })
 }
 
+#[tracing::instrument(skip_all)]
 pub async fn list_plugin_configs(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
@@ -260,6 +264,7 @@ pub async fn list_plugin_configs(
 }
 
 /// Returns `None` if the config is not found or is deactivated.
+#[tracing::instrument(skip_all)]
 pub async fn get_plugin_config(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
@@ -274,6 +279,7 @@ pub async fn get_plugin_config(
 
 /// Partial update. Handles secret restoration and plugin-specific validation internally.
 /// Returns the updated response, or an error describing what went wrong.
+#[tracing::instrument(skip_all)]
 pub async fn update_plugin_config(
     ops: &dyn PluginOps,
     tenant_db: &TenantDb,
@@ -333,6 +339,7 @@ pub async fn update_plugin_config(
 
 /// Soft-delete a plugin configuration.
 /// Returns `true` if deleted, `false` if not found.
+#[tracing::instrument(skip_all)]
 pub async fn delete_plugin_config(tenant_db: &TenantDb, id: Uuid) -> Result<bool> {
     let config = match find_raw_active_config(tenant_db, id).await? {
         Some(c) => c,

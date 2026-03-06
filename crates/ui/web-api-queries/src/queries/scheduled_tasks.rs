@@ -69,6 +69,7 @@ fn compute_next_run(cron_expr: &str, after: OffsetDateTime) -> Option<OffsetDate
 
 // --- Public query functions ---
 
+#[tracing::instrument(skip_all)]
 pub async fn list_scheduled_tasks(tenant_db: &TenantDb) -> Result<Vec<ScheduledTaskResponse>> {
     let tasks = tenant_db
         .find::<scheduled_task::Entity>()
@@ -79,6 +80,7 @@ pub async fn list_scheduled_tasks(tenant_db: &TenantDb) -> Result<Vec<ScheduledT
 }
 
 /// Returns `None` if the task is not found.
+#[tracing::instrument(skip_all)]
 pub async fn get_scheduled_task(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -92,6 +94,7 @@ pub async fn get_scheduled_task(
 }
 
 /// Update a scheduled task.
+#[tracing::instrument(skip_all)]
 pub async fn update_scheduled_task(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -140,6 +143,7 @@ pub async fn update_scheduled_task(
 
 /// Force immediate execution by setting `next_run_at` to now.
 /// Returns `true` if the task was found and updated, `false` if not found.
+#[tracing::instrument(skip_all)]
 pub async fn trigger_scheduled_task(tenant_db: &TenantDb, id: Uuid) -> Result<bool> {
     // Verify task exists for this tenant before issuing the bulk update.
     if tenant_db

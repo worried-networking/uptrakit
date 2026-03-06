@@ -73,6 +73,7 @@ fn model_to_response(m: service::Model) -> ServiceResponse {
 
 // --- Public query functions ---
 
+#[tracing::instrument(skip_all)]
 pub async fn list_services(
     tenant_db: &TenantDb,
     query: &ListServicesQuery,
@@ -111,6 +112,7 @@ pub async fn list_services(
 }
 
 /// Returns `None` if not found or deactivated.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn get_active_service(tenant_db: &TenantDb, id: Uuid) -> Result<Option<ServiceResponse>> {
     let svc = tenant_db
         .find_by_id::<service::Entity, _>(id)
@@ -129,6 +131,7 @@ pub async fn get_active_service(tenant_db: &TenantDb, id: Uuid) -> Result<Option
 /// - `Some(v)` — set column to `v`
 ///
 /// Returns `None` if the service is not found.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn update_service_settings(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -163,6 +166,7 @@ pub async fn update_service_settings(
 }
 
 /// Approve a pending service.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn approve_service(tenant_db: &TenantDb, id: Uuid) -> Result<ServiceResponse> {
     let svc = tenant_db
         .find_by_id::<service::Entity, _>(id)
@@ -187,6 +191,7 @@ pub async fn approve_service(tenant_db: &TenantDb, id: Uuid) -> Result<ServiceRe
 }
 
 /// Reject a pending service.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn reject_service(tenant_db: &TenantDb, id: Uuid) -> Result<ServiceResponse> {
     let svc = tenant_db
         .find_by_id::<service::Entity, _>(id)
@@ -218,6 +223,7 @@ pub async fn reject_service(tenant_db: &TenantDb, id: Uuid) -> Result<ServiceRes
 /// state where certificates are not revoked and the CRL is not updated.
 ///
 /// Returns `true` if the service was deactivated, `false` if not found.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn deactivate_service(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -269,6 +275,7 @@ pub async fn deactivate_service(
 ///
 /// The caller must verify that the target is not currently connected before
 /// calling this function (pass `target_connected = true` to abort cleanly).
+#[tracing::instrument(skip_all)]
 pub async fn merge_service(
     tenant_db: &TenantDb,
     target_uuid: Uuid,

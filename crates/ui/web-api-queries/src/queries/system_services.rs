@@ -82,6 +82,7 @@ fn model_to_response(m: system_service::Model) -> SystemServiceResponse {
 // --- Public query functions ---
 
 /// List system services with optional filters and pagination.
+#[tracing::instrument(skip_all)]
 pub async fn list_system_services(
     db: &DatabaseConnection,
     query: &ListSystemServicesQuery,
@@ -115,6 +116,7 @@ pub async fn list_system_services(
 }
 
 /// Returns `None` if not found or deactivated.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn get_active_system_service(
     db: &DatabaseConnection,
     id: Uuid,
@@ -135,6 +137,7 @@ pub async fn get_active_system_service(
 /// - `Some(v)` — set column to `v`
 ///
 /// Returns `None` if the service is not found.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn update_system_service_settings(
     db: &DatabaseConnection,
     id: Uuid,
@@ -168,6 +171,7 @@ pub async fn update_system_service_settings(
 }
 
 /// Approve a pending system service.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn approve_system_service(
     db: &DatabaseConnection,
     id: Uuid,
@@ -194,6 +198,7 @@ pub async fn approve_system_service(
 }
 
 /// Reject a pending system service.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn reject_system_service(
     db: &DatabaseConnection,
     id: Uuid,
@@ -232,6 +237,7 @@ pub async fn reject_system_service(
 /// `bump_revocation_version` because that function is tenant-scoped. The
 /// calling route handler is responsible for triggering `revocation_notify`
 /// and requesting a CRL renewal.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn deactivate_system_service(db: &DatabaseConnection, id: Uuid) -> Result<bool> {
     let txn = db.begin().await.context_to()?;
 

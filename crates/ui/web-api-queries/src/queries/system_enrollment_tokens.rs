@@ -32,6 +32,7 @@ fn model_to_response(m: system_enrollment_token::Model) -> SystemEnrollmentToken
 }
 
 /// Insert a new system enrollment token and return the model.
+#[tracing::instrument(skip_all)]
 pub async fn create_system_enrollment_token(
     db: &sea_orm::DatabaseConnection,
     params: CreateSystemTokenParams<'_>,
@@ -53,6 +54,7 @@ pub async fn create_system_enrollment_token(
 }
 
 /// List all system enrollment tokens, ordered by `created_at` desc.
+#[tracing::instrument(skip_all)]
 pub async fn list_system_enrollment_tokens(
     db: &sea_orm::DatabaseConnection,
     pagination: &uptrakit_web_api_types::pagination::PaginationParams,
@@ -76,6 +78,7 @@ pub async fn list_system_enrollment_tokens(
 }
 
 /// Get a single system enrollment token by ID.
+#[tracing::instrument(skip_all)]
 pub async fn get_system_enrollment_token(
     db: &sea_orm::DatabaseConnection,
     id: Uuid,
@@ -89,6 +92,7 @@ pub async fn get_system_enrollment_token(
 
 /// Soft-revoke a system enrollment token by setting `revoked_at = now()`.
 /// Returns `true` if a token was found and revoked.
+#[tracing::instrument(skip_all)]
 pub async fn revoke_system_enrollment_token(
     db: &sea_orm::DatabaseConnection,
     id: Uuid,
@@ -108,6 +112,7 @@ pub async fn revoke_system_enrollment_token(
 
 /// Find all active system enrollment tokens: not revoked, not expired, uses remaining.
 /// Used during system service enrollment to verify a provided token.
+#[tracing::instrument(skip_all)]
 pub async fn find_active_system_tokens(
     db: &sea_orm::DatabaseConnection,
 ) -> Result<Vec<system_enrollment_token::Model>, sea_orm::DbErr> {
@@ -132,6 +137,7 @@ pub async fn find_active_system_tokens(
 }
 
 /// Atomically increment `current_uses` on a system enrollment token.
+#[tracing::instrument(skip_all, fields(%token_id))]
 pub async fn increment_system_token_uses(
     db: &sea_orm::DatabaseConnection,
     token_id: Uuid,
@@ -148,6 +154,7 @@ pub async fn increment_system_token_uses(
 }
 
 /// Count active system enrollment tokens (for the global settings summary).
+#[tracing::instrument(skip_all)]
 pub async fn count_active_system_tokens(
     db: &sea_orm::DatabaseConnection,
 ) -> Result<u32, sea_orm::DbErr> {

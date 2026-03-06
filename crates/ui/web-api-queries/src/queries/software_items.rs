@@ -348,6 +348,7 @@ async fn load_item_hosts(
 }
 
 /// Find a non-deactivated software item by ID, scoped to a tenant.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn find_active_item(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -505,6 +506,7 @@ fn validate_assignment(
 // --- Public query functions ---
 
 /// Create a new software item (catalog entry only). Check unique name constraint.
+#[tracing::instrument(skip_all)]
 pub async fn create_software_item(
     tenant_db: &TenantDb,
     req: CreateSoftwareItemRequest,
@@ -544,6 +546,7 @@ pub async fn create_software_item(
     Ok(build_list_response(&inserted, vec![], 0, None, false))
 }
 
+#[tracing::instrument(skip_all)]
 pub async fn list_software_items(
     tenant_db: &TenantDb,
     params: &ListSoftwareItemsParams,
@@ -679,6 +682,7 @@ pub async fn list_software_items(
 }
 
 /// Returns `None` if not found.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn get_software_item(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -707,6 +711,7 @@ pub async fn get_software_item(
 
 /// Partial update -- only `name` and `enabled` are updatable.
 /// Returns `Err(NotFound)` if the item does not exist or is deactivated.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn update_software_item(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -781,6 +786,7 @@ pub async fn update_software_item(
 }
 
 /// Soft-delete a software item. Returns `true` if deleted, `false` if not found.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool> {
     let Some(item) = find_active_item(tenant_db.db(), tenant_db.tenant_id, id).await else {
         return Ok(false);
@@ -798,6 +804,7 @@ pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool
 /// Assign hosts to a software item. Each host carries its own list of role-specific
 /// plugin assignments. Returns the updated detail response, or an error if the item
 /// or a host is not found.
+#[tracing::instrument(skip_all, fields(%id))]
 pub async fn assign_hosts(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -937,6 +944,7 @@ pub async fn assign_hosts(
 }
 
 /// Update a single role assignment for an existing host-software-item pair.
+#[tracing::instrument(skip_all, fields(%id, %host_id))]
 pub async fn update_host_assignment(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -1073,6 +1081,7 @@ pub async fn update_host_assignment(
 /// Unassign a host from a software item.
 /// Returns `true` if removed, `false` if the software item or link was not found.
 /// Cascade deletes will remove the associated `host_software_item_plugins` rows.
+#[tracing::instrument(skip_all, fields(%id, %host_id))]
 pub async fn unassign_host(tenant_db: &TenantDb, id: Uuid, host_id: Uuid) -> Result<bool> {
     if find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
         .await
@@ -1097,6 +1106,7 @@ pub async fn unassign_host(tenant_db: &TenantDb, id: Uuid, host_id: Uuid) -> Res
 
 /// Load the host_software_item link for a specific host assignment.
 /// Used by route handlers to verify the assignment exists.
+#[tracing::instrument(skip_all, fields(%host_id, %software_item_id))]
 pub async fn load_host_assignment(
     db: &sea_orm::DatabaseConnection,
     host_id: Uuid,

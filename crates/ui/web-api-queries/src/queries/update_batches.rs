@@ -69,6 +69,7 @@ pub struct BatchUpdateCandidate {
 }
 
 /// Find all outdated items for a host, optionally filtered by update category.
+#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn find_outdated_items_for_host(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -174,6 +175,7 @@ pub async fn find_outdated_items_for_host(
 }
 
 /// Find all hosts where a software item is outdated.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
 pub async fn find_outdated_hosts_for_item(
     db: &DatabaseConnection,
     tenant_id: Uuid,
@@ -289,6 +291,7 @@ pub struct CreateBatchParams<'a> {
 ///
 /// Returns the `BatchUpdateResponse`. If zero candidates are eligible, returns
 /// a response with `batch_id: None` and `total_created: 0`.
+#[tracing::instrument(skip_all)]
 pub async fn create_batch(
     db: &DatabaseConnection,
     notifier: &dyn ServiceNotifier,
@@ -475,6 +478,7 @@ pub struct BatchCompletionInfo {
 ///
 /// Returns `Some(BatchCompletionInfo)` if the batch just transitioned to a
 /// terminal status, so the caller can dispatch a notification event.
+#[tracing::instrument(skip_all, fields(%batch_id, %host_id))]
 pub async fn dispatch_next_in_batch(
     db: &DatabaseConnection,
     notifier: &dyn ServiceNotifier,
@@ -658,6 +662,7 @@ async fn maybe_complete_batch(
 // ---------------------------------------------------------------------------
 
 /// List batches for a tenant (paginated).
+#[tracing::instrument(skip_all)]
 pub async fn list_batches(
     tenant_db: &TenantDb,
     query: &UpdateBatchListQuery,
@@ -741,6 +746,7 @@ pub async fn list_batches(
 }
 
 /// Get a single batch with its child update details.
+#[tracing::instrument(skip_all, fields(%batch_id))]
 pub async fn get_batch_with_items(
     tenant_db: &TenantDb,
     batch_id: Uuid,
@@ -868,6 +874,7 @@ pub async fn get_batch_with_items(
 /// - Any pending or in-progress host package update already exists for this host.
 /// - No agent is linked to the host, or the agent is not approved.
 /// - A database error occurs.
+#[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
 pub async fn trigger_all_host_package_updates_for_host(
     db: &DatabaseConnection,
     notifier: &dyn ServiceNotifier,

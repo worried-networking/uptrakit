@@ -84,6 +84,7 @@ async fn load_output_lines(
 
 // --- Public query functions ---
 
+#[tracing::instrument(skip_all)]
 pub async fn list_update_history(
     tenant_db: &TenantDb,
     query: &UpdateHistoryQuery,
@@ -213,6 +214,7 @@ pub async fn list_update_history(
 }
 
 /// Returns `None` if the record is not found or its host does not belong to this tenant.
+#[tracing::instrument(skip_all)]
 pub async fn get_update_history(
     tenant_db: &TenantDb,
     id: Uuid,

@@ -37,6 +37,7 @@ fn host_to_response(
     }
 }
 
+#[tracing::instrument(skip_all, fields(%host_id))]
 pub(crate) async fn load_host_agents(tenant_db: &TenantDb, host_id: Uuid) -> Vec<HostAgentSummary> {
     let links = match tenant_db
         .find_via_tenant_join::<service_host::Entity, service::Entity>(
@@ -93,6 +94,7 @@ pub(crate) async fn load_host_agents(tenant_db: &TenantDb, host_id: Uuid) -> Vec
 
 // --- Public query functions ---
 
+#[tracing::instrument(skip_all)]
 pub async fn list_hosts(
     tenant_db: &TenantDb,
     params: &PaginationParams,
@@ -204,6 +206,7 @@ pub async fn list_hosts(
 }
 
 /// Returns `None` if the host is not found or is deactivated.
+#[tracing::instrument(skip_all)]
 pub async fn get_active_host(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -224,6 +227,7 @@ pub async fn get_active_host(
 }
 
 /// Update the host's friendly name. Returns `None` if not found.
+#[tracing::instrument(skip_all)]
 pub async fn update_host(
     tenant_db: &TenantDb,
     id: Uuid,
@@ -253,6 +257,7 @@ pub async fn update_host(
 }
 
 /// Soft-delete a host. Returns `true` if deactivated, `false` if not found.
+#[tracing::instrument(skip_all)]
 pub async fn deactivate_host(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm::DbErr> {
     let Some(h) = tenant_db
         .find_by_id::<host::Entity, _>(id)
