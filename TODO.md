@@ -210,7 +210,7 @@ Main functionality that delivers the core value proposition.
 - [ ] Implement channel support (stable, beta, nightly)
 - [ ] Cache latest version responses with TTL (per-host latest version is now on `host_software_items`)
 - [x] Handle API rate limiting
-- [ ] Add retry logic for failed checks
+- [x] Add retry logic for failed checks
 
 ### Plugin Implementations
 
@@ -806,7 +806,7 @@ Comprehensive security hardening.
 
 - [x] Implement rate limiting for all endpoints
 - [x] Add brute force protection
-- [ ] Implement security headers
+- [x] Implement security headers
 - [x] Add input validation and sanitization
 - [x] Implement secrets management
   - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory in production; dev-only `--allow-plaintext-secrets`
@@ -865,7 +865,7 @@ Ensuring robustness and maintainability.
 - [x] Implement connection retry logic with exponential backoff
 - [ ] Add graceful degradation for partial failures
 - [ ] Implement circuit breaker pattern for external services
-- [ ] Add automatic recovery from transient errors
+- [x] Add automatic recovery from transient errors
 - [ ] Implement idempotent operations
 - [ ] Add operation replay capabilities
 
@@ -888,8 +888,8 @@ Ensuring robustness and maintainability.
 
 ### Reliability
 
-- [x] Implement health check endpoints (`/healthz` returns `"ok"`; no DB check or structured status)
-- [ ] Add readiness probes
+- [x] Implement health check endpoints (`/healthz` liveness + `/readyz` readiness with DB and CA checks)
+- [x] Add readiness probes
 - [x] Implement graceful shutdown (agent waits for in-flight updates before disconnecting)
 - [ ] Add state recovery on restart
 - [ ] Implement data integrity checks

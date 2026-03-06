@@ -104,7 +104,7 @@ uptrakit/
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-packages, services, software-items, plugin-configs, autodiscovery, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
-│       ├── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API layer; routes, middleware, AppState, router, notification_service; event_broadcaster.rs (per-tenant admin event SSE), device_flow_broadcaster.rs (device auth SSE); re-exports auth/queries from sibling crates; test_harness/ shared integration test fixtures (TestApp, TestClient, DB/HTTP helpers); integration_tests/ REST API + WebSocket integration tests (#[cfg(all(test, feature = "db-sqlite"))])
+│       ├── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API layer; routes, middleware (security_headers, request_id, request_log, resolve_ip, rate_limit, resolve_proxy_headers, require_auth, audit_log, permission, tenant_context), AppState, router; /healthz (liveness) + /readyz (readiness: DB + CA checks); event_broadcaster.rs (per-tenant admin event SSE), device_flow_broadcaster.rs (device auth SSE); re-exports auth/queries from sibling crates; test_harness/ shared integration test fixtures (TestApp, TestClient, DB/HTTP helpers); integration_tests/ REST API + WebSocket integration tests (#[cfg(all(test, feature = "db-sqlite"))])
 │       ├── web-api-auth/               # uptrakit-web-api-auth                  (lib)  — authentication subsystem: auth module (JWT, sessions, OIDC, tokens, permissions), SettingKey, settings_store
 │       └── web-api-queries/            # uptrakit-web-api-queries               (lib)  — database query logic: all query modules, TenantDb, ServiceNotifier trait
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
@@ -533,8 +533,11 @@ for user review. Key invariants:
    - `RefreshPackageIndex` — the plugin can refresh/sync a local package index from remote sources.
    - `DetectHostCompatibility` — the plugin implements `detect_host_compatibility()` which returns a
      `HostCompatibility` enum (`Compatible` or `Incompatible { reason: String }`). Both
-     `HostCompatibility` and `PluginError` carry `#[non_exhaustive]`; external match sites must
-     include a wildcard arm (see `coding-standards.md` § Public Enum Extensibility). Implemented by:
+     `HostCompatibility` and `PluginError` carry `#[non_exhaustive]`; `PluginError::is_retryable()`
+     classifies transient errors (command spawn/wait, timeouts, capture failures, internal errors)
+     for the version check retry logic in `crates/shared/agent-core/src/version_check.rs`.
+     External match sites must include a wildcard arm (see `coding-standards.md` § Public Enum
+     Extensibility). Implemented by:
      `AptPlugin` (checks `which apt-get`) and `HomebrewPlugin` (checks `which brew`).
    - `PreUpdateHook` — the plugin implements `pre_update_hook(context: &UpdateHookContext)` which
      returns `PreUpdateHookResult` (`Proceed` or `Abort { reason: String }`). An `Abort` cancels the

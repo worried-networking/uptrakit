@@ -21,6 +21,36 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
   reflected in the OpenAPI spec via the `x-required-permission` extension on every protected endpoint.
   See [Authentication and Authorization](../security/auth-and-authorization.md) for the full permission model.
 
+## Health and Readiness Endpoints
+
+Two unauthenticated probe endpoints are available on both the main HTTPS router and the
+PKI HTTP router:
+
+- `GET /healthz` — Liveness probe. Returns `200 OK` with body `ok`. No dependency checks.
+- `GET /readyz` — Readiness probe. Checks database connectivity and CA bundle availability.
+  Returns `200` when all checks pass, `503 Service Unavailable` when any check fails.
+
+### `/readyz` response format
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "database": "ok",
+    "ca": "ok"
+  }
+}
+```
+
+When a check fails, its value is `"unavailable"` and `status` becomes `"unavailable"`.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/health.rs` | `healthz` and `readyz` handlers |
+| `crates/ui/web-api/src/router.rs` | Route registration on both routers |
+
 ## Authentication Endpoints
 
 - `POST /api/v1/auth/device`: start a device authorization flow (RFC 8628). Returns `device_code`, `user_code`, `verification_url`, `expires_in`,

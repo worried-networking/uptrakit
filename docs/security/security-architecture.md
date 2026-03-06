@@ -10,6 +10,26 @@ Uptrakit follows a defense-in-depth model for agents, controller, and proxies.
 
 See the other security docs for implementation detail on PKI, cryptography, secrets, reverse proxies, and developer expectations.
 
+## Security Response Headers
+
+The controller sets the following security headers on every HTTP response via
+the `security_headers` middleware (`crates/ui/web-api/src/middleware/security_headers.rs`).
+The middleware is applied as the outermost layer on both the main HTTPS router and the
+PKI HTTP router.
+
+| Header | Value | Purpose |
+| --- | --- | --- |
+| `X-Content-Type-Options` | `nosniff` | Prevents MIME-type sniffing |
+| `X-Frame-Options` | `DENY` | Blocks framing (clickjacking protection) |
+| `X-XSS-Protection` | `0` | Disables legacy XSS filter (can introduce vulnerabilities) |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Limits referrer leakage |
+| `Content-Security-Policy` | `default-src 'self'; frame-ancestors 'none'` | Restricts resource origins |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` | Enforces HTTPS |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | Disables unnecessary browser APIs |
+
+See also [coding-standards.md](../development/coding-standards.md) for middleware ordering
+conventions.
+
 ## Agent Host Identity (Machine ID)
 
 Each agent identifies its host using a persistent machine identifier read from
