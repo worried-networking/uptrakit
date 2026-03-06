@@ -424,6 +424,13 @@ async fn run(args: cli::Args) -> Result<()> {
         }
     };
 
+    // Build plugin_ops and seed the extension registry with plugin-provided manifests.
+    let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
+        Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry);
+    let extension_manifests = plugin_ops.extension_manifests();
+    let extension_registry =
+        Arc::new(uptrakit_web_api::extension_registry::ExtensionRegistry::new(extension_manifests));
+
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)
         .ca_key_store(ca_key_store)
@@ -449,7 +456,9 @@ async fn run(args: cli::Args) -> Result<()> {
         .batch_progress_broadcaster(batch_progress_broadcaster)
         .shutdown_token(shutdown_token.clone())
         .audit_log_filter(audit_filter)
-        .audit_log_dispatcher(audit_dispatcher);
+        .audit_log_dispatcher(audit_dispatcher)
+        .plugin_ops(plugin_ops)
+        .extension_registry(extension_registry);
 
     #[cfg(feature = "oidc")]
     let builder = builder

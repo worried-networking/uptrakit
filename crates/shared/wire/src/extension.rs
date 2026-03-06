@@ -36,6 +36,37 @@ pub struct ExtensionManifest {
     pub ui: ExtensionUi,
 }
 
+impl ExtensionManifest {
+    /// Create a new extension manifest.
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        placement: ExtensionPlacement,
+        ui: ExtensionUi,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            placement,
+            required_permission: String::new(),
+            targeting: ExtensionTargeting::default(),
+            ui,
+        }
+    }
+
+    /// Set the required permission.
+    pub fn with_permission(mut self, permission: impl Into<String>) -> Self {
+        self.required_permission = permission.into();
+        self
+    }
+
+    /// Set the targeting mode.
+    pub fn with_targeting(mut self, targeting: ExtensionTargeting) -> Self {
+        self.targeting = targeting;
+        self
+    }
+}
+
 /// How actions should be routed to service instances.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +192,23 @@ pub struct TableColumn {
     pub sortable: bool,
 }
 
+impl TableColumn {
+    /// Create a new table column.
+    pub fn new(key: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            sortable: false,
+        }
+    }
+
+    /// Set whether this column is sortable.
+    pub fn sortable(mut self) -> Self {
+        self.sortable = true;
+        self
+    }
+}
+
 /// Action descriptor exposed by an extension.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +229,44 @@ pub struct ActionDef {
     /// Timeout in seconds for the action invocation. `None` uses the default (30s).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u32>,
+}
+
+impl ActionDef {
+    /// Create a new action definition.
+    pub fn new(action_id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            action_id: action_id.into(),
+            label: label.into(),
+            ui: None,
+            permission: String::new(),
+            destructive: false,
+            timeout_seconds: None,
+        }
+    }
+
+    /// Set the action UI (form or wizard shown before invocation).
+    pub fn with_ui(mut self, ui: ActionUi) -> Self {
+        self.ui = Some(ui);
+        self
+    }
+
+    /// Set the required permission.
+    pub fn with_permission(mut self, permission: impl Into<String>) -> Self {
+        self.permission = permission.into();
+        self
+    }
+
+    /// Mark this action as destructive.
+    pub fn destructive(mut self) -> Self {
+        self.destructive = true;
+        self
+    }
+
+    /// Set the timeout in seconds.
+    pub fn with_timeout(mut self, seconds: u32) -> Self {
+        self.timeout_seconds = Some(seconds);
+        self
+    }
 }
 
 /// UI shown before invoking an action.
@@ -220,6 +306,13 @@ pub struct FormDef {
     pub fields: Vec<FieldDef>,
 }
 
+impl FormDef {
+    /// Create a new form definition.
+    pub fn new(fields: Vec<FieldDef>) -> Self {
+        Self { fields }
+    }
+}
+
 /// A single form field.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,6 +339,40 @@ pub struct FieldDef {
     /// Options for `Select` field type.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<SelectOption>,
+}
+
+impl FieldDef {
+    /// Create a new field definition.
+    pub fn new(key: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            field_type: FieldType::default(),
+            required: false,
+            placeholder: None,
+            help_text: None,
+            default_value: None,
+            options: vec![],
+        }
+    }
+
+    /// Set the field type.
+    pub fn with_type(mut self, field_type: FieldType) -> Self {
+        self.field_type = field_type;
+        self
+    }
+
+    /// Mark this field as required.
+    pub fn required(mut self) -> Self {
+        self.required = true;
+        self
+    }
+
+    /// Set placeholder text.
+    pub fn with_placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = Some(placeholder.into());
+        self
+    }
 }
 
 /// Input field type.

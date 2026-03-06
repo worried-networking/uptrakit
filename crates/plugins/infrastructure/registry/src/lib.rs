@@ -117,6 +117,41 @@ pub trait PluginOps: Send + Sync + 'static {
     fn extension_manifests(&self) -> Vec<uptrakit_internal_wire::extension::ExtensionManifest> {
         vec![]
     }
+
+    /// Handle an extension action invocation for a plugin-backed extension.
+    ///
+    /// The controller calls this when an action is invoked on an extension
+    /// owned by `ExtensionOwner::Plugin`. The plugin registry dispatches to
+    /// the appropriate plugin based on the extension ID prefix.
+    ///
+    /// Returns `Ok(json)` on success or `Err(message)` on failure.
+    /// The route handler maps these to HTTP 200/422 respectively.
+    fn handle_extension_action<'a>(
+        &'a self,
+        _ctx: &'a ExtensionActionContext<'a>,
+        _extension_id: &'a str,
+        _action_id: &'a str,
+        _params: serde_json::Value,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::result::Result<serde_json::Value, String>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Err("plugin-backed extension actions not supported".to_string()) })
+    }
+}
+
+/// Context passed to plugin extension action handlers.
+///
+/// Provides access to the database connection and tenant/user context
+/// from the authenticated HTTP request.
+pub struct ExtensionActionContext<'a> {
+    /// Database connection for queries.
+    pub db: &'a sea_orm::DatabaseConnection,
+    /// Tenant ID from the authenticated request (if available).
+    pub tenant_id: Option<uuid::Uuid>,
 }
 
 impl PluginOps for PluginRegistry {
@@ -166,5 +201,25 @@ impl PluginOps for PluginRegistry {
 
     fn sample_config_for_str(&self, plugin_type: &str) -> serde_json::Value {
         PluginRegistry::sample_config_str(plugin_type)
+    }
+
+    fn extension_manifests(&self) -> Vec<uptrakit_internal_wire::extension::ExtensionManifest> {
+        uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests()
+    }
+
+    fn handle_extension_action<'a>(
+        &'a self,
+        ctx: &'a ExtensionActionContext<'a>,
+        extension_id: &'a str,
+        action_id: &'a str,
+        params: serde_json::Value,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::result::Result<serde_json::Value, String>>
+                + Send
+                + 'a,
+        >,
+    > {
+        PluginRegistry::handle_extension_action(ctx, extension_id, action_id, params)
     }
 }

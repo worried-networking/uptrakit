@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use uptrakit_internal_wire::extension::ExtensionManifest;
+use uptrakit_plugin_infrastructure_registry::ExtensionActionContext;
 
 use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
@@ -141,11 +142,20 @@ pub async fn invoke_action(
             );
         }
         ExtensionOwner::Plugin => {
-            return error_response_with_code(
-                StatusCode::NOT_IMPLEMENTED,
-                "Plugin-backed extension actions are not yet supported",
-                "not_implemented",
-            );
+            let ctx = ExtensionActionContext {
+                db: state.db(),
+                tenant_id: None, // TODO: extract from auth context when tenant-scoped
+            };
+            return match state
+                .plugin_ops
+                .handle_extension_action(&ctx, &extension_id, &action_id, params)
+                .await
+            {
+                Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+                Err(msg) => {
+                    error_response_with_code(StatusCode::UNPROCESSABLE_ENTITY, msg, "action_failed")
+                }
+            };
         }
         ExtensionOwner::Service { .. } => {
             // Proceed below.
