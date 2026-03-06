@@ -94,6 +94,12 @@ pub async fn run(cfg: ServerOptions) -> Result<()> {
     router = router.layer(axum_mw::from_fn(
         uptrakit_web_api::middleware::request_id::request_id,
     ));
+    // security_headers sets standard security response headers. Listed last
+    // so it executes first (outermost layer), ensuring all responses carry
+    // the headers regardless of which inner handler served them.
+    router = router.layer(axum_mw::from_fn(
+        uptrakit_web_api::middleware::security_headers::security_headers,
+    ));
 
     let rustls_acceptor = axum_server::tls_rustls::RustlsAcceptor::new(cfg.rustls_config);
     let mtls_acceptor = MtlsAcceptor::new(rustls_acceptor);
