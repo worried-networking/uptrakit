@@ -730,6 +730,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(crate::routes::service_ws::service_ws),
         )
         .route("/healthz", get(crate::routes::health::healthz))
+        .route("/readyz", get(crate::routes::health::readyz))
         .route("/api/v1/pki/ca.crt", get(crate::routes::ca::ca_cert))
         .route("/api/v1/pki/ca.crl", get(crate::routes::ca::ca_crl))
         .route(
@@ -786,6 +787,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 pub fn build_pki_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(crate::routes::health::healthz))
+        .route("/readyz", get(crate::routes::health::readyz))
         .route("/api/v1/pki/ca.crt", get(crate::routes::ca::ca_cert))
         .route("/api/v1/pki/ca.crl", get(crate::routes::ca::ca_crl))
         .route(
@@ -804,5 +806,8 @@ pub fn build_pki_router(state: Arc<AppState>) -> Router {
             crate::middleware::request_log::request_log,
         ))
         .layer(axum_mw::from_fn(crate::middleware::request_id::request_id))
+        .layer(axum_mw::from_fn(
+            crate::middleware::security_headers::security_headers,
+        ))
         .with_state(state)
 }
