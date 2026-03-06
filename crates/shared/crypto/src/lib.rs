@@ -25,6 +25,8 @@
 //!
 //! See `docs/security/secrets-and-encryption.md` for operational details.
 
+pub mod ecies;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::OnceLock;

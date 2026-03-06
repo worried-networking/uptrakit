@@ -6595,7 +6595,9 @@ name = "uptrakit-crypto"
 version = "0.0.1"
 dependencies = [
  "aws-lc-rs",
+ "base64 0.22.1",
  "rand 0.9.2",
+ "rcgen",
  "rootcause",
  "sea-orm",
  "sha2 0.10.9",
