@@ -15,6 +15,12 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(all(test, not(feature = "sea-orm")), derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateStatus {
+    /// The update is in a batch queue and not yet dispatched — waiting for the
+    /// previous item on the same host to complete. This is not an active state
+    /// (no in-progress work on the host), but represents a committed intent to
+    /// update. Terminal states are [`Self::Completed`] and [`Self::Failed`].
+    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "queued"))]
+    Queued,
     /// The update is waiting to be dispatched.
     #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "pending"))]
     Pending,
@@ -33,6 +39,7 @@ impl UpdateStatus {
     /// Returns the canonical string representation.
     pub const fn as_str(&self) -> &'static str {
         match self {
+            Self::Queued => "queued",
             Self::Pending => "pending",
             Self::InProgress => "in_progress",
             Self::Completed => "completed",
@@ -64,6 +71,7 @@ impl FromStr for UpdateStatus {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "queued" => Ok(Self::Queued),
             "pending" => Ok(Self::Pending),
             "in_progress" => Ok(Self::InProgress),
             "completed" => Ok(Self::Completed),
@@ -113,6 +121,7 @@ mod tests {
 
     #[test]
     fn as_str_values() {
+        assert_eq!(UpdateStatus::Queued.as_str(), "queued");
         assert_eq!(UpdateStatus::Pending.as_str(), "pending");
         assert_eq!(UpdateStatus::InProgress.as_str(), "in_progress");
         assert_eq!(UpdateStatus::Completed.as_str(), "completed");
