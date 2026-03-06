@@ -2,6 +2,7 @@ use axum::extract::Request;
 use axum::http::HeaderValue;
 use axum::middleware::Next;
 use axum::response::Response;
+use tracing::Instrument;
 
 /// Request ID extracted from the `x-request-id` header or generated as UUID v7.
 ///
@@ -38,9 +39,8 @@ pub async fn request_id(mut req: Request, next: Next) -> Response {
         method = %method,
         path = %path,
     );
-    let _guard = span.enter();
 
-    let mut response = next.run(req).await;
+    let mut response = next.run(req).instrument(span).await;
 
     // Propagate request ID to response extensions (for request_log middleware).
     response.extensions_mut().insert(RequestId(id.clone()));
