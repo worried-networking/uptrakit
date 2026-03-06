@@ -104,7 +104,9 @@ pub async fn load_software_states_for_tenant(
             .collect()
     };
 
-    // 5. Bulk-load active update records (Pending or InProgress) for all items.
+    // 5. Bulk-load active update records (Queued, Pending, or InProgress) for all items.
+    //    `Queued` is included because it represents a committed intent to update —
+    //    the host IS going to update even though execution hasn't started yet.
     //    Builds a HashSet<(host_id, software_item_id)> for O(1) lookup.
     let active_updates: HashSet<(Uuid, Uuid)> = UpdateHistory::find()
         .select_only()
@@ -113,6 +115,7 @@ pub async fn load_software_states_for_tenant(
         .filter(update_history::Column::SoftwareItemId.is_in(item_ids.clone()))
         .filter(
             Condition::any()
+                .add(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
                 .add(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
                 .add(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress)),
         )

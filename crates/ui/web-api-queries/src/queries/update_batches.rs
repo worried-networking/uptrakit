@@ -10,7 +10,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, FromQueryResult,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait, sea_query::Expr,
 };
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
@@ -33,6 +33,7 @@ use uuid::Uuid;
 use crate::notifier::ServiceNotifier;
 use crate::queries::update_triggers::{
     CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, ValidatedUpdateTarget,
+    load_target_for_dispatch,
 };
 use crate::queries::update_types::{ActorType, BatchType};
 use crate::tenant_db::TenantDb;
@@ -362,9 +363,27 @@ pub async fn create_batch(
     };
     batch_record.insert(&txn).await.context_to()?;
 
-    // Collect (history_id, index) inside the transaction, then dispatch after commit.
-    let mut history_ids: Vec<Uuid> = Vec::with_capacity(validated.len());
+    // Determine the initial status for each item inside the transaction loop.
+    // The FIRST item per host is inserted as `Pending` and will be dispatched
+    // immediately after commit. Subsequent items for the same host are inserted
+    // as `Queued` and will be promoted to `Pending` (via CAS) by
+    // `dispatch_next_in_batch` as preceding items complete.
+    //
+    // This ensures the partial unique index
+    // `uix_update_history_host_active` (status IN ('pending', 'in_progress'))
+    // is never violated by the batch insertion.
+    let mut first_per_host: HashSet<Uuid> = HashSet::new();
+
+    // Collect (history_id, is_first) pairs inside the transaction, then dispatch
+    // first-per-host items after commit.
+    let mut history_ids: Vec<(Uuid, bool)> = Vec::with_capacity(validated.len());
     for (candidate, _target) in &validated {
+        let is_first = first_per_host.insert(candidate.host_id);
+        let initial_status = if is_first {
+            update_history::UpdateStatus::Pending
+        } else {
+            update_history::UpdateStatus::Queued
+        };
         let update_history_id = super::update_triggers::create_update_history_record(
             &txn,
             &CreateUpdateRecordParams {
@@ -376,22 +395,21 @@ pub async fn create_batch(
                 actor_id: params.actor_id,
                 update_category: &candidate.update_category,
                 batch_id: Some(batch_id),
+                initial_status,
             },
         )
         .await?;
-        history_ids.push(update_history_id);
+        history_ids.push((update_history_id, is_first));
     }
 
     txn.commit().await.context_to()?;
 
-    // Dispatch the first pending update per host (outside the transaction —
-    // WebSocket sends are not transactional).
+    // Dispatch only the first-per-host (Pending) items — Queued items wait for
+    // dispatch_next_in_batch to promote them.
     let mut updates: Vec<BatchUpdateItem> = Vec::new();
-    let mut dispatched_hosts: HashSet<Uuid> = HashSet::new();
 
-    for ((candidate, target), update_history_id) in validated.iter().zip(history_ids) {
-        let trigger_status = if !dispatched_hosts.contains(&candidate.host_id) {
-            dispatched_hosts.insert(candidate.host_id);
+    for ((candidate, target), (update_history_id, is_first)) in validated.iter().zip(history_ids) {
+        let trigger_status = if is_first {
             let connected = super::update_triggers::dispatch_update_to_agent(
                 notifier,
                 target,
@@ -446,8 +464,14 @@ pub struct BatchCompletionInfo {
     pub failed_count: i64,
 }
 
-/// Called after an update completes in a batch. Dispatches the next pending
-/// update for the same host within the batch, and checks if the batch is done.
+/// Called after an update completes in a batch. Dispatches the next queued
+/// update for the same host within the batch (via CAS), and checks if the
+/// batch is done.
+///
+/// **Multi-controller safety:** The transition `Queued → Pending` is performed
+/// atomically with a CAS UPDATE that includes the current status as a filter.
+/// If another controller already promoted the same row, `rows_affected == 0`
+/// and this call skips dispatch without double-dispatching.
 ///
 /// Returns `Some(BatchCompletionInfo)` if the batch just transitioned to a
 /// terminal status, so the caller can dispatch a notification event.
@@ -458,56 +482,86 @@ pub async fn dispatch_next_in_batch(
     host_id: Uuid,
     tenant_id: Uuid,
 ) -> std::result::Result<Option<BatchCompletionInfo>, rootcause::Report<TriggerUpdateError>> {
-    // Find the next Pending update in this batch for this host (ordered by id)
+    // Find the next Queued update in this batch for this host (ordered by id).
+    // We look for Queued (not Pending) because Pending means already dispatched.
     let next = UpdateHistory::find()
         .filter(update_history::Column::BatchId.eq(batch_id))
         .filter(update_history::Column::HostId.eq(host_id))
-        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
         .order_by_asc(update_history::Column::Id)
         .one(db)
         .await
         .context_to()?;
 
-    if let Some(next_record) = next {
-        // Validate and dispatch
-        match super::update_triggers::validate_update_preconditions(
-            db,
-            tenant_id,
-            next_record.host_id,
-            next_record.software_item_id,
+    let Some(next_record) = next else {
+        // No queued items remain for this host — check if the whole batch is done.
+        return maybe_complete_batch(db, batch_id, tenant_id).await;
+    };
+
+    // Atomically promote Queued → Pending (CAS). The partial unique index on
+    // (host_id) WHERE status IN ('pending', 'in_progress') enforces at DB level
+    // that only one active row per host exists. If another controller already
+    // promoted this row, rows_affected == 0 and we skip dispatch.
+    let cas_result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(next_record.id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(update_history::UpdateStatus::Pending),
         )
+        .exec(db)
         .await
-        {
-            Ok(target) => {
-                let _ = super::update_triggers::dispatch_update_to_agent(
-                    notifier,
-                    &target,
-                    DispatchUpdateParams {
-                        update_history_id: next_record.id,
-                        to_version: next_record.to_version,
-                        release_info: None,
-                    },
-                )
-                .await;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    update_id = %next_record.id,
-                    batch_id = %batch_id,
-                    error = %e,
-                    "failed to dispatch next batch update, marking as failed"
-                );
-                // Mark the update as failed so the batch can progress
-                let mut active: update_history::ActiveModel = next_record.into();
-                active.status = Set(update_history::UpdateStatus::Failed);
-                active.completed_at = Set(Some(OffsetDateTime::now_utc()));
-                active.output = Set(format!("dispatch failed: {e}"));
-                active.update(db).await.context_to()?;
-            }
+        .context_to()?;
+
+    if cas_result.rows_affected == 0 {
+        // Another controller already dispatched this item; skip.
+        tracing::debug!(
+            update_id = %next_record.id,
+            batch_id = %batch_id,
+            "CAS missed: another controller already dispatched this queued item, skipping"
+        );
+        return maybe_complete_batch(db, batch_id, tenant_id).await;
+    }
+
+    // Load dispatch data using load_target_for_dispatch — no lock check here
+    // because the CAS already handled concurrency.
+    match load_target_for_dispatch(
+        db,
+        tenant_id,
+        next_record.host_id,
+        next_record.software_item_id,
+    )
+    .await
+    {
+        Ok(target) => {
+            let _ = super::update_triggers::dispatch_update_to_agent(
+                notifier,
+                &target,
+                DispatchUpdateParams {
+                    update_history_id: next_record.id,
+                    to_version: next_record.to_version,
+                    release_info: None,
+                },
+            )
+            .await;
+        }
+        Err(e) => {
+            tracing::warn!(
+                update_id = %next_record.id,
+                batch_id = %batch_id,
+                error = %e,
+                "failed to load dispatch data for next batch update, marking as failed"
+            );
+            // Mark the update as failed so the batch can progress.
+            let mut active: update_history::ActiveModel = next_record.into();
+            active.status = Set(update_history::UpdateStatus::Failed);
+            active.completed_at = Set(Some(OffsetDateTime::now_utc()));
+            active.output = Set(format!("dispatch failed: {e}"));
+            active.update(db).await.context_to()?;
         }
     }
 
-    // Check if all items in the batch are terminal
+    // Check if all items in the batch are terminal.
     maybe_complete_batch(db, batch_id, tenant_id).await
 }
 
@@ -530,6 +584,7 @@ async fn maybe_complete_batch(
     let pending_count = UpdateHistory::find()
         .filter(update_history::Column::BatchId.eq(batch_id))
         .filter(update_history::Column::Status.is_in([
+            update_history::UpdateStatus::Queued,
             update_history::UpdateStatus::Pending,
             update_history::UpdateStatus::InProgress,
         ]))
@@ -744,7 +799,8 @@ pub async fn get_batch_with_items(
             match child.status {
                 update_history::UpdateStatus::Completed => completed_count += 1,
                 update_history::UpdateStatus::Failed => failed_count += 1,
-                update_history::UpdateStatus::Pending
+                update_history::UpdateStatus::Queued
+                | update_history::UpdateStatus::Pending
                 | update_history::UpdateStatus::InProgress => pending_count += 1,
                 _ => {
                     tracing::warn!(
@@ -865,7 +921,22 @@ pub async fn trigger_all_host_package_updates_for_host(
         return Ok(None);
     }
 
-    // 3. Guard: reject if any pending/in-progress update already exists.
+    // 3a. Cross-table guard: reject if any active software-item update exists for this host.
+    let sw_active = UpdateHistory::find()
+        .filter(update_history::Column::HostId.eq(host_id))
+        .filter(update_history::Column::Status.is_in([
+            update_history::UpdateStatus::Pending,
+            update_history::UpdateStatus::InProgress,
+        ]))
+        .count(db)
+        .await
+        .context_to()?;
+
+    if sw_active > 0 {
+        bail!(TriggerUpdateError::HostUpdateInProgress);
+    }
+
+    // 3b. Guard: reject if any pending/in-progress host package update already exists.
     let active_count = HostPackageUpdateHistory::find()
         .filter(host_package_update_history::Column::HostId.eq(host_id))
         .filter(
@@ -878,7 +949,7 @@ pub async fn trigger_all_host_package_updates_for_host(
         .context_to()?;
 
     if active_count > 0 {
-        bail!(TriggerUpdateError::UpdateAlreadyActive);
+        bail!(TriggerUpdateError::HostUpdateInProgress);
     }
 
     // 4. Find the agent linked to this host.
@@ -1041,14 +1112,25 @@ pub async fn trigger_all_host_package_updates_for_host(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, EntityTrait, Set};
+    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, Set};
     use time::OffsetDateTime;
+    use uptrakit_internal_wire::ControllerMessage;
     use uptrakit_shared_db::entity::{
-        host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
-        software_item, tenant,
+        host, host_package, host_software_item, host_software_item_plugin, plugin_config, service,
+        service_host, software_item, tenant, update_history,
     };
     use uptrakit_shared_types::ServiceStatus;
     use uuid::Uuid;
+
+    /// A no-op notifier for tests — always returns `true` (agent locally connected).
+    struct NoopNotifier;
+
+    #[async_trait::async_trait]
+    impl crate::notifier::ServiceNotifier for NoopNotifier {
+        async fn send_to_service(&self, _service_id: &Uuid, _msg: ControllerMessage) -> bool {
+            true
+        }
+    }
 
     async fn setup_db() -> DatabaseConnection {
         let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -1387,5 +1469,421 @@ mod tests {
         assert_eq!(candidates[0].software_item_id, f.item_id);
         assert_eq!(candidates[0].installed_version, "1.0.0");
         assert_eq!(candidates[0].latest_version, "1.1.0");
+    }
+
+    // ── create_batch (per-host Queued status) ───────────────────────────
+
+    /// Helper: insert a second software item + host_software_item + plugin assignment
+    /// on the same host as the base fixture. Returns (item2_id).
+    async fn insert_second_item(db: &DatabaseConnection, f: &Fixture) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let item2_id = Uuid::now_v7();
+        let pc2_id = Uuid::now_v7();
+
+        software_item::ActiveModel {
+            id: Set(item2_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set("test-app-2".to_string()),
+            enabled: Set(true),
+            discovery_state: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host_software_item::ActiveModel {
+            host_id: Set(f.host_id),
+            software_item_id: Set(item2_id),
+            installed_version: Set(Some("2.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            latest_version: Set(Some("2.1.0".to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("security".to_string()),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        plugin_config::ActiveModel {
+            id: Set(pc2_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set("test-plugin-2".to_string()),
+            plugin_type: Set("releases_github".to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(f.host_id),
+            software_item_id: Set(item2_id),
+            plugin_config_id: Set(pc2_id),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("org/repo2".to_string()),
+            config_override: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        item2_id
+    }
+
+    /// When a batch contains two outdated items on the same host, the first must
+    /// be inserted as `Pending` and the second as `Queued`.
+    #[tokio::test]
+    async fn create_batch_multiple_items_same_host_queued() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let item2_id = insert_second_item(&db, &f).await;
+
+        let candidates = vec![
+            BatchUpdateCandidate {
+                software_item_id: f.item_id,
+                software_item_name: "test-app".to_string(),
+                host_id: f.host_id,
+                host_name: "Host 001".to_string(),
+                installed_version: "1.0.0".to_string(),
+                latest_version: "1.1.0".to_string(),
+                update_category: "security".to_string(),
+            },
+            BatchUpdateCandidate {
+                software_item_id: item2_id,
+                software_item_name: "test-app-2".to_string(),
+                host_id: f.host_id,
+                host_name: "Host 001".to_string(),
+                installed_version: "2.0.0".to_string(),
+                latest_version: "2.1.0".to_string(),
+                update_category: "security".to_string(),
+            },
+        ];
+
+        let resp = create_batch(
+            &db,
+            &NoopNotifier,
+            &CreateBatchParams {
+                tenant_id: f.tenant_id,
+                batch_type: BatchType::HostUpdate,
+                actor_type: ActorType::User,
+                actor_id: "test-user",
+            },
+            candidates,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resp.total_created, 2);
+        assert!(resp.batch_id.is_some());
+
+        // Verify DB: exactly one Pending and one Queued.
+        let all_records = UpdateHistory::find()
+            .filter(update_history::Column::BatchId.eq(resp.batch_id.unwrap()))
+            .all(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(all_records.len(), 2);
+
+        let pending_count = all_records
+            .iter()
+            .filter(|r| r.status == update_history::UpdateStatus::Pending)
+            .count();
+        let queued_count = all_records
+            .iter()
+            .filter(|r| r.status == update_history::UpdateStatus::Queued)
+            .count();
+
+        assert_eq!(pending_count, 1, "expected exactly one Pending item");
+        assert_eq!(queued_count, 1, "expected exactly one Queued item");
+
+        // The first item (by insertion order) must be Pending.
+        let first = all_records
+            .iter()
+            .find(|r| r.software_item_id == f.item_id)
+            .unwrap();
+        assert_eq!(
+            first.status,
+            update_history::UpdateStatus::Pending,
+            "first item must be Pending"
+        );
+
+        let second = all_records
+            .iter()
+            .find(|r| r.software_item_id == item2_id)
+            .unwrap();
+        assert_eq!(
+            second.status,
+            update_history::UpdateStatus::Queued,
+            "second item must be Queued"
+        );
+    }
+
+    // ── dispatch_next_in_batch ──────────────────────────────────────────
+
+    /// Helper: insert a batch with two items on the same host (one Pending, one Queued).
+    /// Returns `(batch_id, pending_id, queued_id)`.
+    async fn setup_two_item_batch(db: &DatabaseConnection, f: &Fixture) -> (Uuid, Uuid, Uuid) {
+        let item2_id = insert_second_item(db, f).await;
+        let now = OffsetDateTime::now_utc();
+        let batch_id = Uuid::now_v7();
+        let pending_id = Uuid::now_v7();
+        let queued_id = Uuid::now_v7();
+
+        update_batch::ActiveModel {
+            id: Set(batch_id),
+            tenant_id: Set(f.tenant_id),
+            batch_type: Set("host_software_item".to_string()),
+            status: Set(uptrakit_shared_types::BatchStatus::InProgress),
+            total_count: Set(2),
+            actor_type: Set("user".to_string()),
+            actor_id: Set("test".to_string()),
+            created_at: Set(now),
+            completed_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        update_history::ActiveModel {
+            id: Set(pending_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set("1.1.0".to_string()),
+            status: Set(update_history::UpdateStatus::Pending),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            started_at: Set(now),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(Some(batch_id)),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        update_history::ActiveModel {
+            id: Set(queued_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(item2_id),
+            from_version: Set(Some("2.0.0".to_string())),
+            to_version: Set("2.1.0".to_string()),
+            status: Set(update_history::UpdateStatus::Queued),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            started_at: Set(now),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(Some(batch_id)),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        (batch_id, pending_id, queued_id)
+    }
+
+    /// After the first item completes, `dispatch_next_in_batch` must promote
+    /// the Queued item to Pending.
+    #[tokio::test]
+    async fn dispatch_next_in_batch_sequences_correctly() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let (batch_id, pending_id, queued_id) = setup_two_item_batch(&db, &f).await;
+
+        // Simulate completion of the first item.
+        let first = UpdateHistory::find_by_id(pending_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: update_history::ActiveModel = first.into();
+        active.status = Set(update_history::UpdateStatus::Completed);
+        active.completed_at = Set(Some(OffsetDateTime::now_utc()));
+        active.update(&db).await.unwrap();
+
+        // dispatch_next_in_batch should promote the Queued item to Pending.
+        let result = dispatch_next_in_batch(&db, &NoopNotifier, batch_id, f.host_id, f.tenant_id)
+            .await
+            .unwrap();
+
+        // Batch is not yet complete (queued item was just promoted).
+        assert!(result.is_none(), "batch should still be in progress");
+
+        let queued_record = UpdateHistory::find_by_id(queued_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            queued_record.status,
+            update_history::UpdateStatus::Pending,
+            "queued item must be promoted to Pending"
+        );
+    }
+
+    /// When the Queued record was already promoted by another controller
+    /// (CAS returns 0 rows_affected), dispatch must be skipped without error.
+    #[tokio::test]
+    async fn dispatch_next_in_batch_noop_when_cas_loses() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let (batch_id, pending_id, queued_id) = setup_two_item_batch(&db, &f).await;
+
+        // Simulate first item completing.
+        let first = UpdateHistory::find_by_id(pending_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: update_history::ActiveModel = first.into();
+        active.status = Set(update_history::UpdateStatus::Completed);
+        active.completed_at = Set(Some(OffsetDateTime::now_utc()));
+        active.update(&db).await.unwrap();
+
+        // Simulate another controller already promoting the Queued → Pending.
+        let queued = UpdateHistory::find_by_id(queued_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active2: update_history::ActiveModel = queued.into();
+        active2.status = Set(update_history::UpdateStatus::Pending);
+        active2.update(&db).await.unwrap();
+
+        // dispatch_next_in_batch must succeed (no panic, no error) because there
+        // are no more Queued items — the CAS finds nothing to promote.
+        let result = dispatch_next_in_batch(&db, &NoopNotifier, batch_id, f.host_id, f.tenant_id)
+            .await
+            .unwrap();
+
+        // The record was already Pending (not Queued), so no Queued record
+        // was found; function falls through to maybe_complete_batch which
+        // returns None (still in progress).
+        assert!(result.is_none());
+
+        // The previously-queued item must still be Pending (untouched by us).
+        let record = UpdateHistory::find_by_id(queued_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.status, update_history::UpdateStatus::Pending);
+    }
+
+    // ── trigger_all_host_package_updates_for_host cross-table check ─────
+
+    /// An active software-item update must block a host-package batch update.
+    #[tokio::test]
+    async fn trigger_host_package_update_blocked_by_active_sw_item_update() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+        let plugin_config_id = Uuid::now_v7();
+
+        // Insert a plugin_config for the host package.
+        plugin_config::ActiveModel {
+            id: Set(plugin_config_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set("apt-plugin".to_string()),
+            plugin_type: Set("package_manager_apt".to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Insert an outdated host_package.
+        let pkg_id = Uuid::now_v7();
+        host_package::ActiveModel {
+            id: Set(pkg_id),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            plugin_config_id: Set(plugin_config_id),
+            package_identifier: Set("curl".to_string()),
+            name: Set("curl".to_string()),
+            installed_version: Set(Some("7.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            latest_version: Set(Some("8.0.0".to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            update_category: Set("security".to_string()),
+            enabled: Set(true),
+            last_checked_at: Set(None),
+            last_updated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Insert a Pending software-item update_history row for the same host.
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            from_version: Set(None),
+            to_version: Set("1.1.0".to_string()),
+            status: Set(update_history::UpdateStatus::Pending),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            started_at: Set(now),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Triggering a host-package batch must be rejected.
+        let result = trigger_all_host_package_updates_for_host(
+            &db,
+            &NoopNotifier,
+            f.tenant_id,
+            f.host_id,
+            ActorType::User,
+            "test-user",
+            false,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            TriggerUpdateError::HostUpdateInProgress
+        ));
     }
 }
