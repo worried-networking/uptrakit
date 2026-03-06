@@ -541,6 +541,7 @@ pub(crate) async fn handle_authenticated_loop(
                                         service_id,
                                         app_name,
                                         payload.manifests,
+                                        payload.encryption_public_key,
                                     ) {
                                         tracing::warn!(
                                             %service_id,

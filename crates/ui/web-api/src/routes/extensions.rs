@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use uptrakit_internal_wire::extension::ExtensionManifest;
 use uptrakit_plugin_infrastructure_registry::ExtensionActionContext;
+use uptrakit_web_api_types::extensions::InvokeExtensionActionRequest;
 
 use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
@@ -37,6 +38,9 @@ pub struct ExtensionProviderInfo {
     pub service_id: Uuid,
     pub service_label: String,
     pub hostname: Option<String>,
+    /// Base64-encoded uncompressed P-256 public key for ECIES encryption.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption_public_key: Option<String>,
 }
 
 /// Query parameters for the invoke action endpoint.
@@ -94,18 +98,24 @@ pub async fn list_extension_providers(
                     .await
                 {
                     Ok(Some(svc)) => {
+                        let encryption_public_key =
+                            state.extension_registry.encryption_public_key(&service_id);
                         infos.push(ExtensionProviderInfo {
                             service_id,
                             service_label: svc.friendly_name,
                             hostname: Some(svc.hostname),
+                            encryption_public_key,
                         });
                     }
                     Ok(None) => {
                         // Service no longer in DB; include with minimal info.
+                        let encryption_public_key =
+                            state.extension_registry.encryption_public_key(&service_id);
                         infos.push(ExtensionProviderInfo {
                             service_id,
                             service_label: service_id.to_string(),
                             hostname: None,
+                            encryption_public_key,
                         });
                     }
                     Err(e) => {
@@ -129,7 +139,7 @@ pub async fn invoke_action(
     State(state): State<Arc<AppState>>,
     Path((extension_id, action_id)): Path<(String, String)>,
     Query(query): Query<InvokeActionQuery>,
-    Json(params): Json<serde_json::Value>,
+    Json(body): Json<InvokeExtensionActionRequest>,
 ) -> Response {
     let owner = state.extension_registry.find_owner(&extension_id);
 
@@ -148,7 +158,7 @@ pub async fn invoke_action(
             };
             return match state
                 .plugin_ops
-                .handle_extension_action(&ctx, &extension_id, &action_id, params)
+                .handle_extension_action(&ctx, &extension_id, &action_id, body.params.clone())
                 .await
             {
                 Ok(data) => (StatusCode::OK, Json(data)).into_response(),
@@ -189,7 +199,8 @@ pub async fn invoke_action(
             &state.extension_registry,
             &extension_id,
             &action_id,
-            params,
+            body.params,
+            body.sensitive_params,
             query.service_id,
             timeout,
         )

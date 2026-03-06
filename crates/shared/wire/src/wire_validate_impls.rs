@@ -267,6 +267,11 @@ impl WireValidate for extension::ExtensionRegisterPayload {
         for manifest in &self.manifests {
             manifest.wire_validate()?;
         }
+        check_opt_string_len(
+            &self.encryption_public_key,
+            MAX_SHORT_STRING_LEN,
+            "encryption_public_key",
+        )?;
         Ok(())
     }
 }
@@ -472,6 +477,17 @@ impl WireValidate for extension::ExtensionRequestPayload {
                     "params JSON is {params_len} bytes, max {MAX_EXTENSION_PARAMS_LEN}"
                 ),
             });
+        }
+        if let Some(ref sp) = self.sensitive_params {
+            let sp_len = sp.expose_secret().len();
+            if sp_len > MAX_EXTENSION_PARAMS_LEN {
+                return Err(WireValidationError {
+                    field: "sensitive_params",
+                    message: format!(
+                        "sensitive_params is {sp_len} bytes, max {MAX_EXTENSION_PARAMS_LEN}"
+                    ),
+                });
+            }
         }
         Ok(())
     }
@@ -1149,6 +1165,7 @@ mod tests {
     fn extension_register_validates() {
         let payload = extension::ExtensionRegisterPayload {
             manifests: vec![test_manifest()],
+            encryption_public_key: None,
         };
         assert!(payload.wire_validate().is_ok());
     }
@@ -1161,7 +1178,10 @@ mod tests {
                 ..test_manifest()
             })
             .collect();
-        let payload = extension::ExtensionRegisterPayload { manifests };
+        let payload = extension::ExtensionRegisterPayload {
+            manifests,
+            encryption_public_key: None,
+        };
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "manifests");
     }
@@ -1205,6 +1225,7 @@ mod tests {
                 help_text: None,
                 default_value: None,
                 options: vec![],
+                sensitive: false,
             })
             .collect();
         let form = extension::FormDef { fields };
@@ -1244,6 +1265,7 @@ mod tests {
             help_text: None,
             default_value: None,
             options,
+            sensitive: false,
         };
         let err = field.wire_validate().unwrap_err();
         assert_eq!(err.field, "field.options");
@@ -1256,6 +1278,7 @@ mod tests {
             extension_id: "test.ext".to_string(),
             action_id: "do-thing".to_string(),
             params: serde_json::json!({}),
+            sensitive_params: None,
         };
         assert!(payload.wire_validate().is_ok());
     }
@@ -1268,6 +1291,7 @@ mod tests {
             extension_id: "test.ext".to_string(),
             action_id: "do-thing".to_string(),
             params: serde_json::Value::String(big_value),
+            sensitive_params: None,
         };
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "params");
@@ -1301,6 +1325,7 @@ mod tests {
     fn extension_service_message_register_validates() {
         let msg = ServiceMessage::ExtensionRegister(extension::ExtensionRegisterPayload {
             manifests: vec![test_manifest()],
+            encryption_public_key: None,
         });
         assert!(msg.wire_validate().is_ok());
     }
@@ -1323,6 +1348,7 @@ mod tests {
             extension_id: "test.ext".to_string(),
             action_id: "action".to_string(),
             params: serde_json::json!({}),
+            sensitive_params: None,
         });
         assert!(msg.wire_validate().is_ok());
     }

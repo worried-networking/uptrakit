@@ -86,6 +86,12 @@ pub struct ExtensionRegistry {
     service_extensions: Mutex<HashMap<String, ExtensionEntry>>,
     /// Reverse index: service instance ID to the extension IDs it provides.
     service_index: Mutex<HashMap<Uuid, Vec<String>>>,
+    /// Per-service-instance ECIES encryption public keys (base64-encoded P-256).
+    ///
+    /// Stored separately from `service_extensions` because the key is
+    /// per-instance, not per-extension — one service may provide multiple
+    /// extensions, all sharing the same key.
+    encryption_keys: Mutex<HashMap<Uuid, String>>,
 }
 
 impl ExtensionRegistry {
@@ -95,6 +101,7 @@ impl ExtensionRegistry {
             plugin_extensions,
             service_extensions: Mutex::new(HashMap::new()),
             service_index: Mutex::new(HashMap::new()),
+            encryption_keys: Mutex::new(HashMap::new()),
         }
     }
 
@@ -111,6 +118,7 @@ impl ExtensionRegistry {
         service_id: Uuid,
         service_app_name: &str,
         manifests: Vec<ExtensionManifest>,
+        encryption_public_key: Option<String>,
     ) -> Result<(), ExtensionRegistryError> {
         let mut extensions = self.service_extensions.lock();
 
@@ -154,6 +162,11 @@ impl ExtensionRegistry {
             }
         }
 
+        // Store the encryption public key (if provided).
+        if let Some(key) = encryption_public_key {
+            self.encryption_keys.lock().insert(service_id, key);
+        }
+
         Ok(())
     }
 
@@ -161,6 +174,8 @@ impl ExtensionRegistry {
     ///
     /// Extensions with no remaining providers are removed entirely.
     pub fn unregister_service(&self, service_id: &Uuid) {
+        self.encryption_keys.lock().remove(service_id);
+
         let mut index = self.service_index.lock();
         let Some(ext_ids) = index.remove(service_id) else {
             return;
@@ -240,6 +255,13 @@ impl ExtensionRegistry {
     /// returned. Otherwise the first provider (by `BTreeSet` ordering) is used.
     ///
     /// Returns `None` if no service provides this extension.
+    /// Returns the ECIES encryption public key for a given service instance.
+    ///
+    /// Returns `None` if the service has not registered a key (or is not known).
+    pub fn encryption_public_key(&self, service_id: &Uuid) -> Option<String> {
+        self.encryption_keys.lock().get(service_id).cloned()
+    }
+
     pub fn pick_provider(&self, extension_id: &str, preferred: Option<Uuid>) -> Option<Uuid> {
         let extensions = self.service_extensions.lock();
         let entry = extensions.get(extension_id)?;
@@ -294,6 +316,7 @@ mod tests {
                 svc,
                 "my-app",
                 vec![test_manifest("ext.one"), test_manifest("ext.two")],
+                None,
             )
             .unwrap();
 
@@ -311,10 +334,10 @@ mod tests {
         let svc2 = test_uuid();
 
         registry
-            .register_service(svc1, "my-app", vec![test_manifest("ext.shared")])
+            .register_service(svc1, "my-app", vec![test_manifest("ext.shared")], None)
             .unwrap();
         registry
-            .register_service(svc2, "my-app", vec![test_manifest("ext.shared")])
+            .register_service(svc2, "my-app", vec![test_manifest("ext.shared")], None)
             .unwrap();
 
         // Only one manifest (deduplicated).
@@ -336,11 +359,11 @@ mod tests {
         let svc2 = test_uuid();
 
         registry
-            .register_service(svc1, "app-alpha", vec![test_manifest("ext.conflict")])
+            .register_service(svc1, "app-alpha", vec![test_manifest("ext.conflict")], None)
             .unwrap();
 
         let err = registry
-            .register_service(svc2, "app-beta", vec![test_manifest("ext.conflict")])
+            .register_service(svc2, "app-beta", vec![test_manifest("ext.conflict")], None)
             .unwrap_err();
 
         match err {
@@ -366,10 +389,10 @@ mod tests {
         let svc2 = test_uuid();
 
         registry
-            .register_service(svc1, "app", vec![test_manifest("ext.a")])
+            .register_service(svc1, "app", vec![test_manifest("ext.a")], None)
             .unwrap();
         registry
-            .register_service(svc2, "app", vec![test_manifest("ext.a")])
+            .register_service(svc2, "app", vec![test_manifest("ext.a")], None)
             .unwrap();
 
         // Remove one provider — entry should remain.
@@ -397,7 +420,7 @@ mod tests {
         let svc = test_uuid();
 
         registry
-            .register_service(svc, "svc-app", vec![test_manifest("svc.ext")])
+            .register_service(svc, "svc-app", vec![test_manifest("svc.ext")], None)
             .unwrap();
 
         let manifests = registry.all_manifests();
@@ -416,7 +439,7 @@ mod tests {
 
         // Service registers the same extension ID.
         registry
-            .register_service(svc, "svc-app", vec![test_manifest("shared.ext")])
+            .register_service(svc, "svc-app", vec![test_manifest("shared.ext")], None)
             .unwrap();
 
         // Should only appear once (plugin takes precedence).
@@ -437,7 +460,7 @@ mod tests {
         let svc = test_uuid();
 
         registry
-            .register_service(svc, "app", vec![test_manifest("svc.only")])
+            .register_service(svc, "app", vec![test_manifest("svc.only")], None)
             .unwrap();
 
         assert_eq!(
@@ -460,7 +483,7 @@ mod tests {
         let svc = test_uuid();
 
         registry
-            .register_service(svc, "app", vec![test_manifest("dual.ext")])
+            .register_service(svc, "app", vec![test_manifest("dual.ext")], None)
             .unwrap();
 
         // Plugin ownership takes precedence.
@@ -474,10 +497,10 @@ mod tests {
         let svc2 = test_uuid();
 
         registry
-            .register_service(svc1, "app", vec![test_manifest("ext.pick")])
+            .register_service(svc1, "app", vec![test_manifest("ext.pick")], None)
             .unwrap();
         registry
-            .register_service(svc2, "app", vec![test_manifest("ext.pick")])
+            .register_service(svc2, "app", vec![test_manifest("ext.pick")], None)
             .unwrap();
 
         // Preferred is in the set.
@@ -491,7 +514,7 @@ mod tests {
         let unknown = test_uuid();
 
         registry
-            .register_service(svc, "app", vec![test_manifest("ext.pick")])
+            .register_service(svc, "app", vec![test_manifest("ext.pick")], None)
             .unwrap();
 
         // Preferred is not in the set — falls back to first.
@@ -504,7 +527,7 @@ mod tests {
         let svc = test_uuid();
 
         registry
-            .register_service(svc, "app", vec![test_manifest("ext.pick")])
+            .register_service(svc, "app", vec![test_manifest("ext.pick")], None)
             .unwrap();
 
         assert_eq!(registry.pick_provider("ext.pick", None), Some(svc));
@@ -538,7 +561,7 @@ mod tests {
 
         // svc1 registers ext.a.
         registry
-            .register_service(svc1, "app-one", vec![test_manifest("ext.a")])
+            .register_service(svc1, "app-one", vec![test_manifest("ext.a")], None)
             .unwrap();
 
         // svc2 tries to register ext.a (conflict) and ext.b in the same call.
@@ -547,6 +570,7 @@ mod tests {
             svc2,
             "app-two",
             vec![test_manifest("ext.b"), test_manifest("ext.a")],
+            None,
         );
         assert!(result.is_err());
 

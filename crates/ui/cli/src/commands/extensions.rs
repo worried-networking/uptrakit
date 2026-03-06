@@ -131,7 +131,8 @@ pub async fn invoke(params: InvokeParams<'_>) -> Result<InvokeOutput> {
         .invoke_extension_action(
             &params.extension_id,
             &params.action_id,
-            &params.params,
+            params.params,
+            None,
             params.service_id.as_ref(),
         )
         .await

@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use uptrakit_internal_wire::ControllerMessage;
 use uptrakit_internal_wire::extension::{ExtensionRequestPayload, ExtensionResponsePayload};
+use uptrakit_shared_types::SecretString;
 
 use crate::extension_registry::ExtensionRegistry;
 use crate::service_connections::ServiceConnectionRegistry;
@@ -118,6 +119,7 @@ impl ExtensionProxy {
         extension_id: &str,
         action_id: &str,
         params: serde_json::Value,
+        sensitive_params: Option<SecretString>,
         service_id_override: Option<Uuid>,
         timeout: Duration,
     ) -> Result<ExtensionResponsePayload, ExtensionProxyError> {
@@ -154,6 +156,7 @@ impl ExtensionProxy {
             extension_id: extension_id.to_string(),
             action_id: action_id.to_string(),
             params,
+            sensitive_params,
         });
 
         let sent = service_connections.send(&service_id, msg).await;
@@ -235,7 +238,12 @@ mod tests {
             .register(service_id, BTreeSet::new(), None, None)
             .await;
         registry
-            .register_service(service_id, "test-app", vec![test_manifest("ext.test")])
+            .register_service(
+                service_id,
+                "test-app",
+                vec![test_manifest("ext.test")],
+                None,
+            )
             .unwrap();
 
         let proxy = std::sync::Arc::new(ExtensionProxy::new());
@@ -266,6 +274,7 @@ mod tests {
                 "do-thing",
                 serde_json::json!({"key": "value"}),
                 None,
+                None,
                 Duration::from_secs(5),
             )
             .await;
@@ -289,7 +298,12 @@ mod tests {
             .register(service_id, BTreeSet::new(), None, None)
             .await;
         registry
-            .register_service(service_id, "test-app", vec![test_manifest("ext.test")])
+            .register_service(
+                service_id,
+                "test-app",
+                vec![test_manifest("ext.test")],
+                None,
+            )
             .unwrap();
 
         let result = proxy
@@ -299,6 +313,7 @@ mod tests {
                 "ext.test",
                 "do-thing",
                 serde_json::Value::Null,
+                None,
                 None,
                 Duration::from_millis(100),
             )
@@ -345,6 +360,7 @@ mod tests {
                 "action",
                 serde_json::Value::Null,
                 None,
+                None,
                 Duration::from_secs(5),
             )
             .await;
@@ -365,7 +381,7 @@ mod tests {
         let wrong_svc = Uuid::now_v7();
 
         registry
-            .register_service(real_svc, "app", vec![test_manifest("ext.test")])
+            .register_service(real_svc, "app", vec![test_manifest("ext.test")], None)
             .unwrap();
 
         let result = proxy
@@ -375,6 +391,7 @@ mod tests {
                 "ext.test",
                 "action",
                 serde_json::Value::Null,
+                None,
                 Some(wrong_svc),
                 Duration::from_secs(5),
             )
@@ -395,7 +412,7 @@ mod tests {
 
         // Register the extension provider but do NOT register the service connection.
         registry
-            .register_service(service_id, "app", vec![test_manifest("ext.test")])
+            .register_service(service_id, "app", vec![test_manifest("ext.test")], None)
             .unwrap();
 
         let result = proxy
@@ -405,6 +422,7 @@ mod tests {
                 "ext.test",
                 "action",
                 serde_json::Value::Null,
+                None,
                 None,
                 Duration::from_secs(5),
             )
@@ -430,7 +448,7 @@ mod tests {
             .register(service_id, BTreeSet::new(), None, None)
             .await;
         registry
-            .register_service(service_id, "app", vec![test_manifest("ext.test")])
+            .register_service(service_id, "app", vec![test_manifest("ext.test")], None)
             .unwrap();
 
         let proxy_clone = std::sync::Arc::clone(&proxy);
@@ -454,6 +472,7 @@ mod tests {
                 "ext.test",
                 "action",
                 serde_json::Value::Null,
+                None,
                 None,
                 Duration::from_secs(5),
             )

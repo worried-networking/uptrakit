@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uptrakit_internal_wire::extension::ExtensionManifest;
+use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
 /// Response for a single extension in the list.
@@ -18,13 +19,23 @@ pub struct ExtensionProviderInfo {
     pub service_id: Uuid,
     pub service_label: String,
     pub hostname: Option<String>,
+    /// Base64-encoded uncompressed P-256 public key for ECIES encryption of
+    /// sensitive parameters. `None` if the service did not provide a key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption_public_key: Option<String>,
 }
 
 /// Request body for invoking an extension action.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct InvokeExtensionActionRequest {
     #[serde(default)]
     pub params: serde_json::Value,
+    /// ECIES sealed-box ciphertext (base64) containing sensitive parameters.
+    ///
+    /// Encrypted by the client with the target service's P-256 public key.
+    /// The controller passes this through opaquely.
+    #[serde(default)]
+    pub sensitive_params: Option<SecretString>,
 }
 
 /// Query parameters for invoking an extension action.

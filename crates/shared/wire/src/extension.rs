@@ -7,6 +7,7 @@
 //! All public types are `#[non_exhaustive]` for forward compatibility.
 
 use serde::{Deserialize, Serialize};
+use uptrakit_shared_types::SecretString;
 
 // ── Extension manifest ──────────────────────────────────────────────────────
 
@@ -339,6 +340,13 @@ pub struct FieldDef {
     /// Options for `Select` field type.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<SelectOption>,
+    /// Whether this field contains sensitive data (e.g., passwords, private keys).
+    ///
+    /// Sensitive fields are encrypted client-side using ECIES before submission
+    /// and transmitted in `ExtensionRequestPayload::sensitive_params` instead of
+    /// `params`. The controller never sees their plaintext.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sensitive: bool,
 }
 
 impl FieldDef {
@@ -416,6 +424,15 @@ pub struct SelectOption {
 pub struct ExtensionRegisterPayload {
     /// Extension manifests provided by this service.
     pub manifests: Vec<ExtensionManifest>,
+    /// Base64-encoded uncompressed P-256 public key (65 bytes) for ECIES encryption.
+    ///
+    /// When present, clients encrypt sensitive extension parameters with this key
+    /// using the ECIES sealed-box scheme. The controller passes the ciphertext
+    /// through without decryption — only this service instance can decrypt.
+    ///
+    /// This is per-service-instance (each instance has its own mTLS keypair).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption_public_key: Option<String>,
 }
 
 /// Payload for `ControllerMessage::ExtensionRequest`: the controller proxies
@@ -428,9 +445,19 @@ pub struct ExtensionRequestPayload {
     pub extension_id: String,
     /// Action ID to invoke.
     pub action_id: String,
-    /// Action parameters as JSON.
+    /// Action parameters as JSON (non-sensitive fields only).
     #[serde(default)]
     pub params: serde_json::Value,
+    /// ECIES sealed-box ciphertext (base64) containing sensitive parameters.
+    ///
+    /// Encrypted by the client using the target service's P-256 public key.
+    /// The controller passes this through opaquely — it cannot decrypt.
+    /// The service decrypts using its mTLS private key.
+    ///
+    /// Uses [`SecretString`] so the ciphertext is redacted in logs and
+    /// zero-filled on drop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensitive_params: Option<SecretString>,
 }
 
 /// Payload for `ServiceMessage::ExtensionResponse`: a service responds to a
@@ -529,6 +556,7 @@ mod tests {
                             help_text: None,
                             default_value: None,
                             options: vec![],
+                            sensitive: false,
                         }],
                     })),
                     permission: String::new(),
@@ -612,6 +640,7 @@ mod tests {
                     help_text: Some("Enter the hostname".to_string()),
                     default_value: Some(serde_json::Value::String("localhost".to_string())),
                     options: vec![],
+                    sensitive: false,
                 }],
             },
             submit_action: Some("validate-host".to_string()),
@@ -665,6 +694,7 @@ mod tests {
                     data_action: "get-data".to_string(),
                 },
             }],
+            encryption_public_key: None,
         };
 
         let json = serde_json::to_string(&payload).unwrap();
@@ -679,6 +709,7 @@ mod tests {
             extension_id: "test.ext".to_string(),
             action_id: "do-thing".to_string(),
             params: serde_json::json!({"key": "value"}),
+            sensitive_params: None,
         };
 
         let json = serde_json::to_string(&payload).unwrap();
@@ -774,6 +805,7 @@ mod tests {
                         label: "EU West".to_string(),
                     },
                 ],
+                sensitive: false,
             }],
         };
 
