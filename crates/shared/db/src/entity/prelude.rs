@@ -49,6 +49,9 @@ pub use super::pending_oidc_token_exchange::{
 };
 pub use super::permission::{Entity as Permission, Model as PermissionModel};
 pub use super::plugin_config::{Entity as PluginConfig, Model as PluginConfigModel};
+pub use super::proxmox_host_mapping::{
+    Entity as ProxmoxHostMapping, Model as ProxmoxHostMappingModel,
+};
 pub use super::revoked_token_jti::{Entity as RevokedTokenJti, Model as RevokedTokenJtiModel};
 pub use super::revoked_token_user::{Entity as RevokedTokenUser, Model as RevokedTokenUserModel};
 pub use super::role::{Entity as Role, Model as RoleModel};

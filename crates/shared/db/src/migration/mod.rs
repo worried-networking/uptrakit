@@ -29,6 +29,7 @@ mod m20260311_000002_audit_log_permissions;
 mod m20260312_000001_system_enrollment_tokens;
 mod m20260312_000002_discover_host_packages_task;
 mod m20260313_000001_per_host_update_locking;
+mod m20260314_000001_proxmox_host_mapping;
 
 pub struct Migrator;
 
@@ -64,6 +65,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260312_000002_discover_host_packages_task::Migration),
             Box::new(m20260313_000001_per_host_update_locking::Migration),
             Box::new(m20260305_000002_service_app_name::Migration),
+            Box::new(m20260314_000001_proxmox_host_mapping::Migration),
         ]
     }
 }
@@ -99,9 +101,9 @@ mod tests {
         audit_log, crl_cache, data_encryption_key, global_setting, host_discovery_allowlist,
         host_package, host_package_ignore, host_package_update_history, host_software_item,
         notification_channel, notification_log, notification_rule, plugin_config,
-        revoked_token_jti, revoked_token_user, role, role_permission, service, software_item,
-        system_audit_log, system_enrollment_token, system_service, system_service_certificate,
-        tenant_discovery_allowlist, update_batch, update_history,
+        proxmox_host_mapping, revoked_token_jti, revoked_token_user, role, role_permission,
+        service, software_item, system_audit_log, system_enrollment_token, system_service,
+        system_service_certificate, tenant_discovery_allowlist, update_batch, update_history,
     };
 
     /// Verify that the `has_update` generated column exists in `host_packages`.
@@ -261,6 +263,12 @@ mod tests {
 
         // Verify system_enrollment_tokens table exists.
         system_enrollment_token::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
+
+        // Verify proxmox_host_mappings table exists.
+        proxmox_host_mapping::Entity::find()
             .count(&db)
             .await
             .unwrap();

@@ -52,6 +52,8 @@ pub mod user;
 pub mod user_oidc_link;
 pub mod user_role;
 
+pub mod proxmox_host_mapping;
+
 pub mod prelude;
 pub mod tenant_scoped;
 pub use tenant_scoped::TenantScoped;
