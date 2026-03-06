@@ -31,7 +31,7 @@ Essential infrastructure needed before feature development.
 ### Database & Persistence
 
 - [x] Select and integrate database solution (SQLite for simplicity, PostgreSQL for production)
-- [ ] Design core database schema
+- [x] Design core database schema
   - [x] Hosts table (machine_id, hostname, OS info, architecture, last seen, linked agents)
   - [x] Software items table (plugin config, package identifier, config override, host assignments)
   - [x] ~~Available versions table~~ (removed; per-host latest version now tracked on `host_software_items`)
@@ -43,14 +43,14 @@ Essential infrastructure needed before feature development.
 
 ### Core Data Models
 
-- [ ] Define Rust structs for core entities
-  - [ ] Host model with serialization
-  - [ ] SoftwareItem model with plugin-specific fields
+- [x] Define Rust structs for core entities
+  - [x] Host model with serialization
+  - [x] SoftwareItem model with plugin-specific fields
   - [x] Version model with comparison and ordering
   - [x] UpdateRecord model for tracking history
 - [x] Implement version comparison logic (semver, custom formats)
-- [ ] Create repositories/DAOs for each entity
-- [ ] Add validation logic for data models
+- [x] Create repositories/DAOs for each entity
+- [x] Add validation logic for data models
 - [x] Store JSON encoded strings as settings values
 
 ### User Authentication & Authorization
@@ -113,17 +113,17 @@ Essential infrastructure needed before feature development.
 
 ### Wire Protocol
 
-- [ ] Design message types beyond ping/pong
+- [x] Design message types beyond ping/pong
   - [x] Agent registration message
-  - [ ] Software inventory report message
+  - [x] Software inventory report message (DiscoveryResults)
   - [x] Version check request/response
   - [x] Update command message (ExecuteUpdate, UpdateStarted, UpdateOutput, UpdateResult)
-  - [ ] Status update message
+  - [x] Status update message (VersionCheckResults, UpdateResult)
   - [x] Error reporting message
 - [x] Implement message serialization/deserialization
 - [x] Add message routing in controller
 - [x] Implement message handling in agent
-- [ ] Add protocol versioning for future compatibility
+- [x] Add protocol versioning for future compatibility (`CURRENT_PROTOCOL_VERSION`, `protocol_version` on all envelopes)
 
 ### Agent Registration & Discovery
 
@@ -133,7 +133,7 @@ Essential infrastructure needed before feature development.
   - [x] Client certificate issuance
   - [x] Agent ID assignment
 - [x] Implement agent registration endpoint
-- [ ] Create agent inventory tracking
+- [x] Create agent inventory tracking (ReportHosts, VersionCheckResults, DiscoveryResults)
 - [x] Add agent heartbeat mechanism
 - [x] Implement agent status monitoring (online/offline)
 - [x] Add agent metadata collection (OS, architecture, machine_id via HostInfo)
@@ -189,20 +189,21 @@ Main functionality that delivers the core value proposition.
 ### Version Detection (Agent-Side)
 
 - [ ] Implement plugin-specific version detection
-  - [ ] GitHub releases plugin
-  - [ ] System package managers (apt, yum, pacman)
+  - [x] GitHub releases plugin (controller-side `fetch_releases`)
+  - [x] System package managers (APT `detect_installed_version` + `fetch_releases`; Homebrew; npm)
   - [x] Docker container plugin
   - [x] Proxmox Helper Scripts plugin
+  - [ ] yum/dnf, pacman plugins (not yet implemented)
 - [ ] Add caching for detected versions
-- [ ] Implement periodic inventory scanning
-- [ ] Send version inventory to controller
-- [ ] Handle detection errors gracefully
+- [x] Implement periodic inventory scanning (scheduler: `DetectVersion`, `DiscoverHostPackages` executors)
+- [x] Send version inventory to controller (`VersionCheckResults` and `DiscoveryResults` wire messages)
+- [x] Handle detection errors gracefully (errors reported per-item via VersionCheckResult.error field)
 
 ### Version Checking (Controller-Side)
 
-- [ ] Implement plugin-specific version checking
+- [x] Implement plugin-specific version checking
   - [x] GitHub releases API integration
-  - [ ] Package repository API integration
+  - [x] Package repository API integration (APT via `apt-cache madison`, Homebrew via `brew info --json`, npm via registry API)
   - [x] Docker registry API integration (semver tag filtering + digest tracking)
   - [x] Proxmox Helper Scripts repository check
 - [x] Add version comparison logic per plugin
@@ -221,7 +222,7 @@ Main functionality that delivers the core value proposition.
   - [x] Script version detection
   - [x] Script update mechanism
   - [x] Software discovery (`discover_software()`)
-  - [ ] Script integrity verification
+  - [ ] Script integrity verification (deferred)
 - [ ] Add system package manager plugin
   - [ ] Support for multiple package managers
   - [ ] Package dependency handling
@@ -232,7 +233,7 @@ Main functionality that delivers the core value proposition.
 
 ### Update Execution
 
-- [x] Design update execution framework
+- [ ] Design update execution framework
   - [x] Pre-update hooks (from plugin config + config_override)
   - [x] Update steps execution (plugin-specific via ExecuteUpdate message)
   - [x] Post-update hooks (from plugin config + config_override)
@@ -242,7 +243,7 @@ Main functionality that delivers the core value proposition.
   - [x] State persistence (update_history table)
 - [x] Add update progress reporting (UpdateOutput streaming)
 - [x] Implement update logging (output accumulated in update_history)
-- [ ] Handle update failures and retries
+- [ ] Handle update failures and retries (retry logic not implemented; relies on manual re-trigger)
 - [x] Add update timeout handling (configurable per-update)
 - [ ] Support updating agent and controller
 
@@ -344,7 +345,7 @@ Ways users interact with the system.
   - [x] Trigger version check endpoint (per-item and per-item-per-host)
   - [x] Trigger update endpoint (POST /api/v1/software-items/{id}/hosts/{host_id}/update)
   - [x] Get update history endpoint
-  - [ ] Get system status endpoint
+  - [ ] Get system status endpoint (beyond `/healthz`)
 - [x] Add API authentication
 - [x] Implement API rate limiting
 - [x] Add API documentation (OpenAPI/Swagger)
@@ -360,26 +361,26 @@ Ways users interact with the system.
   - [ ] System overview statistics
   - [ ] Recent update activity
   - [ ] Alert/notification display
-- [x] Implement host list view
-  - [ ] Sortable/filterable table
-  - [ ] Host detail drill-down
+- [ ] Implement host list view
+  - [ ] Sortable/filterable table (pagination exists, no column sorting)
+  - [x] Host detail drill-down (`/hosts/[id]` page with system info, history, allowlist)
   - [x] Host status indicators
 - [ ] Create software list view
-  - [ ] Grouped by host or plugin
-  - [ ] Current vs. available version display
-  - [ ] Update action buttons
-- [ ] Add update trigger UI
-  - [ ] Manual update initiation
-  - [ ] Update confirmation dialogs
-  - [ ] Progress indicators
+  - [ ] Grouped by host or plugin (shows plugin column, not grouped view)
+  - [x] Current vs. available version display
+  - [x] Update action buttons (context menu)
+- [x] Add update trigger UI
+  - [x] Manual update initiation (modal with host selection)
+  - [x] Update confirmation dialogs
+  - [x] Progress indicators (SSE streaming to xterm.js terminal)
 - [ ] Implement schedule configuration UI
-  - [ ] Visual schedule builder
-  - [ ] Enable/disable schedules
-  - [ ] Test schedule expressions
+  - [ ] Visual schedule builder (text-based cron input only)
+  - [x] Enable/disable schedules
+  - [x] Trigger scheduled tasks manually
 - [ ] Add settings/configuration UI
-  - [ ] Plugin configurations
-  - [ ] Global settings
-  - [ ] User management
+  - [x] Plugin configurations (`/plugin-configs` page)
+  - [x] Global settings (`/settings` and `/settings/global` pages)
+  - [ ] User management (no dedicated user admin UI)
 
 ### CLI Tool
 
@@ -406,8 +407,8 @@ Ways users interact with the system.
 - [x] Implement CLI commands (hosts, software-items, check, update, history, scheduler)
 - [x] Add output formatting (table, JSON, YAML)
 - [x] Implement filtering and query options (history filters by host, software item, status)
-- [ ] Add interactive mode for confirmations
-- [ ] Support configuration file for CLI
+- [x] Add interactive mode for confirmations (prompt-based input for login flow and server URL)
+- [x] Support configuration file for CLI (`config.json` + `credentials.json` with secure storage)
 
 ### MQTT/Home Assistant Integration
 
@@ -436,7 +437,7 @@ Ways users interact with the system.
   - [x] Update status pushed after completion (via `SoftwareStates` push)
 - [x] Add configurable MQTT topics (topic_prefix per MQTT client)
 - [x] Implement MQTT connection resilience
-- [ ] Add MQTT authentication support
+- [x] Add MQTT authentication support (username/password via SecretString, encrypted at rest)
 
 ______________________________________________________________________
 
@@ -455,7 +456,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 - [x] The SSH agent manages one or more remote hosts — each appears as a separate host in the controller
 - [x] CLI subcommands for local SSH host management (`host add/list/show/update/remove/bootstrap`)
 - [ ] Configuration file defines target hosts (hostname, port, username, key path, sudo setup)
-- [ ] Clearly separate SSH transport logic from plugin execution logic so plugins remain transport-agnostic
+- [x] Clearly separate SSH transport logic from plugin execution logic so plugins remain transport-agnostic (`CommandExecutor` trait abstraction)
 
 ### SSH Transport Layer
 
@@ -465,15 +466,15 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 - [x] Support Ed25519 (preferred), RSA, and ECDSA keys (auto-detection from PEM content)
 - [x] Strict host key verification (TOFU with persisted fingerprints, or pre-seeded fingerprints)
 - [x] Reject connections on host key mismatch — never silently accept
-- [ ] Connection pooling and multiplexing (reuse connections across checks and updates for the same host)
+- [x] Connection pooling and multiplexing (`SshConnectionPool` with 300s idle TTL, concurrent channels per session)
 - [x] Configurable connection and command timeouts (30s default for bootstrap)
 - [ ] Jump host / bastion support for reaching hosts behind NAT or firewalls
 - [x] Support for custom SSH ports per host (configurable via `--port` in `host add/update`, or via the target string in `host bootstrap`)
 
 ### Remote Execution
 
-- [ ] Run plugin detection commands on the remote host over SSH and parse output locally
-- [ ] Execute updates via sudo on the remote host (same sudo allowlist model as the regular agent)
+- [x] Run plugin detection commands on the remote host over SSH and parse output locally (`run_check_versions_ssh` via `SshCommandExecutor`)
+- [x] Execute updates via sudo on the remote host (`start_update` via `SshCommandExecutor`)
 - [x] Stream command output back for progress reporting
 - [x] Enforce per-host update locking (no concurrent updates to the same host) — implemented via combined cross-table check and partial unique DB index
 - [ ] Timeout and kill long-running remote commands
@@ -481,7 +482,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 
 ### Plugin Compatibility
 
-- [ ] All agent-side plugins must work over SSH (same commands, different transport)
+- [x] All agent-side plugins must work over SSH (all plugins use `CommandExecutor` trait; `SshCommandExecutor` implements it)
 - [x] Plugin trait uses a transport abstraction (`CommandExecutor`) so the same plugin logic works for both local and SSH execution
 - [x] Implement `SshCommandExecutor` that executes commands over SSH connections
 - [ ] Plugin-level capability flag indicating SSH compatibility
@@ -503,7 +504,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 - [ ] CLI flags for overrides (key path, known_hosts path, concurrency limits)
 - [ ] Health checks: periodic SSH connectivity test to each managed host, reported to controller
 - [ ] Controller UI and API: SSH-managed hosts appear alongside regular agents with a transport type indicator
-- [ ] MQTT/Home Assistant entities work identically regardless of agent transport
+- [x] MQTT/Home Assistant entities work identically regardless of agent transport (MQTT operates on `SoftwareStates`, transport-agnostic)
 
 ______________________________________________________________________
 
@@ -518,7 +519,7 @@ Expanding the plugin system with more integrations.
   - [ ] Script execution sandbox
   - [ ] Script output parsing
 - [ ] Add pip/PyPI plugin
-- [ ] Add npm/Node.js plugin
+- [x] Add npm/Node.js plugin (`crates/plugins/package-managers/npm/`)
 - [ ] Add Cargo/Rust plugin
 - [ ] Add Flatpak plugin
 - [ ] Add Snap plugin
@@ -633,7 +634,7 @@ Polish and additional capabilities for production use.
 - [x] Implement notification channels
   - [x] Generic Webhook (HMAC-SHA256 signed, always compiled)
   - [x] Telegram (feature-gated, inline keyboard buttons for actionable notifications)
-  - [ ] Email notifications (via `lettre`)
+  - [x] Email notifications (via `lettre`, feature-gated `notifications-email`, SMTP settings with encrypted password)
   - [ ] Slack integration (via `slack-morphism`)
   - [ ] Discord integration (via `twilight-http`)
   - [ ] Pushover integration
@@ -799,7 +800,7 @@ Comprehensive security hardening.
   - [ ] Per-tenant retention overrides (`audit_log.retention_days` — key defined, executor pending)
   - [ ] Log archival
   - [ ] Log search and analysis
-  - [ ] Audit log read API (REST endpoints for querying audit logs)
+  - [x] Audit log read API (`GET /api/v1/audit-logs`, `GET /api/v1/system-audit-logs` with filter/pagination)
 
 ### Additional Security
 
@@ -887,7 +888,7 @@ Ensuring robustness and maintainability.
 
 ### Reliability
 
-- [ ] Implement health check endpoints
+- [x] Implement health check endpoints (`/healthz` returns `"ok"`; no DB check or structured status)
 - [ ] Add readiness probes
 - [x] Implement graceful shutdown (agent waits for in-flight updates before disconnecting)
 - [ ] Add state recovery on restart
@@ -902,10 +903,10 @@ Making the system usable and maintainable.
 
 ### API Documentation
 
-- [ ] Generate OpenAPI/Swagger specification
-- [ ] Document all REST endpoints
-- [ ] Add request/response examples
-- [ ] Document WebSocket messages
+- [x] Generate OpenAPI/Swagger specification (utoipa auto-generated, served at `/api/openapi.json`)
+- [x] Document all REST endpoints (`docs/api/http-web-api.md`, 150+ endpoints)
+- [ ] Add request/response examples (schemas documented, few curl examples)
+- [x] Document WebSocket messages (`docs/api/wire-protocol.md`, 50KB)
 - [x] Create API client libraries
   - [x] `uptrakit-openapi-client` typed HTTP client crate (used by CLI)
 
@@ -918,8 +919,8 @@ Making the system usable and maintainable.
   - [ ] Configuration walkthrough
 - [ ] Write user manual
   - [ ] Web UI guide
-  - [ ] CLI guide
-  - [ ] MQTT/Home Assistant integration guide
+  - [x] CLI guide (`docs/end-user/cli-usage.md`)
+  - [x] MQTT/Home Assistant integration guide (`docs/end-user/home-assistant-mqtt.md`)
 - [ ] Create FAQ
 - [ ] Add troubleshooting guide
 - [ ] Record video tutorials
@@ -966,7 +967,7 @@ Making the system usable and maintainable.
 - [x] Write [CONTRIBUTING.md](CONTRIBUTING.md)
 - [x] Document development setup
 - [x] Create architecture documentation
-- [ ] Document testing strategy
+- [x] Document testing strategy (`docs/development/testing.md`)
 - [ ] Create PR template and guidelines
 
 ______________________________________________________________________
@@ -978,30 +979,30 @@ Development and release automation.
 ### CI/CD
 
 - [ ] Expand GitHub Actions workflows
-  - [ ] Multi-platform builds
-  - [ ] Cross-compilation
-  - [ ] Test execution
+  - [x] Multi-platform builds (x86_64 + aarch64, Linux + macOS)
+  - [x] Cross-compilation (Cross.toml for ARM64 Linux)
+  - [x] Test execution (ci.yml: clippy, tests, integration tests, frontend checks)
   - [ ] Coverage reporting
 - [ ] Add automated security scanning
   - [ ] cargo-audit integration
-  - [ ] cargo-deny integration
+  - [x] cargo-deny integration (CI job `backend-deny` runs `cargo deny check`)
   - [ ] SAST tools
-- [ ] Implement automated dependency updates
-- [ ] Add automated changelog generation
-- [ ] Implement semantic versioning automation
+- [x] Implement automated dependency updates (Dependabot configured for Cargo + npm)
+- [x] Add automated changelog generation (release-please from conventional commits)
+- [x] Implement semantic versioning automation (release-please auto-determines version bumps)
 
 ### Release Automation
 
-- [ ] Automate binary releases
-  - [ ] Multi-platform binaries
-  - [ ] Checksums and signatures
+- [x] Automate binary releases (release-please workflow)
+  - [x] Multi-platform binaries (7 binaries x 4 targets)
+  - [x] Attestation (GitHub artifact attestation)
 - [x] Automate container image builds
   - [x] Multi-arch images
   - [ ] Image scanning
   - [x] Registry publishing
 - [ ] Create release checklist
-- [ ] Automate release notes generation
-- [ ] Implement version bumping automation
+- [x] Automate release notes generation (release-please)
+- [x] Implement version bumping automation (release-please)
 
 ### Monitoring & Observability
 
