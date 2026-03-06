@@ -3,6 +3,7 @@ mod client;
 mod commands;
 pub(crate) mod db;
 mod error;
+mod extension;
 mod host_info;
 mod host_ops;
 mod ssh_config;
@@ -91,6 +92,13 @@ enum SshAgentEvent {
 
 struct SshAgentHandler {
     local_db: Option<sea_orm::DatabaseConnection>,
+    /// State directory path for the SSH agent.
+    state_dir: std::path::PathBuf,
+    /// Service UUID assigned by the controller (populated in `on_connected`).
+    service_id: Option<uuid::Uuid>,
+    /// PKCS#8 DER-encoded P-256 private key for ECIES decryption of sensitive
+    /// extension parameters. Populated in `on_connected` from the identity.
+    private_key_der: Option<Vec<u8>>,
     /// Path to the operator-controlled freeze file.
     ///
     /// When this file exists, the agent rejects all `ExecuteUpdate` and
@@ -188,8 +196,27 @@ impl ServiceHandler for SshAgentHandler {
     async fn on_connected(
         &mut self,
         conn: &mut ControllerConnection,
-        _identity: &ServiceIdentityState,
+        identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
+        // Store identity state for extension use.
+        self.service_id = identity.service_id();
+        self.private_key_der = identity.private_key_pkcs8_der();
+
+        // Register UI extensions.
+        let encryption_public_key = identity.public_key_raw().map(|bytes| {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        });
+        let register_payload = extension::build_register_payload(encryption_public_key);
+        if let Err(e) = conn
+            .send(uptrakit_internal_wire::ServiceMessage::ExtensionRegister(
+                register_payload,
+            ))
+            .await
+        {
+            tracing::warn!(error = %e, "failed to register UI extensions");
+        }
+
         // DB is initialized at startup (in main) before the event loop starts.
         let local_db = self.local_db.as_ref().ok_or_else(|| {
             report!(LoopError::Other(
@@ -399,6 +426,32 @@ impl ServiceHandler for SshAgentHandler {
 
     fn capabilities(&self) -> BTreeSet<Capability> {
         client::ssh_agent_capabilities()
+    }
+
+    async fn on_extension_request(
+        &mut self,
+        request: uptrakit_internal_wire::extension::ExtensionRequestPayload,
+        conn: &mut ControllerConnection,
+    ) -> LoopResult<()> {
+        let db = self.local_db.as_ref().ok_or_else(|| {
+            report!(LoopError::Other(
+                "local_db not initialized: on_connected must be called before on_extension_request"
+                    .to_string()
+            ))
+        })?;
+
+        extension::handle_extension_request(
+            request,
+            db,
+            &self.state_dir,
+            self.private_key_der.as_deref(),
+            self.service_id,
+            &self.bg_tx,
+            conn,
+        )
+        .await;
+
+        Ok(())
     }
 
     async fn on_shutdown(
@@ -1102,6 +1155,9 @@ async fn main() {
 
     let mut handler = SshAgentHandler {
         local_db: Some(local_db),
+        state_dir: state_dir.to_path_buf(),
+        service_id: None,
+        private_key_der: None,
         freeze_file_path,
         in_flight_updates: HashMap::new(),
         aggregate_rx,
