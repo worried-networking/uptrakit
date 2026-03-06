@@ -16,6 +16,7 @@
 	import { getSystemAlerts } from '$lib/api';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { Permission } from '$lib/types';
+	import { loadExtensions, clearExtensions, getPageExtensions } from '$lib/extensions.svelte';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import '../app.css';
 
@@ -68,6 +69,22 @@
 			fetchAlerts();
 		}
 	});
+
+	// Load extensions when authenticated, clear on logout.
+	$effect(() => {
+		if (getUser()) {
+			loadExtensions();
+		} else {
+			clearExtensions();
+		}
+	});
+
+	const extensionNavItems = $derived(
+		getPageExtensions().map((ext) => ({
+			href: `/extensions/${ext.id}`,
+			label: ext.label
+		}))
+	);
 
 	const publicRoutes = new Set(['/login', '/register', '/device']);
 
@@ -188,6 +205,18 @@
 										(item.href !== '/' &&
 											$page.url.pathname.startsWith(item.href + '/') &&
 											!navItems.some((other) => other.href !== item.href && $page.url.pathname === other.href))
+											? 'preset-tonal-primary'
+											: 'hover:bg-surface-200 dark:hover:bg-surface-800'}"
+									>
+										{item.label}
+									</a>
+								</li>
+							{/each}
+							{#each extensionNavItems as item (item.href)}
+								<li>
+									<a
+										href={item.href}
+										class="block rounded-md px-3 py-2 text-sm font-medium {$page.url.pathname === item.href
 											? 'preset-tonal-primary'
 											: 'hover:bg-surface-200 dark:hover:bg-surface-800'}"
 									>

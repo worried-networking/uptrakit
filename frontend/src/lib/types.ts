@@ -753,3 +753,108 @@ export interface AuditLogListParams {
 }
 
 export type AttestationStatus = 'Verified' | 'NotFound' | 'Unverified';
+
+// ── UI Extensions ─────────────────────────────────────────────────────
+
+export type ExtensionTargeting = 'universal' | 'targeted';
+
+export interface PanelPosition {
+	type: 'tab' | 'below' | 'above' | string;
+}
+
+export type ExtensionPlacement =
+	| { type: 'page'; nav_section: string; icon?: string }
+	| { type: 'panel'; target_page: string; position: PanelPosition }
+	| { type: 'context_menu_group'; target_entity: string; group_label: string }
+	| { type: 'table_columns'; target_table: string; columns: ExtensionColumn[] };
+
+export interface ExtensionColumn {
+	key: string;
+	label: string;
+	data_action: string;
+}
+
+export interface TableColumn {
+	key: string;
+	label: string;
+	sortable?: boolean;
+}
+
+export type FieldType = 'text' | 'password' | 'number' | 'select' | 'textarea' | 'toggle' | 'hidden' | string;
+
+export interface SelectOption {
+	value: string;
+	label: string;
+}
+
+export interface FieldDef {
+	key: string;
+	label: string;
+	field_type: FieldType;
+	required: boolean;
+	placeholder?: string;
+	help_text?: string;
+	default_value?: string;
+	options?: SelectOption[];
+}
+
+export interface FormDef {
+	fields: FieldDef[];
+}
+
+export interface WizardStep {
+	step_id: string;
+	label: string;
+	form: FormDef;
+	submit_action?: string;
+}
+
+export type ActionUi = { type: 'form'; fields: FieldDef[] } | { type: 'wizard'; steps: WizardStep[] };
+
+export interface ActionDef {
+	action_id: string;
+	label: string;
+	ui?: ActionUi;
+	permission?: string;
+	destructive: boolean;
+	timeout_seconds?: number;
+}
+
+export type ExtensionUi =
+	| {
+			type: 'data_table';
+			columns: TableColumn[];
+			data_action: string;
+			row_actions: ActionDef[];
+			primary_actions: ActionDef[];
+	  }
+	| { type: 'form'; fields: FieldDef[] }
+	| { type: 'key_value'; data_action: string }
+	| { type: 'actions'; actions: ActionDef[] };
+
+export interface ExtensionManifest {
+	id: string;
+	source_type: string;
+	label: string;
+	placement: ExtensionPlacement;
+	required_permission?: string;
+	targeting: ExtensionTargeting;
+	ui: ExtensionUi;
+}
+
+export interface ExtensionResponse {
+	id: string;
+	source_type: string;
+	label: string;
+	placement: ExtensionPlacement;
+	required_permission?: string;
+	targeting: ExtensionTargeting;
+	ui: ExtensionUi;
+	provider_count: number;
+}
+
+export interface ExtensionProviderInfo {
+	service_id: string;
+	service_label: string;
+	hostname: string | null;
+}

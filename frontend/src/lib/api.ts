@@ -78,7 +78,9 @@ import type {
 	CreateHostPackageIgnoreRequest,
 	ListHostPackagesParams,
 	AuditLogEntry,
-	AuditLogListParams
+	AuditLogListParams,
+	ExtensionResponse,
+	ExtensionProviderInfo
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -970,4 +972,34 @@ export async function listSystemAuditLogs(params?: AuditLogListParams): Promise<
 	if (params?.per_page) p.set('per_page', String(params.per_page));
 	const qs = p.toString();
 	return request<PaginatedResponse<AuditLogEntry>>(`/system-audit-logs${qs ? '?' + qs : ''}`);
+}
+
+// ── Extensions ────────────────────────────────────────────────────────
+
+export async function listExtensions(): Promise<ExtensionResponse[]> {
+	return request<ExtensionResponse[]>('/extensions');
+}
+
+export async function listExtensionProviders(extensionId: string): Promise<ExtensionProviderInfo[]> {
+	return request<ExtensionProviderInfo[]>(`/extensions/${encodeURIComponent(extensionId)}/providers`);
+}
+
+export async function invokeExtensionAction(
+	extensionId: string,
+	actionId: string,
+	params: Record<string, unknown> = {},
+	serviceId?: string
+): Promise<unknown> {
+	const qs = serviceId ? `?service_id=${encodeURIComponent(serviceId)}` : '';
+	const path = `/extensions/${encodeURIComponent(extensionId)}/actions/${encodeURIComponent(actionId)}${qs}`;
+	const resp = await authenticatedFetch(path, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(params)
+	});
+	if (!resp.ok) {
+		const msg = await extractErrorMessage(resp);
+		throw new Error(msg);
+	}
+	return resp.json();
 }
