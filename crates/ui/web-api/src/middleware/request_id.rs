@@ -66,12 +66,10 @@ mod tests {
     use tower::ServiceExt;
 
     async fn echo_request_id(req: Request) -> impl IntoResponse {
-        let id = req
-            .extensions()
+        req.extensions()
             .get::<RequestId>()
             .map(|r| r.0.clone())
-            .unwrap_or_default();
-        id
+            .unwrap_or_default()
     }
 
     fn build_app() -> Router {
