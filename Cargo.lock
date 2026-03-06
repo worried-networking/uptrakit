@@ -6824,6 +6824,7 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+ "uptrakit-command",
  "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",

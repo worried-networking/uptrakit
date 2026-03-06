@@ -13,6 +13,7 @@ uptrakit-shared-types = { workspace = true }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
+uptrakit-command = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }
 sea-orm = { workspace = true }

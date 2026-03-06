@@ -390,6 +390,14 @@ pub enum ServiceMessage {
     /// so that subsequent messages are gated correctly without requiring a
     /// reconnect.
     UpdateCapabilities(UpdateCapabilitiesPayload),
+    // -- Plugin config reporting --
+    /// Service reports a plugin configuration to the controller.
+    ///
+    /// Sent by agents that detect infrastructure (e.g. PVE nodes) during
+    /// bootstrap. The controller creates or returns an existing plugin config
+    /// matching `(tenant_id, plugin_type, name)` and responds with
+    /// `ReportPluginConfigResponse`.
+    ReportPluginConfig(ReportPluginConfigPayload),
     // -- UI Extensions --
     /// Service declares its UI extensions after connecting.
     ///
@@ -464,6 +472,13 @@ pub enum ControllerMessage {
     /// invokes an extension action. The service should process the action and
     /// respond with `ExtensionResponse`.
     ExtensionRequest(extension::ExtensionRequestPayload),
+    // -- Plugin config reporting --
+    /// Response to a `ReportPluginConfig` request from a service.
+    ///
+    /// Contains the plugin config ID if the operation succeeded, or an error
+    /// message if it failed. Idempotent: returns the existing config ID if a
+    /// matching `(tenant_id, plugin_type, name)` already exists.
+    ReportPluginConfigResponse(ReportPluginConfigResponsePayload),
     // -- Infrastructure credential delivery --
     /// Infrastructure credentials for services that advertise credential
     /// capabilities. Fields are populated based on the service's capability set:
@@ -1531,6 +1546,47 @@ pub struct DiscoveryPluginResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discoveries: Vec<DiscoveredSoftware>,
     /// Plugin-level error message, if discovery failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+// =============================================================================
+// Plugin config reporting
+// =============================================================================
+
+/// Payload for `ServiceMessage::ReportPluginConfig`.
+///
+/// Sent by agents that detect infrastructure (e.g. PVE nodes) during bootstrap
+/// and want the controller to create or retrieve a plugin configuration.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportPluginConfigPayload {
+    /// Unique request identifier for correlating the response.
+    pub request_id: String,
+    /// Plugin type string (e.g. `"infrastructure_proxmox"`).
+    pub plugin_type: String,
+    /// Human-readable name for the config (e.g. `"pve.local"`).
+    pub name: String,
+    /// Plugin-specific configuration JSON.
+    pub config: serde_json::Value,
+}
+
+/// Payload for `ControllerMessage::ReportPluginConfigResponse`.
+///
+/// Returned to a service in response to `ReportPluginConfig`. Idempotent:
+/// if a config with the same `(tenant_id, plugin_type, name)` already exists,
+/// the existing ID is returned without creating a duplicate.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportPluginConfigResponsePayload {
+    /// The request ID from the original `ReportPluginConfig` message.
+    pub request_id: String,
+    /// Whether the operation succeeded.
+    pub success: bool,
+    /// The plugin config ID (set on success).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_config_id: Option<Uuid>,
+    /// Error message (set on failure).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -4524,6 +4580,48 @@ mod tests {
         assert!(
             msg.is_nats_publishable(),
             "SetUpdateFreeze contains no credentials and should be NATS-publishable"
+        );
+    }
+
+    #[test]
+    fn report_plugin_config_roundtrip() {
+        let msg = ServiceMessage::ReportPluginConfig(ReportPluginConfigPayload {
+            request_id: "req-42".to_string(),
+            plugin_type: "infrastructure_proxmox".to_string(),
+            name: "pve.local".to_string(),
+            config: serde_json::json!({"api_url": "https://pve:8006", "api_token": "test"}),
+        });
+        let json = serde_json::to_string(&msg).expect("serialize");
+        let parsed: ServiceMessage = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(msg, parsed);
+    }
+
+    #[test]
+    fn report_plugin_config_response_roundtrip() {
+        let msg =
+            ControllerMessage::ReportPluginConfigResponse(ReportPluginConfigResponsePayload {
+                request_id: "req-42".to_string(),
+                success: true,
+                plugin_config_id: Some(Uuid::nil()),
+                error: None,
+            });
+        let json = serde_json::to_string(&msg).expect("serialize");
+        let parsed: ControllerMessage = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(msg, parsed);
+    }
+
+    #[test]
+    fn report_plugin_config_response_is_nats_publishable() {
+        let msg =
+            ControllerMessage::ReportPluginConfigResponse(ReportPluginConfigResponsePayload {
+                request_id: "req-1".to_string(),
+                success: true,
+                plugin_config_id: None,
+                error: None,
+            });
+        assert!(
+            msg.is_nats_publishable(),
+            "ReportPluginConfigResponse contains no credentials and should be NATS-publishable"
         );
     }
 }

@@ -125,6 +125,9 @@ pub const MAX_EXTENSION_PARAMS_LEN: usize = 65_536;
 /// Maximum byte length of extension action response JSON.
 pub const MAX_EXTENSION_RESPONSE_LEN: usize = 1_048_576;
 
+/// Maximum byte length of plugin config JSON in a `ReportPluginConfig` message.
+pub const MAX_PLUGIN_CONFIG_JSON_LEN: usize = 65_536;
+
 // ── Trace context limits ────────────────────────────────────────────────────
 
 /// Maximum length of a trace ID (32 hex chars for 128-bit W3C trace ID).

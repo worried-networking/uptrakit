@@ -29,6 +29,7 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::MqttTriggerHostPackageUpdate(_) => Ok(()),
             ServiceMessage::Disconnecting(p) => p.wire_validate(),
             ServiceMessage::UpdateCapabilities(p) => p.wire_validate(),
+            ServiceMessage::ReportPluginConfig(p) => p.wire_validate(),
             ServiceMessage::ExtensionRegister(p) => p.wire_validate(),
             ServiceMessage::ExtensionActionsRegister(p) => p.wire_validate(),
             ServiceMessage::ExtensionResponse(p) => p.wire_validate(),
@@ -69,6 +70,7 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::TenantRevoked(p) => p.wire_validate(),
             ControllerMessage::MqttClientCreated(_) => Ok(()),
             ControllerMessage::SoftwareStates(p) => p.wire_validate(),
+            ControllerMessage::ReportPluginConfigResponse(p) => p.wire_validate(),
             ControllerMessage::ExtensionRequest(p) => p.wire_validate(),
             ControllerMessage::ServiceCredentials(_) => Ok(()),
             ControllerMessage::RequestCaRotation(p) => p.wire_validate(),
@@ -618,7 +620,26 @@ impl WireValidate for extension::ExtensionResponsePayload {
     }
 }
 
+impl WireValidate for ReportPluginConfigPayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.request_id, MAX_SHORT_STRING_LEN, "request_id")?;
+        check_string_len(&self.plugin_type, MAX_SHORT_STRING_LEN, "plugin_type")?;
+        check_string_len(&self.name, MAX_SHORT_STRING_LEN, "name")?;
+        let config_str = self.config.to_string();
+        check_string_len(&config_str, MAX_PLUGIN_CONFIG_JSON_LEN, "config")?;
+        Ok(())
+    }
+}
+
 // ── ControllerMessage payload impls ───────────────────────────────────────────
+
+impl WireValidate for ReportPluginConfigResponsePayload {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.request_id, MAX_SHORT_STRING_LEN, "request_id")?;
+        check_opt_string_len(&self.error, MAX_MEDIUM_STRING_LEN, "error")?;
+        Ok(())
+    }
+}
 
 impl WireValidate for CertificatePayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
@@ -1462,5 +1483,39 @@ mod tests {
             sensitive_params: None,
         });
         assert!(msg.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn report_plugin_config_validates() {
+        let msg = ServiceMessage::ReportPluginConfig(ReportPluginConfigPayload {
+            request_id: "req-1".to_string(),
+            plugin_type: "infrastructure_proxmox".to_string(),
+            name: "pve.local".to_string(),
+            config: serde_json::json!({"api_url": "https://pve:8006"}),
+        });
+        assert!(msg.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn report_plugin_config_response_validates() {
+        let msg =
+            ControllerMessage::ReportPluginConfigResponse(ReportPluginConfigResponsePayload {
+                request_id: "req-1".to_string(),
+                success: true,
+                plugin_config_id: Some(uuid::Uuid::nil()),
+                error: None,
+            });
+        assert!(msg.wire_validate().is_ok());
+    }
+
+    #[test]
+    fn report_plugin_config_rejects_oversized_config() {
+        let msg = ServiceMessage::ReportPluginConfig(ReportPluginConfigPayload {
+            request_id: "req-1".to_string(),
+            plugin_type: "infrastructure_proxmox".to_string(),
+            name: "pve.local".to_string(),
+            config: serde_json::Value::String("x".repeat(MAX_PLUGIN_CONFIG_JSON_LEN + 1)),
+        });
+        assert!(msg.wire_validate().is_err());
     }
 }
