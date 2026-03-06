@@ -150,6 +150,27 @@ impl ServiceConnectionRegistry {
         })
     }
 
+    /// Force-disconnect a service by cancelling its connection token and
+    /// removing it from the registry.
+    ///
+    /// The handler loop's `cancel_token.cancelled()` branch fires, closing
+    /// the WebSocket. Returns the set of assigned MQTT client IDs (if any).
+    ///
+    /// This is used when a certificate is revoked or a service is deactivated
+    /// to ensure the existing WebSocket session is terminated immediately,
+    /// rather than waiting for the next message round-trip to detect the
+    /// disconnection.
+    pub async fn force_disconnect(&self, service_id: &Uuid) -> Option<HashSet<Uuid>> {
+        let mut guard = self.inner.write().await;
+        guard.connections.remove(service_id).map(|c| {
+            c.cancel_token.cancel();
+            for client_id in &c.assigned_mqtt_clients {
+                guard.mqtt_client_index.remove(client_id);
+            }
+            c.assigned_mqtt_clients
+        })
+    }
+
     // ---------------------------------------------------------------
     // Messaging
     // ---------------------------------------------------------------
@@ -626,6 +647,29 @@ mod tests {
 
         // Keep rx alive to prevent channel closure before broadcast completes.
         drop(rx);
+    }
+
+    #[tokio::test]
+    async fn force_disconnect_cancels_token_and_removes_connection() {
+        let registry = ServiceConnectionRegistry::new();
+        let svc = Uuid::now_v7();
+        let caps = BTreeSet::from([Capability::GracefulShutdown]);
+        let (_rx, cancel_token) = registry.register(svc, caps, None, None).await;
+
+        assert!(registry.is_connected(&svc).await);
+        assert!(!cancel_token.is_cancelled());
+
+        let result = registry.force_disconnect(&svc).await;
+        assert!(result.is_some());
+        assert!(cancel_token.is_cancelled());
+        assert!(!registry.is_connected(&svc).await);
+    }
+
+    #[tokio::test]
+    async fn force_disconnect_returns_none_for_unknown_service() {
+        let registry = ServiceConnectionRegistry::new();
+        let result = registry.force_disconnect(&Uuid::now_v7()).await;
+        assert!(result.is_none());
     }
 
     #[tokio::test]

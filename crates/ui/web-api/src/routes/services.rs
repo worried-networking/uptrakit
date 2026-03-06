@@ -286,7 +286,10 @@ pub async fn reject_service(
         .await;
 
     // Terminate active WebSocket connection.
-    state.service_connections.unregister(&service_id).await;
+    state
+        .service_connections
+        .force_disconnect(&service_id)
+        .await;
 
     state
         .event_broadcaster
@@ -335,7 +338,10 @@ pub async fn deactivate_service(
                     RequestCrlRenewalPayload::default(),
                 ))
                 .await;
-            state.service_connections.unregister(&service_id).await;
+            state
+                .service_connections
+                .force_disconnect(&service_id)
+                .await;
             state
                 .event_broadcaster
                 .send(
@@ -440,7 +446,10 @@ pub async fn merge_service(
             RequestCrlRenewalPayload::default(),
         ))
         .await;
-    state.service_connections.unregister(&source_uuid).await;
+    state
+        .service_connections
+        .force_disconnect(&source_uuid)
+        .await;
 
     tracing::info!(
         target_id = %target_uuid,
