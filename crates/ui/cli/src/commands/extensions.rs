@@ -395,8 +395,17 @@ fn collect_actions(ui: &ExtensionUi) -> Vec<&ActionDef> {
         ExtensionUi::DataTable {
             row_actions,
             primary_actions,
+            context_selector,
             ..
-        } => row_actions.iter().chain(primary_actions.iter()).collect(),
+        } => {
+            let mut v: Vec<&ActionDef> = row_actions.iter().chain(primary_actions.iter()).collect();
+            if let Some(cs) = context_selector
+                && let Some(add_action) = &cs.add_action
+            {
+                v.push(add_action);
+            }
+            v
+        }
         ExtensionUi::Actions { actions, .. } => actions.iter().collect(),
         ExtensionUi::Form(_) | ExtensionUi::KeyValue { .. } => vec![],
         _ => vec![],

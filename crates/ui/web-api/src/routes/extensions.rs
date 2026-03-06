@@ -269,8 +269,18 @@ fn find_action_timeout(
         ExtensionUi::DataTable {
             row_actions,
             primary_actions,
+            context_selector,
             ..
-        } => row_actions.iter().chain(primary_actions.iter()).collect(),
+        } => {
+            let mut v: Vec<&uptrakit_internal_wire::extension::ActionDef> =
+                row_actions.iter().chain(primary_actions.iter()).collect();
+            if let Some(cs) = context_selector
+                && let Some(add_action) = &cs.add_action
+            {
+                v.push(add_action);
+            }
+            v
+        }
         ExtensionUi::Actions { actions } => actions.iter().collect(),
         _ => {
             tracing::warn!("Unknown ExtensionUi variant when resolving action timeout");
