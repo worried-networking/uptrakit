@@ -62,6 +62,7 @@ fn build_connection_context() -> ConnectionContext {
 /// host so that SSH handshakes and remote commands overlap instead of
 /// serialising.  Errors for individual hosts are logged as warnings and
 /// skipped; the remaining hosts are still reported.
+#[tracing::instrument(skip_all)]
 pub(crate) async fn report_enrolled_hosts(
     local_db: &sea_orm::DatabaseConnection,
     conn: &mut ControllerConnection,
@@ -323,6 +324,7 @@ async fn collect_one_host_for_reload(
 /// Called from `SshAgentHandler::on_service_event` when a
 /// `SshAgentEvent::HostConfigChanged` event fires and the host snapshot has
 /// actually changed.
+#[tracing::instrument(skip_all, fields(host_count = current_hosts.len()))]
 pub(crate) async fn report_hosts_after_config_change(
     db: &sea_orm::DatabaseConnection,
     conn: &mut ControllerConnection,
@@ -380,6 +382,7 @@ pub(crate) fn ssh_agent_capabilities() -> BTreeSet<Capability> {
 /// `InFlightUpdate` and forwards all output/completion events to the shared
 /// `aggregate_tx` channel. The `SshAgentHandler` drains that channel in
 /// `poll_service_event`.
+#[tracing::instrument(skip_all, fields(host_machine_id = %payload.host_machine_id, update_id = %payload.update_history_id))]
 pub(crate) async fn handle_execute_update_ssh(
     payload: ExecuteUpdatePayload,
     db: &sea_orm::DatabaseConnection,
@@ -498,6 +501,12 @@ pub(crate) async fn handle_execute_update_ssh(
 
     let in_flight = uptrakit_agent_core::start_update(payload, executor, conn, &ctx).await;
 
+    tracing::debug!(
+        host_machine_id = %host_machine_id,
+        update_history_id = %update_history_id,
+        "spawning update forwarder task for SSH host"
+    );
+
     // Spawn a forwarder task that owns the InFlightUpdate and forwards all
     // output/completion events to the shared aggregate channel.
     let host_id = host_machine_id.clone();
@@ -550,11 +559,18 @@ pub(crate) fn spawn_check_versions_ssh(
     pool: &SshConnectionPool,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
 ) {
+    let host_machine_id = payload.host_machine_id.clone();
+    tracing::debug!(
+        host_machine_id = %host_machine_id,
+        assignment_count = payload.assignments.len(),
+        "spawning background CheckVersions task for SSH host"
+    );
     let db = db.clone();
     let pool = pool.clone();
     let bg_tx = bg_tx.clone();
     tokio::spawn(async move {
         let msg = run_check_versions_ssh(payload, &db, &pool).await;
+        tracing::debug!(host_machine_id = %host_machine_id, "background CheckVersions task completed");
         let _ = bg_tx.send(msg).await;
     });
 }
@@ -629,11 +645,18 @@ pub(crate) fn spawn_discover_software_ssh(
     pool: &SshConnectionPool,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
 ) {
+    let host_machine_id = payload.host_machine_id.clone();
+    tracing::debug!(
+        host_machine_id = %host_machine_id,
+        plugin_count = payload.plugins.len(),
+        "spawning background DiscoverSoftware task for SSH host"
+    );
     let db = db.clone();
     let pool = pool.clone();
     let bg_tx = bg_tx.clone();
     tokio::spawn(async move {
         let msg = run_discover_software_ssh(payload, &db, &pool).await;
+        tracing::debug!(host_machine_id = %host_machine_id, "background DiscoverSoftware task completed");
         let _ = bg_tx.send(msg).await;
     });
 }
@@ -718,11 +741,19 @@ pub(crate) fn spawn_execute_batch_host_package_update_ssh(
     pool: &SshConnectionPool,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
 ) {
+    let host_machine_id = payload.host_machine_id.clone();
+    tracing::debug!(
+        host_machine_id = %host_machine_id,
+        batch_id = %payload.batch_id,
+        update_count = payload.updates.len(),
+        "spawning background ExecuteBatchHostPackageUpdate task for SSH host"
+    );
     let db = db.clone();
     let pool = pool.clone();
     let bg_tx = bg_tx.clone();
     tokio::spawn(async move {
         let msg = run_execute_batch_host_package_update_ssh(payload, &db, &pool).await;
+        tracing::debug!(host_machine_id = %host_machine_id, "background ExecuteBatchHostPackageUpdate task completed");
         let _ = bg_tx.send(msg).await;
     });
 }

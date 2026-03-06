@@ -37,6 +37,7 @@ impl CommandExecutor for SshCommandExecutor {
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> uptrakit_command::Result<CommandOutput> {
         let remote_cmd = build_remote_command_string(spec)?;
+        tracing::debug!(cmd_len = remote_cmd.len(), "executing remote SSH command");
 
         let fut = self
             .session
@@ -77,6 +78,10 @@ impl CommandExecutor for SshCommandExecutor {
 
     async fn execute_quiet(&self, spec: &CommandSpec) -> uptrakit_command::Result<CommandOutput> {
         let remote_cmd = build_remote_command_string(spec)?;
+        tracing::trace!(
+            cmd_len = remote_cmd.len(),
+            "executing quiet remote SSH command"
+        );
 
         let fut = self.session.exec_command_streaming(&remote_cmd, None);
 
@@ -124,6 +129,7 @@ impl CommandExecutor for SshCommandExecutor {
         &self,
         command: &str,
     ) -> uptrakit_command::Result<Box<dyn StdioTunnel>> {
+        tracing::debug!("opening SSH stdio tunnel");
         let channel = self
             .session
             .open_channel_for_command(command)
