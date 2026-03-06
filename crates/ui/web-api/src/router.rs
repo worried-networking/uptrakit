@@ -608,7 +608,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         // Audit logs
         .routes(routes!(crate::routes::audit_logs::list_audit_logs))
-        .routes(routes!(crate::routes::audit_logs::list_system_audit_logs));
+        .routes(routes!(crate::routes::audit_logs::list_system_audit_logs))
+        // Admin events SSE stream
+        .route(
+            "/api/v1/events/stream",
+            get(crate::routes::events::stream_events),
+        );
 
     // Extension endpoints — plain axum routes (no OpenAPI annotations).
     let auth_routes = auth_routes

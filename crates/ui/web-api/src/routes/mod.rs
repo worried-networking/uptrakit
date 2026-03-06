@@ -7,6 +7,7 @@ pub mod ca;
 pub mod device_auth;
 pub mod discovery_allowlist;
 pub mod enrollment_tokens;
+pub mod events;
 pub mod extensions;
 pub mod health;
 pub mod host_packages;
