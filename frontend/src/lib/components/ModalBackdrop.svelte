@@ -51,13 +51,18 @@
 </script>
 
 <div
-	class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+	class="fixed inset-0 z-50 overflow-y-auto bg-black/50"
 	role="presentation"
 	bind:this={backdrop}
-	onclick={(e) => {
-		if (e.target === e.currentTarget) onclose();
-	}}
 	onkeydown={handleKeydown}
 >
-	{@render children()}
+	<div
+		class="flex min-h-full items-center justify-center p-4"
+		role="presentation"
+		onclick={(e) => {
+			if (e.target === e.currentTarget) onclose();
+		}}
+	>
+		{@render children()}
+	</div>
 </div>
