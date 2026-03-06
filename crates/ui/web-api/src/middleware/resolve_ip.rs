@@ -275,7 +275,10 @@ mod tests {
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::NoopBackend,
             )),
-            extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(vec![])),
+            extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(
+                vec![],
+                vec![],
+            )),
             extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
         })
     }

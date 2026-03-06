@@ -14,9 +14,24 @@ pub fn extension_manifests() -> Vec<ExtensionManifest> {
     vec![hosts_page_manifest(), host_info_panel_manifest()]
 }
 
-/// Full-page extension: Proxmox Hosts data table.
-fn hosts_page_manifest() -> ExtensionManifest {
-    let add_config_action = ActionDef::new("add-config", "Add Configuration")
+/// Returns the action library for the Proxmox VE plugin.
+///
+/// All actions referenced by `action_id` strings in the extension manifests
+/// must be defined here.
+pub fn extension_actions() -> Vec<ActionDef> {
+    vec![
+        add_config_action(),
+        match_action(),
+        unmatch_action(),
+        discover_action(),
+        test_connection_action(),
+    ]
+}
+
+// ── Action definitions ──────────────────────────────────────────────────────
+
+fn add_config_action() -> ActionDef {
+    ActionDef::new("add-config", "Add Configuration")
         .with_permission(Permission::ManageHosts)
         .with_ui(ActionUi::Form(FormDef::new(vec![
             FieldDef::new("name", "Configuration Name")
@@ -58,11 +73,49 @@ fn hosts_page_manifest() -> ExtensionManifest {
             )
             .with_response_id_field("id")
             .with_response_label_field("name"),
-        );
+        )
+}
 
+fn match_action() -> ActionDef {
+    ActionDef::new("match", "Manual Match")
+        .with_ui(ActionUi::Form(FormDef::new(vec![
+            FieldDef::new("mapping_id", "Mapping ID")
+                .with_type(FieldType::Hidden)
+                .required(),
+            FieldDef::new("host_id", "Host")
+                .with_type(FieldType::Select)
+                .required()
+                .with_placeholder("Select a host"),
+        ])))
+        .with_permission(Permission::ManageHosts)
+}
+
+fn unmatch_action() -> ActionDef {
+    ActionDef::new("unmatch", "Remove Match")
+        .with_permission(Permission::ManageHosts)
+        .destructive()
+}
+
+fn discover_action() -> ActionDef {
+    ActionDef::new("discover", "Discover")
+        .with_permission(Permission::ManageHosts)
+        .with_timeout(120)
+}
+
+fn test_connection_action() -> ActionDef {
+    ActionDef::new("test-connection", "Test Connection")
+        .with_permission(Permission::ManageHosts)
+        .with_timeout(30)
+}
+
+// ── Manifest definitions ────────────────────────────────────────────────────
+
+/// Full-page extension: Proxmox Hosts data table.
+fn hosts_page_manifest() -> ExtensionManifest {
     ExtensionManifest::new(
         "proxmox.hosts",
         "Proxmox VE Hosts",
+        650,
         ExtensionPlacement::Page {
             nav_section: "infrastructure".to_string(),
             icon: Some("server".to_string()),
@@ -78,30 +131,8 @@ fn hosts_page_manifest() -> ExtensionManifest {
                 TableColumn::new("match_method", "Match Method"),
             ],
             data_action: "list".to_string(),
-            row_actions: vec![
-                ActionDef::new("match", "Manual Match")
-                    .with_ui(ActionUi::Form(FormDef::new(vec![
-                        FieldDef::new("mapping_id", "Mapping ID")
-                            .with_type(FieldType::Hidden)
-                            .required(),
-                        FieldDef::new("host_id", "Host")
-                            .with_type(FieldType::Select)
-                            .required()
-                            .with_placeholder("Select a host"),
-                    ])))
-                    .with_permission(Permission::ManageHosts),
-                ActionDef::new("unmatch", "Remove Match")
-                    .with_permission(Permission::ManageHosts)
-                    .destructive(),
-            ],
-            primary_actions: vec![
-                ActionDef::new("discover", "Discover")
-                    .with_permission(Permission::ManageHosts)
-                    .with_timeout(120),
-                ActionDef::new("test-connection", "Test Connection")
-                    .with_permission(Permission::ManageHosts)
-                    .with_timeout(30),
-            ],
+            row_actions: vec!["match".to_string(), "unmatch".to_string()],
+            primary_actions: vec!["discover".to_string(), "test-connection".to_string()],
             context_selector: Some(Box::new(
                 ContextSelectorDef::new(
                     "plugin_config_id",
@@ -110,7 +141,7 @@ fn hosts_page_manifest() -> ExtensionManifest {
                         plugin_type: "infrastructure_proxmox".to_string(),
                     },
                 )
-                .with_add_action(add_config_action)
+                .with_add_action("add-config")
                 .with_empty_message("No Proxmox VE configurations found. Add one to get started."),
             )),
         },
@@ -123,6 +154,7 @@ fn host_info_panel_manifest() -> ExtensionManifest {
     ExtensionManifest::new(
         "proxmox.host-info",
         "Proxmox VE Info",
+        0,
         ExtensionPlacement::Panel {
             target_page: "host-detail".to_string(),
             position: PanelPosition::default(),
@@ -361,6 +393,18 @@ mod tests {
     }
 
     #[test]
+    fn extension_actions_returns_five() {
+        let actions = extension_actions();
+        assert_eq!(actions.len(), 5);
+        let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
+        assert!(ids.contains(&"add-config"));
+        assert!(ids.contains(&"match"));
+        assert!(ids.contains(&"unmatch"));
+        assert!(ids.contains(&"discover"));
+        assert!(ids.contains(&"test-connection"));
+    }
+
+    #[test]
     fn hosts_page_is_data_table() {
         let manifest = hosts_page_manifest();
         assert!(matches!(manifest.ui, ExtensionUi::DataTable { .. }));
@@ -368,6 +412,7 @@ mod tests {
             manifest.placement,
             ExtensionPlacement::Page { .. }
         ));
+        assert_eq!(manifest.priority, 650);
     }
 
     #[test]
@@ -385,9 +430,10 @@ mod tests {
                 cs.source,
                 ContextSelectorSource::PluginConfigs { .. }
             ));
-            assert!(
-                cs.add_action.is_some(),
-                "add_action should be set for config creation"
+            assert_eq!(
+                cs.add_action.as_deref(),
+                Some("add-config"),
+                "add_action should reference the add-config action"
             );
         } else {
             panic!("expected DataTable UI");
@@ -395,22 +441,25 @@ mod tests {
     }
 
     #[test]
-    fn hosts_page_primary_actions_do_not_require_config_field() {
+    fn hosts_page_row_actions_reference_action_library() {
+        let manifest = hosts_page_manifest();
+        if let ExtensionUi::DataTable { row_actions, .. } = &manifest.ui {
+            assert_eq!(row_actions, &["match", "unmatch"]);
+        } else {
+            panic!("expected DataTable UI");
+        }
+    }
+
+    #[test]
+    fn hosts_page_primary_actions_reference_action_library() {
         let manifest = hosts_page_manifest();
         if let ExtensionUi::DataTable {
             primary_actions, ..
         } = &manifest.ui
         {
-            for action in primary_actions {
-                if let Some(ActionUi::Form(form)) = &action.ui {
-                    let has_config_field = form.fields.iter().any(|f| f.key == "plugin_config_id");
-                    assert!(
-                        !has_config_field,
-                        "primary action '{}' should not have plugin_config_id field (injected by context selector)",
-                        action.action_id
-                    );
-                }
-            }
+            assert_eq!(primary_actions, &["discover", "test-connection"]);
+        } else {
+            panic!("expected DataTable UI");
         }
     }
 

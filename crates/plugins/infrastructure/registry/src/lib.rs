@@ -118,6 +118,14 @@ pub trait PluginOps: Send + Sync + 'static {
         vec![]
     }
 
+    /// Returns the action library for all registered plugins.
+    ///
+    /// Actions are referenced by `action_id` from the extension manifests.
+    /// Default returns empty.
+    fn extension_actions(&self) -> Vec<uptrakit_internal_wire::extension::ActionDef> {
+        vec![]
+    }
+
     /// Handle an extension action invocation for a plugin-backed extension.
     ///
     /// The controller calls this when an action is invoked on an extension
@@ -205,6 +213,10 @@ impl PluginOps for PluginRegistry {
 
     fn extension_manifests(&self) -> Vec<uptrakit_internal_wire::extension::ExtensionManifest> {
         uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests()
+    }
+
+    fn extension_actions(&self) -> Vec<uptrakit_internal_wire::extension::ActionDef> {
+        uptrakit_plugin_infrastructure_proxmox::extensions::extension_actions()
     }
 
     fn handle_extension_action<'a>(

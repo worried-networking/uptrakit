@@ -428,8 +428,13 @@ async fn run(args: cli::Args) -> Result<()> {
     let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
         Arc::new(uptrakit_plugin_infrastructure_registry::PluginRegistry);
     let extension_manifests = plugin_ops.extension_manifests();
-    let extension_registry =
-        Arc::new(uptrakit_web_api::extension_registry::ExtensionRegistry::new(extension_manifests));
+    let extension_actions = plugin_ops.extension_actions();
+    let extension_registry = Arc::new(
+        uptrakit_web_api::extension_registry::ExtensionRegistry::new(
+            extension_manifests,
+            extension_actions,
+        ),
+    );
 
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)
