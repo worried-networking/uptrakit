@@ -42,6 +42,7 @@ impl NotificationDispatcher {
     ///
     /// This never blocks and never fails from the caller's perspective.
     /// If the channel is closed (dispatcher shut down), the event is silently dropped.
+    #[tracing::instrument(skip_all)]
     pub fn dispatch(&self, event: NotificationEvent) {
         if let Err(e) = self.tx.send(event) {
             tracing::warn!(
@@ -58,6 +59,7 @@ impl NotificationDispatcher {
 /// adds the SMTP connection and auth fields from the live settings snapshot
 /// so that [`EmailChannel::deliver`](uptrakit_notification_channels::EmailChannel::deliver)
 /// receives the full merged config.
+#[tracing::instrument(skip_all)]
 fn merge_smtp_into_config(
     smtp: &crate::settings::SmtpSettingsSnapshot,
     mut config: serde_json::Value,
@@ -91,6 +93,7 @@ fn merge_smtp_into_config(
 
 /// Public (crate-visible) re-export of [`merge_smtp_into_config`] for use in route handlers
 /// (e.g. the `test_channel` endpoint) that need to perform the same SMTP merge logic.
+#[tracing::instrument(skip_all)]
 pub(crate) fn merge_smtp_into_config_pub(
     smtp: &crate::settings::SmtpSettingsSnapshot,
     config: serde_json::Value,
@@ -98,6 +101,7 @@ pub(crate) fn merge_smtp_into_config_pub(
     merge_smtp_into_config(smtp, config)
 }
 
+#[tracing::instrument(skip_all)]
 async fn dispatch_loop(
     db: DatabaseConnection,
     channel_registry: Arc<ChannelRegistry>,

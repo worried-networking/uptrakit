@@ -43,6 +43,7 @@ impl TenantManager {
     /// Apply MQTT client assignments from the controller.
     ///
     /// This is called when receiving `TenantAssignments` message.
+    #[tracing::instrument(skip_all)]
     pub async fn apply_assignments(&mut self, configs: Vec<MqttTenantConfig>) {
         for config in configs {
             if config.enabled {
@@ -56,6 +57,7 @@ impl TenantManager {
     /// Reload a single MQTT client's configuration.
     ///
     /// This is called when receiving `TenantConfigUpdated` message.
+    #[tracing::instrument(skip_all, fields(mqtt_client_id = %config.mqtt_client_id))]
     pub async fn reload_client(&mut self, config: MqttTenantConfig) {
         if config.enabled {
             self.start_or_update_client(config).await;
@@ -67,6 +69,7 @@ impl TenantManager {
     /// Stop an MQTT client.
     ///
     /// This is called when receiving `TenantRevoked` message or when config is disabled.
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     pub async fn stop_client(&mut self, mqtt_client_id: &Uuid) {
         if let Some(state) = self.clients.remove(mqtt_client_id) {
             tracing::info!(%mqtt_client_id, "shutting down MQTT client");
@@ -81,6 +84,7 @@ impl TenantManager {
     }
 
     /// Graceful shutdown: stop all MQTT clients.
+    #[tracing::instrument(skip_all)]
     pub async fn shutdown_all(&mut self) {
         let clients = std::mem::take(&mut self.clients);
         let mut tasks = FuturesUnordered::new();
@@ -102,6 +106,7 @@ impl TenantManager {
     /// State and version topics are published for every connected client.
     /// Home Assistant discovery config topics are published only for clients
     /// that have `ha_discovery` enabled.
+    #[tracing::instrument(skip_all, fields(tenant_id = %payload.tenant_id))]
     pub async fn update_software_states(
         &mut self,
         payload: uptrakit_internal_wire::MqttSoftwareStatesPayload,
@@ -131,6 +136,7 @@ impl TenantManager {
     ///
     /// Republishes both state/version topics (for all clients) and HA discovery
     /// config topics (only for HA-enabled clients) from the in-memory cache.
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     pub async fn handle_reconnected(&mut self, mqtt_client_id: &uuid::Uuid) {
         let Some(state) = self.clients.get(mqtt_client_id) else {
             return;
@@ -152,6 +158,7 @@ impl TenantManager {
     /// re-sending after an HA restart. Only the `{ha_prefix}/update/.../config`
     /// messages need to be republished so that HA re-registers its `update`
     /// entities.
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     pub async fn handle_ha_online(&mut self, mqtt_client_id: &uuid::Uuid) {
         let Some(state) = self.clients.get(mqtt_client_id) else {
             return;
@@ -244,6 +251,7 @@ impl TenantManager {
     }
 
     /// Start or update an MQTT client.
+    #[tracing::instrument(skip_all, fields(mqtt_client_id = %config.mqtt_client_id))]
     async fn start_or_update_client(&mut self, config: MqttTenantConfig) {
         let mqtt_client_id = config.mqtt_client_id;
         let new_hash = compute_config_hash(&config);
@@ -299,6 +307,7 @@ impl TenantManager {
     /// that have `ha_discovery` enabled.
     ///
     /// Called on every `SoftwareStates` push and on broker reconnect.
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     async fn publish_software_states(
         &self,
         mqtt_client_id: uuid::Uuid,
@@ -430,6 +439,7 @@ impl TenantManager {
     /// restarts, state and version topics are already retained on the broker and
     /// do not need re-sending. Only the `{ha_prefix}/update/.../config` messages
     /// need to be republished so that HA re-registers its `update` entities.
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     async fn publish_ha_configs_only(
         &self,
         mqtt_client_id: uuid::Uuid,
@@ -487,6 +497,7 @@ impl TenantManager {
     /// - Publishes `{prefix}/hosts/{host_id}/attributes` (retained)
     /// - Subscribes to `{prefix}/hosts/{host_id}/set`
     /// - If `ha_discovery`: publishes HA discovery config (retained)
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     async fn publish_host_package_states(
         &self,
         mqtt_client_id: uuid::Uuid,
@@ -698,6 +709,7 @@ impl TenantManager {
     /// HA restarts, retained state/attributes topics are already on the broker
     /// and do not need re-sending. Only the discovery config topics need to be
     /// republished so that HA re-registers the `update` entities.
+    #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     async fn publish_host_package_ha_configs_only(
         &self,
         mqtt_client_id: uuid::Uuid,

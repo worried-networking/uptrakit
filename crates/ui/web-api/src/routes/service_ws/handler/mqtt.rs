@@ -58,6 +58,7 @@ pub(super) struct MqttContext {
 /// must register the service before calling [`complete_mqtt_registration`].
 ///
 /// Returns `None` if the connection is closed or the phase fails.
+#[tracing::instrument(skip_all, fields(%service_id))]
 pub(super) async fn handle_mqtt_register_handshake(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
@@ -152,6 +153,7 @@ pub(super) async fn handle_mqtt_register_handshake(
 /// Must be called **after** the service has been added to
 /// `ServiceConnectionRegistry` so that capacity queries succeed.
 /// Returns the [`MqttContext`] used by the main authenticated loop.
+#[tracing::instrument(skip_all, fields(%service_id))]
 pub(super) async fn complete_mqtt_registration(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -204,6 +206,7 @@ pub(super) async fn complete_mqtt_registration(
 // ---------------------------------------------------------------------------
 
 /// Handle a `ReleaseTenants` message: release MQTT client leases.
+#[tracing::instrument(skip_all, fields(%service_id))]
 pub(super) async fn handle_release_tenants(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -239,6 +242,7 @@ pub(super) async fn handle_release_tenants(
 // ---------------------------------------------------------------------------
 
 /// Handle a `MqttClientStatus` message: update MQTT client connection status.
+#[tracing::instrument(skip_all)]
 pub(super) async fn handle_mqtt_client_status(
     state: &Arc<AppState>,
     payload: &MqttClientStatusPayload,
@@ -272,6 +276,7 @@ pub(super) async fn handle_mqtt_client_status(
 
 /// Handle a `MqttTriggerUpdate` message: validate tenant assignment, trigger
 /// update for host.
+#[tracing::instrument(skip_all)]
 pub(super) async fn handle_mqtt_trigger_update(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
@@ -357,6 +362,7 @@ pub(super) async fn handle_mqtt_trigger_update(
 
 /// Handle a `MqttTriggerHostPackageUpdate` message: trigger a batch update of
 /// all outdated host packages on a host.
+#[tracing::instrument(skip_all)]
 pub(super) async fn handle_mqtt_trigger_host_package_update(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
