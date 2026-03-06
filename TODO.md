@@ -1007,15 +1007,15 @@ Development and release automation.
 
 - [ ] Implement structured logging
   - [ ] JSON log output
-  - [ ] Log levels
-  - [ ] Correlation IDs
+  - [x] Log levels
+  - [x] Correlation IDs (request-id middleware, TraceContext on wire protocol)
 - [ ] Add metrics collection
   - [ ] Prometheus metrics
   - [ ] Custom metrics
   - [ ] Metric dashboards
-- [ ] Implement tracing
-  - [ ] Distributed tracing
-  - [ ] OpenTelemetry integration
+- [x] Implement tracing spans (`#[instrument]` on all critical code paths)
+  - [x] Distributed tracing preparation (TraceContext, request IDs, registry-based subscriber)
+  - [ ] OpenTelemetry integration (add `tracing-opentelemetry` exporter layer)
 - [ ] Create monitoring dashboards
   - [ ] System health dashboard
   - [ ] Performance dashboard

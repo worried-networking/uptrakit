@@ -283,6 +283,10 @@ These are non-negotiable design constraints. Do not violate them.
    [Secrets Handling](docs/security/secrets-and-encryption.md).
 1. **Logging goes to journald or stdout.** No internal log storage. Full command output is not captured internally --
    only high-level summaries are retained for display.
+1. **Tracing spans use `skip_all`.** All `#[tracing::instrument]` annotations must use `skip_all` and explicitly
+   list relevant fields. Never auto-capture function arguments. HTTP handlers inherit from the `http.request`
+   span created by the request-id middleware. Wire protocol envelopes carry `TraceContext` for distributed tracing.
+   See [Tracing Conventions](docs/development/tracing.md).
 1. **No overlapping update actions per host.** At most one active (`Pending` or `InProgress`) update may run on a
    host at any time, across ALL update types (software-item updates in `update_history` AND host-package batches in
    `host_package_update_history`). This is enforced by:
@@ -1332,6 +1336,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [OpenAPI Client](docs/development/openapi-client.md)
 - [Embedded Frontend](docs/development/embedded-frontend.md)
 - [Logging](docs/development/logging.md)
+- [Tracing Conventions](docs/development/tracing.md)
 - [Notifications](docs/development/notifications.md)
 - [Audit Logs](docs/development/audit-logs.md)
 - [Docker](docs/development/docker.md)

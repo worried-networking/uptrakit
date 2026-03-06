@@ -225,6 +225,7 @@ for the full convention, required fields, and examples.
 
 ### Cross-references
 
+- [Tracing Conventions](tracing.md) — spans, `#[instrument]`, request IDs, distributed tracing
 - [Security — Secrets Handling and Encryption](../security/secrets-and-encryption.md)
 - [Security — Secure Development](../security/secure-development.md)
 - [Coding Standards](coding-standards.md)

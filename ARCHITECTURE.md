@@ -366,8 +366,9 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
 - **Event Loop**: The SDK owns the unified `tokio::select!` loop that handles ping/pong, certificate renewal, CA staleness checks, signal handling,
   and close-reason dispatch. Services inject custom behaviour through `ServiceHandler` callbacks (`poll_service_event`, `on_service_event`).
 - **Main Helpers**: `init_crypto()`, `print_build_info()`, `init_tracing()`, `default_resolve_shutdown()`, and
-  `run_lifecycle_and_handle_errors()` reduce `main()` boilerplate. `init_tracing()` configures the tracing subscriber
-  (each binary calls it explicitly — the SDK does not configure the global dispatcher autonomously).
+  `run_lifecycle_and_handle_errors()` reduce `main()` boilerplate. `init_tracing()` configures a **registry-based**
+  tracing subscriber (each binary calls it explicitly — the SDK does not configure the global dispatcher autonomously).
+  The registry architecture allows adding an OpenTelemetry exporter layer as a one-line change.
   `default_resolve_shutdown()` maps `ShutdownCause` to `(DisconnectReason, LoopOutcome)` for standard binaries.
 - **Signal Handling**: Cross-platform `SignalWatcher` for `SIGINT`, `SIGTERM`, and `SIGHUP`.
 - **Enrollment**: WebSocket-based enrollment with certificate issuance.
@@ -404,3 +405,12 @@ extension is described by an `ExtensionManifest` (defined in `crates/shared/wire
 - **CLI**: `uptrakit extensions list|providers|invoke` subcommands.
 
 See [Extensions Architecture](docs/architecture/extensions.md) for the detailed design.
+
+## Observability
+
+All binaries use the `tracing` crate with a registry-based subscriber. Critical code paths are instrumented with
+`#[tracing::instrument(skip_all)]` spans. HTTP requests carry a unique `x-request-id` header (UUID v7 generated
+or preserved from the client). WebSocket and NATS envelopes propagate a `TraceContext` (W3C-compatible trace/span
+IDs) for distributed tracing correlation across service boundaries. When OpenTelemetry is enabled, the existing
+span tree and trace context propagation will light up automatically.
+See [Tracing Conventions](docs/development/tracing.md) and [Logging](docs/development/logging.md).

@@ -431,6 +431,32 @@ header fields but an unrecognized `type` (e.g., a new variant from a future serv
 version), the sequence counter is correctly advanced and the message is silently skipped. This ensures that unknown
 message types do not cause sequence mismatches on subsequent messages.
 
+## Distributed Tracing (TraceContext)
+
+Every envelope may carry an optional `trace_context` object for distributed tracing correlation:
+
+```json
+{
+  "protocol_version": 1,
+  "seq": 1,
+  "trace_context": {
+    "trace_id": "0123456789abcdef0123456789abcdef",
+    "span_id": "fedcba9876543210"
+  },
+  "type": "ping",
+  "service_ts": 1706400000000
+}
+```
+
+- `trace_id` (string, required within the object): 32 lowercase hex characters (128-bit W3C trace ID).
+- `span_id` (string, optional): 16 lowercase hex characters (64-bit W3C span ID).
+
+Senders always populate `trace_context`. Receivers tolerate its absence for compatibility
+with older peers (`#[serde(default)]`). NATS event envelopes (`NatsEventEnvelope`) also
+carry `trace_context`.
+
+See [Tracing Conventions](../development/tracing.md) for the full tracing guide.
+
 ## Connection Limits
 
 | Limit | Value | Description |
