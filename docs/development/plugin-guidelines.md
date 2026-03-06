@@ -23,7 +23,7 @@ can continue to validate configs and mask secrets correctly.
 `s.parse::<PluginType>()` to convert strings (returns `ParsePluginTypeError` on failure). The string
 representations are: `releases_github`, `releases_gitlab`, `releases_forgejo`, `releases_docker`,
 `discovery_proxmox_helper_scripts`, `package_manager_homebrew`, `package_manager_apt`,
-`package_manager_npm`, `package_manager_mas`, `generic_shell`.
+`package_manager_npm`, `package_manager_mas`, `generic_shell`, `infrastructure_proxmox`.
 
 ## Plugin Capabilities
 

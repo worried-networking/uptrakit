@@ -389,6 +389,12 @@ ______________________________________________________________________
   - Snapshot creation before updates, configurable rollback trigger conditions (exit code, health
     check), rollback execution via plugin trait method, history tracking, UI, and automatic
     rollback on failure.
+- [ ] Proxmox VE pre-update snapshots and rollback (Phase 2)
+  - **Category**: Plugins / Infrastructure | **Impact**: High | **Effort**: High
+  - Extend the Proxmox VE plugin (`infrastructure_proxmox`) to create VM/CT snapshots before
+    updates and roll back on failure. Requires new Proxmox API client methods (create snapshot,
+    list snapshots, rollback snapshot), snapshot lifecycle management, integration with the
+    update pipeline, and UI controls. Phase 1 (discovery + manual matching) is complete.
 
 ### Update Batching & Orchestration
 

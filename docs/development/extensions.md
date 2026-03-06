@@ -225,31 +225,76 @@ via `env!("CARGO_PKG_NAME")`. No manual changes needed per binary.
 ## Creating a plugin-backed extension
 
 Plugin-backed extensions are registered at compile time via the `PluginOps` trait.
+They differ from service-backed extensions in two ways:
 
-Override the `extension_manifests` method in your plugin's `PluginOps` implementation:
+1. **Registration**: manifests are returned by `PluginOps::extension_manifests()` and
+   loaded into the `ExtensionRegistry` at controller startup (always available, no
+   provider tracking needed).
+2. **Action dispatch**: invocations are handled in-process by
+   `PluginOps::handle_extension_action()` instead of being proxied over WebSocket.
+
+### Step 1: Define extension manifests
+
+Use the builder constructors on `ExtensionManifest` and related types (required because
+the types are `#[non_exhaustive]`):
 
 ```rust
-fn extension_manifests(&self) -> Vec<ExtensionManifest> {
+pub fn extension_manifests() -> Vec<ExtensionManifest> {
     vec![
-        ExtensionManifest {
-            id: "proxmox.lxc-panel".to_string(),
-            label: "LXC Matching".to_string(),
-            placement: ExtensionPlacement::Panel {
-                target_page: "hosts".to_string(),
-                position: PanelPosition::Below,
+        ExtensionManifest::new(
+            "myplugin.hosts",
+            "My Plugin Hosts",
+            ExtensionPlacement::Page {
+                nav_section: "infrastructure".to_string(),
+                icon: Some("server".to_string()),
             },
-            required_permission: String::new(),
-            targeting: ExtensionTargeting::Universal,
-            ui: ExtensionUi::KeyValue {
-                data_action: "get-lxc-info".to_string(),
+            ExtensionUi::DataTable {
+                columns: vec![TableColumn::new("name", "Name").sortable()],
+                data_action: "list".to_string(),
+                row_actions: vec![],
+                primary_actions: vec![
+                    ActionDef::new("discover", "Discover")
+                        .with_permission("manage_hosts")
+                        .with_timeout(120),
+                ],
             },
-        },
+        )
+        .with_permission("manage_hosts"),
     ]
 }
 ```
 
-Plugin-backed extensions are loaded into the `ExtensionRegistry` at controller startup
-and are always available (no provider tracking needed).
+### Step 2: Implement action handling
+
+Add an action handler function that dispatches by `(extension_id, action_id)`:
+
+```rust
+pub async fn handle_action(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    extension_id: &str,
+    action_id: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    match (extension_id, action_id) {
+        ("myplugin.hosts", "list") => handle_list(db, tenant_id, params).await,
+        ("myplugin.hosts", "discover") => handle_discover(db, tenant_id, params).await,
+        _ => Err(format!("unknown action '{action_id}' for extension '{extension_id}'")),
+    }
+}
+```
+
+### Step 3: Wire into the plugin registry
+
+In the `PluginOps` implementation for `PluginRegistry`:
+
+- Return manifests from `extension_manifests()`.
+- Route actions in `handle_extension_action()` based on extension ID prefix.
+
+The route handler passes an `ExtensionActionContext` (DB connection, tenant ID) to
+`handle_extension_action()`. `Ok(Value)` maps to HTTP 200; `Err(String)` maps to HTTP 422.
+
+See the [Proxmox VE plugin](proxmox-plugin.md) for a complete working example.
 
 ## Action protocol
 
@@ -285,7 +330,7 @@ Timeout behaviour:
 | 400 | Missing `service_id` for targeted extension, or invalid params |
 | 404 | Extension or action not found |
 | 422 | Action failed (`success: false`, includes error message) |
-| 501 | Plugin-backed action invocation (not yet implemented) |
+| 422 | Plugin-backed action failed (includes error message) |
 | 503 | Target service disconnected |
 | 504 | Action timed out |
 

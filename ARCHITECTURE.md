@@ -77,6 +77,7 @@ Each assignment carries an `execution_site` column (`auto` | `agent` | `controll
 | `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins; classifies GitHub, npm, and APT-managed containers) |
 | `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
 | `package_manager_npm` | `uptrakit-plugin-package-manager-npm` | Controller (npm registry) | Yes | Globally installed npm packages; upstream versions fetched from `registry.npmjs.org`; `ControllerSideFetchReleases` capability; detects host compatibility; requires `sudo` for updates |
+| `infrastructure_proxmox` | `uptrakit-plugin-infrastructure-proxmox` | Controller (PVE REST API) | No | Proxmox VE infrastructure plugin; discovers QEMU VMs and LXC containers; manual host matching; controller-side only (no agent capabilities); uses Extensions framework for all UI/CLI interaction |
 
 Plugins with a local package index (`package_manager_homebrew`,
 `discovery_proxmox_helper_scripts`, `package_manager_apt`) resolve both
@@ -386,9 +387,17 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
 
 ## UI Extensions
 
-The extensions framework enables connected services (and future plugins) to dynamically
-extend the UI with custom pages, panels, context menu actions, and table columns. Each
-extension is described by an `ExtensionManifest` (defined in `crates/shared/wire/src/extension.rs`).
+The extensions framework enables connected services and plugins to dynamically extend the
+UI with custom pages, panels, context menu actions, and table columns. Each extension is
+described by an `ExtensionManifest` (defined in `crates/shared/wire/src/extension.rs`).
+
+Two registration models coexist:
+
+- **Compile-time (plugins)**: `PluginOps::extension_manifests()` returns manifests at
+  controller startup. Actions are dispatched in-process via
+  `PluginOps::handle_extension_action()`. The Proxmox VE plugin uses this model.
+- **Runtime (services)**: Services register via `ServiceMessage::ExtensionRegister` over
+  WebSocket. Actions are proxied to the service via request/response correlation.
 
 - **Extension Registry** (`crates/ui/web-api/src/extension_registry.rs`): tracks active
   manifests and their provider sets. Services register extensions via
