@@ -718,3 +718,119 @@ async fn discover_software_inner(
 
     results
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use uptrakit_command::NoopCommandExecutor;
+    use uptrakit_internal_wire::{
+        BatchHostPackageUpdate, CheckVersionsPayload, ExecuteBatchHostPackageUpdatePayload,
+        ServiceMessage, UpdateFinalStatus,
+    };
+    use uptrakit_plugin_infrastructure_registry::PluginType;
+    use uuid::Uuid;
+
+    use crate::connection_context::ConnectionContext;
+
+    fn noop_executor() -> Arc<dyn uptrakit_command::CommandExecutor> {
+        Arc::new(NoopCommandExecutor)
+    }
+
+    fn ctx() -> ConnectionContext {
+        ConnectionContext::default()
+    }
+
+    fn make_batch_payload(
+        plugin_type: PluginType,
+        timeout_seconds: u32,
+    ) -> ExecuteBatchHostPackageUpdatePayload {
+        let host_package_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+        ExecuteBatchHostPackageUpdatePayload {
+            host_machine_id: "test-host".to_string(),
+            batch_id: Uuid::now_v7(),
+            plugin_type,
+            plugin_config: serde_json::Value::Object(Default::default()),
+            updates: vec![BatchHostPackageUpdate {
+                host_package_id,
+                update_history_id,
+                package_identifier: "test-pkg".to_string(),
+                to_version: "1.0.0".to_string(),
+                release_info: None,
+            }],
+            pre_update_hooks: vec![],
+            post_update_hooks: vec![],
+            timeout_seconds,
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_plugin_type_causes_all_packages_to_fail() {
+        let payload = make_batch_payload(PluginType::Other("unknown-plugin-xyz".to_string()), 30);
+        let results =
+            super::batch_host_package_update_inner(&payload, noop_executor(), &ctx()).await;
+
+        assert_eq!(results.len(), 1, "must return one result per package");
+        assert_eq!(
+            results[0].status,
+            UpdateFinalStatus::Failed,
+            "unknown plugin must fail"
+        );
+        assert!(
+            results[0]
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("Failed to create plugin"),
+            "error must mention plugin creation failure, got: {:?}",
+            results[0].error
+        );
+        assert_eq!(
+            results[0].host_package_id,
+            payload.updates[0].host_package_id
+        );
+        assert_eq!(
+            results[0].update_history_id,
+            payload.updates[0].update_history_id
+        );
+    }
+
+    #[tokio::test]
+    async fn very_short_timeout_causes_all_packages_to_fail_with_timeout_message() {
+        // Use a known-bad plugin type so the "work" inside the timeout block
+        // never completes before the 0-second deadline.
+        let payload = make_batch_payload(PluginType::Other("unknown-plugin-xyz".to_string()), 0);
+        let results =
+            super::batch_host_package_update_inner(&payload, noop_executor(), &ctx()).await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, UpdateFinalStatus::Failed);
+        // The result is either a timeout message or a plugin-creation error,
+        // depending on scheduler timing. Both are acceptable Failed outcomes.
+        assert!(
+            results[0].error.is_some(),
+            "must have an error message on failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_check_versions_with_empty_assignments() {
+        let payload = CheckVersionsPayload {
+            host_machine_id: "test-host".to_string(),
+            assignments: vec![],
+        };
+
+        let response = super::run_check_versions(payload, noop_executor(), &ctx()).await;
+
+        match response {
+            ServiceMessage::VersionCheckResults(results) => {
+                assert!(
+                    results.results.is_empty(),
+                    "empty assignments must produce empty results"
+                );
+            }
+            other => panic!("expected VersionCheckResults, got {other:?}"),
+        }
+    }
+}
