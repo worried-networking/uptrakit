@@ -19,6 +19,7 @@ use crate::commands::sudoers::{
 use crate::db::entity::ssh_host::Model;
 use crate::error::{Error, Result};
 use crate::host_ops::{self, update_host_sudo_state};
+use crate::remote_exec::SshRemoteExecutor;
 use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_target::SshTarget;
 use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
@@ -180,13 +181,16 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
     // for host-compatibility checks without copying any state.
     let session = Arc::new(session);
 
+    // Build a RemoteExecutor for the sudoers/detection functions.
+    let executor = SshRemoteExecutor::new(Arc::clone(&session));
+
     // 4. Detect sudo state for the *connection* user.
     println!("Detecting privilege context...");
-    let is_root = detect_is_root(&session).await?;
+    let is_root = detect_is_root(&executor).await?;
     let sudo_available = if is_root {
         false
     } else {
-        detect_sudo_available(&session).await?
+        detect_sudo_available(&executor).await?
     };
 
     // When an auth override is active (e.g. `root@host`), the detection
@@ -255,14 +259,14 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
                 // Install the helper script then use its known path directly
                 // as the sudoers command — no `command -v` resolution needed.
                 println!("  Installing helper script '{}'...", helper.install_path);
-                install_helper_script(&session, helper, privileged).await?;
+                install_helper_script(&executor, helper, privileged).await?;
                 resolved.push(ResolvedSudoCommand {
                     command_path: helper.install_path.to_string(),
                     explanation: entry.explanation.clone(),
                     needs_setenv: entry.needs_setenv,
                 });
             } else {
-                match resolve_command_path(&session, &entry.command).await? {
+                match resolve_command_path(&executor, &entry.command).await? {
                     Some(path) => {
                         tracing::debug!(command = %entry.command, path = %path, "resolved command path");
                         resolved.push(ResolvedSudoCommand {
@@ -321,7 +325,7 @@ pub async fn run(args: &UpdateSudoersArgs, db: &DatabaseConnection) -> Result<()
 
         // 9. Write the sudoers file.
         println!("Writing {sudoers_file}...");
-        write_sudoers_file(&session, &host.username, content, privileged).await?;
+        write_sudoers_file(&executor, &host.username, content, privileged).await?;
 
         // 10. Update DB: sudo_available = true (since we just wrote a sudoers file).
         update_host_sudo_state(db, &host.id, Some(true), Some(agent_is_root), None).await?;

@@ -30,6 +30,7 @@ tracing = { workspace = true }
 url = { workspace = true }
 uptrakit-agent-core = { workspace = true }
 uptrakit-command = { workspace = true }
+uptrakit-plugin-infrastructure-proxmox = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon"] }
 uptrakit-directories = { workspace = true }
 uptrakit-service-sdk = { workspace = true }

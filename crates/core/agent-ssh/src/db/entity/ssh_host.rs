@@ -87,6 +87,15 @@ pub struct Model {
     /// Stored as TEXT with `DEFAULT 'auto'` so existing rows are valid without
     /// a data migration.
     pub sudo_policy: String,
+    /// Whether this host is a Proxmox VE node.
+    ///
+    /// Set to `true` during bootstrap when `pveversion` is detected.
+    pub is_pve_node: bool,
+    /// Controller-side plugin config ID for this PVE node's Proxmox plugin.
+    ///
+    /// Set after the controller confirms the `ReportPluginConfig` request.
+    /// `None` for non-PVE hosts or before the config is reported.
+    pub pve_plugin_config_id: Option<String>,
 }
 
 impl Model {
@@ -170,6 +179,8 @@ mod tests {
             sudo_available,
             is_root,
             sudo_policy: sudo_policy.to_string(),
+            is_pve_node: false,
+            pve_plugin_config_id: None,
         }
     }
 

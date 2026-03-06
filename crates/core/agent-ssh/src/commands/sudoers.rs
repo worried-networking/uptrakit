@@ -5,19 +5,18 @@
 //! command and the `update-sudoers` command.
 
 use rootcause::prelude::*;
-use uptrakit_command::shell_escape;
+use uptrakit_command::{RemoteExecutor, shell_escape};
 use uptrakit_plugin_infrastructure_registry::SudoHelperScript;
 
 use crate::error::{Error, Result};
-use crate::ssh_transport::SshSession;
 
 // ── Detection ──────────────────────────────────────────────────────────
 
 /// Detect whether the current SSH user is root by running `id -u`.
 ///
 /// Returns `false` on any error so callers can proceed conservatively.
-pub async fn detect_is_root(session: &SshSession) -> Result<bool> {
-    let result = session.exec_command("id -u").await?;
+pub async fn detect_is_root(executor: &dyn RemoteExecutor) -> Result<bool> {
+    let result = executor.exec_command("id -u").await.context_to::<Error>()?;
     Ok(result.exit_code == 0 && result.stdout.trim() == "0")
 }
 
@@ -25,8 +24,11 @@ pub async fn detect_is_root(session: &SshSession) -> Result<bool> {
 ///
 /// Returns `false` on any error or non-zero exit. Only meaningful when
 /// [`detect_is_root`] returned `false`.
-pub async fn detect_sudo_available(session: &SshSession) -> Result<bool> {
-    let result = session.exec_command("sudo -n true").await?;
+pub async fn detect_sudo_available(executor: &dyn RemoteExecutor) -> Result<bool> {
+    let result = executor
+        .exec_command("sudo -n true")
+        .await
+        .context_to::<Error>()?;
     Ok(result.exit_code == 0)
 }
 
@@ -62,7 +64,7 @@ pub enum SudoersContent {
 /// - `true` when the auth user is non-root and has passwordless sudo.
 /// - `false` when the auth user is root.
 pub async fn install_helper_script(
-    session: &SshSession,
+    executor: &dyn RemoteExecutor,
     helper: &SudoHelperScript,
     privileged: bool,
 ) -> Result<()> {
@@ -76,7 +78,7 @@ pub async fn install_helper_script(
         "printf '%s' {escaped_content} | {sudo_prefix}tee {escaped_path} > /dev/null && \
          {sudo_prefix}chmod 755 {escaped_path}"
     );
-    let result = session.exec_command(&cmd).await?;
+    let result = executor.exec_command(&cmd).await.context_to::<Error>()?;
     if result.exit_code != 0 {
         bail!(Error::SshCommand(format!(
             "failed to install helper script '{}': {}",
@@ -93,10 +95,13 @@ pub async fn install_helper_script(
 /// `command -v <name>`.
 ///
 /// Returns `None` if the command is not found or the session fails.
-pub async fn resolve_command_path(session: &SshSession, command: &str) -> Result<Option<String>> {
+pub async fn resolve_command_path(
+    executor: &dyn RemoteExecutor,
+    command: &str,
+) -> Result<Option<String>> {
     let escaped = shell_escape(command);
     let cmd = format!("command -v {escaped}");
-    let result = session.exec_command(&cmd).await?;
+    let result = executor.exec_command(&cmd).await.context_to::<Error>()?;
     if result.exit_code != 0 {
         return Ok(None);
     }
@@ -174,7 +179,7 @@ pub fn generate_sudoers_content(username: &str, content: &SudoersContent) -> Str
 /// - `true` when the auth user is non-root and has passwordless sudo.
 /// - `false` when the auth user is root.
 pub async fn write_sudoers_file(
-    session: &SshSession,
+    executor: &dyn RemoteExecutor,
     username: &str,
     content: &SudoersContent,
     privileged: bool,
@@ -193,7 +198,10 @@ pub async fn write_sudoers_file(
         "printf '%s' {escaped_content} | {sudo_prefix}tee {escaped_file} > /dev/null && \
          {sudo_prefix}chmod 440 {escaped_file}"
     );
-    let write_result = session.exec_command(&write_cmd).await?;
+    let write_result = executor
+        .exec_command(&write_cmd)
+        .await
+        .context_to::<Error>()?;
     if write_result.exit_code != 0 {
         bail!(Error::SshCommand(format!(
             "failed to write sudoers file '{}': {}",
@@ -208,7 +216,10 @@ pub async fn write_sudoers_file(
     } else {
         format!("visudo -cf {escaped_file}")
     };
-    let validate_result = session.exec_command(&validate_cmd).await?;
+    let validate_result = executor
+        .exec_command(&validate_cmd)
+        .await
+        .context_to::<Error>()?;
     if validate_result.exit_code != 0 {
         bail!(Error::SshCommand(format!(
             "sudoers validation failed (visudo -cf {}): {}",

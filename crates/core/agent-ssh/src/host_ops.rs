@@ -100,6 +100,8 @@ pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<
         sudo_available: sea_orm::ActiveValue::NotSet,
         is_root: sea_orm::ActiveValue::NotSet,
         sudo_policy: Set("auto".to_string()),
+        is_pve_node: Set(false),
+        pve_plugin_config_id: Set(None),
     };
 
     let inserted = model.insert(db).await.context_to::<Error>()?;
@@ -268,6 +270,39 @@ pub async fn find_host_by_machine_id(
     Entity::find()
         .filter(Column::MachineId.eq(machine_id))
         .one(db)
+        .await
+        .context_to::<Error>()
+}
+
+/// Update PVE-related state for an SSH host.
+///
+/// Sets `is_pve_node` and optionally `pve_plugin_config_id`.
+/// Called after bootstrap detects a PVE node and registers the plugin config.
+pub async fn update_host_pve_state(
+    db: &DatabaseConnection,
+    host_id: &str,
+    is_pve_node: bool,
+    pve_plugin_config_id: Option<String>,
+) -> Result<()> {
+    let host = Entity::find_by_id(host_id)
+        .one(db)
+        .await
+        .context_to::<Error>()?
+        .ok_or_else(|| report!(Error::HostNotFound(host_id.to_string())))?;
+
+    let mut model: ActiveModel = host.into();
+    model.is_pve_node = Set(is_pve_node);
+    model.pve_plugin_config_id = Set(pve_plugin_config_id);
+    model.updated_at = Set(time::OffsetDateTime::now_utc());
+    model.update(db).await.context_to::<Error>()?;
+    Ok(())
+}
+
+/// Find all SSH hosts that are PVE nodes.
+pub async fn find_pve_hosts(db: &DatabaseConnection) -> Result<Vec<Model>> {
+    Entity::find()
+        .filter(Column::IsPveNode.eq(true))
+        .all(db)
         .await
         .context_to::<Error>()
 }
