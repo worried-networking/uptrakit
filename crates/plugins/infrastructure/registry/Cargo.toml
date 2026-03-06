@@ -26,13 +26,16 @@ uptrakit-plugin-package-manager-apt = { workspace = true }
 uptrakit-plugin-package-manager-npm = { workspace = true }
 uptrakit-plugin-package-manager-mas = { workspace = true }
 uptrakit-plugin-generic-shell = { workspace = true }
+uptrakit-plugin-infrastructure-proxmox = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 futures-util = { workspace = true }
+sea-orm = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
