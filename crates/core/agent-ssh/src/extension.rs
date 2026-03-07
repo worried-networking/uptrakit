@@ -179,7 +179,6 @@ fn bootstrap_proxmox_action() -> ActionDef {
                 .with_type(FieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
         ])))
-
 }
 
 // ── Extension context ────────────────────────────────────────────────

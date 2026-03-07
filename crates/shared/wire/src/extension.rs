@@ -716,18 +716,6 @@ impl FieldDef {
         self
     }
 
-    /// Set a default value for the field.
-    pub fn with_default_value(mut self, value: serde_json::Value) -> Self {
-        self.default_value = Some(value);
-        self
-    }
-
-    /// Set static options for a `Select` field.
-    pub fn with_options(mut self, options: Vec<SelectOption>) -> Self {
-        self.options = options;
-        self
-    }
-
     /// Set conditional visibility based on another field's value.
     pub fn with_visible_when(mut self, field: impl Into<String>, values: Vec<String>) -> Self {
         self.visible_when = Some(VisibleWhen {
