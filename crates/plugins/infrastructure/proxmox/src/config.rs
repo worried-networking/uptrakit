@@ -136,6 +136,7 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ProxmoxConfig {
                 .with_help_text("Verify TLS certificates (disable for self-signed certs)"),
             FieldDef::new("node_filter", "Node Filter")
                 .with_type(FieldType::Textarea)
+                .list()
                 .with_help_text(
                     "Restrict discovery to these node names (one per line, empty = all)",
                 ),

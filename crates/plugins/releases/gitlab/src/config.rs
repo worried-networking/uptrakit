@@ -133,6 +133,7 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for GitLabConfig {
                 ),
             FieldDef::new("asset_patterns", "Asset Patterns")
                 .with_type(FieldType::Textarea)
+                .list()
                 .with_help_text("Regex patterns to filter release asset links (one per line)"),
         ]
     }

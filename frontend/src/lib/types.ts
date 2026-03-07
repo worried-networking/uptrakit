@@ -830,6 +830,8 @@ export interface FieldDef {
 	select_source?: SelectSource;
 	/** When true, the field value is encrypted client-side before being sent to the service. */
 	sensitive?: boolean;
+	/** When true, the textarea value is a newline-separated list serialized as a JSON string array. */
+	list?: boolean;
 	/** When set, the field is only visible when the controlling field's value matches. */
 	visible_when?: VisibleWhen;
 }

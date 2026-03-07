@@ -139,6 +139,7 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ForgejoConfig {
                 ),
             FieldDef::new("asset_patterns", "Asset Patterns")
                 .with_type(FieldType::Textarea)
+                .list()
                 .with_help_text("Regex patterns to filter release assets (one per line)"),
         ]
     }

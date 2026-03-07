@@ -1375,6 +1375,7 @@ mod tests {
                 options: vec![],
                 select_source: None,
                 sensitive: false,
+                list: false,
                 visible_when: None,
             })
             .collect();
@@ -1417,6 +1418,7 @@ mod tests {
             options,
             select_source: None,
             sensitive: false,
+            list: false,
             visible_when: None,
         };
         let err = field.wire_validate().unwrap_err();

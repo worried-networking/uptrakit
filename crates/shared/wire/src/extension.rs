@@ -629,6 +629,11 @@ pub struct FieldDef {
     /// `params`. The controller never sees their plaintext.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sensitive: bool,
+    /// When `true`, the field value is a newline-separated list that
+    /// serializes as a JSON array of strings. Used with `Textarea` fields
+    /// to represent `Vec<String>` config values (e.g., regex patterns, node names).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub list: bool,
     /// Conditional visibility: show this field only when the controlling
     /// field's value matches one of the specified values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -649,6 +654,7 @@ impl FieldDef {
             options: vec![],
             select_source: None,
             sensitive: false,
+            list: false,
             visible_when: None,
         }
     }
@@ -662,6 +668,12 @@ impl FieldDef {
     /// Mark this field as sensitive (encrypted client-side via ECIES).
     pub fn sensitive(mut self) -> Self {
         self.sensitive = true;
+        self
+    }
+
+    /// Mark this field as a newline-separated list (serialized as JSON array).
+    pub fn list(mut self) -> Self {
+        self.list = true;
         self
     }
 
@@ -1035,6 +1047,7 @@ mod tests {
                     options: vec![],
                     select_source: None,
                     sensitive: false,
+                    list: false,
                     visible_when: None,
                 }],
             },
@@ -1262,6 +1275,7 @@ mod tests {
                 ],
                 select_source: None,
                 sensitive: false,
+                list: false,
                 visible_when: None,
             }],
         };

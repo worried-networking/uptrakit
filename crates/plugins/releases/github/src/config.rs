@@ -151,6 +151,7 @@ impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for GitHubConfig {
                 ),
             FieldDef::new("asset_patterns", "Asset Patterns")
                 .with_type(FieldType::Textarea)
+                .list()
                 .with_help_text("Regex patterns to filter release assets (one per line)"),
             FieldDef::new("verify_attestation", "Verify Attestation")
                 .with_type(FieldType::Toggle)

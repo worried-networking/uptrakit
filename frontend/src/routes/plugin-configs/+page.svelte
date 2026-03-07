@@ -238,11 +238,8 @@
 			let value: unknown;
 			if (field.field_type === 'toggle') {
 				value = raw === 'true';
-			} else if (
-				field.field_type === 'textarea' &&
-				(field.key.includes('patterns') || field.key.includes('node_filter'))
-			) {
-				// Textarea fields that represent arrays: split by newlines, trim, filter empties
+			} else if (field.list) {
+				// List fields: split by newlines, trim, filter empties → JSON array
 				value = raw
 					.split('\n')
 					.map((s) => s.trim())
