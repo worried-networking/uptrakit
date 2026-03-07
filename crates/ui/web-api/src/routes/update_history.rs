@@ -16,7 +16,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
     },
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, RelationTrait};
 use uptrakit_shared_db::entity::{host, update_history, update_output_line};
 use uptrakit_web_api_types::update_history::{OutputLineSSE, UpdateCompletedSSE};
 use uuid::Uuid;
@@ -124,8 +124,15 @@ pub async fn stream_update_output(
     State(state): State<Arc<AppState>>,
     Path(record_id): Path<Uuid>,
 ) -> Response {
-    // 1. Load the update_history record.
-    let record = match update_history::Entity::find_by_id(record_id)
+    // 1. Load the update_history record, scoped to the tenant via host JOIN.
+    //    A single query replaces the previous two-step (load-then-verify) pattern,
+    //    preventing a TOCTOU window where record data was returned before the
+    //    tenant check.
+    let record = match tenant_db
+        .find_via_tenant_join::<update_history::Entity, host::Entity>(
+            update_history::Relation::Host.def(),
+        )
+        .filter(update_history::Column::Id.eq(record_id))
         .one(tenant_db.db())
         .await
     {
@@ -139,34 +146,24 @@ pub async fn stream_update_output(
         }
     };
 
-    // Tenant scoping: verify the record's host belongs to this tenant.
-    match tenant_db
-        .find_by_id::<host::Entity, _>(record.host_id)
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(_)) => {}
-        Ok(None) => {
-            return error_response(StatusCode::NOT_FOUND, "Update history record not found");
-        }
-        Err(e) => {
-            tracing::error!("Failed to verify tenant scope for SSE: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    }
-
     // 2. Subscribe to the broadcast channel BEFORE loading DB lines to avoid
     //    a gap where lines arrive after the DB query but before subscription.
     let broadcast_rx = state.update_output_broadcaster.subscribe(record_id).await;
 
     // 3. Load existing output lines from the DB for replay.
-    let db_lines = update_output_line::Entity::find()
+    let db_lines = match update_output_line::Entity::find()
         .filter(update_output_line::Column::UpdateHistoryId.eq(record_id))
         .order_by_asc(update_output_line::Column::CreatedAt)
         .order_by_asc(update_output_line::Column::Id)
         .all(tenant_db.db())
         .await
-        .unwrap_or_default();
+    {
+        Ok(lines) => lines,
+        Err(e) => {
+            tracing::error!("Failed to load output lines for SSE stream: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     let is_terminal = matches!(
         record.status,
