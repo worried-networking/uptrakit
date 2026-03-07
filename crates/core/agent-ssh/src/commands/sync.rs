@@ -671,11 +671,41 @@ pub async fn run_for_extension(
     if host.is_pve_node {
         match pve_setup::detect_pve_node_name(&executor).await {
             Ok(name) => {
+                // Reconcile pve_plugin_config_id with cluster peers (same logic
+                // as the CLI sync_pve_state path).
+                let canonical_config_id = if let Some(tid) = tenant_id.as_ref() {
+                    match pve_setup::check_pve_token_exists(&executor, tid).await {
+                        Ok(pve_setup::PveTokenStatus::OwnedByTenant(_)) => {
+                            let cluster_nodes =
+                                pve_setup::detect_pve_cluster_nodes(&executor).await;
+                            if cluster_nodes.is_empty() {
+                                None
+                            } else {
+                                reconcile_pve_config(db, &host.id, &cluster_nodes).await
+                            }
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+
+                let config_id_to_store = canonical_config_id
+                    .as_ref()
+                    .or(host.pve_plugin_config_id.as_ref())
+                    .cloned();
+
+                if let Some(ref new_id) = canonical_config_id
+                    && host.pve_plugin_config_id.as_deref() != Some(new_id.as_str())
+                {
+                    summary.push(format!("pve_plugin_config_id: corrected to {new_id}"));
+                }
+
                 host_ops::update_host_pve_state(
                     db,
                     &host.id,
                     true,
-                    host.pve_plugin_config_id.clone(),
+                    config_id_to_store,
                     Some(name.clone()),
                 )
                 .await
