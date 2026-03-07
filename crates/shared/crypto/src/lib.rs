@@ -60,7 +60,7 @@ pub enum CryptoError {
     Decryption(String),
 
     #[error("hex decode failed")]
-    HexDecode(#[from] uptrakit_shared_types::hex::DecodeError),
+    HexDecode(uptrakit_shared_types::hex::DecodeError),
 
     #[error("ciphertext too short")]
     CiphertextTooShort,
@@ -69,7 +69,7 @@ pub enum CryptoError {
     InvalidNonce,
 
     #[error("decrypted value is not valid UTF-8: {0}")]
-    InvalidUtf8(#[from] std::string::FromUtf8Error),
+    InvalidUtf8(std::string::FromUtf8Error),
 
     #[error("master key does not match existing encrypted data")]
     MasterKeyMismatch,

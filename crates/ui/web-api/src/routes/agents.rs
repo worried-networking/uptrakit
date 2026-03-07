@@ -42,13 +42,17 @@ pub(crate) enum AgentRouteError {
     Internal(String),
 
     #[error("database error: {0}")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
 
     #[error("certificate signing error")]
     CertSigning,
 }
 
 impl_report_conversion!(sea_orm::DbErr => AgentRouteError::Database);
+impl_report_conversion!(
+    crate::queries::system_enrollment_tokens::SystemEnrollmentTokenError => AgentRouteError,
+    |e| AgentRouteError::Internal(e.to_string())
+);
 
 // --- Shared enrollment helpers (used by WS handlers) ---
 

@@ -28,7 +28,7 @@ pub enum AgentCoreError {
 
     // ── I/O ───────────────────────────────────────────────────────────
     #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<AgentCoreError>>;

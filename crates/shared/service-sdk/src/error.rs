@@ -73,23 +73,23 @@ pub enum CaError {
 #[derive(Debug, Error)]
 pub enum EnrollmentError {
     #[error(transparent)]
-    Tls(#[from] TlsError),
+    Tls(TlsError),
     #[error(transparent)]
-    Identity(#[from] IdentityError),
+    Identity(IdentityError),
     #[error(transparent)]
-    Protocol(#[from] ProtocolError),
+    Protocol(ProtocolError),
     #[error(transparent)]
-    Ca(#[from] CaError),
+    Ca(CaError),
     #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
     #[error("JSON serialization error: {0}")]
-    Json(#[from] serde_json::Error),
+    Json(serde_json::Error),
     #[error("WebSocket error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocket(tokio_tungstenite::tungstenite::Error),
     #[error("HTTP URI parsing error: {0}")]
-    HttpUri(#[from] http::uri::InvalidUri),
+    HttpUri(http::uri::InvalidUri),
     #[error("directory operation failed")]
-    Directory(#[from] uptrakit_directories::DirectoryError),
+    Directory(uptrakit_directories::DirectoryError),
 }
 
 pub type Result<T> = std::result::Result<T, Report<EnrollmentError>>;

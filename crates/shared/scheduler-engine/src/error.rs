@@ -6,7 +6,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 #[derive(Debug, Error)]
 pub enum SchedulerError {
     #[error("database error: {0}")]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
     #[error("{0}")]
     Execution(String),
     #[error("task timed out: {0:?}")]
