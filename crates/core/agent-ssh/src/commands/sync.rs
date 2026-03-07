@@ -323,7 +323,8 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
-/// Sync PVE-specific state: node name and privilege verification.
+/// Sync PVE-specific state: node name, plugin config ID reconciliation, and
+/// privilege verification.
 async fn sync_pve_state(
     executor: &SshRemoteExecutor,
     db: &DatabaseConnection,
@@ -347,16 +348,64 @@ async fn sync_pve_state(
         }
     };
 
-    // Persist node name (unless dry run).
+    // Reconcile pve_plugin_config_id with cluster peers.
+    //
+    // This corrects a desync that arises when multiple PVE nodes in the same
+    // cluster end up with different plugin config IDs in the local agent-ssh
+    // DB — for example, when a node was bootstrapped before another node's
+    // `pveum user list` succeeded (causing a second plugin config to be
+    // created for the same cluster).
+    //
+    // Strategy:
+    //   1. Ask the cluster for its node list (`pvesh get /cluster/status`).
+    //   2. Find all other local PVE hosts whose `pve_node_name` appears in
+    //      that list — these are confirmed cluster peers.
+    //   3. Collect the set of distinct `pve_plugin_config_id` values held by
+    //      those peers.
+    //   4. If every peer agrees on one config → use it.
+    //      If peers disagree → pick the newest UUID (v7, so newest = highest
+    //      string value) because the most-recently-created config is the one
+    //      the controller is actively using for discovery.
+    //   5. Only update if the determined config differs from what is stored.
+    let canonical_config_id: Option<String> = if let Some(tid) = tenant_id {
+        match pve_setup::check_pve_token_exists(executor, tid).await {
+            Ok(pve_setup::PveTokenStatus::OwnedByTenant(_)) => {
+                let cluster_nodes = pve_setup::detect_pve_cluster_nodes(executor).await;
+                if cluster_nodes.is_empty() {
+                    // Standalone node or pvesh unavailable — skip reconciliation.
+                    None
+                } else {
+                    reconcile_pve_config(db, &host.id, &cluster_nodes).await
+                }
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    // Determine the config ID to persist: reconciled value takes precedence,
+    // otherwise keep whatever is already stored.
+    let config_id_to_store = canonical_config_id
+        .as_ref()
+        .or(host.pve_plugin_config_id.as_ref())
+        .cloned();
+
+    if let Some(ref new_id) = canonical_config_id {
+        if host.pve_plugin_config_id.as_deref() != Some(new_id.as_str()) {
+            println!(
+                "  PVE plugin config: corrected from {} to {new_id}",
+                host.pve_plugin_config_id.as_deref().unwrap_or("(none)")
+            );
+        } else {
+            println!("  PVE plugin config: OK ({new_id})");
+        }
+    }
+
+    // Persist node name and (potentially corrected) config ID.
     if !dry_run && node_name.is_some() {
-        host_ops::update_host_pve_state(
-            db,
-            &host.id,
-            true,
-            host.pve_plugin_config_id.clone(),
-            node_name.clone(),
-        )
-        .await?;
+        host_ops::update_host_pve_state(db, &host.id, true, config_id_to_store, node_name.clone())
+            .await?;
     }
 
     // Verify PVE privileges (requires tenant_id).
@@ -379,6 +428,65 @@ async fn sync_pve_state(
     }
 
     Ok(())
+}
+
+/// Determine the canonical `pve_plugin_config_id` for the cluster this host
+/// belongs to, by inspecting other local PVE hosts that are confirmed cluster
+/// peers.
+///
+/// Returns `None` when no peer has a config, or when the result is ambiguous
+/// and logging a warning is sufficient (caller falls back to the stored value).
+async fn reconcile_pve_config(
+    db: &DatabaseConnection,
+    current_host_id: &str,
+    cluster_nodes: &[String],
+) -> Option<String> {
+    let all_pve_hosts = match host_ops::find_pve_hosts(db).await {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to list local PVE hosts for config reconciliation");
+            return None;
+        }
+    };
+
+    // Collect distinct config IDs held by cluster peers (exclude current host).
+    let mut peer_configs: Vec<String> = all_pve_hosts
+        .iter()
+        .filter(|h| h.id != current_host_id)
+        .filter(|h| {
+            h.pve_node_name
+                .as_deref()
+                .is_some_and(|n| cluster_nodes.contains(&n.to_string()))
+        })
+        .filter_map(|h| h.pve_plugin_config_id.clone())
+        .collect();
+
+    // Deduplicate while preserving the maximum (newest UUID v7 = newest config).
+    peer_configs.sort_unstable();
+    peer_configs.dedup();
+
+    match peer_configs.len() {
+        0 => None,
+        1 => Some(peer_configs.remove(0)),
+        _ => {
+            // Multiple configs among confirmed cluster peers (split-brain from
+            // a failed dedup on a previous bootstrap).  Pick the newest UUID
+            // (highest sort value for v7) — that is the most recently created
+            // config and therefore the one the controller is actively using for
+            // discovery.
+            let newest = peer_configs
+                .into_iter()
+                .max()
+                .expect("non-empty after multi-branch");
+            tracing::warn!(
+                canonical_config_id = %newest,
+                "cluster peers disagree on pve_plugin_config_id \
+                 (likely duplicate configs from a failed bootstrap dedup); \
+                 using newest config"
+            );
+            Some(newest)
+        }
+    }
 }
 
 /// Authentication override for the extension sync action.

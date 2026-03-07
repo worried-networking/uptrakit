@@ -47,6 +47,53 @@ pub async fn detect_pve_node_name(executor: &dyn RemoteExecutor) -> Result<Strin
     Ok(name)
 }
 
+/// Detect all PVE node names in the local cluster via `pvesh get /cluster/status`.
+///
+/// Returns the short hostnames of every **node** member (entries with
+/// `"type": "node"`) in the cluster. On a standalone node (not joined to any
+/// cluster) this returns a single-element vec containing the current node.
+///
+/// Returns an empty vec on failure so callers can treat the result as
+/// best-effort information.
+pub async fn detect_pve_cluster_nodes(executor: &dyn RemoteExecutor) -> Vec<String> {
+    let result = match executor
+        .exec_command("pvesh get /cluster/status --output-format json 2>/dev/null")
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!(error = %e, "pvesh get /cluster/status failed");
+            return Vec::new();
+        }
+    };
+
+    if result.exit_code != 0 || result.stdout.trim().is_empty() {
+        tracing::debug!(
+            exit_code = result.exit_code,
+            "pvesh get /cluster/status returned non-zero or empty output"
+        );
+        return Vec::new();
+    }
+
+    let entries: Vec<serde_json::Value> = match serde_json::from_str(result.stdout.trim()) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::debug!(error = %e, "failed to parse pvesh /cluster/status output");
+            return Vec::new();
+        }
+    };
+
+    entries
+        .into_iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()) == Some("node"))
+        .filter_map(|e| {
+            e.get("name")
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect()
+}
+
 /// Verify that the Uptrakit PVE API user and its ACL role still exist.
 ///
 /// Checks two things:
