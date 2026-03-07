@@ -116,6 +116,33 @@ fn is_valid_pve_token(token: &str) -> bool {
     !user.is_empty() && !realm.is_empty() && !token_id.is_empty() && !secret.is_empty()
 }
 
+impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ProxmoxConfig {
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+        vec![
+            FieldDef::new("api_url", "API URL")
+                .required()
+                .with_placeholder("https://pve.example.com:8006")
+                .with_help_text("Proxmox VE API endpoint URL"),
+            FieldDef::new("api_token", "API Token")
+                .with_type(FieldType::Password)
+                .required()
+                .sensitive()
+                .with_placeholder("USER@REALM!TOKENID=SECRET")
+                .with_help_text("PVE API token in USER@REALM!TOKENID=SECRET format"),
+            FieldDef::new("verify_tls", "Verify TLS")
+                .with_type(FieldType::Toggle)
+                .with_default_value(serde_json::json!(true))
+                .with_help_text("Verify TLS certificates (disable for self-signed certs)"),
+            FieldDef::new("node_filter", "Node Filter")
+                .with_type(FieldType::Textarea)
+                .with_help_text(
+                    "Restrict discovery to these node names (one per line, empty = all)",
+                ),
+        ]
+    }
+}
+
 impl SecretMasking for ProxmoxConfig {
     fn with_secrets_masked(mut self) -> Self {
         self.api_token = SecretString::new(SECRET_MASK.to_string());

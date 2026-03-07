@@ -172,6 +172,54 @@ impl DockerConfig {
     }
 }
 
+impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for DockerConfig {
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+        vec![
+            FieldDef::new("docker_host", "Docker Host")
+                .with_placeholder("unix:///var/run/docker.sock")
+                .with_help_text("Docker daemon endpoint override (tcp://, unix://, or ssh://)"),
+            FieldDef::new("ssh_key_path", "SSH Key Path")
+                .with_help_text("Path to SSH private key (only for ssh:// docker hosts)"),
+            FieldDef::new("auth._type", "Registry Auth")
+                .with_type(FieldType::Select)
+                .with_options(vec![
+                    SelectOption::new("", "None"),
+                    SelectOption::new("basic", "Basic (username/password)"),
+                    SelectOption::new("bearer", "Bearer Token"),
+                ]),
+            FieldDef::new("auth.username", "Registry Username")
+                .with_visible_when("auth._type", vec!["basic".to_string()]),
+            FieldDef::new("auth.password", "Registry Password")
+                .with_type(FieldType::Password)
+                .sensitive()
+                .with_visible_when("auth._type", vec!["basic".to_string()]),
+            FieldDef::new("auth.token", "Registry Token")
+                .with_type(FieldType::Password)
+                .sensitive()
+                .with_visible_when("auth._type", vec!["bearer".to_string()]),
+            FieldDef::new("tracked_tag", "Tracked Tag")
+                .with_help_text("Tag to track (overrides the tag in the image reference)"),
+            FieldDef::new("post_pull_command", "Post-pull Command").with_help_text(
+                "Shell command to run after pulling (supports {image}, {tag}, {digest})",
+            ),
+            FieldDef::new("compose_restart._enabled", "Compose Restart")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Restart via docker compose after pulling a new image"),
+            FieldDef::new("compose_restart.compose_file", "Compose File")
+                .with_placeholder("docker-compose.yml")
+                .with_help_text("Path to the Compose file")
+                .with_visible_when("compose_restart._enabled", vec!["true".to_string()]),
+            FieldDef::new("compose_restart.service", "Compose Service")
+                .with_help_text("Specific service to restart (blank = all services)")
+                .with_visible_when("compose_restart._enabled", vec!["true".to_string()]),
+            FieldDef::new("compose_restart.working_dir", "Compose Working Dir")
+                .with_help_text("Working directory for docker compose")
+                .with_visible_when("compose_restart._enabled", vec!["true".to_string()]),
+        ]
+    }
+}
+
 impl SecretMasking for DockerConfig {
     /// Return a copy with secret fields masked for API responses.
     fn with_secrets_masked(mut self) -> Self {

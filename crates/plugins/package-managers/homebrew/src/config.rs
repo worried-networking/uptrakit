@@ -33,6 +33,21 @@ pub struct HomebrewConfig {
 
 impl SecretMasking for HomebrewConfig {}
 
+impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for HomebrewConfig {
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+        vec![
+            FieldDef::new("package_type", "Package Type")
+                .with_type(FieldType::Select)
+                .with_options(vec![
+                    SelectOption::new("formula", "Formula (CLI tools, libraries)"),
+                    SelectOption::new("cask", "Cask (GUI applications)"),
+                ])
+                .with_help_text("Track formulae, casks, or leave blank to discover both"),
+        ]
+    }
+}
+
 impl HomebrewConfig {
     /// Validate a Homebrew package identifier string.
     ///

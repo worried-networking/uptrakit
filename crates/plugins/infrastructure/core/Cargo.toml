@@ -18,6 +18,7 @@ semver = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 uptrakit-command = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 

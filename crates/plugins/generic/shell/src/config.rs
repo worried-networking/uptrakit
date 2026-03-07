@@ -82,6 +82,20 @@ impl ShellConfig {
     }
 }
 
+impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ShellConfig {
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+        vec![
+            FieldDef::new("version_command", "Version Command")
+                .with_type(FieldType::Textarea)
+                .with_help_text("Shell command to detect the installed version (supports {package_identifier})"),
+            FieldDef::new("update_command", "Update Command")
+                .with_type(FieldType::Textarea)
+                .with_help_text("Shell command to execute an update (supports {version}, {tag}, {package_identifier})"),
+        ]
+    }
+}
+
 /// Shell plugin has no secret fields — masking is a no-op.
 impl SecretMasking for ShellConfig {
     fn with_secrets_masked(self) -> Self {

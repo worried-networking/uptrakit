@@ -18,6 +18,17 @@ pub struct NpmConfig {
 
 impl SecretMasking for NpmConfig {}
 
+impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for NpmConfig {
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+        vec![
+            FieldDef::new("include_prereleases", "Include Pre-releases")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Include pre-release dist-tags (next, beta, alpha, rc, canary)"),
+        ]
+    }
+}
+
 impl NpmConfig {
     /// Validate an npm package identifier string.
     ///

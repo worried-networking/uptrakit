@@ -112,6 +112,32 @@ impl GitLabConfig {
     }
 }
 
+impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for GitLabConfig {
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+        vec![
+            FieldDef::new("auth_token", "Auth Token")
+                .with_type(FieldType::Password)
+                .sensitive()
+                .with_help_text("Personal access token (requires read_api scope)"),
+            FieldDef::new("api_base_url", "API Base URL")
+                .with_placeholder("https://gitlab.com")
+                .with_help_text("Custom URL for self-hosted GitLab instances"),
+            FieldDef::new("include_prereleases", "Include Pre-releases")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Include upcoming/embargoed releases in results"),
+            FieldDef::new("tag_strip_prefix", "Tag Strip Prefix")
+                .with_default_value(serde_json::json!("v"))
+                .with_help_text(
+                    "Prefix to strip from git tags (e.g. \"v\" turns \"v1.0\" into \"1.0\")",
+                ),
+            FieldDef::new("asset_patterns", "Asset Patterns")
+                .with_type(FieldType::Textarea)
+                .with_help_text("Regex patterns to filter release asset links (one per line)"),
+        ]
+    }
+}
+
 impl SecretMasking for GitLabConfig {
     /// Return a copy with secret fields masked for API responses.
     ///

@@ -15,6 +15,12 @@ use uptrakit_plugin_infrastructure_core::SecretMasking;
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ProxmoxHelperScriptsConfig {}
 
+impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for ProxmoxHelperScriptsConfig {
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
+        vec![]
+    }
+}
+
 impl SecretMasking for ProxmoxHelperScriptsConfig {
     fn with_secrets_masked(self) -> Self {
         self

@@ -3,6 +3,7 @@ pub mod batch_fetch;
 pub mod batch_update;
 pub mod command;
 pub mod error;
+pub mod form_schema;
 pub mod secrets;
 pub mod serde_helpers;
 pub mod traits;
@@ -13,6 +14,7 @@ pub use batch_detect::{BatchDetectItem, BatchDetectResult};
 pub use batch_fetch::{BatchFetchItem, BatchFetchResult};
 pub use batch_update::{BatchUpdateItem, BatchUpdateResult};
 pub use error::{PluginError, Result};
+pub use form_schema::ConfigFormSchema;
 pub use secrets::SecretMasking;
 pub use traits::{
     HostCompatibility, Plugin, PreUpdateHookResult, SudoCommandEntry, SudoHelperScript,

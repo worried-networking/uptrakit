@@ -11,6 +11,12 @@ pub struct MasConfig {}
 
 impl SecretMasking for MasConfig {}
 
+impl uptrakit_plugin_infrastructure_core::ConfigFormSchema for MasConfig {
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
+        vec![]
+    }
+}
+
 impl MasConfig {
     /// Validate a Mac App Store package identifier string.
     ///
