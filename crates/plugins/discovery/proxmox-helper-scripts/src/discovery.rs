@@ -63,7 +63,7 @@ pub const SYSTEM_NPM_PACKAGES: &[&str] = &["npm", "n", "nvm", "yarn", "pnpm", "c
 /// Exactly one upstream source type will be set for a successfully-classified
 /// script:
 /// - GitHub: `github_owner` + `github_repo`
-/// - Forgejo/Codeberg: `forgejo_owner` + `forgejo_repo`
+/// - Codeberg: `codeberg_owner` + `codeberg_repo`
 /// - npm: `npm_package`
 /// - APT: `apt_package`
 ///
@@ -74,10 +74,10 @@ pub struct PhsScriptAnalysis {
     pub github_owner: Option<String>,
     /// GitHub repository name, if the app is GitHub-managed.
     pub github_repo: Option<String>,
-    /// Forgejo/Codeberg repository owner, if the app is managed via Codeberg/Forgejo.
-    pub forgejo_owner: Option<String>,
-    /// Forgejo/Codeberg repository name, if the app is managed via Codeberg/Forgejo.
-    pub forgejo_repo: Option<String>,
+    /// Codeberg repository owner, detected via `check_for_codeberg_release` or `CODEBERG_REPO=`.
+    pub codeberg_owner: Option<String>,
+    /// Codeberg repository name, detected via `check_for_codeberg_release` or `CODEBERG_REPO=`.
+    pub codeberg_repo: Option<String>,
     /// npm package name, if the app is npm-managed.
     pub npm_package: Option<String>,
     /// Debian package name, if the app is APT-managed.
@@ -149,8 +149,8 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
             return PhsScriptAnalysis {
                 github_owner: Some(owner.clone()),
                 github_repo: Some(repo.clone()),
-                forgejo_owner: None,
-                forgejo_repo: None,
+                codeberg_owner: None,
+                codeberg_repo: None,
                 npm_package: None,
                 apt_package: None,
                 app_name,
@@ -167,8 +167,8 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
         return PhsScriptAnalysis {
             github_owner: Some(owner),
             github_repo: Some(repo),
-            forgejo_owner: None,
-            forgejo_repo: None,
+            codeberg_owner: None,
+            codeberg_repo: None,
             npm_package: None,
             apt_package: None,
             app_name,
@@ -176,9 +176,9 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
         };
     }
 
-    // ── Forgejo/Codeberg detection ────────────────────────────────────────────
+    // ── Codeberg detection ────────────────────────────────────────────────────
     // Priority 3: check_for_codeberg_release / fetch_and_deploy_codeberg_release.
-    let cb_matches = collect_forgejo_release_calls(content);
+    let cb_matches = collect_codeberg_release_calls(content);
 
     if !cb_matches.is_empty() {
         let best = cb_matches
@@ -193,8 +193,8 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
             return PhsScriptAnalysis {
                 github_owner: None,
                 github_repo: None,
-                forgejo_owner: Some(owner.clone()),
-                forgejo_repo: Some(repo.clone()),
+                codeberg_owner: Some(owner.clone()),
+                codeberg_repo: Some(repo.clone()),
                 npm_package: None,
                 apt_package: None,
                 app_name,
@@ -204,15 +204,15 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
     }
 
     // Priority 4: bare CODEBERG_REPO= assignment.
-    if let Some((owner, repo)) = extract_forgejo_repo_var(content)
+    if let Some((owner, repo)) = extract_codeberg_repo_var(content)
         && is_valid_gh_component(&owner)
         && is_valid_gh_component(&repo)
     {
         return PhsScriptAnalysis {
             github_owner: None,
             github_repo: None,
-            forgejo_owner: Some(owner),
-            forgejo_repo: Some(repo),
+            codeberg_owner: Some(owner),
+            codeberg_repo: Some(repo),
             npm_package: None,
             apt_package: None,
             app_name,
@@ -225,8 +225,8 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
         return PhsScriptAnalysis {
             github_owner: None,
             github_repo: None,
-            forgejo_owner: None,
-            forgejo_repo: None,
+            codeberg_owner: None,
+            codeberg_repo: None,
             npm_package: Some(npm_pkg),
             apt_package: None,
             app_name,
@@ -234,12 +234,12 @@ pub fn analyze_phs_script(slug: &str, content: &str) -> PhsScriptAnalysis {
         };
     }
 
-    // ── APT detection (only when no GitHub, Forgejo, or npm upstream found) ──
+    // ── APT detection (only when no GitHub, Codeberg, or npm upstream found) ──
     PhsScriptAnalysis {
         github_owner: None,
         github_repo: None,
-        forgejo_owner: None,
-        forgejo_repo: None,
+        codeberg_owner: None,
+        codeberg_repo: None,
         npm_package: None,
         apt_package: extract_apt_package(content),
         app_name,
@@ -605,8 +605,8 @@ fn extract_gh_repo_var(content: &str) -> Option<(String, String)> {
 /// and `fetch_and_deploy_codeberg_release` calls in `content`.
 ///
 /// Mirrors [`collect_gh_release_calls`] but matches the Codeberg-named PHS
-/// function prefixes used in community-scripts install scripts for Forgejo-hosted apps.
-fn collect_forgejo_release_calls(content: &str) -> Vec<(String, String, String)> {
+/// function prefixes used in community-scripts install scripts for Codeberg-hosted apps.
+fn collect_codeberg_release_calls(content: &str) -> Vec<(String, String, String)> {
     let mut results = Vec::new();
     for line in content.lines() {
         let line = line.trim();
@@ -628,7 +628,7 @@ fn collect_forgejo_release_calls(content: &str) -> Vec<(String, String, String)>
 /// `CODEBERG_REPO='owner/repo'` assignment.
 ///
 /// Mirrors [`extract_gh_repo_var`] but looks for the `CODEBERG_REPO=` prefix.
-fn extract_forgejo_repo_var(content: &str) -> Option<(String, String)> {
+fn extract_codeberg_repo_var(content: &str) -> Option<(String, String)> {
     for line in content.lines() {
         let line = line.trim();
         let rest = if let Some(r) = line.strip_prefix("CODEBERG_REPO=") {
@@ -1022,10 +1022,10 @@ apt install -y somepackage
         assert!(result.github_owner.is_none());
     }
 
-    // ── Forgejo/Codeberg detection tests ────────────────────────────
+    // ── Codeberg detection tests ─────────────────────────────────────
 
     #[test]
-    fn analyze_forgejo_check_for_release_key_matches_slug() {
+    fn analyze_codeberg_check_for_release_key_matches_slug() {
         // check_for_codeberg_release "readeck" "readeck/readeck"
         // Key "readeck" matches slug "readeck".
         let content = r#"
@@ -1033,8 +1033,8 @@ APP="Readeck"
 check_for_codeberg_release "readeck" "readeck/readeck"
 "#;
         let result = analyze_phs_script("readeck", content);
-        assert_eq!(result.forgejo_owner.as_deref(), Some("readeck"));
-        assert_eq!(result.forgejo_repo.as_deref(), Some("readeck"));
+        assert_eq!(result.codeberg_owner.as_deref(), Some("readeck"));
+        assert_eq!(result.codeberg_repo.as_deref(), Some("readeck"));
         assert!(result.github_owner.is_none());
         assert!(result.github_repo.is_none());
         assert!(result.npm_package.is_none());
@@ -1045,53 +1045,53 @@ check_for_codeberg_release "readeck" "readeck/readeck"
     }
 
     #[test]
-    fn analyze_forgejo_fetch_and_deploy() {
+    fn analyze_codeberg_fetch_and_deploy() {
         // fetch_and_deploy_codeberg_release also detected.
         let content = r#"fetch_and_deploy_codeberg_release "myapp" "myorg/myapp""#;
         let result = analyze_phs_script("myapp", content);
-        assert_eq!(result.forgejo_owner.as_deref(), Some("myorg"));
-        assert_eq!(result.forgejo_repo.as_deref(), Some("myapp"));
+        assert_eq!(result.codeberg_owner.as_deref(), Some("myorg"));
+        assert_eq!(result.codeberg_repo.as_deref(), Some("myapp"));
         assert!(result.github_owner.is_none());
     }
 
     #[test]
-    fn analyze_forgejo_repo_var() {
+    fn analyze_codeberg_repo_var() {
         // CODEBERG_REPO="owner/repo" assignment.
         let content = r#"CODEBERG_REPO="owner/repo""#;
         let result = analyze_phs_script("repo", content);
-        assert_eq!(result.forgejo_owner.as_deref(), Some("owner"));
-        assert_eq!(result.forgejo_repo.as_deref(), Some("repo"));
+        assert_eq!(result.codeberg_owner.as_deref(), Some("owner"));
+        assert_eq!(result.codeberg_repo.as_deref(), Some("repo"));
         assert!(result.github_owner.is_none());
         assert!(result.version_file_basename.is_none());
     }
 
     #[test]
-    fn analyze_forgejo_repo_var_single_quotes() {
+    fn analyze_codeberg_repo_var_single_quotes() {
         let content = "CODEBERG_REPO='owner/repo'\n";
         let result = analyze_phs_script("repo", content);
-        assert_eq!(result.forgejo_owner.as_deref(), Some("owner"));
-        assert_eq!(result.forgejo_repo.as_deref(), Some("repo"));
+        assert_eq!(result.codeberg_owner.as_deref(), Some("owner"));
+        assert_eq!(result.codeberg_repo.as_deref(), Some("repo"));
     }
 
     #[test]
-    fn analyze_github_preferred_over_forgejo() {
-        // When both GitHub and Forgejo/Codeberg patterns exist, GitHub wins (higher priority).
+    fn analyze_github_preferred_over_codeberg() {
+        // When both GitHub and Codeberg patterns exist, GitHub wins (higher priority).
         let content = r#"
 check_for_gh_release "myapp" "myorg/myapp"
 check_for_codeberg_release "myapp" "cbowner/myapp"
 "#;
         let result = analyze_phs_script("myapp", content);
         assert_eq!(result.github_owner.as_deref(), Some("myorg"));
-        assert!(result.forgejo_owner.is_none());
+        assert!(result.codeberg_owner.is_none());
     }
 
     #[test]
-    fn analyze_forgejo_version_file_basename_when_key_differs() {
+    fn analyze_codeberg_version_file_basename_when_key_differs() {
         // Key "readeck-server" differs from slug "readeck", so version_file_basename is set.
         let content = r#"check_for_codeberg_release "readeck-server" "readeck/readeck""#;
         let result = analyze_phs_script("readeck", content);
-        assert_eq!(result.forgejo_owner.as_deref(), Some("readeck"));
-        assert_eq!(result.forgejo_repo.as_deref(), Some("readeck"));
+        assert_eq!(result.codeberg_owner.as_deref(), Some("readeck"));
+        assert_eq!(result.codeberg_repo.as_deref(), Some("readeck"));
         // Key is lowercase slug-like but differs from "readeck" → basename override set.
         assert_eq!(
             result.version_file_basename.as_deref(),

@@ -77,6 +77,9 @@ const PHS_INSTALL_CMD: &str = "sudo PHS_SILENT=1 TERM=xterm /usr/bin/update";
 ///    - GitHub-managed → two `DiscoveryTarget`s: one `GithubReleases`
 ///      (FetchReleases only, with `owner/repo` as `package_identifier`) and
 ///      one `Shell` (DetectVersion + ExecuteUpdate using PHS conventions).
+///    - Codeberg-managed → two `DiscoveryTarget`s: one `ReleasesForgejo`
+///      (FetchReleases only, `api_base_url = "https://codeberg.org"`) and
+///      one `Shell` (DetectVersion + ExecuteUpdate using PHS conventions).
 ///    - APT-managed → one `DiscoveryTarget` with `Apt` plugin type.
 ///
 /// The controller processes targets generically without any PHS-specific logic.
@@ -199,13 +202,17 @@ impl ProxmoxHelperScriptsPlugin {
         }
     }
 
-    /// Build a `DiscoveryTarget` for the Forgejo releases role.
+    /// Build a `DiscoveryTarget` for a Codeberg-hosted release.
     ///
-    /// The plugin config carries only Forgejo-level settings (no `owner`/`repo`).
+    /// PHS scripts use `check_for_codeberg_release` / `CODEBERG_REPO=` to track
+    /// releases on [Codeberg](https://codeberg.org), which runs the Forgejo
+    /// platform. The underlying plugin type is [`PluginType::ReleasesForgejo`]
+    /// with `api_base_url` hardcoded to `https://codeberg.org`.
+    ///
     /// The `owner/repo` pair is expressed as the `package_identifier` override
     /// so the controller routes release queries to the right repo while sharing
-    /// a single plugin config instance across all tracked Forgejo repositories.
-    fn forgejo_fetch_target(owner: &str, repo: &str) -> DiscoveryTarget {
+    /// a single plugin config instance across all tracked Codeberg repositories.
+    fn codeberg_fetch_target(owner: &str, repo: &str) -> DiscoveryTarget {
         DiscoveryTarget {
             plugin_type: PluginType::ReleasesForgejo,
             plugin_config: serde_json::json!({
@@ -214,7 +221,7 @@ impl ProxmoxHelperScriptsPlugin {
                 "include_prereleases": false,
                 "asset_patterns": [],
             }),
-            plugin_config_name: "Forgejo Releases".to_string(),
+            plugin_config_name: "Codeberg Releases".to_string(),
             roles: vec![PluginRole::FetchReleases],
             package_identifier: Some(format!("{owner}/{repo}")),
             config_override: None,
@@ -469,16 +476,16 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     tracking_system: TrackingSystem::Targeted,
                 });
             } else if let (Some(owner), Some(repo)) =
-                (&analysis.forgejo_owner, &analysis.forgejo_repo)
+                (&analysis.codeberg_owner, &analysis.codeberg_repo)
             {
-                // Forgejo-managed: read version via the same PHS helper script.
+                // Codeberg-managed: read version via the same PHS helper script.
                 let vfb = analysis
                     .version_file_basename
                     .as_deref()
                     .unwrap_or(&script.slug);
                 let Some(installed_version) = self.phs_version(vfb).await else {
                     tracing::debug!(slug = %script.slug,
-                        "PHS version helper absent or version file absent; skipping Forgejo item");
+                        "PHS version helper absent or version file absent; skipping Codeberg item");
                     continue;
                 };
 
@@ -488,7 +495,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     version = %installed_version,
                     owner = %owner,
                     repo = %repo,
-                    "discovered Forgejo-managed PHS software"
+                    "discovered Codeberg-managed PHS software"
                 );
 
                 discovered.push(DiscoveredSoftware {
@@ -496,7 +503,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     name: display_name,
                     installed_version,
                     targets: vec![
-                        Self::forgejo_fetch_target(owner, repo),
+                        Self::codeberg_fetch_target(owner, repo),
                         Self::phs_shell_target(analysis.version_file_basename.as_deref()),
                     ],
                     extra: None,
@@ -730,10 +737,10 @@ mod tests {
     }
 
     #[test]
-    fn forgejo_fetch_target_structure() {
-        let target = ProxmoxHelperScriptsPlugin::forgejo_fetch_target("readeck", "readeck");
+    fn codeberg_fetch_target_structure() {
+        let target = ProxmoxHelperScriptsPlugin::codeberg_fetch_target("readeck", "readeck");
         assert_eq!(target.plugin_type, PluginType::ReleasesForgejo);
-        assert_eq!(target.plugin_config_name, "Forgejo Releases");
+        assert_eq!(target.plugin_config_name, "Codeberg Releases");
         // FetchReleases only — no agent-side roles.
         assert_eq!(target.roles.len(), 1);
         assert_eq!(target.roles[0], PluginRole::FetchReleases);

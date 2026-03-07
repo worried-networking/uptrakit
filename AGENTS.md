@@ -76,7 +76,7 @@ uptrakit/
 │   │   │   ├── docker/                 # uptrakit-plugin-releases-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; `daemon` feature (default) gates bollard + local Docker ops; Docker-over-SSH via StdioTunnel proxy (unix socket bridge to `docker system dial-stdio`)
 │   │   │   ├── github/                 # uptrakit-plugin-releases-github                 (lib)  — GitHub Releases plugin: controller-side fetch_releases only; owner/repo parsed from package_identifier at call time (format "owner/repo"); exports validate_identifier
 │   │   │   ├── gitlab/                 # uptrakit-plugin-releases-gitlab                 (lib)  — GitLab Releases plugin: controller-side fetch_releases; supports nested namespaces (group/subgroup/project); project path percent-encoded for Projects API; upcoming_release:true skipped unless include_prereleases; PRIVATE-TOKEN auth header; exports validate_identifier (parse_project_path)
-│   │   │   └── forgejo/                # uptrakit-plugin-releases-forgejo                (lib)  — Forgejo/Gitea Releases plugin: controller-side fetch_releases; api_base_url required (no default); Forgejo API (Authorization: token); same owner/repo format as GitHub; auto-detected by PHS discovery plugin (synthesizes codeberg.org target); exports validate_identifier (parse_owner_repo)
+│   │   │   └── forgejo/                # uptrakit-plugin-releases-forgejo                (lib)  — Forgejo/Gitea Releases plugin: controller-side fetch_releases; api_base_url required (no default); Forgejo API (Authorization: token); same owner/repo format as GitHub; used by PHS discovery plugin with api_base_url="https://codeberg.org" for Codeberg-hosted PHS items; exports validate_identifier (parse_owner_repo)
 │   │   ├── generic/
 │   │   │   └── shell/                  # uptrakit-plugin-generic-shell                  (lib)  — generic agent-side plugin: version_command (detect_installed_version) + update_command (execute_update); supports {package_identifier}, {version}, {tag} placeholders; at least one field required
 │   │   ├── package-managers/
@@ -85,7 +85,7 @@ uptrakit/
 │   │   │   ├── npm/                    # uptrakit-plugin-package-manager-npm                    (lib)  — npm global-package plugin; ControllerSideFetchReleases (queries registry.npmjs.org); discovery via `npm list -g --json`; updates via `sudo npm install -g <pkg>@<version>`; implements DetectHostCompatibility (checks `which npm`); validate_identifier exported for registry; native batch_detect_installed_version (single `npm list -g --depth=0 --json` call, filtered in memory)
 │   │   │   └── mas/                    # uptrakit-plugin-package-manager-mas                    (lib)  — Mac App Store plugin via `mas` CLI; agent-side only (no ControllerSideFetchReleases); discovery via `mas list`; version detection + release fetch via `mas list` + `mas outdated`; updates via `mas upgrade <id>`; implements DetectHostCompatibility (checks `which mas`); package_identifier = numeric App Store ID (digits only, max 15 chars); no sudo needed; native batch_detect_installed_version + batch_fetch_releases (single `mas list` + `mas outdated` calls, mapped in memory)
 │   │   └── discovery/
-│   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Forgejo/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg/Forgejo-managed items, PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
+│   │       └── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib)  — PVE helper-scripts plugin (discovery-only: fetches CT scripts, analyzes for GitHub/Codeberg/npm/APT upstream; emits ReleasesGithub+GenericShell targets for GitHub-managed items, ReleasesForgejo+GenericShell targets for Codeberg-managed items (api_base_url="https://codeberg.org"; uses Forgejo plugin since Codeberg runs Forgejo), PackageManagerNpm target for npm-managed items, PackageManagerApt target for APT-managed items)
 │   ├── shared/
 │   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, batch host package updates, handle_check_versions/execute_update/handle_execute_batch_host_package_update/graceful_shutdown; start_update() for per-host parallel use by SSH agent; batch_check_versions() groups assignments by (PluginType, effective_config), calls batch_detect_installed_version in parallel, refreshes package index once per fetch group, then calls batch_fetch_releases in parallel
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor; SudoAwareCommandExecutor (wraps any executor, prepends sudo based on SudoContext); SudoPolicy enum (auto/force_with/force_without); CommandSpec.privileged flag; StdioTunnel trait (bidirectional byte-stream tunnel for remote command I/O); RemoteExecutor trait + RemoteCommandResult (transport-agnostic remote command execution for SSH and PVE guest exec)
@@ -467,9 +467,17 @@ for user review. Key invariants:
         Both are declared via `ProxmoxHelperScriptsPlugin::required_sudo_commands()` using
         `SudoHelperScript { install_path, content }` — bootstrap installs both scripts.
      The PHS shell constants live in `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`.
+   - Codeberg-managed apps (detected via `check_for_codeberg_release` or `CODEBERG_REPO=`) emit **two**
+     `DiscoveryTarget` values:
+     1. `plugin_type: ReleasesForgejo`, roles `[FetchReleases]`, config with
+        `api_base_url: "https://codeberg.org"` (Codeberg runs the Forgejo platform),
+        `tag_strip_prefix: "v"`, and `package_identifier: Some("owner/repo")` override.
+        The plugin config name is `"Codeberg Releases"` to distinguish it from generic Forgejo instances.
+     2. `plugin_type: GenericShell`, roles `[DetectVersion, ExecuteUpdate]` — same PHS Shell target
+        as for GitHub-managed items.
    - APT-managed apps emit a `DiscoveryTarget` with `plugin_type: PackageManagerApt`, empty config `{}`, and
      name `"APT (auto)"`.
-   - Apps whose scripts contain neither GitHub patterns nor a specific `apt install` line are skipped.
+   - Apps whose scripts contain neither GitHub nor Codeberg patterns nor a specific `apt install` line are skipped.
    The PHS plugin config itself (`discovery_proxmox_helper_scripts`, always `{}`) is retained as an anchor for
    discovery runs but never linked directly to `SoftwareItem` host assignments.
 
