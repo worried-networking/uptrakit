@@ -1968,6 +1968,16 @@ components:
           examples:
             - 120
             - 300
+        tenant_id:
+          type: string
+          format: uuid
+          description: |
+            Tenant UUID that this service belongs to. Present for
+            tenant-scoped services (agents, SSH agents); absent for
+            system services (MQTT, scheduler). Used by agents for
+            tenant-aware provisioning (e.g. PVE API credential naming).
+          examples:
+            - 11111111-1111-1111-1111-111111111111
 
     caBundleUpdatedPayload:
       type: object

@@ -842,6 +842,14 @@ pub struct ServiceSettingsPayload {
     /// Controller-managed; derived from per-service DB override or service-type default.
     #[serde(with = "duration_seconds")]
     pub ping_interval: std::time::Duration,
+    /// Tenant UUID that this service belongs to.
+    ///
+    /// `None` for system services (MQTT, scheduler) which are not
+    /// tenant-scoped. Present for tenant-scoped agents so they can
+    /// include the tenant identity in external provisioning operations
+    /// (e.g. PVE API credential naming).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<Uuid>,
 }
 
 /// Payload for CA bundle update notification.
@@ -2325,6 +2333,7 @@ mod tests {
             capabilities: BTreeSet::new(),
             shutdown_timeout_seconds: Some(120),
             ping_interval: std::time::Duration::from_secs(300),
+            tenant_id: None,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
@@ -2343,6 +2352,7 @@ mod tests {
             capabilities: BTreeSet::new(),
             shutdown_timeout_seconds: None,
             ping_interval: std::time::Duration::from_secs(15),
+            tenant_id: None,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"service_settings"#));
@@ -2365,6 +2375,7 @@ mod tests {
                 capabilities: BTreeSet::new(),
                 shutdown_timeout_seconds: Some(60),
                 ping_interval: std::time::Duration::from_secs(300),
+                tenant_id: None,
             })
         );
     }
@@ -2382,6 +2393,7 @@ mod tests {
                 capabilities: BTreeSet::new(),
                 shutdown_timeout_seconds: None,
                 ping_interval: std::time::Duration::from_secs(300),
+                tenant_id: None,
             })
         );
     }
@@ -2394,6 +2406,7 @@ mod tests {
             capabilities: BTreeSet::new(),
             shutdown_timeout_seconds: None,
             ping_interval: std::time::Duration::from_secs(42),
+            tenant_id: None,
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["ping_interval"], 42);
@@ -3759,6 +3772,7 @@ mod tests {
                 .collect(),
                 shutdown_timeout_seconds: Some(120),
                 ping_interval: std::time::Duration::from_secs(300),
+                tenant_id: Some(TEST_UUID_1),
             }));
         spec.validate("serviceSettingsPayload", &json);
     }

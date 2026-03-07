@@ -226,7 +226,7 @@ pub(super) async fn handle_authenticated(
     // ---------------------------------------------------------------------------
     use uptrakit_internal_wire::service_profile::{ServiceProfile, parse_capabilities};
 
-    let (capabilities_json, ping_interval_seconds) = if is_system {
+    let (capabilities_json, ping_interval_seconds, service_tenant_id) = if is_system {
         let svc = match sys_svc_entity::Entity::find_by_id(service_id)
             .one(state.db())
             .await
@@ -258,7 +258,7 @@ pub(super) async fn handle_authenticated(
             return;
         }
 
-        (svc.capabilities.clone(), svc.ping_interval_seconds)
+        (svc.capabilities.clone(), svc.ping_interval_seconds, None)
     } else {
         let svc = match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
             .one(state.db())
@@ -291,7 +291,11 @@ pub(super) async fn handle_authenticated(
             return;
         }
 
-        (svc.capabilities.clone(), svc.ping_interval_seconds)
+        (
+            svc.capabilities.clone(),
+            svc.ping_interval_seconds,
+            Some(svc.tenant_id),
+        )
     };
 
     // Bundle certificate identity.
@@ -348,6 +352,7 @@ pub(super) async fn handle_authenticated(
         capabilities: controller_capabilities(),
         shutdown_timeout_seconds: shutdown_timeout,
         ping_interval,
+        tenant_id: service_tenant_id,
     });
     let Some(json) = serialize_controller_msg(out_seq, settings_msg) else {
         return;
