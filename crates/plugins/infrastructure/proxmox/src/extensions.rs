@@ -26,6 +26,7 @@ pub fn extension_actions() -> Vec<ActionDef> {
         unmatch_action(),
         discover_action(),
         test_connection_action(),
+        list_all_unmatched_action(),
     ]
 }
 
@@ -128,6 +129,12 @@ fn test_connection_action() -> ActionDef {
         .with_timeout(30)
 }
 
+fn list_all_unmatched_action() -> ActionDef {
+    ActionDef::new("list-all-unmatched", "List All Unmatched Guests")
+        .with_permission(Permission::ManageHosts)
+        .with_timeout(10)
+}
+
 // ── Manifest definitions ────────────────────────────────────────────────────
 
 /// Full-page extension: Proxmox Hosts data table.
@@ -211,6 +218,7 @@ pub async fn handle_action(
         ("proxmox.hosts", "match") => handle_match(db, params).await,
         ("proxmox.hosts", "approve-match") => handle_approve_match(db, params).await,
         ("proxmox.hosts", "unmatch") => handle_unmatch(db, params).await,
+        ("proxmox.hosts", "list-all-unmatched") => handle_list_all_unmatched(db, tenant_id).await,
         ("proxmox.host-info", "get-info") => handle_get_info(db, tenant_id, params).await,
         _ => Err(format!(
             "unknown action '{action_id}' for extension '{extension_id}'"
@@ -491,6 +499,54 @@ async fn handle_get_info(
     }
 }
 
+/// List all unmatched discovered guests across ALL Proxmox configs for a tenant.
+///
+/// Returns results formatted as select options (`value`/`label`) for use in
+/// extension action dropdowns (e.g., SSH agent's "Bootstrap via Discovered Guest").
+async fn handle_list_all_unmatched(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+) -> std::result::Result<serde_json::Value, String> {
+    use uptrakit_shared_db::entity::proxmox_host_mapping;
+
+    let tenant_id = tenant_id.ok_or_else(|| "tenant context required".to_string())?;
+
+    let mappings = proxmox_host_mapping::Entity::find()
+        .filter(proxmox_host_mapping::Column::TenantId.eq(tenant_id))
+        .filter(proxmox_host_mapping::Column::HostId.is_null())
+        .all(db)
+        .await
+        .map_err(|e| format!("database error: {e}"))?;
+
+    let options: Vec<serde_json::Value> = mappings
+        .into_iter()
+        .map(|m| {
+            let name = m.proxmox_name.as_deref().unwrap_or("unnamed");
+            let label = format!(
+                "{name} ({}/{} VMID {})",
+                m.proxmox_node, m.proxmox_type, m.proxmox_vmid
+            );
+            serde_json::json!({
+                "value": m.id.to_string(),
+                "label": label,
+                "mapping_id": m.id.to_string(),
+                "proxmox_node": m.proxmox_node,
+                "proxmox_vmid": m.proxmox_vmid,
+                "proxmox_type": m.proxmox_type,
+                "proxmox_name": m.proxmox_name,
+            })
+        })
+        .collect();
+
+    tracing::debug!(
+        %tenant_id,
+        count = options.len(),
+        "listed all unmatched Proxmox guests"
+    );
+
+    Ok(serde_json::json!({ "options": options }))
+}
+
 /// Load `ProxmoxConfig` from the `plugin_configs` table.
 async fn load_proxmox_config(
     db: &DatabaseConnection,
@@ -540,9 +596,9 @@ mod tests {
     }
 
     #[test]
-    fn extension_actions_returns_six() {
+    fn extension_actions_returns_seven() {
         let actions = extension_actions();
-        assert_eq!(actions.len(), 6);
+        assert_eq!(actions.len(), 7);
         let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
         assert!(ids.contains(&"add-config"));
         assert!(ids.contains(&"match"));
@@ -550,6 +606,7 @@ mod tests {
         assert!(ids.contains(&"unmatch"));
         assert!(ids.contains(&"discover"));
         assert!(ids.contains(&"test-connection"));
+        assert!(ids.contains(&"list-all-unmatched"));
     }
 
     #[test]
