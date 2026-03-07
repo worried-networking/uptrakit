@@ -113,6 +113,31 @@ impl Validate for UpdateServiceRequest {
     }
 }
 
+/// Request to enable or disable the update freeze on a connected service.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SetUpdateFreezeRequest {
+    /// Whether to enable (`true`) or disable (`false`) the update freeze.
+    pub enabled: bool,
+    /// Optional human-readable reason for the freeze.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl Validate for SetUpdateFreezeRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(ref reason) = self.reason
+            && reason.len() > 1024
+        {
+            return Err(ValidationError {
+                field: "reason",
+                message: "reason must be at most 1024 characters".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 // Re-export generic types that are shared across service operations.
 pub use super::agents::{MergeAgentRequest, MessageResponse};
 

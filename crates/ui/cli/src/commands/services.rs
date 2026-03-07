@@ -8,7 +8,7 @@ use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::services::{
     ListServicesQuery, MergeAgentRequest, MessageResponse, ParseServiceStatusError,
-    ServiceResponse, UpdateServiceRequest,
+    ServiceResponse, SetUpdateFreezeRequest, UpdateServiceRequest,
 };
 
 // ── Local wrapper types ───────────────────────────────────────────────────────
@@ -242,6 +242,24 @@ pub async fn merge(
         source_id: *source_id,
         inner,
     })
+}
+
+/// Enable or disable the update freeze on a connected service.
+pub async fn update_freeze(
+    id: &Uuid,
+    enabled: bool,
+    reason: Option<&str>,
+    server: Option<&str>,
+    token: Option<&str>,
+    insecure: bool,
+    request_timeout: Option<std::time::Duration>,
+) -> Result<MessageResponse> {
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
+    let req = SetUpdateFreezeRequest {
+        enabled,
+        reason: reason.map(|s| s.to_string()),
+    };
+    client.set_update_freeze(id, &req).await.context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

@@ -51,6 +51,7 @@ use crate::AppState;
         crate::routes::services::approve_service,
         crate::routes::services::reject_service,
         crate::routes::services::deactivate_service,
+        crate::routes::services::set_update_freeze,
         crate::routes::services::merge_service,
         crate::routes::system_services::list_system_services,
         crate::routes::system_services::get_system_service,
@@ -183,6 +184,7 @@ use crate::AppState;
             crate::routes::services::UpdateServiceRequest,
             crate::routes::services::MessageResponse,
             crate::routes::services::MergeAgentRequest,
+            crate::routes::services::SetUpdateFreezeRequest,
             crate::routes::system_services::SystemServiceResponse,
             crate::routes::system_services::UpdateSystemServiceRequest,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::system_services::SystemServiceResponse>,
@@ -450,6 +452,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::services::update_service,
             crate::routes::services::deactivate_service
         ))
+        .routes(routes!(crate::routes::services::set_update_freeze))
         .routes(routes!(crate::routes::services::merge_service))
         .routes(routes!(
             crate::routes::system_services::list_system_services

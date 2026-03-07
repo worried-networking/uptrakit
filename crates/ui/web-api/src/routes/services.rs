@@ -12,6 +12,7 @@ use axum::{
 use std::sync::Arc;
 use uptrakit_internal_wire::{
     ApprovedPayload, ControllerMessage, RejectedPayload, RequestCrlRenewalPayload,
+    SetUpdateFreezePayload,
 };
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
@@ -20,7 +21,7 @@ use uuid::Uuid;
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::services::{
     ListServicesQuery, MergeAgentRequest, MessageResponse, ServiceResponse, ServiceStatus,
-    UpdateServiceRequest,
+    SetUpdateFreezeRequest, UpdateServiceRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -360,6 +361,88 @@ pub async fn deactivate_service(
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
+}
+
+/// Enable or disable the update freeze on a connected service.
+///
+/// Sends a `SetUpdateFreeze` wire message to the connected agent. The agent
+/// creates or removes the `update-freeze` file in its state directory,
+/// immediately blocking or unblocking `ExecuteUpdate` and
+/// `ExecuteBatchHostPackageUpdate` processing.
+///
+/// Returns 404 if the service is not found, 409 if the service is not
+/// currently connected, and 200 with a confirmation message on success.
+#[utoipa::path(
+    post,
+    path = "/api/v1/services/{id}/update-freeze",
+    params(
+        ("id" = Uuid, Path, description = "Service UUID")
+    ),
+    request_body = SetUpdateFreezeRequest,
+    responses(
+        (status = 200, description = "Freeze state sent to service", body = MessageResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Service not found"),
+        (status = 409, description = "Service not connected")
+    ),
+    tag = "Services",
+    extensions(("x-required-permission" = json!("manage_agents"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn set_update_freeze(
+    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
+    CanManageAgents(_user): CanManageAgents,
+    Path(service_id): Path<Uuid>,
+    Json(body): Json<SetUpdateFreezeRequest>,
+) -> Response {
+    if let Err(e) = body.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    // Verify the service exists in this tenant.
+    match svc_queries::get_active_service(&tenant_db, service_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
+        Err(report) => {
+            tracing::error!("Failed to look up service: {report}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    // Check that the service is currently connected.
+    if !state.service_connections.is_connected(&service_id).await {
+        return error_response(StatusCode::CONFLICT, "Service is not currently connected");
+    }
+
+    let msg = ControllerMessage::SetUpdateFreeze(SetUpdateFreezePayload {
+        enabled: body.enabled,
+        reason: body.reason.clone(),
+    });
+
+    let sent = state.service_connections.send(&service_id, msg).await;
+    if !sent {
+        return error_response(StatusCode::CONFLICT, "Service is not currently connected");
+    }
+
+    let action = if body.enabled { "enabled" } else { "disabled" };
+    tracing::info!(
+        %service_id,
+        enabled = body.enabled,
+        reason = body.reason.as_deref().unwrap_or("-"),
+        "security_audit: update freeze {action} for service"
+    );
+
+    (
+        StatusCode::OK,
+        Json(MessageResponse {
+            message: format!("Update freeze {action} for service {service_id}."),
+        }),
+    )
+        .into_response()
 }
 
 /// Merge a pending (source) agent into an existing approved (target) agent.

@@ -104,6 +104,12 @@ The same attack applies via:
   `set_update_freeze` message. When `enabled: true`, the agent creates the freeze
   file; when `false`, it removes it. The optional `reason` field is logged. This
   removes the requirement for local shell access during an incident.
+- **REST API for remote freeze.** *(Implemented)* The
+  `POST /api/v1/services/{id}/update-freeze` endpoint allows administrators with
+  `manage_agents` permission to enable or disable the update freeze on connected
+  agents via the web API or CLI (`uptrakit-cli services update-freeze`). The
+  endpoint validates that the service exists, is connected, and sends the wire
+  message over the active WebSocket.
 - **Hook audit logging.** *(Implemented)* Before executing pre/post-update hooks,
   agents emit a `security_audit:` warning listing the hook count and command
   summaries, enabling forensic analysis of executed commands.
@@ -140,10 +146,12 @@ The same attack applies via:
   command provenance independently of the controller's TLS identity.
 - ~~Add agent-side execution rate limiting~~ — **Implemented.** Both agents enforce a
   5-second cooldown (`UPDATE_COOLDOWN`) between consecutive updates.
-- ~~Expose a remote freeze API on the controller~~ — **Partially implemented.** The
-  agent-side `SetUpdateFreeze` handler is in place. The controller-side REST API
-  endpoint (`POST /api/v1/services/{id}/freeze`) to trigger it is out of scope for
-  this PR.
+- ~~Expose a remote freeze API on the controller~~ — **Implemented.** The
+  `POST /api/v1/services/{id}/update-freeze` REST endpoint sends
+  `SetUpdateFreeze` wire messages to connected agents, requiring the
+  `manage_agents` permission. The CLI exposes this as
+  `uptrakit-cli services update-freeze --enable/--disable`. See
+  `crates/ui/web-api/src/routes/services.rs` (`set_update_freeze`).
 - Add anomaly detection on agents for unusual command patterns (e.g., hooks that
   download and execute external scripts, commands targeting sensitive system files,
   or updates at unusual times).

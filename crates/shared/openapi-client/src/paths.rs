@@ -219,6 +219,10 @@ pub(crate) mod services {
     pub(crate) fn merge(id: &Uuid) -> String {
         format!("/api/v1/services/{id}/merge")
     }
+    /// `POST /api/v1/services/{id}/update-freeze`
+    pub(crate) fn update_freeze(id: &Uuid) -> String {
+        format!("/api/v1/services/{id}/update-freeze")
+    }
 }
 
 pub(crate) mod system_services {

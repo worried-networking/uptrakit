@@ -92,6 +92,12 @@ uptrakit services update <SERVICE_ID> --ping-interval 0
 
 # Merge a pending source service into an approved target service
 uptrakit services merge <TARGET_ID> <SOURCE_ID>
+
+# Enable update freeze on a connected service (blocks updates on the agent)
+uptrakit services update-freeze <SERVICE_ID> --enable --reason "Incident investigation"
+
+# Disable update freeze
+uptrakit services update-freeze <SERVICE_ID> --disable
 ```
 
 See also: [Service Operations](../api/services-operations.md),

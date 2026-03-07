@@ -1,8 +1,10 @@
 use crate::Result;
 use crate::UptrakitClient;
+use uptrakit_web_api_types::agents::MessageResponse;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::services::{
-    ListServicesQuery, MergeAgentRequest, ServiceResponse, UpdateServiceRequest,
+    ListServicesQuery, MergeAgentRequest, ServiceResponse, SetUpdateFreezeRequest,
+    UpdateServiceRequest,
 };
 use uuid::Uuid;
 
@@ -59,6 +61,16 @@ impl UptrakitClient {
     /// Deactivate (remove) a service.
     pub async fn remove_service(&self, id: &Uuid) -> Result<()> {
         self.delete(&crate::paths::services::by_id(id)).await
+    }
+
+    /// Enable or disable the update freeze on a connected service.
+    pub async fn set_update_freeze(
+        &self,
+        id: &Uuid,
+        req: &SetUpdateFreezeRequest,
+    ) -> Result<MessageResponse> {
+        self.post_json(&crate::paths::services::update_freeze(id), req)
+            .await
     }
 
     /// Merge a pending source service into an approved target service.

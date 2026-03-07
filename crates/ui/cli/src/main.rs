@@ -606,6 +606,20 @@ enum ServicesCommands {
         /// Source service UUID (pending)
         source_id: Uuid,
     },
+    /// Enable or disable the update freeze on a connected service
+    UpdateFreeze {
+        /// Service UUID
+        id: Uuid,
+        /// Enable the freeze (blocks updates on the agent)
+        #[arg(long, group = "freeze_action")]
+        enable: bool,
+        /// Disable the freeze (allows updates on the agent)
+        #[arg(long, group = "freeze_action")]
+        disable: bool,
+        /// Optional reason for the freeze
+        #[arg(long)]
+        reason: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1731,6 +1745,24 @@ async fn run(cli: Cli) -> error::Result<()> {
                 let resp = commands::services::merge(
                     &target_id,
                     &source_id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            ServicesCommands::UpdateFreeze {
+                id,
+                enable,
+                disable: _,
+                reason,
+            } => {
+                let resp = commands::services::update_freeze(
+                    &id,
+                    enable,
+                    reason.as_deref(),
                     cli.server.as_deref(),
                     cli.token.as_deref(),
                     insecure,
