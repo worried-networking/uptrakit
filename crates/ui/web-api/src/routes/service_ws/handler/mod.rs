@@ -141,22 +141,34 @@ pub(crate) async fn handle_authenticated_loop(
         in_seq,
     } = ctx;
 
-    // Load service from DB, derive capabilities and app name.
-    let (capabilities, service_app_name): (BTreeSet<Capability>, Option<String>) = if is_system {
+    // Load service from DB, derive capabilities, app name, and tenant ID.
+    let (capabilities, service_app_name, service_tenant_id): (
+        BTreeSet<Capability>,
+        Option<String>,
+        Option<uuid::Uuid>,
+    ) = if is_system {
         match sys_svc_entity::Entity::find_by_id(service_id)
             .one(state.db())
             .await
         {
-            Ok(Some(svc)) => (parse_capabilities(&svc.capabilities), svc.service_app_name),
-            _ => (BTreeSet::new(), None),
+            Ok(Some(svc)) => (
+                parse_capabilities(&svc.capabilities),
+                svc.service_app_name,
+                None,
+            ),
+            _ => (BTreeSet::new(), None, None),
         }
     } else {
         match service::Entity::find_by_id(service_id)
             .one(state.db())
             .await
         {
-            Ok(Some(svc)) => (parse_capabilities(&svc.capabilities), svc.service_app_name),
-            _ => (BTreeSet::new(), None),
+            Ok(Some(svc)) => (
+                parse_capabilities(&svc.capabilities),
+                svc.service_app_name,
+                Some(svc.tenant_id),
+            ),
+            _ => (BTreeSet::new(), None, None),
         }
     };
 
@@ -637,6 +649,67 @@ pub(crate) async fn handle_authenticated_loop(
                             ServiceMessage::ExtensionResponse(payload) if has_ui_extensions => {
                                 let request_id = payload.request_id.clone();
                                 state.extension_proxy.complete(&request_id, payload);
+                            }
+
+                            // -------------------------------------------------
+                            // ExtensionRequest: service-initiated extension invocation
+                            // -------------------------------------------------
+                            ServiceMessage::ExtensionRequest(payload) if has_ui_extensions => {
+                                let request_id = payload.request_id.clone();
+                                tracing::debug!(
+                                    %service_id,
+                                    request_id = %request_id,
+                                    extension_id = %payload.extension_id,
+                                    action_id = %payload.action_id,
+                                    "service-initiated extension action request"
+                                );
+
+                                let owner = state.extension_registry.find_owner(&payload.extension_id);
+                                let response = match owner {
+                                    crate::extension_registry::ExtensionOwner::Plugin => {
+                                        let ctx = uptrakit_plugin_infrastructure_registry::ExtensionActionContext {
+                                            db: state.db(),
+                                            tenant_id: service_tenant_id,
+                                        };
+                                        match state
+                                            .plugin_ops
+                                            .handle_extension_action(
+                                                &ctx,
+                                                &payload.extension_id,
+                                                &payload.action_id,
+                                                payload.params,
+                                            )
+                                            .await
+                                        {
+                                            Ok(data) => uptrakit_internal_wire::extension::ExtensionResponsePayload {
+                                                request_id,
+                                                success: true,
+                                                data,
+                                                error: None,
+                                            },
+                                            Err(msg) => uptrakit_internal_wire::extension::ExtensionResponsePayload {
+                                                request_id,
+                                                success: false,
+                                                data: serde_json::Value::Null,
+                                                error: Some(msg),
+                                            },
+                                        }
+                                    }
+                                    _ => {
+                                        // Service-to-service proxying not supported for service-initiated requests.
+                                        uptrakit_internal_wire::extension::ExtensionResponsePayload {
+                                            request_id,
+                                            success: false,
+                                            data: serde_json::Value::Null,
+                                            error: Some("extension not found or not plugin-backed".to_string()),
+                                        }
+                                    }
+                                };
+
+                                let msg = ControllerMessage::ExtensionResponse(response);
+                                if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                }
                             }
 
                             // -------------------------------------------------
