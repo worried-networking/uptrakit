@@ -115,14 +115,16 @@ fn bootstrap_action() -> ActionDef {
             FieldDef::new("auth_password", "SSH Password")
                 .with_type(FieldType::Password)
                 .with_help_text("Required when auth method is 'password'.")
-                .sensitive(),
+                .sensitive()
+                .with_visible_when("auth_method", vec!["password".to_string()]),
             FieldDef::new("auth_private_key", "SSH Private Key")
                 .with_type(FieldType::Textarea)
                 .with_placeholder("-----BEGIN OPENSSH PRIVATE KEY-----")
                 .with_help_text(
                     "PEM-encoded private key. Required when auth method is 'private_key'.",
                 )
-                .sensitive(),
+                .sensitive()
+                .with_visible_when("auth_method", vec!["private_key".to_string()]),
             FieldDef::new("target_username", "Target Username")
                 .with_help_text("User to create/use on the remote host.")
                 .with_default_value("uptrakit"),
@@ -177,6 +179,7 @@ fn bootstrap_proxmox_action() -> ActionDef {
                 .with_type(FieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
         ])))
+
 }
 
 // ── Extension context ────────────────────────────────────────────────
