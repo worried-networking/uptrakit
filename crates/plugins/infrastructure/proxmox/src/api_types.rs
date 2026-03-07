@@ -88,6 +88,18 @@ pub struct PveAgentNetworkResult {
     pub result: Vec<PveNetworkInterface>,
 }
 
+/// Result of reading a file via the QEMU guest agent.
+///
+/// Used with `GET /nodes/{node}/qemu/{vmid}/agent/file-read`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PveFileReadResult {
+    /// File content (may be base64-encoded for binary files).
+    pub content: String,
+    /// Whether the content was truncated.
+    #[serde(default)]
+    pub truncated: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

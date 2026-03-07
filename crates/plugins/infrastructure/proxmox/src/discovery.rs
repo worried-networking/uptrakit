@@ -25,6 +25,9 @@ pub struct DiscoveredGuest {
     pub hostname: Option<String>,
     /// IP addresses discovered via QEMU guest agent.
     pub ip_addresses: Vec<String>,
+    /// Machine ID read from `/etc/machine-id` via QEMU guest agent (best-effort).
+    /// Only available for running QEMU VMs with the guest agent installed.
+    pub machine_id: Option<String>,
 }
 
 /// Discover all VMs and containers from the Proxmox API.
@@ -120,9 +123,9 @@ async fn discover_qemu_guest(client: &ProxmoxClient, node: &str, vm: PveQemuVm) 
 
     let hostname = vm.name.clone();
 
-    // Try to get IP addresses from guest agent (only for running VMs)
-    let ip_addresses = if vm.status == "running" {
-        if let Some(interfaces) = client.get_qemu_agent_network(node, vm.vmid).await {
+    // Try to get IP addresses and machine_id from guest agent (only for running VMs)
+    let (ip_addresses, machine_id) = if vm.status == "running" {
+        let ips = if let Some(interfaces) = client.get_qemu_agent_network(node, vm.vmid).await {
             interfaces
                 .into_iter()
                 .flat_map(|iface| {
@@ -136,9 +139,18 @@ async fn discover_qemu_guest(client: &ProxmoxClient, node: &str, vm: PveQemuVm) 
                 .collect()
         } else {
             vec![]
-        }
+        };
+
+        // Best-effort: read machine_id via guest agent file-read
+        let mid = client
+            .read_guest_file(node, vm.vmid, "/etc/machine-id")
+            .await
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        (ips, mid)
     } else {
-        vec![]
+        (vec![], None)
     };
 
     DiscoveredGuest {
@@ -149,6 +161,7 @@ async fn discover_qemu_guest(client: &ProxmoxClient, node: &str, vm: PveQemuVm) 
         status: vm.status,
         hostname,
         ip_addresses,
+        machine_id,
     }
 }
 
@@ -177,6 +190,10 @@ async fn discover_lxc_guest(
         status: ct.status,
         hostname,
         ip_addresses: vec![],
+        // LXC containers don't support the QEMU guest agent file-read API.
+        // The PVE REST API has no equivalent for LXC (pct exec is SSH-side only).
+        // machine_id will be populated via ReportHosts after bootstrap.
+        machine_id: None,
     }
 }
 
@@ -235,6 +252,7 @@ pub async fn persist_discovered_guests(
             active.proxmox_status = Set(guest.status.clone());
             active.hostname = Set(guest.hostname.clone());
             active.ip_addresses = Set(ip_json);
+            active.machine_id = Set(guest.machine_id.clone());
             active.updated_at = Set(now);
             active.update(db).await.map_err(|e| {
                 rootcause::report!(ProxmoxError::Database(format!(
@@ -262,6 +280,7 @@ pub async fn persist_discovered_guests(
                 proxmox_status: Set(guest.status.clone()),
                 hostname: Set(guest.hostname.clone()),
                 ip_addresses: Set(ip_json),
+                machine_id: Set(guest.machine_id.clone()),
                 match_method: Set(None),
                 discovered_at: Set(now),
                 updated_at: Set(now),
@@ -295,6 +314,7 @@ mod tests {
             status: "running".to_string(),
             hostname: Some("web-server".to_string()),
             ip_addresses: vec!["10.0.0.1".to_string()],
+            machine_id: Some("abc123".to_string()),
         };
         let debug = format!("{guest:?}");
         assert!(debug.contains("web-server"));

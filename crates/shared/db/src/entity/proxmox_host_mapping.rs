@@ -16,6 +16,7 @@ pub struct Model {
     pub proxmox_status: String,
     pub hostname: Option<String>,
     pub ip_addresses: Option<String>,
+    pub machine_id: Option<String>,
     pub match_method: Option<String>,
     pub discovered_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,

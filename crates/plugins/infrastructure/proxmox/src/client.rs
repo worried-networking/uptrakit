@@ -165,6 +165,50 @@ impl ProxmoxClient {
         }
     }
 
+    /// Read a file from a QEMU guest via the guest agent.
+    ///
+    /// Uses `GET /nodes/{node}/qemu/{vmid}/agent/file-read?file={file}`.
+    /// Returns `None` on any error (agent not running, file not found, etc.).
+    /// Only works for QEMU VMs with the guest agent installed; LXC containers
+    /// do not support this endpoint.
+    pub async fn read_guest_file(&self, node: &str, vmid: u32, file: &str) -> Option<String> {
+        tracing::trace!(node, vmid, file, "reading file from QEMU guest agent");
+
+        // Build path with query parameter. The `file` path (e.g. `/etc/machine-id`)
+        // is URL-safe, but we use form_urlencoded for correctness.
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("file", file)
+            .finish();
+        let result: std::result::Result<PveFileReadResult, _> = self
+            .get(&format!(
+                "/nodes/{node}/qemu/{vmid}/agent/file-read?{query}"
+            ))
+            .await;
+
+        match result {
+            Ok(data) => {
+                tracing::trace!(
+                    node,
+                    vmid,
+                    file,
+                    truncated = data.truncated,
+                    "read file from guest agent"
+                );
+                Some(data.content)
+            }
+            Err(e) => {
+                tracing::debug!(
+                    node,
+                    vmid,
+                    file,
+                    error = %e,
+                    "guest agent file-read failed (agent may not be running or file not found)"
+                );
+                None
+            }
+        }
+    }
+
     /// Test connectivity by calling the `/version` endpoint.
     pub async fn test_connection(&self) -> Result<serde_json::Value> {
         tracing::debug!(base_url = %self.base_url, "testing Proxmox API connection");
