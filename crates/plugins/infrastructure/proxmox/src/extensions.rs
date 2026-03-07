@@ -547,6 +547,7 @@ async fn handle_list_all_unmatched(
                 "value": m.id.to_string(),
                 "label": label,
                 "mapping_id": m.id.to_string(),
+                "plugin_config_id": m.plugin_config_id.to_string(),
                 "proxmox_node": m.proxmox_node,
                 "proxmox_vmid": m.proxmox_vmid,
                 "proxmox_type": m.proxmox_type,

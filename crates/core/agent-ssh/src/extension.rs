@@ -25,6 +25,7 @@ use uptrakit_plugin_infrastructure_proxmox::guest_exec::PveGuestType;
 
 use crate::commands::bootstrap::{self, BootstrapParams};
 use crate::commands::bootstrap_proxmox::{self, ProxmoxBootstrapParams};
+use crate::commands::sync;
 use crate::host_ops;
 use crate::ssh_target::SshTarget;
 
@@ -55,7 +56,7 @@ pub fn build_manifest() -> ExtensionManifest {
                 TableColumn::new("username", "Username"),
             ],
             data_action: "list-hosts".to_string(),
-            row_actions: vec!["remove-host".to_string()],
+            row_actions: vec!["sync-host".to_string(), "remove-host".to_string()],
             primary_actions: vec![
                 "bootstrap".to_string(),
                 "bootstrap-proxmox".to_string(),
@@ -85,6 +86,9 @@ pub fn build_actions() -> Vec<ActionDef> {
             .destructive()
             .with_confirm_entity_field("name")
             .with_timeout(30),
+        ActionDef::new("sync-host", "Sync Host")
+            .with_permission(Permission::ManageHosts)
+            .with_timeout(120),
         ActionDef::new("list-pve-hosts", "List PVE Hosts")
             .with_permission(Permission::ManageHosts)
             .with_timeout(10),
@@ -277,6 +281,9 @@ pub async fn handle_extension_request(
             let response = handle_remove_host(&request.request_id, &request.params, ctx.db).await;
             send_response(conn, response).await;
         }
+        "sync-host" => {
+            spawn_sync_host(request, ctx);
+        }
         "bootstrap" => {
             spawn_bootstrap(request, ctx);
         }
@@ -399,6 +406,50 @@ fn spawn_bootstrap(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
         let msg = ServiceMessage::ExtensionResponse(response);
         if bg_tx.send(msg).await.is_err() {
             tracing::error!("failed to send bootstrap result via bg_tx");
+        }
+    });
+}
+
+/// Spawn the sync-host workflow as a background task.
+fn spawn_sync_host(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+    let db_state_dir = ctx.state_dir.to_path_buf();
+    let bg_tx = ctx.bg_tx.clone();
+    let tenant_id = ctx.tenant_id;
+    let request_id = request.request_id.clone();
+
+    tokio::spawn(async move {
+        let host_id = match request.params.get("id").and_then(|v| v.as_str()) {
+            Some(id) => id,
+            None => {
+                let resp = make_error_response(&request_id, "missing required field 'id'");
+                let msg = ServiceMessage::ExtensionResponse(resp);
+                let _ = bg_tx.send(msg).await;
+                return;
+            }
+        };
+
+        let db = match crate::db::init_db(&db_state_dir).await {
+            Ok(db) => db,
+            Err(e) => {
+                let resp = make_error_response(
+                    &request_id,
+                    &format!("failed to initialize database: {e}"),
+                );
+                let msg = ServiceMessage::ExtensionResponse(resp);
+                let _ = bg_tx.send(msg).await;
+                return;
+            }
+        };
+
+        let response = match sync::run_for_extension(host_id, &db, tenant_id).await {
+            Ok(summary) => {
+                make_success_response(&request_id, serde_json::json!({ "summary": summary }))
+            }
+            Err(e) => make_error_response(&request_id, &e),
+        };
+        let msg = ServiceMessage::ExtensionResponse(response);
+        if bg_tx.send(msg).await.is_err() {
+            tracing::error!("failed to send sync-host result via bg_tx");
         }
     });
 }
@@ -692,7 +743,7 @@ async fn run_bootstrap_proxmox_guest_action(
         _ => return make_error_response(request_id, "unknown guest type in discovered guest"),
     };
 
-    // Auto-detect PVE host from the guest's node name.
+    // Auto-detect PVE host from the guest's node name + plugin config ID.
     let proxmox_node = match guest.get("proxmox_node").and_then(|v| v.as_str()) {
         Some(n) => n,
         None => {
@@ -700,7 +751,15 @@ async fn run_bootstrap_proxmox_guest_action(
         }
     };
 
-    let pve_host_id = match find_pve_host_for_node(state_dir, proxmox_node).await {
+    let plugin_config_id = match guest.get("plugin_config_id").and_then(|v| v.as_str()) {
+        Some(id) => id,
+        None => {
+            return make_error_response(request_id, "missing plugin_config_id in discovered guest");
+        }
+    };
+
+    let pve_host_id = match find_pve_host_for_node(state_dir, proxmox_node, plugin_config_id).await
+    {
         Ok(id) => id,
         Err(msg) => return make_error_response(request_id, &msg),
     };
@@ -1012,11 +1071,16 @@ fn decrypt_sensitive_params(
     Ok(Some(params))
 }
 
-/// Find the local PVE host whose name matches a Proxmox node name.
+/// Find the local PVE host matching a Proxmox node name and plugin config ID.
 ///
-/// Searches all PVE hosts in the local database and matches by friendly name
-/// (case-insensitive) or hostname. Returns the host's string ID on success.
-async fn find_pve_host_for_node(state_dir: &Path, proxmox_node: &str) -> Result<String, String> {
+/// Matches exclusively on `(pve_node_name, pve_plugin_config_id)` — both fields
+/// must be set on the host and match the given values. This disambiguates hosts
+/// with the same short hostname across different Proxmox clusters.
+async fn find_pve_host_for_node(
+    state_dir: &Path,
+    proxmox_node: &str,
+    plugin_config_id: &str,
+) -> Result<String, String> {
     let db = crate::db::init_db(state_dir)
         .await
         .map_err(|e| format!("failed to initialize local database: {e}"))?;
@@ -1029,24 +1093,29 @@ async fn find_pve_host_for_node(state_dir: &Path, proxmox_node: &str) -> Result<
         return Err("no PVE hosts found; bootstrap a PVE node first".to_string());
     }
 
-    // Match by name (case-insensitive) first, then by hostname.
-    let node_lower = proxmox_node.to_lowercase();
-    let matched = pve_hosts
-        .iter()
-        .find(|h| h.name.to_lowercase() == node_lower)
-        .or_else(|| {
-            pve_hosts
-                .iter()
-                .find(|h| h.hostname.to_lowercase() == node_lower)
-        });
+    let matched = pve_hosts.iter().find(|h| {
+        h.pve_node_name.as_deref() == Some(proxmox_node)
+            && h.pve_plugin_config_id.as_deref() == Some(plugin_config_id)
+    });
 
     match matched {
         Some(host) => Ok(host.id.clone()),
         None => {
-            let available: Vec<&str> = pve_hosts.iter().map(|h| h.name.as_str()).collect();
+            let available: Vec<String> = pve_hosts
+                .iter()
+                .map(|h| {
+                    format!(
+                        "{} (node={}, config={})",
+                        h.name,
+                        h.pve_node_name.as_deref().unwrap_or("?"),
+                        h.pve_plugin_config_id.as_deref().unwrap_or("?"),
+                    )
+                })
+                .collect();
             Err(format!(
-                "no PVE host found for node '{proxmox_node}'; \
-                 available PVE hosts: [{}]",
+                "no PVE host found for node '{proxmox_node}' with plugin config '{plugin_config_id}'; \
+                 run 'host sync' on PVE hosts to populate node names. \
+                 Available PVE hosts: [{}]",
                 available.join(", ")
             ))
         }

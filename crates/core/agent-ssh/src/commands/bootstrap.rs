@@ -479,6 +479,22 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         }
     };
 
+    // 5b'. Detect PVE node name (short hostname used by Proxmox cluster).
+    let pve_node_name = if is_pve_node {
+        match pve_setup::detect_pve_node_name(&executor).await {
+            Ok(name) => {
+                println!("PVE node name: {name}");
+                Some(name)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to detect PVE node name during bootstrap");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // 5c. CREATE PVE API CREDENTIALS (if PVE node detected)
     let (pve_credentials, existing_pve_plugin_config_id) = if is_pve_node {
         create_or_reuse_pve_credentials(&executor, &db, &params.tenant_id).await
@@ -536,9 +552,14 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     // 8b. Update PVE state if detected.
     if is_pve_node {
         let config_id = existing_pve_plugin_config_id.clone();
-        if let Err(e) =
-            host_ops::update_host_pve_state(&db, &params.host_id.to_string(), true, config_id, None)
-                .await
+        if let Err(e) = host_ops::update_host_pve_state(
+            &db,
+            &params.host_id.to_string(),
+            true,
+            config_id,
+            pve_node_name.clone(),
+        )
+        .await
         {
             tracing::warn!(error = %e, "failed to persist PVE state for host");
         }
@@ -571,14 +592,14 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
             params.target_username
         );
         println!(
-            "      Run 'uptrakit-agent-ssh host update-sudoers {}' to refresh \
+            "      Run 'uptrakit-agent-ssh host sync {}' to refresh \
              entries when plugins change.",
             params.name
         );
     } else {
         println!("NOTE: No sudoers file was written — no compatible plugin commands were found.");
         println!(
-            "      Run 'uptrakit-agent-ssh host update-sudoers {}' after installing \
+            "      Run 'uptrakit-agent-ssh host sync {}' after installing \
              supported tools to configure sudo grants.",
             params.name
         );
