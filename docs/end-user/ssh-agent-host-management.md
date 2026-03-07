@@ -134,7 +134,7 @@ uptrakit-agent-ssh host sync my-server \
 
 The command:
 
-1. Connects to the remote host using the stored credentials.
+1. Connects to the remote host using the stored credentials (or custom auth).
 2. Detects the agent user's privilege context (`id -u`, `sudo -n true`).
 3. Resolves each registered plugin command to its absolute path via `command -v`.
 4. Writes a minimal `/etc/sudoers.d/uptrakit-<username>` with one entry per
@@ -142,7 +142,29 @@ The command:
 5. Detects PVE node name and verifies PVE privileges (for Proxmox VE hosts).
 6. Persists the detected state to the database.
 
-Optional flags:
+#### Authenticating as a different user
+
+By default, sync uses the stored agent credentials. Since the agent user
+(typically `uptrakit`) has limited privileges, you often need to authenticate
+as a user with full sudo access (e.g. `root`) to write the sudoers file.
+
+**CLI:** Supply a username via the SSH address format and provide credentials:
+
+```bash
+uptrakit-agent-ssh host sync root@my-server \
+  --auth-password \
+  --master-key-file /etc/uptrakit/master.key
+```
+
+**Web UI:** When invoking "Sync Host" from the extensions page, select
+"Password" or "Private Key" as the auth method to connect as a custom user
+(defaults to `root`). Credentials are encrypted end-to-end via ECIES and
+never stored.
+
+When using custom auth, sudo state is **not** persisted — the detected state
+reflects the override user, not the stored agent user.
+
+#### Optional flags
 
 | Flag | Description |
 | --- | --- |

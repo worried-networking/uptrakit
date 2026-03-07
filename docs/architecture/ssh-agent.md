@@ -810,7 +810,7 @@ handler's `on_extension_response` method calls `proxy.complete()` to deliver the
 | --- | --- | --- | --- |
 | `list-hosts` | data_action | 30s | Query local DB for all SSH hosts |
 | `bootstrap` | primary_action (form) | 120s | Bootstrap a new remote host |
-| `sync-host` | row_action | 120s | Sync host: update sudoers, detect PVE node name, verify PVE privileges |
+| `sync-host` | row_action (form) | 120s | Sync host: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
 | `remove-host` | row_action (destructive) | 30s | Remove a host from local DB |
 | `list-pve-hosts` | select_source (action) | 10s | List PVE-marked hosts for select dropdown |
 | `bootstrap-proxmox` | primary_action (form) | 120s | Bootstrap a guest inside a Proxmox VE node |
@@ -819,8 +819,8 @@ handler's `on_extension_response` method calls `proxy.complete()` to deliver the
 
 ### E2E encryption for sensitive parameters
 
-The bootstrap action accepts sensitive credentials (SSH password, private key) that must not be
-visible to the controller. The SSH agent uses ECIES sealed-box encryption:
+The bootstrap and sync-host actions accept sensitive credentials (SSH password, private key) that
+must not be visible to the controller. The SSH agent uses ECIES sealed-box encryption:
 
 1. On connect, the agent base64-encodes its mTLS P-256 public key and includes it in the
    `ExtensionRegister` payload as `encryption_public_key`.
@@ -838,9 +838,13 @@ See [Extensions Security](../security/extensions.md) for the trust model and
 
 - **`list-hosts`** and **`remove-host`**: Handled inline — fast DB operations, response sent
   immediately from `on_extension_request`.
-- **`sync-host`**: Spawned as a background task. Connects to the host via SSH using the
-  stored key, updates sudoers, detects the PVE node name (`hostname -s`), and verifies
-  PVE API privileges when a tenant ID is available.
+- **`sync-host`**: Spawned as a background task. By default connects using the stored
+  agent key. Optionally accepts custom auth credentials (password or private key, ECIES
+  encrypted) to connect as a different user (e.g. `root`) — necessary when the stored
+  agent user lacks privileges to write sudoers. Updates sudoers, detects the PVE node
+  name (`hostname -s`), and verifies PVE API privileges when a tenant ID is available.
+  When custom auth is used, sudo state is not persisted (it reflects the override user,
+  not the agent user).
 - **`bootstrap`**: Spawned as a background task via the `bg_tx` channel. The
   `ExtensionResponse` is sent asynchronously when the task completes. The extension proxy's
   120-second timeout handles the case where the task runs too long.
