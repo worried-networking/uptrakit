@@ -1284,6 +1284,12 @@ fn init_master_key(
     allow_plaintext_secrets: bool,
 ) -> InitResult<()> {
     let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
+    // Clear the environment variable immediately to remove it from
+    // /proc/pid/environ, container inspection output, and child processes.
+    //
+    // SAFETY: this is called during single-threaded startup before any
+    // async runtime or threads are spawned.
+    unsafe { std::env::remove_var("UPTRAKIT_MASTER_KEY") };
     let key_hex = read_master_key_hex(master_key_file.as_deref(), env_val.as_deref())?;
 
     match key_hex {

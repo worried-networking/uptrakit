@@ -201,7 +201,7 @@ instructions.
 
 | Method | Details |
 | --- | --- |
-| `UPTRAKIT_MASTER_KEY` env var | 64-character hex string (32 bytes). **Not recommended for production** — env vars are visible in `/proc/pid/environ`, container inspection output, and orchestration manifests. A `WARN`-level log message is emitted at startup when this method is used without `--master-key-file`. |
+| `UPTRAKIT_MASTER_KEY` env var | 64-character hex string (32 bytes). **Deprecated — not recommended for production.** Env vars are visible in `/proc/pid/environ`, container inspection output, and orchestration manifests. The variable is cleared from the process environment after reading. A `WARN`-level deprecation message is emitted at startup when this method is used without `--master-key-file`. |
 | `--master-key-file` CLI arg | Path to a file containing the 64-character hex key. Use `chmod 0600` to restrict to the service user. **Recommended method.** |
 
 ### Master Key Verification (HA Safety)

@@ -73,8 +73,12 @@ With the JWT signing key, the attacker can:
   master key and attempts to relocate ciphertexts.
 - **Startup warning for env-var key source.** *(Implemented)* When the master key is
   loaded from `UPTRAKIT_MASTER_KEY` env var (without `--master-key-file`), a `WARN`-
-  level log message is emitted at startup, nudging operators toward the more secure
-  file-based delivery method.
+  level log message is emitted at startup marking env-var delivery as **deprecated**,
+  nudging operators toward the more secure file-based delivery method.
+- **Environment variable cleared after reading.** *(Implemented)* Both the controller
+  and SSH agent clear `UPTRAKIT_MASTER_KEY` from the process environment immediately
+  after reading it during single-threaded startup. This reduces the window during
+  which the key is visible via `/proc/pid/environ` or `ps eww`.
 - **Intermediate hex string zeroization.** *(Implemented)* The
   `read_master_key_hex()` helper returns `Zeroizing<String>` so that the raw hex
   representation of the master key is scrubbed from heap memory on drop. This closes
@@ -93,8 +97,9 @@ With the JWT signing key, the attacker can:
   lifetime of the controller. A memory dump, core dump, or `/proc/pid/mem` read
   exposes the keys.
 - **Environment variable visibility.** `UPTRAKIT_MASTER_KEY` is still accepted; it is
-  now warned about at startup but not prohibited. Operators may still use it in
-  automation without adopting `--master-key-file`.
+  now warned about at startup (deprecated) and cleared from the process environment
+  after reading, but operators may still use it in automation without adopting
+  `--master-key-file`.
 - **SSH agent uses independent key.** The SSH agent's master key is separate from the
   controller's. Compromise of one does not expose the other — but operators may
   reuse the same key for convenience, negating this isolation.

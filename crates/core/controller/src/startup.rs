@@ -68,6 +68,14 @@ pub(crate) fn init_master_key(
     args: &crate::cli::Args,
 ) -> crate::Result<Option<uptrakit_internal_wire::SecretString>> {
     let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
+    // Clear the environment variable immediately to remove it from
+    // /proc/pid/environ, container inspection output, and child processes.
+    // The value has already been captured in `env_val`.
+    //
+    // SAFETY: this is called during single-threaded startup before any
+    // async runtime or threads are spawned, satisfying the safety
+    // requirement that no other thread concurrently reads the environment.
+    unsafe { std::env::remove_var("UPTRAKIT_MASTER_KEY") };
     let key_hex = read_master_key_hex(args.master_key_file.as_deref(), env_val.as_deref())?;
 
     match key_hex {
@@ -84,9 +92,11 @@ pub(crate) fn init_master_key(
             if args.master_key_file.is_none() && env_val.is_some() {
                 tracing::warn!(
                     "master encryption key loaded from UPTRAKIT_MASTER_KEY environment variable. \
-                     For production deployments, prefer --master-key-file with a file readable \
-                     only by the service user (mode 0o600). Environment variables are visible in \
-                     /proc/pid/environ, container inspection output, and orchestration manifests."
+                     This method is DEPRECATED and will be removed in a future release. \
+                     Use --master-key-file with a file readable only by the service user \
+                     (mode 0o600). The environment variable has been cleared from the process \
+                     environment, but may still be visible in container manifests and \
+                     orchestration tooling."
                 );
             }
             let key_bytes = parse_master_key_hex(&key_hex)?;
