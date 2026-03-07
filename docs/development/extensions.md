@@ -236,7 +236,9 @@ For `select` fields whose options depend on live data (e.g., picking an existing
 `select_source` instead of static `options`. The frontend loads options when the form modal
 opens, before the user interacts with the field.
 
-Currently the only variant is `rest_api`:
+Two variants are supported:
+
+**`rest_api` — Fetch from a REST endpoint**
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -259,6 +261,27 @@ FieldDef::new("host_id", "Host")
         path: "/api/v1/hosts".to_string(),
         value_field: "id".to_string(),
         label_field: "friendly_name".to_string(),
+    })
+```
+
+**`action` — Fetch from an extension action**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `type` | `"action"` | Fetch options by invoking an extension action |
+| `action_id` | string | The action ID to invoke |
+
+The frontend calls the specified extension action and expects the response `data` to contain
+an `options` array of `{ "value": "...", "label": "..." }` objects.
+
+**Example — PVE host picker:**
+
+```rust
+FieldDef::new("pve_host_id", "PVE Host")
+    .with_type(FieldType::Select)
+    .required()
+    .with_select_source(SelectSource::Action {
+        action_id: "list-pve-hosts".to_string(),
     })
 ```
 

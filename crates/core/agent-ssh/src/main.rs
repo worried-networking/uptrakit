@@ -495,9 +495,9 @@ impl ServiceHandler for SshAgentHandler {
             }
 
             // Register the action library (separate from manifests).
-            let actions_payload: uptrakit_internal_wire::extension::ExtensionActionsPayload =
-                serde_json::from_value(extension::build_actions_json())
-                    .expect("actions JSON should be valid");
+            let actions_payload = uptrakit_internal_wire::extension::ExtensionActionsPayload::new(
+                extension::build_actions(),
+            );
             if let Err(e) = conn
                 .send(
                     uptrakit_internal_wire::ServiceMessage::ExtensionActionsRegister(

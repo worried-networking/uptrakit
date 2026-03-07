@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { FieldDef, SelectOption } from '$lib/types';
-	import { apiGet } from '$lib/api';
+	import { apiGet, invokeExtensionAction } from '$lib/api';
 	import { showError } from '$lib/notifications.svelte';
 
 	let {
@@ -8,8 +8,8 @@
 		onsubmit,
 		submitLabel = 'Submit',
 		loading = false,
-		extensionId: _extensionId,
-		serviceId: _serviceId,
+		extensionId,
+		serviceId,
 		extraParams = {}
 	}: {
 		fields: FieldDef[];
@@ -46,14 +46,18 @@
 
 	$effect(() => {
 		for (const f of fields) {
-			if (f.field_type === 'select' && f.select_source?.type === 'rest_api' && !initiatedKeys[f.key]) {
+			if (f.field_type === 'select' && f.select_source && !initiatedKeys[f.key]) {
 				initiatedKeys[f.key] = true;
-				loadSelectSourceOptions(f.key, f.select_source.path, f.select_source.value_field, f.select_source.label_field);
+				if (f.select_source.type === 'rest_api') {
+					loadRestApiOptions(f.key, f.select_source.path, f.select_source.value_field, f.select_source.label_field);
+				} else if (f.select_source.type === 'action') {
+					loadActionOptions(f.key, f.select_source.action_id);
+				}
 			}
 		}
 	});
 
-	async function loadSelectSourceOptions(fieldKey: string, path: string, valueField: string, labelField: string) {
+	async function loadRestApiOptions(fieldKey: string, path: string, valueField: string, labelField: string) {
 		loadingOptions = { ...loadingOptions, [fieldKey]: true };
 		try {
 			const allItems: unknown[] = [];
@@ -86,6 +90,22 @@
 					};
 				})
 			};
+		} catch (e) {
+			showError(e instanceof Error ? e.message : `Failed to load options for ${fieldKey}`);
+			dynamicOptions = { ...dynamicOptions, [fieldKey]: [] };
+		} finally {
+			loadingOptions = { ...loadingOptions, [fieldKey]: false };
+		}
+	}
+
+	async function loadActionOptions(fieldKey: string, actionId: string) {
+		if (!extensionId) return;
+		loadingOptions = { ...loadingOptions, [fieldKey]: true };
+		try {
+			const result = await invokeExtensionAction(extensionId, actionId, {}, serviceId);
+			const obj = result as Record<string, unknown>;
+			const options = (obj?.options as SelectOption[]) ?? [];
+			dynamicOptions = { ...dynamicOptions, [fieldKey]: options };
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to load options for ${fieldKey}`);
 			dynamicOptions = { ...dynamicOptions, [fieldKey]: [] };

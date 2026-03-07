@@ -790,7 +790,7 @@ from the Web UI and CLI without using the agent's local CLI directly.
 | `list-hosts` | data_action | 30s | Query local DB for all SSH hosts |
 | `bootstrap` | primary_action (form) | 120s | Bootstrap a new remote host |
 | `remove-host` | row_action (destructive) | 30s | Remove a host from local DB |
-| `list-pve-hosts` | dynamic_options | 30s | List PVE-marked hosts for select dropdown |
+| `list-pve-hosts` | select_source (action) | 10s | List PVE-marked hosts for select dropdown |
 | `bootstrap-proxmox` | primary_action (form) | 120s | Bootstrap a guest inside a Proxmox VE node |
 
 ### E2E encryption for sensitive parameters

@@ -14,7 +14,9 @@ use std::path::Path;
 use uptrakit_crypto::ecies::sealed_box_decrypt;
 use uptrakit_internal_wire::ServiceMessage;
 use uptrakit_internal_wire::extension::{
-    ExtensionManifest, ExtensionRegisterPayload, ExtensionRequestPayload, ExtensionResponsePayload,
+    ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionRegisterPayload,
+    ExtensionRequestPayload, ExtensionResponsePayload, ExtensionTargeting, ExtensionUi, FieldDef,
+    FieldType, FormDef, SelectOption, SelectSource, TableColumn,
 };
 use uptrakit_service_sdk::ControllerConnection;
 use uptrakit_shared_types::Permission;
@@ -33,223 +35,148 @@ pub const EXTENSION_ID: &str = "ssh-agent.hosts";
 
 /// Build the extension manifest for SSH host management.
 ///
-/// Uses JSON deserialization because all extension types are `#[non_exhaustive]`
-/// and cannot be constructed with struct literals from external crates.
-///
 /// Action fields (`row_actions`, `primary_actions`) contain action ID strings
-/// that reference entries in the action library returned by [`build_actions_json`].
+/// that reference entries in the action library returned by [`build_actions`].
 pub fn build_manifest() -> ExtensionManifest {
-    let manage_hosts = Permission::ManageHosts.as_str();
-    serde_json::from_value(json!({
-        "id": EXTENSION_ID,
-        "label": "SSH Hosts",
-        "priority": 450,
-        "placement": {
-            "type": "page",
-            "nav_section": "management",
-            "icon": "server"
+    ExtensionManifest::new(
+        EXTENSION_ID,
+        "SSH Hosts",
+        450,
+        ExtensionPlacement::Page {
+            nav_section: "management".to_string(),
+            icon: Some("server".to_string()),
         },
-        "required_permission": manage_hosts,
-        "targeting": "targeted",
-        "ui": {
-            "type": "data_table",
-            "columns": [
-                { "key": "id", "label": "ID" },
-                { "key": "name", "label": "Name", "sortable": true },
-                { "key": "hostname", "label": "Hostname", "sortable": true },
-                { "key": "port", "label": "Port" },
-                { "key": "username", "label": "Username" }
+        ExtensionUi::DataTable {
+            columns: vec![
+                TableColumn::new("id", "ID"),
+                TableColumn::new("name", "Name").sortable(),
+                TableColumn::new("hostname", "Hostname").sortable(),
+                TableColumn::new("port", "Port"),
+                TableColumn::new("username", "Username"),
             ],
-            "data_action": "list-hosts",
-            "row_actions": ["remove-host"],
-            "primary_actions": ["bootstrap"]
-        }
-    }))
-    .expect("SSH agent extension manifest JSON should be valid")
+            data_action: "list-hosts".to_string(),
+            row_actions: vec!["remove-host".to_string()],
+            primary_actions: vec!["bootstrap".to_string()],
+            context_selector: None,
+        },
+    )
+    .with_permission(Permission::ManageHosts)
+    .with_targeting(ExtensionTargeting::Targeted)
 }
 
 /// Build the register payload including the manifest and encryption key.
-///
-/// Uses JSON deserialization because `ExtensionRegisterPayload` is
-/// `#[non_exhaustive]`.
 pub fn build_register_payload(encryption_public_key: Option<String>) -> ExtensionRegisterPayload {
-    let mut payload = json!({
-        "manifests": [build_manifest()]
-    });
-    if let Some(key) = encryption_public_key {
-        payload["encryption_public_key"] = serde_json::Value::String(key);
+    let payload = ExtensionRegisterPayload::new(vec![build_manifest()]);
+    match encryption_public_key {
+        Some(key) => payload.with_encryption_public_key(key),
+        None => payload,
     }
-    serde_json::from_value(payload).expect("register payload JSON should be valid")
 }
 
-/// Build the action library JSON for registration via `ExtensionActionsRegister`.
-///
-/// Returns a JSON value that can be deserialized into `ExtensionActionsPayload`.
-pub fn build_actions_json() -> serde_json::Value {
-    let manage_hosts = Permission::ManageHosts.as_str();
-    json!({
-        "actions": [
-            {
-                "action_id": "remove-host",
-                "label": "Remove Host",
-                "permission": manage_hosts,
-                "destructive": true,
-                "timeout_seconds": 30
-            },
-            {
-                "action_id": "list-pve-hosts",
-                "label": "List PVE Hosts",
-                "permission": manage_hosts,
-                "timeout_seconds": 10
-            },
-            {
-                "action_id": "bootstrap",
-                "label": "Bootstrap Host",
-                "permission": manage_hosts,
-                "timeout_seconds": 120,
-                "ui": {
-                    "type": "form",
-                    "fields": [
-                        {
-                            "key": "target",
-                            "label": "SSH Target",
-                            "field_type": "text",
-                            "required": true,
-                            "placeholder": "[user@]host[:port]",
-                            "help_text": "SSH target in [user@]host[:port] format. Default user: root, port: 22."
-                        },
-                        {
-                            "key": "name",
-                            "label": "Host Name",
-                            "field_type": "text",
-                            "required": true,
-                            "placeholder": "my-server",
-                            "help_text": "Friendly name for identification."
-                        },
-                        {
-                            "key": "auth_method",
-                            "label": "Auth Method",
-                            "field_type": "select",
-                            "required": true,
-                            "default_value": "password",
-                            "options": [
-                                { "value": "password", "label": "Password" },
-                                { "value": "private_key", "label": "Private Key" }
-                            ]
-                        },
-                        {
-                            "key": "auth_password",
-                            "label": "SSH Password",
-                            "field_type": "password",
-                            "help_text": "Required when auth method is 'password'.",
-                            "sensitive": true
-                        },
-                        {
-                            "key": "auth_private_key",
-                            "label": "SSH Private Key",
-                            "field_type": "textarea",
-                            "placeholder": "-----BEGIN OPENSSH PRIVATE KEY-----",
-                            "help_text": "PEM-encoded private key. Required when auth method is 'private_key'.",
-                            "sensitive": true
-                        },
-                        {
-                            "key": "target_username",
-                            "label": "Target Username",
-                            "field_type": "text",
-                            "help_text": "User to create/use on the remote host.",
-                            "default_value": "uptrakit"
-                        },
-                        {
-                            "key": "host_key_fingerprint",
-                            "label": "Host Key Fingerprint",
-                            "field_type": "text",
-                            "placeholder": "SHA256:...",
-                            "help_text": "Expected SHA-256 fingerprint of the host key."
-                        },
-                        {
-                            "key": "strict_host_key_checking",
-                            "label": "Strict Host Key Checking",
-                            "field_type": "toggle",
-                            "help_text": "Require fingerprint match (disables TOFU)."
-                        },
-                        {
-                            "key": "allow_all",
-                            "label": "Allow All (NOPASSWD: ALL)",
-                            "field_type": "toggle",
-                            "help_text": "Use NOPASSWD: ALL in sudoers (less secure)."
-                        },
-                        {
-                            "key": "remove_stale_keys",
-                            "label": "Remove Stale Keys",
-                            "field_type": "toggle",
-                            "help_text": "Remove existing Uptrakit-managed keys before writing new ones."
-                        }
-                    ]
-                }
-            },
-            {
-                "action_id": "bootstrap-proxmox",
-                "label": "Bootstrap via Proxmox",
-                "permission": manage_hosts,
-                "timeout_seconds": 120,
-                "ui": {
-                    "type": "form",
-                    "fields": [
-                        {
-                            "key": "pve_host_id",
-                            "label": "PVE Host",
-                            "field_type": "select",
-                            "required": true,
-                            "help_text": "PVE node to use as gateway.",
-                            "dynamic_options": {
-                                "action_id": "list-pve-hosts"
-                            }
-                        },
-                        {
-                            "key": "vmid",
-                            "label": "Guest VMID",
-                            "field_type": "text",
-                            "required": true,
-                            "placeholder": "100",
-                            "help_text": "VMID of the target container or virtual machine."
-                        },
-                        {
-                            "key": "guest_type",
-                            "label": "Guest Type",
-                            "field_type": "select",
-                            "required": true,
-                            "default_value": "lxc",
-                            "options": [
-                                { "value": "lxc", "label": "LXC Container" },
-                                { "value": "qemu", "label": "QEMU VM" }
-                            ]
-                        },
-                        {
-                            "key": "name",
-                            "label": "Host Name",
-                            "field_type": "text",
-                            "required": true,
-                            "placeholder": "my-container",
-                            "help_text": "Friendly name for identification."
-                        },
-                        {
-                            "key": "target_username",
-                            "label": "Target Username",
-                            "field_type": "text",
-                            "help_text": "User to create/use in the guest.",
-                            "default_value": "uptrakit"
-                        },
-                        {
-                            "key": "allow_all",
-                            "label": "Allow All (NOPASSWD: ALL)",
-                            "field_type": "toggle",
-                            "help_text": "Use NOPASSWD: ALL in sudoers (less secure)."
-                        },
-                    ]
-                }
-            }
-        ]
-    })
+/// Build the action library for registration via `ExtensionActionsRegister`.
+pub fn build_actions() -> Vec<ActionDef> {
+    vec![
+        ActionDef::new("remove-host", "Remove Host")
+            .with_permission(Permission::ManageHosts)
+            .destructive()
+            .with_timeout(30),
+        ActionDef::new("list-pve-hosts", "List PVE Hosts")
+            .with_permission(Permission::ManageHosts)
+            .with_timeout(10),
+        bootstrap_action(),
+        bootstrap_proxmox_action(),
+    ]
+}
+
+/// Build the bootstrap host action definition with its form UI.
+fn bootstrap_action() -> ActionDef {
+    ActionDef::new("bootstrap", "Bootstrap Host")
+        .with_permission(Permission::ManageHosts)
+        .with_timeout(120)
+        .with_ui(ActionUi::Form(FormDef::new(vec![
+            FieldDef::new("target", "SSH Target")
+                .required()
+                .with_placeholder("[user@]host[:port]")
+                .with_help_text(
+                    "SSH target in [user@]host[:port] format. Default user: root, port: 22.",
+                ),
+            FieldDef::new("name", "Host Name")
+                .required()
+                .with_placeholder("my-server")
+                .with_help_text("Friendly name for identification."),
+            FieldDef::new("auth_method", "Auth Method")
+                .with_type(FieldType::Select)
+                .required()
+                .with_default_value("password")
+                .with_options(vec![
+                    SelectOption::new("password", "Password"),
+                    SelectOption::new("private_key", "Private Key"),
+                ]),
+            FieldDef::new("auth_password", "SSH Password")
+                .with_type(FieldType::Password)
+                .with_help_text("Required when auth method is 'password'.")
+                .sensitive(),
+            FieldDef::new("auth_private_key", "SSH Private Key")
+                .with_type(FieldType::Textarea)
+                .with_placeholder("-----BEGIN OPENSSH PRIVATE KEY-----")
+                .with_help_text(
+                    "PEM-encoded private key. Required when auth method is 'private_key'.",
+                )
+                .sensitive(),
+            FieldDef::new("target_username", "Target Username")
+                .with_help_text("User to create/use on the remote host.")
+                .with_default_value("uptrakit"),
+            FieldDef::new("host_key_fingerprint", "Host Key Fingerprint")
+                .with_placeholder("SHA256:...")
+                .with_help_text("Expected SHA-256 fingerprint of the host key."),
+            FieldDef::new("strict_host_key_checking", "Strict Host Key Checking")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Require fingerprint match (disables TOFU)."),
+            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
+            FieldDef::new("remove_stale_keys", "Remove Stale Keys")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Remove existing Uptrakit-managed keys before writing new ones."),
+        ])))
+}
+
+/// Build the Proxmox bootstrap action definition with its form UI.
+fn bootstrap_proxmox_action() -> ActionDef {
+    ActionDef::new("bootstrap-proxmox", "Bootstrap via Proxmox")
+        .with_permission(Permission::ManageHosts)
+        .with_timeout(120)
+        .with_ui(ActionUi::Form(FormDef::new(vec![
+            FieldDef::new("pve_host_id", "PVE Host")
+                .with_type(FieldType::Select)
+                .required()
+                .with_help_text("PVE node to use as gateway.")
+                .with_select_source(SelectSource::Action {
+                    action_id: "list-pve-hosts".to_string(),
+                }),
+            FieldDef::new("vmid", "Guest VMID")
+                .required()
+                .with_placeholder("100")
+                .with_help_text("VMID of the target container or virtual machine."),
+            FieldDef::new("guest_type", "Guest Type")
+                .with_type(FieldType::Select)
+                .required()
+                .with_default_value("lxc")
+                .with_options(vec![
+                    SelectOption::new("lxc", "LXC Container"),
+                    SelectOption::new("qemu", "QEMU VM"),
+                ]),
+            FieldDef::new("name", "Host Name")
+                .required()
+                .with_placeholder("my-container")
+                .with_help_text("Friendly name for identification."),
+            FieldDef::new("target_username", "Target Username")
+                .with_help_text("User to create/use in the guest.")
+                .with_default_value("uptrakit"),
+            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
+        ])))
 }
 
 // ── Extension context ────────────────────────────────────────────────

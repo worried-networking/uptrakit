@@ -791,15 +791,21 @@ export interface SelectOption {
 }
 
 /** Dynamic data source for a `Select` field, loaded at form-open time. */
-export type SelectSource = {
-	type: 'rest_api';
-	/** API path relative to the controller base URL (e.g., `"/api/v1/hosts"`). */
-	path: string;
-	/** Field in each response item to use as the submitted option value. */
-	value_field: string;
-	/** Field in each response item to use as the human-readable label. */
-	label_field: string;
-};
+export type SelectSource =
+	| {
+			type: 'rest_api';
+			/** API path relative to the controller base URL (e.g., `"/api/v1/hosts"`). */
+			path: string;
+			/** Field in each response item to use as the submitted option value. */
+			value_field: string;
+			/** Field in each response item to use as the human-readable label. */
+			label_field: string;
+	  }
+	| {
+			type: 'action';
+			/** Extension action ID to invoke. Must return `{ options: [{ value, label }] }`. */
+			action_id: string;
+	  };
 
 export interface FieldDef {
 	key: string;
