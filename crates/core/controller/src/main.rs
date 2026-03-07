@@ -58,6 +58,40 @@ impl_report_conversion!(
     |e| AppError::Config(e.to_string())
 );
 
+/// Initialize the global tracing subscriber.
+///
+/// When the `journald` feature is compiled in and the journald backend was
+/// selected on the command line, the registry gets an additional journald layer
+/// filtered to `uptrakit_audit=info`.  In all other cases (or when the feature
+/// is absent) only the fmt layer is installed.
+///
+/// The `_backends` parameter is intentionally prefixed with `_` so that the
+/// compiler does not warn about it being unused when the `journald` feature is
+/// not compiled in.
+fn init_tracing(filter: EnvFilter, _backends: &[cli::AuditLogBackendArg]) {
+    use tracing_subscriber::prelude::*;
+
+    #[cfg(feature = "journald")]
+    if _backends.contains(&cli::AuditLogBackendArg::Journald) {
+        let journald_filter = EnvFilter::new("uptrakit_audit=info");
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_filter(filter))
+            .with(
+                tracing_journald::layer()
+                    .expect("failed to connect to journald")
+                    .with_filter(journald_filter),
+            )
+            .init();
+        return;
+    }
+
+    // Use registry-based subscriber so an OpenTelemetry layer can be added
+    // later as a one-line change.
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(filter))
+        .init();
+}
+
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let args = cli::Args::parse();
@@ -87,35 +121,7 @@ async fn main() -> std::process::ExitCode {
     // When the journald audit backend is selected, add a dedicated journald
     // tracing layer filtered to the `uptrakit_audit` target so that structured
     // audit events reach the system journal alongside normal stdout logging.
-    #[cfg(feature = "journald")]
-    let wants_journald = args
-        .audit_log_backend
-        .contains(&cli::AuditLogBackendArg::Journald);
-    #[cfg(not(feature = "journald"))]
-    let wants_journald = false;
-
-    if wants_journald {
-        #[cfg(feature = "journald")]
-        {
-            use tracing_subscriber::prelude::*;
-            let journald_filter = EnvFilter::new("uptrakit_audit=info");
-            tracing_subscriber::registry()
-                .with(tracing_subscriber::fmt::layer().with_filter(filter))
-                .with(
-                    tracing_journald::layer()
-                        .expect("failed to connect to journald")
-                        .with_filter(journald_filter),
-                )
-                .init();
-        }
-    } else {
-        // Use registry-based subscriber so an OpenTelemetry layer can be added
-        // later as a one-line change.
-        use tracing_subscriber::prelude::*;
-        tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_filter(filter))
-            .init();
-    }
+    init_tracing(filter, &args.audit_log_backend);
 
     // Dispatch optional subcommands before entering the normal server path.
     if let Some(cli::ControllerCommand::DbMigrate(ref db_args)) = args.command {
@@ -291,19 +297,14 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Build the batch progress broadcaster with NATS for cross-instance SSE.
     // When NATS is not configured the broadcaster operates in single-instance mode.
-    #[cfg(feature = "nats")]
-    let batch_progress_broadcaster = {
-        let broadcaster =
-            uptrakit_web_api::batch_progress_broadcaster::BatchProgressBroadcaster::new();
-        if let Some(ref nats) = nats_transport {
-            broadcaster.with_nats(nats.nats_client())
-        } else {
-            broadcaster
-        }
-    };
-    #[cfg(not(feature = "nats"))]
     let batch_progress_broadcaster =
         uptrakit_web_api::batch_progress_broadcaster::BatchProgressBroadcaster::new();
+    #[cfg(feature = "nats")]
+    let batch_progress_broadcaster = if let Some(ref nats) = nats_transport {
+        batch_progress_broadcaster.with_nats(nats.nats_client())
+    } else {
+        batch_progress_broadcaster
+    };
 
     let token_denylist = Arc::new(
         uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
