@@ -227,13 +227,10 @@ pub async fn run_proxmox_bootstrap(
         })
         .unwrap_or_default();
 
-    // For the `uptrakit` user every key is considered Uptrakit-managed; for
-    // other users only lines whose comment starts with `uptrakit` are stale.
-    let stale_lines: Vec<String> = if params.target_username == "uptrakit" {
-        existing.all_key_lines.clone()
-    } else {
-        existing.uptrakit_key_lines.clone()
-    };
+    // Only lines positively identified as Uptrakit-managed (comment starts
+    // with `uptrakit`) are ever treated as stale — regardless of username.
+    // We never assume exclusive ownership of an account.
+    let stale_lines = existing.uptrakit_key_lines.clone();
 
     let mut to_remove: std::collections::HashSet<&str> =
         same_service_lines.iter().map(String::as_str).collect();
