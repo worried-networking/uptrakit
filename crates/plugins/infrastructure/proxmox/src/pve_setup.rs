@@ -29,6 +29,92 @@ pub enum PveTokenStatus {
     OwnedByOtherTenant(String),
 }
 
+/// Detect the short Proxmox VE node name via `hostname -s`.
+///
+/// Returns the trimmed short hostname (e.g. `"optiplex2"`). Proxmox uses the
+/// short hostname as the node identifier in its cluster.
+pub async fn detect_pve_node_name(executor: &dyn RemoteExecutor) -> Result<String> {
+    let result = executor
+        .exec_command("hostname -s")
+        .await
+        .context_to::<ProxmoxError>()?;
+    let name = result.stdout.trim().to_string();
+    if name.is_empty() {
+        bail!(ProxmoxError::Plugin(
+            "hostname -s returned empty output".to_string()
+        ));
+    }
+    Ok(name)
+}
+
+/// Verify that the Uptrakit PVE API user and its ACL role still exist.
+///
+/// Checks two things:
+/// 1. The user `uptrakit-{tenant_id}@pve` exists (`pveum user list`)
+/// 2. The user has the `PVEAuditor` role on `/` (`pveum acl list`)
+///
+/// Returns `Ok(())` on success, or an error describing what is missing.
+pub async fn verify_pve_privileges(
+    executor: &dyn RemoteExecutor,
+    tenant_id: &uuid::Uuid,
+) -> Result<()> {
+    let user_realm = pve_user_realm(tenant_id);
+
+    // Step 1: Check user exists.
+    let status = check_pve_token_exists(executor, tenant_id).await?;
+    match status {
+        PveTokenStatus::OwnedByTenant(_) => {}
+        PveTokenStatus::NotFound => {
+            bail!(ProxmoxError::Plugin(format!(
+                "PVE user '{user_realm}' does not exist on this cluster"
+            )));
+        }
+        PveTokenStatus::OwnedByOtherTenant(other) => {
+            bail!(ProxmoxError::Plugin(format!(
+                "PVE cluster is claimed by a different tenant (user '{other}')"
+            )));
+        }
+    }
+
+    // Step 2: Check ACL role.
+    let acl_result = executor
+        .exec_command("pveum acl list --output-format json 2>/dev/null")
+        .await
+        .context_to::<ProxmoxError>()?;
+
+    if acl_result.exit_code != 0 {
+        bail!(ProxmoxError::Plugin(format!(
+            "pveum acl list failed (exit {})",
+            acl_result.exit_code
+        )));
+    }
+
+    let acls: Vec<serde_json::Value> =
+        serde_json::from_str(acl_result.stdout.trim()).map_err(|e| {
+            report!(ProxmoxError::ParseResponse(format!(
+                "failed to parse pveum acl list output: {e}"
+            )))
+        })?;
+
+    let has_auditor = acls.iter().any(|acl| {
+        let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
+        let roleid = acl
+            .get("roleid")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        path == "/" && ugid == user_realm && roleid == "PVEAuditor"
+    });
+
+    if !has_auditor {
+        bail!(ProxmoxError::Plugin(format!(
+            "PVE user '{user_realm}' is missing the PVEAuditor role on '/'"
+        )));
+    }
+
+    Ok(())
+}
+
 /// Detect whether the remote host is a Proxmox VE node.
 ///
 /// Checks for the presence of `pveversion` in `$PATH`.
@@ -256,6 +342,48 @@ mod tests {
             pve_user_realm(&tenant_id),
             "uptrakit-11111111-1111-1111-1111-111111111111@pve"
         );
+    }
+
+    #[test]
+    fn verify_pve_acl_parsing() {
+        // Simulate the JSON that `pveum acl list --output-format json` returns.
+        let json = r#"[
+            {"path":"/","roleid":"PVEAuditor","type":"user","ugid":"uptrakit-11111111-1111-1111-1111-111111111111@pve","propagate":true},
+            {"path":"/vms","roleid":"PVEVMAdmin","type":"user","ugid":"admin@pam","propagate":true}
+        ]"#;
+        let acls: Vec<serde_json::Value> = serde_json::from_str(json).expect("valid JSON");
+
+        let user_realm = "uptrakit-11111111-1111-1111-1111-111111111111@pve";
+        let has_auditor = acls.iter().any(|acl| {
+            let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+            let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
+            let roleid = acl
+                .get("roleid")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            path == "/" && ugid == user_realm && roleid == "PVEAuditor"
+        });
+        assert!(has_auditor);
+    }
+
+    #[test]
+    fn verify_pve_acl_missing_role() {
+        let json = r#"[
+            {"path":"/vms","roleid":"PVEVMAdmin","type":"user","ugid":"uptrakit-11111111-1111-1111-1111-111111111111@pve","propagate":true}
+        ]"#;
+        let acls: Vec<serde_json::Value> = serde_json::from_str(json).expect("valid JSON");
+
+        let user_realm = "uptrakit-11111111-1111-1111-1111-111111111111@pve";
+        let has_auditor = acls.iter().any(|acl| {
+            let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+            let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
+            let roleid = acl
+                .get("roleid")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            path == "/" && ugid == user_realm && roleid == "PVEAuditor"
+        });
+        assert!(!has_auditor);
     }
 
     #[test]
