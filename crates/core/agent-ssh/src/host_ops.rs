@@ -228,7 +228,7 @@ pub async fn update_host_machine_id(
 
 /// Update the sudo state fields for an SSH host.
 ///
-/// Called after sudo detection during bootstrap or `update-sudoers`.
+/// Called after sudo detection during bootstrap or `sync`.
 /// Only fields with `Some` values are updated; `None` leaves the existing
 /// value unchanged.
 pub async fn update_host_sudo_state(
@@ -328,7 +328,7 @@ pub async fn find_pve_host_with_config(db: &DatabaseConnection) -> Result<Option
 ///
 /// Returns all matching hosts. When `port` is `Some`, only rows with that
 /// port value are returned. Returns an empty `Vec` if there are no matches.
-/// Used by the `update-sudoers` command to resolve an SSH address target to
+/// Used by the `sync` command to resolve an SSH address target to
 /// a local DB entry.
 pub async fn find_hosts_by_hostname(
     db: &DatabaseConnection,

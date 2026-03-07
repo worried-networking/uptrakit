@@ -207,10 +207,12 @@ pub enum HostCommands {
         remove_stale_keys: bool,
     },
 
-    /// Regenerate the sudoers drop-in file for an enrolled SSH host.
+    /// Synchronise host state with the remote system.
     ///
-    /// Connects to the host, resolves plugin command paths, and writes a
-    /// minimal `/etc/sudoers.d/uptrakit-<username>` file.
+    /// Connects to the host and performs all maintenance tasks:
+    ///   - Updates the sudoers drop-in file with current plugin commands
+    ///   - Detects and stores the PVE node name (for Proxmox hosts)
+    ///   - Verifies PVE API user privileges (when tenant ID is available)
     ///
     /// TARGET can be:
     ///   - A host name or UUID (as stored in the local database)
@@ -219,7 +221,7 @@ pub enum HostCommands {
     /// When an SSH address is given the host is looked up by hostname
     /// (and port, when specified).  If multiple hosts share the same
     /// hostname, provide a port or use the host name / UUID instead.
-    UpdateSudoers {
+    Sync {
         /// Host name, UUID, or SSH address ([user@]host[:port] or
         /// ssh://[user@]host[:port]).
         name_or_id: String,
@@ -243,7 +245,7 @@ pub enum HostCommands {
         #[arg(long)]
         allow_all: bool,
 
-        /// Preview the sudoers file without writing it to the remote host.
+        /// Preview changes without writing them to the remote host.
         #[arg(long)]
         dry_run: bool,
     },
@@ -1051,20 +1053,20 @@ mod tests {
     }
 
     #[test]
-    fn host_update_sudoers_with_name_parses() {
+    fn host_sync_with_name_parses() {
         let args = Args::try_parse_from([
             "uptrakit-agent-ssh",
             "--allow-plaintext-secrets",
             "host",
-            "update-sudoers",
+            "sync",
             "my-server",
         ])
-        .expect("should parse update-sudoers with name");
+        .expect("should parse sync with name");
 
         match &args.command {
             Some(Commands::Host {
                 command:
-                    HostCommands::UpdateSudoers {
+                    HostCommands::Sync {
                         name_or_id,
                         allow_all,
                         dry_run,
@@ -1075,76 +1077,76 @@ mod tests {
                 assert!(!allow_all);
                 assert!(!dry_run);
             }
-            other => panic!("expected Host UpdateSudoers, got: {other:?}"),
+            other => panic!("expected Host Sync, got: {other:?}"),
         }
     }
 
     #[test]
-    fn host_update_sudoers_with_ssh_url_parses() {
+    fn host_sync_with_ssh_url_parses() {
         let args = Args::try_parse_from([
             "uptrakit-agent-ssh",
             "--allow-plaintext-secrets",
             "host",
-            "update-sudoers",
+            "sync",
             "ssh://root@myserver.example.com:2222",
         ])
-        .expect("should parse update-sudoers with SSH URL");
+        .expect("should parse sync with SSH URL");
 
         match &args.command {
             Some(Commands::Host {
-                command: HostCommands::UpdateSudoers { name_or_id, .. },
+                command: HostCommands::Sync { name_or_id, .. },
             }) => {
                 assert_eq!(name_or_id, "ssh://root@myserver.example.com:2222");
             }
-            other => panic!("expected Host UpdateSudoers, got: {other:?}"),
+            other => panic!("expected Host Sync, got: {other:?}"),
         }
     }
 
     #[test]
-    fn host_update_sudoers_with_user_at_host_parses() {
+    fn host_sync_with_user_at_host_parses() {
         let args = Args::try_parse_from([
             "uptrakit-agent-ssh",
             "--allow-plaintext-secrets",
             "host",
-            "update-sudoers",
+            "sync",
             "uptrakit@10.0.0.5",
         ])
-        .expect("should parse update-sudoers with user@host");
+        .expect("should parse sync with user@host");
 
         match &args.command {
             Some(Commands::Host {
-                command: HostCommands::UpdateSudoers { name_or_id, .. },
+                command: HostCommands::Sync { name_or_id, .. },
             }) => {
                 assert_eq!(name_or_id, "uptrakit@10.0.0.5");
             }
-            other => panic!("expected Host UpdateSudoers, got: {other:?}"),
+            other => panic!("expected Host Sync, got: {other:?}"),
         }
     }
 
     #[test]
-    fn host_update_sudoers_with_allow_all_and_dry_run_parses() {
+    fn host_sync_with_allow_all_and_dry_run_parses() {
         let args = Args::try_parse_from([
             "uptrakit-agent-ssh",
             "--allow-plaintext-secrets",
             "host",
-            "update-sudoers",
+            "sync",
             "root@10.0.0.5",
             "--allow-all",
             "--dry-run",
         ])
-        .expect("should parse update-sudoers with flags");
+        .expect("should parse sync with flags");
 
         match &args.command {
             Some(Commands::Host {
                 command:
-                    HostCommands::UpdateSudoers {
+                    HostCommands::Sync {
                         allow_all, dry_run, ..
                     },
             }) => {
                 assert!(*allow_all);
                 assert!(*dry_run);
             }
-            other => panic!("expected Host UpdateSudoers, got: {other:?}"),
+            other => panic!("expected Host Sync, got: {other:?}"),
         }
     }
 

@@ -7,7 +7,7 @@ use uptrakit_service_sdk::ServiceIdentityState;
 
 use crate::cli::HostCommands;
 use crate::commands::bootstrap::{self, BootstrapParams};
-use crate::commands::update_sudoers::{self, UpdateSudoersArgs};
+use crate::commands::sync::{self, SyncArgs};
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams, HostUpdates};
 use crate::ssh_config;
@@ -113,7 +113,7 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
             };
             run_bootstrap(cli_params).await
         }
-        HostCommands::UpdateSudoers {
+        HostCommands::Sync {
             name_or_id,
             auth_password,
             auth_private_key_file,
@@ -144,15 +144,17 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
                 None => None,
             };
 
-            let args = UpdateSudoersArgs {
+            let args = SyncArgs {
                 name_or_id,
                 auth_password: resolved_password,
                 auth_private_key_pem,
                 use_ssh_agent,
                 allow_all,
                 dry_run,
+                // Tenant ID is not available in CLI mode.
+                tenant_id: None,
             };
-            update_sudoers::run(&args, &db).await
+            sync::run(&args, &db).await
         }
     }
 }
@@ -262,6 +264,14 @@ async fn run_show(db: &sea_orm::DatabaseConnection, name_or_id: &str) -> Result<
         host.sudo_available
             .map(|v| if v { "yes" } else { "no" })
             .unwrap_or("unknown")
+    );
+    println!(
+        "PVE node:        {}",
+        if host.is_pve_node { "yes" } else { "no" }
+    );
+    println!(
+        "PVE node name:   {}",
+        host.pve_node_name.as_deref().unwrap_or("(not set)")
     );
     println!(
         "Created at:      {}",

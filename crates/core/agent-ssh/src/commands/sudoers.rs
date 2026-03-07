@@ -2,7 +2,7 @@
 //!
 //! This module handles sudo detection, sudoers file generation, and writing
 //! the sudoers drop-in file on remote hosts. It is used by both the bootstrap
-//! command and the `update-sudoers` command.
+//! command and the `sync` command.
 
 use rootcause::prelude::*;
 use uptrakit_command::{RemoteExecutor, shell_escape};
@@ -120,14 +120,14 @@ pub async fn resolve_command_path(
 /// For `AllCommands`:
 /// ```text
 /// # Managed by Uptrakit - DO NOT EDIT MANUALLY
-/// # Regenerate: uptrakit-agent-ssh host update-sudoers <host>
+/// # Regenerate: uptrakit-agent-ssh host sync <host>
 /// alice ALL=(root) NOPASSWD: ALL
 /// ```
 ///
 /// For `SpecificCommands`:
 /// ```text
 /// # Managed by Uptrakit - DO NOT EDIT MANUALLY
-/// # Regenerate: uptrakit-agent-ssh host update-sudoers <host>
+/// # Regenerate: uptrakit-agent-ssh host sync <host>
 /// # /usr/bin/apt-get: Package installation and index refresh require root privileges
 /// alice ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get
 /// ```
@@ -148,7 +148,7 @@ pub async fn resolve_command_path(
 pub fn generate_sudoers_content(username: &str, content: &SudoersContent) -> String {
     let mut out = String::new();
     out.push_str("# Managed by Uptrakit - DO NOT EDIT MANUALLY\n");
-    out.push_str("# Regenerate: uptrakit-agent-ssh host update-sudoers <host>\n");
+    out.push_str("# Regenerate: uptrakit-agent-ssh host sync <host>\n");
 
     match content {
         SudoersContent::AllCommands => {
@@ -245,7 +245,7 @@ mod tests {
         let text = generate_sudoers_content("alice", &content);
 
         assert!(text.contains("# Managed by Uptrakit"));
-        assert!(text.contains("Regenerate: uptrakit-agent-ssh host update-sudoers"));
+        assert!(text.contains("Regenerate: uptrakit-agent-ssh host sync"));
         assert!(text.contains("alice ALL=(root) NOPASSWD: ALL"));
         assert!(!text.contains("/usr/bin/"));
     }
