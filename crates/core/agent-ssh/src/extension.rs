@@ -56,7 +56,7 @@ pub fn build_manifest() -> ExtensionManifest {
             ],
             data_action: "list-hosts".to_string(),
             row_actions: vec!["remove-host".to_string()],
-            primary_actions: vec!["bootstrap".to_string()],
+            primary_actions: vec!["bootstrap".to_string(), "bootstrap-proxmox".to_string()],
             context_selector: None,
         },
     )
