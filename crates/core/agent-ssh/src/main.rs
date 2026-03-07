@@ -746,82 +746,87 @@ impl SshAgentHandler {
         client::report_hosts_after_config_change(db, conn, &hosts, &changed_ref, &self.pool).await;
 
         // After ReportHosts is sent the controller has registered all SSH hosts
-        // using the agent_host_id hint.  Now drain any pending Proxmox mapping
-        // matches that were deferred by "Bootstrap via Discovered Guest".
-        self.drain_pending_proxmox_matches().await;
+        // using the agent_host_id hint.  Spawn the pending-match drain as a
+        // background task so the event loop stays free to forward the proxy
+        // request (via bg_tx → BackgroundResult) and receive the controller
+        // response — calling invoke_proxy_action inline here would deadlock
+        // because on_service_event cannot poll bg_rx while it is blocked.
+        if let Some(db) = self.local_db.as_ref() {
+            let db = db.clone();
+            let proxy = std::sync::Arc::clone(&self.extension_proxy);
+            let bg_tx = self.bg_tx.clone();
+            tokio::spawn(async move {
+                drain_pending_proxmox_matches_bg(db, proxy, bg_tx).await;
+            });
+        }
     }
+}
 
-    /// Fire any pending Proxmox host-mapping matches that were deferred until
-    /// after `ReportHosts` so the FK constraint on `proxmox_host_mappings.host_id`
-    /// can be satisfied.
-    async fn drain_pending_proxmox_matches(&self) {
-        let db = match self.local_db.as_ref() {
-            Some(db) => db,
-            None => return,
-        };
-
-        let pending = match host_ops::drain_pending_proxmox_matches(db).await {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to load pending Proxmox matches");
-                return;
-            }
-        };
-
-        if pending.is_empty() {
+/// Fire any pending Proxmox host-mapping matches in a background task.
+///
+/// Must run outside the event loop so that `invoke_proxy_action` can send
+/// its request via `bg_tx` and the event loop can pick it up (as
+/// `BackgroundResult`) without being blocked waiting for the response.
+async fn drain_pending_proxmox_matches_bg(
+    db: sea_orm::DatabaseConnection,
+    proxy: std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
+    bg_tx: tokio::sync::mpsc::Sender<uptrakit_internal_wire::ServiceMessage>,
+) {
+    let pending = match host_ops::drain_pending_proxmox_matches(&db).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to load pending Proxmox matches");
             return;
         }
+    };
 
-        tracing::info!(
-            count = pending.len(),
-            "draining pending Proxmox host matches"
-        );
+    if pending.is_empty() {
+        return;
+    }
 
-        for entry in pending {
-            let match_params = serde_json::json!({
-                "mapping_id": entry.mapping_id,
-                "host_id": entry.host_id,
-            });
+    tracing::info!(
+        count = pending.len(),
+        "draining pending Proxmox host matches"
+    );
 
-            match extension::invoke_proxy_action(
-                &self.extension_proxy,
-                &self.bg_tx,
-                "proxmox.hosts",
-                "match",
-                match_params,
-            )
+    for entry in pending {
+        let match_params = serde_json::json!({
+            "mapping_id": entry.mapping_id,
+            "host_id": entry.host_id,
+        });
+
+        match extension::invoke_proxy_action(&proxy, &bg_tx, "proxmox.hosts", "match", match_params)
             .await
-            {
-                Ok(resp) if resp.success => {
-                    tracing::info!(
-                        host_id = %entry.host_id,
-                        mapping_id = %entry.mapping_id,
-                        "auto-matched bootstrapped guest to Proxmox host mapping"
-                    );
-                    if let Err(e) = host_ops::delete_pending_proxmox_match(db, entry.id).await {
-                        tracing::warn!(
-                            id = entry.id,
-                            error = %e,
-                            "matched but failed to delete pending Proxmox match row"
-                        );
-                    }
-                }
-                Ok(resp) => {
+        {
+            Ok(resp) if resp.success => {
+                tracing::info!(
+                    host_id = %entry.host_id,
+                    mapping_id = %entry.mapping_id,
+                    "auto-matched bootstrapped guest to Proxmox host mapping"
+                );
+                if let Err(e) = host_ops::delete_pending_proxmox_match(&db, entry.id).await {
                     tracing::warn!(
-                        host_id = %entry.host_id,
-                        mapping_id = %entry.mapping_id,
-                        error = ?resp.error,
-                        "pending Proxmox match failed; will retry on next ReportHosts"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        host_id = %entry.host_id,
-                        mapping_id = %entry.mapping_id,
+                        id = entry.id,
                         error = %e,
-                        "pending Proxmox match proxy call failed; will retry on next ReportHosts"
+                        "matched but failed to delete pending Proxmox match row"
                     );
                 }
+            }
+            Ok(resp) => {
+                tracing::warn!(
+                    host_id = %entry.host_id,
+                    mapping_id = %entry.mapping_id,
+                    error = ?resp.error,
+                    "pending Proxmox match failed; will retry on next ReportHosts"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    host_id = %entry.host_id,
+                    mapping_id = %entry.mapping_id,
+                    error = %e,
+                    "pending Proxmox match proxy call failed; will retry on next ReportHosts"
+                );
             }
         }
     }
