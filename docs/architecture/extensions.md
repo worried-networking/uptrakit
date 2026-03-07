@@ -245,7 +245,7 @@ permissions (same pattern as static nav items).
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/wire/src/extension.rs` | Manifest types and wire payloads |
+| `crates/shared/extension-framework/src/lib.rs` | Extension manifest types and wire payloads (`uptrakit-extension-framework`) |
 | `crates/shared/wire/src/lib.rs` | Wire message variants, `UiExtensions` capability |
 | `crates/ui/web-api/src/extension_registry.rs` | Registry data structure |
 | `crates/ui/web-api/src/extension_proxy.rs` | Oneshot-channel proxy |

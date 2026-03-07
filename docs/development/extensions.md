@@ -658,7 +658,7 @@ a provider automatically or handles it directly (for plugins).
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/wire/src/extension.rs` | Extension manifest types, wire payloads, `ApiSubmitDef`, `ContextSelectorDef` |
+| `crates/shared/extension-framework/src/lib.rs` | Extension manifest types, wire payloads, `ApiSubmitDef`, `ContextSelectorDef` (`uptrakit-extension-framework`) |
 | `crates/shared/types/src/permissions.rs` | `Permission` enum (shared across plugins and web API) |
 | `crates/shared/wire/src/limits.rs` | Wire validation limits |
 | `crates/shared/wire/src/wire_validate_impls.rs` | `WireValidate` implementations |

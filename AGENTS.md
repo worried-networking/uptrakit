@@ -92,6 +92,7 @@ uptrakit/
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption with envelope encryption (KEK wraps DEKs); EncryptedString, init_master_key, DataKeyRing; ENC:v1/v2/v3 formats (v3 = current default with DEK + AAD); column AAD registry (register_column_aad); DEK wrap/unwrap; O(1) master key rotation support
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, software_items, host_packages, host_package_ignores, host_package_update_history, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
+│   │   ├── extension-framework/        # uptrakit-extension-framework            (lib)  — UI extension framework types: ExtensionManifest, ActionDef, FieldDef, FormDef, wire payloads; standalone crate so plugins don't depend on uptrakit-internal-wire
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, PluginType, TrackingSystem, etc.); network::is_private_host() for SSRF validation; feature-gated: sea-orm, openapi
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
@@ -102,7 +103,7 @@ uptrakit/
 │   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
 │   │   ├── notification-channels/      # uptrakit-notification-channels          (lib)  — NotificationChannel trait, DeliveryMessage, ChannelRegistry(ChannelRegistryConfig); shared escape_html(); webhook (default, SSRF validation + header blocklist) + telegram + email (feature-gated) channel impls
 │   │   ├── update-hooks/               # uptrakit-update-hooks                  (lib)  — update hook resolution and config merge logic (extracted from web-api)
-│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields
+│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; re-exports `uptrakit-extension-framework` as `extension` module
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-packages, services, software-items, plugin-configs, autodiscovery, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
 │       ├── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API layer; routes, middleware (security_headers, request_id, request_log, resolve_ip, rate_limit, resolve_proxy_headers, require_auth, audit_log, permission, tenant_context), AppState, router; /healthz (liveness) + /readyz (readiness: DB + CA checks); event_broadcaster.rs (per-tenant admin event SSE), device_flow_broadcaster.rs (device auth SSE); re-exports auth/queries from sibling crates; test_harness/ shared integration test fixtures (TestApp, TestClient, DB/HTTP helpers); integration_tests/ REST API + WebSocket integration tests (#[cfg(all(test, feature = "db-sqlite"))])
@@ -1281,7 +1282,8 @@ web UI, REST API, and CLI with custom functionality. Extensions are described by
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/wire/src/extension.rs` | Wire types: `ExtensionManifest`, `ExtensionUi`, `ActionDef`, etc. |
+| `crates/shared/extension-framework/src/lib.rs` | Extension types: `ExtensionManifest`, `ExtensionUi`, `ActionDef`, `FieldDef`, etc. (`uptrakit-extension-framework`) |
+| `crates/shared/wire/src/extension.rs` | Re-exports `uptrakit-extension-framework` for backward compatibility |
 | `crates/ui/web-api/src/extension_registry.rs` | Runtime registry: tracks manifests and provider sets |
 | `crates/ui/web-api/src/extension_proxy.rs` | Request/response proxy via oneshot channels |
 | `crates/ui/web-api/src/routes/extensions.rs` | REST endpoints: list, providers, invoke |

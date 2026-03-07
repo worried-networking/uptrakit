@@ -389,7 +389,7 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
 
 The extensions framework enables connected services and plugins to dynamically extend the
 UI with custom pages, panels, context menu actions, and table columns. Each extension is
-described by an `ExtensionManifest` (defined in `crates/shared/wire/src/extension.rs`).
+described by an `ExtensionManifest` (defined in `crates/shared/extension-framework/src/lib.rs`).
 
 Two registration models coexist:
 

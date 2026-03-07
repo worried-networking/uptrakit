@@ -159,7 +159,7 @@ message identifying the conflict.
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/wire/src/extension.rs` | `required_permission` field on manifests and actions |
+| `crates/shared/extension-framework/src/lib.rs` | `required_permission` field on manifests and actions (`uptrakit-extension-framework`) |
 | `crates/shared/wire/src/limits.rs` | Wire validation limits for extension payloads |
 | `crates/shared/wire/src/wire_validate_impls.rs` | `WireValidate` implementations |
 | `crates/ui/web-api/src/routes/extensions.rs` | Permission checks in route handlers |

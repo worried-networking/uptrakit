@@ -583,7 +583,7 @@ pub trait ConfigFormSchema {
 ```
 
 Each plugin config struct implements `ConfigFormSchema` to return its field definitions using the
-`FieldDef` builder pattern from `uptrakit-internal-wire::extension`:
+`FieldDef` builder pattern from `uptrakit-extension-framework` (re-exported via `uptrakit-plugin-infrastructure-core::form_schema`):
 
 ```rust
 impl ConfigFormSchema for GitHubConfig {
