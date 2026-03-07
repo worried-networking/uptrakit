@@ -110,6 +110,15 @@ pub trait PluginOps: Send + Sync + 'static {
     /// Returns an empty JSON object `{}` for unknown plugin types.
     fn sample_config_for_str(&self, plugin_type: &str) -> serde_json::Value;
 
+    /// Returns form field definitions for the given plugin type.
+    ///
+    /// Returns `None` for unknown plugin types, empty `Vec` for plugins
+    /// with no configurable fields.
+    fn config_form_schema_str(
+        &self,
+        plugin_type: &str,
+    ) -> Option<Vec<uptrakit_internal_wire::extension::FieldDef>>;
+
     /// Returns UI extension manifests provided by all registered plugins.
     ///
     /// Default returns empty — no plugin provides extensions yet. Override
@@ -209,6 +218,13 @@ impl PluginOps for PluginRegistry {
 
     fn sample_config_for_str(&self, plugin_type: &str) -> serde_json::Value {
         PluginRegistry::sample_config_str(plugin_type)
+    }
+
+    fn config_form_schema_str(
+        &self,
+        plugin_type: &str,
+    ) -> Option<Vec<uptrakit_internal_wire::extension::FieldDef>> {
+        PluginRegistry::config_form_schema_str(plugin_type)
     }
 
     fn extension_manifests(&self) -> Vec<uptrakit_internal_wire::extension::ExtensionManifest> {

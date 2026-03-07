@@ -7,7 +7,9 @@ use uptrakit_plugin_discovery_proxmox_helper_scripts::{
     ProxmoxHelperScriptsConfig, ProxmoxHelperScriptsPlugin,
 };
 use uptrakit_plugin_generic_shell::{ShellConfig, ShellPlugin};
-use uptrakit_plugin_infrastructure_core::{Plugin, PluginType, SecretMasking, SudoCommandEntry};
+use uptrakit_plugin_infrastructure_core::{
+    ConfigFormSchema, Plugin, PluginType, SecretMasking, SudoCommandEntry,
+};
 use uptrakit_plugin_infrastructure_proxmox::{ProxmoxConfig, ProxmoxPlugin};
 use uptrakit_plugin_package_manager_apt::{AptConfig, AptPlugin};
 use uptrakit_plugin_package_manager_homebrew::{HomebrewConfig, HomebrewPlugin};
@@ -217,6 +219,31 @@ macro_rules! register_plugins {
                     return serde_json::Value::Object(serde_json::Map::new());
                 };
                 Self::sample_config(pt)
+            }
+
+            /// Returns form field definitions for the given plugin type.
+            ///
+            /// Uses the [`ConfigFormSchema`] trait implementation on each config
+            /// type. Returns `None` for unknown / `Other` types.
+            pub fn config_form_schema(
+                plugin_type: PluginType,
+            ) -> Option<Vec<uptrakit_internal_wire::extension::FieldDef>> {
+                match plugin_type {
+                    $(
+                        PluginType::$variant => Some(<$config as ConfigFormSchema>::form_schema()),
+                    )+
+                    _ => None,
+                }
+            }
+
+            /// String-accepting convenience wrapper around [`config_form_schema`].
+            pub fn config_form_schema_str(
+                plugin_type: &str,
+            ) -> Option<Vec<uptrakit_internal_wire::extension::FieldDef>> {
+                let Ok(pt) = plugin_type.parse::<PluginType>() else {
+                    return None;
+                };
+                Self::config_form_schema(pt)
             }
 
             /// Returns all plugin types that have the `DiscoverLocalSoftware` capability.
