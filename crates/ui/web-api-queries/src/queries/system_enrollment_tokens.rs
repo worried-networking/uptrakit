@@ -1,12 +1,25 @@
+use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Set, sea_query::Expr,
 };
+use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::system_enrollment_token;
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::system_enrollment_tokens::SystemEnrollmentTokenResponse;
 use uuid::Uuid;
+
+#[derive(Debug, Error)]
+pub enum SystemEnrollmentTokenError {
+    #[error("database error: {0}")]
+    Database(sea_orm::DbErr),
+}
+
+pub type Result<T> = std::result::Result<T, Report<SystemEnrollmentTokenError>>;
+
+impl_report_conversion!(sea_orm::DbErr => SystemEnrollmentTokenError::Database);
 
 /// Parameters for creating a new system enrollment token.
 pub struct CreateSystemTokenParams<'a> {
@@ -36,7 +49,7 @@ fn model_to_response(m: system_enrollment_token::Model) -> SystemEnrollmentToken
 pub async fn create_system_enrollment_token(
     db: &sea_orm::DatabaseConnection,
     params: CreateSystemTokenParams<'_>,
-) -> Result<system_enrollment_token::Model, sea_orm::DbErr> {
+) -> Result<system_enrollment_token::Model> {
     let now = OffsetDateTime::now_utc();
     let model = system_enrollment_token::ActiveModel {
         id: Set(params.id),
@@ -50,7 +63,7 @@ pub async fn create_system_enrollment_token(
         created_by_user_id: Set(params.created_by_user_id),
     };
 
-    model.insert(db).await
+    model.insert(db).await.context_to()
 }
 
 /// List all system enrollment tokens, ordered by `created_at` desc.
@@ -58,19 +71,20 @@ pub async fn create_system_enrollment_token(
 pub async fn list_system_enrollment_tokens(
     db: &sea_orm::DatabaseConnection,
     pagination: &uptrakit_web_api_types::pagination::PaginationParams,
-) -> Result<PaginatedResponse<SystemEnrollmentTokenResponse>, sea_orm::DbErr> {
+) -> Result<PaginatedResponse<SystemEnrollmentTokenResponse>> {
     let pagination = pagination.resolve();
 
     let base_query = system_enrollment_token::Entity::find()
         .order_by_desc(system_enrollment_token::Column::CreatedAt);
 
-    let total = base_query.clone().count(db).await?;
+    let total = base_query.clone().count(db).await.context_to()?;
 
     let tokens = base_query
         .offset(Some(pagination.offset()))
         .limit(Some(pagination.per_page))
         .all(db)
-        .await?;
+        .await
+        .context_to()?;
 
     let items: Vec<SystemEnrollmentTokenResponse> =
         tokens.into_iter().map(model_to_response).collect();
@@ -82,10 +96,11 @@ pub async fn list_system_enrollment_tokens(
 pub async fn get_system_enrollment_token(
     db: &sea_orm::DatabaseConnection,
     id: Uuid,
-) -> Result<Option<SystemEnrollmentTokenResponse>, sea_orm::DbErr> {
+) -> Result<Option<SystemEnrollmentTokenResponse>> {
     let token = system_enrollment_token::Entity::find_by_id(id)
         .one(db)
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(token.map(model_to_response))
 }
@@ -96,7 +111,7 @@ pub async fn get_system_enrollment_token(
 pub async fn revoke_system_enrollment_token(
     db: &sea_orm::DatabaseConnection,
     id: Uuid,
-) -> Result<bool, sea_orm::DbErr> {
+) -> Result<bool> {
     let result = system_enrollment_token::Entity::update_many()
         .col_expr(
             system_enrollment_token::Column::RevokedAt,
@@ -105,7 +120,8 @@ pub async fn revoke_system_enrollment_token(
         .filter(system_enrollment_token::Column::Id.eq(id))
         .filter(system_enrollment_token::Column::RevokedAt.is_null())
         .exec(db)
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(result.rows_affected > 0)
 }
@@ -115,7 +131,7 @@ pub async fn revoke_system_enrollment_token(
 #[tracing::instrument(skip_all)]
 pub async fn find_active_system_tokens(
     db: &sea_orm::DatabaseConnection,
-) -> Result<Vec<system_enrollment_token::Model>, sea_orm::DbErr> {
+) -> Result<Vec<system_enrollment_token::Model>> {
     let now = OffsetDateTime::now_utc();
 
     system_enrollment_token::Entity::find()
@@ -134,6 +150,7 @@ pub async fn find_active_system_tokens(
         )
         .all(db)
         .await
+        .context_to()
 }
 
 /// Atomically increment `current_uses` on a system enrollment token.
@@ -141,7 +158,7 @@ pub async fn find_active_system_tokens(
 pub async fn increment_system_token_uses(
     db: &sea_orm::DatabaseConnection,
     token_id: Uuid,
-) -> Result<(), sea_orm::DbErr> {
+) -> Result<()> {
     system_enrollment_token::Entity::update_many()
         .col_expr(
             system_enrollment_token::Column::CurrentUses,
@@ -149,15 +166,14 @@ pub async fn increment_system_token_uses(
         )
         .filter(system_enrollment_token::Column::Id.eq(token_id))
         .exec(db)
-        .await?;
+        .await
+        .context_to()?;
     Ok(())
 }
 
 /// Count active system enrollment tokens (for the global settings summary).
 #[tracing::instrument(skip_all)]
-pub async fn count_active_system_tokens(
-    db: &sea_orm::DatabaseConnection,
-) -> Result<u32, sea_orm::DbErr> {
+pub async fn count_active_system_tokens(db: &sea_orm::DatabaseConnection) -> Result<u32> {
     let now = OffsetDateTime::now_utc();
 
     let count = system_enrollment_token::Entity::find()
@@ -174,7 +190,8 @@ pub async fn count_active_system_tokens(
                     .lt(Expr::col(system_enrollment_token::Column::MaxUses))),
         )
         .count(db)
-        .await?;
+        .await
+        .context_to()?;
 
     Ok(count as u32)
 }
