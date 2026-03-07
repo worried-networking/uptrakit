@@ -309,6 +309,10 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
         sync_pve_state(&executor, db, &host, args.tenant_id.as_ref(), args.dry_run).await?;
     }
 
+    // Drop the executor before disconnecting so the session Arc has a single
+    // owner — `disconnect_shared` requires sole ownership to cleanly close the
+    // SSH channel.
+    drop(executor);
     SshSession::disconnect_shared(session).await;
 
     if args.dry_run {
@@ -482,6 +486,7 @@ pub async fn run_for_extension(
     .map_err(|e| format!("failed to update sudo state: {e}"))?;
 
     if !is_root && !sudo_available {
+        drop(executor);
         SshSession::disconnect_shared(session).await;
         return Err(format!(
             "sudo is not available for user '{}' on '{}'; cannot sync",
@@ -491,7 +496,8 @@ pub async fn run_for_extension(
 
     let privileged = !is_root;
 
-    // Collect + write sudoers.
+    // Collect + write sudoers.  `ssh_executor` is consumed by
+    // `compatible_sudo_commands_for_host` so only `executor` remains.
     let ssh_executor = Arc::new(SshCommandExecutor::new(Arc::clone(&session)))
         as Arc<dyn uptrakit_command::CommandExecutor>;
     let plugin_sudo_cmds = PluginRegistry::compatible_sudo_commands_for_host(ssh_executor).await;
@@ -581,6 +587,7 @@ pub async fn run_for_extension(
         }
     }
 
+    drop(executor);
     SshSession::disconnect_shared(session).await;
 
     Ok(summary.join("; "))

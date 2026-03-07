@@ -311,7 +311,10 @@ pub async fn run_proxmox_bootstrap(
     }
     verify_session.disconnect().await;
 
-    // Disconnect PVE session.
+    // Drop executors before disconnecting so the session Arc has a single
+    // owner — `disconnect_shared` requires sole ownership.
+    drop(pve_executor);
+    drop(guest_executor);
     SshSession::disconnect_shared(session).await;
 
     // 8. SAVE TO DATABASE

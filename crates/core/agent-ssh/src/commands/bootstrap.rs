@@ -502,7 +502,9 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         (None, None)
     };
 
-    // 6. DISCONNECT auth session.
+    // 6. DISCONNECT auth session — drop the executor first so the session Arc
+    //    has a single owner (required by `disconnect_shared`).
+    drop(executor);
     SshSession::disconnect_shared(session).await;
 
     // 7. VERIFY — reconnect as target_username with target key.
