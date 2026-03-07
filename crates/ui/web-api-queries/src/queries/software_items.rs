@@ -134,7 +134,12 @@ fn host_update_available(installed_version: Option<&str>, latest_version: Option
 
 async fn count_linked_hosts(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> Result<u64> {
     HostSoftwareItem::find()
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            host_software_item::Relation::Host.def(),
+        )
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+        .filter(host::Column::DeactivatedAt.is_null())
         .count(db)
         .await
         .context_to()
@@ -154,8 +159,13 @@ async fn load_latest_version_for_item(
     let rows: Vec<LatestVersionRow> = HostSoftwareItem::find()
         .select_only()
         .column(host_software_item::Column::LatestVersion)
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            host_software_item::Relation::Host.def(),
+        )
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
         .filter(host_software_item::Column::LatestVersion.is_not_null())
+        .filter(host::Column::DeactivatedAt.is_null())
         .into_model::<LatestVersionRow>()
         .all(db)
         .await
@@ -180,8 +190,13 @@ async fn bulk_load_latest_versions(
         .select_only()
         .column(host_software_item::Column::SoftwareItemId)
         .column(host_software_item::Column::LatestVersion)
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            host_software_item::Relation::Host.def(),
+        )
         .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.to_vec()))
         .filter(host_software_item::Column::LatestVersion.is_not_null())
+        .filter(host::Column::DeactivatedAt.is_null())
         .into_model::<ItemLatestRow>()
         .all(db)
         .await
@@ -584,6 +599,7 @@ pub async fn list_software_items(
     let item_ids: Vec<Uuid> = items.iter().map(|i| i.id).collect();
 
     // Bulk-load host counts for all items in one GROUP BY query.
+    // Only active (non-deactivated) hosts are counted.
     let host_counts: HashMap<Uuid, u64> = HostSoftwareItem::find()
         .select_only()
         .column(host_software_item::Column::SoftwareItemId)
@@ -594,7 +610,12 @@ pub async fn list_software_items(
             },
             "count",
         )
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            host_software_item::Relation::Host.def(),
+        )
         .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
+        .filter(host::Column::DeactivatedAt.is_null())
         .group_by(host_software_item::Column::SoftwareItemId)
         .into_model::<ItemHostCount>()
         .all(tenant_db.db())
@@ -645,7 +666,12 @@ pub async fn list_software_items(
         .column(host_software_item::Column::SoftwareItemId)
         .column(host_software_item::Column::InstalledVersion)
         .column(host_software_item::Column::LatestVersion)
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            host_software_item::Relation::Host.def(),
+        )
         .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
+        .filter(host::Column::DeactivatedAt.is_null())
         .into_model::<InstalledVersionRow>()
         .all(tenant_db.db())
         .await
@@ -761,11 +787,16 @@ pub async fn update_software_item(
     let host_count = count_linked_hosts(tenant_db.db(), id).await?;
     let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
 
-    // For update_available we do a quick per-host check.
+    // For update_available we do a quick per-host check (active hosts only).
     let update_available = if latest_version.is_some() {
         HostSoftwareItem::find()
+            .join(
+                sea_orm::JoinType::InnerJoin,
+                host_software_item::Relation::Host.def(),
+            )
             .filter(host_software_item::Column::SoftwareItemId.eq(id))
             .filter(host_software_item::Column::InstalledVersion.is_not_null())
+            .filter(host::Column::DeactivatedAt.is_null())
             .all(tenant_db.db())
             .await
             .unwrap_or_default()
