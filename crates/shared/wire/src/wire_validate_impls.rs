@@ -562,6 +562,24 @@ impl WireValidate for extension::FieldDef {
         for opt in &self.options {
             opt.wire_validate()?;
         }
+        if let Some(ref vw) = self.visible_when {
+            vw.wire_validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for extension::VisibleWhen {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.field, MAX_SHORT_STRING_LEN, "visible_when.field")?;
+        check_vec_len(
+            &self.values,
+            MAX_EXTENSION_SELECT_OPTIONS,
+            "visible_when.values",
+        )?;
+        for v in &self.values {
+            check_string_len(v, MAX_SHORT_STRING_LEN, "visible_when.values[]")?;
+        }
         Ok(())
     }
 }
@@ -1357,6 +1375,7 @@ mod tests {
                 options: vec![],
                 select_source: None,
                 sensitive: false,
+                visible_when: None,
             })
             .collect();
         let form = extension::FormDef { fields };
@@ -1398,6 +1417,7 @@ mod tests {
             options,
             select_source: None,
             sensitive: false,
+            visible_when: None,
         };
         let err = field.wire_validate().unwrap_err();
         assert_eq!(err.field, "field.options");

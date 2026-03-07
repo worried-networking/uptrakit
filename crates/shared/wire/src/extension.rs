@@ -629,6 +629,10 @@ pub struct FieldDef {
     /// `params`. The controller never sees their plaintext.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sensitive: bool,
+    /// Conditional visibility: show this field only when the controlling
+    /// field's value matches one of the specified values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible_when: Option<VisibleWhen>,
 }
 
 impl FieldDef {
@@ -645,6 +649,7 @@ impl FieldDef {
             options: vec![],
             select_source: None,
             sensitive: false,
+            visible_when: None,
         }
     }
 
@@ -698,6 +703,27 @@ impl FieldDef {
         self.select_source = Some(source);
         self
     }
+
+    /// Set a default value for the field.
+    pub fn with_default_value(mut self, value: serde_json::Value) -> Self {
+        self.default_value = Some(value);
+        self
+    }
+
+    /// Set static options for a `Select` field.
+    pub fn with_options(mut self, options: Vec<SelectOption>) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// Set conditional visibility based on another field's value.
+    pub fn with_visible_when(mut self, field: impl Into<String>, values: Vec<String>) -> Self {
+        self.visible_when = Some(VisibleWhen {
+            field: field.into(),
+            values,
+        });
+        self
+    }
 }
 
 /// Input field type.
@@ -722,6 +748,21 @@ pub enum FieldType {
     Hidden,
     /// Forward-compatible catch-all for unknown field types.
     Other(String),
+}
+
+/// Condition for conditional field visibility.
+///
+/// When present on a [`FieldDef`], the field is only shown in the UI when
+/// the controlling field's current value is in the `values` list. This
+/// enables tagged-enum patterns (e.g., show "username"/"password" fields
+/// only when `auth_type` is `"basic"`).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisibleWhen {
+    /// Key of the controlling field.
+    pub field: String,
+    /// Field is visible when the controlling field's value is in this list.
+    pub values: Vec<String>,
 }
 
 /// A single option in a `Select` field.
@@ -994,6 +1035,7 @@ mod tests {
                     options: vec![],
                     select_source: None,
                     sensitive: false,
+                    visible_when: None,
                 }],
             },
             submit_action: Some("validate-host".to_string()),
@@ -1220,6 +1262,7 @@ mod tests {
                 ],
                 select_source: None,
                 sensitive: false,
+                visible_when: None,
             }],
         };
 
@@ -1342,5 +1385,26 @@ mod tests {
         let payload = ExtensionActionsPayload::new(vec![ActionDef::new("list", "List")]);
         assert_eq!(payload.actions.len(), 1);
         assert_eq!(payload.actions[0].action_id, "list");
+    }
+
+    #[test]
+    fn visible_when_roundtrip() {
+        let field = FieldDef::new("auth_username", "Username")
+            .with_visible_when("auth_type", vec!["basic".to_string()]);
+        let json = serde_json::to_string(&field).expect("serialize should succeed");
+        assert!(json.contains("visible_when"));
+        let roundtripped: FieldDef =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(field, roundtripped);
+        let vw = roundtripped.visible_when.expect("should have visible_when");
+        assert_eq!(vw.field, "auth_type");
+        assert_eq!(vw.values, vec!["basic"]);
+    }
+
+    #[test]
+    fn visible_when_omitted_when_none() {
+        let field = FieldDef::new("name", "Name");
+        let json = serde_json::to_string(&field).expect("serialize should succeed");
+        assert!(!json.contains("visible_when"));
     }
 }
