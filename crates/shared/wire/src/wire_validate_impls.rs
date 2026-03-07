@@ -1307,51 +1307,57 @@ mod tests {
     // ── Extension wire validation tests ─────────────────────────────────────
 
     fn test_manifest() -> extension::ExtensionManifest {
-        extension::ExtensionManifest {
-            id: "test.ext".to_string(),
-            label: "Test".to_string(),
-            priority: 0,
-            placement: extension::ExtensionPlacement::Page {
+        extension::ExtensionManifest::new(
+            "test.ext",
+            "Test",
+            0,
+            extension::ExtensionPlacement::Page {
                 nav_section: "test".to_string(),
                 icon: None,
             },
-            required_permission: String::new(),
-            targeting: extension::ExtensionTargeting::Universal,
-            ui: extension::ExtensionUi::Actions { actions: vec![] },
-        }
+            extension::ExtensionUi::Actions { actions: vec![] },
+        )
     }
 
     #[test]
     fn extension_register_validates() {
-        let payload = extension::ExtensionRegisterPayload {
-            manifests: vec![test_manifest()],
-            encryption_public_key: None,
-        };
+        let payload = extension::ExtensionRegisterPayload::new(vec![test_manifest()]);
         assert!(payload.wire_validate().is_ok());
     }
 
     #[test]
     fn extension_register_too_many_manifests() {
         let manifests: Vec<extension::ExtensionManifest> = (0..MAX_EXTENSION_MANIFESTS + 1)
-            .map(|i| extension::ExtensionManifest {
-                id: format!("ext-{i}"),
-                ..test_manifest()
+            .map(|i| {
+                extension::ExtensionManifest::new(
+                    format!("ext-{i}"),
+                    "Test",
+                    0,
+                    extension::ExtensionPlacement::Page {
+                        nav_section: "test".to_string(),
+                        icon: None,
+                    },
+                    extension::ExtensionUi::Actions { actions: vec![] },
+                )
             })
             .collect();
-        let payload = extension::ExtensionRegisterPayload {
-            manifests,
-            encryption_public_key: None,
-        };
+        let payload = extension::ExtensionRegisterPayload::new(manifests);
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "manifests");
     }
 
     #[test]
     fn extension_manifest_id_too_long() {
-        let manifest = extension::ExtensionManifest {
-            id: "x".repeat(MAX_SHORT_STRING_LEN + 1),
-            ..test_manifest()
-        };
+        let manifest = extension::ExtensionManifest::new(
+            "x".repeat(MAX_SHORT_STRING_LEN + 1),
+            "Test",
+            0,
+            extension::ExtensionPlacement::Page {
+                nav_section: "test".to_string(),
+                icon: None,
+            },
+            extension::ExtensionUi::Actions { actions: vec![] },
+        );
         let err = manifest.wire_validate().unwrap_err();
         assert_eq!(err.field, "extension.id");
     }
@@ -1359,10 +1365,8 @@ mod tests {
     #[test]
     fn extension_table_columns_too_many() {
         let columns: Vec<extension::ExtensionColumn> = (0..MAX_EXTENSION_COLUMNS + 1)
-            .map(|i| extension::ExtensionColumn {
-                key: format!("col-{i}"),
-                label: format!("Column {i}"),
-                data_action: "fetch".to_string(),
+            .map(|i| {
+                extension::ExtensionColumn::new(format!("col-{i}"), format!("Column {i}"), "fetch")
             })
             .collect();
         let placement = extension::ExtensionPlacement::TableColumns {
@@ -1376,22 +1380,9 @@ mod tests {
     #[test]
     fn extension_form_too_many_fields() {
         let fields: Vec<extension::FieldDef> = (0..MAX_EXTENSION_FIELDS + 1)
-            .map(|i| extension::FieldDef {
-                key: format!("field-{i}"),
-                label: format!("Field {i}"),
-                field_type: extension::FieldType::Text,
-                required: false,
-                placeholder: None,
-                help_text: None,
-                default_value: None,
-                options: vec![],
-                select_source: None,
-                sensitive: false,
-                list: false,
-                visible_when: None,
-            })
+            .map(|i| extension::FieldDef::new(format!("field-{i}"), format!("Field {i}")))
             .collect();
-        let form = extension::FormDef { fields };
+        let form = extension::FormDef::new(fields);
         let err = form.wire_validate().unwrap_err();
         assert_eq!(err.field, "form.fields");
     }
@@ -1399,11 +1390,12 @@ mod tests {
     #[test]
     fn extension_wizard_too_many_steps() {
         let steps: Vec<extension::WizardStep> = (0..MAX_EXTENSION_WIZARD_STEPS + 1)
-            .map(|i| extension::WizardStep {
-                step_id: format!("s-{i}"),
-                label: format!("Step {i}"),
-                form: extension::FormDef { fields: vec![] },
-                submit_action: None,
+            .map(|i| {
+                extension::WizardStep::new(
+                    format!("s-{i}"),
+                    format!("Step {i}"),
+                    extension::FormDef::new(vec![]),
+                )
             })
             .collect();
         let ui = extension::ActionUi::Wizard { steps };
@@ -1414,25 +1406,11 @@ mod tests {
     #[test]
     fn extension_select_too_many_options() {
         let options: Vec<extension::SelectOption> = (0..MAX_EXTENSION_SELECT_OPTIONS + 1)
-            .map(|i| extension::SelectOption {
-                value: format!("v-{i}"),
-                label: format!("Label {i}"),
-            })
+            .map(|i| extension::SelectOption::new(format!("v-{i}"), format!("Label {i}")))
             .collect();
-        let field = extension::FieldDef {
-            key: "select".to_string(),
-            label: "Select".to_string(),
-            field_type: extension::FieldType::Select,
-            required: false,
-            placeholder: None,
-            help_text: None,
-            default_value: None,
-            options,
-            select_source: None,
-            sensitive: false,
-            list: false,
-            visible_when: None,
-        };
+        let field = extension::FieldDef::new("select", "Select")
+            .with_type(extension::FieldType::Select)
+            .with_options(options);
         let err = field.wire_validate().unwrap_err();
         assert_eq!(err.field, "field.options");
     }
@@ -1489,10 +1467,10 @@ mod tests {
 
     #[test]
     fn extension_service_message_register_validates() {
-        let msg = ServiceMessage::ExtensionRegister(extension::ExtensionRegisterPayload {
-            manifests: vec![test_manifest()],
-            encryption_public_key: None,
-        });
+        let msg =
+            ServiceMessage::ExtensionRegister(extension::ExtensionRegisterPayload::new(vec![
+                test_manifest(),
+            ]));
         assert!(msg.wire_validate().is_ok());
     }
 
