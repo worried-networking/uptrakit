@@ -136,6 +136,28 @@ Services have no knowledge of frontend sessions, user identities, or browser con
 The controller strips all user context before forwarding requests and adds only the
 action parameters.
 
+## Service-initiated extension requests
+
+Services can invoke controller-side plugin actions via `ServiceMessage::ExtensionRequest`.
+The controller dispatches these to the appropriate plugin and returns a
+`ControllerMessage::ExtensionResponse`.
+
+### Trust model
+
+- **Services are authenticated via mTLS** — only enrolled services with valid certificates
+  can send extension requests.
+- **Tenant isolation** — the controller extracts the `tenant_id` from the service's
+  database record and passes it to the plugin's `handle_extension_action()`. Services
+  cannot access data belonging to other tenants.
+- **Plugin dispatch validation** — the controller only dispatches to plugins that own the
+  requested `extension_id`. Unknown extension IDs result in an error response, not a crash.
+- **No privilege escalation** — service-initiated requests bypass the user permission model
+  (there is no "user" in this flow), but the plugin's action handler enforces its own
+  business logic. The service can only invoke actions that the plugin exposes.
+- **Capability gating** — only services that declared `UiExtensions` capability during
+  enrollment can send `ServiceMessage::ExtensionRequest`. Messages from services without
+  this capability are ignored.
+
 ## `service_app_name` conflict detection
 
 The `service_app_name` field (derived from `env!("CARGO_PKG_NAME")` at compile time)
@@ -164,8 +186,9 @@ message identifying the conflict.
 | `crates/shared/wire/src/wire_validate_impls.rs` | `WireValidate` implementations |
 | `crates/ui/web-api/src/routes/extensions.rs` | Permission checks in route handlers |
 | `crates/ui/web-api/src/extension_registry.rs` | `service_app_name` conflict detection |
-| `crates/ui/web-api/src/extension_proxy.rs` | Timeout enforcement via oneshot channels |
-| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | Capability check on registration |
+| `crates/ui/web-api/src/extension_proxy.rs` | Controller-side timeout enforcement via oneshot channels |
+| `crates/shared/service-sdk/src/extension_proxy.rs` | Service-side proxy for controller plugin invocations |
+| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | Capability check on registration; service-initiated request dispatch |
 
 ## See also
 

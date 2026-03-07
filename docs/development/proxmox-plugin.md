@@ -120,6 +120,7 @@ commands or REST routes exist.
 | `proxmox.hosts` | `test-connection` | `plugin_config_id` | Test API connectivity |
 | `proxmox.hosts` | `match` | `mapping_id`, `host_id` | Manual match |
 | `proxmox.hosts` | `unmatch` | `mapping_id` | Remove match |
+| `proxmox.hosts` | `list-all-unmatched` | (none) | List unmatched guests across all configs (for service-initiated invocations) |
 | `proxmox.host-info` | `get-info` | `host_id` | Get Proxmox info for host |
 
 The `plugin_config_id` parameter is **not included in action forms**. Instead, the
@@ -134,6 +135,18 @@ directly to `POST /api/v1/plugin-configs`, bypassing the extension proxy. No
 extension-side handler for config creation is needed. After the REST call succeeds,
 the frontend refreshes the selector options and auto-selects the new configuration
 (identified via `response_id_field: "id"`).
+
+### Cross-config guest listing
+
+The `list-all-unmatched` action returns unmatched guests across **all** Proxmox
+configurations for the tenant. Unlike `list` (which requires a `plugin_config_id`),
+this action is designed for service-initiated invocations where the calling service
+does not know which Proxmox configs exist.
+
+The SSH agent uses this action (via `ServiceExtensionProxy`) to populate the
+`bootstrap-proxmox-guest` dropdown. If the Proxmox plugin is not installed, the
+service-initiated request returns an error and the SSH agent returns an empty options
+list.
 
 ## Configuration Validation
 

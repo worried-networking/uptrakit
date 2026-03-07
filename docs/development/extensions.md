@@ -524,6 +524,66 @@ The route handler passes an `ExtensionActionContext` (DB connection, tenant ID) 
 
 See the [Proxmox VE plugin](proxmox-plugin.md) for a complete working example.
 
+## Service-initiated extension invocation
+
+Services can invoke controller-side plugin actions via `ServiceExtensionProxy`. This
+enables cross-plugin coordination without direct crate dependencies.
+
+### Setup
+
+Add `ServiceExtensionProxy` to your handler struct and wire the response callback:
+
+```rust
+use uptrakit_service_sdk::ServiceExtensionProxy;
+
+struct MyHandler {
+    extension_proxy: Arc<ServiceExtensionProxy>,
+    bg_tx: mpsc::Sender<ServiceMessage>,
+    // ...
+}
+
+impl ServiceHandler for MyHandler {
+    fn on_extension_response(&mut self, response: ExtensionResponsePayload) {
+        let request_id = response.request_id.clone();
+        self.extension_proxy.complete(&request_id, response);
+    }
+}
+```
+
+### Invoking a controller-side action
+
+Use the `invoke()` → send → `wait()` pattern:
+
+```rust
+let pending = proxy.invoke("proxmox.hosts", "list-all-unmatched", json!({}));
+
+// Send the request through the background channel
+bg_tx.send(pending.message.clone()).await?;
+
+// Wait for the response with a timeout
+let response = pending.wait(&proxy, Duration::from_secs(15)).await?;
+```
+
+The `PendingExtensionRequest` contains the `ServiceMessage::ExtensionRequest` to send
+and a oneshot receiver for the response. The `bg_tx` channel flows through
+`poll_service_event` → `on_service_event` → `conn.send()`.
+
+### Graceful degradation
+
+If the target plugin is not installed or the action fails, the controller returns an
+error response. Services should handle this gracefully — for example, by returning an
+empty options list for a dropdown source action.
+
+### Wire messages
+
+| Direction | Message | Purpose |
+| --- | --- | --- |
+| Service → Controller | `ServiceMessage::ExtensionRequest` | Service requests a controller-side plugin action |
+| Controller → Service | `ControllerMessage::ExtensionResponse` | Controller returns the plugin action result |
+
+Both messages reuse the existing `ExtensionRequestPayload` and `ExtensionResponsePayload`
+types. They are **not** NATS-publishable (session-targeted).
+
 ## Action protocol
 
 ### Request/response correlation
@@ -667,8 +727,9 @@ a provider automatically or handles it directly (for plugins).
 | `crates/ui/web-api/src/routes/extensions.rs` | REST API route handlers |
 | `crates/shared/web-api-types/src/extensions.rs` | REST API request/response types |
 | `crates/shared/openapi-client/src/extensions.rs` | OpenAPI client methods |
-| `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler::on_extension_request` |
-| `crates/shared/service-sdk/src/event_loop.rs` | `ExtensionRequest` dispatch |
+| `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler::on_extension_request` + `on_extension_response` |
+| `crates/shared/service-sdk/src/extension_proxy.rs` | `ServiceExtensionProxy` for service-initiated invocations |
+| `crates/shared/service-sdk/src/event_loop.rs` | `ExtensionRequest` + `ExtensionResponse` dispatch |
 | `crates/plugins/infrastructure/registry/src/lib.rs` | `PluginOps::extension_manifests` |
 | `crates/ui/cli/src/commands/extensions.rs` | CLI `extensions` subcommand (static + dynamic) |
 | `crates/core/agent-ssh/src/extension.rs` | SSH agent extension implementation (reference) |

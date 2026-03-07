@@ -59,7 +59,7 @@ uptrakit/
 ├── crates/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
-│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; parallel per-host version checks and updates over SSH (per-host concurrency guard + forwarder task + aggregate mpsc channel); host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts; SshStdioTunnel (bidirectional byte-stream over russh channel for Docker proxy); ExecuteBatchHostPackageUpdate handler with freeze check; UI extension `ssh-agent.hosts` (list-hosts, bootstrap, bootstrap-proxmox, list-pve-hosts, remove-host actions; primary_actions: bootstrap + bootstrap-proxmox; ECIES E2E encryption for sensitive params); PVE node auto-detection during bootstrap with cluster deduplication (check_pve_token_exists → PveTokenStatus) + tenant-scoped PVE credentials (uptrakit-{tenant_id}@pve) + ReportPluginConfig; ExtensionContext struct bundles handler state (db, state_dir, private_key_der, service_id, tenant_id, bg_tx); remote_exec.rs (SshRemoteExecutor, PveGuestExecutor implementing RemoteExecutor); bootstrap_proxmox.rs (guest bootstrap via PVE exec)
+│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; parallel per-host version checks and updates over SSH (per-host concurrency guard + forwarder task + aggregate mpsc channel); host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts; SshStdioTunnel (bidirectional byte-stream over russh channel for Docker proxy); ExecuteBatchHostPackageUpdate handler with freeze check; UI extension `ssh-agent.hosts` (list-hosts, bootstrap, bootstrap-proxmox, list-pve-hosts, remove-host, list-discovered-guests, bootstrap-proxmox-guest actions; primary_actions: bootstrap + bootstrap-proxmox + bootstrap-proxmox-guest; ECIES E2E encryption for sensitive params); ServiceExtensionProxy for invoking controller-side plugin actions (proxmox.hosts/list-all-unmatched, proxmox.hosts/match); PVE node auto-detection during bootstrap with cluster deduplication (check_pve_token_exists → PveTokenStatus) + tenant-scoped PVE credentials (uptrakit-{tenant_id}@pve) + ReportPluginConfig; ExtensionContext struct bundles handler state (db, state_dir, private_key_der, service_id, tenant_id, bg_tx, extension_proxy); remote_exec.rs (SshRemoteExecutor, PveGuestExecutor implementing RemoteExecutor); bootstrap_proxmox.rs (guest bootstrap via PVE exec)
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server; migration runner delegates to `uptrakit_shared_db::migration`
 │   │   │   ├── src/db_migrate/         #   `db-migrate` subcommand: copies all data between DB backends; error.rs (DbMigrateError + Report<> Result), tables.rs (migrate_table<E>, copy_all, clean_all, verify_all for all 44 app tables), mod.rs (run() orchestrator)
 │   │   │   ├── src/scheduler/          #   (cfg: embedded-scheduler) Embedded scheduler using uptrakit-scheduler-engine
@@ -71,7 +71,7 @@ uptrakit/
 │   │   ├── infrastructure/
 │   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin trait + SecretMasking; re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult; batch types: BatchDetectItem/Result, BatchFetchItem/Result, BatchUpdateItem/Result
 │   │   │   ├── registry/              # uptrakit-plugin-infrastructure-registry               (lib)  — plugin dispatch & validation; `daemon` feature (default) enables Docker local ops
-│   │   │   └── proxmox/              # uptrakit-plugin-infrastructure-proxmox                (lib)  — Proxmox VE infrastructure plugin: controller-side REST API client for PVE (incl. guest agent file-read for machine_id), VM/CT discovery with best-effort machine_id collection (QEMU only), semi-automatic host matching with inline suggestions (MatchConfidence: High/Medium/Low, signals: machine_id, hostname+IP, hostname, IP, name), manual matching, extension manifests (proxmox.hosts page + proxmox.host-info panel), extension action handlers (list, discover, test-connection, match, approve-match, unmatch, get-info); DB table: proxmox_host_mappings (incl. machine_id column); agent-side modules: pve_setup (PVE detection, cluster dedup via check_pve_token_exists → PveTokenStatus enum, tenant-scoped API credential creation via pveum with pve_user_realm(tenant_id)), guest_exec (command execution inside LXC/QEMU guests via pct exec / qm guest exec)
+│   │   │   └── proxmox/              # uptrakit-plugin-infrastructure-proxmox                (lib)  — Proxmox VE infrastructure plugin: controller-side REST API client for PVE (incl. guest agent file-read for machine_id), VM/CT discovery with best-effort machine_id collection (QEMU only), semi-automatic host matching with inline suggestions (MatchConfidence: High/Medium/Low, signals: machine_id, hostname+IP, hostname, IP, name), manual matching, extension manifests (proxmox.hosts page + proxmox.host-info panel), extension action handlers (list, discover, test-connection, match, approve-match, unmatch, get-info, list-all-unmatched); DB table: proxmox_host_mappings (incl. machine_id column); agent-side modules: pve_setup (PVE detection, cluster dedup via check_pve_token_exists → PveTokenStatus enum, tenant-scoped API credential creation via pveum with pve_user_realm(tenant_id)), guest_exec (command execution inside LXC/QEMU guests via pct exec / qm guest exec)
 │   │   ├── releases/
 │   │   │   ├── docker/                 # uptrakit-plugin-releases-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; `daemon` feature (default) gates bollard + local Docker ops; Docker-over-SSH via StdioTunnel proxy (unix socket bridge to `docker system dial-stdio`)
 │   │   │   ├── github/                 # uptrakit-plugin-releases-github                 (lib)  — GitHub Releases plugin: controller-side fetch_releases only; owner/repo parsed from package_identifier at call time (format "owner/repo"); exports validate_identifier
@@ -1285,10 +1285,11 @@ web UI, REST API, and CLI with custom functionality. Extensions are described by
 | `crates/shared/extension-framework/src/lib.rs` | Extension types: `ExtensionManifest`, `ExtensionUi`, `ActionDef`, `FieldDef`, etc. (`uptrakit-extension-framework`) |
 | `crates/shared/wire/src/extension.rs` | Re-exports `uptrakit-extension-framework` for backward compatibility |
 | `crates/ui/web-api/src/extension_registry.rs` | Runtime registry: tracks manifests and provider sets |
-| `crates/ui/web-api/src/extension_proxy.rs` | Request/response proxy via oneshot channels |
+| `crates/ui/web-api/src/extension_proxy.rs` | Controller-side request/response proxy via oneshot channels (frontend → service) |
+| `crates/shared/service-sdk/src/extension_proxy.rs` | Service-side proxy for invoking controller plugin actions (service → controller) |
 | `crates/ui/web-api/src/routes/extensions.rs` | REST endpoints: list, providers, invoke |
-| `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler::on_extension_request` default impl |
-| `crates/shared/service-sdk/src/event_loop.rs` | Dispatches `ExtensionRequest` to handler |
+| `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler::on_extension_request` + `on_extension_response` default impls |
+| `crates/shared/service-sdk/src/event_loop.rs` | Dispatches `ExtensionRequest` + `ExtensionResponse` to handler |
 | `crates/ui/cli/src/commands/extensions.rs` | CLI: `extensions list`, `providers`, `invoke` |
 | `frontend/src/lib/extensions.svelte.ts` | Svelte extension store |
 | `frontend/src/lib/components/extensions/` | Schema-driven UI components |
@@ -1308,6 +1309,14 @@ web UI, REST API, and CLI with custom functionality. Extensions are described by
 
 Extensions require the `UiExtensions` capability. Services without this capability cannot
 register extensions or receive extension requests.
+
+### Bidirectional invocation
+
+Services can invoke controller-side plugin actions via `ServiceMessage::ExtensionRequest`.
+The controller dispatches to the plugin and responds with `ControllerMessage::ExtensionResponse`.
+The `ServiceExtensionProxy` (in `uptrakit-service-sdk`) provides the oneshot-channel correlation
+pattern. This enables cross-plugin coordination (e.g., SSH agent querying the Proxmox plugin)
+without direct crate dependencies. Both message types are session-targeted (not NATS-publishable).
 
 See [Extensions Development](docs/development/extensions.md), [Extensions Architecture](docs/architecture/extensions.md),
 and [Extensions Security](docs/security/extensions.md) for full details.

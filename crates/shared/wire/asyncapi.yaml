@@ -831,7 +831,8 @@ operations:
       Sent by the controller when a REST client (web UI or CLI) invokes an
       extension action targeting this service instance. The service processes the
       action and responds with an `ExtensionResponse` message using the same
-      `request_id` for correlation. This message is safe for NATS publication.
+      `request_id` for correlation. NOT safe for NATS publication —
+      session-targeted.
 
   sendExtensionResponse:
     action: send
@@ -843,7 +844,8 @@ operations:
     description: |
       Sent by the service in response to an `ExtensionRequest`. Contains the
       `request_id` for correlation, a `success` flag, optional result `data`,
-      and optional `error` message. This message is safe for NATS publication.
+      and optional `error` message. NOT safe for NATS publication —
+      session-targeted.
 
   sendExtensionRequest:
     action: send

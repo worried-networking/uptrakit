@@ -79,17 +79,17 @@ errors where two unrelated services accidentally use the same extension identifi
 Same extension ID from services with the same `service_app_name` is expected and handled
 via deduplication. Same extension ID from different app names is always an error.
 
-## Extension proxy
+## Extension proxy (controller-side)
 
-The `ExtensionProxy` handles request/response correlation for service-backed action
-invocations using oneshot channels.
+The `ExtensionProxy` handles request/response correlation for **frontend-initiated**
+action invocations using oneshot channels.
 
 ```text
 ExtensionProxy
 └── pending: Mutex<HashMap<String, oneshot::Sender<ExtensionResponsePayload>>>
 ```
 
-### Invocation flow
+### Frontend-to-service invocation flow
 
 ```text
 Frontend                   Controller                     Service
@@ -128,6 +128,64 @@ If the service disconnects while an action is pending, the oneshot sender remain
 map until the timeout fires. The proxy does not actively cancel pending requests on
 disconnect (the timeout handles cleanup).
 
+## Extension proxy (service-side)
+
+The `ServiceExtensionProxy` (in `uptrakit-service-sdk`) mirrors the controller-side
+`ExtensionProxy` pattern but runs inside a service binary. It enables **services to
+invoke controller-side plugin actions** via the WebSocket connection.
+
+```text
+ServiceExtensionProxy
+└── pending: Mutex<HashMap<String, oneshot::Sender<ExtensionResponsePayload>>>
+```
+
+### Service-to-controller invocation flow
+
+```text
+Service                    Controller                     Plugin
+   │                          │                             │
+   │ ServiceMessage::          │                             │
+   │   ExtensionRequest       │                             │
+   │─────────────(WS)────────>│                             │
+   │                          │  1. Extract tenant_id       │
+   │                          │  2. Look up plugin by       │
+   │                          │     extension_id prefix     │
+   │                          │  3. Dispatch to             │
+   │                          │     handle_extension_action │
+   │                          │                        ────>│
+   │                          │                        <────│
+   │                          │                             │
+   │ ControllerMessage::       │                             │
+   │   ExtensionResponse      │                             │
+   │<────────────(WS)─────────│                             │
+   │                          │                             │
+   │ 4. complete() sends via   │                             │
+   │    oneshot channel        │                             │
+```
+
+### Usage pattern
+
+Services use `ServiceExtensionProxy::invoke()` to create a `PendingExtensionRequest`
+containing the `ServiceMessage::ExtensionRequest` to send and a oneshot receiver. The
+service sends the message through its `bg_tx` channel (which flows through the event
+loop to `conn.send()`), then awaits the receiver with a timeout via `pending.wait()`.
+
+When the controller responds with `ControllerMessage::ExtensionResponse`, the service's
+`on_extension_response` handler calls `proxy.complete()` to deliver the response through
+the oneshot channel.
+
+### Use case: cross-plugin coordination
+
+This mechanism enables services to query controller-side plugins they do not directly
+depend on. For example, the SSH agent uses `ServiceExtensionProxy` to:
+
+1. Invoke `proxmox.hosts/list-all-unmatched` to populate a dropdown of discoverable
+   Proxmox guests (the Proxmox plugin runs only on the controller).
+2. Invoke `proxmox.hosts/match` to auto-match a guest after successful bootstrap.
+
+If the target plugin is not installed, the controller returns an error response and
+the service handles it gracefully (e.g., returning an empty options list).
+
 ## Targeting model
 
 ### Universal extensions
@@ -160,37 +218,48 @@ The `UiExtensions` capability (wire string: `"ui_extensions"`) gates extension s
 ## Data flow diagram
 
 ```text
-┌──────────────────────────────────────────────────────────────────┐
-│                          Controller                              │
-│                                                                  │
-│  ┌────────────────┐     ┌───────────────────┐                    │
-│  │ PluginRegistry │────>│ ExtensionRegistry  │                    │
-│  │ (compile-time) │     │                   │                    │
-│  └────────────────┘     │ plugin_extensions  │                    │
-│                         │ service_extensions │                    │
-│  ┌────────────────┐     │ service_index      │                    │
-│  │ WS Handler     │────>│                   │                    │
-│  │ (register/     │     └───────┬───────────┘                    │
-│  │  unregister)   │             │                                │
-│  └────────────────┘             │ all_manifests()                │
-│                                 │ find_owner()                   │
-│  ┌────────────────┐             │ providers()                    │
-│  │ REST Handlers  │<────────────┘                                │
-│  │ GET /extensions│                                              │
-│  │ GET /providers │     ┌───────────────────┐                    │
-│  │ POST /actions  │────>│ ExtensionProxy    │                    │
-│  └────────────────┘     │ (oneshot channels)│                    │
-│                         └───────┬───────────┘                    │
-│                                 │                                │
-│  ┌────────────────┐             │ invoke()                       │
-│  │ WS Handler     │<────────────┘ complete()                     │
-│  │ (send/receive) │                                              │
-│  └────────────────┘                                              │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│                            Controller                                 │
+│                                                                       │
+│  ┌────────────────┐     ┌───────────────────┐                         │
+│  │ PluginRegistry │────>│ ExtensionRegistry  │                         │
+│  │ (compile-time) │     │                   │                         │
+│  └────────────────┘     │ plugin_extensions  │                         │
+│                         │ service_extensions │                         │
+│  ┌────────────────┐     │ service_index      │                         │
+│  │ WS Handler     │────>│                   │                         │
+│  │ (register/     │     └───────┬───────────┘                         │
+│  │  unregister)   │             │                                     │
+│  └────────────────┘             │ all_manifests()                     │
+│                                 │ find_owner()                        │
+│  ┌────────────────┐             │ providers()                         │
+│  │ REST Handlers  │<────────────┘                                     │
+│  │ GET /extensions│                                                   │
+│  │ GET /providers │     ┌───────────────────┐                         │
+│  │ POST /actions  │────>│ ExtensionProxy    │  (frontend → service)   │
+│  └────────────────┘     │ (oneshot channels)│                         │
+│                         └───────┬───────────┘                         │
+│                                 │ invoke() / complete()               │
+│  ┌────────────────┐             │                                     │
+│  │ WS Handler     │<────────────┘                                     │
+│  │ (send/receive) │────────────────────────────────────┐              │
+│  └────────────────┘                                    │              │
+│         │                                              │              │
+│         │ ServiceMessage::ExtensionRequest              │              │
+│         │ (service → controller plugin)                │              │
+│         ▼                                              │              │
+│  ┌────────────────┐     ┌───────────────────┐          │              │
+│  │ Plugin dispatch │────>│ PluginRegistry    │          │              │
+│  │ (in WS handler)│     │ handle_extension_ │          │              │
+│  └────────────────┘     │ action()          │          │              │
+│         │               └───────────────────┘          │              │
+│         │ ControllerMessage::ExtensionResponse          │              │
+│         └──────────────────────────────────────────────┘              │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
          │                                         │
     REST API                                  WebSocket
-         │                                         │
+         │                                    (bidirectional)
     ┌────▼────┐                              ┌─────▼─────┐
     │Frontend │                              │ Service   │
     │ (SPA)   │                              │ Instance  │
@@ -235,11 +304,17 @@ permissions (same pattern as static nav items).
 
 ## NATS publishability
 
-| Message | Publishable | Reason |
-| --- | --- | --- |
-| `ExtensionRegister` | No | Only relevant to the local controller instance |
-| `ExtensionRequest` | Yes | `sensitive_params` is E2E encrypted (ECIES ciphertext) |
-| `ExtensionResponse` | Yes | No secrets in response payload |
+| Message | Direction | Publishable | Reason |
+| --- | --- | --- | --- |
+| `ExtensionRegister` | Service → Controller | No | Only relevant to the local controller instance |
+| `ControllerMessage::ExtensionRequest` | Controller → Service | No | Session-targeted (routed to a specific service's WS) |
+| `ServiceMessage::ExtensionResponse` | Service → Controller | No | Session-targeted (response to a specific proxy request) |
+| `ServiceMessage::ExtensionRequest` | Service → Controller | No | Session-targeted (service requesting its own controller) |
+| `ControllerMessage::ExtensionResponse` | Controller → Service | No | Session-targeted (response to a specific service request) |
+
+All extension request/response messages are session-targeted — they must be delivered
+to the specific WebSocket connection that originated or should receive them. They are
+**not** safe for NATS publication.
 
 ## Key files
 
@@ -248,11 +323,12 @@ permissions (same pattern as static nav items).
 | `crates/shared/extension-framework/src/lib.rs` | Extension manifest types and wire payloads (`uptrakit-extension-framework`) |
 | `crates/shared/wire/src/lib.rs` | Wire message variants, `UiExtensions` capability |
 | `crates/ui/web-api/src/extension_registry.rs` | Registry data structure |
-| `crates/ui/web-api/src/extension_proxy.rs` | Oneshot-channel proxy |
+| `crates/ui/web-api/src/extension_proxy.rs` | Controller-side oneshot-channel proxy (frontend → service) |
+| `crates/shared/service-sdk/src/extension_proxy.rs` | Service-side oneshot-channel proxy (service → controller plugin) |
 | `crates/ui/web-api/src/app_state.rs` | `AppState` fields |
 | `crates/ui/web-api/src/routes/extensions.rs` | REST handlers |
-| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | WS message handling |
-| `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler` trait |
+| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | WS message handling (both directions) |
+| `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler` trait (`on_extension_request` + `on_extension_response`) |
 | `crates/shared/service-sdk/src/event_loop.rs` | Event loop dispatch |
 | `crates/plugins/infrastructure/registry/src/lib.rs` | `PluginOps` trait |
 | `frontend/src/lib/components/extensions/` | Schema-driven Svelte components |

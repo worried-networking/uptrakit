@@ -664,7 +664,9 @@ crates/core/agent-ssh/
     │                    # report_hosts_after_config_change() — all wrap SshCommandExecutor with
     │                    # SudoAwareCommandExecutor
     ├── extension.rs     # UI extension: manifest builder, action dispatch (list-hosts, bootstrap,
-    │                    # remove-host, bootstrap-proxmox, list-pve-hosts), ECIES decryption of sensitive params
+    │                    # remove-host, bootstrap-proxmox, list-pve-hosts, list-discovered-guests,
+    │                    # bootstrap-proxmox-guest), ECIES decryption of sensitive params,
+    │                    # ServiceExtensionProxy invocation helpers
     ├── error.rs         # Error types (rootcause + thiserror)
     ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
     ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH, StdioTunnel support)
@@ -775,6 +777,17 @@ See `crates/shared/service-sdk/src/ws.rs` (`connect_ws`),
 The SSH agent registers a `ssh-agent.hosts` UI extension on connect, enabling host management
 from the Web UI and CLI without using the agent's local CLI directly.
 
+### ServiceExtensionProxy
+
+The SSH agent uses `ServiceExtensionProxy` (from `uptrakit-service-sdk`) to invoke
+controller-side plugin actions. This enables the `bootstrap-proxmox-guest` workflow to
+query the Proxmox plugin for discovered guests and auto-match after bootstrap — without
+a compile-time dependency on the Proxmox plugin crate.
+
+The proxy is stored as `Arc<ServiceExtensionProxy>` in `SshAgentHandler` and passed to
+`ExtensionContext`. When the controller sends `ControllerMessage::ExtensionResponse`, the
+handler's `on_extension_response` method calls `proxy.complete()` to deliver the response.
+
 ### Extension manifest
 
 | Property | Value |
@@ -795,6 +808,8 @@ from the Web UI and CLI without using the agent's local CLI directly.
 | `remove-host` | row_action (destructive) | 30s | Remove a host from local DB |
 | `list-pve-hosts` | select_source (action) | 10s | List PVE-marked hosts for select dropdown |
 | `bootstrap-proxmox` | primary_action (form) | 120s | Bootstrap a guest inside a Proxmox VE node |
+| `list-discovered-guests` | select_source (action) | 15s | List unmatched Proxmox guests (via ServiceExtensionProxy) |
+| `bootstrap-proxmox-guest` | primary_action (form) | 120s | Bootstrap a discovered Proxmox guest with auto-matching |
 
 ### E2E encryption for sensitive parameters
 
@@ -823,6 +838,12 @@ See [Extensions Security](../security/extensions.md) for the trust model and
 - **`bootstrap-proxmox`**: Spawned as a background task. Connects to the PVE node via SSH,
   executes commands inside the guest via `pct exec` (LXC) or `qm guest exec` (QEMU), verifies
   SSH connectivity, and saves the host.
+- **`list-discovered-guests`**: Invokes `proxmox.hosts/list-all-unmatched` via
+  `ServiceExtensionProxy`. Returns empty options if the Proxmox plugin is not installed.
+- **`bootstrap-proxmox-guest`**: Spawned as a background task. Resolves guest metadata
+  from the Proxmox plugin via `ServiceExtensionProxy`, bootstraps the guest (same as
+  `bootstrap-proxmox`), then auto-matches the Proxmox host mapping via
+  `proxmox.hosts/match`.
 
 ### CLI usage
 
