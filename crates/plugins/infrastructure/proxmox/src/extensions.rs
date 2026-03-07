@@ -22,6 +22,7 @@ pub fn extension_actions() -> Vec<ActionDef> {
     vec![
         add_config_action(),
         match_action(),
+        approve_match_action(),
         unmatch_action(),
         discover_action(),
         test_connection_action(),
@@ -105,6 +106,10 @@ fn match_action() -> ActionDef {
         .with_permission(Permission::ManageHosts)
 }
 
+fn approve_match_action() -> ActionDef {
+    ActionDef::new("approve-match", "Approve Match").with_permission(Permission::ManageHosts)
+}
+
 fn unmatch_action() -> ActionDef {
     ActionDef::new("unmatch", "Remove Match")
         .with_permission(Permission::ManageHosts)
@@ -144,9 +149,15 @@ fn hosts_page_manifest() -> ExtensionManifest {
                 TableColumn::new("status", "Status").sortable(),
                 TableColumn::new("matched_host", "Matched Host"),
                 TableColumn::new("match_method", "Match Method"),
+                TableColumn::new("suggested_host", "Suggested Match"),
+                TableColumn::new("match_confidence", "Confidence"),
             ],
             data_action: "list".to_string(),
-            row_actions: vec!["match".to_string(), "unmatch".to_string()],
+            row_actions: vec![
+                "match".to_string(),
+                "approve-match".to_string(),
+                "unmatch".to_string(),
+            ],
             primary_actions: vec!["discover".to_string(), "test-connection".to_string()],
             context_selector: Some(Box::new(
                 ContextSelectorDef::new(
@@ -198,6 +209,7 @@ pub async fn handle_action(
         ("proxmox.hosts", "discover") => handle_discover(db, tenant_id, params).await,
         ("proxmox.hosts", "test-connection") => handle_test_connection(db, params).await,
         ("proxmox.hosts", "match") => handle_match(db, params).await,
+        ("proxmox.hosts", "approve-match") => handle_approve_match(db, params).await,
         ("proxmox.hosts", "unmatch") => handle_unmatch(db, params).await,
         ("proxmox.host-info", "get-info") => handle_get_info(db, tenant_id, params).await,
         _ => Err(format!(
@@ -213,13 +225,13 @@ pub async fn handle_action(
     result
 }
 
-/// List all discovered Proxmox host mappings.
+/// List all discovered Proxmox host mappings with inline match suggestions.
 async fn handle_list(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
-    use uptrakit_shared_db::entity::proxmox_host_mapping;
+    use uptrakit_shared_db::entity::{host, proxmox_host_mapping};
 
     let plugin_config_id = parse_uuid_param(&params, "plugin_config_id")?;
     tracing::debug!(%plugin_config_id, "listing Proxmox host mappings");
@@ -236,10 +248,48 @@ async fn handle_list(
         .await
         .map_err(|e| format!("database error: {e}"))?;
 
+    // Collect IDs of already-matched hosts
+    let matched_host_ids: std::collections::HashSet<Uuid> =
+        mappings.iter().filter_map(|m| m.host_id).collect();
+
+    // Collect unmatched mappings for suggestion computation
+    let unmatched_mappings: Vec<&proxmox_host_mapping::Model> =
+        mappings.iter().filter(|m| m.host_id.is_none()).collect();
+
+    // Load active hosts for suggestions (only if there are unmatched mappings)
+    let suggestion_map = if !unmatched_mappings.is_empty() {
+        if let Some(tid) = tenant_id {
+            let all_hosts: Vec<host::Model> = host::Entity::find()
+                .filter(host::Column::TenantId.eq(tid))
+                .filter(host::Column::DeactivatedAt.is_null())
+                .all(db)
+                .await
+                .map_err(|e| format!("database error loading hosts: {e}"))?;
+
+            // Exclude hosts already matched to any mapping
+            let available_hosts: Vec<host::Model> = all_hosts
+                .into_iter()
+                .filter(|h| !matched_host_ids.contains(&h.id))
+                .collect();
+
+            let unmatched_owned: Vec<proxmox_host_mapping::Model> =
+                unmatched_mappings.into_iter().cloned().collect();
+
+            let suggestions =
+                crate::matching::compute_suggestions(&unmatched_owned, &available_hosts);
+            crate::matching::suggestions_by_mapping_id(suggestions)
+        } else {
+            std::collections::HashMap::new()
+        }
+    } else {
+        std::collections::HashMap::new()
+    };
+
     let rows: Vec<serde_json::Value> = mappings
         .into_iter()
         .map(|m| {
-            serde_json::json!({
+            let mapping_id = m.id;
+            let mut row = serde_json::json!({
                 "id": m.id.to_string(),
                 "mapping_id": m.id.to_string(),
                 "name": m.proxmox_name,
@@ -251,7 +301,18 @@ async fn handle_list(
                 "ip_addresses": m.ip_addresses,
                 "matched_host": m.host_id.map(|id| id.to_string()),
                 "match_method": m.match_method,
-            })
+            });
+
+            // Add suggestion data if available
+            if let Some(suggestion) = suggestion_map.get(&mapping_id) {
+                row["suggested_host"] = serde_json::json!(suggestion.host_name);
+                row["suggested_host_id"] = serde_json::json!(suggestion.host_id.to_string());
+                row["match_confidence"] = serde_json::json!(suggestion.confidence.as_str());
+                row["match_reason"] = serde_json::json!(suggestion.reason);
+                row["suggested_match_method"] = serde_json::json!(suggestion.match_method.as_str());
+            }
+
+            row
         })
         .collect();
 
@@ -330,6 +391,36 @@ async fn handle_match(
     crate::matching::manual_match(db, mapping_id, host_id)
         .await
         .map_err(|e| format!("manual match failed: {e}"))?;
+
+    Ok(serde_json::json!({ "success": true }))
+}
+
+/// Approve a suggested match.
+async fn handle_approve_match(
+    db: &DatabaseConnection,
+    params: serde_json::Value,
+) -> std::result::Result<serde_json::Value, String> {
+    let mapping_id = parse_uuid_param(&params, "mapping_id")?;
+    let host_id = parse_uuid_param(&params, "host_id")?;
+    let match_method_str = params
+        .get("match_method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("suggested_hostname");
+
+    let method: crate::matching::MatchMethod = match_method_str
+        .parse()
+        .map_err(|e| format!("invalid match method: {e}"))?;
+
+    tracing::info!(
+        %mapping_id,
+        %host_id,
+        method = match_method_str,
+        "approving suggested Proxmox guest-to-host match"
+    );
+
+    crate::matching::apply_suggested_match(db, mapping_id, host_id, method)
+        .await
+        .map_err(|e| format!("approve match failed: {e}"))?;
 
     Ok(serde_json::json!({ "success": true }))
 }
@@ -449,12 +540,13 @@ mod tests {
     }
 
     #[test]
-    fn extension_actions_returns_five() {
+    fn extension_actions_returns_six() {
         let actions = extension_actions();
-        assert_eq!(actions.len(), 5);
+        assert_eq!(actions.len(), 6);
         let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
         assert!(ids.contains(&"add-config"));
         assert!(ids.contains(&"match"));
+        assert!(ids.contains(&"approve-match"));
         assert!(ids.contains(&"unmatch"));
         assert!(ids.contains(&"discover"));
         assert!(ids.contains(&"test-connection"));
@@ -500,7 +592,7 @@ mod tests {
     fn hosts_page_row_actions_reference_action_library() {
         let manifest = hosts_page_manifest();
         if let ExtensionUi::DataTable { row_actions, .. } = &manifest.ui {
-            assert_eq!(row_actions, &["match", "unmatch"]);
+            assert_eq!(row_actions, &["match", "approve-match", "unmatch"]);
         } else {
             panic!("expected DataTable UI");
         }
