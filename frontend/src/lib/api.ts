@@ -386,8 +386,8 @@ export function updateHost(id: string, data: UpdateHostRequest): Promise<HostRes
 	return request(`/hosts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
-export function deactivateHost(id: string): Promise<MessageResponse> {
-	return request(`/hosts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export function deactivateHost(id: string): Promise<void> {
+	return requestVoid(`/hosts/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // --- Host Package APIs ---
