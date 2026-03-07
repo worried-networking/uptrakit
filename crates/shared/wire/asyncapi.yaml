@@ -845,6 +845,34 @@ operations:
       `request_id` for correlation, a `success` flag, optional result `data`,
       and optional `error` message. This message is safe for NATS publication.
 
+  sendExtensionRequest:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/serviceExtensionRequest"
+    summary: Service requests an extension action invocation from the controller
+    description: |
+      Enables services to call plugin-backed or other-service-backed extension
+      actions via the wire protocol (e.g., SSH agent querying the Proxmox plugin
+      for discovered guests). The controller dispatches the action exactly as it
+      would for a REST-originated request and responds with
+      `ControllerMessage::ExtensionResponse`. NOT safe for NATS publication —
+      session-targeted.
+
+  receiveExtensionResponse:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/controllerExtensionResponse"
+    summary: Service receives the result of a service-initiated extension action
+    description: |
+      Sent by the controller in response to a `ServiceMessage::ExtensionRequest`.
+      The `request_id` correlates this response with the original request,
+      completing the `ServiceExtensionProxy` oneshot channel on the service side.
+      NOT safe for NATS publication — session-targeted.
+
   sendReportPluginConfig:
     action: send
     channel:
@@ -1302,7 +1330,7 @@ components:
       description: |
         Sent by the controller when a REST client invokes an extension action.
         The `request_id` (UUID v7) correlates the request with the response.
-        Safe for NATS publication — contains no credential material.
+        NOT safe for NATS publication — session-targeted.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/extensionRequestPayload"
@@ -1314,7 +1342,34 @@ components:
       description: |
         Sent by the service in response to `ExtensionRequest`. The `request_id`
         must match. `success` indicates whether the action completed successfully.
-        Safe for NATS publication.
+        NOT safe for NATS publication — session-targeted.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/extensionResponsePayload"
+
+    serviceExtensionRequest:
+      name: extension_request
+      title: Service Extension Request Message
+      summary: Service requests an extension action invocation from the controller
+      description: |
+        Sent by a service to invoke a plugin-backed or other-service-backed extension
+        action via the wire protocol. Uses the same `ExtensionRequestPayload` schema
+        as the controller-to-service direction. The `sensitive_params` field is always
+        `null` for service-initiated requests (the mTLS channel is trusted).
+        NOT safe for NATS publication — session-targeted.
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/extensionRequestPayload"
+
+    controllerExtensionResponse:
+      name: extension_response
+      title: Controller Extension Response Message
+      summary: Controller responds to a service-initiated extension action invocation
+      description: |
+        Sent by the controller in response to `ServiceMessage::ExtensionRequest`.
+        Uses the same `ExtensionResponsePayload` schema as the service-to-controller
+        direction. The `request_id` correlates with the original request.
+        NOT safe for NATS publication — session-targeted.
       contentType: application/json
       payload:
         $ref: "#/components/schemas/extensionResponsePayload"

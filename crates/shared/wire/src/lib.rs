@@ -419,6 +419,18 @@ pub enum ServiceMessage {
     /// controller. The `request_id` correlates this response with the original
     /// request.
     ExtensionResponse(extension::ExtensionResponsePayload),
+    /// Service requests an extension action invocation from the controller.
+    ///
+    /// Enables services to call plugin-backed or other-service-backed extension
+    /// actions via the wire protocol (e.g., SSH agent querying the Proxmox
+    /// plugin for discovered guests). The controller dispatches the action
+    /// exactly as it would for a REST-originated request and responds with
+    /// `ControllerMessage::ExtensionResponse`.
+    ///
+    /// Reuses `ExtensionRequestPayload` for consistency — `sensitive_params`
+    /// is always `None` for service-initiated requests (the mTLS channel is
+    /// already trusted).
+    ExtensionRequest(extension::ExtensionRequestPayload),
     /// Unknown message type from a newer service build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.
@@ -472,6 +484,12 @@ pub enum ControllerMessage {
     /// invokes an extension action. The service should process the action and
     /// respond with `ExtensionResponse`.
     ExtensionRequest(extension::ExtensionRequestPayload),
+    /// Response to a service-initiated extension action invocation.
+    ///
+    /// Sent by the controller after processing a `ServiceMessage::ExtensionRequest`.
+    /// The `request_id` correlates this response with the original request,
+    /// completing the `ServiceExtensionProxy` oneshot channel on the service side.
+    ExtensionResponse(extension::ExtensionResponsePayload),
     // -- Plugin config reporting --
     /// Response to a `ReportPluginConfig` request from a service.
     ///
@@ -527,8 +545,9 @@ impl ControllerMessage {
     /// Returns `true` if this message may be published to NATS JetStream.
     ///
     /// Credential-bearing variants (`ServiceCredentials`, `TenantAssignments`,
-    /// `TenantConfigUpdated`, `TenantRevoked`) must **never** be published to
-    /// NATS — they are delivered exclusively over authenticated WebSocket
+    /// `TenantConfigUpdated`, `TenantRevoked`) and session-targeted variants
+    /// (`ExtensionRequest`, `ExtensionResponse`) must **never** be published
+    /// to NATS — they are delivered exclusively over authenticated WebSocket
     /// connections.  All other variants are safe to broadcast via NATS.
     ///
     /// This is the authoritative gate used by [`NatsConnection::publish`].
@@ -539,6 +558,8 @@ impl ControllerMessage {
                 | ControllerMessage::TenantAssignments(_)
                 | ControllerMessage::TenantConfigUpdated(_)
                 | ControllerMessage::TenantRevoked(_)
+                | ControllerMessage::ExtensionRequest(_)
+                | ControllerMessage::ExtensionResponse(_)
                 | ControllerMessage::Unknown
         )
     }
@@ -4529,6 +4550,27 @@ mod tests {
             })
             .is_nats_publishable()
         );
+
+        // Session-targeted extension variants must not be published to NATS.
+        assert!(
+            !ControllerMessage::ExtensionRequest(extension::ExtensionRequestPayload {
+                request_id: "req-1".into(),
+                extension_id: "ext".into(),
+                action_id: "act".into(),
+                params: serde_json::Value::Null,
+                sensitive_params: None,
+            })
+            .is_nats_publishable()
+        );
+        assert!(
+            !ControllerMessage::ExtensionResponse(extension::ExtensionResponsePayload {
+                request_id: "req-1".into(),
+                success: true,
+                data: serde_json::Value::Null,
+                error: None,
+            })
+            .is_nats_publishable()
+        );
     }
 
     #[test]
@@ -4637,5 +4679,39 @@ mod tests {
             msg.is_nats_publishable(),
             "ReportPluginConfigResponse contains no credentials and should be NATS-publishable"
         );
+    }
+
+    // ── Bidirectional extension request/response round-trips ──────────────
+
+    #[test]
+    fn service_extension_request_roundtrip() {
+        let msg = ServiceMessage::ExtensionRequest(extension::ExtensionRequestPayload {
+            request_id: "req-42".into(),
+            extension_id: "proxmox.hosts".into(),
+            action_id: "list-all-unmatched".into(),
+            params: serde_json::json!({"tenant_id": "abc"}),
+            sensitive_params: None,
+        });
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["type"], "extension_request");
+        assert_eq!(json["request_id"], "req-42");
+        assert_eq!(json["extension_id"], "proxmox.hosts");
+        let roundtripped: ServiceMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(roundtripped, msg);
+    }
+
+    #[test]
+    fn controller_extension_response_roundtrip() {
+        let msg = ControllerMessage::ExtensionResponse(extension::ExtensionResponsePayload {
+            request_id: "req-42".into(),
+            success: true,
+            data: serde_json::json!({"options": []}),
+            error: None,
+        });
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["type"], "extension_response");
+        assert_eq!(json["request_id"], "req-42");
+        let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(roundtripped, msg);
     }
 }

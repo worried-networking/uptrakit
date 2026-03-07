@@ -33,6 +33,7 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::ExtensionRegister(p) => p.wire_validate(),
             ServiceMessage::ExtensionActionsRegister(p) => p.wire_validate(),
             ServiceMessage::ExtensionResponse(p) => p.wire_validate(),
+            ServiceMessage::ExtensionRequest(p) => p.wire_validate(),
             // Forward-compatible: unknown variants from newer peers pass validation.
             _ => {
                 tracing::debug!(
@@ -72,6 +73,7 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::SoftwareStates(p) => p.wire_validate(),
             ControllerMessage::ReportPluginConfigResponse(p) => p.wire_validate(),
             ControllerMessage::ExtensionRequest(p) => p.wire_validate(),
+            ControllerMessage::ExtensionResponse(p) => p.wire_validate(),
             ControllerMessage::ServiceCredentials(_) => Ok(()),
             ControllerMessage::RequestCaRotation(p) => p.wire_validate(),
             ControllerMessage::RequestCrlRenewal(_) => Ok(()),
