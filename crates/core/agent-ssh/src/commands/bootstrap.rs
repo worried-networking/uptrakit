@@ -288,15 +288,10 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         .unwrap_or_default();
 
     // 5d. Determine which additional lines are stale under --remove-stale-keys.
-    //     For the `uptrakit` target user all existing entries are considered
-    //     Uptrakit-managed (the account is exclusively managed by the agent).
-    //     For other users only entries whose comment starts with `uptrakit`
-    //     are treated as stale.
-    let stale_lines: Vec<String> = if params.target_username == "uptrakit" {
-        existing.all_key_lines.clone()
-    } else {
-        existing.uptrakit_key_lines.clone()
-    };
+    //     Only lines positively identified as Uptrakit-managed (comment starts
+    //     with `uptrakit`) are ever candidates — we never assume exclusive
+    //     ownership of an account, even for the `uptrakit` user.
+    let stale_lines = existing.uptrakit_key_lines.clone();
 
     // 5e. Print notice for auto-removed (same-service) keys.
     if !same_service_lines.is_empty() {
@@ -315,13 +310,8 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         .filter(|l| !same_service_lines.contains(l))
         .collect();
     if !remaining_stale.is_empty() {
-        let uptrakit_user_note = if params.target_username == "uptrakit" {
-            " — all are considered Uptrakit-managed"
-        } else {
-            ""
-        };
         println!(
-            "NOTE: Found {} existing key(s) in authorized_keys{uptrakit_user_note}:",
+            "NOTE: Found {} Uptrakit-managed key(s) in authorized_keys:",
             remaining_stale.len()
         );
         for line in &remaining_stale {
