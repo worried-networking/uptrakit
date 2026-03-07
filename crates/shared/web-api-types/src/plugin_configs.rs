@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use uptrakit_internal_wire::extension::FieldDef;
 use uptrakit_shared_types::{PluginCapability, PluginType};
 use uuid::Uuid;
 
@@ -61,6 +62,13 @@ pub struct PluginTypeInfo {
     /// a new plugin config, so end-users see all available fields with their
     /// defaults rather than a blank `{}`.
     pub sample_config: serde_json::Value,
+    /// Form field definitions for this plugin type.
+    ///
+    /// When non-empty, the frontend renders a typed form instead of a raw JSON
+    /// textarea. Empty for plugins with no configurable fields.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<serde_json::Value>))]
+    pub config_form_fields: Vec<FieldDef>,
 }
 
 impl Validate for CreatePluginConfigRequest {
@@ -180,6 +188,7 @@ mod tests {
                 PluginCapability::ControllerSideFetchReleases,
             ],
             sample_config: serde_json::json!({"tracking_mode": "semver_tags"}),
+            config_form_fields: vec![],
         };
         let json = serde_json::to_string(&info).expect("serialization should succeed");
         let de: PluginTypeInfo =
@@ -203,6 +212,7 @@ mod tests {
             display_name: "GitHub Releases".to_string(),
             capabilities: vec![PluginCapability::ControllerSideFetchReleases],
             sample_config: serde_json::json!({}),
+            config_form_fields: vec![],
         };
         let json = serde_json::to_string(&info).expect("serialization should succeed");
         assert!(

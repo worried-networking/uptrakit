@@ -51,11 +51,16 @@ pub async fn list_plugin_types(
         .map(|pt| {
             let capabilities = state.plugin_ops.capabilities_for_str(pt.as_str());
             let sample_config = state.plugin_ops.sample_config_for_str(pt.as_str());
+            let config_form_fields = state
+                .plugin_ops
+                .config_form_schema_str(pt.as_str())
+                .unwrap_or_default();
             PluginTypeInfo {
                 display_name: pt.display_name().to_owned(),
                 plugin_type: pt,
                 capabilities,
                 sample_config,
+                config_form_fields,
             }
         })
         .collect();

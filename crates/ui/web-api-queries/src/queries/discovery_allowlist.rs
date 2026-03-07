@@ -437,6 +437,13 @@ mod tests {
         fn sample_config_for_str(&self, _plugin_type: &str) -> serde_json::Value {
             serde_json::Value::Object(serde_json::Map::new())
         }
+
+        fn config_form_schema_str(
+            &self,
+            _plugin_type: &str,
+        ) -> Option<Vec<uptrakit_internal_wire::extension::FieldDef>> {
+            None
+        }
     }
 
     // ── is_valid_discovery_plugin ─────────────────────────────────────────────
