@@ -229,6 +229,7 @@ Internally tagged with `"type"`:
 | `options` | `Vec<SelectOption>` | no | Static options for `select` fields |
 | `select_source` | `SelectSource` | no | Dynamic options loaded at form-open time; takes precedence over `options` |
 | `sensitive` | bool | no | Field contains sensitive data (encrypted client-side via ECIES) |
+| `visible_when` | `VisibleWhen` | no | Conditional visibility based on another field's value |
 
 #### Dynamic select options (`SelectSource`)
 
@@ -284,6 +285,30 @@ FieldDef::new("pve_host_id", "PVE Host")
         action_id: "list-pve-hosts".to_string(),
     })
 ```
+
+#### Conditional visibility (`VisibleWhen`)
+
+Fields can be conditionally shown or hidden based on the value of another field using the
+`visible_when` property. This is useful for tagged enums (e.g., Docker auth type) or sections
+that only apply when a toggle is enabled.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `field` | string | Key of the controlling field |
+| `values` | `Vec<string>` | Field is visible when the controlling field's value is in this list |
+
+**Example — show password field only when auth type is "basic":**
+
+```rust
+FieldDef::new("auth_password", "Password")
+    .with_type(FieldType::Password)
+    .sensitive()
+    .with_visible_when("auth_type", &["basic"])
+```
+
+The frontend hides the field (and omits its value from submission) when the controlling field's
+current value does not match any entry in `values`. Both `SchemaForm.svelte` and the plugin
+config form implement this logic.
 
 ### Sensitive fields and E2E encryption
 

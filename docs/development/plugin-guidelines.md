@@ -569,6 +569,56 @@ deserialize-method-serialize boilerplate per plugin.
 When adding a new plugin with secrets, implement `SecretMasking` on your config struct. The
 `register_plugins!` macro handles the dispatch automatically.
 
+### Config form schema with the `ConfigFormSchema` trait
+
+The `ConfigFormSchema` trait (`crates/plugins/infrastructure/core/src/form_schema.rs`, re-exported
+from `uptrakit-plugin-infrastructure-core`) allows plugins to declare typed form field definitions
+for their configuration. The frontend renders these as structured forms instead of raw JSON
+textareas.
+
+```rust
+pub trait ConfigFormSchema {
+    fn form_schema() -> Vec<FieldDef>;
+}
+```
+
+Each plugin config struct implements `ConfigFormSchema` to return its field definitions using the
+`FieldDef` builder pattern from `uptrakit-internal-wire::extension`:
+
+```rust
+impl ConfigFormSchema for GitHubConfig {
+    fn form_schema() -> Vec<FieldDef> {
+        vec![
+            FieldDef::new("auth_token", "Auth Token")
+                .with_type(FieldType::Password)
+                .sensitive()
+                .with_help_text("Personal access token for private repos"),
+            FieldDef::new("include_prereleases", "Include Pre-releases")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Include draft/pre-release versions"),
+        ]
+    }
+}
+```
+
+Plugins with no configurable fields (MAS, Proxmox Helper Scripts) return an empty `Vec`.
+
+For nested configuration objects (e.g., Docker's `auth` enum), use dot-separated keys with a
+`_` prefix for tagged enum discriminators:
+
+- `auth._type` — select field for the enum variant (maps to JSON `auth.type`)
+- `auth.username` — text field visible when `auth._type` is `"basic"`
+- `auth.password` — password field visible when `auth._type` is `"basic"`
+
+Use `FieldDef::with_visible_when()` for conditional visibility based on another field's value.
+
+The `register_plugins!` macro auto-generates `config_form_schema()` and `config_form_schema_str()`
+dispatch methods. The schema is served to the frontend via `GET /api/v1/plugin-types` in the
+`config_form_fields` array of `PluginTypeInfo`.
+
+When adding a new plugin, implement `ConfigFormSchema` on your config struct. The macro handles
+the rest.
+
 All plugin `new()` constructors must return `Result<Self, Report<PluginError>>` so the registry can
 handle instantiation failures uniformly. The constructor should validate its configuration before
 returning.
