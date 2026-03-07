@@ -89,6 +89,7 @@ uptrakit-scheduler-engine = { path = "crates/shared/scheduler-engine" }
 uptrakit-service-sdk = { path = "crates/shared/service-sdk" }
 uptrakit-notification-channels = { path = "crates/shared/notification-channels", default-features = false }
 uptrakit-update-hooks = { path = "crates/shared/update-hooks" }
+uptrakit-extension-framework = { path = "crates/shared/extension-framework" }
 uptrakit-internal-wire = { path = "crates/shared/wire" }
 uptrakit-web-api = { path = "crates/ui/web-api", default-features = false }
 uptrakit-web-api-auth = { path = "crates/ui/web-api-auth", default-features = false }

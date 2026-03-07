@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-internal-wire"
+name = "uptrakit-extension-framework"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
@@ -9,16 +9,10 @@ version.workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-strum = { workspace = true }
-thiserror = { workspace = true }
-time = { workspace = true }
-tracing = { workspace = true }
-uuid = { workspace = true, features = ["serde", "v4"] }
-uptrakit-extension-framework = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 
 [dev-dependencies]
-serde_yaml_ng = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

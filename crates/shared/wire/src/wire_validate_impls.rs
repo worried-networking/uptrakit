@@ -361,6 +361,9 @@ impl WireValidate for extension::ExtensionPlacement {
                     col.wire_validate()?;
                 }
             }
+            _ => {
+                tracing::warn!("unknown ExtensionPlacement variant, skipping validation");
+            }
         }
         Ok(())
     }
@@ -395,6 +398,9 @@ impl WireValidate for extension::ContextSelectorSource {
                     MAX_SHORT_STRING_LEN,
                     "context_selector.plugin_type",
                 )?;
+            }
+            _ => {
+                tracing::warn!("unknown ContextSelectorSource variant, skipping validation");
             }
         }
         Ok(())
@@ -467,6 +473,9 @@ impl WireValidate for extension::ExtensionUi {
                     check_string_len(action_id, MAX_SHORT_STRING_LEN, "ui.actions[]")?;
                 }
             }
+            _ => {
+                tracing::warn!("unknown ExtensionUi variant, skipping validation");
+            }
         }
         Ok(())
     }
@@ -522,6 +531,9 @@ impl WireValidate for extension::ActionUi {
                 for step in steps {
                     step.wire_validate()?;
                 }
+            }
+            _ => {
+                tracing::warn!("unknown ActionUi variant, skipping validation");
             }
         }
         Ok(())

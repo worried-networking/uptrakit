@@ -6626,6 +6626,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-extension-framework"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uptrakit-shared-types",
+]
+
+[[package]]
 name = "uptrakit-integration-tests"
 version = "0.0.1"
 dependencies = [
@@ -6669,6 +6678,7 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tracing",
+ "uptrakit-extension-framework",
  "uptrakit-shared-types",
  "uuid",
 ]
