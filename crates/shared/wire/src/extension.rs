@@ -163,6 +163,21 @@ pub struct ExtensionColumn {
     pub data_action: String,
 }
 
+impl ExtensionColumn {
+    /// Create a new extension column.
+    pub fn new(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        data_action: impl Into<String>,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            data_action: data_action.into(),
+        }
+    }
+}
+
 // ── UI definitions ──────────────────────────────────────────────────────────
 
 /// Source for context selector options.
@@ -507,6 +522,24 @@ pub struct WizardStep {
     pub submit_action: Option<String>,
 }
 
+impl WizardStep {
+    /// Create a new wizard step.
+    pub fn new(step_id: impl Into<String>, label: impl Into<String>, form: FormDef) -> Self {
+        Self {
+            step_id: step_id.into(),
+            label: label.into(),
+            form,
+            submit_action: None,
+        }
+    }
+
+    /// Set the action to submit this step's data before proceeding.
+    pub fn with_submit_action(mut self, action_id: impl Into<String>) -> Self {
+        self.submit_action = Some(action_id.into());
+        self
+    }
+}
+
 /// A form definition with typed fields.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -544,6 +577,15 @@ pub enum SelectSource {
         value_field: String,
         /// Field in each response item to use as the human-readable label.
         label_field: String,
+    },
+    /// Fetch options by invoking an extension action.
+    ///
+    /// The frontend calls the extension action identified by `action_id` and
+    /// expects the response `data` to contain an `options` array of
+    /// `{ "value": "...", "label": "..." }` objects.
+    Action {
+        /// The action ID to invoke.
+        action_id: String,
     },
 }
 
@@ -636,6 +678,18 @@ impl FieldDef {
         self
     }
 
+    /// Set the default value.
+    pub fn with_default_value(mut self, value: impl Into<serde_json::Value>) -> Self {
+        self.default_value = Some(value.into());
+        self
+    }
+
+    /// Set static options for a `Select` field.
+    pub fn with_options(mut self, options: Vec<SelectOption>) -> Self {
+        self.options = options;
+        self
+    }
+
     /// Set a dynamic source for `Select` field options.
     ///
     /// When set, the frontend loads options at form-open time by calling the
@@ -680,6 +734,16 @@ pub struct SelectOption {
     pub label: String,
 }
 
+impl SelectOption {
+    /// Create a new select option.
+    pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            label: label.into(),
+        }
+    }
+}
+
 // ── Wire payloads ───────────────────────────────────────────────────────────
 
 /// Payload for `ServiceMessage::ExtensionRegister`: a service declares its UI extensions.
@@ -698,6 +762,22 @@ pub struct ExtensionRegisterPayload {
     pub encryption_public_key: Option<String>,
 }
 
+impl ExtensionRegisterPayload {
+    /// Create a new register payload with the given manifests.
+    pub fn new(manifests: Vec<ExtensionManifest>) -> Self {
+        Self {
+            manifests,
+            encryption_public_key: None,
+        }
+    }
+
+    /// Set the ECIES encryption public key.
+    pub fn with_encryption_public_key(mut self, key: impl Into<String>) -> Self {
+        self.encryption_public_key = Some(key.into());
+        self
+    }
+}
+
 /// Payload for `ServiceMessage::ExtensionActionsRegister`: a service declares
 /// its action library — a flat catalogue of [`ActionDef`] structs that can be
 /// referenced by `action_id` from any extension manifest of the same source.
@@ -705,6 +785,13 @@ pub struct ExtensionRegisterPayload {
 pub struct ExtensionActionsPayload {
     /// Action definitions provided by this service.
     pub actions: Vec<ActionDef>,
+}
+
+impl ExtensionActionsPayload {
+    /// Create a new actions payload.
+    pub fn new(actions: Vec<ActionDef>) -> Self {
+        Self { actions }
+    }
 }
 
 /// Payload for `ControllerMessage::ExtensionRequest`: the controller proxies
@@ -1184,5 +1271,76 @@ mod tests {
         let roundtripped: ContextSelectorDef =
             serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(cs, roundtripped);
+    }
+
+    #[test]
+    fn select_option_new() {
+        let opt = SelectOption::new("val", "Label");
+        assert_eq!(opt.value, "val");
+        assert_eq!(opt.label, "Label");
+    }
+
+    #[test]
+    fn wizard_step_new_with_submit_action() {
+        let step =
+            WizardStep::new("s1", "Step 1", FormDef::new(vec![])).with_submit_action("validate");
+        assert_eq!(step.step_id, "s1");
+        assert_eq!(step.label, "Step 1");
+        assert_eq!(step.submit_action.as_deref(), Some("validate"));
+    }
+
+    #[test]
+    fn extension_column_new() {
+        let col = ExtensionColumn::new("ssh_status", "SSH Status", "get-ssh-status");
+        assert_eq!(col.key, "ssh_status");
+        assert_eq!(col.label, "SSH Status");
+        assert_eq!(col.data_action, "get-ssh-status");
+    }
+
+    #[test]
+    fn field_def_with_default_value() {
+        let field = FieldDef::new("name", "Name").with_default_value("default");
+        assert_eq!(
+            field.default_value,
+            Some(serde_json::Value::String("default".to_string()))
+        );
+    }
+
+    #[test]
+    fn field_def_with_options() {
+        let field = FieldDef::new("region", "Region")
+            .with_type(FieldType::Select)
+            .with_options(vec![
+                SelectOption::new("us", "US"),
+                SelectOption::new("eu", "EU"),
+            ]);
+        assert_eq!(field.options.len(), 2);
+        assert_eq!(field.options[0].value, "us");
+    }
+
+    #[test]
+    fn select_source_action_roundtrip() {
+        let source = SelectSource::Action {
+            action_id: "list-pve-hosts".to_string(),
+        };
+        let json = serde_json::to_string(&source).expect("serialize should succeed");
+        assert!(json.contains(r#""type":"action""#));
+        let roundtripped: SelectSource =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(source, roundtripped);
+    }
+
+    #[test]
+    fn register_payload_builder() {
+        let payload = ExtensionRegisterPayload::new(vec![]).with_encryption_public_key("key123");
+        assert!(payload.manifests.is_empty());
+        assert_eq!(payload.encryption_public_key.as_deref(), Some("key123"));
+    }
+
+    #[test]
+    fn actions_payload_builder() {
+        let payload = ExtensionActionsPayload::new(vec![ActionDef::new("list", "List")]);
+        assert_eq!(payload.actions.len(), 1);
+        assert_eq!(payload.actions[0].action_id, "list");
     }
 }

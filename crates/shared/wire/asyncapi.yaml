@@ -4155,6 +4155,20 @@ components:
             label_field:
               type: string
               description: Field in each response item used as the human-readable label
+        - type: object
+          required:
+            - type
+            - action_id
+          properties:
+            type:
+              type: string
+              const: action
+              description: Fetch options by invoking an extension action
+            action_id:
+              type: string
+              description: |
+                The action ID to invoke. The response `data` must contain an
+                `options` array of `{ "value": "...", "label": "..." }` objects.
 
     extensionFieldDef:
       type: object
