@@ -2,16 +2,14 @@
 //!
 //! Provides:
 //! - Extension manifest describing the `ssh-agent.hosts` data table
-//! - Action library with `list-hosts`, `bootstrap`, `remove-host` definitions
+//! - Action library with `list-hosts`, `bootstrap`, `sync-host`, `remove-host` definitions
 //! - Action handlers for each action
 //! - ECIES decryption of sensitive parameters (auth password, private key)
 
-use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::Path;
 
-use uptrakit_crypto::ecies::sealed_box_decrypt;
 use uptrakit_internal_wire::ServiceMessage;
 use uptrakit_internal_wire::extension::{
     ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionRegisterPayload,
@@ -86,9 +84,7 @@ pub fn build_actions() -> Vec<ActionDef> {
             .destructive()
             .with_confirm_entity_field("name")
             .with_timeout(30),
-        ActionDef::new("sync-host", "Sync Host")
-            .with_permission(Permission::ManageHosts)
-            .with_timeout(120),
+        sync_host_action(),
         ActionDef::new("list-pve-hosts", "List PVE Hosts")
             .with_permission(Permission::ManageHosts)
             .with_timeout(10),
@@ -99,6 +95,46 @@ pub fn build_actions() -> Vec<ActionDef> {
         bootstrap_proxmox_action(),
         bootstrap_proxmox_guest_action(),
     ]
+}
+
+/// Build the sync-host action definition with optional auth override form.
+fn sync_host_action() -> ActionDef {
+    ActionDef::new("sync-host", "Sync Host")
+        .with_permission(Permission::ManageHosts)
+        .with_timeout(120)
+        .with_ui(ActionUi::Form(FormDef::new(vec![
+            FieldDef::new("auth_method", "Auth Method")
+                .with_type(FieldType::Select)
+                .with_default_value("stored")
+                .with_options(vec![
+                    SelectOption::new("stored", "Stored Credentials"),
+                    SelectOption::new("password", "Password"),
+                    SelectOption::new("private_key", "Private Key"),
+                ]),
+            FieldDef::new("username", "SSH Username")
+                .with_default_value("root")
+                .with_help_text("User to connect as (e.g. root). Only used with custom auth.")
+                .with_visible_when(
+                    "auth_method",
+                    vec!["password".to_string(), "private_key".to_string()],
+                ),
+            FieldDef::new("auth_password", "SSH Password")
+                .with_type(FieldType::Password)
+                .with_help_text("Required when auth method is 'password'.")
+                .sensitive()
+                .with_visible_when("auth_method", vec!["password".to_string()]),
+            FieldDef::new("auth_private_key", "SSH Private Key")
+                .with_type(FieldType::Textarea)
+                .with_placeholder("-----BEGIN OPENSSH PRIVATE KEY-----")
+                .with_help_text(
+                    "PEM-encoded private key. Required when auth method is 'private_key'.",
+                )
+                .sensitive()
+                .with_visible_when("auth_method", vec!["private_key".to_string()]),
+            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
+        ])))
 }
 
 /// Build the bootstrap host action definition with its form UI.
@@ -415,6 +451,7 @@ fn spawn_sync_host(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
     let db_state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
+    let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
     let request_id = request.request_id.clone();
 
     tokio::spawn(async move {
@@ -427,6 +464,90 @@ fn spawn_sync_host(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
                 return;
             }
         };
+
+        // Decrypt sensitive params (auth password / private key) if present.
+        let sensitive: Option<SensitiveAuthParams> =
+            match uptrakit_service_sdk::decrypt_sensitive_params(
+                request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+                private_key_der.as_deref(),
+            ) {
+                Ok(s) => s,
+                Err(msg) => {
+                    let resp = make_error_response(&request_id, &msg);
+                    let msg = ServiceMessage::ExtensionResponse(resp);
+                    let _ = bg_tx.send(msg).await;
+                    return;
+                }
+            };
+
+        let auth_method = request
+            .params
+            .get("auth_method")
+            .and_then(|v| v.as_str())
+            .unwrap_or("stored");
+
+        let auth_override = match auth_method {
+            "stored" => None,
+            "password" => {
+                let password = sensitive.as_ref().and_then(|s| s.auth_password.as_deref());
+                match password {
+                    Some(pw) => Some(sync::SyncAuthOverride {
+                        username: request
+                            .params
+                            .get("username")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("root")
+                            .to_string(),
+                        auth_password: Some(pw.to_string()),
+                        auth_private_key_pem: None,
+                    }),
+                    None => {
+                        let resp = make_error_response(
+                            &request_id,
+                            "auth_method is 'password' but no password provided",
+                        );
+                        let msg = ServiceMessage::ExtensionResponse(resp);
+                        let _ = bg_tx.send(msg).await;
+                        return;
+                    }
+                }
+            }
+            "private_key" => {
+                let key = sensitive
+                    .as_ref()
+                    .and_then(|s| s.auth_private_key.as_deref());
+                match key {
+                    Some(pem) => Some(sync::SyncAuthOverride {
+                        username: request
+                            .params
+                            .get("username")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("root")
+                            .to_string(),
+                        auth_password: None,
+                        auth_private_key_pem: Some(pem.to_string()),
+                    }),
+                    None => {
+                        let resp = make_error_response(
+                            &request_id,
+                            "auth_method is 'private_key' but no private key provided",
+                        );
+                        let msg = ServiceMessage::ExtensionResponse(resp);
+                        let _ = bg_tx.send(msg).await;
+                        return;
+                    }
+                }
+            }
+            other => {
+                let resp =
+                    make_error_response(&request_id, &format!("unknown auth_method '{other}'"));
+                let msg = ServiceMessage::ExtensionResponse(resp);
+                let _ = bg_tx.send(msg).await;
+                return;
+            }
+        };
+
+        let allow_all = param_bool(&request.params, "allow_all");
 
         let db = match crate::db::init_db(&db_state_dir).await {
             Ok(db) => db,
@@ -441,7 +562,15 @@ fn spawn_sync_host(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
             }
         };
 
-        let response = match sync::run_for_extension(host_id, &db, tenant_id).await {
+        let response = match sync::run_for_extension(
+            host_id,
+            &db,
+            tenant_id,
+            auth_override.as_ref(),
+            allow_all,
+        )
+        .await
+        {
             Ok(summary) => {
                 make_success_response(&request_id, serde_json::json!({ "summary": summary }))
             }
@@ -892,8 +1021,11 @@ async fn run_bootstrap_action(args: BootstrapActionArgs<'_>) -> ExtensionRespons
     let bg_tx = args.bg_tx;
 
     // Decrypt sensitive params if present.
-    let sensitive: Option<SensitiveBootstrapParams> =
-        match decrypt_sensitive_params(args.sensitive_params_sealed, args.private_key_der) {
+    let sensitive: Option<SensitiveAuthParams> =
+        match uptrakit_service_sdk::decrypt_sensitive_params(
+            args.sensitive_params_sealed,
+            args.private_key_der,
+        ) {
             Ok(s) => s,
             Err(msg) => return make_error_response(request_id, &msg),
         };
@@ -1030,45 +1162,16 @@ async fn run_bootstrap_action(args: BootstrapActionArgs<'_>) -> ExtensionRespons
     }
 }
 
-// ── Sensitive params decryption ──────────────────────────────────────
+// ── Sensitive params ─────────────────────────────────────────────────
 
-/// Sensitive bootstrap parameters extracted from the ECIES sealed box.
+/// Sensitive authentication parameters extracted from the ECIES sealed box.
+///
+/// Used by both bootstrap and sync actions — any action that accepts SSH
+/// credentials from the UI.
 #[derive(Debug, Deserialize)]
-struct SensitiveBootstrapParams {
+struct SensitiveAuthParams {
     auth_password: Option<String>,
     auth_private_key: Option<String>,
-}
-
-/// Decrypt and deserialize the sealed sensitive params.
-///
-/// Returns `Ok(None)` when no sensitive params were provided.
-/// Returns `Err(message)` on decryption or deserialization failure.
-fn decrypt_sensitive_params(
-    sealed_base64: Option<&str>,
-    private_key_der: Option<&[u8]>,
-) -> Result<Option<SensitiveBootstrapParams>, String> {
-    let sealed_b64 = match sealed_base64 {
-        Some(s) if !s.is_empty() => s,
-        _ => return Ok(None),
-    };
-
-    let private_key = private_key_der
-        .ok_or_else(|| "sensitive params received but no private key available".to_string())?;
-
-    let sealed = base64::engine::general_purpose::STANDARD
-        .decode(sealed_b64)
-        .map_err(|e| format!("failed to decode sensitive params base64: {e}"))?;
-
-    let plaintext = sealed_box_decrypt(&sealed, private_key)
-        .map_err(|e| format!("failed to decrypt sensitive params: {e}"))?;
-
-    let json_str = String::from_utf8(plaintext)
-        .map_err(|e| format!("sensitive params plaintext is not valid UTF-8: {e}"))?;
-
-    let params: SensitiveBootstrapParams = serde_json::from_str(&json_str)
-        .map_err(|e| format!("failed to parse sensitive params JSON: {e}"))?;
-
-    Ok(Some(params))
 }
 
 /// Find the local PVE host matching a Proxmox node name and plugin config ID.

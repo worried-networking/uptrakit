@@ -375,21 +375,37 @@ async fn sync_pve_state(
     Ok(())
 }
 
-/// Run the sync command from an extension action (no auth override, no dry run).
+/// Authentication override for the extension sync action.
 ///
-/// Used by the UI extension to sync a host by its database ID, using the
-/// stored SSH key for authentication.
+/// When the UI user selects a non-stored auth method, the extension handler
+/// populates this struct from the form fields and ECIES-decrypted sensitive
+/// params.
+pub struct SyncAuthOverride {
+    /// Username to connect as (e.g. `root`).
+    pub username: String,
+    /// Password authentication (mutually exclusive with `auth_private_key_pem`).
+    pub auth_password: Option<String>,
+    /// PEM-encoded private key (mutually exclusive with `auth_password`).
+    pub auth_private_key_pem: Option<String>,
+}
+
+/// Run the sync command from an extension action.
+///
+/// When `auth_override` is `None`, uses the stored SSH key and username.
+/// When `Some`, connects as the specified user with the provided credentials
+/// (sudo state is not persisted for the override user, matching CLI behavior).
 pub async fn run_for_extension(
     host_id: &str,
     db: &DatabaseConnection,
     tenant_id: Option<uuid::Uuid>,
+    auth_override: Option<&SyncAuthOverride>,
+    allow_all: bool,
 ) -> std::result::Result<String, String> {
     let host = host_ops::find_host(db, host_id)
         .await
         .map_err(|e| format!("database error: {e}"))?
         .ok_or_else(|| format!("host '{host_id}' not found"))?;
 
-    let key_pem = host.private_key.expose_secret().to_string();
     let stored_fingerprint = host
         .host_key_fingerprint
         .as_deref()
@@ -401,10 +417,33 @@ pub async fn run_for_extension(
         connect_timeout: Duration::from_secs(30),
     };
 
+    // Determine connection username and auth method.
+    let key_pem: String;
+    let connect_username: &str;
+    let auth: AuthMethod<'_>;
+    let has_auth_override = auth_override.is_some();
+
+    if let Some(ov) = auth_override {
+        connect_username = &ov.username;
+        if let Some(ref pw) = ov.auth_password {
+            auth = AuthMethod::Password(pw.as_str());
+        } else if let Some(ref pem) = ov.auth_private_key_pem {
+            auth = AuthMethod::PrivateKey(pem.as_str());
+        } else {
+            return Err(
+                "auth override provided but neither password nor private key set".to_string(),
+            );
+        }
+    } else {
+        key_pem = host.private_key.expose_secret().to_string();
+        connect_username = &host.username;
+        auth = AuthMethod::PrivateKey(&key_pem);
+    }
+
     let (session, _fingerprint) = crate::ssh_transport::connect_and_authenticate(
         &config,
-        &host.username,
-        &AuthMethod::PrivateKey(&key_pem),
+        connect_username,
+        &auth,
         Some(stored_fingerprint),
     )
     .await
@@ -425,15 +464,28 @@ pub async fn run_for_extension(
             .map_err(|e| format!("failed to detect sudo status: {e}"))?
     };
 
-    update_host_sudo_state(db, &host.id, Some(sudo_available), Some(is_root), None)
-        .await
-        .map_err(|e| format!("failed to update sudo state: {e}"))?;
+    // Only persist sudo state when using stored credentials (not override).
+    let agent_is_root = if has_auth_override { false } else { is_root };
+    let persisted_sudo_available = if has_auth_override {
+        None
+    } else {
+        Some(sudo_available)
+    };
+    update_host_sudo_state(
+        db,
+        &host.id,
+        persisted_sudo_available,
+        Some(agent_is_root),
+        None,
+    )
+    .await
+    .map_err(|e| format!("failed to update sudo state: {e}"))?;
 
     if !is_root && !sudo_available {
         SshSession::disconnect_shared(session).await;
         return Err(format!(
             "sudo is not available for user '{}' on '{}'; cannot sync",
-            host.username, host.hostname
+            connect_username, host.hostname
         ));
     }
 
@@ -471,15 +523,30 @@ pub async fn run_for_extension(
 
     let mut summary = Vec::new();
 
-    if !resolved.is_empty() {
-        let content = SudoersContent::SpecificCommands(resolved);
-        write_sudoers_file(&executor, &host.username, &content, privileged)
+    let has_resolved_commands = !resolved.is_empty();
+    let sudoers_content: Option<SudoersContent> = if has_resolved_commands {
+        Some(SudoersContent::SpecificCommands(resolved))
+    } else if allow_all {
+        Some(SudoersContent::AllCommands)
+    } else {
+        None
+    };
+
+    if let Some(ref content) = sudoers_content {
+        write_sudoers_file(&executor, &host.username, content, privileged)
             .await
             .map_err(|e| format!("failed to write sudoers file: {e}"))?;
-        update_host_sudo_state(db, &host.id, Some(true), Some(is_root), None)
-            .await
-            .map_err(|e| format!("failed to update sudo state: {e}"))?;
-        summary.push("sudoers: updated".to_string());
+        // Persist sudo state only for stored-credentials runs.
+        if !has_auth_override {
+            update_host_sudo_state(db, &host.id, Some(true), Some(is_root), None)
+                .await
+                .map_err(|e| format!("failed to update sudo state: {e}"))?;
+        }
+        if allow_all && !has_resolved_commands {
+            summary.push("sudoers: updated (NOPASSWD: ALL)".to_string());
+        } else {
+            summary.push("sudoers: updated".to_string());
+        }
     } else {
         summary.push("sudoers: no commands to write".to_string());
     }
