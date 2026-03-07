@@ -461,32 +461,42 @@ async fn sync_pve_state_inner(
 /// when [`Model::is_pve_node`] is `true` so that the generated sudoers file
 /// grants the stored agent user `NOPASSWD` access to these binaries.
 async fn pve_sudo_commands(executor: &SshRemoteExecutor) -> Vec<ResolvedSudoCommand> {
-    let tools = [
-        (
-            "/usr/sbin/pct",
-            "Proxmox LXC container management (pct exec for guest bootstrap)",
-        ),
-        (
-            "/usr/sbin/qm",
-            "Proxmox QEMU VM management (qm guest exec for guest bootstrap)",
-        ),
-    ];
-
     let mut cmds = Vec::new();
-    for (path, explanation) in tools {
-        let exists = executor
-            .exec_command(&format!("test -f {path}"))
-            .await
-            .map(|r| r.exit_code == 0)
-            .unwrap_or(false);
-        if exists {
-            cmds.push(ResolvedSudoCommand {
-                command_path: path.to_string(),
-                explanation: explanation.to_string(),
-                needs_setenv: false,
-            });
-        }
+
+    // pct — restrict to the exec subcommand only (blocks pct destroy, migrate, etc.).
+    let pct_exists = executor
+        .exec_command("test -f /usr/sbin/pct")
+        .await
+        .map(|r| r.exit_code == 0)
+        .unwrap_or(false);
+    if pct_exists {
+        cmds.push(ResolvedSudoCommand {
+            command_path: "/usr/sbin/pct exec *".to_string(),
+            explanation: "Execute commands inside LXC containers for guest bootstrap".to_string(),
+            needs_setenv: false,
+        });
     }
+
+    // qm — restrict to guest exec and the single network-get-interfaces query only
+    // (blocks qm destroy, migrate, set, etc.).
+    let qm_exists = executor
+        .exec_command("test -f /usr/sbin/qm")
+        .await
+        .map(|r| r.exit_code == 0)
+        .unwrap_or(false);
+    if qm_exists {
+        cmds.push(ResolvedSudoCommand {
+            command_path: "/usr/sbin/qm guest exec *".to_string(),
+            explanation: "Execute commands inside QEMU VMs for guest bootstrap".to_string(),
+            needs_setenv: false,
+        });
+        cmds.push(ResolvedSudoCommand {
+            command_path: "/usr/sbin/qm guest cmd * network-get-interfaces".to_string(),
+            explanation: "Query QEMU VM network interfaces for guest IP detection".to_string(),
+            needs_setenv: false,
+        });
+    }
+
     cmds
 }
 
