@@ -281,6 +281,7 @@ for the full dispatch flow.
 - [SSH Agent Architecture](../architecture/ssh-agent.md) — overall architecture, database schema, CLI subcommands, and version check/update execution
 - [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for managing SSH hosts
 - [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — automated remote host setup and troubleshooting
+- [Proxmox Bootstrap Privileges](../development/proxmox-bootstrap.md) — PVE privilege chain for guest bootstrap
 - [Secrets and Encryption](secrets-and-encryption.md) — controller's encryption model
 - [Cryptography](cryptography.md) — cryptographic primitives used across Uptrakit
 - [Filesystem and Dependency Security](filesystem-dependency-security.md) — secure file operations

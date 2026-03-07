@@ -258,6 +258,9 @@ The `PveGuestExecutor` implements `RemoteExecutor` (from `uptrakit-command`) and
 command to `guest_exec::exec_in_guest()`, which builds the appropriate `pct exec` or `qm guest exec`
 invocation and runs it on the PVE node via SSH.
 
+For a full list of commands executed inside the guest and the PVE privileges required, see
+[Proxmox Bootstrap Privileges](../development/proxmox-bootstrap.md).
+
 ### PVE Detection During SSH Bootstrap
 
 When bootstrapping a host via regular SSH (the `bootstrap` action), the agent automatically

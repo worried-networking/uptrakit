@@ -157,6 +157,30 @@ permission.
 different hosts. A monitoring dashboard extension might be **universal** because any
 instance has the same aggregated view.
 
+## Proxmox VE extensions
+
+The Proxmox VE infrastructure plugin provides two extensions:
+
+### Proxmox VE Hosts (page)
+
+A full-page data table listing all discovered VMs and containers from your Proxmox VE cluster.
+Available actions:
+
+- **Discover** -- query the PVE API for VMs/containers and update the list
+- **Test Connection** -- verify connectivity to the PVE API
+- **Manual Match** -- link a Proxmox guest to an Uptrakit host via dropdown
+- **Approve Match** -- accept a system-suggested match (based on machine ID,
+  hostname, or IP address)
+- **Remove Match** -- unlink a guest from its matched host
+
+Unmatched guests display inline match suggestions with a confidence level (high,
+medium, low) based on machine ID, hostname, IP address, and name similarity.
+
+### Proxmox VE Info (panel)
+
+A panel on the host detail page showing the Proxmox node, VMID, type, and status
+for hosts linked to a discovered Proxmox guest.
+
 ## See also
 
 - [Extensions API Reference](../api/extensions.md)
