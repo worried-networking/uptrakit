@@ -139,6 +139,7 @@ the field named by `api_submit.response_id_field`).
 | `timeout_seconds` | u32 | no | Override the default 30s timeout |
 | `api_submit` | `ApiSubmitDef` | no | Route form submission to a REST API instead of the extension proxy |
 | `row_visible_when` | `RowVisibleWhen` | no | Conditional visibility for row actions in a `DataTable` |
+| `confirm_entity_field` | string | no | Row data field used as entity name in destructive action confirmation dialog |
 
 #### `RowVisibleWhen` — conditional row action visibility
 
@@ -156,6 +157,23 @@ Example — show "Approve Match" only when a suggestion exists:
 ActionDef::new("approve-match", "Approve Match")
     .with_row_visible_when("suggested_host_id", RowCondition::Present)
 ```
+
+#### Destructive action confirmation
+
+When an `ActionDef` has `destructive: true` and no `ui` (no form), the frontend
+shows a confirmation dialog before invoking the action. The `confirm_entity_field`
+specifies which row data field to use as the entity name in the dialog message.
+
+If `confirm_entity_field` is not set or the field value is empty, "this item" is
+used as a fallback.
+
+```rust
+ActionDef::new("remove-host", "Remove Host")
+    .destructive()
+    .with_confirm_entity_field("name")
+```
+
+This produces a dialog: "Are you sure you want to remove host **Server-01**?"
 
 #### `ApiSubmitDef` — calling existing REST APIs from extension forms
 

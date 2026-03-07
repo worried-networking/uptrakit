@@ -879,6 +879,8 @@ export interface ActionDef {
 	api_submit?: ApiSubmitDef;
 	/** Conditional visibility for row actions: show only when the condition on a row data field is met. */
 	row_visible_when?: RowVisibleWhen;
+	/** Row data field to use as the entity name in the confirmation dialog for destructive actions. */
+	confirm_entity_field?: string;
 }
 
 export type ContextSelectorSource =

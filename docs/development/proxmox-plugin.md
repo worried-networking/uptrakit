@@ -120,7 +120,7 @@ commands or REST routes exist.
 | `proxmox.hosts` | `test-connection` | `plugin_config_id` | Test API connectivity |
 | `proxmox.hosts` | `match` | `mapping_id`, `host_id` | Manual match |
 | `proxmox.hosts` | `approve-match` | `mapping_id`, `host_id`/`suggested_host_id` | Approve a suggested match (accepts `suggested_host_id` as fallback) |
-| `proxmox.hosts` | `unmatch` | `mapping_id` | Remove match |
+| `proxmox.hosts` | `unmatch` | `mapping_id` | Remove match (destructive, confirmation dialog shows `proxmox_name`) |
 | `proxmox.hosts` | `list-all-unmatched` | (none) | List unmatched guests sorted by name across all configs |
 | `proxmox.host-info` | `get-info` | `host_id` | Get Proxmox info for host |
 

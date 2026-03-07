@@ -454,6 +454,11 @@ pub struct ActionDef {
     /// "Remove Match" to only appear for already-matched rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub row_visible_when: Option<RowVisibleWhen>,
+    /// Row data field to use as the entity name in the confirmation dialog
+    /// for destructive actions without a form UI. When set, the frontend
+    /// shows a confirmation dialog before invoking the action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm_entity_field: Option<String>,
 }
 
 impl ActionDef {
@@ -468,6 +473,7 @@ impl ActionDef {
             timeout_seconds: None,
             api_submit: None,
             row_visible_when: None,
+            confirm_entity_field: None,
         }
     }
 
@@ -514,6 +520,15 @@ impl ActionDef {
             field: field.into(),
             condition,
         });
+        self
+    }
+
+    /// Set the row data field used as the entity name in the confirmation
+    /// dialog for destructive actions. The frontend shows a confirmation
+    /// prompt before invoking the action, using the value of this field
+    /// from the current row as the entity name.
+    pub fn with_confirm_entity_field(mut self, field: impl Into<String>) -> Self {
+        self.confirm_entity_field = Some(field.into());
         self
     }
 }
@@ -1494,5 +1509,25 @@ mod tests {
         let action = ActionDef::new("match", "Manual Match");
         let json = serde_json::to_string(&action).expect("serialize should succeed");
         assert!(!json.contains("row_visible_when"));
+    }
+
+    #[test]
+    fn confirm_entity_field_roundtrip() {
+        let action = ActionDef::new("remove-host", "Remove Host")
+            .destructive()
+            .with_confirm_entity_field("name");
+
+        let json = serde_json::to_string(&action).expect("serialize should succeed");
+        assert!(json.contains(r#""confirm_entity_field":"name""#));
+        let roundtripped: ActionDef =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+        assert_eq!(roundtripped.confirm_entity_field.as_deref(), Some("name"));
+    }
+
+    #[test]
+    fn confirm_entity_field_omitted_when_none() {
+        let action = ActionDef::new("list", "List Items");
+        let json = serde_json::to_string(&action).expect("serialize should succeed");
+        assert!(!json.contains("confirm_entity_field"));
     }
 }

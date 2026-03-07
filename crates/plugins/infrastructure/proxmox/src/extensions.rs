@@ -117,6 +117,7 @@ fn unmatch_action() -> ActionDef {
     ActionDef::new("unmatch", "Remove Match")
         .with_permission(Permission::ManageHosts)
         .destructive()
+        .with_confirm_entity_field("proxmox_name")
         .with_row_visible_when("matched_host", RowCondition::Present)
 }
 

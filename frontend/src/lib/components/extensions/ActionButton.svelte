@@ -4,6 +4,7 @@
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import SchemaForm from './SchemaForm.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let {
 		extensionId,
@@ -24,6 +25,7 @@
 	} = $props();
 
 	let showModal: boolean = $state(false);
+	let showConfirm: boolean = $state(false);
 	let loading: boolean = $state(false);
 
 	/** Recursively substitute `{{field:coercion}}` placeholders in a JSON body template. */
@@ -107,9 +109,20 @@
 	function handleClick() {
 		if (action.ui) {
 			showModal = true;
+		} else if (action.destructive) {
+			showConfirm = true;
 		} else {
 			void invoke();
 		}
+	}
+
+	/** Derive the entity name for the confirmation dialog from row data. */
+	function confirmEntityName(): string {
+		if (action.confirm_entity_field) {
+			const val = extraParams[action.confirm_entity_field];
+			if (val != null && val !== '') return String(val);
+		}
+		return 'this item';
 	}
 
 	let btnClass = $derived(size === 'sm' ? 'btn btn-sm text-xs' : 'btn');
@@ -130,4 +143,20 @@
 	>
 		<SchemaForm fields={action.ui.fields} onsubmit={invoke} {loading} {extensionId} {serviceId} {extraParams} />
 	</Modal>
+{/if}
+
+{#if showConfirm}
+	<ConfirmDialog
+		title={action.label}
+		messagePrefix="Are you sure you want to {action.label.toLowerCase()}"
+		entityName={confirmEntityName()}
+		confirmLabel={action.label}
+		onconfirm={() => {
+			showConfirm = false;
+			void invoke();
+		}}
+		oncancel={() => {
+			showConfirm = false;
+		}}
+	/>
 {/if}

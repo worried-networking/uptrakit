@@ -83,6 +83,7 @@ pub fn build_actions() -> Vec<ActionDef> {
         ActionDef::new("remove-host", "Remove Host")
             .with_permission(Permission::ManageHosts)
             .destructive()
+            .with_confirm_entity_field("name")
             .with_timeout(30),
         ActionDef::new("list-pve-hosts", "List PVE Hosts")
             .with_permission(Permission::ManageHosts)
