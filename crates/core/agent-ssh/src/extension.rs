@@ -56,7 +56,11 @@ pub fn build_manifest() -> ExtensionManifest {
             ],
             data_action: "list-hosts".to_string(),
             row_actions: vec!["remove-host".to_string()],
-            primary_actions: vec!["bootstrap".to_string(), "bootstrap-proxmox".to_string()],
+            primary_actions: vec![
+                "bootstrap".to_string(),
+                "bootstrap-proxmox".to_string(),
+                "bootstrap-proxmox-guest".to_string(),
+            ],
             context_selector: None,
         },
     )
@@ -83,8 +87,12 @@ pub fn build_actions() -> Vec<ActionDef> {
         ActionDef::new("list-pve-hosts", "List PVE Hosts")
             .with_permission(Permission::ManageHosts)
             .with_timeout(10),
+        ActionDef::new("list-discovered-guests", "List Discovered Guests")
+            .with_permission(Permission::ManageHosts)
+            .with_timeout(15),
         bootstrap_action(),
         bootstrap_proxmox_action(),
+        bootstrap_proxmox_guest_action(),
     ]
 }
 
@@ -181,6 +189,43 @@ fn bootstrap_proxmox_action() -> ActionDef {
         ])))
 }
 
+/// Build the "Bootstrap via Discovered Guest" action definition.
+///
+/// Presents a dropdown of unmatched Proxmox guests discovered by the Proxmox
+/// plugin, allowing users to bootstrap a guest without manually specifying
+/// VMID, node, or guest type.
+fn bootstrap_proxmox_guest_action() -> ActionDef {
+    ActionDef::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
+        .with_permission(Permission::ManageHosts)
+        .with_timeout(120)
+        .with_ui(ActionUi::Form(FormDef::new(vec![
+            FieldDef::new("discovered_guest", "Discovered Guest")
+                .with_type(FieldType::Select)
+                .required()
+                .with_help_text("Select a Proxmox guest discovered by the Proxmox VE plugin.")
+                .with_select_source(SelectSource::Action {
+                    action_id: "list-discovered-guests".to_string(),
+                }),
+            FieldDef::new("pve_host_id", "PVE Host")
+                .with_type(FieldType::Select)
+                .required()
+                .with_help_text("PVE node to use as SSH gateway for guest access.")
+                .with_select_source(SelectSource::Action {
+                    action_id: "list-pve-hosts".to_string(),
+                }),
+            FieldDef::new("name", "Host Name")
+                .required()
+                .with_placeholder("my-container")
+                .with_help_text("Friendly name for identification."),
+            FieldDef::new("target_username", "Target Username")
+                .with_help_text("User to create/use in the guest.")
+                .with_default_value("uptrakit"),
+            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(FieldType::Toggle)
+                .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
+        ])))
+}
+
 // ── Extension context ────────────────────────────────────────────────
 
 /// Shared context for extension request handling.
@@ -194,6 +239,7 @@ pub struct ExtensionContext<'a> {
     pub service_id: Option<uuid::Uuid>,
     pub tenant_id: Option<uuid::Uuid>,
     pub bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
+    pub extension_proxy: &'a std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
 }
 
 // ── Action dispatch ──────────────────────────────────────────────────
@@ -240,6 +286,12 @@ pub async fn handle_extension_request(
         }
         "bootstrap-proxmox" => {
             spawn_bootstrap_proxmox(request, ctx.state_dir, ctx.service_id, ctx.bg_tx);
+        }
+        "list-discovered-guests" => {
+            spawn_list_discovered_guests(request, ctx.extension_proxy, ctx.bg_tx);
+        }
+        "bootstrap-proxmox-guest" => {
+            spawn_bootstrap_proxmox_guest(request, ctx);
         }
         other => {
             tracing::warn!(action = %other, "unknown extension action");
@@ -377,6 +429,105 @@ fn spawn_bootstrap_proxmox(
     });
 }
 
+/// Spawn a task to list discovered Proxmox guests via the extension proxy.
+fn spawn_list_discovered_guests(
+    request: ExtensionRequestPayload,
+    proxy: &std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+) {
+    let proxy = std::sync::Arc::clone(proxy);
+    let bg_tx = bg_tx.clone();
+    let request_id = request.request_id.clone();
+
+    tokio::spawn(async move {
+        let response = invoke_proxy_action(
+            &proxy,
+            &bg_tx,
+            "proxmox.hosts",
+            "list-all-unmatched",
+            serde_json::Value::Object(serde_json::Map::new()),
+        )
+        .await;
+
+        // Wrap the proxy response (or error) into our extension response.
+        let ext_response = match response {
+            Ok(proxy_resp) if proxy_resp.success => {
+                make_success_response(&request_id, proxy_resp.data)
+            }
+            Ok(proxy_resp) => {
+                // Proxmox plugin not installed or returned error — return empty options.
+                tracing::debug!(
+                    error = ?proxy_resp.error,
+                    "list-all-unmatched returned error, returning empty options"
+                );
+                make_success_response(&request_id, json!({ "options": [] }))
+            }
+            Err(e) => {
+                tracing::debug!(
+                    error = %e,
+                    "list-all-unmatched proxy call failed, returning empty options"
+                );
+                make_success_response(&request_id, json!({ "options": [] }))
+            }
+        };
+
+        let msg = ServiceMessage::ExtensionResponse(ext_response);
+        if bg_tx.send(msg).await.is_err() {
+            tracing::error!("failed to send list-discovered-guests result via bg_tx");
+        }
+    });
+}
+
+/// Invoke an extension action on the controller via the proxy.
+///
+/// Sends the request via `bg_tx` (which flows through the event loop to
+/// `conn.send()`), then waits for the controller's response via the proxy's
+/// oneshot channel.
+async fn invoke_proxy_action(
+    proxy: &uptrakit_service_sdk::ServiceExtensionProxy,
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+    extension_id: &str,
+    action_id: &str,
+    params: serde_json::Value,
+) -> Result<ExtensionResponsePayload, uptrakit_service_sdk::ServiceExtensionProxyError> {
+    let pending = proxy.invoke(extension_id, action_id, params);
+
+    // Send the request to the controller via bg_tx.
+    if bg_tx.send(pending.message.clone()).await.is_err() {
+        return Err(uptrakit_service_sdk::ServiceExtensionProxyError::SendFailed);
+    }
+
+    // Wait for the response (15s timeout for proxy calls).
+    pending
+        .wait(proxy, std::time::Duration::from_secs(15))
+        .await
+}
+
+/// Spawn the "Bootstrap via Discovered Guest" workflow.
+fn spawn_bootstrap_proxmox_guest(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+    let state_dir = ctx.state_dir.to_path_buf();
+    let bg_tx = ctx.bg_tx.clone();
+    let service_id = ctx.service_id;
+    let proxy = std::sync::Arc::clone(ctx.extension_proxy);
+    let request_id = request.request_id.clone();
+
+    tokio::spawn(async move {
+        let response = run_bootstrap_proxmox_guest_action(
+            &request_id,
+            &request.params,
+            service_id,
+            &state_dir,
+            &proxy,
+            &bg_tx,
+        )
+        .await;
+        let msg = ServiceMessage::ExtensionResponse(response);
+        if bg_tx.send(msg).await.is_err() {
+            tracing::error!("failed to send proxmox guest bootstrap result via bg_tx");
+        }
+    });
+}
+
 /// The actual Proxmox guest bootstrap logic.
 #[tracing::instrument(skip_all, fields(request_id = %request_id))]
 async fn run_bootstrap_proxmox_action(
@@ -452,6 +603,185 @@ async fn run_bootstrap_proxmox_action(
         }
         Err(e) => {
             tracing::error!(error = %e, "Proxmox guest bootstrap failed");
+            make_error_response(request_id, &format!("bootstrap failed: {e}"))
+        }
+    }
+}
+
+/// The "Bootstrap via Discovered Guest" action logic.
+///
+/// 1. Resolves the selected discovered guest's metadata (node, VMID, type).
+/// 2. Runs the Proxmox bootstrap workflow.
+/// 3. On success, auto-matches the host to the Proxmox guest mapping via the
+///    Proxmox plugin's `match` action.
+#[tracing::instrument(skip_all, fields(request_id = %request_id))]
+async fn run_bootstrap_proxmox_guest_action(
+    request_id: &str,
+    params: &serde_json::Value,
+    service_id: Option<uuid::Uuid>,
+    state_dir: &Path,
+    proxy: &uptrakit_service_sdk::ServiceExtensionProxy,
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+) -> ExtensionResponsePayload {
+    // Get the selected discovered guest's mapping_id.
+    let discovered_guest = match params.get("discovered_guest").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => {
+            return make_error_response(request_id, "missing required field 'discovered_guest'");
+        }
+    };
+
+    let pve_host_id = match params.get("pve_host_id").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => return make_error_response(request_id, "missing required field 'pve_host_id'"),
+    };
+
+    // Look up the guest details from the Proxmox plugin.
+    let guests = match invoke_proxy_action(
+        proxy,
+        bg_tx,
+        "proxmox.hosts",
+        "list-all-unmatched",
+        serde_json::Value::Object(serde_json::Map::new()),
+    )
+    .await
+    {
+        Ok(resp) if resp.success => resp.data,
+        Ok(resp) => {
+            let err = resp
+                .error
+                .unwrap_or_else(|| "Proxmox plugin returned error".to_string());
+            return make_error_response(request_id, &err);
+        }
+        Err(e) => {
+            return make_error_response(
+                request_id,
+                &format!("failed to query Proxmox plugin (is it installed?): {e}"),
+            );
+        }
+    };
+
+    // Find the selected guest in the options.
+    let options = guests
+        .get("options")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let guest = options.iter().find(|o| {
+        o.get("value")
+            .and_then(|v| v.as_str())
+            .is_some_and(|v| v == discovered_guest)
+    });
+
+    let guest = match guest {
+        Some(g) => g,
+        None => {
+            return make_error_response(
+                request_id,
+                "selected guest not found in discovered guests list",
+            );
+        }
+    };
+
+    let vmid: u32 = match guest.get("proxmox_vmid").and_then(|v| v.as_i64()) {
+        Some(v) if v > 0 => v as u32,
+        _ => return make_error_response(request_id, "invalid VMID in discovered guest"),
+    };
+
+    let guest_type_str = guest
+        .get("proxmox_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("lxc");
+
+    let guest_type = match guest_type_str {
+        "lxc" => PveGuestType::Lxc,
+        "qemu" => PveGuestType::Qemu,
+        _ => return make_error_response(request_id, "unknown guest type in discovered guest"),
+    };
+
+    let name = match params.get("name").and_then(|v| v.as_str()) {
+        Some(n) => n.to_string(),
+        None => {
+            // Fall back to proxmox_name from the discovered guest.
+            guest
+                .get("proxmox_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unnamed")
+                .to_string()
+        }
+    };
+
+    let target_username = params
+        .get("target_username")
+        .and_then(|v| v.as_str())
+        .unwrap_or("uptrakit")
+        .to_string();
+
+    let allow_all = param_bool(params, "allow_all");
+    let host_id = uuid::Uuid::now_v7();
+
+    let proxmox_params = ProxmoxBootstrapParams {
+        pve_host_id,
+        vmid,
+        guest_type,
+        name,
+        target_username,
+        allow_all,
+        host_id,
+        service_id,
+    };
+
+    match bootstrap_proxmox::run_proxmox_bootstrap(state_dir, proxmox_params).await {
+        Ok(result) => {
+            tracing::info!(
+                %host_id,
+                guest_ip = %result.guest_ip,
+                "discovered guest bootstrap completed successfully"
+            );
+
+            // Auto-match: invoke the Proxmox plugin's "match" action.
+            let match_params = json!({
+                "mapping_id": discovered_guest,
+                "host_id": host_id.to_string(),
+            });
+            match invoke_proxy_action(proxy, bg_tx, "proxmox.hosts", "match", match_params).await {
+                Ok(resp) if resp.success => {
+                    tracing::info!(
+                        %host_id,
+                        mapping_id = %discovered_guest,
+                        "auto-matched host to Proxmox guest mapping"
+                    );
+                }
+                Ok(resp) => {
+                    tracing::warn!(
+                        %host_id,
+                        mapping_id = %discovered_guest,
+                        error = ?resp.error,
+                        "auto-match failed (bootstrap succeeded, match can be done manually)"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        %host_id,
+                        mapping_id = %discovered_guest,
+                        error = %e,
+                        "auto-match proxy call failed (bootstrap succeeded)"
+                    );
+                }
+            }
+
+            make_success_response(
+                request_id,
+                json!({
+                    "host_id": host_id.to_string(),
+                    "guest_ip": result.guest_ip,
+                    "auto_matched": true,
+                }),
+            )
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "discovered guest bootstrap failed");
             make_error_response(request_id, &format!("bootstrap failed: {e}"))
         }
     }

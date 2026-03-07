@@ -157,6 +157,11 @@ struct SshAgentHandler {
     /// Sending end of the background-result channel, cloned into each spawned
     /// background task.
     bg_tx: tokio::sync::mpsc::Sender<uptrakit_internal_wire::ServiceMessage>,
+    /// Proxy for service-initiated extension action invocations.
+    ///
+    /// Enables the SSH agent to invoke controller-side plugin actions (e.g.,
+    /// Proxmox plugin's `list-all-unmatched` for discovered guest bootstrap).
+    extension_proxy: std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
 }
 
 impl SshAgentHandler {
@@ -511,6 +516,14 @@ impl ServiceHandler for SshAgentHandler {
         }
     }
 
+    fn on_extension_response(
+        &mut self,
+        response: uptrakit_internal_wire::extension::ExtensionResponsePayload,
+    ) {
+        let request_id = response.request_id.clone();
+        self.extension_proxy.complete(&request_id, response);
+    }
+
     async fn on_extension_request(
         &mut self,
         request: uptrakit_internal_wire::extension::ExtensionRequestPayload,
@@ -530,6 +543,7 @@ impl ServiceHandler for SshAgentHandler {
             service_id: self.service_id,
             tenant_id: self.tenant_id,
             bg_tx: &self.bg_tx,
+            extension_proxy: &self.extension_proxy,
         };
         extension::handle_extension_request(request, &ctx, conn).await;
 
@@ -1252,6 +1266,7 @@ async fn main() {
         last_update_per_host: HashMap::new(),
         bg_rx,
         bg_tx,
+        extension_proxy: std::sync::Arc::new(uptrakit_service_sdk::ServiceExtensionProxy::new()),
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent-ssh",
