@@ -203,7 +203,7 @@ minimal per-command entries derived from registered plugins. For example:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit-agent-ssh host update-sudoers <host>
+# Regenerate: uptrakit-agent-ssh host sync <host>
 # /usr/bin/apt-get: Package installation and index refresh require root privileges
 uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 ```
@@ -218,7 +218,7 @@ secure). Avoid using `--allow-all` in production.
 Refresh the sudoers file after adding new plugins with:
 
 ```bash
-uptrakit-agent-ssh host update-sudoers <host>
+uptrakit-agent-ssh host sync <host>
 ```
 
 See [Sudoers Management](sudoers-management.md) for the full security model,

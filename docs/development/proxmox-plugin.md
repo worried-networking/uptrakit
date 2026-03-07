@@ -156,7 +156,7 @@ tiebreaker. Unlike `list` (which requires a `plugin_config_id`), this action is
 designed for service-initiated invocations where the calling service does not
 know which Proxmox configs exist.
 
-The response includes `hostname` alongside other guest metadata fields.
+The response includes `hostname`, `plugin_config_id`, and other guest metadata fields.
 
 The SSH agent uses this action (via `ServiceExtensionProxy`) to populate the
 `bootstrap-proxmox-guest` dropdown. If the Proxmox plugin is not installed, the

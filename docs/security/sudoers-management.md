@@ -7,7 +7,7 @@ file on remote SSH hosts, why per-command entries are preferred over
 **Related docs:**
 
 - [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — bootstrap workflow
-- [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — `update-sudoers` command
+- [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — `sync` command
 - [SSH Agent Secrets](ssh-agent-secrets.md) — broader threat model
 - [Plugin Guidelines](../development/plugin-guidelines.md) — `required_sudo_commands()` contract
 - [Command Executor](../development/command-executor.md) — `SudoAwareCommandExecutor` and `SudoContext`
@@ -20,7 +20,7 @@ approach instead:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit-agent-ssh host update-sudoers <host>
+# Regenerate: uptrakit-agent-ssh host sync <host>
 # /usr/bin/apt-get: Package installation and index refresh require root privileges
 uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get
 ```
@@ -41,7 +41,7 @@ such as `LD_PRELOAD` before they reach the privileged process.
 - **Auditability** — each entry carries a human-readable explanation comment.
 - **Path pinning** — absolute paths prevent `PATH` manipulation attacks where an
   attacker replaces a command with a malicious one in an earlier `PATH` entry.
-- **Regenerability** — the file is machine-managed; running `update-sudoers`
+- **Regenerability** — the file is machine-managed; running `sync`
   keeps it current as plugins are added or removed.
 
 ## How entries are generated
@@ -50,7 +50,7 @@ Sudoers entries come from the `required_sudo_commands()` method on each
 registered `Plugin`. Each entry carries a command name, a human-readable
 explanation, and an optional `SudoHelperScript`.
 
-During bootstrap or `update-sudoers`:
+During bootstrap or `sync`:
 
 1. `PluginRegistry::compatible_sudo_commands_for_host(ssh_executor)` collects
    declarations from registered plugins that are **compatible with the target host**.
@@ -156,10 +156,10 @@ The helper script **must**:
 
 ## The `--allow-all` fallback
 
-Both `host bootstrap` and `host update-sudoers` accept `--allow-all`:
+Both `host bootstrap` and `host sync` accept `--allow-all`:
 
 ```bash
-uptrakit-agent-ssh host update-sudoers my-server --allow-all
+uptrakit-agent-ssh host sync my-server --allow-all
 ```
 
 This writes `NOPASSWD: ALL` instead of per-command entries. Use only when:
@@ -199,7 +199,7 @@ the defaults are:
 
 ## Detecting and persisting sudo state
 
-The `host update-sudoers` command always re-detects the agent user's privilege
+The `host sync` command always re-detects the agent user's privilege
 context by running `id -u` (root check) and `sudo -n true` (passwordless sudo
 check) on the remote host, and persists the results to the database.
 
@@ -217,14 +217,15 @@ When new plugins are added or existing plugins add new commands, the sudoers
 file becomes stale. Refresh it by running:
 
 ```bash
-uptrakit-agent-ssh host update-sudoers my-server
+uptrakit-agent-ssh host sync my-server
 ```
 
-This resolves current plugin commands, writes the updated file, and persists
-the detected sudo state. Use `--dry-run` to preview the file without writing:
+This resolves current plugin commands, writes the updated file, detects PVE
+node name, verifies PVE privileges, and persists the detected state. Use
+`--dry-run` to preview the sudoers file without writing:
 
 ```bash
-uptrakit-agent-ssh host update-sudoers my-server --dry-run
+uptrakit-agent-ssh host sync my-server --dry-run
 ```
 
 ## Security recommendations
@@ -233,14 +234,14 @@ uptrakit-agent-ssh host update-sudoers my-server --dry-run
 - **Use `--strict-host-key-checking`** during bootstrap to prevent MITM when writing the sudoers file.
 - **Restrict the master encryption key** (`400` permissions, service account ownership) to protect SSH credentials at rest.
 - **Review the sudoers file** after bootstrap: `ssh user@host sudo cat /etc/sudoers.d/uptrakit-user`.
-- **Run `update-sudoers`** after adding or removing plugins to keep the file minimal and current.
-- **Avoid `--allow-all` for `update-sudoers`** unless the remote host is missing required tools during initial provisioning.
+- **Run `host sync`** after adding or removing plugins to keep the file minimal and current.
+- **Avoid `--allow-all` for `host sync`** unless the remote host is missing required tools during initial provisioning.
 
 ## File format reference
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit-agent-ssh host update-sudoers <host>
+# Regenerate: uptrakit-agent-ssh host sync <host>
 # <absolute-path>: <explanation>
 <username> ALL=(root) NOPASSWD: [SETENV: ]<absolute-path>
 ```
@@ -251,7 +252,7 @@ Or with `--allow-all`:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit-agent-ssh host update-sudoers <host>
+# Regenerate: uptrakit-agent-ssh host sync <host>
 <username> ALL=(root) NOPASSWD: ALL
 ```
 
@@ -262,9 +263,9 @@ Or with `--allow-all`:
 > Regenerate the sudoers file to fix this:
 >
 > ```bash
-> uptrakit-agent-ssh host update-sudoers <host>
+> uptrakit-agent-ssh host sync <host>
 > ```
 
 The file is written to `/etc/sudoers.d/uptrakit-<username>` with `440`
 permissions. The path is deterministic and idempotent — re-running
-`update-sudoers` overwrites the same file.
+`host sync` overwrites the same file.

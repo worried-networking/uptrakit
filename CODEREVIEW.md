@@ -871,7 +871,7 @@ These files contain zero test-exercised code paths:
 | `service-sdk/src/ws.rs` | 308 | WebSocket SDK |
 | `service_ws/handler/mqtt.rs` | 248 | MQTT trigger via WS |
 | `mqtt_client_store.rs` | 202 | MQTT client store |
-| `commands/update_sudoers.rs` | 179 | Sudoers generation |
+| `commands/sync.rs` | ~520 | Host sync (sudoers, PVE node name, PVE privilege verification) |
 | `queries/audit_logs.rs` | 149 | Audit log queries |
 | `service-sdk/src/connection.rs` | 130 | Service connection |
 | `service_ws/handler/renewal.rs` | 119 | Certificate renewal handler |

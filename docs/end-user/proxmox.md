@@ -172,6 +172,18 @@ bootstrapped.
 After bootstrap, the guest is managed like any other SSH host — the agent
 connects directly to it for version checks and updates.
 
+### Bootstrap via Discovered Guest
+
+The "Bootstrap via Discovered Guest" action matches guests discovered by the
+Proxmox plugin to PVE hosts using the stored **PVE node name** and
+**plugin config ID**. This requires that PVE hosts have been synced (via
+`host sync` or during initial bootstrap) so the short node name (e.g.
+`optiplex2`) is stored in the local database. Without a stored node name,
+matching will fail.
+
+If matching fails, run `host sync <pve-host>` (or use the **Sync Host** row
+action in the UI) to populate the node name, then retry.
+
 ## Security Considerations
 
 - The API token secret is stored encrypted at rest and masked in API responses

@@ -295,7 +295,7 @@ fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
 **Contract:**
 
 - `command` is the **bare command name** (e.g. `"apt-get"`, `"systemctl"`), not an absolute path.
-  The bootstrap and `update-sudoers` commands resolve the absolute path on the target host via
+  The bootstrap and `sync` commands resolve the absolute path on the target host via
   `command -v <name>`.
 - `explanation` is shown as a comment in the generated sudoers file and in CLI output. Keep it
   concise and factual.
@@ -306,7 +306,7 @@ fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
 
 The `PluginRegistry::all_required_sudo_commands()` static method aggregates declarations from all
 registered plugins (using the same minimal-config instantiation as `create_plugin_for_discovery()`).
-The bootstrap and `update-sudoers` SSH agent commands call this to build a per-command sudoers entry.
+The bootstrap and `sync` SSH agent commands call this to build a per-command sudoers entry.
 
 **Testing:**
 

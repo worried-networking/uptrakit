@@ -125,7 +125,7 @@ uptrakit ALL=(root) NOPASSWD: /usr/bin/npm
 
 > [!NOTE]
 > The exact `npm` binary path (`/usr/bin/npm`, `/usr/local/bin/npm`, etc.) depends on your
-> installation. The `update-sudoers` bootstrap command generates the correct entry for your
+> installation. The `sync` command generates the correct entry for your
 > system automatically. See [SSH Agent Bootstrap](ssh-agent-bootstrap.md) for setup.
 
 ## Proxmox Helper Scripts Integration

@@ -315,7 +315,7 @@ registered plugin command. For example, if only the APT plugin is active:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit-agent-ssh host update-sudoers <host>
+# Regenerate: uptrakit-agent-ssh host sync <host>
 # /usr/bin/apt-get: Package installation and index refresh require root privileges
 uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 ```
@@ -327,10 +327,10 @@ The `--allow-all` flag writes `NOPASSWD: ALL` instead (less secure; matches the
 pre-1.x behavior). Use it only when the required tools are not yet installed or
 during development.
 
-To refresh the sudoers file after adding new plugins, run:
+To refresh the sudoers file (and PVE configuration) after adding new plugins, run:
 
 ```bash
-uptrakit-agent-ssh host update-sudoers <host-name> \
+uptrakit-agent-ssh host sync <host-name> \
   --master-key-file /etc/uptrakit/master.key
 ```
 
@@ -466,7 +466,7 @@ plugin manually afterwards.
 ## Related documentation
 
 - [SSH Agent Host Management](ssh-agent-host-management.md) — managing existing
-  host entries, including `update-sudoers`
+  host entries, including `sync`
 - [SSH Agent Architecture](../architecture/ssh-agent.md) — architecture and
   database schema
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) — encryption model and

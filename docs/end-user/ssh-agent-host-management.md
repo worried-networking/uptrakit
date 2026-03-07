@@ -118,14 +118,17 @@ configures sudoers, verifies connectivity, and saves the host entry.
 For detailed options and troubleshooting, see
 [SSH Agent Bootstrap](ssh-agent-bootstrap.md).
 
-### Refresh sudoers for a host
+### Sync host configuration
 
-The `host update-sudoers` command regenerates the sudoers drop-in file for an
-already-enrolled host. Use this after enabling new plugins or when the
-installed command paths on the remote host have changed.
+The `host sync` command synchronizes the host configuration with the remote
+host. It is a superset of the previous `update-sudoers` command -- in addition
+to regenerating the sudoers drop-in file, it also detects the PVE node name
+(for Proxmox VE hosts) and verifies PVE privileges. Use this after enabling
+new plugins, when installed command paths on the remote host have changed, or
+when Proxmox VE configuration needs to be refreshed.
 
 ```bash
-uptrakit-agent-ssh host update-sudoers my-server \
+uptrakit-agent-ssh host sync my-server \
   --master-key-file /etc/uptrakit/master.key
 ```
 
@@ -136,7 +139,8 @@ The command:
 3. Resolves each registered plugin command to its absolute path via `command -v`.
 4. Writes a minimal `/etc/sudoers.d/uptrakit-<username>` with one entry per
    resolved command. Validates with `visudo -cf`.
-5. Persists the detected sudo state to the database.
+5. Detects PVE node name and verifies PVE privileges (for Proxmox VE hosts).
+6. Persists the detected state to the database.
 
 Optional flags:
 
@@ -148,7 +152,7 @@ Optional flags:
 Example (dry-run):
 
 ```bash
-uptrakit-agent-ssh host update-sudoers my-server \
+uptrakit-agent-ssh host sync my-server \
   --dry-run \
   --master-key-file /etc/uptrakit/master.key
 ```
