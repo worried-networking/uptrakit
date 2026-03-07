@@ -671,7 +671,7 @@ fn spawn_list_discovered_guests(
 /// Sends the request via `bg_tx` (which flows through the event loop to
 /// `conn.send()`), then waits for the controller's response via the proxy's
 /// oneshot channel.
-async fn invoke_proxy_action(
+pub(crate) async fn invoke_proxy_action(
     proxy: &uptrakit_service_sdk::ServiceExtensionProxy,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
     extension_id: &str,
@@ -958,33 +958,42 @@ async fn run_bootstrap_proxmox_guest_action(
                 "discovered guest bootstrap completed successfully"
             );
 
-            // Auto-match: invoke the Proxmox plugin's "match" action.
-            let match_params = json!({
-                "mapping_id": discovered_guest,
-                "host_id": host_id.to_string(),
-            });
-            match invoke_proxy_action(proxy, bg_tx, "proxmox.hosts", "match", match_params).await {
-                Ok(resp) if resp.success => {
-                    tracing::info!(
-                        %host_id,
-                        mapping_id = %discovered_guest,
-                        "auto-matched host to Proxmox guest mapping"
-                    );
-                }
-                Ok(resp) => {
-                    tracing::warn!(
-                        %host_id,
-                        mapping_id = %discovered_guest,
-                        error = ?resp.error,
-                        "auto-match failed (bootstrap succeeded, match can be done manually)"
-                    );
+            // Defer the Proxmox mapping match until after the next ReportHosts
+            // send.  The controller creates its hosts.id from agent_host_id
+            // (carried in HostInfo), but the FK constraint on
+            // proxmox_host_mappings.host_id cannot be satisfied until the
+            // controller has actually inserted that row.  The background loop
+            // drains this table after every ReportHosts.
+            let db_result = crate::db::init_db(state_dir).await;
+            match db_result {
+                Ok(db) => {
+                    if let Err(e) = crate::host_ops::insert_pending_proxmox_match(
+                        &db,
+                        &host_id.to_string(),
+                        &discovered_guest,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            %host_id,
+                            mapping_id = %discovered_guest,
+                            error = %e,
+                            "failed to persist pending Proxmox match; match must be done manually"
+                        );
+                    } else {
+                        tracing::info!(
+                            %host_id,
+                            mapping_id = %discovered_guest,
+                            "pending Proxmox match saved; will be applied after ReportHosts"
+                        );
+                    }
                 }
                 Err(e) => {
                     tracing::warn!(
                         %host_id,
                         mapping_id = %discovered_guest,
                         error = %e,
-                        "auto-match proxy call failed (bootstrap succeeded)"
+                        "failed to open local DB for pending Proxmox match; match must be done manually"
                     );
                 }
             }
@@ -994,7 +1003,7 @@ async fn run_bootstrap_proxmox_guest_action(
                 json!({
                     "host_id": host_id.to_string(),
                     "guest_ip": result.guest_ip,
-                    "auto_matched": true,
+                    "auto_matched": false,
                 }),
             )
         }

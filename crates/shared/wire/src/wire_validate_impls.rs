@@ -1033,6 +1033,7 @@ mod tests {
                 architecture: None,
                 hostname: None,
                 ip_address: None,
+                agent_host_id: None,
             }],
             agent_version: "1.0.0".to_string(),
             capabilities: std::collections::BTreeSet::new(),
@@ -1050,6 +1051,7 @@ mod tests {
                 architecture: None,
                 hostname: None,
                 ip_address: None,
+                agent_host_id: None,
             })
             .collect();
         let msg = ServiceMessage::ReportHosts(ReportHostsPayload {

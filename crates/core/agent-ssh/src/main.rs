@@ -744,6 +744,86 @@ impl SshAgentHandler {
         // Convert to &str for the client call.
         let changed_ref: HashSet<&str> = changed_ids.iter().map(String::as_str).collect();
         client::report_hosts_after_config_change(db, conn, &hosts, &changed_ref, &self.pool).await;
+
+        // After ReportHosts is sent the controller has registered all SSH hosts
+        // using the agent_host_id hint.  Now drain any pending Proxmox mapping
+        // matches that were deferred by "Bootstrap via Discovered Guest".
+        self.drain_pending_proxmox_matches().await;
+    }
+
+    /// Fire any pending Proxmox host-mapping matches that were deferred until
+    /// after `ReportHosts` so the FK constraint on `proxmox_host_mappings.host_id`
+    /// can be satisfied.
+    async fn drain_pending_proxmox_matches(&self) {
+        let db = match self.local_db.as_ref() {
+            Some(db) => db,
+            None => return,
+        };
+
+        let pending = match host_ops::drain_pending_proxmox_matches(db).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load pending Proxmox matches");
+                return;
+            }
+        };
+
+        if pending.is_empty() {
+            return;
+        }
+
+        tracing::info!(
+            count = pending.len(),
+            "draining pending Proxmox host matches"
+        );
+
+        for entry in pending {
+            let match_params = serde_json::json!({
+                "mapping_id": entry.mapping_id,
+                "host_id": entry.host_id,
+            });
+
+            match extension::invoke_proxy_action(
+                &self.extension_proxy,
+                &self.bg_tx,
+                "proxmox.hosts",
+                "match",
+                match_params,
+            )
+            .await
+            {
+                Ok(resp) if resp.success => {
+                    tracing::info!(
+                        host_id = %entry.host_id,
+                        mapping_id = %entry.mapping_id,
+                        "auto-matched bootstrapped guest to Proxmox host mapping"
+                    );
+                    if let Err(e) = host_ops::delete_pending_proxmox_match(db, entry.id).await {
+                        tracing::warn!(
+                            id = entry.id,
+                            error = %e,
+                            "matched but failed to delete pending Proxmox match row"
+                        );
+                    }
+                }
+                Ok(resp) => {
+                    tracing::warn!(
+                        host_id = %entry.host_id,
+                        mapping_id = %entry.mapping_id,
+                        error = ?resp.error,
+                        "pending Proxmox match failed; will retry on next ReportHosts"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        host_id = %entry.host_id,
+                        mapping_id = %entry.mapping_id,
+                        error = %e,
+                        "pending Proxmox match proxy call failed; will retry on next ReportHosts"
+                    );
+                }
+            }
+        }
     }
 }
 

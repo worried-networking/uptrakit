@@ -103,6 +103,7 @@ async fn report_hosts_creates_new_record_after_deactivation() {
         os_version: Some("Ubuntu 24.04".to_string()),
         architecture: Some("x86_64".to_string()),
         ip_address: Some("10.0.0.99".to_string()),
+        agent_host_id: None,
     };
 
     let result = find_or_create_host_and_link(

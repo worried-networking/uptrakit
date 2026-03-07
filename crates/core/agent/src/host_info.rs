@@ -9,6 +9,7 @@ pub fn collect_host_info() -> HostInfo {
         architecture: Some(std::env::consts::ARCH.to_string()),
         hostname: read_hostname(),
         ip_address: None, // Controller knows the connection IP from the service record.
+        agent_host_id: None, // Regular agent has no persistent host UUID.
     }
 }
 

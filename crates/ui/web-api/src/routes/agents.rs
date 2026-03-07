@@ -289,8 +289,9 @@ pub(crate) async fn find_or_create_host_and_link(
         active.update(db).await.context_to::<AgentRouteError>()?;
         (existing_host.id, false)
     } else {
-        // Create new host
-        let host_id = token::generate_uuid();
+        // Create new host — prefer the agent-supplied UUID so agent-local and
+        // controller UUIDs stay in sync (required for Proxmox FK operations).
+        let host_id = host_info.agent_host_id.unwrap_or_else(token::generate_uuid);
         let new_host = host::ActiveModel {
             id: Set(host_id),
             tenant_id: Set(tenant_id),

@@ -164,6 +164,8 @@ async fn collect_one_host_for_report(
     let mut info = collect_remote_host_info(&session).await;
     // Set the SSH target address as the host's ip_address.
     info.ip_address = Some(host.hostname.clone());
+    // Provide the agent-local UUID so the controller can use it as hosts.id.
+    info.agent_host_id = host.id.parse().ok();
 
     // Persist the machine_id so incoming CheckVersions / ExecuteUpdate
     // messages can be routed to this host via find_host_by_machine_id().
@@ -216,6 +218,7 @@ fn build_fast_path_host_info(host: &Model) -> HostInfo {
         architecture: None,
         hostname: None,
         ip_address: Some(host.hostname.clone()),
+        agent_host_id: host.id.parse().ok(),
     }
 }
 
@@ -300,6 +303,7 @@ async fn collect_one_host_for_reload(
 
     let mut info = collect_remote_host_info(&session).await;
     info.ip_address = Some(host.hostname.clone());
+    info.agent_host_id = host.id.parse().ok();
 
     if let Err(e) = update_host_machine_id(&db, &host.id, &info.machine_id).await {
         tracing::warn!(

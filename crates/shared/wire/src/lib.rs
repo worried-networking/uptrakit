@@ -620,6 +620,14 @@ pub struct HostInfo {
     /// Network address of the host (SSH target address for SSH agent hosts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ip_address: Option<String>,
+    /// Agent-local UUID assigned to this host at bootstrap time.
+    ///
+    /// When present, the controller uses this as `hosts.id` when creating a
+    /// new row, ensuring agent and controller share the same UUID. This is
+    /// required for plugin FK operations (e.g. Proxmox host mapping) that
+    /// reference `hosts.id` before the controller has generated its own UUID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_host_id: Option<Uuid>,
 }
 
 /// Payload for service enrollment request.
@@ -1930,6 +1938,7 @@ mod tests {
                 architecture: Some("x86_64".to_string()),
                 hostname: None,
                 ip_address: None,
+                agent_host_id: None,
             }],
             agent_version: "0.0.1".to_string(),
             capabilities: BTreeSet::new(),
@@ -1953,6 +1962,7 @@ mod tests {
                     architecture: None,
                     hostname: None,
                     ip_address: None,
+                    agent_host_id: None,
                 },
                 HostInfo {
                     machine_id: "host-b".to_string(),
@@ -1961,6 +1971,7 @@ mod tests {
                     architecture: Some("aarch64".to_string()),
                     hostname: None,
                     ip_address: None,
+                    agent_host_id: None,
                 },
             ],
             agent_version: "0.0.1".to_string(),
@@ -2773,6 +2784,7 @@ mod tests {
             architecture: None,
             hostname: None,
             ip_address: None,
+            agent_host_id: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         assert_eq!(json, r#"{"machine_id":"unknown"}"#);
@@ -2789,6 +2801,7 @@ mod tests {
             architecture: None,
             hostname: Some("web-01.example.com".to_string()),
             ip_address: Some("10.0.0.5".to_string()),
+            agent_host_id: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains(r#""hostname":"web-01.example.com"#));
@@ -3606,6 +3619,7 @@ mod tests {
                 architecture: Some("x86_64".to_string()),
                 hostname: Some("web-01.example.com".to_string()),
                 ip_address: Some("10.0.0.5".to_string()),
+                agent_host_id: None,
             }],
             agent_version: "0.0.1".to_string(),
             capabilities: [Capability::SoftwareDiscovery, Capability::GracefulShutdown]
@@ -4352,6 +4366,7 @@ mod tests {
                 architecture: None,
                 hostname: None,
                 ip_address: None,
+                agent_host_id: None,
             }],
             agent_version: "0.0.1".to_string(),
             capabilities: BTreeSet::new(),

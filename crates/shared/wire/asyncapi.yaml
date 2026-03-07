@@ -338,9 +338,12 @@ operations:
     description: |
       Authenticated agent services send this message immediately after connecting
       via mTLS. Contains one or more host entries, enabling a single service to
-      manage multiple hosts (e.g. a future SSH-backed agent). The controller uses
-      each host's machine_id to find or create a Host entity and link it to the
-      service. This enables host tracking across re-enrollments.
+      manage multiple hosts (e.g. the SSH agent). The controller uses each
+      host's machine_id to find or create a Host entity and link it to the
+      service. When the optional `agent_host_id` field is present on a new host,
+      the controller uses it as `hosts.id` so that agent-local and controller
+      UUIDs stay in sync — required for plugin FK operations such as Proxmox host
+      mapping that reference `hosts.id` before the host is registered.
 
   receiveError:
     action: receive
@@ -1845,6 +1848,19 @@ components:
           examples:
             - 10.0.0.5
             - web-01.internal
+        agent_host_id:
+          type: string
+          format: uuid
+          description: |
+            Agent-local UUID assigned to this SSH host at bootstrap time.
+            When present the controller uses this value as `hosts.id` when
+            creating a new host row, ensuring agent and controller share the
+            same UUID. This is required for plugin FK operations (e.g. Proxmox
+            host mapping) that reference `hosts.id` before the controller has
+            generated its own UUID. Absent for regular (non-SSH) agents and for
+            SSH hosts whose `agent_host_id` is unknown (legacy agents).
+          examples:
+            - 01952b3c-1e1a-7e4a-a000-0a1b2c3d4e5f
 
     reportHostsPayload:
       type: object

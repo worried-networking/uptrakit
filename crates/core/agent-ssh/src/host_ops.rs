@@ -3,6 +3,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
 
+use crate::db::entity::pending_proxmox_match;
 use crate::db::entity::ssh_host::{ActiveModel, Column, Entity, Model, SshKeyType};
 use crate::error::{Error, Result};
 
@@ -341,6 +342,79 @@ pub async fn find_hosts_by_hostname(
         query = query.filter(Column::Port.eq(i32::from(p)));
     }
     query.all(db).await.context_to::<Error>()
+}
+
+// ── Pending Proxmox matches ───────────────────────────────────────────────────
+
+/// A pending Proxmox host-mapping match, returned by [`drain_pending_proxmox_matches`].
+pub struct PendingProxmoxMatch {
+    pub id: i32,
+    pub host_id: String,
+    pub mapping_id: String,
+}
+
+/// Insert a pending Proxmox match record.
+///
+/// Called immediately after a successful "Bootstrap via Discovered Guest"
+/// action. The record is drained after the next `ReportHosts` send.
+pub async fn insert_pending_proxmox_match(
+    db: &DatabaseConnection,
+    host_id: &str,
+    mapping_id: &str,
+) -> Result<()> {
+    use pending_proxmox_match::ActiveModel;
+
+    let now = time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
+
+    let row = ActiveModel {
+        host_id: Set(host_id.to_string()),
+        mapping_id: Set(mapping_id.to_string()),
+        created_at: Set(now),
+        ..Default::default()
+    };
+
+    row.insert(db)
+        .await
+        .map_err(|e| report!(Error::Database(e)))?;
+
+    Ok(())
+}
+
+/// Return all pending Proxmox matches, ordered by `id` (insertion order).
+pub async fn drain_pending_proxmox_matches(
+    db: &DatabaseConnection,
+) -> Result<Vec<PendingProxmoxMatch>> {
+    use pending_proxmox_match::{Column as PmColumn, Entity as PmEntity};
+
+    let rows = PmEntity::find()
+        .order_by_asc(PmColumn::Id)
+        .all(db)
+        .await
+        .map_err(|e| report!(Error::Database(e)))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| PendingProxmoxMatch {
+            id: r.id,
+            host_id: r.host_id,
+            mapping_id: r.mapping_id,
+        })
+        .collect())
+}
+
+/// Delete a pending Proxmox match by its row `id`.
+pub async fn delete_pending_proxmox_match(db: &DatabaseConnection, id: i32) -> Result<()> {
+    use pending_proxmox_match::{Column as PmColumn, Entity as PmEntity};
+
+    PmEntity::delete_many()
+        .filter(PmColumn::Id.eq(id))
+        .exec(db)
+        .await
+        .map_err(|e| report!(Error::Database(e)))?;
+
+    Ok(())
 }
 
 #[cfg(test)]
