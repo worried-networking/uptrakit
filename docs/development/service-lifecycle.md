@@ -421,6 +421,22 @@ The profile drives behavioral defaults:
 The `service_label` column in API responses (`ServiceResponse.service_label`) is derived at query time
 from the profile and the presence of `Capability::SshRemote`. It is not stored in the database.
 
+## Identity state persistence
+
+`ServiceIdentityState` manages the `service.json` file in the state directory. The file contains:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `service_id` | UUID | Assigned by the controller during enrollment |
+| `enrollment_secret` | String | Bearer token for pre-certificate auth (cleared after certificate issuance) |
+| `tenant_id` | UUID (optional) | Received from the controller via `ServiceSettings`; persisted so CLI commands can use it offline |
+
+The `tenant_id` field uses `#[serde(default, skip_serializing_if = "Option::is_none")]` for backward
+compatibility with existing `service.json` files that predate the field. Services persist the
+tenant_id by calling `identity.save_tenant_id(tid)` when they receive it in `on_settings()`. CLI
+commands (e.g. the SSH agent's `host sync` and `host bootstrap`) load the persisted tenant_id from
+the identity state instead of requiring a live controller connection.
+
 ## Related documentation
 
 - [Services and Operations](../api/services-operations.md) — shared startup flow and API operations

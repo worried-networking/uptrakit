@@ -37,6 +37,13 @@ const SERVICE_KEY_FILE: &str = "service.key";
 struct ServiceState {
     service_id: Uuid,
     enrollment_secret: SecretString,
+    /// Tenant UUID received from the controller via `ServiceSettings`.
+    ///
+    /// Persisted so that CLI commands (which do not connect to the controller)
+    /// can read it back. Added after the initial format, so existing files
+    /// will deserialize with `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tenant_id: Option<Uuid>,
 }
 
 /// Unified identity state for any service (agent or MQTT).
@@ -62,6 +69,11 @@ pub struct ServiceIdentityState {
     state_dir: PathBuf,
     /// Service UUID assigned by the controller during enrollment.
     service_id: Option<Uuid>,
+    /// Tenant UUID received from the controller via `ServiceSettings`.
+    ///
+    /// Persisted alongside the service identity so that CLI commands can
+    /// read it without connecting to the controller.
+    tenant_id: Option<Uuid>,
     /// Enrollment secret for bearer auth before certificate issuance.
     ///
     /// Stored as [`SecretString`] to prevent accidental exposure in `Debug`
@@ -88,6 +100,7 @@ impl ServiceIdentityState {
             config_dir: config_dir.as_ref().to_path_buf(),
             state_dir: state_dir.as_ref().to_path_buf(),
             service_id: None,
+            tenant_id: None,
             enrollment_secret: None,
             keypair: None,
             certificate_pem: None,
@@ -104,6 +117,7 @@ impl ServiceIdentityState {
             config_dir: path.clone(),
             state_dir: path,
             service_id: None,
+            tenant_id: None,
             enrollment_secret: None,
             keypair: None,
             certificate_pem: None,
@@ -134,6 +148,7 @@ impl ServiceIdentityState {
             match serde_json::from_str::<ServiceState>(&content) {
                 Ok(state) => {
                     self.service_id = Some(state.service_id);
+                    self.tenant_id = state.tenant_id;
                     if !state.enrollment_secret.expose_secret().is_empty() {
                         self.enrollment_secret = Some(state.enrollment_secret);
                     }
@@ -203,6 +218,11 @@ impl ServiceIdentityState {
     /// The service UUID assigned by the controller.
     pub fn service_id(&self) -> Option<Uuid> {
         self.service_id
+    }
+
+    /// The tenant UUID received from the controller.
+    pub fn tenant_id(&self) -> Option<Uuid> {
+        self.tenant_id
     }
 
     /// The enrollment secret (for bearer auth before cert issuance).
@@ -363,6 +383,7 @@ impl ServiceIdentityState {
         let state = ServiceState {
             service_id,
             enrollment_secret: SecretString::new(enrollment_secret.to_string()),
+            tenant_id: self.tenant_id,
         };
         let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
         let path = self.state_dir.join(STATE_FILE);
@@ -372,6 +393,41 @@ impl ServiceIdentityState {
 
         self.service_id = Some(service_id);
         self.enrollment_secret = Some(SecretString::new(enrollment_secret.to_string()));
+        Ok(())
+    }
+
+    /// Persist the tenant UUID to `service.json`.
+    ///
+    /// Reads the current state file, updates the `tenant_id` field, and
+    /// rewrites the file. If no state file exists yet (service not enrolled),
+    /// this is a no-op.
+    pub async fn save_tenant_id(&mut self, tenant_id: Uuid) -> Result<()> {
+        self.tenant_id = Some(tenant_id);
+
+        let Some(sid) = self.service_id else {
+            return Ok(());
+        };
+
+        let state_path = self.state_dir.join(STATE_FILE);
+        if !state_path.exists() {
+            return Ok(());
+        }
+
+        // Read current state to preserve enrollment_secret.
+        let content = fs::read_to_string(&state_path)
+            .await
+            .context_to::<EnrollmentError>()?;
+        let mut state: ServiceState =
+            serde_json::from_str(&content).context_to::<EnrollmentError>()?;
+
+        state.service_id = sid;
+        state.tenant_id = Some(tenant_id);
+
+        let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
+        uptrakit_directories::write_secure_file_str(&state_path, &json)
+            .await
+            .context_to::<EnrollmentError>()?;
+
         Ok(())
     }
 
@@ -413,6 +469,7 @@ impl ServiceIdentityState {
             let state = ServiceState {
                 service_id: sid,
                 enrollment_secret: SecretString::new(String::new()),
+                tenant_id: self.tenant_id,
             };
             let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
             let path = self.state_dir.join(STATE_FILE);
@@ -480,6 +537,7 @@ impl ServiceIdentityState {
         }
 
         self.service_id = None;
+        self.tenant_id = None;
         self.enrollment_secret = None;
         self.keypair = None;
         self.certificate_pem = None;
@@ -502,6 +560,7 @@ impl ServiceIdentityState {
         }
 
         self.service_id = None;
+        self.tenant_id = None;
         self.enrollment_secret = None;
         self.keypair = None;
         self.certificate_pem = None;
@@ -882,6 +941,139 @@ mod tests {
 
         // Should not be expired
         assert_eq!(identity.is_cert_expired(), Some(false));
+    }
+
+    #[tokio::test]
+    async fn tenant_id_persistence_roundtrip() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut identity = ServiceIdentityState::new_single_dir(dir.path());
+        identity.load().await.expect("load");
+
+        let sid = Uuid::now_v7();
+        identity
+            .save_enrollment(sid, "secret")
+            .await
+            .expect("save_enrollment");
+
+        let tid = Uuid::now_v7();
+        identity.save_tenant_id(tid).await.expect("save_tenant_id");
+
+        assert_eq!(identity.tenant_id(), Some(tid));
+
+        // Reload and verify persistence.
+        let mut identity2 = ServiceIdentityState::new_single_dir(dir.path());
+        identity2.load().await.expect("load");
+        assert_eq!(identity2.tenant_id(), Some(tid));
+        // service_id and enrollment_secret must be preserved.
+        assert_eq!(identity2.service_id(), Some(sid));
+        assert_eq!(identity2.enrollment_secret(), Some("secret"));
+    }
+
+    #[tokio::test]
+    async fn tenant_id_backward_compat() {
+        // Simulate a legacy service.json without tenant_id.
+        let dir = TempDir::new().expect("tempdir");
+        let legacy_json = r#"{"service_id":"01936f00-0000-7000-8000-000000000001","enrollment_secret":"old-secret"}"#;
+        let state_path = dir.path().join("service.json");
+        tokio::fs::write(&state_path, legacy_json)
+            .await
+            .expect("write legacy json");
+
+        let mut identity = ServiceIdentityState::new_single_dir(dir.path());
+        identity.load().await.expect("load");
+
+        assert!(identity.tenant_id().is_none());
+        assert!(identity.service_id().is_some());
+        assert_eq!(identity.enrollment_secret(), Some("old-secret"));
+    }
+
+    #[tokio::test]
+    async fn save_tenant_id_noop_when_not_enrolled() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut identity = ServiceIdentityState::new_single_dir(dir.path());
+        identity.load().await.expect("load");
+
+        let tid = Uuid::now_v7();
+        // No enrollment → save_tenant_id updates in-memory but does not
+        // write a file (no service_id to serialize).
+        identity.save_tenant_id(tid).await.expect("save_tenant_id");
+        assert_eq!(identity.tenant_id(), Some(tid));
+        assert!(!dir.path().join("service.json").exists());
+    }
+
+    #[tokio::test]
+    async fn tenant_id_preserved_across_certificate_save() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut identity = ServiceIdentityState::new_single_dir(dir.path());
+        identity.load().await.expect("load");
+
+        let sid = Uuid::now_v7();
+        identity
+            .save_enrollment(sid, "secret")
+            .await
+            .expect("save_enrollment");
+
+        let tid = Uuid::now_v7();
+        identity.save_tenant_id(tid).await.expect("save_tenant_id");
+
+        // Save a certificate (clears enrollment_secret but should preserve tenant_id).
+        identity.ensure_keypair().await.expect("ensure_keypair");
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let params = rcgen::CertificateParams::new(vec![]).expect("cert params");
+        let cert = params.self_signed(&kp).expect("self-sign");
+        identity
+            .save_certificate(&cert.pem())
+            .await
+            .expect("save_certificate");
+
+        // Reload and verify tenant_id survived.
+        let mut identity2 = ServiceIdentityState::new_single_dir(dir.path());
+        identity2.load().await.expect("load");
+        assert_eq!(identity2.tenant_id(), Some(tid));
+        assert!(identity2.enrollment_secret().is_none());
+    }
+
+    #[tokio::test]
+    async fn clear_state_clears_tenant_id() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut identity = ServiceIdentityState::new_single_dir(dir.path());
+        identity.load().await.expect("load");
+
+        let sid = Uuid::now_v7();
+        identity
+            .save_enrollment(sid, "secret")
+            .await
+            .expect("save_enrollment");
+        identity
+            .save_tenant_id(Uuid::now_v7())
+            .await
+            .expect("save_tenant_id");
+
+        identity.clear_state().await.expect("clear_state");
+        assert!(identity.tenant_id().is_none());
+    }
+
+    #[tokio::test]
+    async fn clear_enrollment_state_clears_tenant_id() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut identity = ServiceIdentityState::new_single_dir(dir.path());
+        identity.load().await.expect("load");
+
+        let sid = Uuid::now_v7();
+        identity
+            .save_enrollment(sid, "secret")
+            .await
+            .expect("save_enrollment");
+        identity
+            .save_tenant_id(Uuid::now_v7())
+            .await
+            .expect("save_tenant_id");
+
+        identity
+            .clear_enrollment_state()
+            .await
+            .expect("clear_enrollment_state");
+        assert!(identity.tenant_id().is_none());
     }
 
     #[tokio::test]
