@@ -476,9 +476,23 @@ impl ServiceHandler for SshAgentHandler {
         settings: &uptrakit_internal_wire::ServiceSettingsPayload,
         conn: &mut ControllerConnection,
     ) {
-        // Store tenant_id for PVE credential provisioning.
+        // Store tenant_id for PVE credential provisioning and persist it
+        // to service.json so CLI commands can read it without connecting to
+        // the controller.
         if let Some(tid) = settings.tenant_id {
             self.tenant_id = Some(tid);
+
+            let state_dir = self.state_dir.clone();
+            tokio::spawn(async move {
+                let mut identity = ServiceIdentityState::new_single_dir(&state_dir);
+                if let Err(e) = identity.load().await {
+                    tracing::warn!(error = %e, "failed to load identity for tenant_id persistence");
+                    return;
+                }
+                if let Err(e) = identity.save_tenant_id(tid).await {
+                    tracing::warn!(error = %e, "failed to persist tenant_id to service.json");
+                }
+            });
         }
 
         // Register UI extensions only when the agreed capability set includes

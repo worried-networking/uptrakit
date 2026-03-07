@@ -144,6 +144,17 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
                 None => None,
             };
 
+            // Load tenant_id from persisted identity state (available after the
+            // agent has connected to the controller at least once).
+            let tenant_id = {
+                let mut identity = ServiceIdentityState::new_single_dir(state_dir);
+                identity
+                    .load()
+                    .await
+                    .ok()
+                    .and_then(|()| identity.tenant_id())
+            };
+
             let args = SyncArgs {
                 name_or_id,
                 auth_password: resolved_password,
@@ -151,8 +162,7 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
                 use_ssh_agent,
                 allow_all,
                 dry_run,
-                // Tenant ID is not available in CLI mode.
-                tenant_id: None,
+                tenant_id,
             };
             sync::run(&args, &db).await
         }
@@ -462,15 +472,15 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
         None => None,
     };
 
-    // Load service ID best-effort from the local identity state.  Bootstrap
-    // may run before the first enrollment, so errors are silently ignored.
-    let service_id = {
+    // Load service ID and tenant ID best-effort from the local identity state.
+    // Bootstrap may run before the first enrollment, so errors are silently
+    // ignored.
+    let (service_id, tenant_id) = {
         let mut identity = ServiceIdentityState::new_single_dir(p.state_dir);
-        identity
-            .load()
-            .await
-            .ok()
-            .and_then(|()| identity.service_id())
+        match identity.load().await {
+            Ok(()) => (identity.service_id(), identity.tenant_id()),
+            Err(_) => (None, None),
+        }
     };
 
     let params = BootstrapParams {
@@ -488,10 +498,7 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
         allow_all: p.allow_all,
         host_id: p.host_id,
         service_id,
-        // Tenant ID is not available in CLI mode (only via the
-        // controller's ServiceSettings). PVE credential creation
-        // will be skipped if this is None.
-        tenant_id: None,
+        tenant_id,
         remove_stale_keys: p.remove_stale_keys,
     };
 

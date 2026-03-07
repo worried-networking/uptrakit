@@ -630,8 +630,10 @@ async fn create_or_reuse_pve_credentials(
     tenant_id: &Option<uuid::Uuid>,
 ) -> (Option<pve_setup::PveCredentials>, Option<String>) {
     let Some(tid) = tenant_id else {
-        println!("  Skipping PVE API credential creation: tenant ID not yet known.");
-        println!("  Re-bootstrap this host after the agent has connected to the controller.");
+        println!("  Skipping PVE API credential creation: tenant ID not yet available.");
+        println!(
+            "  Ensure the agent has connected to the controller at least once, then re-bootstrap."
+        );
         return (None, None);
     };
 

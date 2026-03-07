@@ -373,7 +373,9 @@ async fn sync_pve_state(
             }
         }
     } else {
-        println!("  PVE privilege check: skipped (tenant ID not available in CLI mode)");
+        println!(
+            "  PVE privilege check: skipped (tenant ID not yet available — ensure the agent has connected to the controller at least once)"
+        );
     }
 
     Ok(())
