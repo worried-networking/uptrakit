@@ -841,8 +841,10 @@ See [Extensions Security](../security/extensions.md) for the trust model and
 - **`list-discovered-guests`**: Invokes `proxmox.hosts/list-all-unmatched` via
   `ServiceExtensionProxy`. Returns empty options if the Proxmox plugin is not installed.
 - **`bootstrap-proxmox-guest`**: Spawned as a background task. Resolves guest metadata
-  from the Proxmox plugin via `ServiceExtensionProxy`, bootstraps the guest (same as
-  `bootstrap-proxmox`), then auto-matches the Proxmox host mapping via
+  from the Proxmox plugin via `ServiceExtensionProxy`, auto-detects the PVE host from
+  the guest's `proxmox_node` (matching against local PVE host names), auto-fills the
+  hostname from the guest's Proxmox hostname (with user override), bootstraps the guest
+  (same as `bootstrap-proxmox`), then auto-matches the Proxmox host mapping via
   `proxmox.hosts/match`.
 
 ### CLI usage

@@ -115,12 +115,13 @@ commands or REST routes exist.
 
 | Extension | Action | Parameters | Description |
 | --- | --- | --- | --- |
-| `proxmox.hosts` | `list` | `plugin_config_id` | List discovered guests |
+| `proxmox.hosts` | `list` | `plugin_config_id` | List discovered guests with inline match suggestions |
 | `proxmox.hosts` | `discover` | `plugin_config_id` | Trigger discovery |
 | `proxmox.hosts` | `test-connection` | `plugin_config_id` | Test API connectivity |
 | `proxmox.hosts` | `match` | `mapping_id`, `host_id` | Manual match |
+| `proxmox.hosts` | `approve-match` | `mapping_id`, `host_id`/`suggested_host_id` | Approve a suggested match (accepts `suggested_host_id` as fallback) |
 | `proxmox.hosts` | `unmatch` | `mapping_id` | Remove match |
-| `proxmox.hosts` | `list-all-unmatched` | (none) | List unmatched guests across all configs (for service-initiated invocations) |
+| `proxmox.hosts` | `list-all-unmatched` | (none) | List unmatched guests sorted by name across all configs |
 | `proxmox.host-info` | `get-info` | `host_id` | Get Proxmox info for host |
 
 The `plugin_config_id` parameter is **not included in action forms**. Instead, the
@@ -136,12 +137,26 @@ extension-side handler for config creation is needed. After the REST call succee
 the frontend refreshes the selector options and auto-selects the new configuration
 (identified via `response_id_field: "id"`).
 
+### Row action visibility
+
+Row actions use `row_visible_when` to conditionally show/hide buttons based on
+row data:
+
+- **Approve Match**: visible only when `suggested_host_id` is present (a match
+  suggestion exists for the row).
+- **Remove Match**: visible only when `matched_host` is present (the row is
+  already matched to a host).
+- **Manual Match**: always visible (no condition).
+
 ### Cross-config guest listing
 
 The `list-all-unmatched` action returns unmatched guests across **all** Proxmox
-configurations for the tenant. Unlike `list` (which requires a `plugin_config_id`),
-this action is designed for service-initiated invocations where the calling service
-does not know which Proxmox configs exist.
+configurations for the tenant, sorted by name (case-insensitive) with VMID as a
+tiebreaker. Unlike `list` (which requires a `plugin_config_id`), this action is
+designed for service-initiated invocations where the calling service does not
+know which Proxmox configs exist.
+
+The response includes `hostname` alongside other guest metadata fields.
 
 The SSH agent uses this action (via `ServiceExtensionProxy`) to populate the
 `bootstrap-proxmox-guest` dropdown. If the Proxmox plugin is not installed, the

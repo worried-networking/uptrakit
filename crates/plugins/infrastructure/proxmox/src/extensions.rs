@@ -108,13 +108,16 @@ fn match_action() -> ActionDef {
 }
 
 fn approve_match_action() -> ActionDef {
-    ActionDef::new("approve-match", "Approve Match").with_permission(Permission::ManageHosts)
+    ActionDef::new("approve-match", "Approve Match")
+        .with_permission(Permission::ManageHosts)
+        .with_row_visible_when("suggested_host_id", RowCondition::Present)
 }
 
 fn unmatch_action() -> ActionDef {
     ActionDef::new("unmatch", "Remove Match")
         .with_permission(Permission::ManageHosts)
         .destructive()
+        .with_row_visible_when("matched_host", RowCondition::Present)
 }
 
 fn discover_action() -> ActionDef {
@@ -409,9 +412,12 @@ async fn handle_approve_match(
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     let mapping_id = parse_uuid_param(&params, "mapping_id")?;
-    let host_id = parse_uuid_param(&params, "host_id")?;
+    // The frontend passes row data as params; the host ID lives in
+    // `suggested_host_id` (from the suggestion) rather than `host_id`.
+    let host_id = parse_uuid_param_with_fallback(&params, "host_id", "suggested_host_id")?;
     let match_method_str = params
         .get("match_method")
+        .or_else(|| params.get("suggested_match_method"))
         .and_then(|v| v.as_str())
         .unwrap_or("suggested_hostname");
 
@@ -511,12 +517,22 @@ async fn handle_list_all_unmatched(
 
     let tenant_id = tenant_id.ok_or_else(|| "tenant context required".to_string())?;
 
-    let mappings = proxmox_host_mapping::Entity::find()
+    let mut mappings = proxmox_host_mapping::Entity::find()
         .filter(proxmox_host_mapping::Column::TenantId.eq(tenant_id))
         .filter(proxmox_host_mapping::Column::HostId.is_null())
         .all(db)
         .await
         .map_err(|e| format!("database error: {e}"))?;
+
+    // Sort by name (case-insensitive), then by VMID as tiebreaker.
+    mappings.sort_by(|a, b| {
+        let name_a = a.proxmox_name.as_deref().unwrap_or("");
+        let name_b = b.proxmox_name.as_deref().unwrap_or("");
+        name_a
+            .to_lowercase()
+            .cmp(&name_b.to_lowercase())
+            .then_with(|| a.proxmox_vmid.cmp(&b.proxmox_vmid))
+    });
 
     let options: Vec<serde_json::Value> = mappings
         .into_iter()
@@ -534,6 +550,7 @@ async fn handle_list_all_unmatched(
                 "proxmox_vmid": m.proxmox_vmid,
                 "proxmox_type": m.proxmox_type,
                 "proxmox_name": m.proxmox_name,
+                "hostname": m.hostname,
             })
         })
         .collect();
@@ -581,6 +598,26 @@ fn parse_uuid_param(params: &serde_json::Value, key: &str) -> std::result::Resul
         .ok_or_else(|| format!("missing required parameter '{key}'"))?;
 
     Uuid::parse_str(val).map_err(|e| format!("invalid UUID for '{key}': {e}"))
+}
+
+/// Parse a UUID parameter with a fallback key.
+///
+/// Tries `primary_key` first, then `fallback_key`. This allows row actions
+/// to work when the frontend passes row data where the field has a different
+/// name than what the handler originally expected (e.g., `suggested_host_id`
+/// instead of `host_id`).
+fn parse_uuid_param_with_fallback(
+    params: &serde_json::Value,
+    primary_key: &str,
+    fallback_key: &str,
+) -> std::result::Result<Uuid, String> {
+    let val = params
+        .get(primary_key)
+        .and_then(|v| v.as_str())
+        .or_else(|| params.get(fallback_key).and_then(|v| v.as_str()))
+        .ok_or_else(|| format!("missing required parameter '{primary_key}'"))?;
+
+    Uuid::parse_str(val).map_err(|e| format!("invalid UUID for '{primary_key}': {e}"))
 }
 
 #[cfg(test)]
@@ -694,5 +731,45 @@ mod tests {
     fn parse_uuid_param_invalid() {
         let params = serde_json::json!({"id": "not-a-uuid"});
         assert!(parse_uuid_param(&params, "id").is_err());
+    }
+
+    #[test]
+    fn parse_uuid_param_with_fallback_primary() {
+        let params = serde_json::json!({"host_id": "01944c3c-6a3a-7000-8000-000000000001"});
+        assert!(parse_uuid_param_with_fallback(&params, "host_id", "suggested_host_id").is_ok());
+    }
+
+    #[test]
+    fn parse_uuid_param_with_fallback_uses_fallback() {
+        let params =
+            serde_json::json!({"suggested_host_id": "01944c3c-6a3a-7000-8000-000000000001"});
+        let result = parse_uuid_param_with_fallback(&params, "host_id", "suggested_host_id");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn parse_uuid_param_with_fallback_both_missing() {
+        let params = serde_json::json!({});
+        assert!(parse_uuid_param_with_fallback(&params, "host_id", "suggested_host_id").is_err());
+    }
+
+    #[test]
+    fn approve_match_action_has_row_visibility() {
+        let action = approve_match_action();
+        let rvw = action
+            .row_visible_when
+            .expect("approve-match should have row_visible_when");
+        assert_eq!(rvw.field, "suggested_host_id");
+        assert_eq!(rvw.condition, RowCondition::Present);
+    }
+
+    #[test]
+    fn unmatch_action_has_row_visibility() {
+        let action = unmatch_action();
+        let rvw = action
+            .row_visible_when
+            .expect("unmatch should have row_visible_when");
+        assert_eq!(rvw.field, "matched_host");
+        assert_eq!(rvw.condition, RowCondition::Present);
     }
 }

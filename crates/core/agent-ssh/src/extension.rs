@@ -206,17 +206,12 @@ fn bootstrap_proxmox_guest_action() -> ActionDef {
                 .with_select_source(SelectSource::Action {
                     action_id: "list-discovered-guests".to_string(),
                 }),
-            FieldDef::new("pve_host_id", "PVE Host")
-                .with_type(FieldType::Select)
-                .required()
-                .with_help_text("PVE node to use as SSH gateway for guest access.")
-                .with_select_source(SelectSource::Action {
-                    action_id: "list-pve-hosts".to_string(),
-                }),
             FieldDef::new("name", "Host Name")
-                .required()
-                .with_placeholder("my-container")
-                .with_help_text("Friendly name for identification."),
+                .with_placeholder("Leave blank to use guest hostname")
+                .with_help_text(
+                    "Friendly name for identification. Defaults to the guest's \
+                     Proxmox hostname if left blank.",
+                ),
             FieldDef::new("target_username", "Target Username")
                 .with_help_text("User to create/use in the guest.")
                 .with_default_value("uptrakit"),
@@ -611,8 +606,9 @@ async fn run_bootstrap_proxmox_action(
 /// The "Bootstrap via Discovered Guest" action logic.
 ///
 /// 1. Resolves the selected discovered guest's metadata (node, VMID, type).
-/// 2. Runs the Proxmox bootstrap workflow.
-/// 3. On success, auto-matches the host to the Proxmox guest mapping via the
+/// 2. Auto-detects the PVE host from the guest's node name.
+/// 3. Runs the Proxmox bootstrap workflow.
+/// 4. On success, auto-matches the host to the Proxmox guest mapping via the
 ///    Proxmox plugin's `match` action.
 #[tracing::instrument(skip_all, fields(request_id = %request_id))]
 async fn run_bootstrap_proxmox_guest_action(
@@ -629,11 +625,6 @@ async fn run_bootstrap_proxmox_guest_action(
         None => {
             return make_error_response(request_id, "missing required field 'discovered_guest'");
         }
-    };
-
-    let pve_host_id = match params.get("pve_host_id").and_then(|v| v.as_str()) {
-        Some(id) => id.to_string(),
-        None => return make_error_response(request_id, "missing required field 'pve_host_id'"),
     };
 
     // Look up the guest details from the Proxmox plugin.
@@ -700,16 +691,38 @@ async fn run_bootstrap_proxmox_guest_action(
         _ => return make_error_response(request_id, "unknown guest type in discovered guest"),
     };
 
-    let name = match params.get("name").and_then(|v| v.as_str()) {
-        Some(n) => n.to_string(),
+    // Auto-detect PVE host from the guest's node name.
+    let proxmox_node = match guest.get("proxmox_node").and_then(|v| v.as_str()) {
+        Some(n) => n,
         None => {
-            // Fall back to proxmox_name from the discovered guest.
-            guest
-                .get("proxmox_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unnamed")
-                .to_string()
+            return make_error_response(request_id, "missing proxmox_node in discovered guest");
         }
+    };
+
+    let pve_host_id = match find_pve_host_for_node(state_dir, proxmox_node).await {
+        Ok(id) => id,
+        Err(msg) => return make_error_response(request_id, &msg),
+    };
+
+    // Auto-fill hostname: user override → guest hostname → proxmox_name → "unnamed".
+    let name = match params
+        .get("name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        Some(n) => n.to_string(),
+        None => guest
+            .get("hostname")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                guest
+                    .get("proxmox_name")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or("unnamed")
+            .to_string(),
     };
 
     let target_username = params
@@ -996,6 +1009,47 @@ fn decrypt_sensitive_params(
         .map_err(|e| format!("failed to parse sensitive params JSON: {e}"))?;
 
     Ok(Some(params))
+}
+
+/// Find the local PVE host whose name matches a Proxmox node name.
+///
+/// Searches all PVE hosts in the local database and matches by friendly name
+/// (case-insensitive) or hostname. Returns the host's string ID on success.
+async fn find_pve_host_for_node(state_dir: &Path, proxmox_node: &str) -> Result<String, String> {
+    let db = crate::db::init_db(state_dir)
+        .await
+        .map_err(|e| format!("failed to initialize local database: {e}"))?;
+
+    let pve_hosts = host_ops::find_pve_hosts(&db)
+        .await
+        .map_err(|e| format!("failed to list PVE hosts: {e}"))?;
+
+    if pve_hosts.is_empty() {
+        return Err("no PVE hosts found; bootstrap a PVE node first".to_string());
+    }
+
+    // Match by name (case-insensitive) first, then by hostname.
+    let node_lower = proxmox_node.to_lowercase();
+    let matched = pve_hosts
+        .iter()
+        .find(|h| h.name.to_lowercase() == node_lower)
+        .or_else(|| {
+            pve_hosts
+                .iter()
+                .find(|h| h.hostname.to_lowercase() == node_lower)
+        });
+
+    match matched {
+        Some(host) => Ok(host.id.clone()),
+        None => {
+            let available: Vec<&str> = pve_hosts.iter().map(|h| h.name.as_str()).collect();
+            Err(format!(
+                "no PVE host found for node '{proxmox_node}'; \
+                 available PVE hosts: [{}]",
+                available.join(", ")
+            ))
+        }
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
