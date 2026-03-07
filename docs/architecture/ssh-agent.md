@@ -261,12 +261,22 @@ invocation and runs it on the PVE node via SSH.
 ### PVE Detection During SSH Bootstrap
 
 When bootstrapping a host via regular SSH (the `bootstrap` action), the agent automatically
-detects whether the target is a Proxmox VE node by checking for `pveversion`. If detected:
+detects whether the target is a Proxmox VE node by checking for `pveversion`. If detected,
+the agent performs a **cluster deduplication check** before creating credentials:
 
-1. Creates a PVE API user and token via `pveum` commands
-2. Marks the host as `is_pve_node = true` in the local DB
-3. Sends `ReportPluginConfig` to the controller to register a Proxmox plugin configuration
-4. The controller creates or finds an existing config and responds with the `plugin_config_id`
+1. Checks for existing Uptrakit PVE tokens on the cluster via `pveum user list`
+2. If a token owned by the **same tenant** already exists: reuses the existing
+   `pve_plugin_config_id` from a previously bootstrapped host (skips credential creation
+   and `ReportPluginConfig`)
+3. If a token owned by a **different tenant** exists: fails with an error (cluster already
+   claimed by another tenant)
+4. If no token exists: creates a tenant-scoped PVE API user (`uptrakit-{tenant_id}@pve`)
+   and token via `pveum` commands, marks the host as `is_pve_node = true`, and sends
+   `ReportPluginConfig` to register a Proxmox plugin configuration
+5. If `tenant_id` is not yet available (service not enrolled): skips PVE credential creation
+   with a warning
+
+The tenant ID is received via `ServiceSettingsPayload.tenant_id` from the controller.
 
 This enables the `bootstrap-proxmox` action to appear in the UI with the PVE node available
 as a gateway option.

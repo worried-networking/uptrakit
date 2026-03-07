@@ -438,12 +438,21 @@ The host entry is **not** saved to the database unless all steps succeed.
 ## PVE node detection
 
 When bootstrapping a host via SSH, the agent automatically checks whether the
-target is a Proxmox VE node (by looking for `pveversion`). If detected:
+target is a Proxmox VE node (by looking for `pveversion`). If detected, the
+agent checks whether Uptrakit has already been set up on the same PVE cluster:
 
-1. The agent creates a PVE API user and token (`uptrakit@pve`) with `PVEAuditor`
-   role (read-only access).
-2. The host is marked as a PVE node in the local database.
-3. The agent reports the PVE plugin configuration to the controller.
+- **No existing token** — creates a tenant-scoped PVE API user
+  (`uptrakit-{tenant_id}@pve`) with `PVEAuditor` role (read-only access),
+  marks the host as a PVE node, and reports the plugin configuration to the
+  controller.
+- **Token owned by the same tenant** — reuses the existing plugin
+  configuration from a previously bootstrapped node in the same cluster. No
+  duplicate credentials are created.
+- **Token owned by a different tenant** — bootstrap fails with an error
+  explaining that the cluster is already claimed by another tenant.
+- **Tenant ID not yet available** — skips PVE credential creation with a
+  warning. This can happen if the service has not received its settings from
+  the controller yet.
 
 This enables the **Bootstrap via Proxmox** extension action, which allows
 bootstrapping LXC containers and QEMU VMs through the PVE node without direct

@@ -154,16 +154,43 @@ Used during SSH agent bootstrap to detect and configure PVE nodes.
 | Function | Description |
 | --- | --- |
 | `detect_pve_node(executor)` | Runs `command -v pveversion` to detect a PVE node |
-| `create_pve_api_credentials(executor, username)` | Creates a PVE API user and token via `pveum` commands |
+| `check_pve_token_exists(executor, tenant_id)` | Checks whether an Uptrakit PVE token already exists on the cluster and determines ownership |
+| `create_pve_api_credentials(executor, tenant_id)` | Creates a PVE API user and token via `pveum` commands |
+| `pve_user_realm(tenant_id)` | Returns the tenant-specific PVE username: `uptrakit-{tenant_id}@pve` |
+
+#### PVE Cluster Deduplication
+
+PVE clusters share a cluster-wide user and token database. If Uptrakit has
+already been installed on another node in the same cluster, creating a second
+token would fail. The agent performs a pre-flight check via
+`check_pve_token_exists()` before attempting credential creation:
+
+1. Lists all PVE users via `pveum user list --output-format json`
+2. Looks for users matching the `uptrakit-*@pve` pattern
+3. Returns a `PveTokenStatus`:
+   - `NotFound` — no Uptrakit token exists; safe to create
+   - `OwnedByTenant(username)` — token belongs to the current tenant; reuse existing config
+   - `OwnedByOtherTenant(username)` — token belongs to a different tenant; bootstrap fails with error
+
+When the token is owned by the current tenant, the agent looks up the existing
+`pve_plugin_config_id` from a previously bootstrapped host and reuses it
+instead of creating duplicate credentials.
+
+#### Tenant-Scoped PVE Credentials
+
+PVE API users are named per-tenant: `uptrakit-{tenant_id}@pve`. This ensures
+that each tenant's credentials are isolated and identifiable. The tenant ID is
+received via `ServiceSettingsPayload.tenant_id` from the controller.
 
 `create_pve_api_credentials` performs three steps:
 
-1. `pveum user add {user}@pve` — creates the API user (ignores "already exists")
-2. `pveum user token add {user}@pve uptrakit --privsep=0 --output-format json` — creates a token
-3. `pveum acl modify / --users {user}@pve --roles PVEAuditor` — grants read-only access
+1. `pveum user add uptrakit-{tenant_id}@pve` — creates the API user (ignores "already exists")
+2. `pveum user token add uptrakit-{tenant_id}@pve uptrakit --privsep=0 --output-format json` — creates a token
+3. `pveum acl modify / --users uptrakit-{tenant_id}@pve --roles PVEAuditor` — grants read-only access
 
 Returns `PveCredentials { api_url, api_token }` where `api_url` is derived from
-the PVE node's hostname (`https://{hostname}:8006`).
+the PVE node's hostname (`https://{hostname}:8006`). The `api_url` does **not**
+include the `/api2/json` path — that prefix is added per-request by `ProxmoxClient`.
 
 ### `guest_exec.rs` — Guest Command Execution
 

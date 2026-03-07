@@ -130,9 +130,12 @@ means all online nodes are included.
 ## Bootstrapping Guests via SSH Agent
 
 When the SSH agent bootstraps a Proxmox VE node (via regular SSH bootstrap), it
-automatically detects PVE and creates API credentials. This enables a second
-bootstrap mode: bootstrapping guests (LXC containers and QEMU VMs) directly
-through the PVE node without needing SSH access to the guest.
+automatically detects PVE and creates tenant-scoped API credentials
+(`uptrakit-{tenant_id}@pve`). If the cluster already has credentials for the
+same tenant (from bootstrapping another node in the same cluster), the existing
+configuration is reused automatically. This enables a second bootstrap mode:
+bootstrapping guests (LXC containers and QEMU VMs) directly through the PVE
+node without needing SSH access to the guest.
 
 ### How It Works
 

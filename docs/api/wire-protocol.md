@@ -576,6 +576,7 @@ authenticated connection is established. It carries runtime configuration for th
 | `ca_bundle_hash` | `String` | `#[serde(default)]` | Hash of the current CA bundle for staleness detection |
 | `capabilities` | `BTreeSet<Capability>` | `#[serde(default, skip_serializing_if = "BTreeSet::is_empty")]` | Set of capabilities advertised by the controller; used for capability negotiation |
 | `shutdown_timeout_seconds` | `Option<u32>` | `#[serde(default, skip_serializing_if)]` | Max seconds to wait during shutdown; present for agents, absent for MQTT |
+| `tenant_id` | `Option<Uuid>` | `#[serde(default, skip_serializing_if = "Option::is_none")]` | Tenant UUID that this service belongs to; present for tenant-scoped services (agents, SSH agents), absent for system services (MQTT, scheduler) |
 | `ping_interval` | `Duration` | `#[serde(with = "duration_seconds")]` | Controller-managed ping interval; derived from per-service DB override or service-profile default (300s agent/SSH agent, 15s MQTT) |
 
 The `ping_interval` field is serialized as a `u32` number of seconds on the wire (e.g. `"ping_interval": 300`)
