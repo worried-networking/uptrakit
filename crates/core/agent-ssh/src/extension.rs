@@ -1174,15 +1174,11 @@ struct SensitiveAuthParams {
     auth_private_key: Option<String>,
 }
 
-/// Find the local PVE host matching a Proxmox node name.
+/// Find the local PVE host matching a Proxmox node name and plugin config ID.
 ///
-/// First tries an exact match on `(pve_node_name, pve_plugin_config_id)` to
-/// disambiguate nodes with the same short hostname across different Proxmox
-/// clusters. If the exact match fails — which can happen when the discovery ran
-/// via a sibling node's API (e.g. optiplex1's plugin config discovered guests on
-/// optiplex2) — falls back to a node-name-only match. The fallback succeeds only
-/// when there is exactly one PVE host with that node name; if multiple hosts
-/// share the name (genuine multi-cluster ambiguity), an error is returned.
+/// Matches exclusively on `(pve_node_name, pve_plugin_config_id)` — both fields
+/// must be set on the host and match the given values. This disambiguates hosts
+/// with the same short hostname across different Proxmox clusters.
 async fn find_pve_host_for_node(
     state_dir: &Path,
     proxmox_node: &str,
@@ -1200,37 +1196,14 @@ async fn find_pve_host_for_node(
         return Err("no PVE hosts found; bootstrap a PVE node first".to_string());
     }
 
-    // Prefer an exact (node + config) match to handle multi-cluster setups
-    // where two clusters have nodes with identical short names.
-    if let Some(host) = pve_hosts.iter().find(|h| {
+    let matched = pve_hosts.iter().find(|h| {
         h.pve_node_name.as_deref() == Some(proxmox_node)
             && h.pve_plugin_config_id.as_deref() == Some(plugin_config_id)
-    }) {
-        return Ok(host.id.clone());
-    }
+    });
 
-    // Fallback: node-name-only match. This handles the common case where cluster
-    // discovery ran through one node's API (giving all guests that plugin_config_id)
-    // while another node in the same cluster was bootstrapped under a different
-    // plugin config.
-    let by_node: Vec<_> = pve_hosts
-        .iter()
-        .filter(|h| h.pve_node_name.as_deref() == Some(proxmox_node))
-        .collect();
-
-    match by_node.as_slice() {
-        [host] => {
-            tracing::warn!(
-                proxmox_node,
-                guest_plugin_config_id = plugin_config_id,
-                host_plugin_config_id = host.pve_plugin_config_id.as_deref().unwrap_or("?"),
-                host_name = %host.name,
-                "PVE host found by node name only (plugin config mismatch — \
-                 guest was likely discovered via a sibling node's API)"
-            );
-            Ok(host.id.clone())
-        }
-        [] => {
+    match matched {
+        Some(host) => Ok(host.id.clone()),
+        None => {
             let available: Vec<String> = pve_hosts
                 .iter()
                 .map(|h| {
@@ -1243,29 +1216,10 @@ async fn find_pve_host_for_node(
                 })
                 .collect();
             Err(format!(
-                "no PVE host found for node '{proxmox_node}'; \
+                "no PVE host found for node '{proxmox_node}' with plugin config '{plugin_config_id}'; \
                  run 'host sync' on PVE hosts to populate node names. \
                  Available PVE hosts: [{}]",
                 available.join(", ")
-            ))
-        }
-        _ => {
-            // Multiple hosts share the same node name — ambiguous across clusters.
-            let matches: Vec<String> = by_node
-                .iter()
-                .map(|h| {
-                    format!(
-                        "{} (config={})",
-                        h.name,
-                        h.pve_plugin_config_id.as_deref().unwrap_or("?"),
-                    )
-                })
-                .collect();
-            Err(format!(
-                "multiple PVE hosts found for node '{proxmox_node}' but none matches \
-                 plugin config '{plugin_config_id}'; cannot determine target unambiguously. \
-                 Matching hosts: [{}]",
-                matches.join(", ")
             ))
         }
     }
