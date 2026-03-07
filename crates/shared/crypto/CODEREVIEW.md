@@ -107,11 +107,11 @@ in practice it cannot fire. Consider converting to an infallible accessor if `ne
 to return `Result`.
 *(2026-03-06 parallel review -- code quality)*
 
-**[LOW]** `src/lib.rs:63,72+89-92` -- Dual `#[from]` + `impl_report_conversion!` on
+~~**[LOW]** `src/lib.rs:63,72+89-92` -- Dual `#[from]` + `impl_report_conversion!` on
 `CryptoError::HexDecode` and `CryptoError::InvalidUtf8`. When callers use `.context_to()?`,
 only the `impl_report_conversion!` is exercised -- the `#[from]` generates unused `From` impls.
 Remove `#[from]` from these variants to align with the project's documented guidance.
-*(2026-03-06 parallel review -- code quality, coding standards)*
+*(2026-03-06 parallel review -- code quality, coding standards)*~~ *(Fixed.)*
 
 ## High Availability
 

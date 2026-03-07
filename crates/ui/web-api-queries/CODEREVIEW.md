@@ -113,7 +113,7 @@ Recommended tests:
 
 ### Issues
 
-**[MEDIUM]** `queries/system_enrollment_tokens.rs:39,61,85,99,118,144,160` -- All seven public
+~~**[MEDIUM]** `queries/system_enrollment_tokens.rs:39,61,85,99,118,144,160` -- All seven public
 functions return `Result<T, sea_orm::DbErr>` instead of the crate-local `Result<T>` alias
 (which resolves to `Result<T, rootcause::Report>`). Every other query module in the workspace
 uses the `rootcause` error propagation pattern with `context_to` / `bail!` / `report!`
@@ -121,7 +121,7 @@ conventions. Leaking `sea_orm::DbErr` through the public API boundary forces cal
 ORM-specific errors directly and bypasses the structured error context chain provided by
 `rootcause::Report`. Fix: define a `SystemEnrollmentTokenError` enum or use the crate-local
 `Result<T>` alias with `context_to` on every DB call, consistent with the pattern in
-`queries/system_services.rs` and `queries/host_packages.rs`.
+`queries/system_services.rs` and `queries/host_packages.rs`.~~ *(Fixed: added `SystemEnrollmentTokenError` + `Result<T>` alias; all 7 functions now use `context_to()`; `agents.rs` updated with `impl_report_conversion!`.)*
 
 ## Database
 
@@ -139,12 +139,12 @@ handle unrecognised variants rather than receiving misleading query results.
 
 ### Issues
 
-**[MEDIUM] DB-1:** `queries/hosts.rs:123` -- `ServiceHost::find()` in `list_hosts` bypasses
+~~**[MEDIUM] DB-1:** `queries/hosts.rs:123` -- `ServiceHost::find()` in `list_hosts` bypasses
 `find_via_tenant_join`. The query loads `service_host` rows without any tenant filter. Although
 the `host_ids` were already tenant-filtered from the previous query, and the subsequent
 services fetch re-applies tenant filtering, this violates the stated convention. The
 single-host helper `load_host_agents` on line 43 correctly uses `find_via_tenant_join`.
-*Found in parallel database review (2026-03-06).*
+*Found in parallel database review (2026-03-06).*~~ *(Fixed: replaced with `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(...)`.)*
 
 **[LOW] DB-2:** `queries/software_items.rs:237,255,269,284` -- `load_item_hosts` helper takes
 a raw `&DatabaseConnection` rather than `&TenantDb` and queries `HostSoftwareItem::find()`,

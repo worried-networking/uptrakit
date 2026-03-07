@@ -102,11 +102,11 @@ embedded scheduler (which still sees the flag as `true`).
 
 ### Issues
 
-**[LOW]** `src/error.rs:9+18` -- Dual `#[from]` + `impl_report_conversion!` on
+~~**[LOW]** `src/error.rs:9+18` -- Dual `#[from]` + `impl_report_conversion!` on
 `SchedulerError::Database`. The `#[from]` generates an unused `From<sea_orm::DbErr>` impl
 when callers use `.context_to()?`. Remove `#[from]` to align with the project's documented
 guidance.
-*(2026-03-06 parallel review -- code quality, coding standards)*
+*(2026-03-06 parallel review -- code quality, coding standards)*~~ *(Fixed.)*
 
 ## Extensibility
 

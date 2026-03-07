@@ -157,12 +157,12 @@ message.
 
 ### Issues
 
-**[LOW]** `src/error.rs:76-92+169-186` -- Dual `#[from]` + `impl_report_conversion!` on
+~~**[LOW]** `src/error.rs:76-92+169-186` -- Dual `#[from]` + `impl_report_conversion!` on
 multiple `EnrollmentError` variants. The `#[from]` attributes generate unused `From` impls when
 callers use `.context_to()?`. The inner enum `TlsError` also has `#[from]` variants
 (lines 13-17) paired with conversion closures at lines 181-186. Remove `#[from]` from all
 variants that have a corresponding `impl_report_conversion!`.
-*(2026-03-06 parallel review -- code quality, coding standards)*
+*(2026-03-06 parallel review -- code quality, coding standards)*~~ *(Fixed: removed `#[from]` from all 9 `EnrollmentError` variants that had paired `impl_report_conversion!`.)*
 
 ## Extensibility
 

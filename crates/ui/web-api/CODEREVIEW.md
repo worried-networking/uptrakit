@@ -241,20 +241,20 @@ reduce duplication.
 **[MEDIUM]** `oidc_callback` has no unit tests despite 413 lines and 7 code paths. All seven
 `OidcUserResolution` branches are untested at the unit level.
 
-**[MEDIUM]** `src/routes/update_history.rs:169` -- DB error silently swallowed in SSE handler.
+~~**[MEDIUM]** `src/routes/update_history.rs:169` -- DB error silently swallowed in SSE handler.
 The `.all(tenant_db.db()).await.unwrap_or_default()` converts a database error into an empty
 vector. This is within an SSE stream handler (not an auth path), but it is the primary data
 being requested -- a transient DB failure would silently return zero output lines, making
 completed updates appear to have no output. Should match on the result, log the DB error, and
 emit an SSE error event so the client knows the replay failed. *Found in parallel code quality
-review (2026-03-06).*
+review (2026-03-06).*~~ *(Fixed: replaced with explicit match that logs and returns 500.)*
 
-**[MEDIUM]** `src/routes/update_history.rs:128-140` -- `stream_update_output` bypasses
+~~**[MEDIUM]** `src/routes/update_history.rs:128-140` -- `stream_update_output` bypasses
 `TenantDb` for initial record load. The SSE streaming handler loads the `update_history` record
 via `update_history::Entity::find_by_id(record_id).one(tenant_db.db())` without tenant
 filtering, then performs a separate tenant check by looking up the record's `host_id`. The
 initial load reads the full record (including potentially sensitive `output` text) before
-verifying tenant scope. *Found in parallel consistency review (2026-03-06).*
+verifying tenant scope. *Found in parallel consistency review (2026-03-06).*~~ *(Fixed: replaced two-step load+verify with a single `find_via_tenant_join` query.)*
 
 **[INFO]** `src/settings.rs:154` -- `tokio::sync::Mutex` usage is justified. The
 `write_mutex: tokio::sync::Mutex<()>` deviates from the `parking_lot::Mutex` standard, but

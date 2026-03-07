@@ -119,12 +119,12 @@ No high availability issues found.
 
 ### Issues
 
-**[LOW]** `src/error.rs:31+36-38` -- Dual `#[from]` + `impl_report_conversion!` on
+~~**[LOW]** `src/error.rs:31+36-38` -- Dual `#[from]` + `impl_report_conversion!` on
 `AgentCoreError::Io`. The error-handling docs state: "Having both `#[from]` and
 `impl_report_conversion!` on the same variant is dead code: the `From` impl is never called."
 When callers use `.context_to()?` (the prescribed pattern), only the `impl_report_conversion!`
 is exercised. Remove `#[from]` from `AgentCoreError::Io`.
-*(2026-03-06 parallel review -- code quality, coding standards)*
+*(2026-03-06 parallel review -- code quality, coding standards)*~~ *(Fixed.)*
 
 **[LOW]** `src/error.rs:10,13` -- Error message casing inconsistency. `"Pre-update hook failed:
 {0}"` and `"Post-update hook failed: {0}"` use uppercase first letter. The error-handling docs
