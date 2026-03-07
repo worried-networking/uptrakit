@@ -178,6 +178,15 @@ pub trait ServiceHandler: Send {
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>>;
 
+    /// Handle an extension action response from the controller.
+    ///
+    /// Called when the controller sends `ControllerMessage::ExtensionResponse`
+    /// in reply to a service-initiated `ServiceMessage::ExtensionRequest`.
+    /// The default implementation does nothing. Services using
+    /// [`ServiceExtensionProxy`](crate::ServiceExtensionProxy) should override
+    /// this to call `proxy.complete()`.
+    fn on_extension_response(&mut self, _response: ExtensionResponsePayload) {}
+
     /// Handle an extension action request from the controller.
     ///
     /// The default implementation responds with a "not supported" error.

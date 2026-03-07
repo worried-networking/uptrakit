@@ -4,6 +4,7 @@ pub mod cli;
 pub mod connection;
 pub mod error;
 pub mod event_loop;
+pub mod extension_proxy;
 pub mod identity;
 pub mod lifecycle;
 pub mod main_helper;
@@ -21,6 +22,9 @@ pub use error::{
     is_rustls_cert_expired,
 };
 pub use event_loop::EventLoopContext;
+pub use extension_proxy::{
+    PendingExtensionRequest, ServiceExtensionProxy, ServiceExtensionProxyError,
+};
 pub use identity::ServiceIdentityState;
 pub use lifecycle::{
     LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause, default_resolve_shutdown,

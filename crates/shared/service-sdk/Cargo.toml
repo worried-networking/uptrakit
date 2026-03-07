@@ -12,6 +12,7 @@ clap = { workspace = true }
 futures-util = { workspace = true }
 hostname = { workspace = true }
 http = { workspace = true }
+parking_lot = { workspace = true }
 uptrakit-backoff = { workspace = true }
 rcgen = { workspace = true }
 reqwest = { workspace = true }
