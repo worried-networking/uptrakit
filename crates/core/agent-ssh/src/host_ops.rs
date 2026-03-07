@@ -307,6 +307,20 @@ pub async fn find_pve_hosts(db: &DatabaseConnection) -> Result<Vec<Model>> {
         .context_to::<Error>()
 }
 
+/// Find a PVE host that already has a `pve_plugin_config_id` set.
+///
+/// Used during bootstrap deduplication: when a new PVE node in the same
+/// cluster is detected, this function retrieves the existing config ID so
+/// the new host can reuse it instead of creating a duplicate plugin config.
+pub async fn find_pve_host_with_config(db: &DatabaseConnection) -> Result<Option<Model>> {
+    Entity::find()
+        .filter(Column::IsPveNode.eq(true))
+        .filter(Column::PvePluginConfigId.is_not_null())
+        .one(db)
+        .await
+        .context_to::<Error>()
+}
+
 /// Find SSH hosts by hostname, optionally narrowing by port.
 ///
 /// Returns all matching hosts. When `port` is `Some`, only rows with that
@@ -882,5 +896,58 @@ mod tests {
             after.updated_at >= before.updated_at,
             "updated_at should not decrease"
         );
+    }
+
+    // ── find_pve_host_with_config tests ────────────────────────────────────
+
+    #[tokio::test]
+    async fn find_pve_host_with_config_returns_none_when_empty() {
+        let (_dir, db) = setup_db().await;
+        let result = find_pve_host_with_config(&db).await.expect("query");
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn find_pve_host_with_config_returns_none_when_no_config_set() {
+        let (_dir, db) = setup_db().await;
+
+        let host = add_host(
+            &db,
+            add_params("pve-node", "10.0.0.1", 22, "uptrakit", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add");
+
+        // Mark as PVE but without a config ID.
+        update_host_pve_state(&db, &host.id, true, None)
+            .await
+            .expect("update pve state");
+
+        let result = find_pve_host_with_config(&db).await.expect("query");
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn find_pve_host_with_config_returns_host_with_config() {
+        let (_dir, db) = setup_db().await;
+
+        let host = add_host(
+            &db,
+            add_params("pve-node", "10.0.0.1", 22, "uptrakit", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add");
+
+        // Mark as PVE with a config ID.
+        update_host_pve_state(&db, &host.id, true, Some("cfg-12345".to_string()))
+            .await
+            .expect("update pve state");
+
+        let result = find_pve_host_with_config(&db)
+            .await
+            .expect("query")
+            .expect("should find host");
+        assert_eq!(result.id, host.id);
+        assert_eq!(result.pve_plugin_config_id, Some("cfg-12345".to_string()));
     }
 }

@@ -478,6 +478,10 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
         allow_all: p.allow_all,
         host_id: p.host_id,
         service_id,
+        // Tenant ID is not available in CLI mode (only via the
+        // controller's ServiceSettings). PVE credential creation
+        // will be skipped if this is None.
+        tenant_id: None,
         remove_stale_keys: p.remove_stale_keys,
     };
 

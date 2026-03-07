@@ -252,6 +252,21 @@ pub fn build_actions_json() -> serde_json::Value {
     })
 }
 
+// ── Extension context ────────────────────────────────────────────────
+
+/// Shared context for extension request handling.
+///
+/// Groups the handler-level state needed by action dispatch and background
+/// bootstrap tasks, avoiding parameter-count explosion on public APIs.
+pub struct ExtensionContext<'a> {
+    pub db: &'a sea_orm::DatabaseConnection,
+    pub state_dir: &'a Path,
+    pub private_key_der: Option<&'a [u8]>,
+    pub service_id: Option<uuid::Uuid>,
+    pub tenant_id: Option<uuid::Uuid>,
+    pub bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
+}
+
 // ── Action dispatch ──────────────────────────────────────────────────
 
 /// Dispatch an extension request to the appropriate handler.
@@ -265,11 +280,7 @@ pub fn build_actions_json() -> serde_json::Value {
 ))]
 pub async fn handle_extension_request(
     request: ExtensionRequestPayload,
-    db: &sea_orm::DatabaseConnection,
-    state_dir: &Path,
-    private_key_der: Option<&[u8]>,
-    service_id: Option<uuid::Uuid>,
-    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+    ctx: &ExtensionContext<'_>,
     conn: &mut ControllerConnection,
 ) {
     if request.extension_id != EXTENSION_ID {
@@ -284,22 +295,22 @@ pub async fn handle_extension_request(
 
     match request.action_id.as_str() {
         "list-hosts" => {
-            let response = handle_list_hosts(&request.request_id, db).await;
+            let response = handle_list_hosts(&request.request_id, ctx.db).await;
             send_response(conn, response).await;
         }
         "list-pve-hosts" => {
-            let response = handle_list_pve_hosts(&request.request_id, db).await;
+            let response = handle_list_pve_hosts(&request.request_id, ctx.db).await;
             send_response(conn, response).await;
         }
         "remove-host" => {
-            let response = handle_remove_host(&request.request_id, &request.params, db).await;
+            let response = handle_remove_host(&request.request_id, &request.params, ctx.db).await;
             send_response(conn, response).await;
         }
         "bootstrap" => {
-            spawn_bootstrap(request, state_dir, private_key_der, service_id, bg_tx);
+            spawn_bootstrap(request, ctx);
         }
         "bootstrap-proxmox" => {
-            spawn_bootstrap_proxmox(request, state_dir, service_id, bg_tx);
+            spawn_bootstrap_proxmox(request, ctx.state_dir, ctx.service_id, ctx.bg_tx);
         }
         other => {
             tracing::warn!(action = %other, "unknown extension action");
@@ -388,28 +399,25 @@ async fn handle_remove_host(
 // ── Background tasks ─────────────────────────────────────────────────
 
 /// Spawn the bootstrap workflow as a background task.
-fn spawn_bootstrap(
-    request: ExtensionRequestPayload,
-    state_dir: &Path,
-    private_key_der: Option<&[u8]>,
-    service_id: Option<uuid::Uuid>,
-    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
-) {
-    let state_dir = state_dir.to_path_buf();
-    let private_key_der = private_key_der.map(|k| k.to_vec());
-    let bg_tx = bg_tx.clone();
+fn spawn_bootstrap(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+    let state_dir = ctx.state_dir.to_path_buf();
+    let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
+    let bg_tx = ctx.bg_tx.clone();
+    let service_id = ctx.service_id;
+    let tenant_id = ctx.tenant_id;
     let request_id = request.request_id.clone();
 
     tokio::spawn(async move {
-        let response = run_bootstrap_action(
-            &request_id,
-            &request.params,
-            request.sensitive_params.as_ref().map(|s| s.expose_secret()),
-            private_key_der.as_deref(),
+        let response = run_bootstrap_action(BootstrapActionArgs {
+            request_id: &request_id,
+            params: &request.params,
+            sensitive_params_sealed: request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+            private_key_der: private_key_der.as_deref(),
             service_id,
-            &state_dir,
-            Some(&bg_tx),
-        )
+            tenant_id,
+            state_dir: &state_dir,
+            bg_tx: Some(&bg_tx),
+        })
         .await;
         let msg = ServiceMessage::ExtensionResponse(response);
         if bg_tx.send(msg).await.is_err() {
@@ -533,23 +541,32 @@ fn param_bool(params: &serde_json::Value, key: &str) -> bool {
     }
 }
 
-/// The actual bootstrap logic, run inside a spawned task.
-#[tracing::instrument(skip_all, fields(request_id = %request_id))]
-async fn run_bootstrap_action(
-    request_id: &str,
-    params: &serde_json::Value,
-    sensitive_params_sealed: Option<&str>,
-    private_key_der: Option<&[u8]>,
+/// Arguments for the bootstrap action, bundled to stay within the 7-arg limit.
+struct BootstrapActionArgs<'a> {
+    request_id: &'a str,
+    params: &'a serde_json::Value,
+    sensitive_params_sealed: Option<&'a str>,
+    private_key_der: Option<&'a [u8]>,
     service_id: Option<uuid::Uuid>,
-    state_dir: &Path,
-    bg_tx: Option<&tokio::sync::mpsc::Sender<ServiceMessage>>,
-) -> ExtensionResponsePayload {
+    tenant_id: Option<uuid::Uuid>,
+    state_dir: &'a Path,
+    bg_tx: Option<&'a tokio::sync::mpsc::Sender<ServiceMessage>>,
+}
+
+/// The actual bootstrap logic, run inside a spawned task.
+#[tracing::instrument(skip_all, fields(request_id = %args.request_id))]
+async fn run_bootstrap_action(args: BootstrapActionArgs<'_>) -> ExtensionResponsePayload {
+    let request_id = args.request_id;
+    let bg_tx = args.bg_tx;
+
     // Decrypt sensitive params if present.
     let sensitive: Option<SensitiveBootstrapParams> =
-        match decrypt_sensitive_params(sensitive_params_sealed, private_key_der) {
+        match decrypt_sensitive_params(args.sensitive_params_sealed, args.private_key_der) {
             Ok(s) => s,
             Err(msg) => return make_error_response(request_id, &msg),
         };
+
+    let params = args.params;
 
     // Parse the SSH target.
     let target_str = match params.get("target").and_then(|v| v.as_str()) {
@@ -624,11 +641,12 @@ async fn run_bootstrap_action(
         strict_host_key_checking,
         allow_all,
         host_id,
-        service_id,
+        service_id: args.service_id,
+        tenant_id: args.tenant_id,
         remove_stale_keys,
     };
 
-    match bootstrap::run_bootstrap(state_dir, bootstrap_params).await {
+    match bootstrap::run_bootstrap(args.state_dir, bootstrap_params).await {
         Ok(result) => {
             tracing::info!(
                 %host_id,
@@ -636,11 +654,10 @@ async fn run_bootstrap_action(
                 "bootstrap completed successfully"
             );
 
-            // If PVE credentials were obtained, send ReportPluginConfig to
-            // the controller so it creates a Proxmox plugin config.
             if let Some(creds) = &result.pve_credentials
                 && let Some(bg_tx) = bg_tx
             {
+                // New PVE cluster: send ReportPluginConfig to controller.
                 let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
                     serde_json::from_value(json!({
                         "request_id": uuid::Uuid::now_v7().to_string(),
@@ -657,6 +674,15 @@ async fn run_bootstrap_action(
                 if bg_tx.send(msg).await.is_err() {
                     tracing::error!("failed to send ReportPluginConfig via bg_tx");
                 }
+            } else if let Some(config_id) = &result.existing_pve_plugin_config_id {
+                // Existing PVE cluster: reuse the plugin config from the
+                // already-bootstrapped node. Update the host's PVE state
+                // directly without sending ReportPluginConfig.
+                tracing::info!(
+                    %host_id,
+                    %config_id,
+                    "reusing existing PVE plugin config for cluster node"
+                );
             }
 
             let mut data = json!({ "host_id": host_id.to_string() });

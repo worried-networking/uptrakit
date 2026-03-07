@@ -97,6 +97,11 @@ struct SshAgentHandler {
     state_dir: std::path::PathBuf,
     /// Service UUID assigned by the controller (populated in `on_connected`).
     service_id: Option<uuid::Uuid>,
+    /// Tenant UUID that this service belongs to (populated from `ServiceSettings`).
+    ///
+    /// Used for tenant-aware external provisioning such as PVE API credential
+    /// naming (`uptrakit-{tenant_id}@pve`).
+    tenant_id: Option<uuid::Uuid>,
     /// PKCS#8 DER-encoded P-256 private key for ECIES decryption of sensitive
     /// extension parameters. Populated in `on_connected` from the identity.
     private_key_der: Option<Vec<u8>>,
@@ -462,9 +467,14 @@ impl ServiceHandler for SshAgentHandler {
 
     async fn on_settings(
         &mut self,
-        _settings: &uptrakit_internal_wire::ServiceSettingsPayload,
+        settings: &uptrakit_internal_wire::ServiceSettingsPayload,
         conn: &mut ControllerConnection,
     ) {
+        // Store tenant_id for PVE credential provisioning.
+        if let Some(tid) = settings.tenant_id {
+            self.tenant_id = Some(tid);
+        }
+
         // Register UI extensions only when the agreed capability set includes
         // UiExtensions. The SDK sends UpdateCapabilities before calling
         // on_settings, so the controller has already refreshed its gating flags
@@ -513,16 +523,15 @@ impl ServiceHandler for SshAgentHandler {
             ))
         })?;
 
-        extension::handle_extension_request(
-            request,
+        let ctx = extension::ExtensionContext {
             db,
-            &self.state_dir,
-            self.private_key_der.as_deref(),
-            self.service_id,
-            &self.bg_tx,
-            conn,
-        )
-        .await;
+            state_dir: &self.state_dir,
+            private_key_der: self.private_key_der.as_deref(),
+            service_id: self.service_id,
+            tenant_id: self.tenant_id,
+            bg_tx: &self.bg_tx,
+        };
+        extension::handle_extension_request(request, &ctx, conn).await;
 
         Ok(())
     }
@@ -1230,6 +1239,7 @@ async fn main() {
         local_db: Some(local_db),
         state_dir: state_dir.to_path_buf(),
         service_id: None,
+        tenant_id: None,
         private_key_der: None,
         encryption_public_key: None,
         freeze_file_path,

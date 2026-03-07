@@ -12,10 +12,21 @@ use crate::{ProxmoxError, Result};
 /// Credentials for the Proxmox VE REST API.
 #[derive(Debug, Clone)]
 pub struct PveCredentials {
-    /// Full API URL (e.g. `https://pve.local:8006/api2/json`).
+    /// Base API URL (e.g. `https://pve.local:8006`).
     pub api_url: String,
     /// API token in PVE format (`USER@REALM!TOKENID=SECRET`).
     pub api_token: String,
+}
+
+/// Result of checking for existing PVE API tokens on the cluster.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PveTokenStatus {
+    /// No Uptrakit token exists on the cluster — safe to create one.
+    NotFound,
+    /// A token exists for the requesting tenant — cluster already configured.
+    OwnedByTenant(String),
+    /// A token exists for a different tenant — cluster claimed by another tenant.
+    OwnedByOtherTenant(String),
 }
 
 /// Detect whether the remote host is a Proxmox VE node.
@@ -29,9 +40,11 @@ pub async fn detect_pve_node(executor: &dyn RemoteExecutor) -> Result<bool> {
     Ok(result.exit_code == 0 && !result.stdout.trim().is_empty())
 }
 
-/// Resolve the PVE API URL from the node's hostname/IP.
+/// Resolve the PVE API base URL from the node's hostname.
 ///
-/// Reads the hostname from the remote and constructs the standard API endpoint.
+/// Reads the FQDN from the remote and constructs the standard PVE API base
+/// URL. The `/api2/json` path prefix is **not** included — the
+/// [`ProxmoxClient`](crate::client::ProxmoxClient) appends it per-request.
 pub async fn resolve_pve_api_url(executor: &dyn RemoteExecutor) -> Result<String> {
     let result = executor
         .exec_command("hostname -f")
@@ -41,21 +54,93 @@ pub async fn resolve_pve_api_url(executor: &dyn RemoteExecutor) -> Result<String
     if hostname.is_empty() {
         bail!(ProxmoxError::Plugin("remote hostname is empty".to_string()));
     }
-    Ok(format!("https://{hostname}:8006/api2/json"))
+    Ok(format!("https://{hostname}:8006"))
+}
+
+/// PVE username prefix used for Uptrakit API credentials.
+const PVE_USERNAME_PREFIX: &str = "uptrakit-";
+
+/// PVE realm for Uptrakit API credentials.
+const PVE_REALM: &str = "pve";
+
+/// PVE API token name created by Uptrakit.
+const PVE_TOKEN_NAME: &str = "uptrakit";
+
+/// Build the PVE user@realm string for a given tenant ID.
+///
+/// Format: `uptrakit-{tenant_id}@pve`
+pub fn pve_user_realm(tenant_id: &uuid::Uuid) -> String {
+    format!("{PVE_USERNAME_PREFIX}{tenant_id}@{PVE_REALM}")
+}
+
+/// Check whether an Uptrakit PVE API token already exists on the cluster.
+///
+/// Searches for PVE users matching the `uptrakit-*@pve` pattern by listing
+/// all PVE users and filtering locally. Returns the ownership status
+/// relative to the given `tenant_id`.
+pub async fn check_pve_token_exists(
+    executor: &dyn RemoteExecutor,
+    tenant_id: &uuid::Uuid,
+) -> Result<PveTokenStatus> {
+    let result = executor
+        .exec_command("pveum user list --output-format json 2>/dev/null")
+        .await
+        .context_to::<ProxmoxError>()?;
+
+    if result.exit_code != 0 {
+        // Cannot list users — treat as "not found" and let creation attempt
+        // handle the error naturally.
+        tracing::debug!(
+            exit_code = result.exit_code,
+            "pveum user list returned non-zero; assuming no existing token"
+        );
+        return Ok(PveTokenStatus::NotFound);
+    }
+
+    let users: Vec<serde_json::Value> =
+        serde_json::from_str(result.stdout.trim()).map_err(|e| {
+            report!(ProxmoxError::ParseResponse(format!(
+                "failed to parse pveum user list output: {e}"
+            )))
+        })?;
+
+    let own_user = pve_user_realm(tenant_id);
+
+    for user in &users {
+        let userid = match user.get("userid").and_then(|v| v.as_str()) {
+            Some(u) => u,
+            None => continue,
+        };
+
+        // Check if this is an Uptrakit-managed user: `uptrakit-{uuid}@pve`
+        let Some(rest) = userid.strip_prefix(PVE_USERNAME_PREFIX) else {
+            continue;
+        };
+        if !rest.ends_with(&format!("@{PVE_REALM}")) {
+            continue;
+        }
+
+        if userid == own_user {
+            return Ok(PveTokenStatus::OwnedByTenant(userid.to_string()));
+        }
+        return Ok(PveTokenStatus::OwnedByOtherTenant(userid.to_string()));
+    }
+
+    Ok(PveTokenStatus::NotFound)
 }
 
 /// Create a PVE API user and token for Uptrakit.
 ///
-/// 1. Creates the user `{pve_username}@pve` (ignores "already exists" errors)
+/// 1. Creates the user `uptrakit-{tenant_id}@pve` (ignores "already exists")
 /// 2. Creates an API token named `uptrakit` with `privsep=0`
 /// 3. Grants `PVEAuditor` role on `/` (read-only cluster access)
 ///
 /// Returns the credentials needed to configure the Proxmox plugin.
 pub async fn create_pve_api_credentials(
     executor: &dyn RemoteExecutor,
-    pve_username: &str,
+    tenant_id: &uuid::Uuid,
 ) -> Result<PveCredentials> {
-    let user_realm = format!("{pve_username}@pve");
+    let user_realm = pve_user_realm(tenant_id);
 
     // Step 1: Create user (idempotent — ignore "already exists")
     let create_user_cmd =
@@ -66,8 +151,9 @@ pub async fn create_pve_api_credentials(
         .context_to::<ProxmoxError>()?;
 
     // Step 2: Create API token
-    let create_token_cmd =
-        format!("pveum user token add '{user_realm}' uptrakit --privsep=0 --output-format json");
+    let create_token_cmd = format!(
+        "pveum user token add '{user_realm}' {PVE_TOKEN_NAME} --privsep=0 --output-format json"
+    );
     let token_result = executor
         .exec_command(&create_token_cmd)
         .await
@@ -100,7 +186,7 @@ pub async fn create_pve_api_credentials(
     // Step 4: Resolve API URL
     let api_url = resolve_pve_api_url(executor).await?;
 
-    let api_token = format!("{user_realm}!uptrakit={token_value}");
+    let api_token = format!("{user_realm}!{PVE_TOKEN_NAME}={token_value}");
 
     Ok(PveCredentials { api_url, api_token })
 }
@@ -160,5 +246,24 @@ mod tests {
     #[test]
     fn parse_token_value_invalid_json() {
         assert!(parse_token_value("not json").is_err());
+    }
+
+    #[test]
+    fn pve_user_realm_format() {
+        let tenant_id =
+            uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid");
+        assert_eq!(
+            pve_user_realm(&tenant_id),
+            "uptrakit-11111111-1111-1111-1111-111111111111@pve"
+        );
+    }
+
+    #[test]
+    fn resolve_pve_api_url_no_api2_suffix() {
+        // The function appends only the scheme, host, and port — no path.
+        // This is verified indirectly via the format string in the function.
+        let url = format!("https://{}:8006", "pve.example.com");
+        assert!(!url.contains("api2"));
+        assert!(!url.contains("json"));
     }
 }

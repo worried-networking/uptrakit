@@ -60,6 +60,9 @@ pub struct BootstrapParams {
     /// Service UUID for the `authorized_keys` comment.  `None` when the
     /// service has not yet been enrolled.
     pub service_id: Option<uuid::Uuid>,
+    /// Tenant UUID for PVE API credential naming.  `None` when the tenant
+    /// ID has not yet been received from the controller.
+    pub tenant_id: Option<uuid::Uuid>,
     /// Remove existing Uptrakit-managed keys from `authorized_keys` before
     /// writing the new entry.
     pub remove_stale_keys: bool,
@@ -69,8 +72,12 @@ pub struct BootstrapParams {
 pub struct BootstrapResult {
     /// Whether the bootstrapped host is a Proxmox VE node.
     pub is_pve_node: bool,
-    /// PVE API credentials (api_url, api_token) if auto-created.
+    /// PVE API credentials (api_url, api_token) if auto-created on a new cluster.
     pub pve_credentials: Option<pve_setup::PveCredentials>,
+    /// Existing PVE plugin config ID when the cluster was already configured
+    /// by a previous bootstrap. The event loop should update the new host's
+    /// `pve_plugin_config_id` directly instead of sending `ReportPluginConfig`.
+    pub existing_pve_plugin_config_id: Option<String>,
 }
 
 // ── Main orchestrator ────────────────────────────────────────────────
@@ -473,23 +480,10 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     };
 
     // 5c. CREATE PVE API CREDENTIALS (if PVE node detected)
-    let pve_credentials = if is_pve_node {
-        println!("Creating PVE API credentials...");
-        match pve_setup::create_pve_api_credentials(&executor, "uptrakit").await {
-            Ok(creds) => {
-                println!("  API URL: {}", creds.api_url);
-                println!("  API token created for uptrakit@pve");
-                Some(creds)
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to create PVE API credentials");
-                println!("  Warning: could not create PVE API credentials automatically: {e}");
-                println!("  You can configure them manually in the Proxmox plugin settings.");
-                None
-            }
-        }
+    let (pve_credentials, existing_pve_plugin_config_id) = if is_pve_node {
+        create_or_reuse_pve_credentials(&executor, &db, &params.tenant_id).await
     } else {
-        None
+        (None, None)
     };
 
     // 6. DISCONNECT auth session.
@@ -540,11 +534,13 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     .await?;
 
     // 8b. Update PVE state if detected.
-    if is_pve_node
-        && let Err(e) =
-            host_ops::update_host_pve_state(&db, &params.host_id.to_string(), true, None).await
-    {
-        tracing::warn!(error = %e, "failed to persist PVE state for host");
+    if is_pve_node {
+        let config_id = existing_pve_plugin_config_id.clone();
+        if let Err(e) =
+            host_ops::update_host_pve_state(&db, &params.host_id.to_string(), true, config_id).await
+        {
+            tracing::warn!(error = %e, "failed to persist PVE state for host");
+        }
     }
 
     // 9. OUTPUT
@@ -590,7 +586,85 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     Ok(BootstrapResult {
         is_pve_node,
         pve_credentials,
+        existing_pve_plugin_config_id,
     })
+}
+
+// ── Verification ─────────────────────────────────────────────────────
+
+// ── PVE credential dedup ─────────────────────────────────────────────
+
+/// Check for existing Uptrakit PVE tokens on the cluster and either reuse
+/// the existing config or create new credentials.
+///
+/// Returns `(Some(creds), None)` when new credentials were created,
+/// `(None, Some(config_id))` when an existing config was reused, or
+/// `(None, None)` when credentials could not be created.
+async fn create_or_reuse_pve_credentials(
+    executor: &dyn uptrakit_command::RemoteExecutor,
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: &Option<uuid::Uuid>,
+) -> (Option<pve_setup::PveCredentials>, Option<String>) {
+    let Some(tid) = tenant_id else {
+        println!("  Skipping PVE API credential creation: tenant ID not yet known.");
+        println!("  Re-bootstrap this host after the agent has connected to the controller.");
+        return (None, None);
+    };
+
+    // Check if the cluster already has an Uptrakit API token.
+    match pve_setup::check_pve_token_exists(executor, tid).await {
+        Ok(pve_setup::PveTokenStatus::OwnedByTenant(user)) => {
+            println!("  PVE API user '{user}' already exists on this cluster.");
+            println!("  Skipping credential creation.");
+
+            // Try to find an existing PVE host with a config ID to reuse.
+            match host_ops::find_pve_host_with_config(db).await {
+                Ok(Some(host)) => {
+                    let config_id = host
+                        .pve_plugin_config_id
+                        .expect("find_pve_host_with_config only returns hosts with config");
+                    println!("  Reusing plugin config from host '{}'.", host.name);
+                    return (None, Some(config_id));
+                }
+                Ok(None) => {
+                    println!("  Warning: no local PVE host has a plugin config ID to reuse.");
+                    println!("  Configure the Proxmox plugin manually in the controller UI.");
+                    return (None, None);
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to look up existing PVE hosts");
+                    return (None, None);
+                }
+            }
+        }
+        Ok(pve_setup::PveTokenStatus::OwnedByOtherTenant(user)) => {
+            println!("  PVE API user '{user}' exists and belongs to a different tenant.");
+            println!("  This cluster has already been claimed. Skipping credential creation.");
+            return (None, None);
+        }
+        Ok(pve_setup::PveTokenStatus::NotFound) => {
+            // No existing token — proceed with creation below.
+        }
+        Err(e) => {
+            tracing::debug!(error = %e, "PVE token check failed, proceeding with creation");
+        }
+    }
+
+    // No existing token found — create new credentials.
+    println!("Creating PVE API credentials...");
+    match pve_setup::create_pve_api_credentials(executor, tid).await {
+        Ok(creds) => {
+            println!("  API URL: {}", creds.api_url);
+            println!("  API token created for {}", pve_setup::pve_user_realm(tid));
+            (Some(creds), None)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to create PVE API credentials");
+            println!("  Warning: could not create PVE API credentials automatically: {e}");
+            println!("  You can configure them manually in the Proxmox plugin settings.");
+            (None, None)
+        }
+    }
 }
 
 // ── Verification ─────────────────────────────────────────────────────
