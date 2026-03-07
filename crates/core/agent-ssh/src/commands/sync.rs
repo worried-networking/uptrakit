@@ -323,8 +323,9 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
-/// Sync PVE-specific state: node name, plugin config ID reconciliation, and
-/// privilege verification.
+/// Sync PVE-specific state and print a human-readable summary to stdout.
+///
+/// Thin CLI wrapper around [`sync_pve_state_inner`].
 async fn sync_pve_state(
     executor: &SshRemoteExecutor,
     db: &DatabaseConnection,
@@ -334,45 +335,61 @@ async fn sync_pve_state(
 ) -> Result<()> {
     println!();
     println!("Syncing Proxmox VE state...");
+    for line in sync_pve_state_inner(executor, db, host, tenant_id.copied(), dry_run).await? {
+        println!("  {line}");
+    }
+    Ok(())
+}
 
-    // Collect PVE node name.
+/// Core PVE sync logic shared by the CLI and extension paths.
+///
+/// Performs three steps and returns a list of human-readable summary lines:
+///
+/// 1. **Node name detection** — reads `hostname -s` and stores it so that
+///    `bootstrap-proxmox-guest` can locate the correct SSH host for each guest.
+///
+/// 2. **Plugin config ID reconciliation** — detects a desync that arises when
+///    multiple PVE nodes in the same cluster hold different `pve_plugin_config_id`
+///    values (e.g. because a second plugin config was created during a bootstrap
+///    where `pveum user list` failed transiently). Strategy:
+///    - Get the cluster node list via `pvesh get /cluster/status`.
+///    - Collect distinct config IDs held by confirmed cluster peers.
+///    - One unique value → adopt it. Multiple → pick the newest UUID v7 (the
+///      most-recently-created config is the one the controller actively uses for
+///      discovery).
+///
+/// 3. **Privilege verification** — confirms the Uptrakit PVE API user still
+///    holds the `PVEAuditor` role on `/`.
+///
+/// When `dry_run` is `true` the DB write is skipped; all other steps still run.
+async fn sync_pve_state_inner(
+    executor: &SshRemoteExecutor,
+    db: &DatabaseConnection,
+    host: &Model,
+    tenant_id: Option<uuid::Uuid>,
+    dry_run: bool,
+) -> Result<Vec<String>> {
+    let mut lines: Vec<String> = Vec::new();
+
+    // Step 1: node name.
     let node_name = match pve_setup::detect_pve_node_name(executor).await {
         Ok(name) => {
-            println!("  PVE node name: {name}");
+            lines.push(format!("node name: {name}"));
             Some(name)
         }
         Err(e) => {
             tracing::warn!(error = %e, "failed to detect PVE node name");
-            println!("  Warning: could not detect PVE node name: {e}");
+            lines.push(format!("node name: detection failed ({e})"));
             None
         }
     };
 
-    // Reconcile pve_plugin_config_id with cluster peers.
-    //
-    // This corrects a desync that arises when multiple PVE nodes in the same
-    // cluster end up with different plugin config IDs in the local agent-ssh
-    // DB — for example, when a node was bootstrapped before another node's
-    // `pveum user list` succeeded (causing a second plugin config to be
-    // created for the same cluster).
-    //
-    // Strategy:
-    //   1. Ask the cluster for its node list (`pvesh get /cluster/status`).
-    //   2. Find all other local PVE hosts whose `pve_node_name` appears in
-    //      that list — these are confirmed cluster peers.
-    //   3. Collect the set of distinct `pve_plugin_config_id` values held by
-    //      those peers.
-    //   4. If every peer agrees on one config → use it.
-    //      If peers disagree → pick the newest UUID (v7, so newest = highest
-    //      string value) because the most-recently-created config is the one
-    //      the controller is actively using for discovery.
-    //   5. Only update if the determined config differs from what is stored.
-    let canonical_config_id: Option<String> = if let Some(tid) = tenant_id {
+    // Step 2: plugin config ID reconciliation.
+    let canonical_config_id: Option<String> = if let Some(ref tid) = tenant_id {
         match pve_setup::check_pve_token_exists(executor, tid).await {
             Ok(pve_setup::PveTokenStatus::OwnedByTenant(_)) => {
                 let cluster_nodes = pve_setup::detect_pve_cluster_nodes(executor).await;
                 if cluster_nodes.is_empty() {
-                    // Standalone node or pvesh unavailable — skip reconciliation.
                     None
                 } else {
                     reconcile_pve_config(db, &host.id, &cluster_nodes).await
@@ -384,8 +401,6 @@ async fn sync_pve_state(
         None
     };
 
-    // Determine the config ID to persist: reconciled value takes precedence,
-    // otherwise keep whatever is already stored.
     let config_id_to_store = canonical_config_id
         .as_ref()
         .or(host.pve_plugin_config_id.as_ref())
@@ -393,41 +408,41 @@ async fn sync_pve_state(
 
     if let Some(ref new_id) = canonical_config_id {
         if host.pve_plugin_config_id.as_deref() != Some(new_id.as_str()) {
-            println!(
-                "  PVE plugin config: corrected from {} to {new_id}",
+            lines.push(format!(
+                "plugin config: corrected from {} to {new_id}",
                 host.pve_plugin_config_id.as_deref().unwrap_or("(none)")
-            );
+            ));
         } else {
-            println!("  PVE plugin config: OK ({new_id})");
+            lines.push(format!("plugin config: OK ({new_id})"));
         }
     }
 
-    // Persist node name and (potentially corrected) config ID.
+    // Persist (unless dry run).
     if !dry_run && node_name.is_some() {
-        host_ops::update_host_pve_state(db, &host.id, true, config_id_to_store, node_name.clone())
-            .await?;
+        host_ops::update_host_pve_state(db, &host.id, true, config_id_to_store, node_name).await?;
     }
 
-    // Verify PVE privileges (requires tenant_id).
-    if let Some(tid) = tenant_id {
+    // Step 3: privilege verification.
+    if let Some(ref tid) = tenant_id {
         match pve_setup::verify_pve_privileges(executor, tid).await {
-            Ok(()) => {
-                println!("  PVE privileges: OK (PVEAuditor on /)");
-            }
+            Ok(()) => lines.push("privileges: OK (PVEAuditor on /)".to_string()),
             Err(e) => {
-                println!("  PVE privileges: FAILED — {e}");
-                println!(
-                    "  Run bootstrap again or manually grant PVEAuditor on / to the Uptrakit user."
+                lines.push(format!("privileges: FAILED — {e}"));
+                lines.push(
+                    "run bootstrap again or manually grant PVEAuditor on / to the Uptrakit user"
+                        .to_string(),
                 );
             }
         }
     } else {
-        println!(
-            "  PVE privilege check: skipped (tenant ID not yet available — ensure the agent has connected to the controller at least once)"
+        lines.push(
+            "privilege check: skipped (tenant ID not yet available — \
+             ensure the agent has connected to the controller at least once)"
+                .to_string(),
         );
     }
 
-    Ok(())
+    Ok(lines)
 }
 
 /// Determine the canonical `pve_plugin_config_id` for the cluster this host
@@ -669,61 +684,13 @@ pub async fn run_for_extension(
 
     // PVE sync.
     if host.is_pve_node {
-        match pve_setup::detect_pve_node_name(&executor).await {
-            Ok(name) => {
-                // Reconcile pve_plugin_config_id with cluster peers (same logic
-                // as the CLI sync_pve_state path).
-                let canonical_config_id = if let Some(tid) = tenant_id.as_ref() {
-                    match pve_setup::check_pve_token_exists(&executor, tid).await {
-                        Ok(pve_setup::PveTokenStatus::OwnedByTenant(_)) => {
-                            let cluster_nodes =
-                                pve_setup::detect_pve_cluster_nodes(&executor).await;
-                            if cluster_nodes.is_empty() {
-                                None
-                            } else {
-                                reconcile_pve_config(db, &host.id, &cluster_nodes).await
-                            }
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
-
-                let config_id_to_store = canonical_config_id
-                    .as_ref()
-                    .or(host.pve_plugin_config_id.as_ref())
-                    .cloned();
-
-                if let Some(ref new_id) = canonical_config_id
-                    && host.pve_plugin_config_id.as_deref() != Some(new_id.as_str())
-                {
-                    summary.push(format!("pve_plugin_config_id: corrected to {new_id}"));
+        match sync_pve_state_inner(&executor, db, &host, tenant_id, false).await {
+            Ok(lines) => {
+                for line in lines {
+                    summary.push(format!("pve: {line}"));
                 }
-
-                host_ops::update_host_pve_state(
-                    db,
-                    &host.id,
-                    true,
-                    config_id_to_store,
-                    Some(name.clone()),
-                )
-                .await
-                .map_err(|e| format!("failed to update PVE state: {e}"))?;
-                summary.push(format!("pve_node_name: {name}"));
             }
-            Err(e) => {
-                summary.push(format!("pve_node_name: detection failed ({e})"));
-            }
-        }
-
-        if let Some(tid) = tenant_id {
-            match pve_setup::verify_pve_privileges(&executor, &tid).await {
-                Ok(()) => summary.push("pve_privileges: OK".to_string()),
-                Err(e) => summary.push(format!("pve_privileges: FAILED ({e})")),
-            }
-        } else {
-            summary.push("pve_privileges: skipped (no tenant ID)".to_string());
+            Err(e) => summary.push(format!("pve: sync failed ({e})")),
         }
     }
 
