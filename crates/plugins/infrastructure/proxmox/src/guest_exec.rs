@@ -81,7 +81,7 @@ async fn exec_in_lxc(
     vmid: u32,
     escaped_command: &str,
 ) -> Result<GuestExecResult> {
-    let cmd = format!("pct exec {vmid} -- bash -c {escaped_command}");
+    let cmd = format!("sudo /usr/sbin/pct exec {vmid} -- bash -c {escaped_command}");
     let result = executor
         .exec_command(&cmd)
         .await
@@ -100,7 +100,7 @@ async fn exec_in_qemu(
     escaped_command: &str,
 ) -> Result<GuestExecResult> {
     // qm guest exec returns JSON with the execution result
-    let cmd = format!("qm guest exec {vmid} -- bash -c {escaped_command}");
+    let cmd = format!("sudo /usr/sbin/qm guest exec {vmid} -- bash -c {escaped_command}");
     let result = executor
         .exec_command(&cmd)
         .await
@@ -159,7 +159,7 @@ async fn get_lxc_guest_ip(executor: &dyn RemoteExecutor, vmid: u32) -> Result<St
 }
 
 async fn get_qemu_guest_ip(executor: &dyn RemoteExecutor, vmid: u32) -> Result<String> {
-    let cmd = format!("qm guest cmd {vmid} network-get-interfaces");
+    let cmd = format!("sudo /usr/sbin/qm guest cmd {vmid} network-get-interfaces");
     let result = executor
         .exec_command(&cmd)
         .await

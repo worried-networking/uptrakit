@@ -14,6 +14,8 @@ use sea_orm::DatabaseConnection;
 use uptrakit_plugin_infrastructure_proxmox::pve_setup;
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
+use uptrakit_command::RemoteExecutor as _;
+
 use crate::commands::sudoers::{
     self, ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,
     install_helper_script, resolve_command_path, write_sudoers_file,
@@ -256,6 +258,11 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
         }
     }
 
+    // PVE nodes require sudo access to pct/qm for guest bootstrap.
+    if host.is_pve_node {
+        resolved.extend(pve_sudo_commands(&executor).await);
+    }
+
     let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
         Some(SudoersContent::SpecificCommands(resolved))
     } else if args.allow_all {
@@ -443,6 +450,44 @@ async fn sync_pve_state_inner(
     }
 
     Ok(lines)
+}
+
+/// Collect sudoers entries for PVE-specific management tools.
+///
+/// `/usr/sbin/pct` and `/usr/sbin/qm` live outside the default PATH of
+/// non-root users and must be invoked as `sudo /usr/sbin/pct …` by the agent.
+/// This helper checks which tools are present on the remote host and returns
+/// [`ResolvedSudoCommand`] entries for each one found.  Called during sync
+/// when [`Model::is_pve_node`] is `true` so that the generated sudoers file
+/// grants the stored agent user `NOPASSWD` access to these binaries.
+async fn pve_sudo_commands(executor: &SshRemoteExecutor) -> Vec<ResolvedSudoCommand> {
+    let tools = [
+        (
+            "/usr/sbin/pct",
+            "Proxmox LXC container management (pct exec for guest bootstrap)",
+        ),
+        (
+            "/usr/sbin/qm",
+            "Proxmox QEMU VM management (qm guest exec for guest bootstrap)",
+        ),
+    ];
+
+    let mut cmds = Vec::new();
+    for (path, explanation) in tools {
+        let exists = executor
+            .exec_command(&format!("test -f {path}"))
+            .await
+            .map(|r| r.exit_code == 0)
+            .unwrap_or(false);
+        if exists {
+            cmds.push(ResolvedSudoCommand {
+                command_path: path.to_string(),
+                explanation: explanation.to_string(),
+                needs_setenv: false,
+            });
+        }
+    }
+    cmds
 }
 
 /// Determine the canonical `pve_plugin_config_id` for the cluster this host
@@ -653,6 +698,11 @@ pub async fn run_for_extension(
     }
 
     let mut summary = Vec::new();
+
+    // PVE nodes require sudo access to pct/qm for guest bootstrap.
+    if host.is_pve_node {
+        resolved.extend(pve_sudo_commands(&executor).await);
+    }
 
     let has_resolved_commands = !resolved.is_empty();
     let sudoers_content: Option<SudoersContent> = if has_resolved_commands {
