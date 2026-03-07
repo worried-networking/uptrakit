@@ -35,6 +35,7 @@ socket2 = { workspace = true }
 webpki-roots = { workspace = true }
 x509-parser = { workspace = true }
 uptrakit-build-info = { workspace = true }
+uptrakit-crypto = { workspace = true }
 uptrakit-directories = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }

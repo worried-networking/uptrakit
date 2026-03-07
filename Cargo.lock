@@ -7103,6 +7103,7 @@ dependencies = [
  "tracing-subscriber",
  "uptrakit-backoff",
  "uptrakit-build-info",
+ "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-shared-macros",

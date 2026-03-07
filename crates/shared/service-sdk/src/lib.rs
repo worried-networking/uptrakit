@@ -8,6 +8,7 @@ pub mod extension_proxy;
 pub mod identity;
 pub mod lifecycle;
 pub mod main_helper;
+pub mod sensitive_params;
 pub mod signal;
 pub mod tls;
 pub(crate) mod ws;
@@ -33,5 +34,6 @@ pub use lifecycle::{
 pub use main_helper::{
     init_crypto, init_tracing, print_build_info, run_lifecycle_and_handle_errors,
 };
+pub use sensitive_params::decrypt_sensitive_params;
 pub use signal::{Signal, SignalWatcher};
 pub use uptrakit_backoff::Backoff;
