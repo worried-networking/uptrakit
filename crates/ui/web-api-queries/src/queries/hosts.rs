@@ -1,10 +1,10 @@
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, RelationTrait, Set,
+    ActiveModelTrait, ColumnTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+    RelationTrait, Set,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{host, prelude::ServiceHost, service, service_host};
+use uptrakit_shared_db::entity::{host, service, service_host};
 use uptrakit_web_api_types::host_packages::HostUpdateSummary;
 use uptrakit_web_api_types::hosts::{HostAgentSummary, HostResponse, UpdateHostRequest};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
@@ -120,7 +120,10 @@ pub async fn list_hosts(
     let all_links = if host_ids.is_empty() {
         vec![]
     } else {
-        match ServiceHost::find()
+        match tenant_db
+            .find_via_tenant_join::<service_host::Entity, service::Entity>(
+                service_host::Relation::Service.def(),
+            )
             .filter(service_host::Column::HostId.is_in(host_ids.clone()))
             .all(tenant_db.db())
             .await
