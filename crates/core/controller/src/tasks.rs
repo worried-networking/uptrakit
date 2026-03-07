@@ -82,13 +82,18 @@ impl BackgroundTasks {
         tracing::info!("beginning graceful shutdown");
 
         // 1. Stop accepting new connections
+        tracing::debug!("stopping HTTP server (no new connections accepted)");
         server_handle.graceful_shutdown(Some(shutdown_timeout));
 
-        // 2. Scatter restart notifications, then wait for services to disconnect
+        // 2. Scatter restart notifications, then wait for services to disconnect.
+        //    `broadcast_server_restarting_scattered` returns immediately after
+        //    scheduling the per-service delayed sends; the actual sends happen
+        //    in the background while `wait_for_service_drain` polls below.
         let connected_count = service_connections.connection_count().await;
         if connected_count > 0 {
             tracing::info!(
                 connected = connected_count,
+                scatter_window_secs = durations::RESTART_NOTIFICATION_SCATTER.as_secs(),
                 "sending ServerRestarting notifications to connected services"
             );
             service_connections
@@ -99,7 +104,7 @@ impl BackgroundTasks {
                     durations::RESTART_NOTIFICATION_SCATTER,
                 )
                 .await;
-            tracing::info!(
+            tracing::debug!(
                 count = connected_count,
                 timeout_secs = shutdown_timeout.as_secs(),
                 "waiting for services to disconnect gracefully"
@@ -110,6 +115,11 @@ impl BackgroundTasks {
         }
 
         // 3. Cancel all token-based tasks
+        tracing::debug!(
+            cancellable = self.cancellable.len(),
+            abortable = self.abortable.len(),
+            "cancelling background tasks"
+        );
         self.shutdown_token.cancel();
 
         // 4. Abort tasks that don't use CancellationToken
@@ -121,11 +131,18 @@ impl BackgroundTasks {
         // 5. Wait for token-based tasks to complete
         tracing::debug!("waiting for background tasks to complete");
         for (name, handle, task_timeout) in self.cancellable {
+            tracing::trace!(
+                task = name,
+                timeout_secs = task_timeout.as_secs(),
+                "awaiting task shutdown"
+            );
             if tokio::time::timeout(task_timeout, handle).await.is_err() {
                 tracing::warn!(
                     timeout_secs = task_timeout.as_secs(),
                     "{name} did not complete within shutdown timeout"
                 );
+            } else {
+                tracing::trace!(task = name, "task shut down cleanly");
             }
         }
 

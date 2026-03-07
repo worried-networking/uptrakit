@@ -252,6 +252,11 @@ impl ServiceConnectionRegistry {
     /// This avoids a thundering herd when services reconnect by spreading out the
     /// notifications randomly over the specified duration. Each service receives
     /// the message at a random time within the scatter window.
+    ///
+    /// **This method returns immediately** after scheduling all notifications; it does
+    /// not block until the scatter window elapses. Callers that need to wait for services
+    /// to disconnect should use [`wait_for_service_drain`](super::tasks::wait_for_service_drain)
+    /// after calling this method.
     pub async fn broadcast_server_restarting_scattered(
         &self,
         payload: uptrakit_internal_wire::ServerRestartingPayload,
@@ -269,9 +274,16 @@ impl ServiceConnectionRegistry {
         let msg = ControllerMessage::ServerRestarting(payload);
         let scatter_ms = scatter_duration.as_millis() as u64;
 
-        let mut futures = Vec::with_capacity(count);
+        tracing::debug!(
+            count,
+            scatter_window_ms = scatter_ms,
+            "scheduling scattered ServerRestarting notifications"
+        );
+
         for service_id in service_ids {
-            // Random delay within scatter window
+            // Assign a random delay within the scatter window so that reconnects
+            // from all services are spread out over time rather than hitting the
+            // controller simultaneously (thundering herd prevention).
             let delay_ms = if scatter_ms > 0 {
                 rand::rng().random_range(0..scatter_ms)
             } else {
@@ -279,16 +291,25 @@ impl ServiceConnectionRegistry {
             };
             let delay = Duration::from_millis(delay_ms);
 
+            tracing::trace!(
+                %service_id,
+                delay_ms,
+                "scheduled ServerRestarting notification"
+            );
+
             let msg_clone = msg.clone();
             let inner = Arc::clone(&self.inner);
 
-            futures.push(async move {
+            // Spawn instead of join_all so this function returns immediately.
+            // The drain loop in `wait_for_service_drain` is responsible for
+            // waiting until all services have actually disconnected.
+            tokio::spawn(async move {
                 tokio::time::sleep(delay).await;
                 let guard = inner.read().await;
                 if let Some(conn) = guard.connections.get(&service_id) {
+                    tracing::trace!(%service_id, "sending ServerRestarting notification");
                     // Use the same send timeout as broadcast()/send_parallel() to
-                    // prevent a single unresponsive service from blocking the
-                    // entire shutdown sequence.
+                    // prevent an unresponsive service from blocking indefinitely.
                     if tokio::time::timeout(BROADCAST_SEND_TIMEOUT, conn.sender.send(msg_clone))
                         .await
                         .is_err()
@@ -298,10 +319,16 @@ impl ServiceConnectionRegistry {
                             "ServerRestarting send timed out for service"
                         );
                     }
+                } else {
+                    tracing::trace!(
+                        %service_id,
+                        "service already disconnected before scatter send"
+                    );
                 }
             });
         }
-        futures_util::future::join_all(futures).await;
+
+        tracing::debug!(count, "ServerRestarting notifications scheduled");
     }
 
     // ---------------------------------------------------------------
@@ -548,6 +575,49 @@ mod tests {
     /// Helper: build a capability set for an MQTT bridge service.
     fn mqtt_caps() -> BTreeSet<Capability> {
         BTreeSet::from([Capability::MqttBridge, Capability::GracefulShutdown])
+    }
+
+    /// `broadcast_server_restarting_scattered` must return immediately rather than
+    /// blocking until the scatter window elapses.  With virtual time paused, the
+    /// sleeping scatter tasks can only fire after an explicit `advance()` — so if
+    /// the function were still using `join_all`, this test would hang.
+    #[tokio::test(start_paused = true)]
+    async fn scattered_broadcast_is_non_blocking() {
+        let registry = ServiceConnectionRegistry::new();
+        let svc_a = Uuid::now_v7();
+        let svc_b = Uuid::now_v7();
+
+        let caps = BTreeSet::from([Capability::GracefulShutdown]);
+        let (mut rx_a, _) = registry.register(svc_a, caps.clone(), None, None).await;
+        let (mut rx_b, _) = registry.register(svc_b, caps, None, None).await;
+
+        let payload = uptrakit_internal_wire::ServerRestartingPayload {
+            reason: "test".to_string(),
+        };
+
+        // Virtual time is paused: no sleep can complete without explicit `advance()`.
+        // The old `join_all` implementation would block here indefinitely.
+        let start = tokio::time::Instant::now();
+        registry
+            .broadcast_server_restarting_scattered(payload, Duration::from_secs(5))
+            .await;
+        assert!(
+            start.elapsed() < Duration::from_millis(10),
+            "broadcast_server_restarting_scattered must return immediately, not await scatter delays"
+        );
+
+        // Advance virtual time past the scatter window so the spawned tasks wake up and send.
+        tokio::time::advance(Duration::from_secs(6)).await;
+
+        // Both receivers should now have a message enqueued.
+        assert!(
+            rx_a.recv().await.is_some(),
+            "service A should receive the ServerRestarting notification"
+        );
+        assert!(
+            rx_b.recv().await.is_some(),
+            "service B should receive the ServerRestarting notification"
+        );
     }
 
     #[tokio::test]

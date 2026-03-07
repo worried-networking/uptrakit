@@ -151,31 +151,45 @@ impl NatsTransport {
         let mut backoff = Backoff::new(Duration::from_secs(1), Duration::from_secs(30));
 
         loop {
-            if cancel.is_cancelled() {
-                tracing::info!("NATS consumer shutting down");
-                break;
-            }
-
-            let messages = match consumer
-                .fetch()
-                .max_messages(PULL_BATCH_SIZE)
-                .expires(PULL_EXPIRES)
-                .messages()
-                .await
-            {
-                Ok(m) => {
-                    backoff.reset();
-                    m
+            // Race each pull request against the shutdown token so the consumer
+            // exits immediately when cancelled rather than waiting up to PULL_EXPIRES
+            // for an in-flight fetch to time out.
+            let messages = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => {
+                    tracing::info!("NATS consumer shutting down");
+                    break;
                 }
-                Err(e) => {
-                    let delay = backoff.next_delay();
-                    tracing::warn!(
-                        error = %e,
-                        delay_ms = delay.as_millis(),
-                        "NATS consumer fetch error, retrying with backoff"
-                    );
-                    tokio::time::sleep(delay).await;
-                    continue;
+                result = consumer
+                    .fetch()
+                    .max_messages(PULL_BATCH_SIZE)
+                    .expires(PULL_EXPIRES)
+                    .messages() =>
+                {
+                    match result {
+                        Ok(m) => {
+                            backoff.reset();
+                            m
+                        }
+                        Err(e) => {
+                            let delay = backoff.next_delay();
+                            tracing::warn!(
+                                error = %e,
+                                delay_ms = delay.as_millis(),
+                                "NATS consumer fetch error, retrying with backoff"
+                            );
+                            // Also make the backoff sleep cancellable.
+                            tokio::select! {
+                                biased;
+                                _ = cancel.cancelled() => {
+                                    tracing::info!("NATS consumer shutting down during backoff");
+                                    break;
+                                }
+                                _ = tokio::time::sleep(delay) => {}
+                            }
+                            continue;
+                        }
+                    }
                 }
             };
 
