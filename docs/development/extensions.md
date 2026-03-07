@@ -138,6 +138,24 @@ the field named by `api_submit.response_id_field`).
 | `destructive` | bool | no | Show with warning styling (default: `false`) |
 | `timeout_seconds` | u32 | no | Override the default 30s timeout |
 | `api_submit` | `ApiSubmitDef` | no | Route form submission to a REST API instead of the extension proxy |
+| `row_visible_when` | `RowVisibleWhen` | no | Conditional visibility for row actions in a `DataTable` |
+
+#### `RowVisibleWhen` — conditional row action visibility
+
+When set on an `ActionDef` used as a row action in a `DataTable`, the action
+button is only rendered in rows where the condition is met.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `field` | string | yes | Key of the row data field to check |
+| `condition` | `"present"` or `"absent"` | yes | `present`: field is non-null; `absent`: field is null or missing |
+
+Example — show "Approve Match" only when a suggestion exists:
+
+```rust
+ActionDef::new("approve-match", "Approve Match")
+    .with_row_visible_when("suggested_host_id", RowCondition::Present)
+```
 
 #### `ApiSubmitDef` — calling existing REST APIs from extension forms
 

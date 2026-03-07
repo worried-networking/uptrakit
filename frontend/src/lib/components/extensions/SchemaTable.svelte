@@ -4,6 +4,15 @@
 	import { showError } from '$lib/notifications.svelte';
 	import ActionButton from './ActionButton.svelte';
 
+	/** Check whether a row action should be visible for a given row. */
+	function isRowActionVisible(action: ActionDef, row: Record<string, unknown>): boolean {
+		const cond = action.row_visible_when;
+		if (!cond) return true;
+		const val = row[cond.field];
+		const isPresent = val != null && val !== '';
+		return cond.condition === 'present' ? isPresent : !isPresent;
+	}
+
 	let {
 		extensionId,
 		ui,
@@ -206,7 +215,7 @@
 										<div class="flex gap-1">
 											{#each ui.row_actions as actionId (actionId)}
 												{@const action = resolveAction(actionId)}
-												{#if action}
+												{#if action && isRowActionVisible(action, row)}
 													<ActionButton
 														{extensionId}
 														{action}

@@ -863,6 +863,11 @@ export interface ApiSubmitDef {
 	response_label_field?: string;
 }
 
+export interface RowVisibleWhen {
+	field: string;
+	condition: 'present' | 'absent';
+}
+
 export interface ActionDef {
 	action_id: string;
 	label: string;
@@ -872,6 +877,8 @@ export interface ActionDef {
 	timeout_seconds?: number;
 	/** When set, form submission calls this REST API endpoint directly instead of routing through the extension proxy. */
 	api_submit?: ApiSubmitDef;
+	/** Conditional visibility for row actions: show only when the condition on a row data field is met. */
+	row_visible_when?: RowVisibleWhen;
 }
 
 export type ContextSelectorSource =

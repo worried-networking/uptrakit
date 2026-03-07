@@ -446,6 +446,14 @@ pub struct ActionDef {
     /// operations without duplicating server-side handler logic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_submit: Option<Box<ApiSubmitDef>>,
+    /// Conditional visibility for row actions in a `DataTable`.
+    ///
+    /// When set, the action button is only shown in a table row if the
+    /// specified condition on a row data field is met. This allows actions
+    /// like "Approve Match" to only appear when a suggestion exists, or
+    /// "Remove Match" to only appear for already-matched rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_visible_when: Option<RowVisibleWhen>,
 }
 
 impl ActionDef {
@@ -459,6 +467,7 @@ impl ActionDef {
             destructive: false,
             timeout_seconds: None,
             api_submit: None,
+            row_visible_when: None,
         }
     }
 
@@ -489,6 +498,22 @@ impl ActionDef {
     /// Set the REST API submit target (bypasses extension proxy on form submission).
     pub fn with_api_submit(mut self, api_submit: ApiSubmitDef) -> Self {
         self.api_submit = Some(Box::new(api_submit));
+        self
+    }
+
+    /// Set conditional visibility for row actions in a `DataTable`.
+    ///
+    /// The action button is only shown in rows where the specified condition
+    /// on the given field is met.
+    pub fn with_row_visible_when(
+        mut self,
+        field: impl Into<String>,
+        condition: RowCondition,
+    ) -> Self {
+        self.row_visible_when = Some(RowVisibleWhen {
+            field: field.into(),
+            condition,
+        });
         self
     }
 }
@@ -763,6 +788,38 @@ pub struct VisibleWhen {
     pub field: String,
     /// Field is visible when the controlling field's value is in this list.
     pub values: Vec<String>,
+}
+
+/// Conditional visibility for a row action in a `DataTable`.
+///
+/// When present on an [`ActionDef`], the action button is only rendered in
+/// a table row if the specified condition on a row data field is satisfied.
+///
+/// # Example
+///
+/// ```
+/// # use uptrakit_extension_framework::{ActionDef, RowCondition};
+/// let action = ActionDef::new("approve-match", "Approve Match")
+///     .with_row_visible_when("suggested_host_id", RowCondition::Present);
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RowVisibleWhen {
+    /// Key of the row data field to check.
+    pub field: String,
+    /// The condition that must hold for the action to be visible.
+    pub condition: RowCondition,
+}
+
+/// Condition type for [`RowVisibleWhen`].
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RowCondition {
+    /// The field must be present and non-null (i.e., not `null`, not absent).
+    Present,
+    /// The field must be absent or `null`.
+    Absent,
 }
 
 /// A single option in a `Select` field.
@@ -1169,15 +1226,9 @@ mod tests {
 
     #[test]
     fn destructive_action_serialization() {
-        let action = ActionDef {
-            action_id: "delete-all".to_string(),
-            label: "Delete All".to_string(),
-            ui: None,
-            permission: Permission::ManageHosts.into(),
-            destructive: true,
-            timeout_seconds: None,
-            api_submit: None,
-        };
+        let action = ActionDef::new("delete-all", "Delete All")
+            .with_permission(Permission::ManageHosts)
+            .destructive();
 
         let json = serde_json::to_string(&action).expect("serialize should succeed");
         assert!(json.contains(r#""destructive":true"#));
@@ -1408,5 +1459,40 @@ mod tests {
         let field = FieldDef::new("name", "Name");
         let json = serde_json::to_string(&field).expect("serialize should succeed");
         assert!(!json.contains("visible_when"));
+    }
+
+    #[test]
+    fn row_visible_when_roundtrip() {
+        let action = ActionDef::new("approve-match", "Approve Match")
+            .with_row_visible_when("suggested_host_id", RowCondition::Present);
+
+        let json = serde_json::to_string(&action).expect("serialize should succeed");
+        let roundtripped: ActionDef =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+
+        let rvw = roundtripped.row_visible_when.expect("should be set");
+        assert_eq!(rvw.field, "suggested_host_id");
+        assert_eq!(rvw.condition, RowCondition::Present);
+    }
+
+    #[test]
+    fn row_visible_when_absent_condition() {
+        let action = ActionDef::new("unmatch", "Remove Match")
+            .with_row_visible_when("matched_host", RowCondition::Absent);
+
+        let json = serde_json::to_string(&action).expect("serialize should succeed");
+        let roundtripped: ActionDef =
+            serde_json::from_str(&json).expect("deserialize should succeed");
+
+        let rvw = roundtripped.row_visible_when.expect("should be set");
+        assert_eq!(rvw.field, "matched_host");
+        assert_eq!(rvw.condition, RowCondition::Absent);
+    }
+
+    #[test]
+    fn row_visible_when_omitted_when_none() {
+        let action = ActionDef::new("match", "Manual Match");
+        let json = serde_json::to_string(&action).expect("serialize should succeed");
+        assert!(!json.contains("row_visible_when"));
     }
 }
