@@ -12,7 +12,7 @@ uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-extension-framework = { workspace = true }
 uptrakit-command = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }

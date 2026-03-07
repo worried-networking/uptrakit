@@ -1,5 +1,5 @@
-// Re-export form schema types so plugin crates don't need a direct wire dep.
-pub use uptrakit_internal_wire::extension::{FieldDef, FieldType, SelectOption};
+// Re-export form schema types so plugin crates don't need a direct extension-framework dep.
+pub use uptrakit_extension_framework::{FieldDef, FieldType, SelectOption};
 
 /// Trait for plugin configs that can describe their form schema.
 ///

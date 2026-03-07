@@ -117,13 +117,13 @@ pub trait PluginOps: Send + Sync + 'static {
     fn config_form_schema_str(
         &self,
         plugin_type: &str,
-    ) -> Option<Vec<uptrakit_internal_wire::extension::FieldDef>>;
+    ) -> Option<Vec<uptrakit_extension_framework::FieldDef>>;
 
     /// Returns UI extension manifests provided by all registered plugins.
     ///
     /// Default returns empty — no plugin provides extensions yet. Override
     /// when a plugin declares compile-time UI extensions.
-    fn extension_manifests(&self) -> Vec<uptrakit_internal_wire::extension::ExtensionManifest> {
+    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
         vec![]
     }
 
@@ -131,7 +131,7 @@ pub trait PluginOps: Send + Sync + 'static {
     ///
     /// Actions are referenced by `action_id` from the extension manifests.
     /// Default returns empty.
-    fn extension_actions(&self) -> Vec<uptrakit_internal_wire::extension::ActionDef> {
+    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
         vec![]
     }
 
@@ -223,15 +223,15 @@ impl PluginOps for PluginRegistry {
     fn config_form_schema_str(
         &self,
         plugin_type: &str,
-    ) -> Option<Vec<uptrakit_internal_wire::extension::FieldDef>> {
+    ) -> Option<Vec<uptrakit_extension_framework::FieldDef>> {
         PluginRegistry::config_form_schema_str(plugin_type)
     }
 
-    fn extension_manifests(&self) -> Vec<uptrakit_internal_wire::extension::ExtensionManifest> {
+    fn extension_manifests(&self) -> Vec<uptrakit_extension_framework::ExtensionManifest> {
         uptrakit_plugin_infrastructure_proxmox::extensions::extension_manifests()
     }
 
-    fn extension_actions(&self) -> Vec<uptrakit_internal_wire::extension::ActionDef> {
+    fn extension_actions(&self) -> Vec<uptrakit_extension_framework::ActionDef> {
         uptrakit_plugin_infrastructure_proxmox::extensions::extension_actions()
     }
 

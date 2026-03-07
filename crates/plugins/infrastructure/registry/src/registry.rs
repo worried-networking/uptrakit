@@ -227,7 +227,7 @@ macro_rules! register_plugins {
             /// type. Returns `None` for unknown / `Other` types.
             pub fn config_form_schema(
                 plugin_type: PluginType,
-            ) -> Option<Vec<uptrakit_internal_wire::extension::FieldDef>> {
+            ) -> Option<Vec<uptrakit_extension_framework::FieldDef>> {
                 match plugin_type {
                     $(
                         PluginType::$variant => Some(<$config as ConfigFormSchema>::form_schema()),
@@ -239,7 +239,7 @@ macro_rules! register_plugins {
             /// String-accepting convenience wrapper around [`config_form_schema`].
             pub fn config_form_schema_str(
                 plugin_type: &str,
-            ) -> Option<Vec<uptrakit_internal_wire::extension::FieldDef>> {
+            ) -> Option<Vec<uptrakit_extension_framework::FieldDef>> {
                 let Ok(pt) = plugin_type.parse::<PluginType>() else {
                     return None;
                 };

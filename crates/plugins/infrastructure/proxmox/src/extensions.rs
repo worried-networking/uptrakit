@@ -3,7 +3,7 @@
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
-use uptrakit_internal_wire::extension::*;
+use uptrakit_extension_framework::*;
 use uptrakit_shared_types::Permission;
 
 use crate::client::ProxmoxClient;
