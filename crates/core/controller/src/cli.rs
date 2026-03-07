@@ -222,14 +222,14 @@ pub struct Args {
     #[arg(long)]
     pub allow_private_notification_urls: bool,
 
-    /// Reject plugin config changes that contain dangerous command patterns.
-    /// When enabled, creating or updating plugin configs with patterns such as
+    /// Allow plugin config changes that contain dangerous command patterns.
+    /// By default, creating or updating plugin configs with patterns such as
     /// `curl|bash`, `rm -rf /`, fork bombs, or bash network sockets will
-    /// return HTTP 400 instead of the default advisory-only warning.
+    /// return HTTP 400. Pass this flag to downgrade to advisory-only warnings.
     /// This does not replace the `manage_commands` permission requirement —
-    /// it adds a content-level safety net on top.
-    #[arg(long, env = "UPTRAKIT_REJECT_DANGEROUS_COMMANDS")]
-    pub reject_dangerous_commands: bool,
+    /// it removes a content-level safety net.
+    #[arg(long, env = "UPTRAKIT_ALLOW_DANGEROUS_COMMANDS")]
+    pub allow_dangerous_commands: bool,
 
     /// Path to a new master key file for key rotation.
     ///
@@ -517,18 +517,18 @@ mod tests {
     }
 
     #[test]
-    fn reject_dangerous_commands_default_false() {
+    fn allow_dangerous_commands_default_false() {
         let args =
             super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
-        assert!(!args.reject_dangerous_commands);
+        assert!(!args.allow_dangerous_commands);
     }
 
     #[test]
-    fn reject_dangerous_commands_flag() {
+    fn allow_dangerous_commands_flag() {
         let args =
-            super::Args::try_parse_from(["uptrakit-controller", "--reject-dangerous-commands"])
-                .expect("should parse reject flag");
-        assert!(args.reject_dangerous_commands);
+            super::Args::try_parse_from(["uptrakit-controller", "--allow-dangerous-commands"])
+                .expect("should parse allow flag");
+        assert!(args.allow_dangerous_commands);
     }
 
     #[test]

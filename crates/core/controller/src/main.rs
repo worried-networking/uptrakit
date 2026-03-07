@@ -465,7 +465,7 @@ async fn run(args: cli::Args) -> Result<()> {
         .audit_log_dispatcher(audit_dispatcher)
         .plugin_ops(plugin_ops)
         .extension_registry(extension_registry)
-        .reject_dangerous_commands(args.reject_dangerous_commands);
+        .reject_dangerous_commands(!args.allow_dangerous_commands);
 
     #[cfg(feature = "oidc")]
     let builder = builder

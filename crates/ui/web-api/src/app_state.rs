@@ -124,10 +124,10 @@ pub struct AppState {
     pub extension_registry: Arc<ExtensionRegistry>,
     /// Request/response proxy for extension action invocations.
     pub extension_proxy: Arc<ExtensionProxy>,
-    /// When `true`, plugin config create/update requests that contain dangerous
-    /// command patterns (e.g. `curl|bash`, `rm -rf /`) are rejected with HTTP 400
-    /// instead of the default advisory-only warning. Set via
-    /// `--reject-dangerous-commands` CLI flag.
+    /// When `true` (default), plugin config create/update requests that contain
+    /// dangerous command patterns (e.g. `curl|bash`, `rm -rf /`) are rejected
+    /// with HTTP 400. Set to `false` via `--allow-dangerous-commands` CLI flag
+    /// to downgrade to advisory-only warnings.
     pub reject_dangerous_commands: bool,
 }
 

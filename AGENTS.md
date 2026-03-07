@@ -1244,9 +1244,12 @@ let auth_routes = auth_routes
 
 ### `reject_dangerous_commands` flag
 
-`AppState.reject_dangerous_commands: bool` — set via `--reject-dangerous-commands` CLI flag
-or `UPTRAKIT_REJECT_DANGEROUS_COMMANDS` env var. When `true`, plugin config create/update
-requests containing dangerous command patterns are rejected with HTTP 400. Default: `false`.
+`AppState.reject_dangerous_commands: bool` — dangerous command rejection is **enabled by
+default**. Plugin config create/update requests containing dangerous command patterns are
+rejected with HTTP 400. Operators can disable this with the `--allow-dangerous-commands` CLI
+flag or `UPTRAKIT_ALLOW_DANGEROUS_COMMANDS` env var, which sets the internal flag to `false`.
+The CLI flag inversion happens in `crates/core/controller/src/main.rs`:
+`reject_dangerous_commands(!args.allow_dangerous_commands)`.
 
 ### Design decisions
 

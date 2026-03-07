@@ -144,10 +144,11 @@ for the implementation pattern and required fields.
 
 ## Dangerous Command Pattern Rejection
 
-The `--reject-dangerous-commands` CLI flag (or `UPTRAKIT_REJECT_DANGEROUS_COMMANDS`
-environment variable) upgrades the advisory dangerous pattern detection to a blocking
-policy. When enabled, plugin config create/update requests containing known dangerous
-patterns are rejected with HTTP 400 before the database write.
+Dangerous command pattern rejection is **enabled by default**. Plugin config
+create/update requests containing known dangerous patterns are rejected with HTTP 400
+before the database write. Operators who need to bypass this protection can use the
+`--allow-dangerous-commands` CLI flag (or `UPTRAKIT_ALLOW_DANGEROUS_COMMANDS`
+environment variable) to downgrade detection to advisory-only.
 
 Detected patterns include:
 
@@ -160,8 +161,8 @@ The detection logic lives in `uptrakit-web-api-types::command_validation::detect
 The rejection gate is in `crates/ui/web-api/src/routes/plugin_configs.rs`
 (`collect_dangerous_patterns`, `format_dangerous_pattern_rejection`).
 
-The flag is off by default for backward compatibility. When disabled, detected
-patterns are still logged as `security_audit:` warnings. See
+When disabled via `--allow-dangerous-commands`, detected patterns are still logged as
+`security_audit:` warnings. See
 [ATK-16](../hackme/16-rce-plugin-config-manipulation.md) for the threat model.
 
 ## NATS Plugin Config Protection
