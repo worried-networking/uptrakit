@@ -28,7 +28,9 @@
 		PluginConfigResponse,
 		AutodiscoveryIgnoreResponse,
 		TenantDiscoveryAllowlistEntry,
-		PluginTypeInfo
+		PluginTypeInfo,
+		FieldDef,
+		SelectOption
 	} from '$lib/types';
 
 	type ActiveTab = 'configs' | 'ignores' | 'allowlist';
@@ -51,6 +53,7 @@
 	let configDeleteConfirm: { id: string; name: string } | null = $state(null);
 	let discoveringId: string | null = $state(null);
 	let discardingId: string | null = $state(null);
+	let showJsonEditor: boolean = $state(false);
 
 	// Ignore rules state
 	let ignores: AutodiscoveryIgnoreResponse[] = $state([]);
@@ -184,21 +187,136 @@
 		return t ? JSON.stringify(t.sample_config, null, 2) : '{}';
 	}
 
+	function getFormFields(pluginType: string): FieldDef[] {
+		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
+		return t?.config_form_fields ?? [];
+	}
+
+	const currentFormFields = $derived(getFormFields(configForm.plugin_type));
+	const hasFormFields = $derived(currentFormFields.length > 0);
+
+	/** Flatten a nested config JSON object into dot-path string values for form fields. */
+	function flattenConfig(config: Record<string, unknown>, fields: FieldDef[]): Record<string, string> {
+		const result: Record<string, string> = {};
+		for (const field of fields) {
+			const parts = field.key.split('.');
+			let val: unknown = config;
+			for (const part of parts) {
+				if (val == null || typeof val !== 'object') {
+					val = undefined;
+					break;
+				}
+				// For tagged enum keys like "auth._type", the JSON stores "auth.type"
+				const jsonKey = part.startsWith('_') ? part.slice(1) : part;
+				val = (val as Record<string, unknown>)[jsonKey];
+			}
+
+			if (val === undefined || val === null) {
+				result[field.key] = field.default_value ?? '';
+			} else if (field.field_type === 'toggle') {
+				result[field.key] = val ? 'true' : '';
+			} else if (Array.isArray(val)) {
+				// Arrays in textarea fields are joined by newlines
+				result[field.key] = val.join('\n');
+			} else {
+				result[field.key] = String(val);
+			}
+		}
+		return result;
+	}
+
+	/** Unflatten dot-path form values into a nested JSON config object. */
+	function unflattenConfig(formValues: Record<string, string>, fields: FieldDef[]): Record<string, unknown> {
+		const result: Record<string, unknown> = {};
+
+		for (const field of fields) {
+			const raw = formValues[field.key] ?? '';
+
+			// Skip empty optional fields
+			if (raw === '' && !field.required && field.field_type !== 'toggle') continue;
+
+			let value: unknown;
+			if (field.field_type === 'toggle') {
+				value = raw === 'true';
+			} else if (
+				field.field_type === 'textarea' &&
+				(field.key.includes('patterns') || field.key.includes('node_filter'))
+			) {
+				// Textarea fields that represent arrays: split by newlines, trim, filter empties
+				value = raw
+					.split('\n')
+					.map((s) => s.trim())
+					.filter((s) => s.length > 0);
+				if ((value as string[]).length === 0) continue;
+			} else {
+				value = raw;
+			}
+
+			const parts = field.key.split('.');
+			if (parts.length === 1) {
+				result[parts[0]] = value;
+			} else {
+				// Nested path: e.g. "auth._type" → { auth: { type: value } }
+				let target = result;
+				for (let i = 0; i < parts.length - 1; i++) {
+					const key = parts[i].startsWith('_') ? parts[i].slice(1) : parts[i];
+					if (target[key] == null || typeof target[key] !== 'object') {
+						target[key] = {};
+					}
+					target = target[key] as Record<string, unknown>;
+				}
+				const lastKey = parts[parts.length - 1];
+				const jsonKey = lastKey.startsWith('_') ? lastKey.slice(1) : lastKey;
+				target[jsonKey] = value;
+			}
+		}
+
+		// Clean up empty nested objects (e.g. auth with only type="" set)
+		for (const key of Object.keys(result)) {
+			const val = result[key];
+			if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+				const obj = val as Record<string, unknown>;
+				const nonEmpty = Object.values(obj).some((v) => v !== '' && v !== undefined);
+				if (!nonEmpty) delete result[key];
+			}
+		}
+
+		return result;
+	}
+
+	let formValues: Record<string, string> = $state({});
+
+	function isFieldVisible(field: FieldDef): boolean {
+		if (!field.visible_when) return true;
+		const controlValue = formValues[field.visible_when.field] ?? '';
+		return field.visible_when.values.includes(controlValue);
+	}
+
+	function resolvedOptions(field: FieldDef): SelectOption[] {
+		return field.options ?? [];
+	}
+
 	function openCreateConfig() {
 		editingConfig = null;
 		const firstType = pluginTypes[0]?.plugin_type ?? '';
+		const fields = getFormFields(firstType);
 		configForm = { name: '', plugin_type: firstType, config: sampleConfigJson(firstType), enabled: true };
+		formValues = flattenConfig({}, fields);
+		showJsonEditor = false;
 		showConfigModal = true;
 	}
 
 	function openEditConfig(config: PluginConfigResponse) {
 		editingConfig = config;
+		const fields = getFormFields(config.plugin_type);
 		configForm = {
 			name: config.name,
 			plugin_type: config.plugin_type,
 			config: JSON.stringify(config.config, null, 2),
 			enabled: config.enabled
 		};
+		formValues = flattenConfig(config.config, fields);
+		showJsonEditor = false;
 		showConfigModal = true;
 	}
 
@@ -209,11 +327,15 @@
 
 	async function saveConfig() {
 		let parsedConfig: Record<string, unknown>;
-		try {
-			parsedConfig = JSON.parse(configForm.config || '{}');
-		} catch {
-			showError('Config must be valid JSON');
-			return;
+		if (hasFormFields && !showJsonEditor) {
+			parsedConfig = unflattenConfig(formValues, currentFormFields);
+		} else {
+			try {
+				parsedConfig = JSON.parse(configForm.config || '{}');
+			} catch {
+				showError('Config must be valid JSON');
+				return;
+			}
 		}
 
 		try {
@@ -555,7 +677,11 @@
 				<select
 					class="select"
 					bind:value={configForm.plugin_type}
-					onchange={() => (configForm.config = sampleConfigJson(configForm.plugin_type))}
+					onchange={() => {
+						configForm.config = sampleConfigJson(configForm.plugin_type);
+						formValues = flattenConfig({}, getFormFields(configForm.plugin_type));
+						showJsonEditor = false;
+					}}
 				>
 					{#each pluginTypes as t (t.plugin_type)}
 						<option value={t.plugin_type}>{t.display_name}</option>
@@ -564,10 +690,105 @@
 			</label>
 		{/if}
 
-		<label class="label">
-			<span>Config (JSON)</span>
-			<textarea class="textarea font-mono text-sm" rows="6" bind:value={configForm.config}></textarea>
-		</label>
+		{#if hasFormFields && !showJsonEditor}
+			<div class="space-y-3 mt-2">
+				{#each currentFormFields as field (field.key)}
+					{#if isFieldVisible(field)}
+						<div>
+							<label for="cfg-{field.key}" class="mb-1 block text-sm font-medium">
+								{field.label}
+								{#if field.required}<span class="text-error-500">*</span>{/if}
+							</label>
+
+							{#if field.field_type === 'textarea'}
+								<textarea
+									id="cfg-{field.key}"
+									bind:value={formValues[field.key]}
+									placeholder={field.placeholder}
+									required={field.required}
+									class="textarea font-mono text-sm w-full"
+									rows="3"
+								></textarea>
+							{:else if field.field_type === 'select'}
+								<select
+									id="cfg-{field.key}"
+									bind:value={formValues[field.key]}
+									required={field.required}
+									class="select w-full"
+								>
+									<option value="">— select —</option>
+									{#each resolvedOptions(field) as opt (opt.value)}
+										<option value={opt.value}>{opt.label}</option>
+									{/each}
+								</select>
+							{:else if field.field_type === 'toggle'}
+								<label class="flex items-center gap-2">
+									<input
+										type="checkbox"
+										id="cfg-{field.key}"
+										checked={formValues[field.key] === 'true'}
+										onchange={(e) => {
+											formValues[field.key] = String((e.target as HTMLInputElement).checked);
+										}}
+										class="checkbox"
+									/>
+									<span class="text-sm">{field.help_text ?? ''}</span>
+								</label>
+							{:else}
+								<input
+									id="cfg-{field.key}"
+									type={field.field_type === 'password' ? 'password' : 'text'}
+									bind:value={formValues[field.key]}
+									placeholder={field.placeholder}
+									required={field.required}
+									class="input w-full"
+								/>
+							{/if}
+
+							{#if field.help_text && field.field_type !== 'toggle'}
+								<p class="mt-1 text-xs text-surface-500">{field.help_text}</p>
+							{/if}
+						</div>
+					{/if}
+				{/each}
+			</div>
+
+			<button
+				type="button"
+				class="btn btn-sm preset-tonal mt-3"
+				onclick={() => {
+					configForm.config = JSON.stringify(unflattenConfig(formValues, currentFormFields), null, 2);
+					showJsonEditor = true;
+				}}
+			>
+				Advanced: Edit as JSON
+			</button>
+		{:else if hasFormFields && showJsonEditor}
+			<label class="label">
+				<span>Config (JSON)</span>
+				<textarea class="textarea font-mono text-sm" rows="8" bind:value={configForm.config}></textarea>
+			</label>
+			<button
+				type="button"
+				class="btn btn-sm preset-tonal mt-1"
+				onclick={() => {
+					try {
+						const parsed = JSON.parse(configForm.config || '{}');
+						formValues = flattenConfig(parsed, currentFormFields);
+						showJsonEditor = false;
+					} catch {
+						showError('Config must be valid JSON to switch back to form view');
+					}
+				}}
+			>
+				Back to Form
+			</button>
+		{:else}
+			<label class="label">
+				<span>Config (JSON)</span>
+				<textarea class="textarea font-mono text-sm" rows="6" bind:value={configForm.config}></textarea>
+			</label>
+		{/if}
 
 		<label class="flex items-center gap-3">
 			<input class="checkbox" type="checkbox" bind:checked={configForm.enabled} />

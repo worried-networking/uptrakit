@@ -119,6 +119,12 @@
 		return field.options ?? [];
 	}
 
+	function isFieldVisible(field: FieldDef): boolean {
+		if (!field.visible_when) return true;
+		const controlValue = values[field.visible_when.field] ?? '';
+		return field.visible_when.values.includes(controlValue);
+	}
+
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
 		// Coerce values to the correct types expected by the backend:
@@ -141,7 +147,7 @@
 
 <form onsubmit={handleSubmit} class="space-y-4">
 	{#each fields as field (field.key)}
-		{#if field.field_type !== 'hidden'}
+		{#if field.field_type !== 'hidden' && isFieldVisible(field)}
 			<div>
 				<label for={field.key} class="mb-1 block text-sm font-medium">
 					{field.label}

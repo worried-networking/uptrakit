@@ -372,6 +372,8 @@ export interface PluginTypeInfo {
 	capabilities: PluginCapability[];
 	/** Sample/default configuration JSON for this plugin type. */
 	sample_config: Record<string, unknown>;
+	/** Form field definitions for this plugin type. Empty for plugins with no configurable fields. */
+	config_form_fields?: FieldDef[];
 }
 
 export interface PluginConfigResponse {
@@ -807,6 +809,14 @@ export type SelectSource =
 			action_id: string;
 	  };
 
+/** Condition for conditional field visibility. */
+export interface VisibleWhen {
+	/** Key of the controlling field. */
+	field: string;
+	/** Field is visible when the controlling field's value is in this list. */
+	values: string[];
+}
+
 export interface FieldDef {
 	key: string;
 	label: string;
@@ -820,6 +830,8 @@ export interface FieldDef {
 	select_source?: SelectSource;
 	/** When true, the field value is encrypted client-side before being sent to the service. */
 	sensitive?: boolean;
+	/** When set, the field is only visible when the controlling field's value matches. */
+	visible_when?: VisibleWhen;
 }
 
 export interface FormDef {
