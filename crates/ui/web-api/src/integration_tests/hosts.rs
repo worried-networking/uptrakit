@@ -1,7 +1,9 @@
+use crate::routes::agents::find_or_create_host_and_link;
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::{
     insert_host, insert_service, link_service_host, register_and_get_token,
 };
+use uptrakit_internal_wire::HostInfo;
 use uptrakit_shared_db::entity::service::ServiceStatus;
 
 #[tokio::test]
@@ -71,4 +73,72 @@ async fn deactivate_host_returns_204() {
         .await;
 
     assert_eq!(status, http::StatusCode::NO_CONTENT);
+}
+
+/// After deactivating a host, `find_or_create_host_and_link` must create a
+/// fresh host record with a new ID rather than updating the deactivated one.
+#[tokio::test]
+async fn report_hosts_creates_new_record_after_deactivation() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let svc = insert_service(&app.db, app.tenant_id, ServiceStatus::Approved).await;
+    let host = insert_host(&app.db, app.tenant_id).await;
+    link_service_host(&app.db, svc.id, host.id).await;
+
+    // Deactivate the host via the REST API.
+    let status = client
+        .delete(&format!("/api/v1/hosts/{}", host.id))
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(status, http::StatusCode::NO_CONTENT);
+
+    // Simulate agent re-reporting the same machine_id.
+    let host_info = HostInfo {
+        machine_id: host.machine_id.clone(),
+        hostname: Some("re-registered-host".to_string()),
+        os_type: Some("linux".to_string()),
+        os_version: Some("Ubuntu 24.04".to_string()),
+        architecture: Some("x86_64".to_string()),
+        ip_address: Some("10.0.0.99".to_string()),
+    };
+
+    let result = find_or_create_host_and_link(
+        &app.db,
+        app.tenant_id,
+        svc.id,
+        &host_info,
+        host_info.hostname.as_deref().unwrap_or("unknown"),
+        host_info.ip_address.as_deref(),
+    )
+    .await
+    .expect("find_or_create_host_and_link should succeed");
+
+    let (new_host_id, is_new) = result.expect("should return Some for valid machine_id");
+
+    // Must be a brand new host, not the deactivated one.
+    assert!(is_new, "host must be reported as newly created");
+    assert_ne!(
+        new_host_id, host.id,
+        "new host must have a different ID from the deactivated host"
+    );
+
+    // The new host must be visible via the API.
+    let (get_status, body): (_, serde_json::Value) = client
+        .get(&format!("/api/v1/hosts/{new_host_id}"))
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(get_status, http::StatusCode::OK);
+    assert_eq!(body["hostname"], "re-registered-host");
+
+    // The old deactivated host must still be invisible.
+    let old_status = client
+        .get(&format!("/api/v1/hosts/{}", host.id))
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(old_status, http::StatusCode::NOT_FOUND);
 }

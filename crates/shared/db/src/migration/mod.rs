@@ -31,6 +31,7 @@ mod m20260312_000002_discover_host_packages_task;
 mod m20260313_000001_per_host_update_locking;
 mod m20260314_000001_proxmox_host_mapping;
 mod m20260315_000001_proxmox_hm_machine_id;
+mod m20260316_000001_host_machine_id_partial_unique;
 
 pub struct Migrator;
 
@@ -68,6 +69,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260305_000002_service_app_name::Migration),
             Box::new(m20260314_000001_proxmox_host_mapping::Migration),
             Box::new(m20260315_000001_proxmox_hm_machine_id::Migration),
+            Box::new(m20260316_000001_host_machine_id_partial_unique::Migration),
         ]
     }
 }

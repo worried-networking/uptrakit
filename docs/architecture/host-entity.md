@@ -5,8 +5,8 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 
 ## Database tables
 
-- **`hosts`**: `id` (UUID PK), `machine_id` (unique), `hostname`, `friendly_name`, `os_type?`, `os_version?`,
-  `architecture?`, `ip_address?`, `last_seen_at?`, `created_at`, `updated_at`, `deactivated_at?`
+- **`hosts`**: `id` (UUID PK), `machine_id` (unique among active hosts), `hostname`, `friendly_name`, `os_type?`,
+  `os_version?`, `architecture?`, `ip_address?`, `last_seen_at?`, `created_at`, `updated_at`, `deactivated_at?`
 - **`service_hosts`**: junction table with composite PK `(service_id, host_id)` and `linked_at` timestamp. FKs cascade
   on delete.
 
@@ -221,11 +221,18 @@ commands and additionally sets `ip_address` to the SSH target address from the l
 `find_or_create_host_and_link()` in the agent WebSocket handler area:
 
 - Skips if `machine_id == "unknown"`
-- Finds host by `machine_id` → updates mutable fields (hostname, IP, OS info, `last_seen_at`)
+- Finds **active** host by `machine_id` (excludes deactivated hosts) → updates mutable fields (hostname, IP, OS info,
+  `last_seen_at`)
 - Or creates new host with `friendly_name` defaulting to hostname
 - Upserts `service_host` link (insert if not exists)
 - Called on `ReportHosts` messages (not during enrollment)
 - Non-fatal on failure
+
+**Host re-registration after removal:** When a host is removed (soft-deleted via `DELETE /api/v1/hosts/{id}`), the
+deactivated record is never reactivated. If the same agent reconnects and reports the same `machine_id`, a brand new
+host record is created with a fresh UUID. The `(tenant_id, machine_id)` uniqueness constraint is a partial unique
+index that only covers active hosts (`WHERE deactivated_at IS NULL`), allowing multiple deactivated records to coexist
+with one active record for the same `machine_id`. Autodiscovery is triggered for the newly created host.
 
 ## Host packages
 

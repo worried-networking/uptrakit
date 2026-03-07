@@ -263,6 +263,7 @@ pub(crate) async fn find_or_create_host_and_link(
     let existing = Host::find()
         .filter(host::Column::TenantId.eq(tenant_id))
         .filter(host::Column::MachineId.eq(&host_info.machine_id))
+        .filter(host::Column::DeactivatedAt.is_null())
         .one(db)
         .await
         .context_to::<AgentRouteError>()?;
