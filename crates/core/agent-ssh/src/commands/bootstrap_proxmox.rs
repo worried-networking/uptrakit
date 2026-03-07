@@ -9,6 +9,7 @@ use uptrakit_crypto::EncryptedString;
 use uptrakit_plugin_infrastructure_proxmox::guest_exec::{self, PveGuestType};
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
+use crate::commands::bootstrap;
 use crate::commands::sudoers::{
     ResolvedSudoCommand, SudoersContent, install_helper_script, resolve_command_path,
     write_sudoers_file,
@@ -41,6 +42,10 @@ pub struct ProxmoxBootstrapParams {
     pub target_username: String,
     /// Write `NOPASSWD: ALL` instead of specific commands.
     pub allow_all: bool,
+    /// Remove existing Uptrakit-managed keys from `authorized_keys` before
+    /// writing the new entry (mirrors `--remove-stale-keys` in the normal
+    /// bootstrap). Same-service keys are always removed regardless of this flag.
+    pub remove_stale_keys: bool,
     /// Pre-generated UUID for the new host DB entry.
     pub host_id: uuid::Uuid,
     /// Service UUID for the `authorized_keys` comment.
@@ -184,7 +189,7 @@ pub async fn run_proxmox_bootstrap(
         )));
     }
 
-    // Deploy authorized_keys.
+    // Deploy authorized_keys (with stale key removal).
     let service_comment = match &params.service_id {
         Some(svc_id) => format!("uptrakit-svc:{svc_id}-host:{}", params.host_id),
         None => format!("uptrakit-host:{}", params.host_id),
@@ -196,28 +201,104 @@ pub async fn run_proxmox_bootstrap(
         .collect::<Vec<_>>()
         .join(" ");
 
-    let ak_restrictions = "no-pty,no-agent-forwarding,no-X11-forwarding";
-    let ak_entry = format!("{ak_restrictions} {stripped_pubkey} {service_comment}");
-    let escaped_entry = uptrakit_command::shell_escape(&ak_entry);
     let escaped_home = uptrakit_command::shell_escape(&home_dir);
     let escaped_user = uptrakit_command::shell_escape(&params.target_username);
+    let ak_path = format!("{home_dir}/.ssh/authorized_keys");
+    let escaped_ak_path = uptrakit_command::shell_escape(&ak_path);
 
-    let ak_cmd = format!(
-        "mkdir -p {escaped_home}/.ssh && \
-         chmod 700 {escaped_home}/.ssh && \
-         echo {escaped_entry} >> {escaped_home}/.ssh/authorized_keys && \
-         chmod 600 {escaped_home}/.ssh/authorized_keys && \
-         chown -R {escaped_user}:{escaped_user} {escaped_home}/.ssh"
-    );
-    let ak_result = guest_executor
-        .exec_command(&ak_cmd)
+    // Read existing authorized_keys (tolerate a missing file).
+    let read_result = guest_executor
+        .exec_command(&format!("cat {escaped_ak_path} 2>/dev/null || true"))
         .await
         .context_to::<Error>()?;
-    if ak_result.exit_code != 0 {
-        bail!(Error::SshCommand(format!(
-            "failed to deploy authorized_keys in guest: {}",
-            ak_result.stderr.trim()
-        )));
+    let existing = bootstrap::parse_existing_authorized_keys(&read_result.stdout);
+
+    // Auto-remove same-service keys (always, no flag required).
+    let same_service_lines: Vec<String> = params
+        .service_id
+        .as_ref()
+        .map(|svc_id| {
+            existing
+                .all_key_lines
+                .iter()
+                .filter(|l| bootstrap::is_same_service_key_line(l, svc_id))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // For the `uptrakit` user every key is considered Uptrakit-managed; for
+    // other users only lines whose comment starts with `uptrakit` are stale.
+    let stale_lines: Vec<String> = if params.target_username == "uptrakit" {
+        existing.all_key_lines.clone()
+    } else {
+        existing.uptrakit_key_lines.clone()
+    };
+
+    let mut to_remove: std::collections::HashSet<&str> =
+        same_service_lines.iter().map(String::as_str).collect();
+    if params.remove_stale_keys {
+        for l in &stale_lines {
+            to_remove.insert(l.as_str());
+        }
+    }
+
+    let ak_entry = format!(
+        "{} {stripped_pubkey} {service_comment}",
+        bootstrap::AUTHORIZED_KEYS_RESTRICTIONS
+    );
+
+    if to_remove.is_empty() {
+        // No removals — append the new key.
+        let escaped_entry = uptrakit_command::shell_escape(&ak_entry);
+        let ak_cmd = format!(
+            "mkdir -p {escaped_home}/.ssh && \
+             chmod 700 {escaped_home}/.ssh && \
+             echo {escaped_entry} >> {escaped_ak_path} && \
+             chmod 600 {escaped_ak_path} && \
+             chown -R {escaped_user}:{escaped_user} {escaped_home}/.ssh"
+        );
+        let ak_result = guest_executor
+            .exec_command(&ak_cmd)
+            .await
+            .context_to::<Error>()?;
+        if ak_result.exit_code != 0 {
+            bail!(Error::SshCommand(format!(
+                "failed to deploy authorized_keys in guest: {}",
+                ak_result.stderr.trim()
+            )));
+        }
+    } else {
+        // Removals required — atomically rewrite the file.
+        let keep_lines: Vec<&str> = existing
+            .all_key_lines
+            .iter()
+            .map(String::as_str)
+            .filter(|l| !to_remove.contains(l))
+            .collect();
+        let new_content = if keep_lines.is_empty() {
+            format!("{ak_entry}\n")
+        } else {
+            format!("{}\n{ak_entry}\n", keep_lines.join("\n"))
+        };
+        let escaped_content = uptrakit_command::shell_escape(&new_content);
+        let ak_cmd = format!(
+            "mkdir -p {escaped_home}/.ssh && \
+             chmod 700 {escaped_home}/.ssh && \
+             printf '%s' {escaped_content} | tee {escaped_ak_path} > /dev/null && \
+             chmod 600 {escaped_ak_path} && \
+             chown -R {escaped_user}:{escaped_user} {escaped_home}/.ssh"
+        );
+        let ak_result = guest_executor
+            .exec_command(&ak_cmd)
+            .await
+            .context_to::<Error>()?;
+        if ak_result.exit_code != 0 {
+            bail!(Error::SshCommand(format!(
+                "failed to write authorized_keys in guest: {}",
+                ak_result.stderr.trim()
+            )));
+        }
     }
 
     // Configure sudoers.

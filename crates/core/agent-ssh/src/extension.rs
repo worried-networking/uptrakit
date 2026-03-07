@@ -227,6 +227,12 @@ fn bootstrap_proxmox_action() -> ActionDef {
             FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
                 .with_type(FieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
+            FieldDef::new("remove_stale_keys", "Remove Stale Keys")
+                .with_type(FieldType::Toggle)
+                .with_help_text(
+                    "Remove existing Uptrakit-managed keys from authorized_keys before \
+                     writing the new entry. Same-service keys are always removed regardless.",
+                ),
         ])))
 }
 
@@ -259,6 +265,12 @@ fn bootstrap_proxmox_guest_action() -> ActionDef {
             FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
                 .with_type(FieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
+            FieldDef::new("remove_stale_keys", "Remove Stale Keys")
+                .with_type(FieldType::Toggle)
+                .with_help_text(
+                    "Remove existing Uptrakit-managed keys from authorized_keys before \
+                     writing the new entry. Same-service keys are always removed regardless.",
+                ),
         ])))
 }
 
@@ -748,6 +760,7 @@ async fn run_bootstrap_proxmox_action(
         .to_string();
 
     let allow_all = param_bool(params, "allow_all");
+    let remove_stale_keys = param_bool(params, "remove_stale_keys");
 
     let host_id = uuid::Uuid::now_v7();
 
@@ -758,6 +771,7 @@ async fn run_bootstrap_proxmox_action(
         name,
         target_username,
         allow_all,
+        remove_stale_keys,
         host_id,
         service_id,
     };
@@ -921,6 +935,7 @@ async fn run_bootstrap_proxmox_guest_action(
         .to_string();
 
     let allow_all = param_bool(params, "allow_all");
+    let remove_stale_keys = param_bool(params, "remove_stale_keys");
     let host_id = uuid::Uuid::now_v7();
 
     let proxmox_params = ProxmoxBootstrapParams {
@@ -930,6 +945,7 @@ async fn run_bootstrap_proxmox_guest_action(
         name,
         target_username,
         allow_all,
+        remove_stale_keys,
         host_id,
         service_id,
     };

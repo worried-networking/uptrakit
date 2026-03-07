@@ -843,7 +843,8 @@ fn cmd_detect_home(username: &str, use_sudo: bool) -> String {
 /// These prevent interactive terminal allocation, SSH agent forwarding, and
 /// X11 forwarding through the managed account while allowing non-interactive
 /// command execution that the agent requires.
-const AUTHORIZED_KEYS_RESTRICTIONS: &str = "no-pty,no-agent-forwarding,no-X11-forwarding";
+pub(crate) const AUTHORIZED_KEYS_RESTRICTIONS: &str =
+    "no-pty,no-agent-forwarding,no-X11-forwarding";
 
 /// Build a remote command that reads `authorized_keys`, tolerating a missing
 /// file (returns empty output).
@@ -919,7 +920,7 @@ fn is_uptrakit_key_line(line: &str) -> bool {
 /// Matches comments of the form `uptrakit-svc:<service_id>-host:<host_id>`.
 /// Keys with other service UUIDs, plain `uptrakit-host:<host_id>` entries,
 /// and non-Uptrakit keys all return `false`.
-fn is_same_service_key_line(line: &str, service_id: &uuid::Uuid) -> bool {
+pub(crate) fn is_same_service_key_line(line: &str, service_id: &uuid::Uuid) -> bool {
     if !is_uptrakit_key_line(line) {
         return false;
     }
@@ -933,15 +934,15 @@ fn is_same_service_key_line(line: &str, service_id: &uuid::Uuid) -> bool {
 }
 
 /// Classification of the current `authorized_keys` file content.
-struct ExistingAuthorizedKeys {
+pub(crate) struct ExistingAuthorizedKeys {
     /// Non-blank, non-comment lines (actual key entries).
-    all_key_lines: Vec<String>,
+    pub(crate) all_key_lines: Vec<String>,
     /// Subset of `all_key_lines` that pass `is_uptrakit_key_line`.
-    uptrakit_key_lines: Vec<String>,
+    pub(crate) uptrakit_key_lines: Vec<String>,
 }
 
 /// Parse `authorized_keys` content into classified buckets.
-fn parse_existing_authorized_keys(content: &str) -> ExistingAuthorizedKeys {
+pub(crate) fn parse_existing_authorized_keys(content: &str) -> ExistingAuthorizedKeys {
     let mut all_key_lines = Vec::new();
     let mut uptrakit_key_lines = Vec::new();
 
