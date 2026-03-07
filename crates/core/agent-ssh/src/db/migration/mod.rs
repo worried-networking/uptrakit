@@ -7,6 +7,7 @@ mod m20260224_000003_add_sudo_columns;
 mod m20260302_000001_convert_ssh_host_timestamps;
 mod m20260302_000002_ensure_machine_id_nullable;
 mod m20260306_000001_add_pve_columns;
+mod m20260307_000001_add_pve_node_name;
 mod m20260310_000001_data_encryption_keys;
 
 pub struct Migrator;
@@ -22,6 +23,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260302_000002_ensure_machine_id_nullable::Migration),
             Box::new(m20260310_000001_data_encryption_keys::Migration),
             Box::new(m20260306_000001_add_pve_columns::Migration),
+            Box::new(m20260307_000001_add_pve_node_name::Migration),
         ]
     }
 }

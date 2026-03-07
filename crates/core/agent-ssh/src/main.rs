@@ -371,6 +371,7 @@ impl ServiceHandler for SshAgentHandler {
                                         &host.id,
                                         true,
                                         Some(config_id.to_string()),
+                                        host.pve_node_name.clone(),
                                     )
                                     .await;
                                     break;

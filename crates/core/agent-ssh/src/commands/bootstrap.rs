@@ -537,7 +537,8 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     if is_pve_node {
         let config_id = existing_pve_plugin_config_id.clone();
         if let Err(e) =
-            host_ops::update_host_pve_state(&db, &params.host_id.to_string(), true, config_id).await
+            host_ops::update_host_pve_state(&db, &params.host_id.to_string(), true, config_id, None)
+                .await
         {
             tracing::warn!(error = %e, "failed to persist PVE state for host");
         }

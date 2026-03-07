@@ -96,6 +96,12 @@ pub struct Model {
     /// Set after the controller confirms the `ReportPluginConfig` request.
     /// `None` for non-PVE hosts or before the config is reported.
     pub pve_plugin_config_id: Option<String>,
+    /// Short Proxmox VE node name (e.g. `"optiplex2"`).
+    ///
+    /// Collected from `hostname -s` during bootstrap or `host sync`.
+    /// Used to match discovered guests to their PVE host node.
+    /// `None` for non-PVE hosts or hosts not yet synced.
+    pub pve_node_name: Option<String>,
 }
 
 impl Model {
@@ -181,6 +187,7 @@ mod tests {
             sudo_policy: sudo_policy.to_string(),
             is_pve_node: false,
             pve_plugin_config_id: None,
+            pve_node_name: None,
         }
     }
 

@@ -102,6 +102,7 @@ pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<
         sudo_policy: Set("auto".to_string()),
         is_pve_node: Set(false),
         pve_plugin_config_id: Set(None),
+        pve_node_name: Set(None),
     };
 
     let inserted = model.insert(db).await.context_to::<Error>()?;
@@ -276,13 +277,14 @@ pub async fn find_host_by_machine_id(
 
 /// Update PVE-related state for an SSH host.
 ///
-/// Sets `is_pve_node` and optionally `pve_plugin_config_id`.
+/// Sets `is_pve_node` and optionally `pve_plugin_config_id` and `pve_node_name`.
 /// Called after bootstrap detects a PVE node and registers the plugin config.
 pub async fn update_host_pve_state(
     db: &DatabaseConnection,
     host_id: &str,
     is_pve_node: bool,
     pve_plugin_config_id: Option<String>,
+    pve_node_name: Option<String>,
 ) -> Result<()> {
     let host = Entity::find_by_id(host_id)
         .one(db)
@@ -293,6 +295,7 @@ pub async fn update_host_pve_state(
     let mut model: ActiveModel = host.into();
     model.is_pve_node = Set(is_pve_node);
     model.pve_plugin_config_id = Set(pve_plugin_config_id);
+    model.pve_node_name = Set(pve_node_name);
     model.updated_at = Set(time::OffsetDateTime::now_utc());
     model.update(db).await.context_to::<Error>()?;
     Ok(())
@@ -919,7 +922,7 @@ mod tests {
         .expect("add");
 
         // Mark as PVE but without a config ID.
-        update_host_pve_state(&db, &host.id, true, None)
+        update_host_pve_state(&db, &host.id, true, None, Some("pve-node".to_string()))
             .await
             .expect("update pve state");
 
@@ -939,9 +942,15 @@ mod tests {
         .expect("add");
 
         // Mark as PVE with a config ID.
-        update_host_pve_state(&db, &host.id, true, Some("cfg-12345".to_string()))
-            .await
-            .expect("update pve state");
+        update_host_pve_state(
+            &db,
+            &host.id,
+            true,
+            Some("cfg-12345".to_string()),
+            Some("pve-node".to_string()),
+        )
+        .await
+        .expect("update pve state");
 
         let result = find_pve_host_with_config(&db)
             .await
