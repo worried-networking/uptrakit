@@ -5,15 +5,44 @@
 
 use std::net::IpAddr;
 
+/// Check whether an IP address is private, loopback, link-local, or
+/// otherwise non-public.
+///
+/// Returns `true` for:
+/// - IPv4: private (RFC 1918), loopback, link-local (`169.254.0.0/16`),
+///   CGNAT (`100.64.0.0/10`), unspecified (`0.0.0.0`)
+/// - IPv6: loopback (`::1`), unspecified (`::`), ULA (`fc00::/7`),
+///   link-local (`fe80::/10`)
+pub fn is_private_ip(addr: IpAddr) -> bool {
+    match addr {
+        IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_unspecified()
+                // Link-local: 169.254.0.0/16
+                || (octets[0] == 169 && octets[1] == 254)
+                // CGNAT (Carrier-Grade NAT): 100.64.0.0/10
+                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+        }
+        IpAddr::V6(v6) => {
+            let segments = v6.segments();
+            v6.is_loopback()
+                || v6.is_unspecified()
+                // ULA (Unique Local Address): fc00::/7
+                || (segments[0] >> 8) & 0xFE == 0xFC
+                // Link-local: fe80::/10
+                || (segments[0] & 0xFFC0) == 0xFE80
+        }
+    }
+}
+
 /// Check whether a hostname or IP address refers to a private, loopback,
 /// link-local, or otherwise non-public network destination.
 ///
 /// Returns `true` for:
 /// - DNS names: `localhost`, `*.local`, `*.internal`, `*.localhost`
-/// - IPv4: private (RFC 1918), loopback, link-local (`169.254.0.0/16`),
-///   CGNAT (`100.64.0.0/10`), unspecified (`0.0.0.0`)
-/// - IPv6: loopback (`::1`), unspecified (`::`), ULA (`fc00::/7`),
-///   link-local (`fe80::/10`)
+/// - IP addresses: delegates to [`is_private_ip`]
 ///
 /// Non-parseable hostnames that don't match the blocked DNS patterns
 /// return `false`.
@@ -28,25 +57,7 @@ pub fn is_private_host(host: &str) -> bool {
     }
 
     match host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(v4)) => {
-            let octets = v4.octets();
-            v4.is_private()
-                || v4.is_loopback()
-                || v4.is_unspecified()
-                // Link-local: 169.254.0.0/16
-                || (octets[0] == 169 && octets[1] == 254)
-                // CGNAT (Carrier-Grade NAT): 100.64.0.0/10
-                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
-        }
-        Ok(IpAddr::V6(v6)) => {
-            let segments = v6.segments();
-            v6.is_loopback()
-                || v6.is_unspecified()
-                // ULA (Unique Local Address): fc00::/7
-                || (segments[0] >> 8) & 0xFE == 0xFC
-                // Link-local: fe80::/10
-                || (segments[0] & 0xFFC0) == 0xFE80
-        }
+        Ok(addr) => is_private_ip(addr),
         Err(_) => false,
     }
 }
@@ -207,5 +218,61 @@ mod tests {
     #[test]
     fn non_parseable_hostname_returns_false() {
         assert!(!is_private_host("not-an-ip-or-blocked-domain.org"));
+    }
+
+    // ── is_private_ip direct tests ────────────────────────────────────────
+
+    #[test]
+    fn is_private_ip_ipv4_private() {
+        assert!(is_private_ip("10.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("172.16.0.1".parse().unwrap()));
+        assert!(is_private_ip("192.168.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_private_ip_ipv4_loopback() {
+        assert!(is_private_ip("127.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_private_ip_ipv4_link_local() {
+        assert!(is_private_ip("169.254.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_private_ip_ipv4_cgnat() {
+        assert!(is_private_ip("100.64.0.1".parse().unwrap()));
+        assert!(is_private_ip("100.127.255.255".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_private_ip_ipv4_unspecified() {
+        assert!(is_private_ip("0.0.0.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_private_ip_ipv4_public() {
+        assert!(!is_private_ip("8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ip("1.1.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_private_ip_ipv6_loopback() {
+        assert!(is_private_ip("::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_private_ip_ipv6_ula() {
+        assert!(is_private_ip("fd00::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_private_ip_ipv6_link_local() {
+        assert!(is_private_ip("fe80::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn is_private_ip_ipv6_public() {
+        assert!(!is_private_ip("2001:4860:4860::8888".parse().unwrap()));
     }
 }
