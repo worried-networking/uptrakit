@@ -109,7 +109,7 @@ pub async fn execute_update(
     let mut final_status = UpdateFinalStatus::Completed;
 
     // Run with timeout
-    let timeout_duration = std::time::Duration::from_secs(u64::from(payload.timeout_seconds));
+    let timeout_duration = payload.timeout;
     let execution_result = tokio::time::timeout(timeout_duration, async {
         // Run pre-update hooks
         if !payload.pre_update_hooks.is_empty() {
@@ -262,10 +262,10 @@ pub async fn execute_update(
             None
         }
         Err(_) => {
-            let timeout_msg = format!("Update timed out after {} seconds", payload.timeout_seconds);
+            let timeout_msg = format!("Update timed out after {}s", payload.timeout.as_secs());
             tracing::warn!(
                 software_item = %payload.software_item_name,
-                timeout_seconds = payload.timeout_seconds,
+                timeout = ?payload.timeout,
                 "update timed out"
             );
             let formatted = format!("[error] {timeout_msg}\n");
@@ -876,7 +876,7 @@ mod tests {
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
             release_info: None,
-            timeout_seconds: 60,
+            timeout: std::time::Duration::from_secs(60),
         }
     }
 

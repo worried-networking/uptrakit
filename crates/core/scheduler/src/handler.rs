@@ -279,7 +279,7 @@ impl ServiceHandler for SchedulerHandler {
         &mut self,
         conn: &mut ControllerConnection,
         cause: ShutdownCause,
-        _shutdown_timeout_seconds: u32,
+        _shutdown_timeout: std::time::Duration,
     ) -> LoopOutcome {
         let (disconnect_reason, outcome) = default_resolve_shutdown(cause);
 

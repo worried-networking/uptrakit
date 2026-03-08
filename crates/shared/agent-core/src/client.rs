@@ -91,21 +91,18 @@ pub async fn send_update_result(
 pub async fn handle_graceful_shutdown(
     conn: &mut ControllerConnection,
     in_flight_update: Option<InFlightUpdate>,
-    timeout_seconds: u32,
+    shutdown_timeout: std::time::Duration,
     disconnect_reason: DisconnectReason,
     outcome: LoopOutcome,
 ) -> LoopOutcome {
-    use std::time::Duration;
-
     if let Some(mut update) = in_flight_update {
         tracing::info!(
             update_id = %update.update_history_id,
-            timeout_seconds,
+            timeout = ?shutdown_timeout,
             "waiting for in-flight update to complete before shutdown"
         );
 
-        let timeout = Duration::from_secs(u64::from(timeout_seconds));
-        let deadline = tokio::time::Instant::now() + timeout;
+        let deadline = tokio::time::Instant::now() + shutdown_timeout;
 
         // Continue processing output and wait for completion
         loop {
@@ -132,7 +129,7 @@ pub async fn handle_graceful_shutdown(
                         from_version: None,
                         to_version: None,
                         output: String::new(),
-                        error: Some(format!("Agent shutdown timeout ({timeout_seconds}s) reached")),
+                        error: Some(format!("Agent shutdown timeout ({}s) reached", shutdown_timeout.as_secs())),
                     })).await;
                     break;
                 }
@@ -409,7 +406,7 @@ async fn batch_host_package_update_inner(
         tokio::sync::mpsc::channel::<uptrakit_command::UpdateOutputLine>(100);
 
     // Execute with timeout
-    let timeout_duration = std::time::Duration::from_secs(u64::from(payload.timeout_seconds));
+    let timeout_duration = payload.timeout;
     let batch_results = tokio::time::timeout(timeout_duration, async {
         // Create plugin
         let plugin = match uptrakit_plugin_infrastructure_registry::PluginRegistry::create_plugin(
@@ -506,12 +503,12 @@ async fn batch_host_package_update_inner(
         Err(_) => {
             // Timeout
             let timeout_msg = format!(
-                "Batch update timed out after {} seconds",
-                payload.timeout_seconds
+                "Batch update timed out after {}s",
+                payload.timeout.as_secs()
             );
             tracing::warn!(
                 batch_id = %payload.batch_id,
-                timeout_seconds = payload.timeout_seconds,
+                timeout = ?payload.timeout,
                 "batch update timed out"
             );
             payload
@@ -743,7 +740,7 @@ mod tests {
 
     fn make_batch_payload(
         plugin_type: PluginType,
-        timeout_seconds: u32,
+        timeout: std::time::Duration,
     ) -> ExecuteBatchHostPackageUpdatePayload {
         let host_package_id = Uuid::now_v7();
         let update_history_id = Uuid::now_v7();
@@ -761,13 +758,16 @@ mod tests {
             }],
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
-            timeout_seconds,
+            timeout,
         }
     }
 
     #[tokio::test]
     async fn unknown_plugin_type_causes_all_packages_to_fail() {
-        let payload = make_batch_payload(PluginType::Other("unknown-plugin-xyz".to_string()), 30);
+        let payload = make_batch_payload(
+            PluginType::Other("unknown-plugin-xyz".to_string()),
+            std::time::Duration::from_secs(30),
+        );
         let results =
             super::batch_host_package_update_inner(&payload, noop_executor(), &ctx()).await;
 
@@ -800,7 +800,10 @@ mod tests {
     async fn very_short_timeout_causes_all_packages_to_fail_with_timeout_message() {
         // Use a known-bad plugin type so the "work" inside the timeout block
         // never completes before the 0-second deadline.
-        let payload = make_batch_payload(PluginType::Other("unknown-plugin-xyz".to_string()), 0);
+        let payload = make_batch_payload(
+            PluginType::Other("unknown-plugin-xyz".to_string()),
+            std::time::Duration::ZERO,
+        );
         let results =
             super::batch_host_package_update_inner(&payload, noop_executor(), &ctx()).await;
 

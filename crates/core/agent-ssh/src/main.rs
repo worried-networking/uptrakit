@@ -572,7 +572,7 @@ impl ServiceHandler for SshAgentHandler {
         &mut self,
         conn: &mut ControllerConnection,
         cause: ShutdownCause,
-        shutdown_timeout_seconds: u32,
+        shutdown_timeout: Duration,
     ) -> LoopOutcome {
         use uptrakit_internal_wire::{
             DisconnectingPayload, ServiceMessage, UpdateFinalStatus, UpdateResultPayload,
@@ -584,12 +584,11 @@ impl ServiceHandler for SshAgentHandler {
             let count = self.in_flight_updates.len();
             tracing::info!(
                 count,
-                timeout_seconds = shutdown_timeout_seconds,
+                timeout = ?shutdown_timeout,
                 "waiting for in-flight updates to complete before shutdown"
             );
 
-            let deadline = tokio::time::Instant::now()
-                + Duration::from_secs(u64::from(shutdown_timeout_seconds));
+            let deadline = tokio::time::Instant::now() + shutdown_timeout;
 
             while !self.in_flight_updates.is_empty() {
                 tokio::select! {
@@ -624,7 +623,8 @@ impl ServiceHandler for SshAgentHandler {
                                     to_version: None,
                                     output: String::new(),
                                     error: Some(format!(
-                                        "Agent shutdown timeout ({shutdown_timeout_seconds}s) reached"
+                                        "Agent shutdown timeout ({}s) reached",
+                                        shutdown_timeout.as_secs()
                                     )),
                                 },
                             ))

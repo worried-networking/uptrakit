@@ -1102,7 +1102,7 @@ pub async fn trigger_all_host_package_updates_for_host(
                 updates,
                 pre_update_hooks: vec![],
                 post_update_hooks: vec![],
-                timeout_seconds: 7200,
+                timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
             },
         ));
 

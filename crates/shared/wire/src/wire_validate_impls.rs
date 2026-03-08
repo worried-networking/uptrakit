@@ -1225,7 +1225,7 @@ mod tests {
                 attestation_status: None,
                 require_attestation: false,
             }),
-            timeout_seconds: 60,
+            timeout: std::time::Duration::from_secs(60),
         };
         assert!(payload.wire_validate().is_ok());
     }
@@ -1253,7 +1253,7 @@ mod tests {
             pre_update_hooks: hooks,
             post_update_hooks: vec![],
             release_info: None,
-            timeout_seconds: 60,
+            timeout: std::time::Duration::from_secs(60),
         };
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "pre_update_hooks");

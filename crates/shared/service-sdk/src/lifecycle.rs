@@ -229,7 +229,7 @@ pub trait ServiceHandler: Send {
         &mut self,
         conn: &mut ControllerConnection,
         cause: ShutdownCause,
-        shutdown_timeout_seconds: u32,
+        shutdown_timeout: Duration,
     ) -> LoopOutcome;
 }
 
