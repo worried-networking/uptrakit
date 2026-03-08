@@ -193,7 +193,8 @@ mod tests {
             tenant_id: Uuid::now_v7(),
             task_type:
                 uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType::ServiceCertCheck,
-            cron_expression: "0 * * * *".to_string(),
+            interval_seconds: 3600,
+            jitter_seconds: 0,
             enabled: true,
             task_config: None,
             last_run_at: None,

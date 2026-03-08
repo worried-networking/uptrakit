@@ -109,7 +109,8 @@ mod tests {
             tenant_id: uuid::Uuid::now_v7(),
             task_type:
                 uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType::StaleLeaseCleanup,
-            cron_expression: "* * * * *".to_string(),
+            interval_seconds: 60,
+            jitter_seconds: 0,
             enabled: true,
             task_config: None,
             last_run_at: None,

@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;
-use crate::{claim, cron_utils};
+use crate::{claim, interval};
 
 /// Default poll interval for the scheduler loop (15 seconds).
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(15);
@@ -232,8 +232,7 @@ impl Scheduler {
                         // up the task immediately rather than waiting for the
                         // stale-claim recovery window (up to 10 minutes).
                         let now = time::OffsetDateTime::now_utc();
-                        let next_run_at = cron_utils::next_run_after(&task.cron_expression, now)
-                            .unwrap_or_else(|| now + time::Duration::hours(1));
+                        let next_run_at = interval::compute_next_run_at(now, task.interval_seconds, task.jitter_seconds);
                         if let Err(e) = claim::release_claim(
                             &db,
                             task.id,
@@ -272,10 +271,9 @@ impl Scheduler {
                     );
                 }
 
-                // Compute the next run time from the cron expression
+                // Compute the next run time from the interval + jitter
                 let now = time::OffsetDateTime::now_utc();
-                let next_run_at = cron_utils::next_run_after(&task.cron_expression, now)
-                    .unwrap_or_else(|| now + time::Duration::hours(1));
+                let next_run_at = interval::compute_next_run_at(now, task.interval_seconds, task.jitter_seconds);
 
                 // Convert typed error to string for DB storage.
                 let db_result = result.as_ref().map(|_| ()).map_err(|e| e.to_string());
@@ -415,7 +413,8 @@ mod tests {
             id: ActiveValue::Set(task_id),
             tenant_id: ActiveValue::Set(tenant.id),
             task_type: ActiveValue::Set(ScheduledTaskType::AuthCleanup),
-            cron_expression: ActiveValue::Set("*/5 * * * *".to_string()),
+            interval_seconds: ActiveValue::Set(300),
+            jitter_seconds: ActiveValue::Set(30),
             enabled: ActiveValue::Set(true),
             task_config: ActiveValue::Set(None),
             last_run_at: ActiveValue::Set(None),
@@ -465,7 +464,8 @@ mod tests {
             id: ActiveValue::Set(task_id),
             tenant_id: ActiveValue::Set(tenant.id),
             task_type: ActiveValue::Set(ScheduledTaskType::AuthCleanup),
-            cron_expression: ActiveValue::Set("*/5 * * * *".to_string()),
+            interval_seconds: ActiveValue::Set(300),
+            jitter_seconds: ActiveValue::Set(30),
             enabled: ActiveValue::Set(true),
             task_config: ActiveValue::Set(None),
             last_run_at: ActiveValue::Set(None),
@@ -515,7 +515,8 @@ mod tests {
             id: ActiveValue::Set(Uuid::now_v7()),
             tenant_id: ActiveValue::Set(tenant.id),
             task_type: ActiveValue::Set(ScheduledTaskType::StaleLeaseCleanup),
-            cron_expression: ActiveValue::Set("*/5 * * * *".to_string()),
+            interval_seconds: ActiveValue::Set(300),
+            jitter_seconds: ActiveValue::Set(30),
             enabled: ActiveValue::Set(true),
             task_config: ActiveValue::Set(None),
             last_run_at: ActiveValue::Set(None),
@@ -666,7 +667,8 @@ mod tests {
             id: ActiveValue::Set(Uuid::now_v7()),
             tenant_id: ActiveValue::Set(tenant.id),
             task_type: ActiveValue::Set(ScheduledTaskType::StaleLeaseCleanup),
-            cron_expression: ActiveValue::Set("*/5 * * * *".to_string()),
+            interval_seconds: ActiveValue::Set(300),
+            jitter_seconds: ActiveValue::Set(30),
             enabled: ActiveValue::Set(true),
             task_config: ActiveValue::Set(None),
             last_run_at: ActiveValue::Set(None),
@@ -728,7 +730,8 @@ mod tests {
             id: ActiveValue::Set(task_id),
             tenant_id: ActiveValue::Set(tenant.id),
             task_type: ActiveValue::Set(ScheduledTaskType::AuthCleanup),
-            cron_expression: ActiveValue::Set("*/5 * * * *".to_string()),
+            interval_seconds: ActiveValue::Set(300),
+            jitter_seconds: ActiveValue::Set(30),
             enabled: ActiveValue::Set(true),
             task_config: ActiveValue::Set(None),
             last_run_at: ActiveValue::Set(None),
@@ -794,7 +797,8 @@ mod tests {
             id: ActiveValue::Set(task_id),
             tenant_id: ActiveValue::Set(tenant.id),
             task_type: ActiveValue::Set(ScheduledTaskType::CrlRenewal),
-            cron_expression: ActiveValue::Set("0 */4 * * *".to_string()),
+            interval_seconds: ActiveValue::Set(14400),
+            jitter_seconds: ActiveValue::Set(120),
             enabled: ActiveValue::Set(true),
             task_config: ActiveValue::Set(None),
             last_run_at: ActiveValue::Set(None),

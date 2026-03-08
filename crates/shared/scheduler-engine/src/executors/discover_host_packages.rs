@@ -29,7 +29,7 @@ use crate::notifier::SchedulerNotifier;
 
 /// Triggers periodic host-package rediscovery for every active host in the tenant.
 ///
-/// Runs every 6 hours (configurable via `cron_expression` on the scheduled task).
+/// Runs every 6 hours (configurable via `interval_seconds` on the scheduled task).
 /// Sends `DiscoverSoftware` to every agent-backed host, which causes the agent to
 /// run all applicable discovery plugins and report back discovered packages.
 ///
@@ -295,7 +295,8 @@ mod tests {
             id: Uuid::now_v7(),
             tenant_id,
             task_type: ScheduledTaskType::DiscoverHostPackages,
-            cron_expression: "0 */6 * * *".to_string(),
+            interval_seconds: 21600,
+            jitter_seconds: 300,
             enabled: true,
             task_config: None,
             last_run_at: None,

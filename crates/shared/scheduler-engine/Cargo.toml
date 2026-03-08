@@ -13,8 +13,7 @@ oidc = []
 
 [dependencies]
 async-trait = { workspace = true }
-chrono = { workspace = true }
-cron = { workspace = true }
+rand = { workspace = true }
 rootcause = { workspace = true }
 sea-orm = { workspace = true }
 serde_json = { workspace = true }
