@@ -117,12 +117,6 @@ capability namespace is ever opened to user input.
 
 ### Issues
 
-**[LOW]** `src/envelope.rs:9-17` -- `NatsEventEnvelope` derives only
-`Serialize` and `Deserialize` but not `Debug`. This makes it difficult to log
-or inspect envelopes during troubleshooting. Adding `#[derive(Debug)]` (or a
-custom `Debug` that redacts the `message` field if it may contain sensitive
-data) would improve operational observability.
-
 **[LOW]** `src/envelope.rs:38-46` -- The roundtrip test asserts on
 `source_controller_id`, `target_service_id`, `target_capability`, and
 `created_at`, but does not assert on the `message` field. If

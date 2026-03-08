@@ -36,9 +36,7 @@ to memory growth under connection disruption.
 
 ### Issues
 
-**[LOW]** `Cargo.toml:24` -- `rumqttc` not in workspace dependencies. Declared inline
-(`version = "0.25.1"`) rather than in `[workspace.dependencies]`. Currently sole consumer, but
-inconsistent with workspace standard and risks version drift if a second crate ever needs it.
+No architectural issues found.
 
 ## Security and Safety
 
@@ -80,10 +78,6 @@ comment stating the deliberate choice would make the security posture self-docum
 - Deterministic fixture construction via `tcp_config()` with struct update syntax.
 
 ### Issues
-
-**[LOW]** `src/main.rs:221` -- `&uuid::Uuid::now_v7().to_string()[..8]` uses byte-offset slicing
-on a UTF-8 string. UUID v7 string representation is always ASCII and this is safe, but the
-pattern is fragile. Consider `.chars().take(8).collect::<String>()`.
 
 **[LOW]** `src/mqtt_client.rs:421-430` -- `tls_transport_sets_tls` and
 `tls_with_custom_ca_pem_does_not_panic` only assert no panic. No verification of produced

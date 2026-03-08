@@ -58,9 +58,7 @@ No security issues found.
 
 ### Issues
 
-**[LOW]** `src/scheduler.rs` -- `DEFAULT_POLL_INTERVAL_SECS` is a bare `const u64` without a
-doc comment. Promote to a typed `Duration` constant with documentation, matching the
-`durations.rs` pattern used in the controller.
+No code quality issues found.
 
 ## High Availability
 
@@ -177,13 +175,6 @@ regressions when new plugin types or assignment logic are added.
 
 ### Issues
 
-**[MEDIUM]** `src/scheduler.rs:17` vs `src/claim.rs:12` -- `DEFAULT_POLL_INTERVAL_SECS` is a
-bare `const u64` while `STALE_CLAIM_SECONDS` in `claim.rs` is also a bare `const i64`. Neither
-is typed as `Duration`, unlike `TASK_EXECUTION_TIMEOUT` on line 24 which correctly uses
-`Duration::from_secs(...)`. The two raw-integer constants are inconsistent with the one
-`Duration` constant in the same crate and with the controller's `durations.rs` convention of
-typed `Duration` constants with doc-comments throughout.
-
 **[LOW]** `src/scheduler.rs:107-113` (cancellation arm, `release_all_claims`) vs
 `src/scheduler.rs:217-231` (mid-task cancellation, `release_claim` with shutdown reason) --
 The shutdown path in the main loop (`token.cancelled()` outer arm) calls `release_all_claims`
@@ -217,13 +208,6 @@ to infer from the trait definition alone.
   The claim-and-release pattern is explained in the struct-level doc.
 
 ### Issues
-
-**[MEDIUM]** `src/scheduler.rs:17` -- `DEFAULT_POLL_INTERVAL_SECS: u64 = 15` is a bare numeric
-constant with no doc comment explaining its relationship to task latency or the STALE_CLAIM
-window. A reader tuning the scheduler cannot tell from the constant alone whether 15 seconds is
-a hard constraint or a conservative default. Promote to a typed `Duration` constant with a doc
-comment explaining the relationship (poll interval should be much shorter than the stale claim
-threshold of 600 s), and move to a `durations` module for discoverability.
 
 **[LOW]** `src/executors/` -- Four executor files (`auth_cleanup.rs`, `crl_renewal.rs`,
 `service_cert_check.rs`, `stale_lease_cleanup.rs`) have no module-level doc comment. Each

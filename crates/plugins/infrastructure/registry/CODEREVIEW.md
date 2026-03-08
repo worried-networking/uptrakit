@@ -110,10 +110,7 @@ No coding standards issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/lib.rs:148-152` -- `validate_package_identifier_str` silently returns
-`Ok(())` for unknown plugin types. Asymmetry with config validation which fails for unknown
-types. A new plugin type added to the `PluginType` enum but not yet registered in
-`register_plugins!` would pass identifier validation without any actual check.
+No extensibility issues found.
 
 **[MEDIUM]** `crates/shared/types/src/plugin_types.rs` -- `PluginType` has high modification
 cost: adding a single variant requires touching six separate `match` arms across `as_str()`,

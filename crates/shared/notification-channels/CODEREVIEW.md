@@ -105,12 +105,6 @@ transport-level logging is disabled for this client.
 
 ### Issues
 
-**[LOW]** `src/email.rs:66-71` and `src/telegram.rs:155-159` -- `escape_html` is duplicated
-across email and Telegram modules. The email version escapes four characters (`&`, `<`, `>`,
-`"`), while the Telegram version escapes three (`&`, `<`, `>`). Both should be consolidated
-into a shared helper in `channel.rs` or a `utils.rs` module. The difference in escaped
-characters (Telegram omits `"`) should be documented.
-
 **[LOW]** `src/email.rs:51-56` -- `is_valid_email` is a minimal format check (non-empty
 local, non-empty domain with at least one dot). It does not reject addresses with spaces,
 control characters, or multiple `@` signs (the `splitn(2, '@')` handles multiple `@` by
@@ -237,10 +231,7 @@ server.
 
 ### Issues
 
-**[LOW]** `src/email.rs:66-71` vs `src/telegram.rs:155-159` -- Duplicated `escape_html`
-functions with different escape sets. The email version escapes `"` (double quote) while the
-Telegram version does not. This inconsistency should be documented or the functions should be
-consolidated with an explicit API noting which characters are escaped.
+No consistency issues found.
 
 ## Maintainability
 
