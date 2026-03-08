@@ -53,8 +53,7 @@ well-designed with a macro-generated registry. The service SDK provides an excel
 for the enrollment-lifecycle-reconnect flow shared across all service binaries.
 
 Key areas for improvement: the `web-api` crate at ~38K LoC is approaching "god crate" territory
-and would benefit from decomposition; the wire protocol file (`wire/src/lib.rs`) at 3.8K lines
-should be split into domain modules; and remaining HA concerns should be addressed before
+and would benefit from decomposition; and remaining HA concerns should be addressed before
 multi-instance deployment. The previously-reported SSRF in Docker auth realm, the OIDC
 privilege escalation via `unwrap_or(0)`, all `#[cfg(not(feature))]` violations, the unbounded
 MQTT event channel, and the scheduler claim leak on cancellation have been fixed. The OIDC
@@ -128,7 +127,7 @@ NULL. A composite index `idx_update_history_host_item_status` on
 `m20260311_000001_update_history_status_index` to eliminate the full table scan in
 `validate_update_preconditions`. `validate_update_preconditions` (10 scenarios) and the
 `find_outdated_*` helpers (6 scenarios) now have comprehensive unit tests using in-memory
-SQLite. The dead `ParseCapabilityError` type in `wire/src/lib.rs` has been removed.
+SQLite. The dead `ParseCapabilityError` type has been removed.
 The silent machine-ID fallback in `agent/src/host_info.rs` now logs a warning. The
 byte-offset UUID slicing in `mqtt/src/main.rs` now uses safe `.get()`. `NatsEventEnvelope`
 now derives `Debug`. The `validate_package_identifier_str` in the plugin registry now
@@ -233,8 +232,10 @@ and update output broadcasting.
 **[HIGH]** `crates/core/controller/Cargo.toml:22-60` -- Controller depends directly on
 `uptrakit-web-api` (a UI crate), coupling the core binary to the entire web-api surface.
 
-**[HIGH]** `crates/shared/wire/src/lib.rs` -- At 3,798 lines in a single file, the entire wire
-protocol definition lives in one module. Should be decomposed into domain modules.
+~~**[HIGH]** `crates/shared/wire/src/lib.rs` -- At 3,798 lines in a single file, the entire wire
+protocol definition lives in one module. Should be decomposed into domain modules.~~ *(Fixed:
+split into domain modules: `capabilities.rs`, `messages.rs`, `payloads.rs`, `envelope.rs`,
+`serde_helpers.rs`, `close_reason.rs`, `service_profile.rs`, etc. `lib.rs` is re-exports only.)*
 
 **[HIGH]** `crates/ui/web-api/src/lib.rs:1-34` -- Twenty-four modules are declared `pub` at the
 crate root (`app_state`, `batch_progress_broadcaster`, `ca_snapshot`, `cert_signer`,
@@ -500,10 +501,10 @@ updates older than `TASK_EXECUTION_TIMEOUT` (e.g., 2 hours) to `Failed` status.
 
 **[HIGH]** In-flight update executions not drained on agent shutdown (HA-1) -- The `on_shutdown`
 callback in `ServiceHandler` (`service-sdk/src/lifecycle.rs:207-218`) receives a
-`shutdown_timeout_seconds` parameter, but there is no mechanism to wait for an in-flight
+`shutdown_timeout` parameter (a `Duration`), but there is no mechanism to wait for an in-flight
 `execute_update` to complete before the WebSocket closes. If an agent receives SIGTERM while
 executing an update, the update is left in `InProgress` status. Implement update execution
-draining in `on_shutdown()` by waiting (up to `shutdown_timeout_seconds`) for any in-flight
+draining in `on_shutdown()` by waiting (up to `shutdown_timeout`) for any in-flight
 update to complete before returning `LoopOutcome`.
 *(2026-03-06 parallel review: HA agent)*
 
@@ -578,7 +579,7 @@ suppressions" was incorrect. *(2026-03-06 parallel review: coding standards agen
 
 ### Issues
 
-**[MEDIUM]** `crates/shared/wire/src/lib.rs:214-234` -- `ServiceMessage` and
+**[MEDIUM]** `crates/shared/wire/src/messages.rs` -- `ServiceMessage` and
 `ControllerMessage` mix agent-specific and MQTT-specific variants.
 
 **[MEDIUM]** `crates/shared/service-sdk/src/lifecycle.rs:79,89` -- `ServiceHandler` is not
@@ -641,31 +642,12 @@ first.
 
 ---
 
-#### `uptrakit-shared-wire` (3,798 lines, single file)
+#### ~~`uptrakit-shared-wire` (3,798 lines, single file)~~ -- DONE
 
-**Current concerns:** The entire wire protocol lives in `src/lib.rs`. Production code (~1,266
-lines) and test code (~2,524 lines) are in the same file. Finding a type definition requires
-knowing roughly what line it is on; there is no module hierarchy to navigate.
-
-**Recommendation (module extraction, no crate split):** Split into sub-modules within the same
-crate. No new crate is needed.
-
-| Proposed module | Contents |
-| --- | --- |
-| `src/capability.rs` | `Capability`, `ParseCapabilityError`, `is_known()` |
-| `src/messages.rs` | `ServiceMessage`, `ControllerMessage`, all payload structs |
-| `src/envelopes.rs` | `ServiceEnvelope`, `ControllerEnvelope`, `IncomingSeq`, `OutgoingSeq`, `SeqError` |
-| `src/serde_helpers.rs` | `utc_datetime_millis`, `duration_seconds`, `now_millis`, `Timestamp` |
-| `src/lib.rs` | Re-exports only |
-
-Tests move to `src/messages/tests.rs` etc., matching the sub-module they exercise.
-
-**Priority:** HIGH — pure refactor (no behavioral change, no dependency changes). Reduces the
-cognitive overhead of navigating the protocol definition and makes it easier to review changes
-to a specific message type without scrolling through 3,800 lines.
-
-**Risk:** Low. All types remain in the same crate; consumers see no change to import paths
-(re-exports from `lib.rs`). The `asyncapi.yaml` spec-conformance tests continue to work.
+*(Fixed: the crate has been split into domain modules: `src/capabilities.rs`, `src/messages.rs`,
+`src/payloads.rs`, `src/envelope.rs`, `src/serde_helpers.rs`, `src/close_reason.rs`,
+`src/service_profile.rs`, and more. `src/lib.rs` contains only re-exports. All types remain in the
+same crate; consumers see no change to import paths.)*
 
 ---
 
@@ -981,7 +963,7 @@ These files contain zero test-exercised code paths:
 
 These files demonstrate excellent test discipline:
 
-- `wire/src/lib.rs` (2,410 lines, 99.0%) - wire protocol
+- `wire/src/` (2,410 lines, 99.0%) - wire protocol
 - `crypto/src/lib.rs` (1,056 lines, 90.7%) - cryptographic operations
 - `phs/discovery.rs` (970 lines, 97.0%) - PHS discovery logic
 - `registry/src/registry.rs` (943 lines, 97.3%) - plugin registry

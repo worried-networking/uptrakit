@@ -168,7 +168,8 @@ The same attack applies via:
 - [ATK-16: RCE via Plugin Config Manipulation](16-rce-plugin-config-manipulation.md)
 - [ATK-03: Master Key Compromise](03-master-key-compromise.md)
 - [Security Architecture](../security/security-architecture.md)
-- `crates/shared/wire/src/lib.rs` — `ExecuteUpdatePayload`, `HookCommand`
+- `crates/shared/wire/src/payloads.rs` — `ExecuteUpdatePayload`
+- `crates/shared/wire/src/messages.rs` — `HookCommand`
 - `crates/shared/agent-core/src/update.rs` — `run_hook_command()`
 - `crates/shared/command/src/command.rs` — `run_command_with_shell()`
 - `crates/core/agent/src/main.rs` — freeze file check, rate limiting, and `SetUpdateFreeze` handler

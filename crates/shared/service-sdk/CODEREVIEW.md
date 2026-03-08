@@ -73,13 +73,14 @@ No security issues found.
 - Every source file opens with a module doc comment. `cert_handler.rs` documents each public
   function and the invariant that `CertificateRenewalHandler` must be created per connection.
 - Named constants throughout: `CERT_RECONNECT_DELAY`, `FAR_FUTURE`,
-  `DEFAULT_SHUTDOWN_TIMEOUT`.
+  `DEFAULT_SHUTDOWN_TIMEOUT`, `MAX_CONSECUTIVE_SERVICE_EVENTS`.
 - `src/event_loop.rs:212-218` -- `LoopState` struct groups mutable references for
   `handle_service_settings`, keeping the function signature readable.
 - Consistent `rootcause` error propagation: `context_to()`, `bail!`, `report!`. No
   `Report::new()` anti-pattern.
 - `src/event_loop.rs:94` -- `biased` on `tokio::select!` ensures explicit priority ordering.
-  Documented in adjacent comments.
+  Documented in adjacent comments. A `MAX_CONSECUTIVE_SERVICE_EVENTS` budget counter (16)
+  prevents starvation of lower-priority arms during event bursts.
 
 ### Issues
 
@@ -120,13 +121,15 @@ exercising signal delivery. Does not test signal dispatch path.
 
 ### Issues
 
-**[MEDIUM]** `src/event_loop.rs:97-102` -- Service-specific `poll_service_event` is at
+~~**[MEDIUM]** `src/event_loop.rs:97-102` -- Service-specific `poll_service_event` is at
 highest priority in the `biased` `tokio::select!`. If a service implementation produces
 rapid events (e.g., an MQTT bridge with a burst of client status changes), the ping timer
 and certificate renewal arms will be starved until the event burst subsides. A missed ping
 causes the controller to consider the service dead and may trigger unnecessary failover.
 Consider moving `poll_service_event` to a lower-priority arm or adding a yield point after
-processing N consecutive service events.
+processing N consecutive service events.~~ *(Fixed: a `MAX_CONSECUTIVE_SERVICE_EVENTS`
+budget counter (16) now yields to lower-priority arms after processing N consecutive service
+events, preventing starvation of ping and certificate renewal timers.)*
 
 **[MEDIUM]** *(HA-10)* `src/ca.rs` -- CA rotation can leave offline services unable to
 reconnect if the old CA expires before they fetch the new one. If a service is offline when
@@ -266,9 +269,10 @@ in the shutdown path.
   reconnect backoff and vice versa. The two retry loops are structurally symmetric.
 - `src/event_loop.rs:94` -- The `tokio::select!` loop uses `biased` with a documented
   priority ordering. Service-specific events are arm 1 (highest priority), then ping, then
-  renewal, then controller messages, then OS signals. This matches the design intent stated
-  in the module doc-comment and is applied consistently for a single loop, not split across
-  multiple loops.
+  renewal, then controller messages, then OS signals. A `MAX_CONSECUTIVE_SERVICE_EVENTS`
+  budget counter (16) yields to lower-priority arms after processing N consecutive service
+  events, preventing starvation. This matches the design intent stated in the module
+  doc-comment and is applied consistently for a single loop, not split across multiple loops.
 - `src/connection.rs:100-182` -- `recv()` applies the same validation pipeline (header
   parse, protocol version check, sequence check, full envelope deserialize) identically
   for both `Message::Text` and `Message::Binary` frames. Neither branch skips a step.
@@ -349,11 +353,12 @@ cryptic compiler error referencing object safety rather than a clear note in the
 comment on the trait explaining the non-object-safety and the reason for the design would
 prevent future confusion.
 
-**[LOW]** `src/event_loop.rs:62` -- `DEFAULT_SHUTDOWN_TIMEOUT: u32 = 120` is defined as a
+~~**[LOW]** `src/event_loop.rs:62` -- `DEFAULT_SHUTDOWN_TIMEOUT: u32 = 120` is defined as a
 local constant inside `run_event_loop` rather than in a `durations` module. This makes it
 invisible to operators looking for tunable timeouts. The constant is sent to the controller as
 the initial `ServiceSettings` fallback. Moving it to `src/lib.rs` or a `durations.rs` with a
-doc comment would make it discoverable.
+doc comment would make it discoverable.~~ *(Fixed: `DEFAULT_SHUTDOWN_TIMEOUT` is now a
+module-level `Duration` constant with a doc comment.)*
 
 ---
 

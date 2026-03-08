@@ -50,7 +50,7 @@ pub trait ServiceHandler: Send {
         &mut self,
         conn: &mut ControllerConnection,
         cause: ShutdownCause,
-        shutdown_timeout_seconds: u32,
+        shutdown_timeout: Duration,
     ) -> LoopOutcome;
 }
 ```
@@ -112,7 +112,7 @@ Handle a resolved service event from `poll_service_event`. Return `Ok(Some(outco
 
 Graceful shutdown handler. Called when an OS signal or `ServerRestarting` message is received. Send `Disconnecting` and drain in-flight work. The
 `cause` parameter is a `ShutdownCause` enum that distinguishes OS signals (`Signal::Hangup` for restart, `Signal::Interrupt`/`Signal::Terminate` for
-shutdown) from controller-initiated restarts. `shutdown_timeout_seconds` comes from the latest `ServiceSettings`.
+shutdown) from controller-initiated restarts. `shutdown_timeout` (a `Duration`) comes from the latest `ServiceSettings`.
 
 ### `LoopOutcome`
 
@@ -227,6 +227,7 @@ The SDK provides shared initialization and error-handling functions to reduce bo
 
 ```rust
 use std::collections::BTreeSet;
+use std::time::Duration;
 use async_trait::async_trait;
 use uptrakit_internal_wire::{Capability, ControllerMessage};
 use uptrakit_service_sdk::{
@@ -282,7 +283,7 @@ impl ServiceHandler for MyHandler {
         &mut self,
         _conn: &mut ControllerConnection,
         _cause: ShutdownCause,
-        _shutdown_timeout_seconds: u32,
+        _shutdown_timeout: Duration,
     ) -> LoopOutcome {
         LoopOutcome::Shutdown
     }

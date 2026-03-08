@@ -522,7 +522,7 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 **Wire protocol:**
 
 Agents and MQTT services share a unified wire protocol (`ServiceMessage` / `ControllerMessage`) defined in
-`crates/shared/wire/src/lib.rs`. `ServiceMessage` contains both agent-specific variants (`ReportHosts`,
+`crates/shared/wire/src/messages.rs` (re-exported via `lib.rs`). `ServiceMessage` contains both agent-specific variants (`ReportHosts`,
 `VersionCheckResults`, `UpdateStarted`, `UpdateOutput`, `UpdateResult`) and MQTT-specific variants (`Register`,
 `ReleaseTenants`), plus shared variants (`Enroll`, `RequestCertificate`, `RenewCertificate`, `Ping`, `Disconnecting`).
 `ControllerMessage` is fully shared. The `service_ws/` directory module is the public WebSocket entry point (`service_ws/mod.rs`
@@ -563,7 +563,7 @@ MQTT services use the unified service entity:
 | `crates/shared/web-api-types/src/mqtt_transport.rs` | `MqttTransport` enum (Tcp/Tls) |
 | `crates/shared/web-api-types/src/mqtt_url.rs` | `MqttUrl` parsing and formatting |
 | `crates/shared/web-api-types/src/settings_mqtt.rs` | API request/response types |
-| `crates/shared/wire/src/lib.rs` | Unified wire protocol messages (`ServiceMessage` / `ControllerMessage`) |
+| `crates/shared/wire/src/messages.rs` | Unified wire protocol messages (`ServiceMessage` / `ControllerMessage`) |
 | `crates/shared/db/src/entity/service.rs` | SeaORM entity for service identity (agents and MQTT) |
 | `crates/shared/db/src/entity/service_certificate.rs` | SeaORM entity for service certificates |
 | `crates/shared/db/src/entity/mqtt_client.rs` | SeaORM entity for MQTT config |

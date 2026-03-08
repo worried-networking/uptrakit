@@ -951,7 +951,8 @@ The frontend filters services by capability instead of type and displays `servic
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/wire/src/lib.rs` | `Capability` enum, serde, `is_known()`, `EnrollPayload` with `capabilities` field |
+| `crates/shared/wire/src/capabilities.rs` | `Capability` enum, serde, `is_known()` |
+| `crates/shared/wire/src/payloads.rs` | `EnrollPayload` with `capabilities` field |
 | `crates/shared/wire/src/service_profile.rs` | `ServiceProfile` enum, `from_capabilities()`, `parse_capabilities()`, `serialize_capabilities()` |
 | `crates/ui/web-api/src/service_connections.rs` | `register()`, `broadcast_by_capability()` |
 | `crates/shared/db/src/entity/enrollment_token.rs` | `enrollment_tokens` SeaORM entity |

@@ -27,33 +27,35 @@ spec-conformance against `asyncapi.yaml`.
 
 ### Strengths
 
-- `src/lib.rs` -- Single-responsibility scope. Contains only wire types, serde helpers, sequence
+- Single-responsibility scope. Contains only wire types, serde helpers, sequence
   counters, and protocol documentation. No application logic, no database layer, no HTTP
   framework. Minimal dependency tree: `serde`, `serde_json`, `strum`, `thiserror`, `time`,
-  `uuid`, and `uptrakit-shared-types`.
+  `uuid`, and `uptrakit-shared-types`. The crate is organized into domain modules
+  (`capabilities.rs`, `messages.rs`, `payloads.rs`, `envelope.rs`, `serde_helpers.rs`,
+  `close_reason.rs`, etc.) with `src/lib.rs` providing re-exports.
 - `Cargo.toml:21-25` -- Only crate enforcing `warnings = "deny"` and `clippy::all = "deny"` at
   the `[lints]` table level. Serves as reference configuration for `[workspace.lints]`.
-- `src/lib.rs` -- `#[non_exhaustive]` applied throughout: `Capability`, `EnrollmentStatus`,
+- `#[non_exhaustive]` applied throughout: `Capability`, `EnrollmentStatus`,
   `ErrorCode`, `UpdateFinalStatus`, `DisconnectReason`, `ServiceMessage`, `ControllerMessage`.
-- `src/lib.rs:71,87-93,118-131` -- `Capability::Other(String)` forward-compatibility pattern.
+- `src/capabilities.rs` -- `Capability::Other(String)` forward-compatibility pattern.
   `is_known()` guards intersection logic so `Other` variants never treated as agreed
   capabilities.
 - `src/close_reason.rs:87-105` -- `CloseReason::Unknown(String)` mirrors the same pattern.
   Infallible `from_str`.
-- `src/lib.rs:841-941` -- `ServiceEnvelope` and `ControllerEnvelope` wrap every message with
+- `src/envelope.rs` -- `ServiceEnvelope` and `ControllerEnvelope` wrap every message with
   monotonically increasing `seq: u64` for application-level replay protection. `SeqError` with
   `expected` and `received` fields.
 - `asyncapi.yaml` -- Machine-readable protocol source of truth, shipped inside the crate via
   `include_str!`. Tests parse it at runtime and validate required-field lists, const
   discriminators, and enum constraints.
-- `src/lib.rs:254` -- `ExecuteUpdate` heap-boxed to limit enum discriminant size.
+- `src/messages.rs` -- `ExecuteUpdate` heap-boxed to limit enum discriminant size.
 - `SecretString` on all credential fields in wire payloads: `EnrollPayload.enrollment_token`,
   `EnrolledPayload.enrollment_secret`, `MqttTenantConfig.username`, `.password`, `.ca_pem`.
 - Serde helpers (`utc_datetime_millis`, `duration_seconds`) are self-contained and documented.
 
 ### Issues
 
-**[MEDIUM]** `src/lib.rs:214-262` -- `ServiceMessage` and `ControllerMessage` mix agent and MQTT
+**[MEDIUM]** `src/messages.rs` -- `ServiceMessage` and `ControllerMessage` mix agent and MQTT
 concerns in a single monolithic enum. The inline comment sections (`// -- Agent-specific --`,
 `// -- MQTT-specific --`) carry no structural enforcement. An agent handler receives variants
 it must never act on (`Register`, `ReleaseTenants`, `MqttClientStatus`). The controller side
@@ -83,9 +85,8 @@ No security issues found.
 
 - Every public type has a doc comment documenting wire-format string, deprecation intent, and
   intersection semantics where applicable.
-- `ParseCapabilityError(std::convert::Infallible)` is defined but `Capability::from_str`
-  declares `type Err = std::convert::Infallible` directly. Comment at `lib.rs:102-106`
-  explains this.
+- `Capability::from_str` declares `type Err = std::convert::Infallible` directly, ensuring
+  infallible parsing with the `Other(String)` catch-all.
 - `now_millis()` uses `time::UtcDateTime` consistently, returns `i64` via the `Timestamp`
   type alias.
 - Backward-compatibility serde tests are explicit:
@@ -103,12 +104,11 @@ No security issues found.
 
 ### Issues
 
-**[LOW]** `src/lib.rs:102-116` -- Dead `ParseCapabilityError` struct is not annotated
-`#[allow(dead_code)]` or removed. The struct wraps `std::convert::Infallible` but is never
-constructed. Passes compilation because it is `pub`. Add a comment explaining why the type is
-retained.
+~~**[LOW]** `src/lib.rs:102-116` -- Dead `ParseCapabilityError` struct is not annotated
+`#[allow(dead_code)]` or removed.~~ *(Fixed: `ParseCapabilityError` has been removed during
+the module split.)*
 
-**[LOW]** `src/lib.rs:2397-2484` -- `AsyncApiSpec::validate` does not check field types or
+**[LOW]** `AsyncApiSpec::validate` does not check field types or
 object/array shapes. A field present with the wrong JSON type (e.g., `"seq": "one"` instead of
 `"seq": 1`) would pass the validator. Acceptable at current complexity but should be noted.
 
@@ -157,7 +157,7 @@ No coding standards issues found.
 
 ### Issues
 
-**[MEDIUM]** `src/lib.rs:214-262` -- `ServiceMessage` and `ControllerMessage` mix agent and
+**[MEDIUM]** `src/messages.rs` -- `ServiceMessage` and `ControllerMessage` mix agent and
 MQTT concerns without structural separation. When a new `ServiceHandler` author writes a custom
 service role, they face a flat enum with no type-level guidance about which variants are
 relevant. This is a latent correctness hazard as new service roles are added.
@@ -166,13 +166,13 @@ relevant. This is a latent correctness hazard as new service roles are added.
 
 ### Strengths
 
-- `src/lib.rs:1287-1808+` -- The test module exceeds 2,000 lines with 50+ tests covering
-  every `ServiceMessage` and `ControllerMessage` variant for JSON round-trip serialisation,
-  `#[serde(other)] Unknown` handling, backward-compatibility deserialization (missing new
-  fields, extra ignored fields), and the serde helper utilities (`utc_datetime_millis`,
-  `duration_seconds`) at boundary values (Unix epoch, year 9999, pre-epoch).
-- `src/lib.rs` -- `IncomingSeq` / `OutgoingSeq` state machine fully tested: sequential
-  acceptance, replay rejection, skip rejection, and zero-seq rejection.
+- The test module exceeds 2,000 lines with 50+ tests covering every `ServiceMessage` and
+  `ControllerMessage` variant for JSON round-trip serialisation, `#[serde(other)] Unknown`
+  handling, backward-compatibility deserialization (missing new fields, extra ignored fields),
+  and the serde helper utilities (`utc_datetime_millis`, `duration_seconds`) at boundary values
+  (Unix epoch, year 9999, pre-epoch).
+- `IncomingSeq` / `OutgoingSeq` state machine fully tested: sequential acceptance, replay
+  rejection, skip rejection, and zero-seq rejection.
 - `src/close_reason.rs:131-205` -- `CloseReason` exhaustive coverage: all 11 known variants
   in the `KNOWN_VARIANTS` constant, four tests per variant (serialise, deserialise, round-trip,
   `Unknown` fallback).
@@ -184,21 +184,21 @@ relevant. This is a latent correctness hazard as new service roles are added.
 
 ### Issues
 
-**[LOW]** `src/lib.rs:2397-2484` -- `AsyncApiSpec::validate` does not check field types or
-object/array shapes. A field present with the wrong JSON type (e.g., `"seq": "one"` instead of
-`"seq": 1`) would pass the spec-conformance validator. The existing validation detects missing
-required fields and unknown field names, but type-level constraints are not enforced. This
-limits the spec-conformance tests' ability to catch schema regressions in payload structure.
+**[LOW]** `AsyncApiSpec::validate` does not check field types or object/array shapes. A field
+present with the wrong JSON type (e.g., `"seq": "one"` instead of `"seq": 1`) would pass the
+spec-conformance validator. The existing validation detects missing required fields and unknown
+field names, but type-level constraints are not enforced. This limits the spec-conformance
+tests' ability to catch schema regressions in payload structure.
 
 ## Consistency
 
 ### Strengths
 
-- All duration fields that cross the wire use one of two consistent encoding strategies: a
-  bare `u32` with an explicit `_seconds` suffix in the field name, or a `std::time::Duration`
-  with `#[serde(with = "duration_seconds")]`. Both strategies produce the same JSON
-  representation (an integer number of seconds), and the two serde helpers (`duration_seconds`,
-  `utc_datetime_millis`) are shared and documented at `src/lib.rs:559-577`.
+- All duration fields that cross the wire now use `std::time::Duration` with
+  `#[serde(with = "duration_seconds")]` (or `option_duration_seconds` for optional fields).
+  Wire field names retain the `_seconds` suffix via `#[serde(rename = "...")]` for backward
+  compatibility. The serde helpers (`duration_seconds`, `option_duration_seconds`,
+  `utc_datetime_millis`) are shared and documented in `src/serde_helpers.rs`.
 - `#[non_exhaustive]` is applied consistently to every extensible enum:
   `Capability`, `EnrollmentStatus`, `ErrorCode`, `UpdateFinalStatus`, `DisconnectReason`,
   `ServiceMessage`, `ControllerMessage`. No public enum in the crate is accidentally exhaustive.
@@ -217,22 +217,13 @@ limits the spec-conformance tests' ability to catch schema regressions in payloa
 
 ### Issues
 
-**[MEDIUM]** `src/lib.rs:596` (`ServiceSettingsPayload.shutdown_timeout_seconds`) and
+~~**[MEDIUM]** `src/lib.rs:596` (`ServiceSettingsPayload.shutdown_timeout_seconds`) and
 `src/lib.rs:748` (`ExecuteUpdatePayload.timeout_seconds`) vs `src/lib.rs:600`
 (`ServiceSettingsPayload.ping_interval`) -- Duration fields are encoded inconsistently across
-`ServiceSettingsPayload`. `shutdown_timeout_seconds` is a bare `Option<u32>` with the
-`_seconds` suffix encoded directly in the field name. `timeout_seconds` in
-`ExecuteUpdatePayload` is a bare `u32` with the same suffix convention. By contrast,
-`ping_interval` is typed as `std::time::Duration` and relies on `#[serde(with =
-"duration_seconds")]` for serialization — with no `_seconds` suffix in the field name. The
-on-wire representation is identical (integer seconds), but the Rust API surface is not: callers
-of `ping_interval` use `Duration::from_secs(n)` while callers of `shutdown_timeout_seconds`
-use a raw `u32`. Both conventions appear within the same struct, creating an inconsistent
-authoring experience when adding new duration fields. Preferred pattern: adopt one convention
-throughout — either all durations as `u32` with `_seconds` suffix (simpler, no serde helper
-needed), or all as `std::time::Duration` with `#[serde(with = "duration_seconds")]` (more
-type-safe). The `duration_seconds` module is already well-tested and available; the bare-u32
-fields are legacy.
+`ServiceSettingsPayload`.~~ *(Fixed: all duration fields now use `std::time::Duration` with
+`#[serde(with = "duration_seconds")]` or `option_duration_seconds`. The wire field names
+retain the `_seconds` suffix via `#[serde(rename = "...")]` for backward compatibility, but
+the Rust API surface is uniformly `Duration`-typed.)*
 
 ## Extensibility -- Additional Findings (2026-03-06)
 
@@ -262,29 +253,30 @@ deserialization risk.
 
 ### Strengths
 
-- Every public type in the production section (lines 1–1266) has a doc comment. Enum variants
-  carry their wire-format string, deprecation intent, and intersection semantics. This makes the
-  file self-documenting as a protocol reference.
-- The test module (lines 1267–3790) is larger than the production code (~2,524 vs ~1,266 lines),
-  demonstrating thorough investment in test coverage. The asymmetry is deliberate and appropriate
-  for a wire-protocol library where correctness is critical.
-- Section headers (`// =====`, `// MQTT Service Specific`, `// Infrastructure Credential`) divide
-  the production code into named domains that mirror the `asyncapi.yaml` spec structure.
+- Every public type has a doc comment. Enum variants carry their wire-format string, deprecation
+  intent, and intersection semantics. This makes the crate self-documenting as a protocol
+  reference.
+- The test module is larger than the production code, demonstrating thorough investment in test
+  coverage. The asymmetry is deliberate and appropriate for a wire-protocol library where
+  correctness is critical.
+- The crate is organized into domain modules (`capabilities.rs`, `messages.rs`, `payloads.rs`,
+  `envelope.rs`, `serde_helpers.rs`, `close_reason.rs`, `service_profile.rs`, `limits.rs`,
+  `wire_validate_impls.rs`, `trace_context.rs`, `extension.rs`) with `src/lib.rs` providing
+  re-exports. Each concern is independently navigable.
 - `asyncapi.yaml` is versioned alongside the Rust types with spec-conformance tests that fail
   when the spec drifts from the implementation, providing automated documentation correctness.
 
 ### Issues
 
-**[HIGH]** `src/lib.rs:1-3790` -- The entire wire protocol library — production types, serde
-helpers, sequence counters, and 2,524 lines of tests — lives in a single file. While the
-section headers divide it logically, navigating between a payload type definition (e.g.,
-`ExecuteUpdatePayload` at line ~720) and its tests (scattered through the 1267–3790 range)
-requires manual searching. Splitting into modules (`src/messages.rs`, `src/envelopes.rs`,
-`src/serde_helpers.rs`, `src/sequence.rs`) with a `src/lib.rs` that only re-exports public
-items would make each concern independently navigable. The tests could move to
-`src/messages/tests.rs` etc. This is a pure refactor with no behavioral change.
+~~**[HIGH]** `src/lib.rs:1-3790` -- The entire wire protocol library — production types, serde
+helpers, sequence counters, and 2,524 lines of tests — lives in a single file.~~
+*(Fixed: the crate has been split into domain modules: `src/capabilities.rs`, `src/messages.rs`,
+`src/payloads.rs`, `src/envelope.rs`, `src/serde_helpers.rs`, `src/close_reason.rs`,
+`src/service_profile.rs`, `src/limits.rs`, `src/wire_validate_impls.rs`, `src/trace_context.rs`,
+and `src/extension.rs`. `src/lib.rs` contains only re-exports and the shared test module.
+Each concern is independently navigable.)*
 
-**[MEDIUM]** `src/lib.rs:266-371` -- `ServiceMessage` and `ControllerMessage` are documented
+**[MEDIUM]** `src/messages.rs` -- `ServiceMessage` and `ControllerMessage` are documented
 with inline section comments (`// -- Agent-specific --`, `// -- MQTT-specific --`) but those
 comments carry no structural enforcement. A new `ServiceHandler` implementation — say, an
 HTTP-bridge service — will see a flat enum containing MQTT variants (`Register`,
@@ -293,9 +285,5 @@ irrelevant to it. As the number of service roles grows, the lack of variant grou
 maintenance hazard. Already noted in Architecture and Extensibility; included here because the
 maintenance cost compounds with each new service role added.
 
-**[LOW]** `src/lib.rs:102-116` -- `ParseCapabilityError(std::convert::Infallible)` is a dead
-struct: it wraps `Infallible` and is never constructed, but because it is `pub` it compiles
-without a lint warning. The comment at lines 102–106 explains that `Capability::from_str`
-declares `type Err = std::convert::Infallible` directly, making the struct redundant. The fix
-is either to remove the struct or to annotate it `#[deprecated = "Use std::convert::Infallible
-directly"]` to signal intent to future readers.
+~~**[LOW]** `src/lib.rs:102-116` -- `ParseCapabilityError(std::convert::Infallible)` is a dead
+struct.~~ *(Fixed: `ParseCapabilityError` has been removed during the module split.)*

@@ -100,7 +100,7 @@
 - [PKI and Certificates](../security/pki-certificates.md)
 - [Security Architecture](../security/security-architecture.md)
 - [Secrets and Encryption](../security/secrets-and-encryption.md)
-- `crates/shared/wire/src/lib.rs` — `ServiceMessage`, `ControllerMessage` enums
+- `crates/shared/wire/src/messages.rs` — `ServiceMessage`, `ControllerMessage` enums
 - `crates/shared/service-sdk/src/identity.rs` — key storage and enrollment secret
   lifecycle
 - `crates/ui/web-api/src/routes/service_ws/` — WebSocket handler and authentication
