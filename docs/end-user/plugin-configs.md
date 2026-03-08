@@ -278,6 +278,89 @@ Latest version information is tracked per-host in the host assignment (`host_sof
 not globally. This means different hosts can report different latest versions if their
 `fetch_releases` plugins or execution sites differ.
 
+## Managing Per-Host Plugin Assignments
+
+Each host assigned to a software item carries its own set of role-based plugin assignments.
+You can view and edit these assignments from the **Software** item detail page.
+
+### Viewing plugin assignments (Web UI)
+
+Navigate to **Software**, then click a software item name to open its detail view. The hosts
+table shows each assigned host with a compact summary of its configured roles below the
+hostname — for example:
+
+```text
+Detect: APT (prometheus)
+Fetch:  GitHub Releases (prometheus/prometheus)
+Update: APT (prometheus)
+```
+
+If a role is configured to run on `agent` or `controller` instead of the default `auto`, a
+small site badge appears next to the config name.
+
+### Editing plugin assignments (Web UI)
+
+1. Open the software item detail page (**Software → [item name]**).
+2. In the hosts table, click **Configure** on the row for the host you want to edit.
+3. The **Configure Plugins** modal opens with three sections — one per role:
+   - **Detect Version** — checks the installed version on the host.
+   - **Fetch Releases** — queries upstream for the latest available version.
+   - **Execute Update** — runs the update command on the host.
+4. For each role:
+   - Select the **Plugin Config** to use. Set to `— not configured —` to leave a role unconfigured.
+   - Enter the **Package ID** (plugin-specific identifier, e.g. `owner/repo` for GitHub Releases or
+     `prometheus` for APT).
+   - For **Fetch Releases** only: choose the **Execution Site** (`auto`, `agent`, or `controller`).
+     See [Execution site](#execution-site) for details.
+   - Optionally expand **Config Override (advanced)** to enter a JSON object of fields to merge on
+     top of the plugin config's base settings — useful for per-host customisation without creating
+     a separate plugin config. Leave empty to clear any existing override.
+5. Click **Save Changes**. The change takes effect on the next version check cycle.
+
+> **Removing a role:** The modal can only add or update role assignments. To remove a role entirely,
+> unassign the host from the software item (**Software** list → context menu → **Assign to Hosts**,
+> deselect the host) and reassign it without the role you want to drop.
+
+### Assigning hosts to a software item (Web UI)
+
+1. Open the **Software** list.
+2. Open the context menu (three-dot button) on the software item and select **Assign to Hosts**.
+3. Check the hosts to add or uncheck hosts to remove.
+4. For newly added hosts, the **Role assignments for new hosts** table appears. Configure each
+   enabled role: choose a **Plugin Config**, enter a **Package ID**, and optionally set the
+   **Execution Site** for the **Fetch Releases** role.
+5. Click **Save**.
+
+> All newly added hosts receive the same role configuration in a single assignment call. If
+> different hosts need different plugin configs or package identifiers, assign them in separate
+> operations and use the **Configure** button to adjust each host individually afterward.
+
+### Managing plugin assignments via the CLI
+
+```bash
+# Assign a host with a full role setup
+uptrakit software-items assign <ITEM_ID> \
+  --host <HOST_ID> \
+  --plugin-config <CONFIG_ID> \
+  --package-identifier "owner/repo" \
+  --role fetch_releases
+
+# Update the package identifier for a specific role on a host
+uptrakit software-items update-assignment <ITEM_ID> \
+  --host <HOST_ID> \
+  --role detect_version \
+  --package-identifier "prometheus"
+
+# Change the execution site for fetch_releases on a host
+uptrakit software-items update-assignment <ITEM_ID> \
+  --host <HOST_ID> \
+  --role fetch_releases \
+  --execution-site controller
+
+# Unassign a host from a software item
+uptrakit software-items unassign <ITEM_ID> --host <HOST_ID>
+```
+
 ## Managing Plugin Configs
 
 ### Web UI
