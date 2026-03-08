@@ -10,14 +10,25 @@ use uptrakit_openapi_client::types::scheduler::{
 
 // ── Human output ────────────────────────────────────────────────────────────
 
+/// Format an interval in seconds as a human-readable string (e.g. "5m", "6h", "24h").
+fn format_interval(seconds: i32) -> String {
+    if seconds % 3600 == 0 {
+        format!("{}h", seconds / 3600)
+    } else if seconds % 60 == 0 {
+        format!("{}m", seconds / 60)
+    } else {
+        format!("{}s", seconds)
+    }
+}
+
 impl HumanOutput for Vec<ScheduledTaskResponse> {
     fn to_human_string(&self) -> String {
         if self.is_empty() {
             return "No scheduled tasks found.\n".to_string();
         }
         let mut out = format!(
-            "{:<38} {:<25} {:<15} {:<8} NEXT RUN\n",
-            "ID", "TYPE", "CRON", "ENABLED"
+            "{:<38} {:<25} {:<10} {:<8} {:<8} NEXT RUN\n",
+            "ID", "TYPE", "INTERVAL", "JITTER", "ENABLED"
         );
         for task in self {
             let next_run = task
@@ -25,8 +36,13 @@ impl HumanOutput for Vec<ScheduledTaskResponse> {
                 .format(&Rfc3339)
                 .unwrap_or_else(|_| task.next_run_at.to_string());
             out.push_str(&format!(
-                "{:<38} {:<25} {:<15} {:<8} {}\n",
-                task.id, task.task_type, task.cron_expression, task.enabled, next_run
+                "{:<38} {:<25} {:<10} {:<8} {:<8} {}\n",
+                task.id,
+                task.task_type,
+                format_interval(task.interval_seconds),
+                format_interval(task.jitter_seconds),
+                task.enabled,
+                next_run
             ));
         }
         out
@@ -39,7 +55,14 @@ impl HumanOutput for ScheduledTaskResponse {
         out.push_str(&format!("ID:         {}\n", self.id));
         out.push_str(&format!("Type:       {}\n", self.task_type));
         out.push_str(&format!("Label:      {}\n", self.label));
-        out.push_str(&format!("Cron:       {}\n", self.cron_expression));
+        out.push_str(&format!(
+            "Interval:   {}\n",
+            format_interval(self.interval_seconds)
+        ));
+        out.push_str(&format!(
+            "Jitter:     {}\n",
+            format_interval(self.jitter_seconds)
+        ));
         out.push_str(&format!("Enabled:    {}\n", self.enabled));
         out.push_str(&format!("Running:    {}\n", self.is_running));
         out.push_str(&format!("Run Count:  {}\n", self.run_count));
@@ -163,7 +186,8 @@ mod tests {
                 .unwrap(),
             task_type: TASK_TYPE_FETCH_RELEASES.to_string(),
             label: "Fetch Latest Releases".to_string(),
-            cron_expression: "0 * * * *".to_string(),
+            interval_seconds: 21600,
+            jitter_seconds: 300,
             enabled: true,
             task_config: None,
             is_running: false,
@@ -182,7 +206,8 @@ mod tests {
         let s = task.to_human_string();
         assert!(s.contains("fetch_releases"), "task_type missing");
         assert!(s.contains("Fetch Latest Releases"), "label missing");
-        assert!(s.contains("0 * * * *"), "cron missing");
+        assert!(s.contains("6h"), "interval missing");
+        assert!(s.contains("5m"), "jitter missing");
         assert!(s.contains("true"), "enabled missing");
     }
 

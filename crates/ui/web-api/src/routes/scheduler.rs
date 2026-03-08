@@ -73,7 +73,7 @@ pub async fn get_scheduled_task(
     }
 }
 
-/// Update a scheduled task (cron expression, enabled, config).
+/// Update a scheduled task (interval, jitter, enabled, config).
 #[utoipa::path(
     put,
     path = "/api/v1/scheduler/tasks/{id}",
@@ -106,8 +106,8 @@ pub async fn update_scheduled_task(
         Ok(task) => Json(task).into_response(),
         Err(report) => match report.current_context() {
             ScheduledTaskError::NotFound => error_response(StatusCode::NOT_FOUND, "Task not found"),
-            ScheduledTaskError::InvalidCronExpression => {
-                error_response(StatusCode::BAD_REQUEST, "Invalid cron expression")
+            ScheduledTaskError::InvalidInterval => {
+                error_response(StatusCode::BAD_REQUEST, "Invalid interval")
             }
             ScheduledTaskError::Db(_) => {
                 tracing::error!(error = %report, "failed to update scheduled task");

@@ -30,7 +30,8 @@ pub struct ScheduledTaskResponse {
     pub id: Uuid,
     pub task_type: String,
     pub label: String,
-    pub cron_expression: String,
+    pub interval_seconds: i32,
+    pub jitter_seconds: i32,
     pub enabled: bool,
     pub task_config: Option<serde_json::Value>,
     #[serde(with = "time::serde::rfc3339::option")]
@@ -54,8 +55,10 @@ pub struct ScheduledTaskResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateScheduledTaskRequest {
-    /// New cron expression (5-field standard cron).
-    pub cron_expression: Option<String>,
+    /// Base repeat interval in seconds. Must be > 0.
+    pub interval_seconds: Option<i32>,
+    /// Maximum random jitter added to each interval in seconds. Must be >= 0.
+    pub jitter_seconds: Option<i32>,
     /// Enable or disable the task.
     pub enabled: Option<bool>,
     /// Per-task configuration (JSON). Send null to clear.
@@ -74,21 +77,22 @@ pub struct TriggerScheduledTaskResponse {
 
 impl Validate for UpdateScheduledTaskRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if let Some(ref cron) = self.cron_expression {
-            if cron.is_empty() {
-                return Err(ValidationError {
-                    field: "cron_expression",
-                    message: "must not be empty".to_string(),
-                });
-            }
+        if let Some(interval) = self.interval_seconds
+            && interval <= 0
+        {
+            return Err(ValidationError {
+                field: "interval_seconds",
+                message: "must be greater than 0".to_string(),
+            });
+        }
 
-            let fields: Vec<&str> = cron.split_whitespace().collect();
-            if fields.len() != 5 {
-                return Err(ValidationError {
-                    field: "cron_expression",
-                    message: "must have exactly 5 fields".to_string(),
-                });
-            }
+        if let Some(jitter) = self.jitter_seconds
+            && jitter < 0
+        {
+            return Err(ValidationError {
+                field: "jitter_seconds",
+                message: "must be >= 0".to_string(),
+            });
         }
 
         Ok(())
@@ -113,7 +117,8 @@ mod tests {
             id: sample_uuid(),
             task_type: "fetch_releases".to_string(),
             label: "Fetch Latest Releases".to_string(),
-            cron_expression: "0 0 * * *".to_string(),
+            interval_seconds: 21600,
+            jitter_seconds: 300,
             enabled: true,
             task_config: Some(serde_json::json!({"timeout": 30})),
             last_run_at: Some(datetime!(2025-06-01 00:00:00 UTC)),
@@ -130,7 +135,8 @@ mod tests {
         assert_eq!(deserialized.id, sample_uuid());
         assert_eq!(deserialized.task_type, "fetch_releases");
         assert_eq!(deserialized.label, "Fetch Latest Releases");
-        assert_eq!(deserialized.cron_expression, "0 0 * * *");
+        assert_eq!(deserialized.interval_seconds, 21600);
+        assert_eq!(deserialized.jitter_seconds, 300);
         assert!(deserialized.enabled);
         assert!(deserialized.task_config.is_some());
         assert_eq!(
@@ -150,7 +156,8 @@ mod tests {
             id: sample_uuid(),
             task_type: "cleanup".to_string(),
             label: "Weekly cleanup".to_string(),
-            cron_expression: "0 0 * * 0".to_string(),
+            interval_seconds: 86400,
+            jitter_seconds: 300,
             enabled: false,
             task_config: None,
             last_run_at: None,
@@ -178,7 +185,8 @@ mod tests {
             id: sample_uuid(),
             task_type: "sync".to_string(),
             label: "Sync".to_string(),
-            cron_expression: "*/5 * * * *".to_string(),
+            interval_seconds: 300,
+            jitter_seconds: 30,
             enabled: true,
             task_config: None,
             last_run_at: None,
@@ -200,14 +208,16 @@ mod tests {
     #[test]
     fn update_scheduled_task_request_round_trip_all_fields() {
         let req = UpdateScheduledTaskRequest {
-            cron_expression: Some("0 */2 * * *".to_string()),
+            interval_seconds: Some(7200),
+            jitter_seconds: Some(60),
             enabled: Some(false),
             task_config: Some(serde_json::json!({"retries": 3})),
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let deserialized: UpdateScheduledTaskRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert_eq!(deserialized.cron_expression.as_deref(), Some("0 */2 * * *"));
+        assert_eq!(deserialized.interval_seconds, Some(7200));
+        assert_eq!(deserialized.jitter_seconds, Some(60));
         assert_eq!(deserialized.enabled, Some(false));
         assert!(deserialized.task_config.is_some());
     }
@@ -215,14 +225,16 @@ mod tests {
     #[test]
     fn update_scheduled_task_request_round_trip_none_fields() {
         let req = UpdateScheduledTaskRequest {
-            cron_expression: None,
+            interval_seconds: None,
+            jitter_seconds: None,
             enabled: None,
             task_config: None,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let deserialized: UpdateScheduledTaskRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert!(deserialized.cron_expression.is_none());
+        assert!(deserialized.interval_seconds.is_none());
+        assert!(deserialized.jitter_seconds.is_none());
         assert!(deserialized.enabled.is_none());
         assert!(deserialized.task_config.is_none());
     }
@@ -232,7 +244,8 @@ mod tests {
         let json = r#"{}"#;
         let req: UpdateScheduledTaskRequest =
             serde_json::from_str(json).expect("deserialization should succeed");
-        assert!(req.cron_expression.is_none());
+        assert!(req.interval_seconds.is_none());
+        assert!(req.jitter_seconds.is_none());
         assert!(req.enabled.is_none());
         assert!(req.task_config.is_none());
     }
@@ -240,9 +253,10 @@ mod tests {
     // ── UpdateScheduledTaskRequest validation ────────────────────────
 
     #[test]
-    fn validate_valid_cron_expression() {
+    fn validate_valid_interval() {
         let req = UpdateScheduledTaskRequest {
-            cron_expression: Some("0 * * * *".to_string()),
+            interval_seconds: Some(300),
+            jitter_seconds: Some(30),
             enabled: None,
             task_config: None,
         };
@@ -250,9 +264,10 @@ mod tests {
     }
 
     #[test]
-    fn validate_none_cron_passes() {
+    fn validate_none_interval_passes() {
         let req = UpdateScheduledTaskRequest {
-            cron_expression: None,
+            interval_seconds: None,
+            jitter_seconds: None,
             enabled: Some(true),
             task_config: None,
         };
@@ -260,67 +275,58 @@ mod tests {
     }
 
     #[test]
-    fn validate_empty_cron_fails() {
+    fn validate_zero_interval_fails() {
         let req = UpdateScheduledTaskRequest {
-            cron_expression: Some("".to_string()),
+            interval_seconds: Some(0),
+            jitter_seconds: None,
             enabled: None,
             task_config: None,
         };
         let err = req
             .validate()
-            .expect_err("empty cron should fail validation");
-        assert_eq!(err.field, "cron_expression");
-        assert!(
-            err.message.contains("not be empty"),
-            "error message should mention emptiness"
-        );
+            .expect_err("zero interval should fail validation");
+        assert_eq!(err.field, "interval_seconds");
+        assert!(err.message.contains("greater than 0"));
     }
 
     #[test]
-    fn validate_cron_too_few_fields_fails() {
+    fn validate_negative_interval_fails() {
         let req = UpdateScheduledTaskRequest {
-            cron_expression: Some("0 * *".to_string()),
+            interval_seconds: Some(-1),
+            jitter_seconds: None,
             enabled: None,
             task_config: None,
         };
         let err = req
             .validate()
-            .expect_err("cron with 3 fields should fail validation");
-        assert_eq!(err.field, "cron_expression");
-        assert!(
-            err.message.contains("5 fields"),
-            "error message should mention 5 fields"
-        );
+            .expect_err("negative interval should fail validation");
+        assert_eq!(err.field, "interval_seconds");
     }
 
     #[test]
-    fn validate_cron_too_many_fields_fails() {
+    fn validate_negative_jitter_fails() {
         let req = UpdateScheduledTaskRequest {
-            cron_expression: Some("0 * * * * *".to_string()),
+            interval_seconds: None,
+            jitter_seconds: Some(-1),
             enabled: None,
             task_config: None,
         };
         let err = req
             .validate()
-            .expect_err("cron with 6 fields should fail validation");
-        assert_eq!(err.field, "cron_expression");
-        assert!(
-            err.message.contains("5 fields"),
-            "error message should mention 5 fields"
-        );
+            .expect_err("negative jitter should fail validation");
+        assert_eq!(err.field, "jitter_seconds");
+        assert!(err.message.contains(">= 0"));
     }
 
     #[test]
-    fn validate_cron_single_field_fails() {
+    fn validate_zero_jitter_passes() {
         let req = UpdateScheduledTaskRequest {
-            cron_expression: Some("daily".to_string()),
+            interval_seconds: Some(300),
+            jitter_seconds: Some(0),
             enabled: None,
             task_config: None,
         };
-        let err = req
-            .validate()
-            .expect_err("single-word cron should fail validation");
-        assert_eq!(err.field, "cron_expression");
+        assert!(req.validate().is_ok());
     }
 
     // ── TriggerScheduledTaskResponse ─────────────────────────────────

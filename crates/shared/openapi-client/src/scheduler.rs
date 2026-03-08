@@ -16,7 +16,7 @@ impl UptrakitClient {
         self.get(&crate::paths::scheduler::by_id(id)).await
     }
 
-    /// Update a scheduled task (cron expression, enabled state, or config).
+    /// Update a scheduled task (interval, jitter, enabled state, or config).
     pub async fn update_scheduled_task(
         &self,
         id: &Uuid,
@@ -39,19 +39,22 @@ mod tests {
     #[test]
     fn update_scheduled_task_request_serialization() {
         let req = UpdateScheduledTaskRequest {
-            cron_expression: Some("0 */6 * * *".to_string()),
+            interval_seconds: Some(21600),
+            jitter_seconds: Some(300),
             enabled: Some(true),
             task_config: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
-        assert_eq!(json["cron_expression"], "0 */6 * * *");
+        assert_eq!(json["interval_seconds"], 21600);
+        assert_eq!(json["jitter_seconds"], 300);
         assert_eq!(json["enabled"], true);
     }
 
     #[test]
     fn update_scheduled_task_request_with_config() {
         let req = UpdateScheduledTaskRequest {
-            cron_expression: None,
+            interval_seconds: None,
+            jitter_seconds: None,
             enabled: None,
             task_config: Some(serde_json::json!({"key": "value"})),
         };

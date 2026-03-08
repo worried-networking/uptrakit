@@ -1,9 +1,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveEnum, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter,
-    sea_query::Expr,
+    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr,
 };
-use std::str::FromStr;
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::scheduled_task;
@@ -19,9 +17,9 @@ pub enum ScheduledTaskError {
     /// The requested task does not exist for this tenant.
     #[error("scheduled task not found")]
     NotFound,
-    /// The provided cron expression could not be parsed.
-    #[error("invalid cron expression")]
-    InvalidCronExpression,
+    /// The provided interval is invalid.
+    #[error("invalid interval")]
+    InvalidInterval,
     /// A database error occurred.
     #[error("database error: {0}")]
     Db(sea_orm::DbErr),
@@ -35,9 +33,10 @@ impl_report_conversion!(sea_orm::DbErr => ScheduledTaskError::Db);
 fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
     ScheduledTaskResponse {
         id: m.id,
-        task_type: m.task_type.to_value().to_string(),
+        task_type: sea_orm::ActiveEnum::to_value(&m.task_type).to_string(),
         label: m.task_type.label().to_string(),
-        cron_expression: m.cron_expression.clone(),
+        interval_seconds: m.interval_seconds,
+        jitter_seconds: m.jitter_seconds,
         enabled: m.enabled,
         task_config: m.task_config.clone(),
         last_run_at: m.last_run_at,
@@ -50,21 +49,19 @@ fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
     }
 }
 
-/// Normalize a 5-field standard cron expression to 6-field (the `cron` crate requires seconds).
-fn normalize_cron(expr: &str) -> String {
-    if expr.split_whitespace().count() == 5 {
-        format!("0 {expr}")
+/// Compute the next run time inline (same logic as `uptrakit_scheduler_engine::interval`
+/// but avoids a crate dependency for a single addition).
+fn compute_next_run_at(
+    now: OffsetDateTime,
+    interval_seconds: i32,
+    jitter_seconds: i32,
+) -> OffsetDateTime {
+    let jitter = if jitter_seconds > 0 {
+        rand::Rng::random_range(&mut rand::rng(), 0..=jitter_seconds)
     } else {
-        expr.to_string()
-    }
-}
-
-fn compute_next_run(cron_expr: &str, after: OffsetDateTime) -> Option<OffsetDateTime> {
-    let normalized = normalize_cron(cron_expr);
-    let schedule = cron::Schedule::from_str(&normalized).ok()?;
-    let after_chrono = chrono::DateTime::from_timestamp(after.unix_timestamp(), 0)?;
-    let next_chrono = schedule.after(&after_chrono).next()?;
-    OffsetDateTime::from_unix_timestamp(next_chrono.timestamp()).ok()
+        0
+    };
+    now + time::Duration::seconds(i64::from(interval_seconds) + i64::from(jitter))
 }
 
 // --- Public query functions ---
@@ -108,18 +105,31 @@ pub async fn update_scheduled_task(
 
     let task = task.ok_or_else(|| report!(ScheduledTaskError::NotFound))?;
 
+    let mut interval = task.interval_seconds;
+    let mut jitter = task.jitter_seconds;
+
     let mut active: scheduled_task::ActiveModel = task.into();
     let now = OffsetDateTime::now_utc();
 
-    if let Some(ref cron_expr) = req.cron_expression {
-        let normalized = normalize_cron(cron_expr);
-        if cron::Schedule::from_str(&normalized).is_err() {
-            bail!(ScheduledTaskError::InvalidCronExpression);
+    if let Some(new_interval) = req.interval_seconds {
+        if new_interval <= 0 {
+            bail!(ScheduledTaskError::InvalidInterval);
         }
-        active.cron_expression = ActiveValue::Set(cron_expr.clone());
-        if let Some(next) = compute_next_run(cron_expr, now) {
-            active.next_run_at = ActiveValue::Set(next);
+        interval = new_interval;
+        active.interval_seconds = ActiveValue::Set(new_interval);
+    }
+
+    if let Some(new_jitter) = req.jitter_seconds {
+        if new_jitter < 0 {
+            bail!(ScheduledTaskError::InvalidInterval);
         }
+        jitter = new_jitter;
+        active.jitter_seconds = ActiveValue::Set(new_jitter);
+    }
+
+    // Recompute next_run_at if interval or jitter changed.
+    if req.interval_seconds.is_some() || req.jitter_seconds.is_some() {
+        active.next_run_at = ActiveValue::Set(compute_next_run_at(now, interval, jitter));
     }
 
     if let Some(enabled) = req.enabled {

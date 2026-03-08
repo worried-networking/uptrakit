@@ -977,11 +977,12 @@ mod tests {
     }
 
     #[test]
-    fn update_scheduled_task_valid_cron() {
+    fn update_scheduled_task_valid_interval() {
         use crate::scheduler::UpdateScheduledTaskRequest;
         use crate::validation::Validate;
         let req = UpdateScheduledTaskRequest {
-            cron_expression: Some("0 * * * *".to_string()),
+            interval_seconds: Some(300),
+            jitter_seconds: Some(30),
             enabled: None,
             task_config: None,
         };
@@ -989,16 +990,17 @@ mod tests {
     }
 
     #[test]
-    fn update_scheduled_task_invalid_cron() {
+    fn update_scheduled_task_invalid_interval() {
         use crate::scheduler::UpdateScheduledTaskRequest;
         use crate::validation::Validate;
         let req = UpdateScheduledTaskRequest {
-            cron_expression: Some("not a cron".to_string()),
+            interval_seconds: Some(0),
+            jitter_seconds: None,
             enabled: None,
             task_config: None,
         };
         let err = req.validate().unwrap_err();
-        assert_eq!(err.field, "cron_expression");
+        assert_eq!(err.field, "interval_seconds");
     }
 
     #[test]

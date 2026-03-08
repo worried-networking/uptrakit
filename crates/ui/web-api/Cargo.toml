@@ -24,8 +24,6 @@ db-mysql = ["sea-orm/sqlx-mysql", "uptrakit-web-api-queries/db-mysql"]
 async-stream = { workspace = true }
 axum = { workspace = true }
 async-trait = { workspace = true }
-chrono = { workspace = true }
-cron = { workspace = true }
 futures-util = { workspace = true }
 http = { workspace = true }
 ipnet = { workspace = true }

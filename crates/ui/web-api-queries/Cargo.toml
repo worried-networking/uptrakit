@@ -17,8 +17,7 @@ db-mysql = ["sea-orm/sqlx-mysql"]
 [dependencies]
 async-trait = { workspace = true }
 base64 = { workspace = true }
-chrono = { workspace = true }
-cron = { workspace = true }
+rand = { workspace = true }
 rootcause = { workspace = true }
 sea-orm = { workspace = true }
 serde = { workspace = true }
