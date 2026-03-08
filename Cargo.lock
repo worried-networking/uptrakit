@@ -6465,7 +6465,7 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-plugin-infrastructure-proxmox",
+ "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
@@ -6809,6 +6809,8 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "rootcause",
+ "sea-orm",
+ "sea-orm-migration",
  "semver",
  "serde",
  "serde_json",
@@ -6820,6 +6822,7 @@ dependencies = [
  "uptrakit-extension-framework",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uuid",
 ]
 
 [[package]]
@@ -6827,9 +6830,11 @@ name = "uptrakit-plugin-infrastructure-proxmox"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "futures-util",
  "reqwest",
  "rootcause",
  "sea-orm",
+ "sea-orm-migration",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

@@ -9,12 +9,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
-use uptrakit_plugin_infrastructure_proxmox::pve_setup;
-use uptrakit_plugin_infrastructure_registry::PluginRegistry;
-
-use uptrakit_command::RemoteExecutor as _;
+use uptrakit_plugin_infrastructure_core::agent_infra::{
+    GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult, InfraActionInvoker,
+    InfraPluginContext,
+};
+use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_registry};
 
 use crate::commands::sudoers::{
     self, ResolvedSudoCommand, SudoersContent, detect_is_root, detect_sudo_available,
@@ -262,9 +264,40 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
         }
     }
 
-    // PVE nodes require sudo access to pct/qm for guest bootstrap.
-    if host.is_pve_node {
-        resolved.extend(pve_sudo_commands(&executor).await);
+    // Ask infra plugins for additional sudo commands required by this host.
+    let infra_registry = create_agent_infra_registry();
+    let noop_invoker = NoopInfraActionInvoker;
+    let noop_bootstrap = NoopGuestBootstrap;
+    let tenant_id_str = args.tenant_id.map(|t| t.to_string());
+    let infra_ctx = InfraPluginContext {
+        db,
+        tenant_id: tenant_id_str.as_deref(),
+        service_id: None,
+        state_dir: std::path::Path::new("."),
+        private_key_der: None,
+        action_invoker: &noop_invoker,
+        guest_bootstrap: &noop_bootstrap,
+    };
+    for plugin in infra_registry.plugins() {
+        if plugin.has_infra_state(db, &host.id).await {
+            match plugin.on_host_synced(&infra_ctx, &executor, &host.id).await {
+                Ok(sync_result) => {
+                    for cmd in sync_result.sudo_commands {
+                        resolved.push(ResolvedSudoCommand {
+                            command_path: cmd.command_path,
+                            explanation: cmd.explanation,
+                            needs_setenv: cmd.needs_setenv,
+                        });
+                    }
+                    for line in &sync_result.summary_lines {
+                        println!("  {line}");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, plugin = %plugin.plugin_type(), "infra plugin sync failed");
+                }
+            }
+        }
     }
 
     let sudoers_content: Option<SudoersContent> = if !resolved.is_empty() {
@@ -280,8 +313,6 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
 
     let sudoers_file = format!("/etc/sudoers.d/uptrakit-{}", host.username);
 
-    // Handle dry run for sudoers only — PVE sync still runs in dry-run mode
-    // to show what would be detected without making sudoers changes.
     if !args.dry_run {
         if let Some(ref content) = sudoers_content {
             let preview_text = sudoers::generate_sudoers_content(&host.username, content);
@@ -315,11 +346,6 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
         println!("Dry run — no sudoers file would be written (no commands resolved).");
     }
 
-    // 7. PVE node name detection and privilege verification.
-    if host.is_pve_node {
-        sync_pve_state(&executor, db, &host, args.tenant_id.as_ref(), args.dry_run).await?;
-    }
-
     // Drop the executor before disconnecting so the session Arc has a single
     // owner — `disconnect_shared` requires sole ownership to cleanly close the
     // SSH channel.
@@ -334,232 +360,34 @@ pub async fn run(args: &SyncArgs, db: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
-/// Sync PVE-specific state and print a human-readable summary to stdout.
-///
-/// Thin CLI wrapper around [`sync_pve_state_inner`].
-async fn sync_pve_state(
-    executor: &SshRemoteExecutor,
-    db: &DatabaseConnection,
-    host: &Model,
-    tenant_id: Option<&uuid::Uuid>,
-    dry_run: bool,
-) -> Result<()> {
-    println!();
-    println!("Syncing Proxmox VE state...");
-    for line in sync_pve_state_inner(executor, db, host, tenant_id.copied(), dry_run).await? {
-        println!("  {line}");
+// ── Noop infra impls for sync context ────────────────────────────────
+
+/// No-op [`InfraActionInvoker`] for sync context.
+struct NoopInfraActionInvoker;
+
+#[async_trait]
+impl InfraActionInvoker for NoopInfraActionInvoker {
+    async fn invoke(
+        &self,
+        _extension_id: &str,
+        _action_id: &str,
+        _params: serde_json::Value,
+    ) -> std::result::Result<uptrakit_internal_wire::extension::ExtensionResponsePayload, String>
+    {
+        Err("InfraActionInvoker not available during sync".to_string())
     }
-    Ok(())
 }
 
-/// Core PVE sync logic shared by the CLI and extension paths.
-///
-/// Performs three steps and returns a list of human-readable summary lines:
-///
-/// 1. **Node name detection** — reads `hostname -s` and stores it so that
-///    `bootstrap-proxmox-guest` can locate the correct SSH host for each guest.
-///
-/// 2. **Plugin config ID reconciliation** — detects a desync that arises when
-///    multiple PVE nodes in the same cluster hold different `pve_plugin_config_id`
-///    values (e.g. because a second plugin config was created during a bootstrap
-///    where `pveum user list` failed transiently). Strategy:
-///    - Get the cluster node list via `pvesh get /cluster/status`.
-///    - Collect distinct config IDs held by confirmed cluster peers.
-///    - One unique value → adopt it. Multiple → pick the newest UUID v7 (the
-///      most-recently-created config is the one the controller actively uses for
-///      discovery).
-///
-/// 3. **Privilege verification** — confirms the Uptrakit PVE API user still
-///    holds the `PVEAuditor` role on `/`.
-///
-/// When `dry_run` is `true` the DB write is skipped; all other steps still run.
-async fn sync_pve_state_inner(
-    executor: &SshRemoteExecutor,
-    db: &DatabaseConnection,
-    host: &Model,
-    tenant_id: Option<uuid::Uuid>,
-    dry_run: bool,
-) -> Result<Vec<String>> {
-    let mut lines: Vec<String> = Vec::new();
+/// No-op [`GuestBootstrapExecutor`] for sync context.
+struct NoopGuestBootstrap;
 
-    // Step 1: node name.
-    let node_name = match pve_setup::detect_pve_node_name(executor).await {
-        Ok(name) => {
-            lines.push(format!("node name: {name}"));
-            Some(name)
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to detect PVE node name");
-            lines.push(format!("node name: detection failed ({e})"));
-            None
-        }
-    };
-
-    // Step 2: plugin config ID reconciliation.
-    let canonical_config_id: Option<String> = if let Some(ref tid) = tenant_id {
-        match pve_setup::check_pve_token_exists(executor, tid).await {
-            Ok(pve_setup::PveTokenStatus::OwnedByTenant(_)) => {
-                let cluster_nodes = pve_setup::detect_pve_cluster_nodes(executor).await;
-                if cluster_nodes.is_empty() {
-                    None
-                } else {
-                    reconcile_pve_config(db, &host.id, &cluster_nodes).await
-                }
-            }
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    let config_id_to_store = canonical_config_id
-        .as_ref()
-        .or(host.pve_plugin_config_id.as_ref())
-        .cloned();
-
-    if let Some(ref new_id) = canonical_config_id {
-        if host.pve_plugin_config_id.as_deref() != Some(new_id.as_str()) {
-            lines.push(format!(
-                "plugin config: corrected from {} to {new_id}",
-                host.pve_plugin_config_id.as_deref().unwrap_or("(none)")
-            ));
-        } else {
-            lines.push(format!("plugin config: OK ({new_id})"));
-        }
-    }
-
-    // Persist (unless dry run).
-    if !dry_run && node_name.is_some() {
-        host_ops::update_host_pve_state(db, &host.id, true, config_id_to_store, node_name).await?;
-    }
-
-    // Step 3: privilege verification.
-    if let Some(ref tid) = tenant_id {
-        match pve_setup::verify_pve_privileges(executor, tid).await {
-            Ok(()) => lines.push("privileges: OK (PVEAuditor on /)".to_string()),
-            Err(e) => {
-                lines.push(format!("privileges: FAILED — {e}"));
-                lines.push(
-                    "run bootstrap again or manually grant PVEAuditor on / to the Uptrakit user"
-                        .to_string(),
-                );
-            }
-        }
-    } else {
-        lines.push(
-            "privilege check: skipped (tenant ID not yet available — \
-             ensure the agent has connected to the controller at least once)"
-                .to_string(),
-        );
-    }
-
-    Ok(lines)
-}
-
-/// Collect sudoers entries for PVE-specific management tools.
-///
-/// `/usr/sbin/pct` and `/usr/sbin/qm` live outside the default PATH of
-/// non-root users and must be invoked as `sudo /usr/sbin/pct …` by the agent.
-/// This helper checks which tools are present on the remote host and returns
-/// [`ResolvedSudoCommand`] entries for each one found.  Called during sync
-/// when [`Model::is_pve_node`] is `true` so that the generated sudoers file
-/// grants the stored agent user `NOPASSWD` access to these binaries.
-async fn pve_sudo_commands(executor: &SshRemoteExecutor) -> Vec<ResolvedSudoCommand> {
-    let mut cmds = Vec::new();
-
-    // pct — restrict to the exec subcommand only (blocks pct destroy, migrate, etc.).
-    let pct_exists = executor
-        .exec_command("test -f /usr/sbin/pct")
-        .await
-        .map(|r| r.exit_code == 0)
-        .unwrap_or(false);
-    if pct_exists {
-        cmds.push(ResolvedSudoCommand {
-            command_path: "/usr/sbin/pct exec *".to_string(),
-            explanation: "Execute commands inside LXC containers for guest bootstrap".to_string(),
-            needs_setenv: false,
-        });
-    }
-
-    // qm — restrict to guest exec and the single network-get-interfaces query only
-    // (blocks qm destroy, migrate, set, etc.).
-    let qm_exists = executor
-        .exec_command("test -f /usr/sbin/qm")
-        .await
-        .map(|r| r.exit_code == 0)
-        .unwrap_or(false);
-    if qm_exists {
-        cmds.push(ResolvedSudoCommand {
-            command_path: "/usr/sbin/qm guest exec *".to_string(),
-            explanation: "Execute commands inside QEMU VMs for guest bootstrap".to_string(),
-            needs_setenv: false,
-        });
-        cmds.push(ResolvedSudoCommand {
-            command_path: "/usr/sbin/qm guest cmd * network-get-interfaces".to_string(),
-            explanation: "Query QEMU VM network interfaces for guest IP detection".to_string(),
-            needs_setenv: false,
-        });
-    }
-
-    cmds
-}
-
-/// Determine the canonical `pve_plugin_config_id` for the cluster this host
-/// belongs to, by inspecting other local PVE hosts that are confirmed cluster
-/// peers.
-///
-/// Returns `None` when no peer has a config, or when the result is ambiguous
-/// and logging a warning is sufficient (caller falls back to the stored value).
-async fn reconcile_pve_config(
-    db: &DatabaseConnection,
-    current_host_id: &str,
-    cluster_nodes: &[String],
-) -> Option<String> {
-    let all_pve_hosts = match host_ops::find_pve_hosts(db).await {
-        Ok(h) => h,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to list local PVE hosts for config reconciliation");
-            return None;
-        }
-    };
-
-    // Collect distinct config IDs held by cluster peers (exclude current host).
-    let mut peer_configs: Vec<String> = all_pve_hosts
-        .iter()
-        .filter(|h| h.id != current_host_id)
-        .filter(|h| {
-            h.pve_node_name
-                .as_deref()
-                .is_some_and(|n| cluster_nodes.contains(&n.to_string()))
-        })
-        .filter_map(|h| h.pve_plugin_config_id.clone())
-        .collect();
-
-    // Deduplicate while preserving the maximum (newest UUID v7 = newest config).
-    peer_configs.sort_unstable();
-    peer_configs.dedup();
-
-    match peer_configs.len() {
-        0 => None,
-        1 => Some(peer_configs.remove(0)),
-        _ => {
-            // Multiple configs among confirmed cluster peers (split-brain from
-            // a failed dedup on a previous bootstrap).  Pick the newest UUID
-            // (highest sort value for v7) — that is the most recently created
-            // config and therefore the one the controller is actively using for
-            // discovery.
-            let newest = peer_configs
-                .into_iter()
-                .max()
-                .expect("non-empty after multi-branch");
-            tracing::warn!(
-                canonical_config_id = %newest,
-                "cluster peers disagree on pve_plugin_config_id \
-                 (likely duplicate configs from a failed bootstrap dedup); \
-                 using newest config"
-            );
-            Some(newest)
-        }
+#[async_trait]
+impl GuestBootstrapExecutor for NoopGuestBootstrap {
+    async fn bootstrap_guest(
+        &self,
+        _params: GuestBootstrapParams,
+    ) -> std::result::Result<GuestBootstrapResult, String> {
+        Err("GuestBootstrapExecutor not available during sync".to_string())
     }
 }
 
@@ -717,9 +545,40 @@ pub async fn run_for_extension(
 
     let mut summary = Vec::new();
 
-    // PVE nodes require sudo access to pct/qm for guest bootstrap.
-    if host.is_pve_node {
-        resolved.extend(pve_sudo_commands(&executor).await);
+    // Ask infra plugins for additional sudo commands required by this host.
+    let infra_registry = create_agent_infra_registry();
+    let noop_invoker = NoopInfraActionInvoker;
+    let noop_bootstrap = NoopGuestBootstrap;
+    let tenant_id_str = tenant_id.map(|t| t.to_string());
+    let infra_ctx = InfraPluginContext {
+        db,
+        tenant_id: tenant_id_str.as_deref(),
+        service_id: None,
+        state_dir: std::path::Path::new("."),
+        private_key_der: None,
+        action_invoker: &noop_invoker,
+        guest_bootstrap: &noop_bootstrap,
+    };
+    for plugin in infra_registry.plugins() {
+        if plugin.has_infra_state(db, &host.id).await {
+            match plugin.on_host_synced(&infra_ctx, &executor, &host.id).await {
+                Ok(sync_result) => {
+                    for cmd in sync_result.sudo_commands {
+                        resolved.push(ResolvedSudoCommand {
+                            command_path: cmd.command_path,
+                            explanation: cmd.explanation,
+                            needs_setenv: cmd.needs_setenv,
+                        });
+                    }
+                    for line in sync_result.summary_lines {
+                        summary.push(format!("{}: {line}", plugin.plugin_type()));
+                    }
+                }
+                Err(e) => {
+                    summary.push(format!("{}: sync failed ({e})", plugin.plugin_type()));
+                }
+            }
+        }
     }
 
     let has_resolved_commands = !resolved.is_empty();
@@ -748,18 +607,6 @@ pub async fn run_for_extension(
         }
     } else {
         summary.push("sudoers: no commands to write".to_string());
-    }
-
-    // PVE sync.
-    if host.is_pve_node {
-        match sync_pve_state_inner(&executor, db, &host, tenant_id, false).await {
-            Ok(lines) => {
-                for line in lines {
-                    summary.push(format!("pve: {line}"));
-                }
-            }
-            Err(e) => summary.push(format!("pve: sync failed ({e})")),
-        }
     }
 
     drop(executor);

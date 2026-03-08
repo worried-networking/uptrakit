@@ -3,10 +3,11 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_command::RemoteExecutor;
 use uptrakit_crypto::EncryptedString;
-use uptrakit_plugin_infrastructure_proxmox::guest_exec::{self, PveGuestType};
+use uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapExecutor;
 use uptrakit_plugin_infrastructure_registry::PluginRegistry;
 
 use crate::commands::bootstrap;
@@ -17,7 +18,7 @@ use crate::commands::sudoers::{
 use crate::db::entity::ssh_host::SshKeyType;
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
-use crate::remote_exec::{PveGuestCommandExecutor, PveGuestExecutor, SshRemoteExecutor};
+use crate::remote_exec::SshRemoteExecutor;
 use crate::ssh_key;
 use crate::ssh_transport::{self, AuthMethod, SshConnectionConfig, SshSession};
 
@@ -33,8 +34,8 @@ pub struct ProxmoxBootstrapParams {
     pub pve_host_id: String,
     /// VMID of the target guest.
     pub vmid: u32,
-    /// Guest type (LXC or QEMU).
-    pub guest_type: PveGuestType,
+    /// Guest type string (e.g. `"lxc"` or `"qemu"`).
+    pub guest_type: String,
     /// Friendly name for the new host entry.
     pub name: String,
     /// Username to create/use on the guest.
@@ -57,11 +58,74 @@ pub struct ProxmoxBootstrapResult {
     pub guest_ip: String,
 }
 
+/// A [`GuestBootstrapExecutor`] that always returns an error.
+///
+/// Used in contexts where no bootstrap will actually be performed (e.g., in the
+/// `on_post_report_hosts` background task where guest execution is not needed).
+pub struct NoopGuestBootstrapExecutor;
+
+#[async_trait]
+impl GuestBootstrapExecutor for NoopGuestBootstrapExecutor {
+    async fn bootstrap_guest(
+        &self,
+        _params: uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapParams,
+    ) -> std::result::Result<
+        uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapResult,
+        String,
+    > {
+        Err(
+            "NoopGuestBootstrapExecutor: guest bootstrap is not supported in this context"
+                .to_string(),
+        )
+    }
+}
+
+/// [`GuestBootstrapExecutor`] implementation for the SSH agent.
+///
+/// Translates generic `GuestBootstrapParams` from the infra plugin into
+/// `ProxmoxBootstrapParams` and calls `run_proxmox_bootstrap`.
+pub struct AgentGuestBootstrapExecutor {
+    pub state_dir: std::path::PathBuf,
+    pub service_id: Option<uuid::Uuid>,
+}
+
+#[async_trait]
+impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
+    async fn bootstrap_guest(
+        &self,
+        params: uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapParams,
+    ) -> std::result::Result<
+        uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapResult,
+        String,
+    > {
+        let proxmox_params = ProxmoxBootstrapParams {
+            pve_host_id: params.gateway_host_id,
+            vmid: params.guest_id,
+            guest_type: params.guest_type,
+            name: params.name,
+            target_username: params.target_username,
+            allow_all: params.allow_all,
+            remove_stale_keys: params.remove_stale_keys,
+            host_id: params.host_id,
+            service_id: params.service_id.or(self.service_id),
+        };
+
+        run_proxmox_bootstrap(&self.state_dir, proxmox_params)
+            .await
+            .map(
+                |r| uptrakit_plugin_infrastructure_core::agent_infra::GuestBootstrapResult {
+                    guest_ip: r.guest_ip,
+                },
+            )
+            .map_err(|e| e.to_string())
+    }
+}
+
 /// Run the Proxmox guest bootstrap workflow.
 ///
 /// 1. Load the PVE host from the local DB
 /// 2. Connect to the PVE node via SSH
-/// 3. Create a `PveGuestExecutor` for the target guest
+/// 3. Create guest executors via the infra registry's `GuestExecProvider`
 /// 4. Create user, deploy SSH key, configure sudoers inside the guest
 /// 5. Get the guest's IP address
 /// 6. Verify SSH connectivity to the guest
@@ -119,7 +183,7 @@ pub async fn run_proxmox_bootstrap(
         pve_host = %pve_host.name,
         hostname = %pve_host.hostname,
         vmid = params.vmid,
-        guest_type = ?params.guest_type,
+        guest_type = %params.guest_type,
         "connecting to PVE node for guest bootstrap"
     );
 
@@ -132,11 +196,29 @@ pub async fn run_proxmox_bootstrap(
     .await?;
 
     let session = Arc::new(session);
-    let pve_executor = SshRemoteExecutor::new(Arc::clone(&session));
+    let pve_executor: Arc<dyn RemoteExecutor> =
+        Arc::new(SshRemoteExecutor::new(Arc::clone(&session)));
 
-    // 3. CREATE GUEST EXECUTOR
-    let guest_executor =
-        PveGuestExecutor::new(Arc::clone(&session), params.vmid, params.guest_type);
+    // 3. CREATE GUEST EXECUTORS via the infra registry
+    let infra_registry = uptrakit_plugin_infrastructure_registry::create_agent_infra_registry();
+    let guest_exec_provider = infra_registry
+        .guest_exec_provider_for("infrastructure_proxmox")
+        .ok_or_else(|| {
+            report!(Error::InvalidInput(
+                "no GuestExecProvider found for infrastructure_proxmox".to_string()
+            ))
+        })?;
+
+    let guest_executor = guest_exec_provider.create_guest_remote_executor(
+        Arc::clone(&pve_executor),
+        params.vmid,
+        &params.guest_type,
+    );
+    let guest_cmd_executor = guest_exec_provider.create_guest_command_executor(
+        Arc::clone(&pve_executor),
+        params.vmid,
+        &params.guest_type,
+    );
 
     // 4. GENERATE KEY MATERIAL
     let (target_private_pem, target_public_openssh) = ssh_key::generate_ed25519_keypair()?;
@@ -277,6 +359,7 @@ pub async fn run_proxmox_bootstrap(
         } else {
             format!("{}\n{ak_entry}\n", keep_lines.join("\n"))
         };
+
         let escaped_content = uptrakit_command::shell_escape(&new_content);
         let ak_cmd = format!(
             "mkdir -p {escaped_home}/.ssh && \
@@ -298,16 +381,8 @@ pub async fn run_proxmox_bootstrap(
     }
 
     // Configure sudoers.
-    // Use a PveGuestCommandExecutor so compatibility probes (e.g. `which apt`,
-    // `which brew`) run against the *guest* rather than the PVE host.  The PVE
-    // host will not have `/usr/bin/update`, so using the SSH session directly
-    // would cause the PHS plugin to report Incompatible and skip helper-script
-    // installation on the guest.
-    let guest_cmd_executor = Arc::new(PveGuestCommandExecutor(PveGuestExecutor::new(
-        Arc::clone(&session),
-        params.vmid,
-        params.guest_type,
-    ))) as Arc<dyn uptrakit_command::CommandExecutor>;
+    // Use the guest command executor so compatibility probes (e.g. `which apt`,
+    // `which brew`) run against the *guest* rather than the PVE host.
     let plugin_sudo_cmds =
         PluginRegistry::compatible_sudo_commands_for_host(guest_cmd_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
@@ -315,13 +390,14 @@ pub async fn run_proxmox_bootstrap(
     for (_plugin_type, entries) in &plugin_sudo_cmds {
         for entry in entries {
             if let Some(helper) = &entry.helper_script {
-                install_helper_script(&guest_executor, helper, use_sudo).await?;
+                install_helper_script(guest_executor.as_ref(), helper, use_sudo).await?;
                 resolved.push(ResolvedSudoCommand {
                     command_path: helper.install_path.to_string(),
                     explanation: entry.explanation.clone(),
                     needs_setenv: entry.needs_setenv,
                 });
-            } else if let Some(path) = resolve_command_path(&guest_executor, &entry.command).await?
+            } else if let Some(path) =
+                resolve_command_path(guest_executor.as_ref(), &entry.command).await?
             {
                 let command_path = match entry.args_suffix {
                     Some(suffix) => format!("{path} {suffix}"),
@@ -345,7 +421,13 @@ pub async fn run_proxmox_bootstrap(
     };
 
     if let Some(ref content) = sudoers_content {
-        write_sudoers_file(&guest_executor, &params.target_username, content, use_sudo).await?;
+        write_sudoers_file(
+            guest_executor.as_ref(),
+            &params.target_username,
+            content,
+            use_sudo,
+        )
+        .await?;
     }
 
     // Get host key fingerprint from guest.
@@ -364,7 +446,8 @@ pub async fn run_proxmox_bootstrap(
         .map(String::from);
 
     // 6. GET GUEST IP
-    let guest_ip = guest_exec::get_guest_ip(&pve_executor, params.vmid, params.guest_type)
+    let guest_ip = guest_exec_provider
+        .get_guest_ip(pve_executor.as_ref(), params.vmid, &params.guest_type)
         .await
         .map_err(|e| report!(Error::SshCommand(format!("failed to get guest IP: {e}"))))?;
 
@@ -403,8 +486,8 @@ pub async fn run_proxmox_bootstrap(
 
     // Drop executors before disconnecting so the session Arc has a single
     // owner — `disconnect_shared` requires sole ownership.
-    drop(pve_executor);
     drop(guest_executor);
+    drop(pve_executor);
     SshSession::disconnect_shared(session).await;
 
     // 8. SAVE TO DATABASE

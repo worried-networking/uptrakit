@@ -6,23 +6,25 @@
 //! - Action handlers for each action
 //! - ECIES decryption of sensitive parameters (auth password, private key)
 
+use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::Path;
+use std::sync::Arc;
 
 use uptrakit_internal_wire::ServiceMessage;
 use uptrakit_internal_wire::extension::{
     ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionRegisterPayload,
     ExtensionRequestPayload, ExtensionResponsePayload, ExtensionTargeting, ExtensionUi, FieldDef,
-    FieldType, FormDef, SelectOption, SelectSource, TableColumn,
+    FieldType, FormDef, SelectOption, TableColumn,
 };
+use uptrakit_plugin_infrastructure_core::agent_infra::{InfraActionInvoker, InfraPluginContext};
+use uptrakit_plugin_infrastructure_registry::AgentInfraRegistry;
 use uptrakit_service_sdk::ControllerConnection;
 use uptrakit_shared_types::Permission;
 
-use uptrakit_plugin_infrastructure_proxmox::guest_exec::PveGuestType;
-
 use crate::commands::bootstrap::{self, BootstrapParams};
-use crate::commands::bootstrap_proxmox::{self, ProxmoxBootstrapParams};
+use crate::commands::bootstrap_proxmox::AgentGuestBootstrapExecutor;
 use crate::commands::sync;
 use crate::host_ops;
 use crate::ssh_target::SshTarget;
@@ -36,7 +38,12 @@ pub const EXTENSION_ID: &str = "ssh-agent.hosts";
 ///
 /// Action fields (`row_actions`, `primary_actions`) contain action ID strings
 /// that reference entries in the action library returned by [`build_actions`].
-pub fn build_manifest() -> ExtensionManifest {
+/// `infra_primary_actions` are additional primary action IDs contributed by
+/// infrastructure plugins (via [`AgentInfraRegistry::all_primary_action_ids`]).
+pub fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManifest {
+    let mut primary_actions = vec!["bootstrap".to_string()];
+    primary_actions.extend(infra_primary_actions.iter().cloned());
+
     ExtensionManifest::new(
         EXTENSION_ID,
         "SSH Hosts",
@@ -55,11 +62,7 @@ pub fn build_manifest() -> ExtensionManifest {
             ],
             data_action: "list-hosts".to_string(),
             row_actions: vec!["sync-host".to_string(), "remove-host".to_string()],
-            primary_actions: vec![
-                "bootstrap".to_string(),
-                "bootstrap-proxmox".to_string(),
-                "bootstrap-proxmox-guest".to_string(),
-            ],
+            primary_actions,
             context_selector: None,
         },
     )
@@ -68,8 +71,17 @@ pub fn build_manifest() -> ExtensionManifest {
 }
 
 /// Build the register payload including the manifest and encryption key.
-pub fn build_register_payload(encryption_public_key: Option<String>) -> ExtensionRegisterPayload {
-    let payload = ExtensionRegisterPayload::new(vec![build_manifest()]);
+pub fn build_register_payload(
+    encryption_public_key: Option<String>,
+    infra_registry: &AgentInfraRegistry,
+) -> ExtensionRegisterPayload {
+    let infra_primary_actions = infra_registry.all_primary_action_ids();
+    let infra_manifests = infra_registry.all_extension_manifests();
+
+    let mut manifests = vec![build_manifest(&infra_primary_actions)];
+    manifests.extend(infra_manifests);
+
+    let payload = ExtensionRegisterPayload::new(manifests);
     match encryption_public_key {
         Some(key) => payload.with_encryption_public_key(key),
         None => payload,
@@ -77,24 +89,18 @@ pub fn build_register_payload(encryption_public_key: Option<String>) -> Extensio
 }
 
 /// Build the action library for registration via `ExtensionActionsRegister`.
-pub fn build_actions() -> Vec<ActionDef> {
-    vec![
+pub fn build_actions(infra_registry: &AgentInfraRegistry) -> Vec<ActionDef> {
+    let mut actions = vec![
         ActionDef::new("remove-host", "Remove Host")
             .with_permission(Permission::ManageHosts)
             .destructive()
             .with_confirm_entity_field("name")
             .with_timeout(30),
         sync_host_action(),
-        ActionDef::new("list-pve-hosts", "List PVE Hosts")
-            .with_permission(Permission::ManageHosts)
-            .with_timeout(10),
-        ActionDef::new("list-discovered-guests", "List Discovered Guests")
-            .with_permission(Permission::ManageHosts)
-            .with_timeout(15),
         bootstrap_action(),
-        bootstrap_proxmox_action(),
-        bootstrap_proxmox_guest_action(),
-    ]
+    ];
+    actions.extend(infra_registry.all_extension_actions());
+    actions
 }
 
 /// Build the sync-host action definition with optional auth override form.
@@ -192,87 +198,6 @@ fn bootstrap_action() -> ActionDef {
         ])))
 }
 
-/// Build the Proxmox bootstrap action definition with its form UI.
-fn bootstrap_proxmox_action() -> ActionDef {
-    ActionDef::new("bootstrap-proxmox", "Bootstrap via Proxmox")
-        .with_permission(Permission::ManageHosts)
-        .with_timeout(120)
-        .with_ui(ActionUi::Form(FormDef::new(vec![
-            FieldDef::new("pve_host_id", "PVE Host")
-                .with_type(FieldType::Select)
-                .required()
-                .with_help_text("PVE node to use as gateway.")
-                .with_select_source(SelectSource::Action {
-                    action_id: "list-pve-hosts".to_string(),
-                }),
-            FieldDef::new("vmid", "Guest VMID")
-                .required()
-                .with_placeholder("100")
-                .with_help_text("VMID of the target container or virtual machine."),
-            FieldDef::new("guest_type", "Guest Type")
-                .with_type(FieldType::Select)
-                .required()
-                .with_default_value("lxc")
-                .with_options(vec![
-                    SelectOption::new("lxc", "LXC Container"),
-                    SelectOption::new("qemu", "QEMU VM"),
-                ]),
-            FieldDef::new("name", "Host Name")
-                .required()
-                .with_placeholder("my-container")
-                .with_help_text("Friendly name for identification."),
-            FieldDef::new("target_username", "Target Username")
-                .with_help_text("User to create/use in the guest.")
-                .with_default_value("uptrakit"),
-            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
-                .with_type(FieldType::Toggle)
-                .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-            FieldDef::new("remove_stale_keys", "Remove Stale Keys")
-                .with_type(FieldType::Toggle)
-                .with_help_text(
-                    "Remove existing Uptrakit-managed keys from authorized_keys before \
-                     writing the new entry. Same-service keys are always removed regardless.",
-                ),
-        ])))
-}
-
-/// Build the "Bootstrap via Discovered Guest" action definition.
-///
-/// Presents a checkbox list of unmatched Proxmox guests discovered by the
-/// Proxmox plugin, allowing users to bootstrap one or more guests in a single
-/// action invocation without manually specifying VMID, node, or guest type.
-/// Names are auto-derived per guest (hostname → proxmox_name → "ct-{vmid}" /
-/// "vm-{vmid}").
-fn bootstrap_proxmox_guest_action() -> ActionDef {
-    ActionDef::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
-        .with_permission(Permission::ManageHosts)
-        .with_timeout(300)
-        .with_ui(ActionUi::Form(FormDef::new(vec![
-            FieldDef::new("discovered_guests", "Discovered Guests")
-                .with_type(FieldType::MultiSelect)
-                .required()
-                .with_help_text(
-                    "Select one or more Proxmox guests to bootstrap. \
-                     Names are auto-derived from the guest's hostname.",
-                )
-                .with_select_source(SelectSource::Action {
-                    action_id: "list-discovered-guests".to_string(),
-                }),
-            FieldDef::new("target_username", "Target Username")
-                .with_help_text("User to create/use in each guest.")
-                .with_default_value("uptrakit"),
-            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
-                .with_type(FieldType::Toggle)
-                .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-            FieldDef::new("remove_stale_keys", "Remove Stale Keys")
-                .with_type(FieldType::Toggle)
-                .with_help_text(
-                    "Remove existing Uptrakit-managed keys from authorized_keys before \
-                     writing the new entry. Same-service keys are always removed regardless.",
-                ),
-        ])))
-}
-
 // ── Extension context ────────────────────────────────────────────────
 
 /// Shared context for extension request handling.
@@ -286,7 +211,114 @@ pub struct ExtensionContext<'a> {
     pub service_id: Option<uuid::Uuid>,
     pub tenant_id: Option<uuid::Uuid>,
     pub bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
-    pub extension_proxy: &'a std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
+    pub extension_proxy: &'a Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
+    pub infra_registry: Arc<AgentInfraRegistry>,
+}
+
+// ── InfraActionInvoker implementation ────────────────────────────────
+
+/// [`InfraActionInvoker`] that routes calls through the `ServiceExtensionProxy`.
+///
+/// Wraps `invoke_proxy_action` so that infrastructure plugins can invoke
+/// controller-side extension actions without depending on `uptrakit-service-sdk`.
+pub struct InfraActionInvokerImpl<'a> {
+    proxy: &'a uptrakit_service_sdk::ServiceExtensionProxy,
+    bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
+}
+
+impl<'a> InfraActionInvokerImpl<'a> {
+    pub fn new(
+        proxy: &'a uptrakit_service_sdk::ServiceExtensionProxy,
+        bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
+    ) -> Self {
+        Self { proxy, bg_tx }
+    }
+}
+
+#[async_trait]
+impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
+    async fn invoke(
+        &self,
+        extension_id: &str,
+        action_id: &str,
+        params: serde_json::Value,
+    ) -> std::result::Result<uptrakit_internal_wire::extension::ExtensionResponsePayload, String>
+    {
+        invoke_proxy_action(self.proxy, self.bg_tx, extension_id, action_id, params)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+// ── Infra plugin action dispatch ─────────────────────────────────────
+
+/// Spawn an infrastructure plugin action as a background task.
+///
+/// Iterates all registered infra plugins; the first one to return `Some`
+/// wins. If no plugin handles the action, an error response is sent.
+fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+    let state_dir = ctx.state_dir.to_path_buf();
+    let bg_tx = ctx.bg_tx.clone();
+    let proxy = std::sync::Arc::clone(ctx.extension_proxy);
+    let infra_registry = std::sync::Arc::clone(&ctx.infra_registry);
+    let service_id = ctx.service_id;
+    let tenant_id = ctx.tenant_id;
+    let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
+
+    tokio::spawn(async move {
+        let db = match crate::db::init_db(&state_dir).await {
+            Ok(db) => db,
+            Err(e) => {
+                let resp = make_error_response(
+                    &request.request_id,
+                    &format!("failed to initialize database: {e}"),
+                );
+                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+                return;
+            }
+        };
+
+        let tenant_id_str = tenant_id.map(|t| t.to_string());
+        let action_invoker = InfraActionInvokerImpl::new(&proxy, &bg_tx);
+        let guest_bootstrap = AgentGuestBootstrapExecutor {
+            state_dir: state_dir.clone(),
+            service_id,
+        };
+        let plugin_ctx = InfraPluginContext {
+            db: &db,
+            tenant_id: tenant_id_str.as_deref(),
+            service_id,
+            state_dir: &state_dir,
+            private_key_der: private_key_der.as_deref(),
+            action_invoker: &action_invoker,
+            guest_bootstrap: &guest_bootstrap,
+        };
+
+        let mut response: Option<ExtensionResponsePayload> = None;
+        for plugin in infra_registry.plugins() {
+            if let Some(resp) = plugin.handle_extension_action(&plugin_ctx, &request).await {
+                response = Some(resp);
+                break;
+            }
+        }
+
+        let resp = response.unwrap_or_else(|| {
+            tracing::warn!(
+                action_id = %request.action_id,
+                extension_id = %request.extension_id,
+                "no infrastructure plugin handled this action"
+            );
+            make_error_response(&request.request_id, "unknown action")
+        });
+
+        if bg_tx
+            .send(ServiceMessage::ExtensionResponse(resp))
+            .await
+            .is_err()
+        {
+            tracing::error!("failed to send infra plugin action result via bg_tx");
+        }
+    });
 }
 
 // ── Action dispatch ──────────────────────────────────────────────────
@@ -320,10 +352,6 @@ pub async fn handle_extension_request(
             let response = handle_list_hosts(&request.request_id, ctx.db).await;
             send_response(conn, response).await;
         }
-        "list-pve-hosts" => {
-            let response = handle_list_pve_hosts(&request.request_id, ctx.db).await;
-            send_response(conn, response).await;
-        }
         "remove-host" => {
             let response = handle_remove_host(&request.request_id, &request.params, ctx.db).await;
             send_response(conn, response).await;
@@ -334,19 +362,9 @@ pub async fn handle_extension_request(
         "bootstrap" => {
             spawn_bootstrap(request, ctx);
         }
-        "bootstrap-proxmox" => {
-            spawn_bootstrap_proxmox(request, ctx.state_dir, ctx.service_id, ctx.bg_tx);
-        }
-        "list-discovered-guests" => {
-            spawn_list_discovered_guests(request, ctx.extension_proxy, ctx.bg_tx);
-        }
-        "bootstrap-proxmox-guest" => {
-            spawn_bootstrap_proxmox_guest(request, ctx);
-        }
-        other => {
-            tracing::warn!(action = %other, "unknown extension action");
-            let response = make_error_response(&request.request_id, "unknown action");
-            send_response(conn, response).await;
+        _ => {
+            // Delegate to infrastructure plugins.
+            spawn_infra_plugin_action(request, ctx);
         }
     }
 }
@@ -377,31 +395,6 @@ async fn handle_list_hosts(
         Err(e) => {
             tracing::error!(error = %e, "failed to list hosts");
             make_error_response(request_id, "failed to list hosts")
-        }
-    }
-}
-
-/// List PVE hosts for dynamic select options in bootstrap-proxmox.
-async fn handle_list_pve_hosts(
-    request_id: &str,
-    db: &sea_orm::DatabaseConnection,
-) -> ExtensionResponsePayload {
-    match host_ops::find_pve_hosts(db).await {
-        Ok(hosts) => {
-            let options: Vec<serde_json::Value> = hosts
-                .into_iter()
-                .map(|h| {
-                    json!({
-                        "value": h.id,
-                        "label": format!("{} ({})", h.name, h.hostname),
-                    })
-                })
-                .collect();
-            make_success_response(request_id, json!({ "options": options }))
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "failed to list PVE hosts");
-            make_error_response(request_id, "failed to list PVE hosts")
         }
     }
 }
@@ -594,77 +587,6 @@ fn spawn_sync_host(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>)
     });
 }
 
-/// Spawn the Proxmox guest bootstrap workflow as a background task.
-fn spawn_bootstrap_proxmox(
-    request: ExtensionRequestPayload,
-    state_dir: &Path,
-    service_id: Option<uuid::Uuid>,
-    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
-) {
-    let state_dir = state_dir.to_path_buf();
-    let bg_tx = bg_tx.clone();
-    let request_id = request.request_id.clone();
-
-    tokio::spawn(async move {
-        let response =
-            run_bootstrap_proxmox_action(&request_id, &request.params, service_id, &state_dir)
-                .await;
-        let msg = ServiceMessage::ExtensionResponse(response);
-        if bg_tx.send(msg).await.is_err() {
-            tracing::error!("failed to send proxmox bootstrap result via bg_tx");
-        }
-    });
-}
-
-/// Spawn a task to list discovered Proxmox guests via the extension proxy.
-fn spawn_list_discovered_guests(
-    request: ExtensionRequestPayload,
-    proxy: &std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
-    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
-) {
-    let proxy = std::sync::Arc::clone(proxy);
-    let bg_tx = bg_tx.clone();
-    let request_id = request.request_id.clone();
-
-    tokio::spawn(async move {
-        let response = invoke_proxy_action(
-            &proxy,
-            &bg_tx,
-            "proxmox.hosts",
-            "list-all-unmatched",
-            serde_json::Value::Object(serde_json::Map::new()),
-        )
-        .await;
-
-        // Wrap the proxy response (or error) into our extension response.
-        let ext_response = match response {
-            Ok(proxy_resp) if proxy_resp.success => {
-                make_success_response(&request_id, proxy_resp.data)
-            }
-            Ok(proxy_resp) => {
-                // Proxmox plugin not installed or returned error — return empty options.
-                tracing::debug!(
-                    error = ?proxy_resp.error,
-                    "list-all-unmatched returned error, returning empty options"
-                );
-                make_success_response(&request_id, json!({ "options": [] }))
-            }
-            Err(e) => {
-                tracing::debug!(
-                    error = %e,
-                    "list-all-unmatched proxy call failed, returning empty options"
-                );
-                make_success_response(&request_id, json!({ "options": [] }))
-            }
-        };
-
-        let msg = ServiceMessage::ExtensionResponse(ext_response);
-        if bg_tx.send(msg).await.is_err() {
-            tracing::error!("failed to send list-discovered-guests result via bg_tx");
-        }
-    });
-}
-
 /// Invoke an extension action on the controller via the proxy.
 ///
 /// Sends the request via `bg_tx` (which flows through the event loop to
@@ -688,474 +610,6 @@ pub(crate) async fn invoke_proxy_action(
     pending
         .wait(proxy, std::time::Duration::from_secs(15))
         .await
-}
-
-/// Spawn the "Bootstrap via Discovered Guest" workflow.
-fn spawn_bootstrap_proxmox_guest(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
-    let state_dir = ctx.state_dir.to_path_buf();
-    let bg_tx = ctx.bg_tx.clone();
-    let service_id = ctx.service_id;
-    let proxy = std::sync::Arc::clone(ctx.extension_proxy);
-    let request_id = request.request_id.clone();
-
-    tokio::spawn(async move {
-        let response = run_bootstrap_proxmox_guest_action(
-            &request_id,
-            &request.params,
-            service_id,
-            &state_dir,
-            &proxy,
-            &bg_tx,
-        )
-        .await;
-        let msg = ServiceMessage::ExtensionResponse(response);
-        if bg_tx.send(msg).await.is_err() {
-            tracing::error!("failed to send proxmox guest bootstrap result via bg_tx");
-        }
-    });
-}
-
-/// The actual Proxmox guest bootstrap logic.
-#[tracing::instrument(skip_all, fields(request_id = %request_id))]
-async fn run_bootstrap_proxmox_action(
-    request_id: &str,
-    params: &serde_json::Value,
-    service_id: Option<uuid::Uuid>,
-    state_dir: &Path,
-) -> ExtensionResponsePayload {
-    let pve_host_id = match params.get("pve_host_id").and_then(|v| v.as_str()) {
-        Some(id) => id.to_string(),
-        None => return make_error_response(request_id, "missing required field 'pve_host_id'"),
-    };
-
-    let vmid_str = match params.get("vmid").and_then(|v| v.as_str()) {
-        Some(v) => v,
-        None => return make_error_response(request_id, "missing required field 'vmid'"),
-    };
-    let vmid: u32 = match vmid_str.parse() {
-        Ok(v) => v,
-        Err(_) => return make_error_response(request_id, "vmid must be a number"),
-    };
-
-    let guest_type_str = params
-        .get("guest_type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("lxc");
-    let guest_type = match guest_type_str {
-        "lxc" => PveGuestType::Lxc,
-        "qemu" => PveGuestType::Qemu,
-        _ => return make_error_response(request_id, "guest_type must be 'lxc' or 'qemu'"),
-    };
-
-    let name = match params.get("name").and_then(|v| v.as_str()) {
-        Some(n) => n.to_string(),
-        None => return make_error_response(request_id, "missing required field 'name'"),
-    };
-
-    let target_username = params
-        .get("target_username")
-        .and_then(|v| v.as_str())
-        .unwrap_or("uptrakit")
-        .to_string();
-
-    let allow_all = param_bool(params, "allow_all");
-    let remove_stale_keys = param_bool(params, "remove_stale_keys");
-
-    let host_id = uuid::Uuid::now_v7();
-
-    let proxmox_params = ProxmoxBootstrapParams {
-        pve_host_id,
-        vmid,
-        guest_type,
-        name,
-        target_username,
-        allow_all,
-        remove_stale_keys,
-        host_id,
-        service_id,
-    };
-
-    match bootstrap_proxmox::run_proxmox_bootstrap(state_dir, proxmox_params).await {
-        Ok(result) => {
-            tracing::info!(
-                %host_id,
-                guest_ip = %result.guest_ip,
-                "Proxmox guest bootstrap completed successfully"
-            );
-            make_success_response(
-                request_id,
-                json!({
-                    "host_id": host_id.to_string(),
-                    "guest_ip": result.guest_ip,
-                }),
-            )
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Proxmox guest bootstrap failed");
-            make_error_response(request_id, &format!("bootstrap failed: {e}"))
-        }
-    }
-}
-
-/// The "Bootstrap via Discovered Guest" action logic (multi-guest, parallel).
-///
-/// 1. Parses `discovered_guests` as a JSON array of mapping IDs.
-/// 2. Fetches the full unmatched guest list from the Proxmox plugin **once**.
-/// 3. Loads all PVE hosts from the local DB **once** and builds a lookup map.
-/// 4. Resolves each selected guest to [`ProxmoxBootstrapParams`].
-/// 5. Runs bootstraps **in parallel** with a bounded concurrency of
-///    [`MAX_CONCURRENT_BOOTSTRAPS`], each in its own Tokio task.
-/// 6. Returns an aggregated result showing per-guest success/failure.
-///
-/// Partial success (some guests ok, some failed) returns `success: true` with
-/// the full `results` array so the UI can display a breakdown. Only if every
-/// guest fails does the response carry `success: false`.
-#[tracing::instrument(skip_all, fields(request_id = %request_id))]
-async fn run_bootstrap_proxmox_guest_action(
-    request_id: &str,
-    params: &serde_json::Value,
-    service_id: Option<uuid::Uuid>,
-    state_dir: &Path,
-    proxy: &uptrakit_service_sdk::ServiceExtensionProxy,
-    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
-) -> ExtensionResponsePayload {
-    // Maximum number of guest bootstraps running at the same time.
-    const MAX_CONCURRENT_BOOTSTRAPS: usize = 4;
-
-    // ── 1. Parse selected guest IDs ────────────────────────────────────
-    let discovered_guests: Vec<String> = match params.get("discovered_guests") {
-        Some(serde_json::Value::Array(arr)) => arr
-            .iter()
-            .filter_map(|v| v.as_str().map(str::to_string))
-            .collect(),
-        // The frontend serialises multi-select state as a JSON-array string.
-        Some(serde_json::Value::String(s)) => serde_json::from_str::<Vec<String>>(s)
-            .unwrap_or_else(|_| {
-                if s.is_empty() {
-                    vec![]
-                } else {
-                    vec![s.clone()]
-                }
-            }),
-        _ => vec![],
-    };
-
-    if discovered_guests.is_empty() {
-        return make_error_response(request_id, "no guests selected");
-    }
-
-    // ── 2. Fetch all unmatched guests (one proxy call) ─────────────────
-    let guests_data = match invoke_proxy_action(
-        proxy,
-        bg_tx,
-        "proxmox.hosts",
-        "list-all-unmatched",
-        serde_json::Value::Object(serde_json::Map::new()),
-    )
-    .await
-    {
-        Ok(resp) if resp.success => resp.data,
-        Ok(resp) => {
-            let err = resp
-                .error
-                .unwrap_or_else(|| "Proxmox plugin returned error".to_string());
-            return make_error_response(request_id, &err);
-        }
-        Err(e) => {
-            return make_error_response(
-                request_id,
-                &format!("failed to query Proxmox plugin (is it installed?): {e}"),
-            );
-        }
-    };
-
-    let options = guests_data
-        .get("options")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    // ── 3. Load PVE hosts once and build a (node, config_id) → id map ─
-    let pve_host_map: std::collections::HashMap<(String, String), String> = {
-        let db = match crate::db::init_db(state_dir).await {
-            Ok(db) => db,
-            Err(e) => {
-                return make_error_response(
-                    request_id,
-                    &format!("failed to initialize local database: {e}"),
-                );
-            }
-        };
-        match host_ops::find_pve_hosts(&db).await {
-            Ok(hosts) => hosts
-                .into_iter()
-                .filter_map(|h| {
-                    let node = h.pve_node_name?;
-                    let config = h.pve_plugin_config_id?;
-                    Some(((node, config), h.id))
-                })
-                .collect(),
-            Err(e) => {
-                return make_error_response(request_id, &format!("failed to load PVE hosts: {e}"));
-            }
-        }
-    };
-
-    // ── 4. Resolve each guest_id → ProxmoxBootstrapParams ─────────────
-    let target_username = params
-        .get("target_username")
-        .and_then(|v| v.as_str())
-        .unwrap_or("uptrakit")
-        .to_string();
-    let allow_all = param_bool(params, "allow_all");
-    let remove_stale_keys = param_bool(params, "remove_stale_keys");
-
-    // Guests that fail resolution are collected as immediate errors.
-    let mut immediate_errors: Vec<serde_json::Value> = Vec::new();
-    // Guests that resolved successfully are queued for bootstrap.
-    let mut tasks: Vec<(String, String, ProxmoxBootstrapParams)> = Vec::new();
-
-    for guest_id in &discovered_guests {
-        let guest = options.iter().find(|o| {
-            o.get("value")
-                .and_then(|v| v.as_str())
-                .is_some_and(|v| v == guest_id)
-        });
-
-        let guest = match guest {
-            Some(g) => g,
-            None => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": "guest not found in discovered guests list",
-                }));
-                continue;
-            }
-        };
-
-        let vmid: u32 = match guest.get("proxmox_vmid").and_then(|v| v.as_i64()) {
-            Some(v) if v > 0 => v as u32,
-            _ => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": "invalid VMID in discovered guest",
-                }));
-                continue;
-            }
-        };
-
-        let guest_type_str = guest
-            .get("proxmox_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("lxc");
-        let guest_type = match guest_type_str {
-            "lxc" => PveGuestType::Lxc,
-            "qemu" => PveGuestType::Qemu,
-            _ => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": "unknown guest type in discovered guest",
-                }));
-                continue;
-            }
-        };
-
-        let proxmox_node = match guest.get("proxmox_node").and_then(|v| v.as_str()) {
-            Some(n) => n.to_string(),
-            None => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": "missing proxmox_node in discovered guest",
-                }));
-                continue;
-            }
-        };
-
-        let plugin_config_id = match guest.get("plugin_config_id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": "missing plugin_config_id in discovered guest",
-                }));
-                continue;
-            }
-        };
-
-        let pve_host_id = match pve_host_map.get(&(proxmox_node.clone(), plugin_config_id.clone()))
-        {
-            Some(id) => id.clone(),
-            None => {
-                immediate_errors.push(json!({
-                    "mapping_id": guest_id,
-                    "name": guest_id,
-                    "status": "error",
-                    "error": format!(
-                        "no PVE host found for node '{proxmox_node}' with plugin \
-                         config '{plugin_config_id}'; run 'host sync' on PVE hosts first"
-                    ),
-                }));
-                continue;
-            }
-        };
-
-        // Auto-derive name: hostname → proxmox_name → "ct-{vmid}" / "vm-{vmid}".
-        let name = guest
-            .get("hostname")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                guest
-                    .get("proxmox_name")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-            })
-            .map(str::to_string)
-            .unwrap_or_else(|| match guest_type {
-                PveGuestType::Lxc => format!("ct-{vmid}"),
-                PveGuestType::Qemu => format!("vm-{vmid}"),
-            });
-
-        let host_id = uuid::Uuid::now_v7();
-        tasks.push((
-            guest_id.clone(),
-            name.clone(),
-            ProxmoxBootstrapParams {
-                pve_host_id,
-                vmid,
-                guest_type,
-                name,
-                target_username: target_username.clone(),
-                allow_all,
-                remove_stale_keys,
-                host_id,
-                service_id,
-            },
-        ));
-    }
-
-    // ── 5. Run bootstraps in parallel with bounded concurrency ─────────
-    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_BOOTSTRAPS));
-    let mut join_set: tokio::task::JoinSet<serde_json::Value> = tokio::task::JoinSet::new();
-    let state_dir_buf = state_dir.to_path_buf();
-
-    for (mapping_id, name, proxmox_params) in tasks {
-        let sem = std::sync::Arc::clone(&semaphore);
-        let state_dir = state_dir_buf.clone();
-        let host_id = proxmox_params.host_id;
-
-        join_set.spawn(async move {
-            // Acquire a permit before starting the bootstrap so at most
-            // MAX_CONCURRENT_BOOTSTRAPS SSH sessions are open simultaneously.
-            let _permit = sem.acquire().await.expect("semaphore is never closed");
-
-            match bootstrap_proxmox::run_proxmox_bootstrap(&state_dir, proxmox_params).await {
-                Ok(result) => {
-                    tracing::info!(
-                        %host_id,
-                        guest_ip = %result.guest_ip,
-                        mapping_id = %mapping_id,
-                        "discovered guest bootstrap completed"
-                    );
-
-                    // Defer the Proxmox mapping match until after the next
-                    // ReportHosts — the controller must create hosts.id before
-                    // the FK constraint on proxmox_host_mappings can be satisfied.
-                    if let Ok(db) = crate::db::init_db(&state_dir).await {
-                        if let Err(e) = crate::host_ops::insert_pending_proxmox_match(
-                            &db,
-                            &host_id.to_string(),
-                            &mapping_id,
-                        )
-                        .await
-                        {
-                            tracing::warn!(
-                                %host_id,
-                                %mapping_id,
-                                error = %e,
-                                "failed to persist pending Proxmox match; \
-                                 match must be done manually"
-                            );
-                        } else {
-                            tracing::info!(
-                                %host_id,
-                                %mapping_id,
-                                "pending Proxmox match saved; \
-                                 will be applied after ReportHosts"
-                            );
-                        }
-                    }
-
-                    json!({
-                        "mapping_id": mapping_id,
-                        "name": name,
-                        "host_id": host_id.to_string(),
-                        "guest_ip": result.guest_ip,
-                        "status": "ok",
-                    })
-                }
-                Err(e) => {
-                    tracing::error!(
-                        mapping_id = %mapping_id,
-                        error = %e,
-                        "discovered guest bootstrap failed"
-                    );
-                    json!({
-                        "mapping_id": mapping_id,
-                        "name": name,
-                        "status": "error",
-                        "error": format!("bootstrap failed: {e}"),
-                    })
-                }
-            }
-        });
-    }
-
-    // ── 6. Collect results ─────────────────────────────────────────────
-    let mut results = immediate_errors;
-    while let Some(task_result) = join_set.join_next().await {
-        match task_result {
-            Ok(v) => results.push(v),
-            Err(e) => results.push(json!({
-                "status": "error",
-                "error": format!("bootstrap task panicked: {e}"),
-            })),
-        }
-    }
-
-    let succeeded: usize = results.iter().filter(|r| r["status"] == "ok").count();
-    let failed = results.len() - succeeded;
-
-    if succeeded == 0 {
-        let errors: Vec<&str> = results.iter().filter_map(|r| r["error"].as_str()).collect();
-        return make_error_response(
-            request_id,
-            &format!(
-                "all {} guest(s) failed to bootstrap: {}",
-                failed,
-                errors.join("; ")
-            ),
-        );
-    }
-
-    make_success_response(
-        request_id,
-        json!({
-            "results": results,
-            "succeeded": succeeded,
-            "failed": failed,
-        }),
-    )
 }
 
 /// Extract a boolean parameter from an extension params object.
@@ -1281,46 +735,39 @@ async fn run_bootstrap_action(args: BootstrapActionArgs<'_>) -> ExtensionRespons
 
     match bootstrap::run_bootstrap(args.state_dir, bootstrap_params).await {
         Ok(result) => {
-            tracing::info!(
-                %host_id,
-                is_pve_node = result.is_pve_node,
-                "bootstrap completed successfully"
-            );
+            tracing::info!(%host_id, "bootstrap completed successfully");
 
-            if let Some(creds) = &result.pve_credentials
-                && let Some(bg_tx) = bg_tx
-            {
-                // New PVE cluster: send ReportPluginConfig to controller.
-                let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
-                    serde_json::from_value(json!({
-                        "request_id": uuid::Uuid::now_v7().to_string(),
-                        "plugin_type": "infrastructure_proxmox",
-                        "name": format!("pve-{}", host_id),
-                        "config": {
-                            "api_url": creds.api_url,
-                            "api_token": creds.api_token,
-                            "verify_ssl": true,
-                        },
-                    }))
-                    .expect("ReportPluginConfigPayload JSON is always valid");
-                let msg = ServiceMessage::ReportPluginConfig(payload);
-                if bg_tx.send(msg).await.is_err() {
-                    tracing::error!("failed to send ReportPluginConfig via bg_tx");
+            // For each infra plugin that detected infrastructure, send
+            // ReportPluginConfig if new credentials were created.
+            for infra in &result.infra_results {
+                if let Some(report) = &infra.report_plugin_config {
+                    if let Some(bg_tx) = bg_tx {
+                        let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
+                            serde_json::from_value(json!({
+                                "request_id": uuid::Uuid::now_v7().to_string(),
+                                "plugin_type": report.plugin_type,
+                                "name": report.name,
+                                "config": report.config,
+                            }))
+                            .expect("ReportPluginConfigPayload JSON is always valid");
+                        let msg = ServiceMessage::ReportPluginConfig(payload);
+                        if bg_tx.send(msg).await.is_err() {
+                            tracing::error!("failed to send ReportPluginConfig via bg_tx");
+                        }
+                    }
+                } else if let Some(config_id) = &infra.existing_plugin_config_id {
+                    tracing::info!(
+                        %host_id,
+                        %config_id,
+                        "reusing existing plugin config for cluster node"
+                    );
                 }
-            } else if let Some(config_id) = &result.existing_pve_plugin_config_id {
-                // Existing PVE cluster: reuse the plugin config from the
-                // already-bootstrapped node. Update the host's PVE state
-                // directly without sending ReportPluginConfig.
-                tracing::info!(
-                    %host_id,
-                    %config_id,
-                    "reusing existing PVE plugin config for cluster node"
-                );
             }
 
+            let any_infra = result.infra_results.iter().any(|r| r.detected);
             let mut data = json!({ "host_id": host_id.to_string() });
-            if result.is_pve_node {
-                data["is_pve_node"] = json!(true);
+            if any_infra {
+                data["has_infrastructure"] = json!(true);
             }
             make_success_response(request_id, data)
         }

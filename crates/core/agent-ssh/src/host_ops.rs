@@ -3,7 +3,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
 
-use crate::db::entity::pending_proxmox_match;
 use crate::db::entity::ssh_host::{ActiveModel, Column, Entity, Model, SshKeyType};
 use crate::error::{Error, Result};
 
@@ -276,55 +275,6 @@ pub async fn find_host_by_machine_id(
         .context_to::<Error>()
 }
 
-/// Update PVE-related state for an SSH host.
-///
-/// Sets `is_pve_node` and optionally `pve_plugin_config_id` and `pve_node_name`.
-/// Called after bootstrap detects a PVE node and registers the plugin config.
-pub async fn update_host_pve_state(
-    db: &DatabaseConnection,
-    host_id: &str,
-    is_pve_node: bool,
-    pve_plugin_config_id: Option<String>,
-    pve_node_name: Option<String>,
-) -> Result<()> {
-    let host = Entity::find_by_id(host_id)
-        .one(db)
-        .await
-        .context_to::<Error>()?
-        .ok_or_else(|| report!(Error::HostNotFound(host_id.to_string())))?;
-
-    let mut model: ActiveModel = host.into();
-    model.is_pve_node = Set(is_pve_node);
-    model.pve_plugin_config_id = Set(pve_plugin_config_id);
-    model.pve_node_name = Set(pve_node_name);
-    model.updated_at = Set(time::OffsetDateTime::now_utc());
-    model.update(db).await.context_to::<Error>()?;
-    Ok(())
-}
-
-/// Find all SSH hosts that are PVE nodes.
-pub async fn find_pve_hosts(db: &DatabaseConnection) -> Result<Vec<Model>> {
-    Entity::find()
-        .filter(Column::IsPveNode.eq(true))
-        .all(db)
-        .await
-        .context_to::<Error>()
-}
-
-/// Find a PVE host that already has a `pve_plugin_config_id` set.
-///
-/// Used during bootstrap deduplication: when a new PVE node in the same
-/// cluster is detected, this function retrieves the existing config ID so
-/// the new host can reuse it instead of creating a duplicate plugin config.
-pub async fn find_pve_host_with_config(db: &DatabaseConnection) -> Result<Option<Model>> {
-    Entity::find()
-        .filter(Column::IsPveNode.eq(true))
-        .filter(Column::PvePluginConfigId.is_not_null())
-        .one(db)
-        .await
-        .context_to::<Error>()
-}
-
 /// Find SSH hosts by hostname, optionally narrowing by port.
 ///
 /// Returns all matching hosts. When `port` is `Some`, only rows with that
@@ -342,79 +292,6 @@ pub async fn find_hosts_by_hostname(
         query = query.filter(Column::Port.eq(i32::from(p)));
     }
     query.all(db).await.context_to::<Error>()
-}
-
-// ── Pending Proxmox matches ───────────────────────────────────────────────────
-
-/// A pending Proxmox host-mapping match, returned by [`drain_pending_proxmox_matches`].
-pub struct PendingProxmoxMatch {
-    pub id: i32,
-    pub host_id: String,
-    pub mapping_id: String,
-}
-
-/// Insert a pending Proxmox match record.
-///
-/// Called immediately after a successful "Bootstrap via Discovered Guest"
-/// action. The record is drained after the next `ReportHosts` send.
-pub async fn insert_pending_proxmox_match(
-    db: &DatabaseConnection,
-    host_id: &str,
-    mapping_id: &str,
-) -> Result<()> {
-    use pending_proxmox_match::ActiveModel;
-
-    let now = time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
-
-    let row = ActiveModel {
-        host_id: Set(host_id.to_string()),
-        mapping_id: Set(mapping_id.to_string()),
-        created_at: Set(now),
-        ..Default::default()
-    };
-
-    row.insert(db)
-        .await
-        .map_err(|e| report!(Error::Database(e)))?;
-
-    Ok(())
-}
-
-/// Return all pending Proxmox matches, ordered by `id` (insertion order).
-pub async fn drain_pending_proxmox_matches(
-    db: &DatabaseConnection,
-) -> Result<Vec<PendingProxmoxMatch>> {
-    use pending_proxmox_match::{Column as PmColumn, Entity as PmEntity};
-
-    let rows = PmEntity::find()
-        .order_by_asc(PmColumn::Id)
-        .all(db)
-        .await
-        .map_err(|e| report!(Error::Database(e)))?;
-
-    Ok(rows
-        .into_iter()
-        .map(|r| PendingProxmoxMatch {
-            id: r.id,
-            host_id: r.host_id,
-            mapping_id: r.mapping_id,
-        })
-        .collect())
-}
-
-/// Delete a pending Proxmox match by its row `id`.
-pub async fn delete_pending_proxmox_match(db: &DatabaseConnection, id: i32) -> Result<()> {
-    use pending_proxmox_match::{Column as PmColumn, Entity as PmEntity};
-
-    PmEntity::delete_many()
-        .filter(PmColumn::Id.eq(id))
-        .exec(db)
-        .await
-        .map_err(|e| report!(Error::Database(e)))?;
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -973,64 +850,5 @@ mod tests {
             after.updated_at >= before.updated_at,
             "updated_at should not decrease"
         );
-    }
-
-    // ── find_pve_host_with_config tests ────────────────────────────────────
-
-    #[tokio::test]
-    async fn find_pve_host_with_config_returns_none_when_empty() {
-        let (_dir, db) = setup_db().await;
-        let result = find_pve_host_with_config(&db).await.expect("query");
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn find_pve_host_with_config_returns_none_when_no_config_set() {
-        let (_dir, db) = setup_db().await;
-
-        let host = add_host(
-            &db,
-            add_params("pve-node", "10.0.0.1", 22, "uptrakit", SshKeyType::Ed25519),
-        )
-        .await
-        .expect("add");
-
-        // Mark as PVE but without a config ID.
-        update_host_pve_state(&db, &host.id, true, None, Some("pve-node".to_string()))
-            .await
-            .expect("update pve state");
-
-        let result = find_pve_host_with_config(&db).await.expect("query");
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn find_pve_host_with_config_returns_host_with_config() {
-        let (_dir, db) = setup_db().await;
-
-        let host = add_host(
-            &db,
-            add_params("pve-node", "10.0.0.1", 22, "uptrakit", SshKeyType::Ed25519),
-        )
-        .await
-        .expect("add");
-
-        // Mark as PVE with a config ID.
-        update_host_pve_state(
-            &db,
-            &host.id,
-            true,
-            Some("cfg-12345".to_string()),
-            Some("pve-node".to_string()),
-        )
-        .await
-        .expect("update pve state");
-
-        let result = find_pve_host_with_config(&db)
-            .await
-            .expect("query")
-            .expect("should find host");
-        assert_eq!(result.id, host.id);
-        assert_eq!(result.pve_plugin_config_id, Some("cfg-12345".to_string()));
     }
 }

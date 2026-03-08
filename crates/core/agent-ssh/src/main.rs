@@ -162,6 +162,8 @@ struct SshAgentHandler {
     /// Enables the SSH agent to invoke controller-side plugin actions (e.g.,
     /// Proxmox plugin's `list-all-unmatched` for discovered guest bootstrap).
     extension_proxy: std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
+    /// Registry of agent-side infrastructure plugins.
+    infra_registry: std::sync::Arc<uptrakit_plugin_infrastructure_registry::AgentInfraRegistry>,
 }
 
 impl SshAgentHandler {
@@ -354,27 +356,25 @@ impl ServiceHandler for SshAgentHandler {
             }
             ControllerMessage::ReportPluginConfigResponse(payload) => {
                 if payload.success {
-                    if let Some(config_id) = &payload.plugin_config_id {
+                    if let Some(config_id_str) = &payload.plugin_config_id {
                         tracing::info!(
                             request_id = %payload.request_id,
-                            %config_id,
+                            config_id = %config_id_str,
                             "plugin config reported successfully"
                         );
-                        // Update the host's pve_plugin_config_id if we can
-                        // find it. The request_id encodes no host reference,
-                        // so we search PVE hosts missing a config id.
-                        if let Ok(pve_hosts) = host_ops::find_pve_hosts(db).await {
-                            for host in pve_hosts {
-                                if host.pve_plugin_config_id.is_none() {
-                                    let _ = host_ops::update_host_pve_state(
-                                        db,
-                                        &host.id,
-                                        true,
-                                        Some(config_id.to_string()),
-                                        host.pve_node_name.clone(),
-                                    )
-                                    .await;
-                                    break;
+                        {
+                            let config_id = *config_id_str;
+                            let request_id = payload.request_id.clone();
+                            for plugin in self.infra_registry.plugins() {
+                                if let Err(e) = plugin
+                                    .on_plugin_config_reported(db, config_id, &request_id)
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        error = %e,
+                                        plugin_type = %plugin.plugin_type(),
+                                        "plugin on_plugin_config_reported failed"
+                                    );
                                 }
                             }
                         }
@@ -503,8 +503,10 @@ impl ServiceHandler for SshAgentHandler {
             .agreed_capabilities()
             .contains(&Capability::UiExtensions)
         {
-            let register_payload =
-                extension::build_register_payload(self.encryption_public_key.clone());
+            let register_payload = extension::build_register_payload(
+                self.encryption_public_key.clone(),
+                &self.infra_registry,
+            );
             if let Err(e) = conn
                 .send(uptrakit_internal_wire::ServiceMessage::ExtensionRegister(
                     register_payload,
@@ -516,7 +518,7 @@ impl ServiceHandler for SshAgentHandler {
 
             // Register the action library (separate from manifests).
             let actions_payload = uptrakit_internal_wire::extension::ExtensionActionsPayload::new(
-                extension::build_actions(),
+                extension::build_actions(&self.infra_registry),
             );
             if let Err(e) = conn
                 .send(
@@ -559,6 +561,7 @@ impl ServiceHandler for SshAgentHandler {
             tenant_id: self.tenant_id,
             bg_tx: &self.bg_tx,
             extension_proxy: &self.extension_proxy,
+            infra_registry: std::sync::Arc::clone(&self.infra_registry),
         };
         extension::handle_extension_request(request, &ctx, conn).await;
 
@@ -755,79 +758,33 @@ impl SshAgentHandler {
             let db = db.clone();
             let proxy = std::sync::Arc::clone(&self.extension_proxy);
             let bg_tx = self.bg_tx.clone();
+            let infra_registry = std::sync::Arc::clone(&self.infra_registry);
+            let state_dir = self.state_dir.clone();
+            let tenant_id_str = self.tenant_id.map(|t| t.to_string());
+            let service_id = self.service_id;
+            let private_key_der = self.private_key_der.clone();
             tokio::spawn(async move {
-                drain_pending_proxmox_matches_bg(db, proxy, bg_tx).await;
-            });
-        }
-    }
-}
-
-/// Fire any pending Proxmox host-mapping matches in a background task.
-///
-/// Must run outside the event loop so that `invoke_proxy_action` can send
-/// its request via `bg_tx` and the event loop can pick it up (as
-/// `BackgroundResult`) without being blocked waiting for the response.
-async fn drain_pending_proxmox_matches_bg(
-    db: sea_orm::DatabaseConnection,
-    proxy: std::sync::Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
-    bg_tx: tokio::sync::mpsc::Sender<uptrakit_internal_wire::ServiceMessage>,
-) {
-    let pending = match host_ops::drain_pending_proxmox_matches(&db).await {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to load pending Proxmox matches");
-            return;
-        }
-    };
-
-    if pending.is_empty() {
-        return;
-    }
-
-    tracing::info!(
-        count = pending.len(),
-        "draining pending Proxmox host matches"
-    );
-
-    for entry in pending {
-        let match_params = serde_json::json!({
-            "mapping_id": entry.mapping_id,
-            "host_id": entry.host_id,
-        });
-
-        match extension::invoke_proxy_action(&proxy, &bg_tx, "proxmox.hosts", "match", match_params)
-            .await
-        {
-            Ok(resp) if resp.success => {
-                tracing::info!(
-                    host_id = %entry.host_id,
-                    mapping_id = %entry.mapping_id,
-                    "auto-matched bootstrapped guest to Proxmox host mapping"
-                );
-                if let Err(e) = host_ops::delete_pending_proxmox_match(&db, entry.id).await {
-                    tracing::warn!(
-                        id = entry.id,
-                        error = %e,
-                        "matched but failed to delete pending Proxmox match row"
-                    );
+                let action_invoker = crate::extension::InfraActionInvokerImpl::new(&proxy, &bg_tx);
+                let ctx = uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext {
+                    db: &db,
+                    tenant_id: tenant_id_str.as_deref(),
+                    service_id,
+                    state_dir: &state_dir,
+                    private_key_der: private_key_der.as_deref(),
+                    action_invoker: &action_invoker,
+                    guest_bootstrap:
+                        &crate::commands::bootstrap_proxmox::NoopGuestBootstrapExecutor,
+                };
+                for plugin in infra_registry.plugins() {
+                    if let Err(e) = plugin.on_post_report_hosts(&ctx).await {
+                        tracing::warn!(
+                            error = %e,
+                            plugin_type = %plugin.plugin_type(),
+                            "plugin on_post_report_hosts failed"
+                        );
+                    }
                 }
-            }
-            Ok(resp) => {
-                tracing::warn!(
-                    host_id = %entry.host_id,
-                    mapping_id = %entry.mapping_id,
-                    error = ?resp.error,
-                    "pending Proxmox match failed; will retry on next ReportHosts"
-                );
-            }
-            Err(e) => {
-                tracing::warn!(
-                    host_id = %entry.host_id,
-                    mapping_id = %entry.mapping_id,
-                    error = %e,
-                    "pending Proxmox match proxy call failed; will retry on next ReportHosts"
-                );
-            }
+            });
         }
     }
 }
@@ -1349,6 +1306,9 @@ async fn main() {
 
     let freeze_file_path = state_dir.join("update-freeze");
 
+    let infra_registry =
+        std::sync::Arc::new(uptrakit_plugin_infrastructure_registry::create_agent_infra_registry());
+
     let mut handler = SshAgentHandler {
         local_db: Some(local_db),
         state_dir: state_dir.to_path_buf(),
@@ -1367,6 +1327,7 @@ async fn main() {
         bg_rx,
         bg_tx,
         extension_proxy: std::sync::Arc::new(uptrakit_service_sdk::ServiceExtensionProxy::new()),
+        infra_registry,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent-ssh",

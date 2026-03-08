@@ -6,12 +6,15 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use uptrakit_crypto::EncryptedString;
-use uptrakit_plugin_infrastructure_registry::PluginRegistry;
-
-use uptrakit_plugin_infrastructure_proxmox::pve_setup;
+use uptrakit_plugin_infrastructure_core::agent_infra::{
+    BootstrapInfraResult, GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult,
+    InfraActionInvoker, InfraPluginContext,
+};
+use uptrakit_plugin_infrastructure_registry::{PluginRegistry, create_agent_infra_registry};
 
 use crate::commands::sudoers::{
     ResolvedSudoCommand, SudoersContent, detect_is_root, install_helper_script,
@@ -70,14 +73,10 @@ pub struct BootstrapParams {
 
 /// Result of a successful bootstrap, carrying metadata for the event loop.
 pub struct BootstrapResult {
-    /// Whether the bootstrapped host is a Proxmox VE node.
-    pub is_pve_node: bool,
-    /// PVE API credentials (api_url, api_token) if auto-created on a new cluster.
-    pub pve_credentials: Option<pve_setup::PveCredentials>,
-    /// Existing PVE plugin config ID when the cluster was already configured
-    /// by a previous bootstrap. The event loop should update the new host's
-    /// `pve_plugin_config_id` directly instead of sending `ReportPluginConfig`.
-    pub existing_pve_plugin_config_id: Option<String>,
+    /// Infrastructure detection results from each plugin that ran
+    /// `on_host_bootstrapped`. The event loop uses these to send
+    /// `ReportPluginConfig` or update host state.
+    pub infra_results: Vec<BootstrapInfraResult>,
 }
 
 // ── Main orchestrator ────────────────────────────────────────────────
@@ -459,42 +458,42 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         write_sudoers_file(&executor, &params.target_username, content, use_sudo).await?;
     }
 
-    // 5b. DETECT PVE NODE
-    let is_pve_node = match pve_setup::detect_pve_node(&executor).await {
-        Ok(detected) => {
-            if detected {
-                println!("Detected Proxmox VE node.");
-            }
-            detected
-        }
-        Err(e) => {
-            tracing::debug!(error = %e, "PVE detection failed, treating as non-PVE host");
-            false
-        }
+    // 5b. RUN INFRA PLUGIN DETECTION
+    let infra_registry = create_agent_infra_registry();
+    let noop_invoker = NoopInfraActionInvoker;
+    let noop_bootstrap = NoopGuestBootstrap;
+    let tenant_id_str = params.tenant_id.map(|t| t.to_string());
+    let infra_ctx = InfraPluginContext {
+        db: &db,
+        tenant_id: tenant_id_str.as_deref(),
+        service_id: params.service_id,
+        state_dir,
+        private_key_der: None,
+        action_invoker: &noop_invoker,
+        guest_bootstrap: &noop_bootstrap,
     };
-
-    // 5b'. Detect PVE node name (short hostname used by Proxmox cluster).
-    let pve_node_name = if is_pve_node {
-        match pve_setup::detect_pve_node_name(&executor).await {
-            Ok(name) => {
-                println!("PVE node name: {name}");
-                Some(name)
+    let mut infra_results: Vec<BootstrapInfraResult> = Vec::new();
+    let host_id_str = params.host_id.to_string();
+    for plugin in infra_registry.plugins() {
+        match plugin
+            .on_host_bootstrapped(&infra_ctx, &executor, &host_id_str, &params.name)
+            .await
+        {
+            Ok(result) => {
+                if result.detected {
+                    println!("Detected infrastructure: {}", plugin.plugin_type());
+                }
+                infra_results.push(result);
             }
             Err(e) => {
-                tracing::warn!(error = %e, "failed to detect PVE node name during bootstrap");
-                None
+                tracing::debug!(
+                    error = %e,
+                    plugin = %plugin.plugin_type(),
+                    "infrastructure detection failed, skipping"
+                );
             }
         }
-    } else {
-        None
-    };
-
-    // 5c. CREATE PVE API CREDENTIALS (if PVE node detected)
-    let (pve_credentials, existing_pve_plugin_config_id) = if is_pve_node {
-        create_or_reuse_pve_credentials(&executor, &db, &params.tenant_id).await
-    } else {
-        (None, None)
-    };
+    }
 
     // 6. DISCONNECT auth session — drop the executor first so the session Arc
     //    has a single owner (required by `disconnect_shared`).
@@ -545,22 +544,6 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     )
     .await?;
 
-    // 8b. Update PVE state if detected.
-    if is_pve_node {
-        let config_id = existing_pve_plugin_config_id.clone();
-        if let Err(e) = host_ops::update_host_pve_state(
-            &db,
-            &params.host_id.to_string(),
-            true,
-            config_id,
-            pve_node_name.clone(),
-        )
-        .await
-        {
-            tracing::warn!(error = %e, "failed to persist PVE state for host");
-        }
-    }
-
     // 9. OUTPUT
     println!();
     println!("Bootstrap complete for host '{}'.", params.name);
@@ -568,9 +551,6 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     println!("  Target user: {}", params.target_username);
     println!("  Key type: {key_type}");
     println!("  Host key: {observed_fp}");
-    if is_pve_node {
-        println!("  PVE node: yes");
-    }
 
     if generated_key {
         println!();
@@ -601,89 +581,40 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         );
     }
 
-    Ok(BootstrapResult {
-        is_pve_node,
-        pve_credentials,
-        existing_pve_plugin_config_id,
-    })
+    Ok(BootstrapResult { infra_results })
 }
 
-// ── Verification ─────────────────────────────────────────────────────
+// ── Noop infra impls for bootstrap context ───────────────────────────
 
-// ── PVE credential dedup ─────────────────────────────────────────────
-
-/// Check for existing Uptrakit PVE tokens on the cluster and either reuse
-/// the existing config or create new credentials.
+/// No-op [`InfraActionInvoker`] for bootstrap context.
 ///
-/// Returns `(Some(creds), None)` when new credentials were created,
-/// `(None, Some(config_id))` when an existing config was reused, or
-/// `(None, None)` when credentials could not be created.
-async fn create_or_reuse_pve_credentials(
-    executor: &dyn uptrakit_command::RemoteExecutor,
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: &Option<uuid::Uuid>,
-) -> (Option<pve_setup::PveCredentials>, Option<String>) {
-    let Some(tid) = tenant_id else {
-        println!("  Skipping PVE API credential creation: tenant ID not yet available.");
-        println!(
-            "  Ensure the agent has connected to the controller at least once, then re-bootstrap."
-        );
-        return (None, None);
-    };
+/// `on_host_bootstrapped` implementations that don't need to invoke
+/// controller-side actions can rely on this.
+struct NoopInfraActionInvoker;
 
-    // Check if the cluster already has an Uptrakit API token.
-    match pve_setup::check_pve_token_exists(executor, tid).await {
-        Ok(pve_setup::PveTokenStatus::OwnedByTenant(user)) => {
-            println!("  PVE API user '{user}' already exists on this cluster.");
-            println!("  Skipping credential creation.");
-
-            // Try to find an existing PVE host with a config ID to reuse.
-            match host_ops::find_pve_host_with_config(db).await {
-                Ok(Some(host)) => {
-                    let config_id = host
-                        .pve_plugin_config_id
-                        .expect("find_pve_host_with_config only returns hosts with config");
-                    println!("  Reusing plugin config from host '{}'.", host.name);
-                    return (None, Some(config_id));
-                }
-                Ok(None) => {
-                    println!("  Warning: no local PVE host has a plugin config ID to reuse.");
-                    println!("  Configure the Proxmox plugin manually in the controller UI.");
-                    return (None, None);
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to look up existing PVE hosts");
-                    return (None, None);
-                }
-            }
-        }
-        Ok(pve_setup::PveTokenStatus::OwnedByOtherTenant(user)) => {
-            println!("  PVE API user '{user}' exists and belongs to a different tenant.");
-            println!("  This cluster has already been claimed. Skipping credential creation.");
-            return (None, None);
-        }
-        Ok(pve_setup::PveTokenStatus::NotFound) => {
-            // No existing token — proceed with creation below.
-        }
-        Err(e) => {
-            tracing::debug!(error = %e, "PVE token check failed, proceeding with creation");
-        }
+#[async_trait]
+impl InfraActionInvoker for NoopInfraActionInvoker {
+    async fn invoke(
+        &self,
+        _extension_id: &str,
+        _action_id: &str,
+        _params: serde_json::Value,
+    ) -> std::result::Result<uptrakit_internal_wire::extension::ExtensionResponsePayload, String>
+    {
+        Err("InfraActionInvoker not available during bootstrap".to_string())
     }
+}
 
-    // No existing token found — create new credentials.
-    println!("Creating PVE API credentials...");
-    match pve_setup::create_pve_api_credentials(executor, tid).await {
-        Ok(creds) => {
-            println!("  API URL: {}", creds.api_url);
-            println!("  API token created for {}", pve_setup::pve_user_realm(tid));
-            (Some(creds), None)
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to create PVE API credentials");
-            println!("  Warning: could not create PVE API credentials automatically: {e}");
-            println!("  You can configure them manually in the Proxmox plugin settings.");
-            (None, None)
-        }
+/// No-op [`GuestBootstrapExecutor`] for bootstrap context.
+struct NoopGuestBootstrap;
+
+#[async_trait]
+impl GuestBootstrapExecutor for NoopGuestBootstrap {
+    async fn bootstrap_guest(
+        &self,
+        _params: GuestBootstrapParams,
+    ) -> std::result::Result<GuestBootstrapResult, String> {
+        Err("GuestBootstrapExecutor not available during bootstrap".to_string())
     }
 }
 
