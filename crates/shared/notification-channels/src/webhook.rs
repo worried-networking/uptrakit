@@ -4,11 +4,14 @@
 //! with HMAC-SHA256 and includes the signature in the `X-Uptrakit-Signature`
 //! header.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use hmac::Mac as _;
 use rootcause::prelude::*;
 use sha2::Sha256;
 use uptrakit_shared_types::network::is_private_host;
+use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 use crate::channel::{DeliveryMessage, NotificationChannel};
 use crate::error::{self, ChannelError};
@@ -69,8 +72,14 @@ impl WebhookChannel {
     /// Returns [`ChannelError::HttpClientBuild`] if the HTTP client cannot be
     /// constructed.
     pub fn new(allow_private_urls: bool) -> error::Result<Self> {
+        let resolver = if allow_private_urls {
+            SsrfSafeResolver::permissive()
+        } else {
+            SsrfSafeResolver::new()
+        };
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .dns_resolver(Arc::new(resolver))
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
             .build()

@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use rootcause::prelude::*;
+use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 use crate::auth::RegistryAuth;
 use crate::config::DockerAuth;
@@ -32,6 +35,7 @@ impl RegistryClient {
                 env!("CARGO_PKG_VERSION")
             ))
             .redirect(reqwest::redirect::Policy::none())
+            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
             .build()

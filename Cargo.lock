@@ -6791,6 +6791,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -6950,6 +6951,7 @@ dependencies = [
  "tracing",
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -7162,11 +7164,13 @@ name = "uptrakit-shared-types"
 version = "0.0.1"
 dependencies = [
  "husky-rs",
+ "reqwest 0.13.2",
  "sea-orm",
  "serde",
  "serde_json",
  "strum",
  "thiserror 2.0.18",
+ "tokio",
  "utoipa",
  "zeroize",
 ]

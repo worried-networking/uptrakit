@@ -6,6 +6,7 @@ use uptrakit_plugin_infrastructure_core::{
     DiscoveredSoftware, DiscoveryTarget, HostCompatibility, Plugin, PluginCapability, PluginRole,
     PluginType, SudoCommandEntry, SudoHelperScript, TrackingSystem,
 };
+use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 use crate::config::ProxmoxHelperScriptsConfig;
 use crate::discovery::{
@@ -107,6 +108,7 @@ impl ProxmoxHelperScriptsPlugin {
                 env!("CARGO_PKG_VERSION")
             ))
             .redirect(reqwest::redirect::Policy::none())
+            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
             .build()

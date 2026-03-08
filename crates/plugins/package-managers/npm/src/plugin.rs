@@ -14,6 +14,7 @@ use uptrakit_plugin_infrastructure_core::{
     ReleaseInfo, Result, SudoCommandEntry, TrackingSystem, UpdateOutputLine, UpstreamRelease,
     Version,
 };
+use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 use crate::config::NpmConfig;
 
@@ -178,6 +179,7 @@ impl NpmPlugin {
                 env!("CARGO_PKG_VERSION")
             ))
             .redirect(reqwest::redirect::Policy::none())
+            .dns_resolver(Arc::new(SsrfSafeResolver::new()))
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
             .build()

@@ -14,7 +14,7 @@ ssh = ["daemon", "bollard/ssh"]
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true }
-uptrakit-shared-types = { workspace = true }
+uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 bollard      = { workspace = true, features = ["aws-lc-rs"], optional = true }
 futures-util = { workspace = true, optional = true }
 parking_lot = { workspace = true }

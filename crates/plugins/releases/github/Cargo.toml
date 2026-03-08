@@ -19,7 +19,7 @@ uptrakit-shared-macros = { workspace = true }
 tracing = { workspace = true }
 regex = { workspace = true }
 async-trait = { workspace = true }
-uptrakit-shared-types = { workspace = true }
+uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 url = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["io-util"] }
