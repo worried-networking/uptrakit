@@ -7,8 +7,8 @@ use tokio::task::JoinSet;
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter,
-    QuerySelect, RelationTrait, Set, prelude::Expr,
+    ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect,
+    RelationTrait, prelude::Expr,
 };
 use time::OffsetDateTime;
 use uptrakit_command::{CommandExecutor, NoopCommandExecutor};
@@ -352,24 +352,39 @@ impl FetchReleasesExecutor {
                 );
 
                 for (host_id, software_item_id) in targets {
-                    let active = host_software_item::ActiveModel {
-                        host_id: Set(*host_id),
-                        software_item_id: Set(*software_item_id),
-                        latest_version: Set(Some(latest_version_str.clone())),
-                        latest_version_fetched_at: Set(Some(now)),
-                        latest_release_metadata: Set(Some(release_metadata.clone())),
-                        update_category: Set(category_str.clone()),
-                        ..Default::default()
-                    };
-                    if let Err(e) = active.update(&self.db).await {
-                        tracing::warn!(
-                            host_id = %host_id,
-                            software_item_id = %software_item_id,
-                            error = %e,
-                            "failed to update host_software_item with latest version"
-                        );
-                    } else {
-                        updated_item_ids.insert(*software_item_id);
+                    match host_software_item::Entity::update_many()
+                        .col_expr(
+                            host_software_item::Column::LatestVersion,
+                            sea_orm::sea_query::Expr::value(Some(latest_version_str.clone())),
+                        )
+                        .col_expr(
+                            host_software_item::Column::LatestVersionFetchedAt,
+                            sea_orm::sea_query::Expr::value(Some(now)),
+                        )
+                        .col_expr(
+                            host_software_item::Column::LatestReleaseMetadata,
+                            sea_orm::sea_query::Expr::value(Some(release_metadata.clone())),
+                        )
+                        .col_expr(
+                            host_software_item::Column::UpdateCategory,
+                            sea_orm::sea_query::Expr::value(category_str.clone()),
+                        )
+                        .filter(host_software_item::Column::HostId.eq(*host_id))
+                        .filter(host_software_item::Column::SoftwareItemId.eq(*software_item_id))
+                        .exec(&self.db)
+                        .await
+                    {
+                        Err(e) => {
+                            tracing::warn!(
+                                host_id = %host_id,
+                                software_item_id = %software_item_id,
+                                error = %e,
+                                "failed to update host_software_item with latest version"
+                            );
+                        }
+                        Ok(_) => {
+                            updated_item_ids.insert(*software_item_id);
+                        }
                     }
                 }
             }

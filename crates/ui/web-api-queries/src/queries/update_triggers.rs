@@ -253,7 +253,9 @@ pub(crate) async fn load_target_for_dispatch(
         .ok_or_else(|| report!(TriggerUpdateError::HostNotFound))?;
 
     // 3. Verify host is assigned to the software item.
-    let hsi_link = HostSoftwareItem::find_by_id((host_id, item_id))
+    let hsi_link = HostSoftwareItem::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
         .one(db)
         .await
         .context_to()?
@@ -785,9 +787,12 @@ mod tests {
         .await
         .unwrap();
 
+        let hsi_id = Uuid::now_v7();
         host_software_item::ActiveModel {
+            id: Set(hsi_id),
             host_id: Set(host_id),
             software_item_id: Set(item_id),
+            qualifier: Set(None),
             installed_version: Set(Some("1.0.0".to_string())),
             installed_version_detected_at: Set(None),
             latest_version: Set(Some("1.1.0".to_string())),
@@ -820,6 +825,7 @@ mod tests {
             id: Set(Uuid::now_v7()),
             host_id: Set(host_id),
             software_item_id: Set(item_id),
+            host_software_item_id: Set(hsi_id),
             plugin_config_id: Set(plugin_config_id),
             role: Set("execute_update".to_string()),
             ordinal: Set(0),
@@ -939,7 +945,9 @@ mod tests {
     async fn validate_preconditions_host_not_assigned() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
-        let hsi = HostSoftwareItem::find_by_id((f.host_id, f.item_id))
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(f.host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(f.item_id))
             .one(&db)
             .await
             .unwrap()

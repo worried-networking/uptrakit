@@ -269,8 +269,10 @@ async fn host_count_excludes_deactivated_hosts() {
     // Link both hosts to the software item directly via the join table.
     for host_id in [host1_id, host2_id] {
         host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
             host_id: Set(host_id),
             software_item_id: Set(item_id),
+            qualifier: Set(None),
             installed_version: Set(None),
             installed_version_detected_at: Set(None),
             latest_version: Set(None),

@@ -542,14 +542,16 @@ impl Plugin for DockerPlugin {
                 }
             };
 
-            // Container-qualified package identifier: "image:tag#container_name".
-            // This uniquely identifies one container even when multiple containers
-            // on the same host use the same image.
-            let pkg_id = format!("{}#{}", ir.full_ref, container_name);
+            // Image-level package identifier: shared by all containers using the same image.
+            let pkg_id = ir.full_ref.clone();
 
-            // Software item name: image reference first (the "what"), container
-            // name in brackets (the "which one").  Example: "nginx:latest [web-server]".
-            let name = format!("{} [{}]", ir.full_ref, container_name);
+            // Software item name: just the image reference.
+            let name = ir.full_ref.clone();
+
+            // Container-qualified identifier used for per-container plugin operations.
+            // Stored in host_software_item_plugin.package_identifier so execute_update
+            // can target the specific container.
+            let plugin_pkg_id = format!("{}#{}", ir.full_ref, container_name);
 
             let targets = if emit_targets {
                 vec![DiscoveryTarget {
@@ -576,6 +578,8 @@ impl Plugin for DockerPlugin {
                 targets,
                 extra: Some(json!({ "container": container_name })),
                 tracking_system: TrackingSystem::Targeted,
+                qualifier: Some(container_name.clone()),
+                plugin_package_identifier: Some(plugin_pkg_id),
             });
         }
 
@@ -1137,14 +1141,31 @@ mod tests {
         // Two containers → two software items, even though both use the same image.
         assert_eq!(discoveries.len(), 2);
 
-        discoveries.sort_by(|a, b| a.package_identifier.cmp(&b.package_identifier));
-        assert_eq!(discoveries[0].package_identifier, "nginx:latest#api-proxy");
-        assert_eq!(discoveries[0].name, "nginx:latest [api-proxy]");
+        // Both items share the same image-level package_identifier and name.
+        // The container name is carried in `qualifier` and `plugin_package_identifier`.
+        discoveries.sort_by(|a, b| {
+            a.qualifier
+                .as_deref()
+                .unwrap_or("")
+                .cmp(b.qualifier.as_deref().unwrap_or(""))
+        });
+        assert_eq!(discoveries[0].package_identifier, "nginx:latest");
+        assert_eq!(discoveries[0].name, "nginx:latest");
         assert_eq!(discoveries[0].installed_version, "sha256:abc123");
+        assert_eq!(discoveries[0].qualifier.as_deref(), Some("api-proxy"));
+        assert_eq!(
+            discoveries[0].plugin_package_identifier.as_deref(),
+            Some("nginx:latest#api-proxy")
+        );
 
-        assert_eq!(discoveries[1].package_identifier, "nginx:latest#web-server");
-        assert_eq!(discoveries[1].name, "nginx:latest [web-server]");
+        assert_eq!(discoveries[1].package_identifier, "nginx:latest");
+        assert_eq!(discoveries[1].name, "nginx:latest");
         assert_eq!(discoveries[1].installed_version, "sha256:abc123");
+        assert_eq!(discoveries[1].qualifier.as_deref(), Some("web-server"));
+        assert_eq!(
+            discoveries[1].plugin_package_identifier.as_deref(),
+            Some("nginx:latest#web-server")
+        );
     }
 
     #[tokio::test]
@@ -1162,11 +1183,17 @@ mod tests {
         let discoveries = plugin.discover_software().await.unwrap();
 
         assert_eq!(discoveries.len(), 1);
-        // Package identifier includes the container name qualifier.
-        assert_eq!(discoveries[0].package_identifier, "nginx:latest#my-nginx");
-        // Name is based on the image, not just the container name.
-        assert_eq!(discoveries[0].name, "nginx:latest [my-nginx]");
+        // Package identifier is the image reference (shared across containers).
+        assert_eq!(discoveries[0].package_identifier, "nginx:latest");
+        // Name is just the image reference.
+        assert_eq!(discoveries[0].name, "nginx:latest");
         assert_eq!(discoveries[0].installed_version, "sha256:abc123");
+        // Container name is carried in qualifier and plugin_package_identifier.
+        assert_eq!(discoveries[0].qualifier.as_deref(), Some("my-nginx"));
+        assert_eq!(
+            discoveries[0].plugin_package_identifier.as_deref(),
+            Some("nginx:latest#my-nginx")
+        );
     }
 
     #[tokio::test]
@@ -1185,7 +1212,13 @@ mod tests {
             DockerPlugin::new_for_test(DockerConfig::default(), test_executor(), mock).unwrap();
         let discoveries = plugin.discover_software().await.unwrap();
         assert_eq!(discoveries.len(), 1);
-        assert_eq!(discoveries[0].package_identifier, "nginx:latest#my-nginx");
+        // package_identifier is the image-level identifier; qualifier holds the container name.
+        assert_eq!(discoveries[0].package_identifier, "nginx:latest");
+        assert_eq!(discoveries[0].qualifier.as_deref(), Some("my-nginx"));
+        assert_eq!(
+            discoveries[0].plugin_package_identifier.as_deref(),
+            Some("nginx:latest#my-nginx")
+        );
     }
 
     #[tokio::test]

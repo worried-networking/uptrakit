@@ -478,6 +478,8 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     ],
                     extra: None,
                     tracking_system: TrackingSystem::Targeted,
+                    qualifier: None,
+                    plugin_package_identifier: None,
                 });
             } else if let (Some(owner), Some(repo)) =
                 (&analysis.codeberg_owner, &analysis.codeberg_repo)
@@ -512,6 +514,8 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     ],
                     extra: None,
                     tracking_system: TrackingSystem::Targeted,
+                    qualifier: None,
+                    plugin_package_identifier: None,
                 });
             } else if let Some(ref npm_pkg) = analysis.npm_package {
                 // npm-managed: verify installed via `npm list -g`.
@@ -535,6 +539,8 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     targets: vec![Self::npm_target(npm_pkg)],
                     extra: None,
                     tracking_system: TrackingSystem::Targeted,
+                    qualifier: None,
+                    plugin_package_identifier: None,
                 });
             } else if let Some(ref apt_pkg) = analysis.apt_package {
                 // APT direct: verify installed via dpkg-query.
@@ -558,6 +564,8 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     targets: vec![Self::apt_target()],
                     extra: None,
                     tracking_system: TrackingSystem::Targeted,
+                    qualifier: None,
+                    plugin_package_identifier: None,
                 });
             } else {
                 // Neither — try install-script fallback.
@@ -594,6 +602,8 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         targets: vec![Self::npm_target(&npm_pkg)],
                         extra: None,
                         tracking_system: TrackingSystem::Targeted,
+                        qualifier: None,
+                        plugin_package_identifier: None,
                     });
                     continue;
                 }
@@ -627,6 +637,8 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                         targets: vec![Self::apt_target()],
                         extra: None,
                         tracking_system: TrackingSystem::Targeted,
+                        qualifier: None,
+                        plugin_package_identifier: None,
                     });
                     found_any = true;
                 }

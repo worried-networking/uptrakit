@@ -34,6 +34,7 @@ mod m20260314_000001_proxmox_host_mapping;
 mod m20260315_000001_proxmox_hm_machine_id;
 mod m20260316_000001_host_machine_id_partial_unique;
 mod m20260317_000001_fix_hosts_count_desync;
+mod m20260318_000001_host_software_item_qualifier;
 
 pub struct Migrator;
 
@@ -74,6 +75,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260316_000001_host_machine_id_partial_unique::Migration),
             Box::new(m20260317_000001_fix_hosts_count_desync::Migration),
             Box::new(m20260308_000003_proxmox_hm_pagination_indexes::Migration),
+            Box::new(m20260318_000001_host_software_item_qualifier::Migration),
         ]
     }
 }

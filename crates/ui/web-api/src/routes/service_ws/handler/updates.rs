@@ -661,16 +661,26 @@ pub(super) async fn handle_update_result(
 
     if payload.status == UpdateFinalStatus::Completed
         && let Some(ref to_version) = payload.to_version
-        && let Ok(Some(link)) =
-            host_software_item::Entity::find_by_id((record.host_id, record.software_item_id))
-                .one(state.db())
-                .await
     {
-        let mut link_active: host_software_item::ActiveModel = link.into();
-        link_active.installed_version = Set(Some(to_version.clone()));
-        link_active.installed_version_detected_at = Set(Some(time::OffsetDateTime::now_utc()));
-        link_active.last_updated_at = Set(Some(time::OffsetDateTime::now_utc()));
-        if let Err(e) = link_active.update(state.db()).await {
+        let now = time::OffsetDateTime::now_utc();
+        if let Err(e) = host_software_item::Entity::update_many()
+            .col_expr(
+                host_software_item::Column::InstalledVersion,
+                sea_orm::sea_query::Expr::value(Some(to_version.clone())),
+            )
+            .col_expr(
+                host_software_item::Column::InstalledVersionDetectedAt,
+                sea_orm::sea_query::Expr::value(Some(now)),
+            )
+            .col_expr(
+                host_software_item::Column::LastUpdatedAt,
+                sea_orm::sea_query::Expr::value(Some(now)),
+            )
+            .filter(host_software_item::Column::HostId.eq(record.host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(record.software_item_id))
+            .exec(state.db())
+            .await
+        {
             tracing::warn!(
                 error = %e,
                 "failed to update host_software_item installed_version"

@@ -21,6 +21,19 @@ use crate::tracking_system::TrackingSystem;
 ///
 /// The `extra` field is purely informational metadata (e.g. Docker's container
 /// names) — the controller never interprets it for config synthesis.
+///
+/// # Per-row qualifier
+///
+/// The `qualifier` field selects which `host_software_item` row to create or
+/// reuse. `None` = unqualified (default behaviour, one row per software item per
+/// host). Docker uses the container name here so that each container gets its
+/// own tracking row even when multiple containers run the same image.
+///
+/// # Plugin package identifier
+///
+/// `plugin_package_identifier`, when set, overrides `package_identifier` as the
+/// value stored in `host_software_item_plugin.package_identifier` for plugin
+/// operations. `None` = use `package_identifier` (existing behaviour).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DiscoveredSoftware {
@@ -47,6 +60,19 @@ pub struct DiscoveredSoftware {
     /// with existing discovery results.
     #[serde(default)]
     pub tracking_system: TrackingSystem,
+    /// Row discriminator within `host_software_items`.
+    ///
+    /// `None` = unqualified (default). Docker sets this to the container name
+    /// so that each container produces its own `host_software_item` row even
+    /// when multiple containers run the same image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier: Option<String>,
+    /// Override for the `package_identifier` stored in
+    /// `host_software_item_plugin.package_identifier`.
+    ///
+    /// `None` = use `package_identifier` (existing behaviour).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_package_identifier: Option<String>,
 }
 
 #[cfg(test)]
@@ -63,6 +89,8 @@ mod tests {
             targets: vec![],
             extra: Some(serde_json::json!({"package_type": "formula"})),
             tracking_system: TrackingSystem::Targeted,
+            qualifier: None,
+            plugin_package_identifier: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
@@ -78,6 +106,8 @@ mod tests {
             targets: vec![],
             extra: None,
             tracking_system: TrackingSystem::Targeted,
+            qualifier: None,
+            plugin_package_identifier: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("extra"));
@@ -95,6 +125,8 @@ mod tests {
             targets: vec![],
             extra: None,
             tracking_system: TrackingSystem::Targeted,
+            qualifier: None,
+            plugin_package_identifier: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("targets"));
@@ -117,6 +149,8 @@ mod tests {
             }],
             extra: None,
             tracking_system: TrackingSystem::Targeted,
+            qualifier: None,
+            plugin_package_identifier: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(json.contains("targets"));
@@ -135,6 +169,8 @@ mod tests {
         assert!(sw.targets.is_empty());
         assert!(sw.extra.is_none());
         assert_eq!(sw.tracking_system, TrackingSystem::Targeted);
+        assert!(sw.qualifier.is_none());
+        assert!(sw.plugin_package_identifier.is_none());
     }
 
     #[test]
@@ -146,10 +182,70 @@ mod tests {
             targets: vec![],
             extra: None,
             tracking_system: TrackingSystem::HostManaged,
+            qualifier: None,
+            plugin_package_identifier: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(json.contains("host_managed"));
         let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.tracking_system, TrackingSystem::HostManaged);
+    }
+
+    #[test]
+    fn qualifier_roundtrip() {
+        let sw = DiscoveredSoftware {
+            package_identifier: "nginx".to_string(),
+            name: "nginx".to_string(),
+            installed_version: "1.24.0".to_string(),
+            targets: vec![],
+            extra: None,
+            tracking_system: TrackingSystem::Targeted,
+            qualifier: Some("web-container".to_string()),
+            plugin_package_identifier: None,
+        };
+        let json = serde_json::to_string(&sw).expect("serialize");
+        assert!(json.contains("qualifier"));
+        assert!(json.contains("web-container"));
+        let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized.qualifier, Some("web-container".to_string()));
+    }
+
+    #[test]
+    fn qualifier_none_omitted() {
+        let sw = DiscoveredSoftware {
+            package_identifier: "nginx".to_string(),
+            name: "nginx".to_string(),
+            installed_version: "1.24.0".to_string(),
+            targets: vec![],
+            extra: None,
+            tracking_system: TrackingSystem::Targeted,
+            qualifier: None,
+            plugin_package_identifier: None,
+        };
+        let json = serde_json::to_string(&sw).expect("serialize");
+        assert!(!json.contains("qualifier"));
+        assert!(!json.contains("plugin_package_identifier"));
+    }
+
+    #[test]
+    fn plugin_package_identifier_roundtrip() {
+        let sw = DiscoveredSoftware {
+            package_identifier: "sha256:abc123".to_string(),
+            name: "my-app".to_string(),
+            installed_version: "2.0.0".to_string(),
+            targets: vec![],
+            extra: None,
+            tracking_system: TrackingSystem::Targeted,
+            qualifier: Some("app-container".to_string()),
+            plugin_package_identifier: Some("my-app:2.0.0".to_string()),
+        };
+        let json = serde_json::to_string(&sw).expect("serialize");
+        assert!(json.contains("plugin_package_identifier"));
+        let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            deserialized.plugin_package_identifier,
+            Some("my-app:2.0.0".to_string())
+        );
+        assert_eq!(deserialized.qualifier, Some("app-container".to_string()));
     }
 }

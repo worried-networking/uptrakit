@@ -230,6 +230,32 @@ impl WireValidate for DiscoveryPluginResult {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_vec_len(&self.discoveries, MAX_DISCOVERIES_PER_PLUGIN, "discoveries")?;
         check_opt_string_len(&self.error, MAX_MEDIUM_STRING_LEN, "error")?;
+        for discovery in &self.discoveries {
+            discovery.wire_validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl WireValidate for uptrakit_shared_types::DiscoveredSoftware {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(
+            &self.package_identifier,
+            MAX_SHORT_STRING_LEN,
+            "package_identifier",
+        )?;
+        check_string_len(&self.name, MAX_SHORT_STRING_LEN, "name")?;
+        check_string_len(
+            &self.installed_version,
+            MAX_SHORT_STRING_LEN,
+            "installed_version",
+        )?;
+        check_opt_string_len(&self.qualifier, MAX_DISCOVERED_QUALIFIER_LEN, "qualifier")?;
+        check_opt_string_len(
+            &self.plugin_package_identifier,
+            MAX_SHORT_STRING_LEN,
+            "plugin_package_identifier",
+        )?;
         Ok(())
     }
 }

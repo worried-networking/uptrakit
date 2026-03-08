@@ -1119,7 +1119,9 @@ pub async fn trigger_all_host_package_updates_for_host(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, Set};
+    use sea_orm::{
+        ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    };
     use time::OffsetDateTime;
     use uptrakit_internal_wire::ControllerMessage;
     use uptrakit_shared_db::entity::{
@@ -1243,9 +1245,12 @@ mod tests {
         .await
         .unwrap();
 
+        let hsi_id = Uuid::now_v7();
         host_software_item::ActiveModel {
+            id: Set(hsi_id),
             host_id: Set(host_id),
             software_item_id: Set(item_id),
+            qualifier: Set(None),
             installed_version: Set(Some("1.0.0".to_string())),
             installed_version_detected_at: Set(None),
             latest_version: Set(Some("1.1.0".to_string())),
@@ -1278,6 +1283,7 @@ mod tests {
             id: Set(Uuid::now_v7()),
             host_id: Set(host_id),
             software_item_id: Set(item_id),
+            host_software_item_id: Set(hsi_id),
             plugin_config_id: Set(plugin_config_id),
             role: Set("execute_update".to_string()),
             ordinal: Set(0),
@@ -1305,7 +1311,9 @@ mod tests {
     async fn find_outdated_items_empty_when_versions_match() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
-        let hsi = HostSoftwareItem::find_by_id((f.host_id, f.item_id))
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(f.host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(f.item_id))
             .one(&db)
             .await
             .unwrap()
@@ -1361,9 +1369,12 @@ mod tests {
         .insert(&db)
         .await
         .unwrap();
+        let hsi2_id = Uuid::now_v7();
         host_software_item::ActiveModel {
+            id: Set(hsi2_id),
             host_id: Set(f.host_id),
             software_item_id: Set(item2_id),
+            qualifier: Set(None),
             installed_version: Set(Some("2.0.0".to_string())),
             installed_version_detected_at: Set(None),
             latest_version: Set(Some("2.1.0".to_string())),
@@ -1394,6 +1405,7 @@ mod tests {
             id: Set(Uuid::now_v7()),
             host_id: Set(f.host_id),
             software_item_id: Set(item2_id),
+            host_software_item_id: Set(hsi2_id),
             plugin_config_id: Set(pc2_id),
             role: Set("execute_update".to_string()),
             ordinal: Set(0),
@@ -1445,7 +1457,9 @@ mod tests {
     async fn find_outdated_hosts_empty_when_up_to_date() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
-        let hsi = HostSoftwareItem::find_by_id((f.host_id, f.item_id))
+        let hsi = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(f.host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(f.item_id))
             .one(&db)
             .await
             .unwrap()
@@ -1503,9 +1517,12 @@ mod tests {
         .await
         .unwrap();
 
+        let hsi2_id = Uuid::now_v7();
         host_software_item::ActiveModel {
+            id: Set(hsi2_id),
             host_id: Set(f.host_id),
             software_item_id: Set(item2_id),
+            qualifier: Set(None),
             installed_version: Set(Some("2.0.0".to_string())),
             installed_version_detected_at: Set(None),
             latest_version: Set(Some("2.1.0".to_string())),
@@ -1538,6 +1555,7 @@ mod tests {
             id: Set(Uuid::now_v7()),
             host_id: Set(f.host_id),
             software_item_id: Set(item2_id),
+            host_software_item_id: Set(hsi2_id),
             plugin_config_id: Set(pc2_id),
             role: Set("execute_update".to_string()),
             ordinal: Set(0),

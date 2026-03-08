@@ -8,6 +8,7 @@ pub struct Model {
     pub id: Uuid,
     pub host_id: Uuid,
     pub software_item_id: Uuid,
+    pub host_software_item_id: Uuid,
     pub plugin_config_id: Uuid,
     /// Plugin role: "detect_version", "fetch_releases", "execute_update".
     /// Stored as TEXT; parsed to PluginRole at application boundaries.
@@ -47,8 +48,8 @@ pub enum Relation {
     PluginConfig,
     #[sea_orm(
         belongs_to = "super::host_software_item::Entity",
-        from = "(Column::HostId, Column::SoftwareItemId)",
-        to = "(super::host_software_item::Column::HostId, super::host_software_item::Column::SoftwareItemId)"
+        from = "Column::HostSoftwareItemId",
+        to = "super::host_software_item::Column::Id"
     )]
     HostSoftwareItem,
 }

@@ -464,24 +464,52 @@ pub(super) async fn handle_version_check_results(
         // Route to host_software_item (targeted tracking system).
         let software_item_id = result.software_item_id;
 
-        // Update installed version and latest version on host_software_item records.
+        // Update installed version and latest version on all host_software_item records
+        // for this (host_id, software_item_id) pair.  Using update_many ensures that all
+        // qualifier rows (e.g. multiple Docker containers using the same image) are updated
+        // in a single statement.
         for &host_id in &host_ids {
-            match host_software_item::Entity::find_by_id((host_id, software_item_id))
+            // Check if any row exists for notification dispatch purposes.
+            let row_exists = host_software_item::Entity::find()
+                .filter(host_software_item::Column::HostId.eq(host_id))
+                .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
                 .one(state.db())
-                .await
-            {
-                Ok(Some(existing)) => {
-                    let mut active: host_software_item::ActiveModel = existing.into();
+                .await;
+
+            match row_exists {
+                Ok(Some(_)) => {
+                    // Build the update_many expression for fields that are Some.
+                    let mut update = host_software_item::Entity::update_many()
+                        .filter(host_software_item::Column::HostId.eq(host_id))
+                        .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id));
+                    // Always update update_category.
+                    update = update.col_expr(
+                        host_software_item::Column::UpdateCategory,
+                        sea_orm::sea_query::Expr::value(result.update_category.to_string()),
+                    );
                     if let Some(ref installed_version) = result.installed_version {
-                        active.installed_version = Set(Some(installed_version.clone()));
-                        active.installed_version_detected_at = Set(Some(now));
+                        update = update
+                            .col_expr(
+                                host_software_item::Column::InstalledVersion,
+                                sea_orm::sea_query::Expr::value(Some(installed_version.clone())),
+                            )
+                            .col_expr(
+                                host_software_item::Column::InstalledVersionDetectedAt,
+                                sea_orm::sea_query::Expr::value(Some(now)),
+                            );
                     }
                     if let Some(ref latest_version) = result.latest_version {
-                        active.latest_version = Set(Some(latest_version.clone()));
-                        active.latest_version_fetched_at = Set(Some(now));
+                        update = update
+                            .col_expr(
+                                host_software_item::Column::LatestVersion,
+                                sea_orm::sea_query::Expr::value(Some(latest_version.clone())),
+                            )
+                            .col_expr(
+                                host_software_item::Column::LatestVersionFetchedAt,
+                                sea_orm::sea_query::Expr::value(Some(now)),
+                            );
                     }
-                    active.update_category = Set(result.update_category.to_string());
-                    if let Err(e) = active.update(state.db()).await {
+                    if let Err(e) = update.exec(state.db()).await {
                         tracing::warn!(
                             error = %e,
                             host_id = %host_id,

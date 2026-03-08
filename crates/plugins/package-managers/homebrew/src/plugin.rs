@@ -197,6 +197,8 @@ impl HomebrewPlugin {
                     targets,
                     extra: None,
                     tracking_system: TrackingSystem::HostManaged,
+                    qualifier: None,
+                    plugin_package_identifier: None,
                 });
             }
         }
@@ -282,6 +284,8 @@ impl HomebrewPlugin {
                     targets,
                     extra: None,
                     tracking_system: TrackingSystem::HostManaged,
+                    qualifier: None,
+                    plugin_package_identifier: None,
                 });
             }
         }

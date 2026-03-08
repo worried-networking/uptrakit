@@ -406,6 +406,8 @@ impl Plugin for AptPlugin {
                     targets,
                     extra: None,
                     tracking_system: TrackingSystem::HostManaged,
+                    qualifier: None,
+                    plugin_package_identifier: None,
                 }
             })
             .collect();

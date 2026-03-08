@@ -525,6 +525,8 @@ async fn process_plugin_result(
                     package_identifier: &item.package_identifier,
                     name: &item.name,
                     installed_version: &item.installed_version,
+                    qualifier: item.qualifier.as_deref(),
+                    plugin_package_identifier: item.plugin_package_identifier.as_deref(),
                 };
                 if !item.targets.is_empty() {
                     process_targets_discovery(
@@ -607,6 +609,23 @@ struct DiscoveredItemInfo<'a> {
     package_identifier: &'a str,
     name: &'a str,
     installed_version: &'a str,
+    /// Qualifier for the `host_software_items` row (e.g. Docker container name).
+    /// `None` = unqualified (default for non-Docker items).
+    qualifier: Option<&'a str>,
+    /// Package identifier stored in `host_software_item_plugins` for per-container operations.
+    /// `None` = use `package_identifier` (existing behavior for non-Docker items).
+    plugin_package_identifier: Option<&'a str>,
+}
+
+impl<'a> DiscoveredItemInfo<'a> {
+    /// Returns the package identifier to store in `host_software_item_plugin.package_identifier`.
+    ///
+    /// For Docker items, this is `plugin_package_identifier` (e.g. `nginx:latest#web-server`).
+    /// For all other items, this falls back to `package_identifier`.
+    fn effective_plugin_pkg_id(&self) -> &str {
+        self.plugin_package_identifier
+            .unwrap_or(self.package_identifier)
+    }
 }
 
 /// Process a discovered item that carries explicit `DiscoveryTarget` values.
@@ -662,14 +681,14 @@ async fn process_targets_discovery(
             package_identifier: pkg_id,
             name: item.name,
             installed_version: item.installed_version,
+            qualifier: item.qualifier,
+            plugin_package_identifier: item.plugin_package_identifier,
         };
 
         // Find-or-create the software item and host link.
-        let software_item_id =
-            find_or_create_software_item(db, tenant_id, host_id, pc_id, &target_item, now).await?;
-
-        // If None, the item already existed and was updated in-place.
-        let Some(software_item_id) = software_item_id else {
+        let Some((software_item_id, hsi_id)) =
+            find_or_create_software_item(db, tenant_id, host_id, pc_id, &target_item, now).await?
+        else {
             continue;
         };
 
@@ -679,10 +698,11 @@ async fn process_targets_discovery(
                 id: Set(Uuid::now_v7()),
                 host_id: Set(host_id),
                 software_item_id: Set(software_item_id),
+                host_software_item_id: Set(hsi_id),
                 plugin_config_id: Set(pc_id),
                 role: Set(role.as_str().to_string()),
                 ordinal: Set(0),
-                package_identifier: Set(pkg_id.to_string()),
+                package_identifier: Set(target_item.effective_plugin_pkg_id().to_string()),
                 config_override: Set(target.config_override.clone()),
                 execution_site: Set(execution_site.to_owned()),
                 created_at: Set(now),
@@ -717,13 +737,15 @@ async fn load_ignore_set(
     Ok(rules.into_iter().map(|r| r.package_identifier).collect())
 }
 
-/// Find-or-create a software item + host link. Returns the software_item_id if a
-/// new link was created (caller must then create role assignments), or `None` if
-/// the existing link was updated in-place.
+/// Find-or-create a software item + host link.
+///
+/// Returns `Some((software_item_id, hsi_id))` when a new link was created (caller must then
+/// create role assignments), or `None` if the existing link was updated in-place.
 ///
 /// Three-phase lookup:
+///
 /// 1. If this host already has a `host_software_item_plugin` row for
-///    `(plugin_config_id, package_identifier)`, update `installed_version` in place
+///    `(plugin_config_id, effective_plugin_pkg_id)`, update `installed_version` in place
 ///    **if** the linked `software_item` is still active. If the item has been
 ///    discarded (soft-deleted), the orphaned link is removed and the function falls
 ///    through to phases 2/3 so a fresh pending item is created.
@@ -741,15 +763,19 @@ async fn find_or_create_software_item(
     plugin_config_id: Uuid,
     item: &DiscoveredItemInfo<'_>,
     now: OffsetDateTime,
-) -> Result<Option<Uuid>> {
+) -> Result<Option<(Uuid, Uuid)>> {
     let package_identifier = item.package_identifier;
     let name = item.name;
     let installed_version = item.installed_version;
-    // Phase 1: Check if this specific host already tracks (plugin_config_id, package_identifier)
+    // Use the container-qualified identifier for plugin link lookup so that
+    // two containers on the same host using the same image are tracked separately.
+    let lookup_pkg_id = item.effective_plugin_pkg_id();
+
+    // Phase 1: Check if this specific host already tracks (plugin_config_id, lookup_pkg_id)
     let existing_plugin_link = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
         .filter(host_software_item_plugin::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(package_identifier))
+        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(lookup_pkg_id))
         .one(db)
         .await
         .context_to()?;
@@ -764,12 +790,17 @@ async fn find_or_create_software_item(
             .is_some();
 
         if linked_item_active {
-            // Just refresh the installed version on the parent host_software_item row.
-            let hsi = HostSoftwareItem::find_by_id((host_id, plugin_link.software_item_id))
-                .one(db)
-                .await
-                .context_to()?;
-            if let Some(hsi) = hsi {
+            // Refresh the installed version on the qualifier-specific host_software_item row.
+            let mut hsi_query = HostSoftwareItem::find()
+                .filter(host_software_item::Column::HostId.eq(host_id))
+                .filter(
+                    host_software_item::Column::SoftwareItemId.eq(plugin_link.software_item_id),
+                );
+            hsi_query = match item.qualifier {
+                Some(q) => hsi_query.filter(host_software_item::Column::Qualifier.eq(q)),
+                None => hsi_query.filter(host_software_item::Column::Qualifier.is_null()),
+            };
+            if let Some(hsi) = hsi_query.one(db).await.context_to()? {
                 let mut active: host_software_item::ActiveModel = hsi.into();
                 active.installed_version = Set(Some(installed_version.to_string()));
                 active.installed_version_detected_at = Set(Some(now));
@@ -784,11 +815,23 @@ async fn find_or_create_software_item(
             package_identifier = %package_identifier,
             "removing orphaned host link for discarded software item; will re-discover"
         );
-        if let Some(hsi) = HostSoftwareItem::find_by_id((host_id, plugin_link.software_item_id))
-            .one(db)
-            .await
-            .context_to()?
-        {
+        let mut orphan_query = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(plugin_link.software_item_id));
+        orphan_query = match item.qualifier {
+            Some(q) => orphan_query.filter(host_software_item::Column::Qualifier.eq(q)),
+            None => orphan_query.filter(host_software_item::Column::Qualifier.is_null()),
+        };
+        if let Some(hsi) = orphan_query.one(db).await.context_to()? {
+            // Explicitly remove plugin link rows before deleting the HSI row.
+            // SQLite disables FK cascade enforcement inside the migration
+            // transaction (PRAGMA foreign_keys is a no-op inside BEGIN), so
+            // we must delete child rows manually to maintain integrity.
+            HostSoftwareItemPlugin::delete_many()
+                .filter(host_software_item_plugin::Column::HostSoftwareItemId.eq(hsi.id))
+                .exec(db)
+                .await
+                .context_to()?;
             let hsi_active: host_software_item::ActiveModel = hsi.into();
             hsi_active.delete(db).await.context_to()?;
         }
@@ -796,10 +839,10 @@ async fn find_or_create_software_item(
     }
 
     // Phase 2: Check if any other host in this tenant already has
-    // (plugin_config_id, package_identifier).
+    // (plugin_config_id, lookup_pkg_id).
     let candidate_links: Vec<Uuid> = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(package_identifier))
+        .filter(host_software_item_plugin::Column::PackageIdentifier.eq(lookup_pkg_id))
         .all(db)
         .await
         .context_to()?
@@ -819,8 +862,8 @@ async fn find_or_create_software_item(
             .context_to()?
     };
 
-    let software_item_id = if let Some(item) = existing_item {
-        item.id
+    let software_item_id = if let Some(existing) = existing_item {
+        existing.id
     } else {
         // Phase 3: Create a new pending software item.
         let new_id = Uuid::now_v7();
@@ -870,9 +913,12 @@ async fn find_or_create_software_item(
     };
 
     // Insert host_software_item link.
+    let hsi_id = Uuid::now_v7();
     let link = host_software_item::ActiveModel {
+        id: Set(hsi_id),
         host_id: Set(host_id),
         software_item_id: Set(software_item_id),
+        qualifier: Set(item.qualifier.map(|s| s.to_string())),
         installed_version: Set(Some(installed_version.to_string())),
         installed_version_detected_at: Set(Some(now)),
         latest_version: Set(None),
@@ -882,13 +928,30 @@ async fn find_or_create_software_item(
         linked_at: Set(now),
         update_category: Set("unknown".to_string()),
     };
-    if let Err(e) = HostSoftwareItem::insert(link).exec(db).await
-        && !is_unique_constraint_violation(&e)
-    {
-        return Err(report!(AutodiscoveryError::Db(e)));
+    match HostSoftwareItem::insert(link).exec(db).await {
+        Ok(_) => {}
+        Err(e) if is_unique_constraint_violation(&e) => {
+            // Either a concurrent task or a second DiscoveryTarget for the same software item
+            // already inserted this (host_id, software_item_id, qualifier) row.
+            // Look up the existing row's surrogate id so the caller can still create plugin assignments.
+            let mut existing_query = HostSoftwareItem::find()
+                .filter(host_software_item::Column::HostId.eq(host_id))
+                .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id));
+            existing_query = match item.qualifier {
+                Some(q) => existing_query.filter(host_software_item::Column::Qualifier.eq(q)),
+                None => existing_query.filter(host_software_item::Column::Qualifier.is_null()),
+            };
+            let existing_hsi_id = existing_query.one(db).await.context_to()?.map(|hsi| hsi.id);
+            if let Some(existing_id) = existing_hsi_id {
+                return Ok(Some((software_item_id, existing_id)));
+            }
+            // Row disappeared between insert failure and lookup — return None to skip.
+            return Ok(None);
+        }
+        Err(e) => return Err(report!(AutodiscoveryError::Db(e))),
     }
 
-    Ok(Some(software_item_id))
+    Ok(Some((software_item_id, hsi_id)))
 }
 
 /// Process a single discovered software item using the config-ID path.
@@ -914,11 +977,9 @@ async fn process_one_discovery(
         return Ok(());
     }
 
-    let software_item_id =
-        find_or_create_software_item(db, tenant_id, host_id, plugin_config_id, &args, now).await?;
-
-    // If None, the item already existed and was updated in-place.
-    let Some(software_item_id) = software_item_id else {
+    let Some((software_item_id, hsi_id)) =
+        find_or_create_software_item(db, tenant_id, host_id, plugin_config_id, &args, now).await?
+    else {
         return Ok(());
     };
 
@@ -928,10 +989,11 @@ async fn process_one_discovery(
             id: Set(Uuid::now_v7()),
             host_id: Set(host_id),
             software_item_id: Set(software_item_id),
+            host_software_item_id: Set(hsi_id),
             plugin_config_id: Set(plugin_config_id),
             role: Set(role.to_string()),
             ordinal: Set(0),
-            package_identifier: Set(args.package_identifier.to_string()),
+            package_identifier: Set(args.effective_plugin_pkg_id().to_string()),
             config_override: Set(None),
             execution_site: Set("auto".to_string()),
             created_at: Set(now),
@@ -1068,9 +1130,12 @@ mod tests {
         package_identifier: &str,
     ) {
         let now = time::OffsetDateTime::now_utc();
+        let hsi_id = Uuid::now_v7();
         let link = host_software_item::ActiveModel {
+            id: Set(hsi_id),
             host_id: Set(host_id),
             software_item_id: Set(software_item_id),
+            qualifier: Set(None),
             installed_version: Set(Some("1.0.0".to_string())),
             installed_version_detected_at: Set(Some(now)),
             latest_version: Set(None),
@@ -1091,6 +1156,7 @@ mod tests {
                 id: Set(Uuid::now_v7()),
                 host_id: Set(host_id),
                 software_item_id: Set(software_item_id),
+                host_software_item_id: Set(hsi_id),
                 plugin_config_id: Set(plugin_config_id),
                 role: Set(role.to_string()),
                 ordinal: Set(0),
@@ -1152,6 +1218,8 @@ mod tests {
                 }],
                 extra: None,
                 tracking_system: Default::default(),
+                qualifier: None,
+                plugin_package_identifier: None,
             }],
         }
     }
@@ -1180,6 +1248,8 @@ mod tests {
                 }],
                 extra: None,
                 tracking_system: Default::default(),
+                qualifier: None,
+                plugin_package_identifier: None,
             }],
         }
     }
@@ -1196,6 +1266,8 @@ mod tests {
                 targets: vec![],
                 extra: None,
                 tracking_system: Default::default(),
+                qualifier: None,
+                plugin_package_identifier: None,
             }],
         }
     }
@@ -1249,6 +1321,8 @@ mod tests {
                 ],
                 extra: None,
                 tracking_system: Default::default(),
+                qualifier: None,
+                plugin_package_identifier: None,
             }],
         }
     }
@@ -1316,6 +1390,8 @@ mod tests {
             package_identifier: "curl",
             name: "curl",
             installed_version: "8.0.0",
+            qualifier: None,
+            plugin_package_identifier: None,
         };
         let ignore_set = HashSet::new();
 
@@ -1380,6 +1456,8 @@ mod tests {
             package_identifier: "wget",
             name: "wget",
             installed_version: "2.0.0",
+            qualifier: None,
+            plugin_package_identifier: None,
         };
         let ignore_set = HashSet::new();
 
@@ -1620,6 +1698,8 @@ mod tests {
                 targets: vec![],
                 extra: None,
                 tracking_system: Default::default(),
+                qualifier: None,
+                plugin_package_identifier: None,
             }],
         };
 
@@ -2013,6 +2093,8 @@ mod tests {
                     }],
                     extra: None,
                     tracking_system: TrackingSystem::HostManaged,
+                    qualifier: None,
+                    plugin_package_identifier: None,
                 }],
             }],
         };
@@ -2084,6 +2166,8 @@ mod tests {
                         }],
                         extra: None,
                         tracking_system: TrackingSystem::HostManaged,
+                        qualifier: None,
+                        plugin_package_identifier: None,
                     }],
                 }],
             }

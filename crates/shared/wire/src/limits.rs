@@ -70,6 +70,9 @@ pub const MAX_DISCOVERY_PLUGIN_RESULTS: usize = 50;
 /// Maximum number of discoveries per plugin result.
 pub const MAX_DISCOVERIES_PER_PLUGIN: usize = 1_000;
 
+/// Maximum byte length of a `DiscoveredSoftware.qualifier` string.
+pub const MAX_DISCOVERED_QUALIFIER_LEN: usize = 256;
+
 /// Maximum number of capabilities in a capability set.
 pub const MAX_CAPABILITIES: usize = 50;
 

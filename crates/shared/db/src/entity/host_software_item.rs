@@ -5,9 +5,10 @@ use time::OffsetDateTime;
 #[sea_orm(table_name = "host_software_items")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
     pub host_id: Uuid,
-    #[sea_orm(primary_key, auto_increment = false)]
     pub software_item_id: Uuid,
+    pub qualifier: Option<String>,
     pub installed_version: Option<String>,
     pub installed_version_detected_at: Option<OffsetDateTime>,
     pub latest_version: Option<String>,

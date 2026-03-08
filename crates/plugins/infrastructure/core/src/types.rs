@@ -137,6 +137,8 @@ mod tests {
             targets: vec![],
             extra: Some(serde_json::json!({"install_path": "/usr/local/bin/prometheus"})),
             tracking_system: TrackingSystem::Targeted,
+            qualifier: None,
+            plugin_package_identifier: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
@@ -152,6 +154,8 @@ mod tests {
             targets: vec![],
             extra: None,
             tracking_system: TrackingSystem::Targeted,
+            qualifier: None,
+            plugin_package_identifier: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
         assert!(!json.contains("extra"));

@@ -863,15 +863,22 @@ pub async fn assign_hosts(
         }
 
         // Upsert the host_software_item link row (no plugin fields, just the link).
-        let existing_link = HostSoftwareItem::find_by_id((host_id, id))
+        let existing_link = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(id))
             .one(&txn)
             .await
             .context_to()?;
 
-        if existing_link.is_none() {
+        let hsi_id = if let Some(ref link) = existing_link {
+            link.id
+        } else {
+            let new_hsi_id = Uuid::now_v7();
             let link = host_software_item::ActiveModel {
+                id: Set(new_hsi_id),
                 host_id: Set(host_id),
                 software_item_id: Set(id),
+                qualifier: Set(None),
                 installed_version: Set(None),
                 installed_version_detected_at: Set(None),
                 latest_version: Set(None),
@@ -882,7 +889,8 @@ pub async fn assign_hosts(
                 update_category: Set("unknown".to_string()),
             };
             link.insert(&txn).await.context_to()?;
-        }
+            new_hsi_id
+        };
 
         // Process each role assignment for this host.
         for role_assignment in &assignment.plugins {
@@ -927,6 +935,7 @@ pub async fn assign_hosts(
                         id: Set(generate_uuid()),
                         host_id: Set(host_id),
                         software_item_id: Set(id),
+                        host_software_item_id: Set(hsi_id),
                         plugin_config_id: Set(plugin_config_id),
                         role: Set(role.as_str().to_string()),
                         ordinal: Set(0),
@@ -987,11 +996,14 @@ pub async fn update_host_assignment(
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
     // Verify the host_software_item link exists.
-    HostSoftwareItem::find_by_id((host_id, id))
+    let hsi_link = HostSoftwareItem::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::SoftwareItemId.eq(id))
         .one(tenant_db.db())
         .await
         .context_to()?
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
+    let hsi_id = hsi_link.id;
 
     // Load the existing plugin assignment for this role.
     let existing_plugin = HostSoftwareItemPlugin::find()
@@ -1075,6 +1087,7 @@ pub async fn update_host_assignment(
                 id: Set(generate_uuid()),
                 host_id: Set(host_id),
                 software_item_id: Set(id),
+                host_software_item_id: Set(hsi_id),
                 plugin_config_id: Set(plugin_config_id),
                 role: Set(req.role.as_str().to_string()),
                 ordinal: Set(0),
@@ -1121,7 +1134,9 @@ pub async fn unassign_host(tenant_db: &TenantDb, id: Uuid, host_id: Uuid) -> Res
         return Ok(false);
     }
 
-    let link = HostSoftwareItem::find_by_id((host_id, id))
+    let link = HostSoftwareItem::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::SoftwareItemId.eq(id))
         .one(tenant_db.db())
         .await
         .context_to()?;
@@ -1143,7 +1158,9 @@ pub async fn load_host_assignment(
     host_id: Uuid,
     software_item_id: Uuid,
 ) -> Option<host_software_item::Model> {
-    HostSoftwareItem::find_by_id((host_id, software_item_id))
+    HostSoftwareItem::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
         .one(db)
         .await
         .ok()
