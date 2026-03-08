@@ -133,15 +133,17 @@ impl DockerPlugin {
     /// Compile-time capabilities for the Docker plugin.
     ///
     /// Read directly by the registry macro for sync capability queries.
-    pub const CAPABILITIES: &'static [PluginCapability] = if cfg!(feature = "daemon") {
-        &[
-            PluginCapability::ControllerSideFetchReleases,
-            PluginCapability::DiscoverLocalSoftware,
-            PluginCapability::DetectHostCompatibility,
-        ]
-    } else {
-        &[PluginCapability::ControllerSideFetchReleases]
-    };
+    /// All capabilities are declared unconditionally so the controller's
+    /// `discovery_plugins()` always includes Docker in discovery assignments.
+    /// The actual `discover_software()` and `detect_host_compatibility()`
+    /// implementations are gated behind `#[cfg(feature = "daemon")]` on the
+    /// trait impl — the controller never calls them; it only sends the
+    /// assignment to the agent over WebSocket.
+    pub const CAPABILITIES: &'static [PluginCapability] = &[
+        PluginCapability::ControllerSideFetchReleases,
+        PluginCapability::DiscoverLocalSoftware,
+        PluginCapability::DetectHostCompatibility,
+    ];
 
     /// Test constructor that injects a custom [`DockerClient`].
     #[cfg(all(test, feature = "daemon"))]
