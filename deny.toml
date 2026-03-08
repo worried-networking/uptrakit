@@ -343,6 +343,17 @@ skip = [
 
     # windows-sys: 0.59 via nix 0.29, 0.61 via clap; 0.60 already skipped above
     { crate = "windows-sys@0.59.0", reason = "pulled by nix 0.29; newer 0.60/0.61 used by tokio/clap" },
+
+    # RustCrypto stack duplicates: older stable versions pulled by openidconnect/ecdsa/elliptic-curve;
+    # newer RC versions pulled by russh 0.57 crypto stack. Will resolve when upstream crates converge.
+    { crate = "crypto-bigint@0.5.5", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.7-rc used by russh crypto" },
+    { crate = "der@0.7.10", reason = "pulled by spki/pkcs8 0.7/0.10 (openidconnect); newer 0.8 used by russh crypto" },
+    { crate = "pem-rfc7468@0.7.0", reason = "pulled by pkcs8 0.10 (openidconnect); newer 1.0 used by russh crypto" },
+    { crate = "pkcs1@0.7.5", reason = "pulled by rsa 0.9 (openidconnect); newer 0.8-rc used by russh crypto" },
+    { crate = "pkcs8@0.10.2", reason = "pulled by rsa 0.9 / ecdsa (openidconnect); newer 0.11-rc used by russh crypto" },
+    { crate = "rsa@0.9.10", reason = "pulled by openidconnect; newer 0.10-rc used by russh crypto" },
+    { crate = "sha2@0.10.9", reason = "pulled by digest 0.10 chain (openidconnect/argon2); newer 0.11-rc used by russh crypto" },
+    { crate = "spki@0.7.3", reason = "pulled by pkcs8 0.10 / ecdsa (openidconnect); newer 0.8-rc used by russh crypto" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
