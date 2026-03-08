@@ -7164,7 +7164,7 @@ name = "uptrakit-shared-types"
 version = "0.0.1"
 dependencies = [
  "husky-rs",
- "reqwest 0.13.2",
+ "reqwest",
  "sea-orm",
  "serde",
  "serde_json",
