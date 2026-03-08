@@ -18,6 +18,8 @@ mod secret_string;
 mod service_status;
 mod session_token_type;
 mod software_discovery_state;
+#[cfg(feature = "http-ssrf")]
+pub mod ssrf;
 mod tracking_system;
 mod update_category;
 mod update_status;

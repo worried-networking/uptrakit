@@ -10,6 +10,7 @@ version.workspace = true
 default = []
 sea-orm = ["dep:sea-orm"]
 openapi = ["dep:utoipa"]
+http-ssrf = ["dep:reqwest", "dep:tokio"]
 
 [dependencies]
 serde = { workspace = true }
@@ -19,9 +20,12 @@ strum = { workspace = true }
 sea-orm = { workspace = true, optional = true }
 utoipa = { workspace = true, optional = true }
 zeroize = { workspace = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["net"], optional = true }
 
 [dev-dependencies]
 husky-rs = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true
