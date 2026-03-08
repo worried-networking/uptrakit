@@ -31,6 +31,9 @@ use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
+pub use uptrakit_web_api_types::batch_actions::{
+    BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
+};
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams,
@@ -1278,4 +1281,86 @@ pub async fn check_versions_host(
         message: format!("Version check triggered for '{}' on 1 agent", item.name),
     };
     (StatusCode::OK, Json(resp)).into_response()
+}
+
+/// Perform a batch action on multiple software items.
+///
+/// Supported actions: `approve`, `delete`.
+/// Returns per-item success/failure results (partial success is possible).
+#[utoipa::path(
+    post,
+    path = "/api/v1/software-items/batch",
+    request_body = BatchActionRequest,
+    responses(
+        (status = 200, description = "Batch action results", body = BatchActionResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
+    ),
+    tag = "Software Items",
+    extensions(("x-required-permission" = json!("manage_software"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_software_items(
+    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Json(body): Json<BatchActionRequest>,
+) -> Response {
+    if let Err(e) = body.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    let (succeeded_ids, failed) = match body.action.as_str() {
+        "approve" => {
+            match item_queries::batch_approve_software_items(&tenant_db, &body.ids).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("batch approve failed: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+        }
+        "delete" => match item_queries::batch_delete_software_items(&tenant_db, &body.ids).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("batch delete failed: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        },
+        unknown => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("unknown action: {unknown}. Supported: approve, delete"),
+            );
+        }
+    };
+
+    // Dispatch side effects per succeeded item.
+    for id in &succeeded_ids {
+        state
+            .event_broadcaster
+            .send(
+                tenant_db.tenant_id,
+                AdminEvent::SoftwareItemUpdated { id: *id },
+            )
+            .await;
+    }
+
+    let response = BatchActionResponse {
+        succeeded: succeeded_ids
+            .into_iter()
+            .map(|id| BatchActionSuccess { id })
+            .collect(),
+        failed: failed
+            .into_iter()
+            .map(|(id, error)| BatchActionFailure { id, error })
+            .collect(),
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
 }

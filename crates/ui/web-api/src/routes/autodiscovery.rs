@@ -21,6 +21,9 @@ use uuid::Uuid;
 pub use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, CreateAutodiscoveryIgnoreRequest,
 };
+pub use uptrakit_web_api_types::batch_actions::{
+    BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
+};
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 
 /// List autodiscovery ignore rules.
@@ -208,6 +211,75 @@ pub async fn delete_autodiscovery_ignore(
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
+}
+
+/// Perform a batch action on multiple autodiscovery ignore rules.
+///
+/// Supported actions: `delete`.
+/// Returns per-item success/failure results (partial success is possible).
+#[utoipa::path(
+    post,
+    path = "/api/v1/autodiscovery/ignores/batch",
+    request_body = BatchActionRequest,
+    responses(
+        (status = 200, description = "Batch action results", body = BatchActionResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
+    ),
+    tag = "Autodiscovery",
+    extensions(("x-required-permission" = json!("manage_software"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_autodiscovery_ignores(
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Json(body): Json<BatchActionRequest>,
+) -> Response {
+    if let Err(e) = body.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    let (succeeded_ids, failed) = match body.action.as_str() {
+        "delete" => {
+            match autodiscovery_queries::batch_delete_ignore_rules(
+                tenant_db.db(),
+                tenant_db.tenant_id,
+                &body.ids,
+            )
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("batch delete failed: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+        }
+        unknown => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("unknown action: {unknown}. Supported: delete"),
+            );
+        }
+    };
+
+    let response = BatchActionResponse {
+        succeeded: succeeded_ids
+            .into_iter()
+            .map(|id| BatchActionSuccess { id })
+            .collect(),
+        failed: failed
+            .into_iter()
+            .map(|(id, error)| BatchActionFailure { id, error })
+            .collect(),
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 #[derive(serde::Deserialize, Default)]

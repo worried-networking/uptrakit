@@ -19,6 +19,9 @@ use uptrakit_web_api_types::autodiscovery::{DiscardDiscoveredResponse, TriggerDi
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
+pub use uptrakit_web_api_types::batch_actions::{
+    BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
+};
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
@@ -749,6 +752,64 @@ fn detect_command_fields(config: &serde_json::Value) -> Vec<&'static str> {
     }
 
     fields
+}
+
+/// Perform a batch action on multiple plugin configs.
+///
+/// Supported actions: `delete`.
+/// Returns per-item success/failure results (partial success is possible).
+#[utoipa::path(
+    post,
+    path = "/api/v1/plugin-configs/batch",
+    request_body = BatchActionRequest,
+    responses(
+        (status = 200, description = "Batch action results", body = BatchActionResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
+    ),
+    tag = "Plugin Configs",
+    extensions(("x-required-permission" = json!("manage_software"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_plugin_configs(
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Json(body): Json<BatchActionRequest>,
+) -> Response {
+    if let Err(e) = body.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    let (succeeded_ids, failed) = match body.action.as_str() {
+        "delete" => match pc_queries::batch_delete_plugin_configs(&tenant_db, &body.ids).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("batch delete failed: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        },
+        unknown => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("unknown action: {unknown}. Supported: delete"),
+            );
+        }
+    };
+
+    let response = BatchActionResponse {
+        succeeded: succeeded_ids
+            .into_iter()
+            .map(|id| BatchActionSuccess { id })
+            .collect(),
+        failed: failed
+            .into_iter()
+            .map(|(id, error)| BatchActionFailure { id, error })
+            .collect(),
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 #[cfg(test)]

@@ -27,6 +27,9 @@ use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
+pub use uptrakit_web_api_types::batch_actions::{
+    BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
+};
 pub use uptrakit_web_api_types::host_packages::{
     CreateHostPackageIgnoreRequest, HostPackageDetailResponse, HostPackageIgnoreResponse,
     HostPackageResponse, HostUpdateSummary, ListHostPackagesParams, PromoteHostPackageRequest,
@@ -486,6 +489,113 @@ pub async fn promote_host_package(
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
+}
+
+// ── Batch operations ────────────────────────────────────────────────────────
+
+/// Perform a batch action on multiple host packages.
+///
+/// Supported actions: `delete`, `enable`, `disable`.
+/// Returns per-item success/failure results (partial success is possible).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hosts/{host_id}/packages/batch",
+    request_body = BatchActionRequest,
+    responses(
+        (status = 200, description = "Batch action results", body = BatchActionResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Host not found")
+    ),
+    tag = "Host Packages",
+    extensions(("x-required-permission" = json!("manage_software"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_host_packages(
+    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Path(host_id): Path<Uuid>,
+    Json(body): Json<BatchActionRequest>,
+) -> Response {
+    if let Err(e) = body.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    if let Err(resp) = verify_host(&tenant_db, host_id).await {
+        return resp;
+    }
+
+    let (succeeded_ids, failed) = match body.action.as_str() {
+        "delete" => {
+            match hp_queries::batch_deactivate_host_packages(&tenant_db, host_id, &body.ids).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("batch delete failed: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+        }
+        "enable" => {
+            match hp_queries::batch_enable_host_packages(&tenant_db, host_id, &body.ids).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("batch enable failed: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+        }
+        "disable" => {
+            match hp_queries::batch_disable_host_packages(&tenant_db, host_id, &body.ids).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("batch disable failed: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+        }
+        unknown => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("unknown action: {unknown}. Supported: delete, enable, disable"),
+            );
+        }
+    };
+
+    // Broadcast a single event if any items succeeded.
+    if !succeeded_ids.is_empty() {
+        state
+            .event_broadcaster
+            .send(
+                tenant_db.tenant_id,
+                AdminEvent::HostPackagesChanged { host_id },
+            )
+            .await;
+    }
+
+    let response = BatchActionResponse {
+        succeeded: succeeded_ids
+            .into_iter()
+            .map(|id| BatchActionSuccess { id })
+            .collect(),
+        failed: failed
+            .into_iter()
+            .map(|(id, error)| BatchActionFailure { id, error })
+            .collect(),
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 // ── Query parameter structs ─────────────────────────────────────────────────

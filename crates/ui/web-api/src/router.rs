@@ -53,12 +53,14 @@ use crate::AppState;
         crate::routes::services::deactivate_service,
         crate::routes::services::set_update_freeze,
         crate::routes::services::merge_service,
+        crate::routes::services::batch_services,
         crate::routes::system_services::list_system_services,
         crate::routes::system_services::get_system_service,
         crate::routes::system_services::update_system_service,
         crate::routes::system_services::approve_system_service,
         crate::routes::system_services::reject_system_service,
         crate::routes::system_services::deactivate_system_service,
+        crate::routes::system_services::batch_system_services,
         crate::routes::enrollment_tokens::create_enrollment_token,
         crate::routes::enrollment_tokens::list_enrollment_tokens,
         crate::routes::enrollment_tokens::get_enrollment_token,
@@ -87,12 +89,14 @@ use crate::AppState;
         crate::routes::hosts::get_host,
         crate::routes::hosts::update_host,
         crate::routes::hosts::deactivate_host,
+        crate::routes::hosts::batch_hosts,
         crate::routes::plugin_configs::list_plugin_types,
         crate::routes::plugin_configs::create_plugin_config,
         crate::routes::plugin_configs::list_plugin_configs,
         crate::routes::plugin_configs::get_plugin_config,
         crate::routes::plugin_configs::update_plugin_config,
         crate::routes::plugin_configs::delete_plugin_config,
+        crate::routes::plugin_configs::batch_plugin_configs,
         crate::routes::software_items::create_software_item,
         crate::routes::software_items::list_software_items,
         crate::routes::software_items::get_software_item,
@@ -105,6 +109,7 @@ use crate::AppState;
         crate::routes::software_items::check_versions,
         crate::routes::software_items::check_versions_host,
         crate::routes::software_items::approve_software_item,
+        crate::routes::software_items::batch_software_items,
         crate::routes::hosts::discover_host,
         crate::routes::hosts::discard_host_discovered,
         // Host packages
@@ -116,11 +121,13 @@ use crate::AppState;
         crate::routes::host_packages::list_host_package_ignores,
         crate::routes::host_packages::create_host_package_ignore,
         crate::routes::host_packages::delete_host_package_ignore,
+        crate::routes::host_packages::batch_host_packages,
         crate::routes::plugin_configs::discover_plugin_config,
         crate::routes::plugin_configs::discard_plugin_config_discovered,
         crate::routes::autodiscovery::list_autodiscovery_ignores,
         crate::routes::autodiscovery::create_autodiscovery_ignore,
         crate::routes::autodiscovery::delete_autodiscovery_ignore,
+        crate::routes::autodiscovery::batch_autodiscovery_ignores,
         crate::routes::discovery_allowlist::list_tenant_discovery_allowlist,
         crate::routes::discovery_allowlist::add_tenant_discovery_allowlist_entry,
         crate::routes::discovery_allowlist::remove_tenant_discovery_allowlist_entry,
@@ -185,6 +192,10 @@ use crate::AppState;
             crate::routes::services::MessageResponse,
             crate::routes::services::MergeAgentRequest,
             crate::routes::services::SetUpdateFreezeRequest,
+            crate::routes::services::BatchActionRequest,
+            crate::routes::services::BatchActionResponse,
+            crate::routes::services::BatchActionSuccess,
+            crate::routes::services::BatchActionFailure,
             crate::routes::system_services::SystemServiceResponse,
             crate::routes::system_services::UpdateSystemServiceRequest,
             uptrakit_web_api_types::pagination::PaginatedResponse<crate::routes::system_services::SystemServiceResponse>,
@@ -437,6 +448,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             crate::routes::settings_agent_certs::update_agent_certificate_settings
         ))
         .routes(routes!(crate::routes::services::list_services))
+        .routes(routes!(crate::routes::services::batch_services))
         .routes(routes!(
             crate::routes::enrollment_tokens::create_enrollment_token,
             crate::routes::enrollment_tokens::list_enrollment_tokens
@@ -454,6 +466,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(crate::routes::services::set_update_freeze))
         .routes(routes!(crate::routes::services::merge_service))
+        // Batch actions
+        .routes(routes!(
+            crate::routes::system_services::batch_system_services
+        ))
         .routes(routes!(
             crate::routes::system_services::list_system_services
         ))
@@ -498,6 +514,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::hosts::get_host))
         .routes(routes!(crate::routes::hosts::update_host))
         .routes(routes!(crate::routes::hosts::deactivate_host))
+        .routes(routes!(crate::routes::hosts::batch_hosts))
         .routes(routes!(crate::routes::plugin_configs::list_plugin_types))
         .routes(routes!(
             crate::routes::plugin_configs::create_plugin_config,
@@ -506,6 +523,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::plugin_configs::get_plugin_config))
         .routes(routes!(crate::routes::plugin_configs::update_plugin_config))
         .routes(routes!(crate::routes::plugin_configs::delete_plugin_config))
+        .routes(routes!(crate::routes::plugin_configs::batch_plugin_configs))
         .routes(routes!(
             crate::routes::software_items::create_software_item,
             crate::routes::software_items::list_software_items
@@ -544,6 +562,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(
             crate::routes::software_items::approve_software_item
         ))
+        .routes(routes!(crate::routes::software_items::batch_software_items))
         .routes(routes!(crate::routes::hosts::discover_host))
         .routes(routes!(crate::routes::hosts::discard_host_discovered))
         // Host packages
@@ -561,6 +580,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(
             crate::routes::host_packages::delete_host_package_ignore
         ))
+        .routes(routes!(crate::routes::host_packages::batch_host_packages))
         .routes(routes!(
             crate::routes::plugin_configs::discover_plugin_config
         ))
@@ -573,6 +593,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(
             crate::routes::autodiscovery::delete_autodiscovery_ignore
+        ))
+        .routes(routes!(
+            crate::routes::autodiscovery::batch_autodiscovery_ignores
         ))
         // Notifications
         .routes(routes!(

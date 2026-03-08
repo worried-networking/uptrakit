@@ -15,10 +15,14 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, prelude::*, service_host};
 use uptrakit_web_api_types::events::AdminEvent;
+use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::autodiscovery::{
     DiscardDiscoveredResponse, TriggerDiscoveryResponse,
+};
+pub use uptrakit_web_api_types::batch_actions::{
+    BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
 };
 pub use uptrakit_web_api_types::hosts::{
     HostAgentSummary, HostMessageResponse, HostResponse, UpdateHostRequest,
@@ -309,6 +313,73 @@ pub async fn discard_host_discovered(
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
+}
+
+/// Perform a batch action on multiple hosts.
+///
+/// Supported actions: `deactivate`.
+/// Returns per-item success/failure results (partial success is possible).
+#[utoipa::path(
+    post,
+    path = "/api/v1/hosts/batch",
+    request_body = BatchActionRequest,
+    responses(
+        (status = 200, description = "Batch action results", body = BatchActionResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
+    ),
+    tag = "Hosts",
+    extensions(("x-required-permission" = json!("manage_hosts"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_hosts(
+    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
+    CanManageHosts(_user): CanManageHosts,
+    Json(body): Json<BatchActionRequest>,
+) -> Response {
+    if let Err(e) = body.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    let (succeeded_ids, failed) = match body.action.as_str() {
+        "deactivate" => match host_queries::batch_deactivate_hosts(&tenant_db, &body.ids).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("batch deactivate failed: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        },
+        unknown => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("unknown action: {unknown}. Supported: deactivate"),
+            );
+        }
+    };
+
+    // Dispatch side effects per succeeded item.
+    for id in &succeeded_ids {
+        state
+            .event_broadcaster
+            .send(tenant_db.tenant_id, AdminEvent::HostDeleted { id: *id })
+            .await;
+    }
+
+    let response = BatchActionResponse {
+        succeeded: succeeded_ids
+            .into_iter()
+            .map(|id| BatchActionSuccess { id })
+            .collect(),
+        failed: failed
+            .into_iter()
+            .map(|(id, error)| BatchActionFailure { id, error })
+            .collect(),
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 #[derive(serde::Deserialize, Default)]

@@ -16,6 +16,9 @@ use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
 
+pub use uptrakit_web_api_types::batch_actions::{
+    BatchActionFailure, BatchActionRequest, BatchActionResponse, BatchActionSuccess,
+};
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::system_services::{
     ListSystemServicesQuery, SystemServiceResponse, UpdateSystemServiceRequest,
@@ -330,4 +333,138 @@ pub async fn deactivate_system_service(
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
+}
+
+/// Perform a batch action on multiple system services.
+///
+/// Supported actions: `approve`, `reject`, `deactivate`.
+/// Returns per-item success/failure results (partial success is possible).
+#[utoipa::path(
+    post,
+    path = "/api/v1/system-services/batch",
+    request_body = BatchActionRequest,
+    responses(
+        (status = 200, description = "Batch action results", body = BatchActionResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
+    ),
+    tag = "System Services",
+    extensions(("x-required-permission" = json!("manage_system_services"))),
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_system_services(
+    State(state): State<Arc<AppState>>,
+    CanManageSystemServices(_user): CanManageSystemServices,
+    Json(body): Json<BatchActionRequest>,
+) -> Response {
+    if let Err(e) = body.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
+    let (succeeded_ids, failed) = match body.action.as_str() {
+        "approve" => match ss_queries::batch_approve_system_services(state.db(), &body.ids).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("batch approve failed: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        },
+        "reject" => match ss_queries::batch_reject_system_services(state.db(), &body.ids).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("batch reject failed: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        },
+        "deactivate" => {
+            match ss_queries::batch_deactivate_system_services(state.db(), &body.ids).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("batch deactivate failed: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+        }
+        unknown => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("unknown action: {unknown}. Supported: approve, reject, deactivate"),
+            );
+        }
+    };
+
+    // Dispatch side effects per succeeded item.
+    for id in &succeeded_ids {
+        match body.action.as_str() {
+            "approve" => {
+                let _ = state
+                    .notification_service
+                    .send(
+                        id,
+                        ControllerMessage::Approved(ApprovedPayload { service_id: *id }),
+                    )
+                    .await;
+                state
+                    .event_broadcaster
+                    .send_global(AdminEvent::SystemServiceStatusChanged {
+                        id: *id,
+                        status: "approved".to_string(),
+                    })
+                    .await;
+            }
+            "reject" => {
+                let _ = state
+                    .notification_service
+                    .send(
+                        id,
+                        ControllerMessage::Rejected(RejectedPayload { service_id: *id }),
+                    )
+                    .await;
+                state.service_connections.force_disconnect(id).await;
+                state
+                    .event_broadcaster
+                    .send_global(AdminEvent::SystemServiceStatusChanged {
+                        id: *id,
+                        status: "rejected".to_string(),
+                    })
+                    .await;
+            }
+            "deactivate" => {
+                state.revocation_notify.notify_one();
+                state
+                    .notification_service
+                    .publish_controller_event(ControllerMessage::RequestCrlRenewal(
+                        RequestCrlRenewalPayload::default(),
+                    ))
+                    .await;
+                state.service_connections.force_disconnect(id).await;
+                state
+                    .event_broadcaster
+                    .send_global(AdminEvent::SystemServiceStatusChanged {
+                        id: *id,
+                        status: "deactivated".to_string(),
+                    })
+                    .await;
+            }
+            _ => {}
+        }
+    }
+
+    let response = BatchActionResponse {
+        succeeded: succeeded_ids
+            .into_iter()
+            .map(|id| BatchActionSuccess { id })
+            .collect(),
+        failed: failed
+            .into_iter()
+            .map(|(id, error)| BatchActionFailure { id, error })
+            .collect(),
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
 }
