@@ -16,7 +16,12 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![
+        // Core agent-ssh schema migrations.  Keep the legacy
+        // `m20260307_000002_pending_proxmox_matches` entry — existing
+        // databases already have it recorded in `seaql_migrations` and the
+        // Proxmox plugin's own `CreateProxmoxPendingMatches` migration handles
+        // the rename + data migration from the old table on first run.
+        let mut migrations: Vec<Box<dyn MigrationTrait>> = vec![
             Box::new(m20260215_000001_initial::Migration),
             Box::new(m20260222_000002_add_machine_id::Migration),
             Box::new(m20260224_000003_add_sudo_columns::Migration),
@@ -26,7 +31,21 @@ impl MigratorTrait for Migrator {
             Box::new(m20260306_000001_add_pve_columns::Migration),
             Box::new(m20260307_000001_add_pve_node_name::Migration),
             Box::new(m20260307_000002_pending_proxmox_matches::Migration),
-        ]
+        ];
+
+        // Append plugin-owned migrations so they run after the core schema is
+        // in place.  Each plugin migration has a unique name tracked in
+        // `seaql_migrations`, so already-applied migrations are skipped.
+        //
+        // `CreateProxmoxHostState`       — creates `proxmox_host_state`,
+        //   migrates PVE state from legacy `ssh_hosts` columns if present.
+        // `CreateProxmoxPendingMatches`  — creates `proxmox_pending_matches`,
+        //   migrates data from the legacy `pending_proxmox_matches` table.
+        migrations.extend(
+            uptrakit_plugin_infrastructure_registry::create_agent_infra_registry().all_migrations(),
+        );
+
+        migrations
     }
 }
 

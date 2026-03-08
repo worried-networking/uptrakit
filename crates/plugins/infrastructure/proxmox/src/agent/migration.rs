@@ -138,27 +138,27 @@ impl MigrationTrait for CreateProxmoxPendingMatches {
         manager
             .create_table(
                 Table::create()
-                    .table(ProxmoxPendingMatch::Table)
+                    .table(ProxmoxPendingMatches::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(ProxmoxPendingMatch::Id)
+                        ColumnDef::new(ProxmoxPendingMatches::Id)
                             .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(ProxmoxPendingMatch::HostId)
+                        ColumnDef::new(ProxmoxPendingMatches::HostId)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(ProxmoxPendingMatch::MappingId)
+                        ColumnDef::new(ProxmoxPendingMatches::MappingId)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(ProxmoxPendingMatch::CreatedAt)
+                        ColumnDef::new(ProxmoxPendingMatches::CreatedAt)
                             .string()
                             .not_null(),
                     )
@@ -194,13 +194,13 @@ impl MigrationTrait for CreateProxmoxPendingMatches {
 
     async fn down(&self, manager: &SchemaManager) -> std::result::Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(ProxmoxPendingMatch::Table).to_owned())
+            .drop_table(Table::drop().table(ProxmoxPendingMatches::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum ProxmoxPendingMatch {
+enum ProxmoxPendingMatches {
     Table,
     Id,
     HostId,
