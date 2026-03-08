@@ -11,7 +11,8 @@
 		updateSoftwareItem,
 		listPluginTypes,
 		getSoftwareItem,
-		triggerSoftwareUpdate
+		triggerSoftwareUpdate,
+		unassignHostFromSoftwareItemWithIgnore
 	} from '$lib/api';
 	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -52,6 +53,8 @@
 	let updateModalLoading: boolean = $state(false);
 	let selectedHostIds: Set<string> = $state(new Set());
 	let triggeringUpdate: boolean = $state(false);
+	let confirmIgnore: { id: string; name: string } | null = $state(null);
+	let ignoreSubmitting: boolean = $state(false);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
@@ -192,6 +195,30 @@
 			loadAll(currentPage);
 		} finally {
 			submitting = false;
+		}
+	}
+
+	function requestIgnore(item: SoftwareItemResponse) {
+		closeMenu();
+		confirmIgnore = { id: item.id, name: item.name };
+	}
+
+	async function executeIgnore() {
+		if (!confirmIgnore || ignoreSubmitting) return;
+		const { id, name } = confirmIgnore;
+		confirmIgnore = null;
+		ignoreSubmitting = true;
+		try {
+			const detail = await getSoftwareItem(id);
+			await Promise.all(detail.hosts.map((h) => unassignHostFromSoftwareItemWithIgnore(id, h.host_id)));
+			await deleteSoftwareItem(id);
+			items = items.filter((i) => i.id !== id);
+			showSuccess(`"${name}" will be ignored in future autodiscovery runs.`);
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to ignore software item.');
+			loadAll(currentPage);
+		} finally {
+			ignoreSubmitting = false;
 		}
 	}
 
@@ -446,6 +473,16 @@
 						</li>
 						<li>
 							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
+								role="menuitem"
+								tabindex="-1"
+								onclick={() => requestIgnore(item)}
+							>
+								Ignore
+							</button>
+						</li>
+						<li>
+							<button
 								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 								role="menuitem"
 								tabindex="-1"
@@ -512,6 +549,26 @@
 				onconfirm={executeDelete}
 				oncancel={() => (confirmDelete = null)}
 			/>
+		{/if}
+
+		{#if confirmIgnore}
+			<Modal title="Ignore Software Item" onclose={() => (confirmIgnore = null)}>
+				<p class="text-sm">
+					Permanently ignore <strong>{confirmIgnore.name}</strong> from future autodiscovery runs?
+				</p>
+				<p class="mt-2 text-sm text-surface-500">
+					An ignore rule will be created so this package is not re-discovered. You can manage ignore rules under <a
+						href="/plugin-configs"
+						class="underline">Plugin Configs → Ignore Rules</a
+					>.
+				</p>
+				{#snippet footer()}
+					<button class="btn preset-tonal-surface" onclick={() => (confirmIgnore = null)}>Cancel</button>
+					<button class="btn preset-filled-warning-500" disabled={ignoreSubmitting} onclick={executeIgnore}>
+						{ignoreSubmitting ? 'Ignoring…' : 'Ignore'}
+					</button>
+				{/snippet}
+			</Modal>
 		{/if}
 
 		{#if assignItem}
