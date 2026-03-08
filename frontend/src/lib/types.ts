@@ -785,7 +785,16 @@ export interface TableColumn {
 	sortable?: boolean;
 }
 
-export type FieldType = 'text' | 'password' | 'number' | 'select' | 'textarea' | 'toggle' | 'hidden' | string;
+export type FieldType =
+	| 'text'
+	| 'password'
+	| 'number'
+	| 'select'
+	| 'multi_select'
+	| 'textarea'
+	| 'toggle'
+	| 'hidden'
+	| string;
 
 export interface SelectOption {
 	value: string;

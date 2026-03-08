@@ -22,6 +22,8 @@
 	} = $props();
 
 	let values: Record<string, string> = $state({});
+	// Separate state for multi_select fields — stores selected values as string[].
+	let multiValues: Record<string, string[]> = $state({});
 	let dynamicOptions: Record<string, SelectOption[]> = $state({});
 	let loadingOptions: Record<string, boolean> = $state({});
 
@@ -33,20 +35,24 @@
 
 	$effect(() => {
 		const initial: Record<string, string> = {};
+		const initialMulti: Record<string, string[]> = {};
 		const rowData = extraParams._row as Record<string, unknown> | undefined;
 		for (const f of fields) {
-			if (f.field_type === 'hidden' && rowData && rowData[f.key] != null) {
+			if (f.field_type === 'multi_select') {
+				initialMulti[f.key] = [];
+			} else if (f.field_type === 'hidden' && rowData && rowData[f.key] != null) {
 				initial[f.key] = String(rowData[f.key]);
 			} else {
 				initial[f.key] = f.default_value ?? '';
 			}
 		}
 		values = initial;
+		multiValues = initialMulti;
 	});
 
 	$effect(() => {
 		for (const f of fields) {
-			if (f.field_type === 'select' && f.select_source && !initiatedKeys[f.key]) {
+			if ((f.field_type === 'select' || f.field_type === 'multi_select') && f.select_source && !initiatedKeys[f.key]) {
 				initiatedKeys[f.key] = true;
 				if (f.select_source.type === 'rest_api') {
 					loadRestApiOptions(f.key, f.select_source.path, f.select_source.value_field, f.select_source.label_field);
@@ -125,21 +131,34 @@
 		return field.visible_when.values.includes(controlValue);
 	}
 
+	function toggleMultiValue(fieldKey: string, optionValue: string, checked: boolean) {
+		const current = multiValues[fieldKey] ?? [];
+		multiValues = {
+			...multiValues,
+			[fieldKey]: checked ? [...current, optionValue] : current.filter((v) => v !== optionValue)
+		};
+	}
+
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
 		// Coerce values to the correct types expected by the backend:
+		// - multi_select → JSON-encoded string array
 		// - toggles → boolean (values map stores "true" / "" as strings)
 		// - empty text/textarea/password fields → omit entirely (absent = unset)
 		// - all other fields → pass through as strings
 		const coerced: Record<string, unknown> = {};
 		for (const f of fields) {
-			const raw = values[f.key];
-			if (f.field_type === 'toggle') {
-				coerced[f.key] = raw === 'true';
-			} else if (raw !== '') {
-				coerced[f.key] = raw;
+			if (f.field_type === 'multi_select') {
+				coerced[f.key] = JSON.stringify(multiValues[f.key] ?? []);
+			} else {
+				const raw = values[f.key];
+				if (f.field_type === 'toggle') {
+					coerced[f.key] = raw === 'true';
+				} else if (raw !== '') {
+					coerced[f.key] = raw;
+				}
+				// Empty optional text fields are intentionally omitted.
 			}
-			// Empty optional text fields are intentionally omitted.
 		}
 		await onsubmit({ ...extraParams, ...coerced });
 	}
@@ -174,6 +193,37 @@
 							{/each}
 						</select>
 					{/if}
+				{:else if field.field_type === 'multi_select'}
+					{#if loadingOptions[field.key]}
+						<p class="text-sm text-surface-500">Loading options...</p>
+					{:else}
+						{@const opts = resolvedOptions(field)}
+						{#if opts.length === 0}
+							<p class="text-sm text-surface-500">No options available.</p>
+						{:else}
+							<div
+								class="max-h-48 overflow-y-auto rounded-container-token border border-surface-300-600-token p-2 space-y-1"
+							>
+								{#each opts as opt (opt.value)}
+									{@const checked = (multiValues[field.key] ?? []).includes(opt.value)}
+									<label
+										class="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-surface-100-800-token"
+									>
+										<input
+											type="checkbox"
+											{checked}
+											onchange={(e) => toggleMultiValue(field.key, opt.value, (e.target as HTMLInputElement).checked)}
+											class="checkbox"
+										/>
+										<span class="text-sm">{opt.label}</span>
+									</label>
+								{/each}
+							</div>
+							<p class="mt-1 text-xs text-surface-500">
+								{(multiValues[field.key] ?? []).length} selected
+							</p>
+						{/if}
+					{/if}
 				{:else if field.field_type === 'toggle'}
 					<label class="flex items-center gap-2">
 						<input
@@ -198,7 +248,7 @@
 					/>
 				{/if}
 
-				{#if field.help_text && field.field_type !== 'toggle'}
+				{#if field.help_text && field.field_type !== 'toggle' && field.field_type !== 'multi_select'}
 					<p class="mt-1 text-xs text-surface-500">{field.help_text}</p>
 				{/if}
 			</div>

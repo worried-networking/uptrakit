@@ -595,12 +595,13 @@ impl FormDef {
     }
 }
 
-/// Dynamic data source for `Select` field options.
+/// Dynamic data source for `Select` and `MultiSelect` field options.
 ///
-/// When a `FieldDef` with `field_type = Select` has `select_source` set, the
-/// frontend calls the specified endpoint at form-open time to populate the
-/// dropdown. Static `options` and `select_source` are mutually exclusive; when
-/// both are present `select_source` takes precedence.
+/// When a `FieldDef` with `field_type = Select` or `field_type = MultiSelect`
+/// has `select_source` set, the frontend calls the specified endpoint at
+/// form-open time to populate the options. Static `options` and `select_source`
+/// are mutually exclusive; when both are present `select_source` takes
+/// precedence.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -780,6 +781,11 @@ pub enum FieldType {
     Number,
     /// Dropdown select.
     Select,
+    /// Checkbox list allowing multiple selections.
+    ///
+    /// Value is submitted as a JSON array of strings. Uses `select_source` or
+    /// `options` like `Select`.
+    MultiSelect,
     /// Multi-line text input.
     Textarea,
     /// Boolean toggle.
