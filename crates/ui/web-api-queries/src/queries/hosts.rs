@@ -279,6 +279,49 @@ pub async fn deactivate_host(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea
     Ok(true)
 }
 
+// ---------------------------------------------------------------------------
+// Batch operations
+// ---------------------------------------------------------------------------
+
+/// Deactivate multiple hosts (soft-delete).
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_deactivate_hosts(
+    tenant_db: &TenantDb,
+    ids: &[Uuid],
+) -> std::result::Result<(Vec<Uuid>, Vec<(Uuid, String)>), sea_orm::DbErr> {
+    let hosts = tenant_db
+        .find::<host::Entity>()
+        .filter(host::Column::Id.is_in(ids.iter().copied()))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await?;
+
+    let found: std::collections::HashMap<Uuid, host::Model> =
+        hosts.into_iter().map(|h| (h.id, h)).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains_key(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for (id, h) in &found {
+        let mut active: host::ActiveModel = h.clone().into();
+        active.deactivated_at = Set(Some(now));
+        active.updated_at = Set(now);
+        active.update(tenant_db.db()).await?;
+        succeeded.push(*id);
+    }
+
+    Ok((succeeded, failed))
+}
+
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;

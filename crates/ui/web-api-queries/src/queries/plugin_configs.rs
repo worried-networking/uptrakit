@@ -337,6 +337,51 @@ pub async fn update_plugin_config(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Batch operations
+// ---------------------------------------------------------------------------
+
+/// Soft-delete multiple plugin configs.
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_delete_plugin_configs(
+    tenant_db: &TenantDb,
+    ids: &[Uuid],
+) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+    let configs = tenant_db
+        .find::<plugin_config::Entity>()
+        .filter(plugin_config::Column::Id.is_in(ids.iter().copied()))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await
+        .context_to()?;
+
+    let found: std::collections::HashMap<Uuid, plugin_config::Model> =
+        configs.into_iter().map(|c| (c.id, c)).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains_key(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for (id, config) in &found {
+        let mut active: plugin_config::ActiveModel = config.clone().into();
+        active.deactivated_at = Set(Some(now));
+        active.enabled = Set(false);
+        active.updated_at = Set(now);
+        active.update(tenant_db.db()).await.context_to()?;
+        succeeded.push(*id);
+    }
+
+    Ok((succeeded, failed))
+}
+
 /// Soft-delete a plugin configuration.
 /// Returns `true` if deleted, `false` if not found.
 #[tracing::instrument(skip_all)]

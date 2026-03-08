@@ -161,6 +161,49 @@ pub async fn delete_ignore_rule(
     Ok(result.rows_affected > 0)
 }
 
+/// Hard-delete multiple autodiscovery ignore rules.
+///
+/// Returns `(succeeded_ids, failed)` where `failed` contains `(id, reason)` pairs.
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all, fields(%tenant_id))]
+pub async fn batch_delete_ignore_rules(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    ids: &[Uuid],
+) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+    // Load existing rules to determine which IDs are valid.
+    let rules = AutodiscoveryIgnore::find()
+        .filter(autodiscovery_ignore::Column::Id.is_in(ids.iter().copied()))
+        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
+        .all(db)
+        .await
+        .context_to()?;
+
+    let found: std::collections::HashSet<Uuid> = rules.into_iter().map(|r| r.id).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    // Delete all found rules in one query.
+    if !found.is_empty() {
+        AutodiscoveryIgnore::delete_many()
+            .filter(autodiscovery_ignore::Column::Id.is_in(found.iter().copied()))
+            .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
+            .exec(db)
+            .await
+            .context_to()?;
+        succeeded.extend(found);
+    }
+
+    Ok((succeeded, failed))
+}
+
 // ── Discard pending items ─────────────────────────────────────────────────────
 
 /// Soft-delete all `pending` software items for a tenant, optionally filtered by

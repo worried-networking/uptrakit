@@ -1167,6 +1167,105 @@ pub async fn load_host_assignment(
         .flatten()
 }
 
+// ---------------------------------------------------------------------------
+// Batch operations
+// ---------------------------------------------------------------------------
+
+/// Approve multiple pending discovered software items.
+///
+/// Sets `discovery_state = Approved` and `enabled = true` for items in
+/// `Pending` discovery state. Items not found or not pending are reported
+/// as failed.
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_approve_software_items(
+    tenant_db: &TenantDb,
+    ids: &[Uuid],
+) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+    let items = software_item::Entity::find()
+        .filter(software_item::Column::Id.is_in(ids.iter().copied()))
+        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await
+        .context_to()?;
+
+    let found: std::collections::HashMap<Uuid, software_item::Model> =
+        items.into_iter().map(|i| (i.id, i)).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains_key(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for (id, item) in &found {
+        if item.discovery_state != Some(uptrakit_shared_types::SoftwareDiscoveryState::Pending) {
+            failed.push((
+                *id,
+                "software item is not in pending discovery state".to_string(),
+            ));
+            continue;
+        }
+        let mut active: software_item::ActiveModel = item.clone().into();
+        active.discovery_state = Set(Some(
+            uptrakit_shared_types::SoftwareDiscoveryState::Approved,
+        ));
+        active.enabled = Set(true);
+        active.updated_at = Set(now);
+        active.update(tenant_db.db()).await.context_to()?;
+        succeeded.push(*id);
+    }
+
+    Ok((succeeded, failed))
+}
+
+/// Soft-delete multiple software items.
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_delete_software_items(
+    tenant_db: &TenantDb,
+    ids: &[Uuid],
+) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+    let items = software_item::Entity::find()
+        .filter(software_item::Column::Id.is_in(ids.iter().copied()))
+        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await
+        .context_to()?;
+
+    let found: std::collections::HashMap<Uuid, software_item::Model> =
+        items.into_iter().map(|i| (i.id, i)).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains_key(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for (id, item) in &found {
+        let mut active: software_item::ActiveModel = item.clone().into();
+        active.deactivated_at = Set(Some(now));
+        active.enabled = Set(false);
+        active.updated_at = Set(now);
+        active.update(tenant_db.db()).await.context_to()?;
+        succeeded.push(*id);
+    }
+
+    Ok((succeeded, failed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

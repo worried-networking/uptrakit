@@ -276,6 +276,155 @@ pub async fn deactivate_system_service(db: &DatabaseConnection, id: Uuid) -> Res
     Ok(true)
 }
 
+// ---------------------------------------------------------------------------
+// Batch operations
+// ---------------------------------------------------------------------------
+
+/// Approve multiple pending system services.
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_approve_system_services(
+    db: &DatabaseConnection,
+    ids: &[Uuid],
+) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+    let services = system_service::Entity::find()
+        .filter(system_service::Column::Id.is_in(ids.iter().copied()))
+        .filter(system_service::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await
+        .context_to()?;
+
+    let found: std::collections::HashMap<Uuid, system_service::Model> =
+        services.into_iter().map(|s| (s.id, s)).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains_key(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for (id, svc) in &found {
+        if svc.status != SystemServiceStatus::Pending {
+            failed.push((*id, "system service is not in pending status".to_string()));
+            continue;
+        }
+        let mut active: system_service::ActiveModel = svc.clone().into();
+        active.status = Set(SystemServiceStatus::Approved);
+        active.updated_at = Set(now);
+        active.update(db).await.context_to()?;
+        succeeded.push(*id);
+    }
+
+    Ok((succeeded, failed))
+}
+
+/// Reject multiple pending system services.
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_reject_system_services(
+    db: &DatabaseConnection,
+    ids: &[Uuid],
+) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+    let services = system_service::Entity::find()
+        .filter(system_service::Column::Id.is_in(ids.iter().copied()))
+        .filter(system_service::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await
+        .context_to()?;
+
+    let found: std::collections::HashMap<Uuid, system_service::Model> =
+        services.into_iter().map(|s| (s.id, s)).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains_key(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for (id, svc) in &found {
+        if svc.status != SystemServiceStatus::Pending {
+            failed.push((*id, "system service is not in pending status".to_string()));
+            continue;
+        }
+        let mut active: system_service::ActiveModel = svc.clone().into();
+        active.status = Set(SystemServiceStatus::Rejected);
+        active.deactivated_at = Set(Some(now));
+        active.updated_at = Set(now);
+        active.update(db).await.context_to()?;
+        succeeded.push(*id);
+    }
+
+    Ok((succeeded, failed))
+}
+
+/// Deactivate multiple system services (soft-delete with certificate revocation).
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all)]
+pub async fn batch_deactivate_system_services(
+    db: &DatabaseConnection,
+    ids: &[Uuid],
+) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+    let services = system_service::Entity::find()
+        .filter(system_service::Column::Id.is_in(ids.iter().copied()))
+        .filter(system_service::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await
+        .context_to()?;
+
+    let found: std::collections::HashMap<Uuid, system_service::Model> =
+        services.into_iter().map(|s| (s.id, s)).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains_key(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for (id, svc) in &found {
+        let txn = db.begin().await.context_to()?;
+
+        let mut active: system_service::ActiveModel = svc.clone().into();
+        active.deactivated_at = Set(Some(now));
+        active.updated_at = Set(now);
+        active.update(&txn).await.context_to()?;
+
+        system_service_certificate::Entity::update_many()
+            .col_expr(
+                system_service_certificate::Column::RevokedAt,
+                Expr::value(Some(now)),
+            )
+            .col_expr(
+                system_service_certificate::Column::RevocationReason,
+                Expr::value(Some(SystemRevocationReason::ServiceDeactivated)),
+            )
+            .filter(system_service_certificate::Column::SystemServiceId.eq(*id))
+            .filter(system_service_certificate::Column::RevokedAt.is_null())
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        txn.commit().await.context_to()?;
+        succeeded.push(*id);
+    }
+
+    Ok((succeeded, failed))
+}
+
 #[cfg(test)]
 mod tests {
     use sea_orm::{

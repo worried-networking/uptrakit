@@ -775,6 +775,141 @@ pub async fn promote_host_package(
         .ok_or_else(|| report!(HostPackageError::SoftwareItemNotFound(software_item_id)))
 }
 
+// ---------------------------------------------------------------------------
+// Batch operations
+// ---------------------------------------------------------------------------
+
+/// Soft-delete multiple host packages.
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all, fields(%host_id))]
+pub async fn batch_deactivate_host_packages(
+    tenant_db: &TenantDb,
+    host_id: Uuid,
+    ids: &[Uuid],
+) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+    let packages = host_package::Entity::find()
+        .filter(host_package::Column::Id.is_in(ids.iter().copied()))
+        .filter(host_package::Column::HostId.eq(host_id))
+        .filter(host_package::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await
+        .context_to()?;
+
+    let found: std::collections::HashMap<Uuid, host_package::Model> =
+        packages.into_iter().map(|p| (p.id, p)).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains_key(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for (id, pkg) in &found {
+        let mut active: host_package::ActiveModel = pkg.clone().into();
+        active.deactivated_at = Set(Some(now));
+        active.updated_at = Set(now);
+        active.update(tenant_db.db()).await.context_to()?;
+        succeeded.push(*id);
+    }
+
+    Ok((succeeded, failed))
+}
+
+/// Enable multiple host packages for version checks.
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all, fields(%host_id))]
+pub async fn batch_enable_host_packages(
+    tenant_db: &TenantDb,
+    host_id: Uuid,
+    ids: &[Uuid],
+) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+    let packages = host_package::Entity::find()
+        .filter(host_package::Column::Id.is_in(ids.iter().copied()))
+        .filter(host_package::Column::HostId.eq(host_id))
+        .filter(host_package::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await
+        .context_to()?;
+
+    let found: std::collections::HashMap<Uuid, host_package::Model> =
+        packages.into_iter().map(|p| (p.id, p)).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains_key(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for (id, pkg) in &found {
+        if pkg.enabled {
+            succeeded.push(*id); // already enabled, count as success
+            continue;
+        }
+        let mut active: host_package::ActiveModel = pkg.clone().into();
+        active.enabled = Set(true);
+        active.updated_at = Set(now);
+        active.update(tenant_db.db()).await.context_to()?;
+        succeeded.push(*id);
+    }
+
+    Ok((succeeded, failed))
+}
+
+/// Disable multiple host packages from version checks.
+#[allow(clippy::type_complexity)]
+#[tracing::instrument(skip_all, fields(%host_id))]
+pub async fn batch_disable_host_packages(
+    tenant_db: &TenantDb,
+    host_id: Uuid,
+    ids: &[Uuid],
+) -> Result<(Vec<Uuid>, Vec<(Uuid, String)>)> {
+    let packages = host_package::Entity::find()
+        .filter(host_package::Column::Id.is_in(ids.iter().copied()))
+        .filter(host_package::Column::HostId.eq(host_id))
+        .filter(host_package::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await
+        .context_to()?;
+
+    let found: std::collections::HashMap<Uuid, host_package::Model> =
+        packages.into_iter().map(|p| (p.id, p)).collect();
+
+    let mut succeeded = Vec::new();
+    let mut failed: Vec<(Uuid, String)> = Vec::new();
+
+    for id in ids {
+        if !found.contains_key(id) {
+            failed.push((*id, "not found".to_string()));
+        }
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for (id, pkg) in &found {
+        if !pkg.enabled {
+            succeeded.push(*id); // already disabled, count as success
+            continue;
+        }
+        let mut active: host_package::ActiveModel = pkg.clone().into();
+        active.enabled = Set(false);
+        active.updated_at = Set(now);
+        active.update(tenant_db.db()).await.context_to()?;
+        succeeded.push(*id);
+    }
+
+    Ok((succeeded, failed))
+}
+
 /// Helper: create a new software item using the package name or a caller-supplied override.
 async fn create_new_software_item(
     tenant_db: &TenantDb,
