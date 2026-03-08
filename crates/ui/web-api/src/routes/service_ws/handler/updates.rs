@@ -168,17 +168,21 @@ pub(super) async fn deliver_pending_updates(
         .map(|h| (h.id, h))
         .collect();
 
-    // Batch 3: plugin assignments for the two relevant roles across all
+    // Batch 3: plugin assignments for the three relevant roles across all
     // (host_id, software_item_id) combinations that appear in pending_updates.
     // The cross-product filter may include extra rows for pairs not in
     // pending_updates; those are silently ignored during the join below.
+    // `fetch_releases` is included so its plugin config can be used to extract
+    // the `require_attestation` flag when enriching `release_info`.
     let assignments: Vec<host_software_item_plugin::Model> =
         host_software_item_plugin::Entity::find()
-            .filter(host_software_item_plugin::Column::HostId.is_in(host_ids))
-            .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(sw_ids))
-            .filter(
-                host_software_item_plugin::Column::Role.is_in(["execute_update", "detect_version"]),
-            )
+            .filter(host_software_item_plugin::Column::HostId.is_in(host_ids.clone()))
+            .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(sw_ids.clone()))
+            .filter(host_software_item_plugin::Column::Role.is_in([
+                "execute_update",
+                "detect_version",
+                "fetch_releases",
+            ]))
             .all(state.db())
             .await
             .context_to::<HandlerError>()?;
@@ -209,6 +213,23 @@ pub(super) async fn deliver_pending_updates(
         .into_iter()
         .map(|c| (c.id, c))
         .collect();
+
+    // Batch 5: host_software_item rows for `latest_release_metadata`.
+    //
+    // The cross-product filter may return extra rows; they are silently
+    // ignored during the join below (same pattern as batch 3).
+    // This allows `enrich_release_info_with_attestation` to reconstruct
+    // `release_info` for plugins like GitHub that require asset download URLs.
+    let hsi_metadata_map: HashMap<(uuid::Uuid, uuid::Uuid), Option<serde_json::Value>> =
+        host_software_item::Entity::find()
+            .filter(host_software_item::Column::HostId.is_in(host_ids))
+            .filter(host_software_item::Column::SoftwareItemId.is_in(sw_ids))
+            .all(state.db())
+            .await
+            .context_to::<HandlerError>()?
+            .into_iter()
+            .map(|m| ((m.host_id, m.software_item_id), m.latest_release_metadata))
+            .collect();
 
     // 3. Build ExecuteUpdatePayload for each pending update using HashMap lookups.
     //
@@ -288,6 +309,23 @@ pub(super) async fn deliver_pending_updates(
             continue;
         };
 
+        // Reconstruct release_info from latest_release_metadata so that
+        // asset-download plugins (e.g. GitHub) receive the download URLs on
+        // reconnect replay — same enrichment used in dispatch_update_to_agent.
+        let hsi_metadata = hsi_metadata_map
+            .get(&(update_record.host_id, item.id))
+            .and_then(|m| m.as_ref());
+        let fetch_key = (update_record.host_id, item.id, "fetch_releases".to_string());
+        let fetch_config = assignments_map
+            .get(&fetch_key)
+            .and_then(|a| configs_map.get(&a.plugin_config_id))
+            .map(|c| &c.config);
+        let release_info = crate::queries::update_triggers::enrich_release_info_with_attestation(
+            None,
+            hsi_metadata,
+            fetch_config,
+        );
+
         let execute_payload = ExecuteUpdatePayload {
             host_machine_id: host.machine_id.clone(),
             update_history_id: update_record.id,
@@ -298,7 +336,7 @@ pub(super) async fn deliver_pending_updates(
             execute_update_plugin,
             pre_update_hooks: resolved_hooks.pre_update_hooks,
             post_update_hooks: resolved_hooks.post_update_hooks,
-            release_info: None,
+            release_info,
             timeout_seconds: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT_SECS,
         };
 
