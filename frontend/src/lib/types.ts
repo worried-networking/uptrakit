@@ -446,6 +446,7 @@ export interface UpdateHostAssignmentRequest {
 	plugin_config?: CreatePluginConfigRequest;
 	package_identifier?: string;
 	config_override?: Record<string, unknown> | null;
+	execution_site?: string;
 }
 
 export interface TriggerVersionCheckResponse {

@@ -13,6 +13,7 @@
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
+	import EditHostAssignmentModal from '$lib/components/EditHostAssignmentModal.svelte';
 	import { connectOutputStream } from '$lib/sse';
 	import type { SseConnectionState } from '$lib/sse';
 	import { Permission } from '$lib/types';
@@ -29,6 +30,9 @@
 	// Update confirm modal state
 	let updateModal: { host: SoftwareItemHostSummary; toVersion: string } | null = $state(null);
 	let updateTriggering: boolean = $state(false);
+
+	// Configure plugins modal state
+	let configureModal: SoftwareItemHostSummary | null = $state(null);
 
 	// Release notes modal state
 	interface ReleaseMeta {
@@ -52,6 +56,12 @@
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
+
+	const ROLE_SHORT: Record<string, string> = {
+		detect_version: 'Detect',
+		fetch_releases: 'Fetch',
+		execute_update: 'Update'
+	};
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];
@@ -125,7 +135,6 @@
 			} else {
 				showSuccess('Version check queued — no agents currently connected');
 			}
-			// Refresh data after a short delay to pick up results.
 			setTimeout(() => loadItem(true), 2000);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger version check');
@@ -149,7 +158,6 @@
 			});
 			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
 			updateModal = null;
-			// Open the live terminal modal
 			openLiveModal(res.update_history_id, hostName);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger update');
@@ -161,7 +169,6 @@
 	function openLiveModal(updateHistoryId: string, hostName: string) {
 		liveModal = { updateHistoryId, hostName };
 		liveStreamState = 'connecting';
-		// Defer SSE connection to next tick so the terminal has mounted
 		setTimeout(() => {
 			liveDisconnect = connectOutputStream(updateHistoryId, {
 				onOutput: (line) => {
@@ -170,7 +177,6 @@
 					}
 				},
 				onCompleted: () => {
-					// Refresh host data when update finishes
 					loadItem(true);
 				},
 				onStateChange: (state) => {
@@ -315,6 +321,24 @@
 									{#if host.friendly_name && host.friendly_name !== host.hostname}
 										<span class="block text-xs text-surface-500">{host.friendly_name}</span>
 									{/if}
+									{#if host.plugins.length > 0}
+										<div class="mt-1 space-y-0.5">
+											{#each host.plugins as p (p.role)}
+												<div class="flex items-baseline gap-1 text-xs text-surface-500">
+													<span class="shrink-0 font-semibold">{ROLE_SHORT[p.role] ?? p.role}:</span>
+													<span class="truncate">{p.plugin_config_name}</span>
+													{#if p.package_identifier}
+														<span class="shrink-0 opacity-60">({p.package_identifier})</span>
+													{/if}
+													{#if p.execution_site && p.execution_site !== 'auto'}
+														<span class="badge preset-tonal text-xs shrink-0">{p.execution_site}</span>
+													{/if}
+												</div>
+											{/each}
+										</div>
+									{:else}
+										<span class="mt-1 block text-xs italic text-surface-400">No plugins configured</span>
+									{/if}
 								</td>
 								<td title={host.installed_version ?? undefined}>{formatVersion(host.installed_version)}</td>
 								<td>
@@ -361,6 +385,13 @@
 											disabled={checkingHostId === host.host_id}
 										>
 											{checkingHostId === host.host_id ? 'Checking…' : 'Check Versions'}
+										</button>
+										<button
+											class="btn btn-sm preset-tonal-surface"
+											onclick={() => (configureModal = host)}
+											title="Configure plugin assignments for this host"
+										>
+											Configure
 										</button>
 									</td>
 								{/if}
@@ -487,4 +518,19 @@
 			</button>
 		{/snippet}
 	</Modal>
+{/if}
+
+{#if configureModal && item}
+	<EditHostAssignmentModal
+		softwareItemId={item.id}
+		hostId={configureModal.host_id}
+		hostName={configureModal.hostname}
+		softwareItemName={item.name}
+		existingPlugins={configureModal.plugins}
+		onclose={() => (configureModal = null)}
+		onsuccess={(result) => {
+			item = result;
+			configureModal = null;
+		}}
+	/>
 {/if}

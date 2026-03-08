@@ -43,12 +43,14 @@
 
 	let pluginConfigs: PluginConfigResponse[] = $state([]);
 
-	let roleAssignments: Record<RoleKey, { enabled: boolean; plugin_config_id: string; package_identifier: string }> =
-		$state({
-			detect_version: { enabled: true, plugin_config_id: '', package_identifier: '' },
-			fetch_releases: { enabled: false, plugin_config_id: '', package_identifier: '' },
-			execute_update: { enabled: false, plugin_config_id: '', package_identifier: '' }
-		});
+	let roleAssignments: Record<
+		RoleKey,
+		{ enabled: boolean; plugin_config_id: string; package_identifier: string; execution_site: string }
+	> = $state({
+		detect_version: { enabled: true, plugin_config_id: '', package_identifier: '', execution_site: 'auto' },
+		fetch_releases: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' },
+		execute_update: { enabled: false, plugin_config_id: '', package_identifier: '', execution_site: 'auto' }
+	});
 
 	const toAdd = $derived([...selectedIds].filter((id) => !originalAssignedIds.has(id)));
 
@@ -67,9 +69,9 @@
 			pluginConfigs = configsResult.items;
 			const firstId = configsResult.items[0]?.id ?? '';
 			roleAssignments = {
-				detect_version: { enabled: true, plugin_config_id: firstId, package_identifier: '' },
-				fetch_releases: { enabled: false, plugin_config_id: firstId, package_identifier: '' },
-				execute_update: { enabled: false, plugin_config_id: firstId, package_identifier: '' }
+				detect_version: { enabled: true, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' },
+				fetch_releases: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' },
+				execute_update: { enabled: false, plugin_config_id: firstId, package_identifier: '', execution_site: 'auto' }
 			};
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to load data.';
@@ -105,7 +107,9 @@
 				).map((role) => ({
 					role,
 					plugin_config_id: roleAssignments[role].plugin_config_id || undefined,
-					package_identifier: roleAssignments[role].package_identifier.trim() || undefined
+					package_identifier: roleAssignments[role].package_identifier.trim() || undefined,
+					execution_site:
+						roleAssignments[role].execution_site !== 'auto' ? roleAssignments[role].execution_site : undefined
 				}));
 
 				tasks.push(
@@ -174,7 +178,8 @@
 							<tr>
 								<th class="w-36">Role</th>
 								<th>Plugin Config</th>
-								<th>Package Identifier</th>
+								<th>Package ID</th>
+								<th class="w-36">Execution Site</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -207,6 +212,19 @@
 											bind:value={roleAssignments[role].package_identifier}
 											disabled={!a.enabled}
 										/>
+									</td>
+									<td>
+										<select
+											class="select text-sm"
+											bind:value={roleAssignments[role].execution_site}
+											disabled={!a.enabled}
+										>
+											<option value="auto">Auto</option>
+											<option value="agent">Agent</option>
+											{#if role === 'fetch_releases'}
+												<option value="controller">Controller</option>
+											{/if}
+										</select>
 									</td>
 								</tr>
 							{/each}
