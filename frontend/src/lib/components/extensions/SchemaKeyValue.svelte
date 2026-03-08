@@ -33,19 +33,17 @@
 	});
 </script>
 
-<div class="card p-4">
-	{#if loading}
-		<p class="text-center py-4 text-surface-500">Loading...</p>
-	{:else if Object.keys(data).length === 0}
-		<p class="text-center py-4 text-surface-500">No data available.</p>
-	{:else}
-		<dl class="divide-y divide-surface-200 dark:divide-surface-700">
-			{#each Object.entries(data) as [key, value] (key)}
-				<div class="flex justify-between py-2">
-					<dt class="text-sm font-medium text-surface-600 dark:text-surface-400">{key}</dt>
-					<dd class="text-sm">{String(value ?? '')}</dd>
-				</div>
-			{/each}
-		</dl>
-	{/if}
-</div>
+{#if loading}
+	<p class="py-8 text-center text-surface-500">Loading...</p>
+{:else if Object.keys(data).length === 0}
+	<p class="py-8 text-center text-surface-500">No data available.</p>
+{:else}
+	<dl class="divide-y divide-surface-200 dark:divide-surface-700">
+		{#each Object.entries(data) as [key, value] (key)}
+			<div class="flex justify-between py-2">
+				<dt class="text-sm font-medium text-surface-600 dark:text-surface-400">{key}</dt>
+				<dd class="text-sm">{String(value ?? '')}</dd>
+			</div>
+		{/each}
+	</dl>
+{/if}

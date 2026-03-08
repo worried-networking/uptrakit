@@ -167,33 +167,44 @@
 <form onsubmit={handleSubmit} class="space-y-4">
 	{#each fields as field (field.key)}
 		{#if field.field_type !== 'hidden' && isFieldVisible(field)}
-			<div>
-				<label for={field.key} class="mb-1 block text-sm font-medium">
-					{field.label}
-					{#if field.required}<span class="text-error-500">*</span>{/if}
-				</label>
-
-				{#if field.field_type === 'textarea'}
+			{#if field.field_type === 'textarea'}
+				<label class="label">
+					<span>
+						{field.label}
+						{#if field.required}<span class="text-error-500">*</span>{/if}
+					</span>
 					<textarea
 						id={field.key}
 						bind:value={values[field.key]}
 						placeholder={field.placeholder}
 						required={field.required}
-						class="input w-full"
+						class="textarea"
 						rows="3"
 					></textarea>
-				{:else if field.field_type === 'select'}
+				</label>
+			{:else if field.field_type === 'select'}
+				<label class="label">
+					<span>
+						{field.label}
+						{#if field.required}<span class="text-error-500">*</span>{/if}
+					</span>
 					{#if loadingOptions[field.key]}
 						<p class="text-sm text-surface-500">Loading options...</p>
 					{:else}
-						<select id={field.key} bind:value={values[field.key]} required={field.required} class="select w-full">
+						<select id={field.key} bind:value={values[field.key]} required={field.required} class="select">
 							<option value="">Select...</option>
 							{#each resolvedOptions(field) as opt (opt.value)}
 								<option value={opt.value}>{opt.label}</option>
 							{/each}
 						</select>
 					{/if}
-				{:else if field.field_type === 'multi_select'}
+				</label>
+			{:else if field.field_type === 'multi_select'}
+				<div>
+					<span class="label">
+						{field.label}
+						{#if field.required}<span class="text-error-500">*</span>{/if}
+					</span>
 					{#if loadingOptions[field.key]}
 						<p class="text-sm text-surface-500">Loading options...</p>
 					{:else}
@@ -224,34 +235,40 @@
 							</p>
 						{/if}
 					{/if}
-				{:else if field.field_type === 'toggle'}
-					<label class="flex items-center gap-2">
-						<input
-							type="checkbox"
-							id={field.key}
-							checked={values[field.key] === 'true'}
-							onchange={(e) => {
-								values[field.key] = String((e.target as HTMLInputElement).checked);
-							}}
-							class="checkbox"
-						/>
-						<span class="text-sm">{field.help_text ?? ''}</span>
-					</label>
-				{:else}
+				</div>
+			{:else if field.field_type === 'toggle'}
+				<label class="flex items-center gap-2">
+					<input
+						type="checkbox"
+						id={field.key}
+						checked={values[field.key] === 'true'}
+						onchange={(e) => {
+							values[field.key] = String((e.target as HTMLInputElement).checked);
+						}}
+						class="checkbox"
+					/>
+					<span class="text-sm">{field.help_text ?? field.label}</span>
+				</label>
+			{:else}
+				<label class="label">
+					<span>
+						{field.label}
+						{#if field.required}<span class="text-error-500">*</span>{/if}
+					</span>
 					<input
 						id={field.key}
 						type={field.field_type === 'password' ? 'password' : field.field_type === 'number' ? 'number' : 'text'}
 						bind:value={values[field.key]}
 						placeholder={field.placeholder}
 						required={field.required}
-						class="input w-full"
+						class="input"
 					/>
-				{/if}
+				</label>
+			{/if}
 
-				{#if field.help_text && field.field_type !== 'toggle' && field.field_type !== 'multi_select'}
-					<p class="mt-1 text-xs text-surface-500">{field.help_text}</p>
-				{/if}
-			</div>
+			{#if field.help_text && field.field_type !== 'toggle' && field.field_type !== 'multi_select'}
+				<p class="-mt-2 text-xs text-surface-500">{field.help_text}</p>
+			{/if}
 		{:else}
 			<input type="hidden" name={field.key} bind:value={values[field.key]} />
 		{/if}

@@ -130,7 +130,7 @@
 </script>
 
 <button class="{btnClass} {presetClass}" disabled={loading} onclick={handleClick}>
-	{loading ? '...' : action.label}
+	{loading ? 'Processing...' : action.label}
 </button>
 
 {#if showModal && action.ui?.type === 'form'}

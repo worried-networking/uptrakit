@@ -58,6 +58,10 @@
 	// Data is ready when either there's no context selector, or a context value is selected.
 	let dataReady = $derived(!cs || (contextLoaded && selectedContext != null));
 
+	// Count visible row actions for colspan calculation.
+	let hasRowActions = $derived(ui.row_actions.length > 0);
+	let columnCount = $derived(ui.columns.length + (hasRowActions ? 1 : 0));
+
 	async function loadContextOptions(autoSelectId?: string) {
 		if (!cs) return;
 		try {
@@ -195,119 +199,121 @@
 	let contextParams = $derived(cs && selectedContext != null ? { [cs.param_key]: selectedContext } : {});
 </script>
 
-<div class="card p-4">
-	{#if cs}
-		<div class="mb-4 flex items-center gap-3">
-			<span class="text-sm font-medium text-surface-600 dark:text-surface-400">{cs.label}:</span>
+{#if cs}
+	<div class="mb-4 flex items-center gap-3">
+		<span class="text-sm font-medium text-surface-600 dark:text-surface-400">{cs.label}:</span>
 
-			{#if !contextLoaded}
-				<span class="text-sm text-surface-500">Loading...</span>
-			{:else if contextOptions.length === 0}
-				{#if cs.empty_message}
-					<span class="text-sm text-surface-500">{cs.empty_message}</span>
-				{:else}
-					<span class="text-sm text-surface-500">No options available.</span>
-				{/if}
-			{:else if contextOptions.length === 1}
-				<span class="text-sm">{contextOptions[0].label}</span>
+		{#if !contextLoaded}
+			<span class="text-sm text-surface-500">Loading...</span>
+		{:else if contextOptions.length === 0}
+			{#if cs.empty_message}
+				<span class="text-sm text-surface-500">{cs.empty_message}</span>
 			{:else}
-				<select class="select w-auto" bind:value={selectedContext}>
-					<option value={undefined}>Select...</option>
-					{#each contextOptions as opt (opt.value)}
-						<option value={opt.value}>{opt.label}</option>
-					{/each}
-				</select>
+				<span class="text-sm text-surface-500">No options available.</span>
 			{/if}
+		{:else if contextOptions.length === 1}
+			<span class="text-sm">{contextOptions[0].label}</span>
+		{:else}
+			<select class="select w-auto" bind:value={selectedContext}>
+				<option value={undefined}>Select...</option>
+				{#each contextOptions as opt (opt.value)}
+					<option value={opt.value}>{opt.label}</option>
+				{/each}
+			</select>
+		{/if}
 
-			{#if addAction}
-				<ActionButton
-					{extensionId}
-					action={addAction}
-					{serviceId}
-					{encryptionPublicKey}
-					size="sm"
-					onComplete={handleAddActionComplete}
-				/>
-			{/if}
+		{#if addAction}
+			<ActionButton
+				{extensionId}
+				action={addAction}
+				{serviceId}
+				{encryptionPublicKey}
+				size="sm"
+				onComplete={handleAddActionComplete}
+			/>
+		{/if}
+	</div>
+{/if}
+
+{#if !dataReady}
+	<p class="py-8 text-center text-surface-500">Select a configuration to continue.</p>
+{:else}
+	{#if ui.primary_actions.length > 0}
+		<div class="mb-4 flex flex-wrap gap-2">
+			{#each ui.primary_actions as actionId (actionId)}
+				{@const action = resolveAction(actionId)}
+				{#if action}
+					<ActionButton
+						{extensionId}
+						{action}
+						{serviceId}
+						{encryptionPublicKey}
+						extraParams={contextParams}
+						onComplete={reloadData}
+					/>
+				{/if}
+			{/each}
 		</div>
 	{/if}
 
-	{#if !dataReady}
-		<p class="py-8 text-center text-surface-500">Select a configuration to continue.</p>
-	{:else}
-		{#if ui.primary_actions.length > 0}
-			<div class="mb-4 flex flex-wrap gap-2">
-				{#each ui.primary_actions as actionId (actionId)}
-					{@const action = resolveAction(actionId)}
-					{#if action}
-						<ActionButton
-							{extensionId}
-							{action}
-							{serviceId}
-							{encryptionPublicKey}
-							extraParams={contextParams}
-							onComplete={reloadData}
-						/>
+	<div class="table-wrap">
+		<table class="table">
+			<thead>
+				<tr>
+					{#each ui.columns as col (col.key)}
+						<th>{col.label}</th>
+					{/each}
+					{#if hasRowActions}
+						<th class="w-20"></th>
 					{/if}
-				{/each}
-			</div>
-		{/if}
-
-		{#if loading}
-			<p class="py-8 text-center text-surface-500">Loading...</p>
-		{:else if rows.length === 0}
-			<p class="py-8 text-center text-surface-500">No data available.</p>
-		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-left text-sm">
-					<thead>
-						<tr class="border-b border-surface-300 dark:border-surface-600">
+				</tr>
+			</thead>
+			<tbody>
+				{#if loading}
+					<tr>
+						<td colspan={columnCount} class="py-8 text-center">
+							<p class="text-surface-500">Loading...</p>
+						</td>
+					</tr>
+				{:else}
+					{#each rows as row, i (i)}
+						<tr>
 							{#each ui.columns as col (col.key)}
-								<th class="px-3 py-2 font-medium">{col.label}</th>
+								<td>{String(row[col.key] ?? '')}</td>
 							{/each}
-							{#if ui.row_actions.length > 0}
-								<th class="px-3 py-2 font-medium">Actions</th>
+							{#if hasRowActions}
+								<td>
+									<div class="flex gap-1">
+										{#each ui.row_actions as actionId (actionId)}
+											{@const action = resolveAction(actionId)}
+											{#if action && isRowActionVisible(action, row)}
+												<ActionButton
+													{extensionId}
+													{action}
+													{serviceId}
+													{encryptionPublicKey}
+													extraParams={{ ...contextParams, ...row, _row: row }}
+													size="sm"
+													onComplete={reloadData}
+												/>
+											{/if}
+										{/each}
+									</div>
+								</td>
 							{/if}
 						</tr>
-					</thead>
-					<tbody>
-						{#each rows as row, i (i)}
-							<tr class="border-b border-surface-200 dark:border-surface-700">
-								{#each ui.columns as col (col.key)}
-									<td class="px-3 py-2">{String(row[col.key] ?? '')}</td>
-								{/each}
-								{#if ui.row_actions.length > 0}
-									<td class="px-3 py-2">
-										<div class="flex gap-1">
-											{#each ui.row_actions as actionId (actionId)}
-												{@const action = resolveAction(actionId)}
-												{#if action && isRowActionVisible(action, row)}
-													<ActionButton
-														{extensionId}
-														{action}
-														{serviceId}
-														{encryptionPublicKey}
-														extraParams={{ ...contextParams, ...row, _row: row }}
-														size="sm"
-														onComplete={reloadData}
-													/>
-												{/if}
-											{/each}
-										</div>
-									</td>
-								{/if}
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
+					{:else}
+						<tr>
+							<td colspan={columnCount} class="py-8 text-center">
+								<p class="text-lg font-medium">No data available</p>
+								<p class="mt-1 text-sm text-surface-500">There are no items to display.</p>
+							</td>
+						</tr>
+					{/each}
+				{/if}
+			</tbody>
+		</table>
+	</div>
 
-			{#if totalPages > 1}
-				<div class="mt-2 flex items-center justify-between text-sm text-surface-500">
-					<span>{total} total</span>
-					<Pagination {currentPage} {totalPages} onPageChange={handlePageChange} />
-				</div>
-			{/if}
-		{/if}
-	{/if}
-</div>
+	<Pagination {currentPage} {totalPages} {total} onPageChange={handlePageChange} />
+{/if}
