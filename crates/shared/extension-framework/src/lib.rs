@@ -466,6 +466,13 @@ pub struct ActionDef {
     /// shows a confirmation dialog before invoking the action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirm_entity_field: Option<String>,
+    /// Whether this action supports batch invocation on multiple selected rows.
+    ///
+    /// When `true`, the frontend shows this action in the batch action bar when
+    /// multiple rows are selected. The `ids` parameter in the action params
+    /// carries the selected row IDs.
+    #[serde(default)]
+    pub batch_action: bool,
 }
 
 impl ActionDef {
@@ -481,6 +488,7 @@ impl ActionDef {
             api_submit: None,
             row_visible_when: None,
             confirm_entity_field: None,
+            batch_action: false,
         }
     }
 
@@ -536,6 +544,12 @@ impl ActionDef {
     /// from the current row as the entity name.
     pub fn with_confirm_entity_field(mut self, field: impl Into<String>) -> Self {
         self.confirm_entity_field = Some(field.into());
+        self
+    }
+
+    /// Mark this action as supporting batch invocation on multiple selected rows.
+    pub fn batch(mut self) -> Self {
+        self.batch_action = true;
         self
     }
 }

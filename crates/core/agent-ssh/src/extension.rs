@@ -96,7 +96,8 @@ pub fn build_actions(infra_registry: &AgentInfraRegistry) -> Vec<ActionDef> {
             .with_permission(Permission::ManageHosts)
             .destructive()
             .with_confirm_entity_field("name")
-            .with_timeout(30),
+            .with_timeout(30)
+            .batch(),
         sync_host_action(),
         bootstrap_action(),
     ];
@@ -142,6 +143,7 @@ fn sync_host_action() -> ActionDef {
                 .with_type(FieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
         ])))
+        .batch()
 }
 
 /// Build the bootstrap host action definition with its form UI.
