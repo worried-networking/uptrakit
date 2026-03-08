@@ -157,7 +157,7 @@ async fn collect_one_host_for_report(
             hostname = %host.hostname,
             "SSH command executor check failed, evicting session and skipping host"
         );
-        pool.evict(&host.id.to_string()).await;
+        pool.evict(host.id).await;
         return None;
     }
 
@@ -218,7 +218,7 @@ fn build_fast_path_host_info(host: &Model) -> HostInfo {
         architecture: None,
         hostname: None,
         ip_address: Some(host.hostname.clone()),
-        agent_host_id: host.id.parse().ok(),
+        agent_host_id: Some(host.id),
     }
 }
 
@@ -446,7 +446,7 @@ pub(crate) async fn handle_execute_update_ssh(
                 error = %e,
                 "failed to acquire SSH session for ExecuteUpdate"
             );
-            pool.evict(&host.id.to_string()).await;
+            pool.evict(host.id).await;
             conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
                 update_history_id: payload.update_history_id,
                 status: UpdateFinalStatus::Failed,
@@ -621,7 +621,7 @@ async fn run_check_versions_ssh(
                 error = %e,
                 "failed to acquire SSH session for CheckVersions"
             );
-            pool.evict(&host.id.to_string()).await;
+            pool.evict(host.id).await;
             let results = error_results_for_check(&payload, &format!("SSH connection failed: {e}"));
             return ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results });
         }
@@ -713,7 +713,7 @@ async fn run_discover_software_ssh(
                 error = %e,
                 "failed to acquire SSH session for DiscoverSoftware"
             );
-            pool.evict(&host.id.to_string()).await;
+            pool.evict(host.id).await;
             let results =
                 error_results_for_discovery(&payload, &format!("SSH connection failed: {e}"));
             return ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
@@ -836,7 +836,7 @@ async fn run_execute_batch_host_package_update_ssh(
                 error = %e,
                 "failed to acquire SSH session for ExecuteBatchHostPackageUpdate"
             );
-            pool.evict(&host.id.to_string()).await;
+            pool.evict(host.id).await;
             let results: Vec<BatchHostPackageUpdateResult> = payload
                 .updates
                 .iter()
@@ -1024,8 +1024,8 @@ mod tests {
     /// fast path — no SSH required.
     #[test]
     fn host_does_not_need_ssh_when_machine_id_known_and_unchanged() {
-        let host = make_test_host("h3", "10.0.0.3", Some("mid-xyz"));
-        let changed: HashSet<&str> = HashSet::new();
+        let host = make_test_host(uuid::Uuid::now_v7(), "10.0.0.3", Some("mid-xyz"));
+        let changed: HashSet<uuid::Uuid> = HashSet::new();
         assert!(
             !host_needs_ssh(&host, &changed),
             "host with known machine_id not in changed_ids must skip SSH"
@@ -1035,9 +1035,9 @@ mod tests {
     /// A different host being in `changed_ids` must not affect this host.
     #[test]
     fn host_does_not_need_ssh_when_different_host_changed() {
-        let host = make_test_host("h4", "10.0.0.4", Some("mid-def"));
-        let mut changed: HashSet<&str> = HashSet::new();
-        changed.insert("h5"); // different host
+        let host = make_test_host(uuid::Uuid::now_v7(), "10.0.0.4", Some("mid-def"));
+        let mut changed: HashSet<uuid::Uuid> = HashSet::new();
+        changed.insert(uuid::Uuid::now_v7()); // different host
         assert!(
             !host_needs_ssh(&host, &changed),
             "an unrelated entry in changed_ids must not affect this host"
@@ -1049,7 +1049,7 @@ mod tests {
     /// Fast-path `HostInfo` must carry the persisted `machine_id` and SSH address.
     #[test]
     fn fast_path_host_info_fields() {
-        let host = make_test_host("h6", "192.168.1.10", Some("machine-id-99"));
+        let host = make_test_host(uuid::Uuid::now_v7(), "192.168.1.10", Some("machine-id-99"));
         let info = build_fast_path_host_info(&host);
 
         assert_eq!(info.machine_id, "machine-id-99");
@@ -1074,7 +1074,7 @@ mod tests {
     /// this branch from being reached in practice).
     #[test]
     fn fast_path_host_info_machine_id_none_fallback() {
-        let host = make_test_host("h7", "192.168.1.11", None);
+        let host = make_test_host(uuid::Uuid::now_v7(), "192.168.1.11", None);
         let info = build_fast_path_host_info(&host);
         assert_eq!(
             info.machine_id, "",
