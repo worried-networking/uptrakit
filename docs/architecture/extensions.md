@@ -273,7 +273,7 @@ and the frontend renders appropriate components:
 
 | `ExtensionUi` variant | Frontend component | Description |
 | --- | --- | --- |
-| `data_table` | `SchemaTable.svelte` | Fetches rows via action, renders columns and actions |
+| `data_table` | `SchemaTable.svelte` | Fetches paginated rows via action, renders columns, actions, and pagination controls |
 | `form` | `SchemaForm.svelte` | Typed inputs from `FieldDef`, client-side validation |
 | `key_value` | `SchemaKeyValue.svelte` | Read-only key-value display from action response |
 | `actions` | `ExtensionContextMenuItems.svelte` | Action buttons/menu items |

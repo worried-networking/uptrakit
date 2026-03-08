@@ -131,16 +131,24 @@ Maximum request body size: 64 KB.
 
 #### Response (success)
 
+Data actions return a paginated response:
+
 ```json
 {
-  "rows": [
+  "items": [
     { "hostname": "web-01", "status": "connected" },
     { "hostname": "web-02", "status": "disconnected" }
-  ]
+  ],
+  "total": 42,
+  "page": 1,
+  "per_page": 20,
+  "total_pages": 3
 }
 ```
 
 The response shape is defined by the extension action and is returned as-is from the service.
+All `data_table` data actions must return the paginated format shown above (see
+[Pagination in Extensions Development](../development/extensions.md#pagination)).
 
 #### Response (action failure)
 

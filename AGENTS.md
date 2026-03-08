@@ -1318,6 +1318,14 @@ web UI, REST API, and CLI with custom functionality. Extensions are described by
 Extensions require the `UiExtensions` capability. Services without this capability cannot
 register extensions or receive extension requests.
 
+### Pagination convention
+
+All `data_table` data actions must return paginated responses in the format
+`{ items, total, page, per_page, total_pages }`. The frontend sends `page` and `per_page`
+parameters with every request. Backend handlers must use DB-level `offset`/`limit` pagination
+(not in-memory slicing). The `ExtensionUi::DataTable` variant has an optional `default_per_page`
+field to override the frontend default of 20 items per page.
+
 ### Bidirectional invocation
 
 Services can invoke controller-side plugin actions via `ServiceMessage::ExtensionRequest`.

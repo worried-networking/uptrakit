@@ -89,7 +89,7 @@ Internally tagged with `"type"`. Four variants:
 
 | Variant | Fields | Description |
 | --- | --- | --- |
-| `data_table` | `columns`, `data_action`, `row_actions`, `primary_actions`, `context_selector` | Table with data fetching |
+| `data_table` | `columns`, `data_action`, `row_actions`, `primary_actions`, `context_selector`, `default_per_page` | Table with data fetching and pagination |
 | `form` | `fields` | Input form |
 | `key_value` | `data_action` | Read-only key-value display |
 | `actions` | `actions` | List of actions (used with `context_menu_group` placement) |
@@ -126,6 +126,68 @@ The `add_action` may carry `api_submit` to route form submission directly to a R
 endpoint instead of through the extension proxy. After a successful add, the frontend
 refreshes the options list and auto-selects the newly created item (if the response includes
 the field named by `api_submit.response_id_field`).
+
+#### Pagination
+
+All `data_table` data actions **must** return paginated responses. The frontend sends `page`
+and `per_page` parameters with every data-load request and expects a paginated response object.
+
+**Request parameters** (injected by the frontend into every data action call):
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `page` | integer | 1-based page number |
+| `per_page` | integer | Items per page (1-1000) |
+
+**Response format** (required from every data action):
+
+```json
+{
+  "items": [...],
+  "total": 150,
+  "page": 1,
+  "per_page": 50,
+  "total_pages": 3
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `items` | array | Row data for the current page |
+| `total` | integer | Total number of rows across all pages |
+| `page` | integer | Current page number (echoed from request) |
+| `per_page` | integer | Items per page (echoed from request) |
+| `total_pages` | integer | Total number of pages (`ceil(total / per_page)`) |
+
+**Backend implementation**: Use DB-level pagination with `offset`/`limit` and a separate
+`count` query. Do not load all rows and slice in memory.
+
+```rust
+let page = params.get("page").and_then(|v| v.as_u64()).unwrap_or(1).max(1);
+let per_page = params.get("per_page").and_then(|v| v.as_u64()).unwrap_or(50).clamp(1, 1000);
+let total = base_query.clone().count(db).await?;
+let offset = (page.saturating_sub(1)) * per_page;
+let items = base_query.offset(Some(offset)).limit(Some(per_page)).all(db).await?;
+let total_pages = if per_page == 0 { 0 } else { total.div_ceil(per_page) };
+```
+
+**`default_per_page`**: Set this optional field on the `DataTable` variant to override the
+frontend's default of 20 items per page. Common value: `Some(50)`.
+
+```rust
+ExtensionUi::DataTable {
+    columns: vec![...],
+    data_action: "list".to_string(),
+    row_actions: vec![...],
+    primary_actions: vec![...],
+    context_selector: None,
+    default_per_page: Some(50),
+}
+```
+
+Non-table listing actions (e.g., fetching unmatched items for a select dropdown) must also
+return the paginated response format. The frontend paginates through all pages when populating
+context selector dropdowns or action-sourced select options.
 
 ### `ActionDef`
 
@@ -440,6 +502,8 @@ conn.send(ServiceMessage::ExtensionRegister(ExtensionRegisterPayload {
                 data_action: "list-hosts".to_string(),
                 row_actions: vec![],
                 primary_actions: vec![],
+                context_selector: None,
+                default_per_page: Some(50),
             },
         },
     ],
@@ -521,6 +585,7 @@ pub fn extension_manifests() -> Vec<ExtensionManifest> {
                         .with_timeout(120),
                 ],
                 context_selector: None,
+                default_per_page: Some(50),
             },
         )
         .with_permission("manage_hosts"),
