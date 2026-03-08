@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Modal from './Modal.svelte';
-	import { getPluginConfigs, updateHostAssignment } from '$lib/api';
+	import { getPluginConfigs, updateHostAssignment, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type {
+		FieldDef,
 		HostPluginRoleSummary,
 		PluginConfigResponse,
+		PluginTypeInfo,
+		SelectOption,
 		SoftwareItemDetailResponse,
 		UpdateHostAssignmentRequest
 	} from '$lib/types';
@@ -77,14 +80,45 @@
 
 	let roleStates: Record<RoleKey, RoleState> = $state(makeInitialState());
 	let pluginConfigs: PluginConfigResponse[] = $state([]);
+	let pluginTypes: PluginTypeInfo[] = $state([]);
 	let loading: boolean = $state(true);
 	let loadError: string | null = $state(null);
 	let submitting: boolean = $state(false);
 
+	// Per-role override form state (flat dot-path values)
+	let overrideFormValues: Record<RoleKey, Record<string, string>> = $state({
+		detect_version: {},
+		fetch_releases: {},
+		execute_update: {}
+	});
+
+	// Per-role toggle: true = JSON editor mode, false = form mode
+	let overrideShowJson: Record<RoleKey, boolean> = $state({
+		detect_version: false,
+		fetch_releases: false,
+		execute_update: false
+	});
+
 	onMount(async () => {
 		try {
-			const result = await getPluginConfigs(1, 500);
-			pluginConfigs = result.items;
+			const [configsResult, typesResult] = await Promise.all([getPluginConfigs(1, 500), listPluginTypes()]);
+			pluginConfigs = configsResult.items;
+			pluginTypes = typesResult;
+
+			// Initialise override form values from existing config_override
+			for (const role of ALL_ROLES) {
+				const existing = existingPlugins.find((p) => p.role === role);
+				if (existing) {
+					const config = pluginConfigs.find((c) => c.id === existing.plugin_config_id);
+					if (config) {
+						const fields = getFormFields(config.plugin_type);
+						overrideFormValues[role] = flattenConfig(
+							(existing.config_override as Record<string, unknown>) ?? {},
+							fields
+						);
+					}
+				}
+			}
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to load plugin configs.';
 		} finally {
@@ -92,7 +126,132 @@
 		}
 	});
 
+	// --- Form field helpers (mirrors plugin-configs page logic) ---
+
+	function getFormFields(pluginType: string): FieldDef[] {
+		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
+		return t?.config_form_fields ?? [];
+	}
+
+	function getRoleFormFields(role: RoleKey): FieldDef[] {
+		const configId = roleStates[role].plugin_config_id;
+		if (!configId) return [];
+		const config = pluginConfigs.find((c) => c.id === configId);
+		if (!config) return [];
+		return getFormFields(config.plugin_type);
+	}
+
+	function resolvedOptions(field: FieldDef): SelectOption[] {
+		return field.options ?? [];
+	}
+
+	function isOverrideFieldVisible(field: FieldDef, role: RoleKey): boolean {
+		if (!field.visible_when) return true;
+		const controlValue = overrideFormValues[role][field.visible_when.field] ?? '';
+		return field.visible_when.values.includes(controlValue);
+	}
+
+	/** Flatten a nested config JSON object into dot-path string values for form fields. */
+	function flattenConfig(config: Record<string, unknown>, fields: FieldDef[]): Record<string, string> {
+		const result: Record<string, string> = {};
+		for (const field of fields) {
+			const parts = field.key.split('.');
+			let val: unknown = config;
+			for (const part of parts) {
+				if (val == null || typeof val !== 'object') {
+					val = undefined;
+					break;
+				}
+				const jsonKey = part.startsWith('_') ? part.slice(1) : part;
+				val = (val as Record<string, unknown>)[jsonKey];
+			}
+
+			if (val === undefined || val === null) {
+				result[field.key] = field.default_value ?? '';
+			} else if (field.field_type === 'toggle') {
+				result[field.key] = val ? 'true' : '';
+			} else if (Array.isArray(val)) {
+				result[field.key] = val.join('\n');
+			} else {
+				result[field.key] = String(val);
+			}
+		}
+		return result;
+	}
+
+	/** Unflatten dot-path form values into a nested JSON config object. */
+	function unflattenConfig(formValues: Record<string, string>, fields: FieldDef[]): Record<string, unknown> {
+		const result: Record<string, unknown> = {};
+
+		for (const field of fields) {
+			const raw = formValues[field.key] ?? '';
+
+			if (raw === '' && field.field_type !== 'toggle') continue;
+
+			let value: unknown;
+			if (field.field_type === 'toggle') {
+				value = raw === 'true';
+				// In override context, skip false toggles (leave base config value in place)
+				if (value === false) continue;
+			} else if (field.list) {
+				value = raw
+					.split('\n')
+					.map((s) => s.trim())
+					.filter((s) => s.length > 0);
+				if ((value as string[]).length === 0) continue;
+			} else {
+				value = raw;
+			}
+
+			const parts = field.key.split('.');
+			if (parts.length === 1) {
+				result[parts[0]] = value;
+			} else {
+				let target = result;
+				for (let i = 0; i < parts.length - 1; i++) {
+					const key = parts[i].startsWith('_') ? parts[i].slice(1) : parts[i];
+					if (target[key] == null || typeof target[key] !== 'object') {
+						target[key] = {};
+					}
+					target = target[key] as Record<string, unknown>;
+				}
+				const lastKey = parts[parts.length - 1];
+				const jsonKey = lastKey.startsWith('_') ? lastKey.slice(1) : lastKey;
+				target[jsonKey] = value;
+			}
+		}
+
+		// Clean up empty nested objects
+		for (const key of Object.keys(result)) {
+			const val = result[key];
+			if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+				const obj = val as Record<string, unknown>;
+				const nonEmpty = Object.values(obj).some((v) => v !== '' && v !== undefined);
+				if (!nonEmpty) delete result[key];
+			}
+		}
+
+		return result;
+	}
+
+	/** Whether this role has any non-empty config override set. */
+	function hasOverride(role: RoleKey): boolean {
+		const fields = getRoleFormFields(role);
+		if (fields.length > 0 && !overrideShowJson[role]) {
+			const obj = unflattenConfig(overrideFormValues[role], fields);
+			return Object.keys(obj).length > 0;
+		}
+		return !!roleStates[role].config_override_text.trim();
+	}
+
 	function validateOverride(role: RoleKey): boolean {
+		const fields = getRoleFormFields(role);
+		// In form mode, form inputs always produce valid values
+		if (fields.length > 0 && !overrideShowJson[role]) {
+			roleStates[role].config_override_error = null;
+			return true;
+		}
+
 		const text = roleStates[role].config_override_text.trim();
 		if (!text) {
 			roleStates[role].config_override_error = null;
@@ -132,13 +291,24 @@
 			let lastResult: SoftwareItemDetailResponse | undefined;
 			for (const role of toUpdate) {
 				const s = roleStates[role];
-				const overrideText = s.config_override_text.trim();
+				const fields = getRoleFormFields(role);
+				const hasFields = fields.length > 0;
+
+				let configOverride: Record<string, unknown> | null = null;
+				if (hasFields && !overrideShowJson[role]) {
+					const overrideObj = unflattenConfig(overrideFormValues[role], fields);
+					configOverride = Object.keys(overrideObj).length > 0 ? overrideObj : null;
+				} else {
+					const overrideText = s.config_override_text.trim();
+					configOverride = overrideText ? (JSON.parse(overrideText) as Record<string, unknown>) : null;
+				}
+
 				const req: UpdateHostAssignmentRequest = {
 					role,
 					plugin_config_id: s.plugin_config_id,
 					package_identifier: s.package_identifier.trim() || undefined,
 					execution_site: s.execution_site,
-					config_override: overrideText ? (JSON.parse(overrideText) as Record<string, unknown>) : null
+					config_override: configOverride
 				};
 				lastResult = await updateHostAssignment(softwareItemId, hostId, req);
 			}
@@ -169,6 +339,8 @@
 		<div class="space-y-3">
 			{#each ALL_ROLES as role (role)}
 				{@const s = roleStates[role]}
+				{@const roleFields = getRoleFormFields(role)}
+				{@const hasFormFields = roleFields.length > 0}
 				<div class="rounded-lg border border-surface-200 p-4 space-y-3 dark:border-surface-700">
 					<div class="flex items-start gap-2">
 						<span class="badge preset-tonal shrink-0 text-xs">{ROLE_LABELS[role]}</span>
@@ -178,7 +350,19 @@
 					<!-- Plugin Config -->
 					<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
 						<label class="text-sm font-medium" for="cfg-{role}">Plugin Config</label>
-						<select id="cfg-{role}" class="select text-sm" bind:value={roleStates[role].plugin_config_id}>
+						<select
+							id="cfg-{role}"
+							class="select text-sm"
+							bind:value={roleStates[role].plugin_config_id}
+							onchange={() => {
+								const config = pluginConfigs.find((c) => c.id === roleStates[role].plugin_config_id);
+								const fields = config ? getFormFields(config.plugin_type) : [];
+								overrideFormValues[role] = flattenConfig({}, fields);
+								overrideShowJson[role] = false;
+								roleStates[role].config_override_text = '';
+								roleStates[role].config_override_error = null;
+							}}
+						>
 							<option value="">— not configured —</option>
 							{#each pluginConfigs as cfg (cfg.id)}
 								<option value={cfg.id}>{cfg.name}</option>
@@ -215,25 +399,145 @@
 						<details>
 							<summary class="cursor-pointer select-none text-xs text-surface-500 hover:text-surface-700">
 								Config Override <span class="opacity-60">(advanced)</span>
-								{#if s.config_override_text.trim()}
+								{#if hasOverride(role)}
 									<span class="ml-1 badge preset-tonal-warning text-xs">set</span>
 								{/if}
 							</summary>
-							<div class="mt-2 space-y-1">
-								<textarea
-									class="textarea font-mono text-xs"
-									rows={4}
-									placeholder={`{\n  "example_field": "value"\n}`}
-									bind:value={roleStates[role].config_override_text}
-									onblur={() => validateOverride(role)}
-								></textarea>
-								{#if s.config_override_error}
-									<p class="text-xs rounded px-2 py-1 preset-filled-error-500">{s.config_override_error}</p>
-								{/if}
-								<p class="text-xs text-surface-400">
-									JSON object merged on top of the plugin config. Leave empty to clear any existing override.
-								</p>
-							</div>
+
+							{#if hasFormFields && !overrideShowJson[role]}
+								<!-- Form mode -->
+								<div class="mt-2 space-y-2">
+									{#each roleFields as field (field.key)}
+										{#if isOverrideFieldVisible(field, role)}
+											<div>
+												<label for="ovr-{role}-{field.key}" class="mb-1 block text-xs font-medium">
+													{field.label}
+												</label>
+
+												{#if field.field_type === 'textarea'}
+													<textarea
+														id="ovr-{role}-{field.key}"
+														bind:value={overrideFormValues[role][field.key]}
+														placeholder={field.placeholder}
+														class="textarea font-mono text-xs w-full"
+														rows="3"
+													></textarea>
+												{:else if field.field_type === 'select'}
+													<select
+														id="ovr-{role}-{field.key}"
+														bind:value={overrideFormValues[role][field.key]}
+														class="select text-xs w-full"
+													>
+														<option value="">— keep base config —</option>
+														{#each resolvedOptions(field) as opt (opt.value)}
+															<option value={opt.value}>{opt.label}</option>
+														{/each}
+													</select>
+												{:else if field.field_type === 'toggle'}
+													<label class="flex items-center gap-2">
+														<input
+															type="checkbox"
+															id="ovr-{role}-{field.key}"
+															checked={overrideFormValues[role][field.key] === 'true'}
+															onchange={(e) => {
+																overrideFormValues[role][field.key] = String((e.target as HTMLInputElement).checked);
+															}}
+															class="checkbox"
+														/>
+														<span class="text-xs">{field.help_text ?? ''}</span>
+													</label>
+												{:else}
+													<input
+														id="ovr-{role}-{field.key}"
+														type={field.field_type === 'password' ? 'password' : 'text'}
+														bind:value={overrideFormValues[role][field.key]}
+														placeholder={field.placeholder ?? 'Leave blank to keep base config value'}
+														class="input text-xs w-full"
+													/>
+												{/if}
+
+												{#if field.help_text && field.field_type !== 'toggle'}
+													<p class="mt-0.5 text-xs text-surface-400">{field.help_text}</p>
+												{/if}
+											</div>
+										{/if}
+									{/each}
+
+									<p class="text-xs text-surface-400">
+										Leave fields blank to use the base plugin config value. Only filled fields are applied as an
+										override.
+									</p>
+
+									<button
+										type="button"
+										class="btn btn-sm preset-tonal text-xs"
+										onclick={() => {
+											const obj = unflattenConfig(overrideFormValues[role], roleFields);
+											roleStates[role].config_override_text =
+												Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
+											overrideShowJson[role] = true;
+										}}
+									>
+										Advanced: Edit as JSON
+									</button>
+								</div>
+							{:else if hasFormFields && overrideShowJson[role]}
+								<!-- JSON editor mode (with form available) -->
+								<div class="mt-2 space-y-1">
+									<textarea
+										class="textarea font-mono text-xs"
+										rows={4}
+										placeholder={`{\n  "example_field": "value"\n}`}
+										bind:value={roleStates[role].config_override_text}
+										onblur={() => validateOverride(role)}
+									></textarea>
+									{#if s.config_override_error}
+										<p class="text-xs rounded px-2 py-1 preset-filled-error-500">
+											{s.config_override_error}
+										</p>
+									{/if}
+									<p class="text-xs text-surface-400">
+										JSON object merged on top of the plugin config. Leave empty to clear any existing override.
+									</p>
+									<button
+										type="button"
+										class="btn btn-sm preset-tonal text-xs"
+										onclick={() => {
+											try {
+												const parsed = roleStates[role].config_override_text.trim()
+													? (JSON.parse(roleStates[role].config_override_text) as Record<string, unknown>)
+													: {};
+												overrideFormValues[role] = flattenConfig(parsed, roleFields);
+												overrideShowJson[role] = false;
+												roleStates[role].config_override_error = null;
+											} catch {
+												showError('Config must be valid JSON to switch back to form view.');
+											}
+										}}
+									>
+										Back to Form
+									</button>
+								</div>
+							{:else}
+								<!-- No form fields — plain JSON editor -->
+								<div class="mt-2 space-y-1">
+									<textarea
+										class="textarea font-mono text-xs"
+										rows={4}
+										placeholder={`{\n  "example_field": "value"\n}`}
+										bind:value={roleStates[role].config_override_text}
+										onblur={() => validateOverride(role)}
+									></textarea>
+									{#if s.config_override_error}
+										<p class="text-xs rounded px-2 py-1 preset-filled-error-500">
+											{s.config_override_error}
+										</p>
+									{/if}
+									<p class="text-xs text-surface-400">
+										JSON object merged on top of the plugin config. Leave empty to clear any existing override.
+									</p>
+								</div>
+							{/if}
 						</details>
 					{/if}
 				</div>
