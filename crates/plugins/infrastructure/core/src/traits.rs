@@ -115,6 +115,13 @@ pub struct SudoCommandEntry {
     /// entry. The sudoers entry uses the install path directly. The script must
     /// validate its own arguments to enforce the least-privilege contract.
     pub helper_script: Option<SudoHelperScript>,
+    /// Optional argument suffix appended to the resolved command path in the
+    /// sudoers entry (e.g. `"start *"` → `/usr/bin/systemctl start *`).
+    ///
+    /// Use this to restrict the allowed subcommands/arguments without needing a
+    /// helper script. The suffix is appended verbatim after a space separator.
+    /// When `None`, the sudoers entry permits any arguments.
+    pub args_suffix: Option<&'static str>,
     /// When `true`, the sudoers entry is generated with the `SETENV:` tag, which
     /// allows the agent to pass inline `NAME=VALUE` env var assignments before
     /// the program name (e.g. `sudo DEBIAN_FRONTEND=noninteractive apt-get …`).

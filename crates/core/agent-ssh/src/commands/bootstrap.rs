@@ -421,8 +421,12 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
                 match resolve_command_path(&executor, &entry.command).await? {
                     Some(path) => {
                         tracing::debug!(command = %entry.command, path = %path, "resolved command path");
+                        let command_path = match entry.args_suffix {
+                            Some(suffix) => format!("{path} {suffix}"),
+                            None => path,
+                        };
                         resolved.push(ResolvedSudoCommand {
-                            command_path: path,
+                            command_path,
                             explanation: entry.explanation.clone(),
                             needs_setenv: entry.needs_setenv,
                         });

@@ -323,8 +323,12 @@ pub async fn run_proxmox_bootstrap(
                 });
             } else if let Some(path) = resolve_command_path(&guest_executor, &entry.command).await?
             {
+                let command_path = match entry.args_suffix {
+                    Some(suffix) => format!("{path} {suffix}"),
+                    None => path,
+                };
                 resolved.push(ResolvedSudoCommand {
-                    command_path: path,
+                    command_path,
                     explanation: entry.explanation.clone(),
                     needs_setenv: entry.needs_setenv,
                 });

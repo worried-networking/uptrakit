@@ -383,6 +383,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     install_path: PHS_VERSION_HELPER_PATH,
                     content: PHS_VERSION_HELPER_CONTENT,
                 }),
+                args_suffix: None,
                 needs_setenv: false,
             },
             SudoCommandEntry {
@@ -392,6 +393,7 @@ impl Plugin for ProxmoxHelperScriptsPlugin {
                     can pass the env vars inline in the sudo call"
                     .into(),
                 helper_script: None,
+                args_suffix: None,
                 needs_setenv: true,
             },
         ]
