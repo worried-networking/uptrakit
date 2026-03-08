@@ -221,7 +221,7 @@ impl PluginOps for PluginRegistry {
         value: &str,
     ) -> std::result::Result<(), String> {
         let Ok(pt) = plugin_type.parse::<PluginType>() else {
-            return Ok(());
+            return Err(format!("unknown plugin type: {plugin_type}"));
         };
         PluginRegistry::validate_package_identifier(pt, value)
     }

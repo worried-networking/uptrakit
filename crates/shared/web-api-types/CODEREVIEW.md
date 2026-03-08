@@ -23,9 +23,7 @@ request types including the MQTT client request types.
 
 ### Issues
 
-**[LOW]** `Cargo.toml` -- `publish = false` is omitted, unlike all other internal crates which
-mark themselves as non-publishable. If intentional (intended for external consumption as a
-client type library), document the rationale. If an oversight, add `publish = false`.
+No architectural issues found.
 
 ## Security and Safety
 

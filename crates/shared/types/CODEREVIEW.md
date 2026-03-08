@@ -155,11 +155,6 @@ documented as a future risk.
 
 ### Issues
 
-**[LOW]** `src/secret_string.rs` -- `SecretString` has no inline tests for `Debug` redaction
-(`"***"`), `Display` redaction, or `Zeroize` on drop. Although `SecretString` is a thin
-wrapper over a well-known pattern, a one-line `assert_eq!(format!("{:?}", s), "***")` test
-would prevent inadvertent removal of the redaction during future refactors.
-
 **[LOW]** `src/mqtt_transport.rs`, `src/mqtt_connection_status.rs`, `src/output_stream_type.rs`,
 `src/device_auth_status.rs`, `src/plugin_role.rs`, `src/plugin_capability.rs`, and
 `src/software_discovery_state.rs` have no tests despite following the same `as_str`/`FromStr`

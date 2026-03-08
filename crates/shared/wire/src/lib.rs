@@ -164,22 +164,6 @@ impl fmt::Display for Capability {
     }
 }
 
-/// Error returned when parsing a capability string fails.
-///
-/// This error is never actually returned because [`Capability::Other`]
-/// catches all unrecognized strings, but the type satisfies the
-/// [`FromStr`] trait contract.
-#[derive(Debug)]
-pub struct ParseCapabilityError(std::convert::Infallible);
-
-impl fmt::Display for ParseCapabilityError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid capability")
-    }
-}
-
-impl std::error::Error for ParseCapabilityError {}
-
 impl FromStr for Capability {
     type Err = std::convert::Infallible;
 

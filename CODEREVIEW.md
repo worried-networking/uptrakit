@@ -128,7 +128,18 @@ NULL. A composite index `idx_update_history_host_item_status` on
 `m20260311_000001_update_history_status_index` to eliminate the full table scan in
 `validate_update_preconditions`. `validate_update_preconditions` (10 scenarios) and the
 `find_outdated_*` helpers (6 scenarios) now have comprehensive unit tests using in-memory
-SQLite.
+SQLite. The dead `ParseCapabilityError` type in `wire/src/lib.rs` has been removed.
+The silent machine-ID fallback in `agent/src/host_info.rs` now logs a warning. The
+byte-offset UUID slicing in `mqtt/src/main.rs` now uses safe `.get()`. `NatsEventEnvelope`
+now derives `Debug`. The `validate_package_identifier_str` in the plugin registry now
+returns an error for unknown plugin types instead of silently accepting. Bare "Not found"
+messages in `settings_mqtt.rs` now read "MQTT client not found". The per-message executor
+allocation in the agent has been refactored to a shared `Arc` on the handler. The duplicated
+`execute`/`execute_quiet` logic in `agent-ssh/ssh_executor.rs` has been extracted to a
+shared `run_remote()` method. `DEFAULT_POLL_INTERVAL_SECS` in `scheduler-engine` is now a
+proper `Duration` constant. `STALE_CLAIM_SECONDS` now has a doc comment explaining its
+relationship to `TASK_EXECUTION_TIMEOUT`. `uptrakit-backoff` and `uptrakit-web-api-types`
+now carry `publish = false`.
 
 ## Per-Crate Review Files
 

@@ -26,21 +26,22 @@ impl SshCommandExecutor {
     pub fn new(session: Arc<SshSession>) -> Self {
         Self { session }
     }
-}
 
-#[async_trait]
-impl CommandExecutor for SshCommandExecutor {
-    async fn execute(
+    /// Shared implementation for `execute` and `execute_quiet`.
+    ///
+    /// When `output_tx` is `Some`, streamed output is forwarded to the channel.
+    /// When `log_failures` is `true`, non-zero exit codes produce a WARN log
+    /// with stderr/stdout context (used for the non-quiet path).
+    async fn run_remote(
         &self,
         spec: &CommandSpec,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
+        output_tx: Option<&mpsc::Sender<UpdateOutputLine>>,
+        log_failures: bool,
     ) -> uptrakit_command::Result<CommandOutput> {
         let remote_cmd = build_remote_command_string(spec)?;
         tracing::debug!(cmd_len = remote_cmd.len(), "executing remote SSH command");
 
-        let fut = self
-            .session
-            .exec_command_streaming(&remote_cmd, Some(output_tx));
+        let fut = self.session.exec_command_streaming(&remote_cmd, output_tx);
 
         let result = if let Some(dur) = spec.timeout {
             tokio::time::timeout(dur, fut)
@@ -64,7 +65,9 @@ impl CommandExecutor for SshCommandExecutor {
 
         if result.exit_code != 0 {
             let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);
-            log_failed_command_output(exit_code, &result.stderr, &result.stdout);
+            if log_failures {
+                log_failed_command_output(exit_code, &result.stderr, &result.stdout);
+            }
             bail!(CommandError::CommandFailed(exit_code));
         }
 
@@ -74,50 +77,20 @@ impl CommandExecutor for SshCommandExecutor {
         let exit_code = i32::try_from(result.exit_code).unwrap_or(0);
         Ok(CommandOutput { output, exit_code })
     }
+}
+
+#[async_trait]
+impl CommandExecutor for SshCommandExecutor {
+    async fn execute(
+        &self,
+        spec: &CommandSpec,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> uptrakit_command::Result<CommandOutput> {
+        self.run_remote(spec, Some(output_tx), true).await
+    }
 
     async fn execute_quiet(&self, spec: &CommandSpec) -> uptrakit_command::Result<CommandOutput> {
-        let remote_cmd = build_remote_command_string(spec)?;
-        tracing::trace!(
-            cmd_len = remote_cmd.len(),
-            "executing quiet remote SSH command"
-        );
-
-        let fut = self.session.exec_command_streaming(&remote_cmd, None);
-
-        let result = if let Some(dur) = spec.timeout {
-            tokio::time::timeout(dur, fut)
-                .await
-                .map_err(|_| {
-                    tracing::warn!(timeout = ?dur, "SSH command timed out");
-                    report!(CommandError::TimedOut)
-                })?
-                .map_err(|e| {
-                    report!(CommandError::CommandSpawn(std::io::Error::other(
-                        e.to_string()
-                    )))
-                })?
-        } else {
-            fut.await.map_err(|e| {
-                report!(CommandError::CommandSpawn(std::io::Error::other(
-                    e.to_string()
-                )))
-            })?
-        };
-
-        if result.exit_code != 0 {
-            let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);
-            // Do not log here: quiet execution is used for probing / compatibility
-            // checks where a non-zero exit code is an expected, routine outcome
-            // (e.g. `which brew` returning 1 when Homebrew is not installed).
-            // The error is propagated to the caller, which decides how to handle it.
-            bail!(CommandError::CommandFailed(exit_code));
-        }
-
-        let mut output = result.stdout;
-        output.push_str(&result.stderr);
-
-        let exit_code = i32::try_from(result.exit_code).unwrap_or(0);
-        Ok(CommandOutput { output, exit_code })
+        self.run_remote(spec, None, false).await
     }
 
     fn supports_stdio_tunnel(&self) -> bool {

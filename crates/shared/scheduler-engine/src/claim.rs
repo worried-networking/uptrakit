@@ -8,8 +8,15 @@ use uuid::Uuid;
 
 use crate::error::{self, SchedulerError};
 
-/// Duration after which a locked task is considered stale and can be reclaimed.
-const STALE_CLAIM_SECONDS: i64 = 600; // 10 minutes
+/// Duration after which a locked task is considered stale and can be reclaimed
+/// (10 minutes).
+///
+/// This is intentionally much shorter than [`super::TASK_EXECUTION_TIMEOUT`]
+/// (2 hours). If a controller crashes mid-execution, we want another instance
+/// to pick up the abandoned task within minutes rather than waiting for the
+/// full execution timeout. Running tasks check their own cancellation token
+/// against `TASK_EXECUTION_TIMEOUT` independently.
+const STALE_CLAIM_SECONDS: i64 = 600;
 
 /// Attempt to claim a task for execution via optimistic locking.
 ///

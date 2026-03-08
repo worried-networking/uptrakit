@@ -57,10 +57,6 @@ coverage for the protocol-to-transport bridge in `client.rs`.
 types, SSH pooling, SSH transport, commands, and host management. The SSH connection pool, key
 handling, and transport layers could be extracted into a shared `ssh-transport` crate.
 
-**[LOW]** `Cargo.toml:12` -- `dirs` not in workspace dependencies. Declared inline (`dirs = "6"`
-rather than in `[workspace.dependencies]`). Currently sole consumer, but inconsistent with
-workspace convention and risks version drift.
-
 ## Security and Safety
 
 ### Strengths
@@ -146,11 +142,6 @@ point of error reporting.
   `; rm -rf /`, and `` `id` `` are safely wrapped in single quotes.
 
 ### Issues
-
-**[MEDIUM]** `src/ssh_executor.rs:34-76,78-119` -- `execute()` and `execute_quiet()` share ~90%
-identical structure. DRY violation -- both methods construct an SSH session, run the command,
-collect output, and handle errors via the same pattern. A shared inner method parameterised on
-whether output is streamed or accumulated would eliminate the duplication.
 
 **[MEDIUM]** No test coverage for `report_enrolled_hosts` or any `client.rs` handler. The three
 handlers (`handle_check_versions_ssh`, `handle_execute_update_ssh`,

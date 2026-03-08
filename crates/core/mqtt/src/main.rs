@@ -246,6 +246,9 @@ fn generate_instance_id() -> String {
     let host = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".to_string());
-    let uuid_prefix = &uuid::Uuid::now_v7().to_string()[..8];
+    let uuid_str = uuid::Uuid::now_v7().to_string();
+    // UUID v7 format is `xxxxxxxx-xxxx-...`, so the first 8 chars are always
+    // ASCII hex digits. Using `.get()` for defence-in-depth.
+    let uuid_prefix = uuid_str.get(..8).unwrap_or(&uuid_str);
     format!("{host}-{uuid_prefix}")
 }

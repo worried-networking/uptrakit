@@ -6,7 +6,9 @@ use clap::Parser;
 use rootcause::prelude::*;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{Capability, ControllerMessage, ReportHostsPayload, ServiceMessage};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
@@ -38,6 +40,8 @@ struct AgentHandler {
     freeze_file_path: PathBuf,
     /// Timestamp of the last accepted update execution, for rate limiting.
     last_update_accepted: Option<std::time::Instant>,
+    /// Shared command executor, created once and reused across all message handlers.
+    executor: Arc<dyn CommandExecutor>,
 }
 
 #[async_trait::async_trait]
@@ -85,7 +89,7 @@ impl ServiceHandler for AgentHandler {
                     );
                     return Ok(None);
                 }
-                Ok(client::handle_check_versions(payload, conn).await)
+                Ok(client::handle_check_versions(payload, self.executor.clone(), conn).await)
             }
             ControllerMessage::ExecuteUpdate(payload) => {
                 if payload.host_machine_id != self.machine_id {
@@ -115,7 +119,13 @@ impl ServiceHandler for AgentHandler {
                     return Ok(None);
                 }
                 self.last_update_accepted = Some(std::time::Instant::now());
-                client::handle_execute_update(*payload, &mut self.in_flight_update, conn).await;
+                client::handle_execute_update(
+                    *payload,
+                    self.executor.clone(),
+                    &mut self.in_flight_update,
+                    conn,
+                )
+                .await;
                 Ok(None)
             }
             ControllerMessage::DiscoverSoftware(payload) => {
@@ -127,7 +137,7 @@ impl ServiceHandler for AgentHandler {
                     );
                     return Ok(None);
                 }
-                Ok(client::handle_discover_software(payload, conn).await)
+                Ok(client::handle_discover_software(payload, self.executor.clone(), conn).await)
             }
             ControllerMessage::ExecuteBatchHostPackageUpdate(payload) => {
                 if payload.host_machine_id != self.machine_id {
@@ -157,7 +167,12 @@ impl ServiceHandler for AgentHandler {
                     return Ok(None);
                 }
                 self.last_update_accepted = Some(std::time::Instant::now());
-                Ok(client::handle_execute_batch_host_package_update(*payload, conn).await)
+                Ok(client::handle_execute_batch_host_package_update(
+                    *payload,
+                    self.executor.clone(),
+                    conn,
+                )
+                .await)
             }
             ControllerMessage::SetUpdateFreeze(payload) => {
                 handle_set_update_freeze(&self.freeze_file_path, payload).await;
@@ -343,6 +358,7 @@ async fn main() {
         in_flight_update: None,
         freeze_file_path,
         last_update_accepted: None,
+        executor: client::make_executor(),
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent",
