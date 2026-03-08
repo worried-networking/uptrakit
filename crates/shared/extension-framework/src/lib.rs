@@ -373,6 +373,13 @@ pub enum ExtensionUi {
         /// is injected into all action params under `context_selector.param_key`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context_selector: Option<Box<ContextSelectorDef>>,
+        /// Default number of items per page.
+        ///
+        /// When set, the data action receives `page` and `per_page` params and
+        /// must return a paginated response (`items`, `total`, `page`, `per_page`,
+        /// `total_pages`). When `None`, defaults to 20.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default_per_page: Option<u64>,
     },
     /// Input form.
     Form(FormDef),
@@ -983,6 +990,7 @@ mod tests {
                 row_actions: vec![],
                 primary_actions: vec![],
                 context_selector: None,
+                default_per_page: None,
             },
         };
 
@@ -1362,6 +1370,7 @@ mod tests {
             row_actions: vec!["edit".to_string(), "delete".to_string()],
             primary_actions: vec!["create".to_string()],
             context_selector: None,
+            default_per_page: None,
         };
 
         let json = serde_json::to_string(&ui).expect("serialize should succeed");

@@ -846,6 +846,7 @@ mod tests {
                 row_actions: vec!["edit".to_string()],
                 primary_actions: vec!["create".to_string()],
                 context_selector: None,
+                default_per_page: None,
             },
         )
         .with_targeting(targeting)
@@ -911,6 +912,7 @@ mod tests {
                 data_action: "list".to_string(),
                 row_actions: vec![],
                 primary_actions: vec!["discover".to_string()],
+                default_per_page: None,
                 context_selector: Some(Box::new(ContextSelectorDef::new(
                     "plugin_config_id",
                     "Configuration",
@@ -946,6 +948,7 @@ mod tests {
                     plugin_type: "test".to_string(),
                 },
             ))),
+            default_per_page: None,
         };
 
         let mut cmd = clap::Command::new("test")
@@ -977,6 +980,7 @@ mod tests {
                     plugin_type: "test".to_string(),
                 },
             ))),
+            default_per_page: None,
         };
 
         let mut cmd = clap::Command::new("test")

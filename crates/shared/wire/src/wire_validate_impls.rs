@@ -441,6 +441,7 @@ impl WireValidate for extension::ExtensionUi {
                 row_actions,
                 primary_actions,
                 context_selector,
+                ..
             } => {
                 check_vec_len(columns, MAX_EXTENSION_COLUMNS, "ui.columns")?;
                 check_string_len(data_action, MAX_SHORT_STRING_LEN, "ui.data_action")?;

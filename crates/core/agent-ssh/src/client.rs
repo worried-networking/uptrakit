@@ -157,7 +157,7 @@ async fn collect_one_host_for_report(
             hostname = %host.hostname,
             "SSH command executor check failed, evicting session and skipping host"
         );
-        pool.evict(&host.id).await;
+        pool.evict(&host.id.to_string()).await;
         return None;
     }
 
@@ -165,11 +165,11 @@ async fn collect_one_host_for_report(
     // Set the SSH target address as the host's ip_address.
     info.ip_address = Some(host.hostname.clone());
     // Provide the agent-local UUID so the controller can use it as hosts.id.
-    info.agent_host_id = host.id.parse().ok();
+    info.agent_host_id = Some(host.id);
 
     // Persist the machine_id so incoming CheckVersions / ExecuteUpdate
     // messages can be routed to this host via find_host_by_machine_id().
-    if let Err(e) = update_host_machine_id(&db, &host.id, &info.machine_id).await {
+    if let Err(e) = update_host_machine_id(&db, host.id, &info.machine_id).await {
         tracing::warn!(
             host_name = %host.name,
             machine_id = %info.machine_id,
@@ -197,8 +197,8 @@ async fn collect_one_host_for_report(
 /// - it appears in `changed_ids` (added or updated since the last snapshot).
 ///
 /// Extracted as a free function so it can be unit-tested independently.
-fn host_needs_ssh(host: &Model, changed_ids: &HashSet<&str>) -> bool {
-    host.machine_id.is_none() || changed_ids.contains(host.id.as_str())
+fn host_needs_ssh(host: &Model, changed_ids: &HashSet<uuid::Uuid>) -> bool {
+    host.machine_id.is_none() || changed_ids.contains(&host.id)
 }
 
 /// Build the fast-path [`HostInfo`] for a host that does not require SSH.
@@ -238,7 +238,7 @@ fn build_fast_path_host_info(host: &Model) -> HostInfo {
 pub(crate) async fn build_reload_host_infos(
     db: &sea_orm::DatabaseConnection,
     current_hosts: &[Model],
-    changed_ids: &HashSet<&str>,
+    changed_ids: &HashSet<uuid::Uuid>,
     pool: &SshConnectionPool,
 ) -> Vec<HostInfo> {
     // Fast-path: build HostInfo from DB values for hosts that need no SSH.
@@ -303,9 +303,9 @@ async fn collect_one_host_for_reload(
 
     let mut info = collect_remote_host_info(&session).await;
     info.ip_address = Some(host.hostname.clone());
-    info.agent_host_id = host.id.parse().ok();
+    info.agent_host_id = Some(host.id);
 
-    if let Err(e) = update_host_machine_id(&db, &host.id, &info.machine_id).await {
+    if let Err(e) = update_host_machine_id(&db, host.id, &info.machine_id).await {
         tracing::warn!(
             host_name = %host.name,
             machine_id = %info.machine_id,
@@ -333,7 +333,7 @@ pub(crate) async fn report_hosts_after_config_change(
     db: &sea_orm::DatabaseConnection,
     conn: &mut ControllerConnection,
     current_hosts: &[Model],
-    changed_ids: &HashSet<&str>,
+    changed_ids: &HashSet<uuid::Uuid>,
     pool: &SshConnectionPool,
 ) {
     let host_infos = build_reload_host_infos(db, current_hosts, changed_ids, pool).await;
@@ -446,7 +446,7 @@ pub(crate) async fn handle_execute_update_ssh(
                 error = %e,
                 "failed to acquire SSH session for ExecuteUpdate"
             );
-            pool.evict(&host.id).await;
+            pool.evict(&host.id.to_string()).await;
             conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
                 update_history_id: payload.update_history_id,
                 status: UpdateFinalStatus::Failed,
@@ -621,7 +621,7 @@ async fn run_check_versions_ssh(
                 error = %e,
                 "failed to acquire SSH session for CheckVersions"
             );
-            pool.evict(&host.id).await;
+            pool.evict(&host.id.to_string()).await;
             let results = error_results_for_check(&payload, &format!("SSH connection failed: {e}"));
             return ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results });
         }
@@ -713,7 +713,7 @@ async fn run_discover_software_ssh(
                 error = %e,
                 "failed to acquire SSH session for DiscoverSoftware"
             );
-            pool.evict(&host.id).await;
+            pool.evict(&host.id.to_string()).await;
             let results =
                 error_results_for_discovery(&payload, &format!("SSH connection failed: {e}"));
             return ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
@@ -836,7 +836,7 @@ async fn run_execute_batch_host_package_update_ssh(
                 error = %e,
                 "failed to acquire SSH session for ExecuteBatchHostPackageUpdate"
             );
-            pool.evict(&host.id).await;
+            pool.evict(&host.id.to_string()).await;
             let results: Vec<BatchHostPackageUpdateResult> = payload
                 .updates
                 .iter()
@@ -930,12 +930,12 @@ mod tests {
     ///
     /// Initializes the crypto master key (no-op if already set) so that
     /// [`EncryptedString::new`] succeeds.
-    fn make_test_host(id: &str, hostname: &str, machine_id: Option<&str>) -> Model {
+    fn make_test_host(id: uuid::Uuid, hostname: &str, machine_id: Option<&str>) -> Model {
         use crate::db::entity::ssh_host::SshKeyType;
         use uptrakit_crypto::{EncryptedString, init_master_key};
         let _ = init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
         Model {
-            id: id.to_string(),
+            id,
             name: id.to_string(),
             hostname: hostname.to_string(),
             port: 22,
@@ -998,8 +998,9 @@ mod tests {
     /// A host with no `machine_id` always needs SSH (new host).
     #[test]
     fn host_needs_ssh_when_machine_id_is_none() {
-        let host = make_test_host("h1", "10.0.0.1", None);
-        let changed: HashSet<&str> = HashSet::new();
+        let id1 = uuid::Uuid::now_v7();
+        let host = make_test_host(id1, "10.0.0.1", None);
+        let changed: HashSet<uuid::Uuid> = HashSet::new();
         assert!(
             host_needs_ssh(&host, &changed),
             "host with no machine_id must need SSH"
@@ -1009,9 +1010,10 @@ mod tests {
     /// A host with a known `machine_id` that is also in `changed_ids` needs SSH.
     #[test]
     fn host_needs_ssh_when_in_changed_ids() {
-        let host = make_test_host("h2", "10.0.0.2", Some("mid-abc"));
-        let mut changed: HashSet<&str> = HashSet::new();
-        changed.insert("h2");
+        let id2 = uuid::Uuid::now_v7();
+        let host = make_test_host(id2, "10.0.0.2", Some("mid-abc"));
+        let mut changed: HashSet<uuid::Uuid> = HashSet::new();
+        changed.insert(id2);
         assert!(
             host_needs_ssh(&host, &changed),
             "host in changed_ids must need SSH even if machine_id is known"

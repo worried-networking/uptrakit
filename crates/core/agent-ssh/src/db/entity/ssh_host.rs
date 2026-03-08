@@ -58,7 +58,7 @@ impl FromStr for SshKeyType {
 #[sea_orm(table_name = "ssh_hosts")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: String,
+    pub id: uuid::Uuid,
     pub name: String,
     pub hostname: String,
     pub port: i32,
@@ -95,7 +95,7 @@ pub struct Model {
     ///
     /// Set after the controller confirms the `ReportPluginConfig` request.
     /// `None` for non-PVE hosts or before the config is reported.
-    pub pve_plugin_config_id: Option<String>,
+    pub pve_plugin_config_id: Option<uuid::Uuid>,
     /// Short Proxmox VE node name (e.g. `"optiplex2"`).
     ///
     /// Collected from `hostname -s` during bootstrap or `host sync`.
@@ -170,7 +170,7 @@ mod tests {
         // Ensure a test master key is set (no-op if already initialized).
         let _ = init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
         Model {
-            id: "test".to_string(),
+            id: uuid::Uuid::nil(),
             name: "test".to_string(),
             hostname: "127.0.0.1".to_string(),
             port: 22,
