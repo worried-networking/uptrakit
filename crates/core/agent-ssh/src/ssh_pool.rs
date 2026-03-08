@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use tokio::time::Instant;
+use uuid::Uuid;
 
 use crate::db::entity::ssh_host::Model;
 use crate::error::Result;
@@ -66,7 +67,7 @@ struct PoolEntry {
 /// controller connection.
 #[derive(Clone)]
 pub struct SshConnectionPool {
-    sessions: Arc<Mutex<HashMap<String, PoolEntry>>>,
+    sessions: Arc<Mutex<HashMap<Uuid, PoolEntry>>>,
 }
 
 impl SshConnectionPool {
@@ -125,7 +126,7 @@ impl SshConnectionPool {
         // acquire() that may have inserted a session while we were connecting.
         let session = {
             let mut pool = self.sessions.lock();
-            match pool.entry(host.id.clone()) {
+            match pool.entry(host.id) {
                 std::collections::hash_map::Entry::Vacant(v) => Arc::clone(
                     &v.insert(PoolEntry {
                         session,
@@ -153,8 +154,8 @@ impl SshConnectionPool {
     /// defunct session.
     ///
     /// [`acquire`]: Self::acquire
-    pub async fn evict(&self, host_id: &str) {
-        let removed = self.sessions.lock().remove(host_id).is_some();
+    pub async fn evict(&self, host_id: Uuid) {
+        let removed = self.sessions.lock().remove(&host_id).is_some();
         if removed {
             tracing::debug!(host_id = %host_id, "evicted SSH session from pool");
         }
@@ -190,8 +191,8 @@ impl SshConnectionPool {
 
     /// Return whether `host_id` has a cached session.
     #[cfg(test)]
-    pub async fn is_cached(&self, host_id: &str) -> bool {
-        self.sessions.lock().contains_key(host_id)
+    pub async fn is_cached(&self, host_id: Uuid) -> bool {
+        self.sessions.lock().contains_key(&host_id)
     }
 
     /// Return the number of currently cached sessions.
@@ -261,14 +262,7 @@ mod tests {
     #[tokio::test]
     async fn evict_nonexistent_is_noop() {
         let pool = SshConnectionPool::new();
-        pool.evict("nonexistent-host-id").await;
-        assert_eq!(pool.len().await, 0);
-    }
-
-    #[tokio::test]
-    async fn evict_empty_string_is_noop() {
-        let pool = SshConnectionPool::new();
-        pool.evict("").await;
+        pool.evict(Uuid::nil()).await;
         assert_eq!(pool.len().await, 0);
     }
 
@@ -286,7 +280,7 @@ mod tests {
     #[tokio::test]
     async fn is_cached_false_for_missing_host() {
         let pool = SshConnectionPool::new();
-        assert!(!pool.is_cached("absent").await);
+        assert!(!pool.is_cached(Uuid::nil()).await);
     }
 
     #[tokio::test]
@@ -312,12 +306,12 @@ mod tests {
     fn entry_api_first_insert_wins_and_pool_stays_at_one() {
         // Simulate the fixed code path in acquire() using a plain HashMap
         // (same Entry API, same branch logic, no real SSH needed).
-        let mut map: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
-        let host_id = "test-host-id";
+        let mut map: std::collections::HashMap<Uuid, u32> = std::collections::HashMap::new();
+        let host_id = Uuid::nil();
 
         // --- First "acquire" (vacant) ---
         let first_id = 1u32;
-        let result1 = match map.entry(host_id.to_string()) {
+        let result1 = match map.entry(host_id) {
             std::collections::hash_map::Entry::Vacant(v) => *v.insert(first_id),
             std::collections::hash_map::Entry::Occupied(o) => *o.get(),
         };
@@ -333,7 +327,7 @@ mod tests {
 
         // --- Second "acquire" (occupied — concurrent caller beat us) ---
         let second_id = 2u32;
-        let result2 = match map.entry(host_id.to_string()) {
+        let result2 = match map.entry(host_id) {
             std::collections::hash_map::Entry::Vacant(v) => *v.insert(second_id),
             // Occupied → reuse existing; second_id is dropped (never stored).
             std::collections::hash_map::Entry::Occupied(o) => *o.get(),

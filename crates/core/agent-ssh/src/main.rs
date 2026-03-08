@@ -701,24 +701,19 @@ impl SshAgentHandler {
             return;
         }
 
-        // Compute what changed.  Collect into owned Strings immediately so the
-        // borrows of `self.host_snapshot` and `current_snapshot` are released
-        // before we update the snapshot and call async methods.
-        let (deleted_ids, changed_ids) = {
-            let (d, c) = diff_host_snapshots(&self.host_snapshot, &current_snapshot);
-            let deleted: HashSet<String> = d.into_iter().map(str::to_string).collect();
-            let changed: HashSet<String> = c.into_iter().map(str::to_string).collect();
-            (deleted, changed)
-        };
+        // Compute what changed.  `diff_host_snapshots` returns owned UUIDs,
+        // so no lifetime issues with the snapshot borrows.
+        let (deleted_ids, changed_ids) =
+            diff_host_snapshots(&self.host_snapshot, &current_snapshot);
 
         // Evict pool entries for deleted and updated/new hosts so the next
         // acquire establishes a fresh connection rather than reusing a stale
         // or wrong-host session.
         for id in &deleted_ids {
-            self.pool.evict(id).await;
+            self.pool.evict(*id).await;
         }
         for id in &changed_ids {
-            self.pool.evict(id).await;
+            self.pool.evict(*id).await;
         }
 
         // Commit the new snapshot before the async send so that a send failure
@@ -744,9 +739,7 @@ impl SshAgentHandler {
             "host configuration changed — sending updated ReportHosts"
         );
 
-        // Convert to &str for the client call.
-        let changed_ref: HashSet<&str> = changed_ids.iter().map(String::as_str).collect();
-        client::report_hosts_after_config_change(db, conn, &hosts, &changed_ref, &self.pool).await;
+        client::report_hosts_after_config_change(db, conn, &hosts, &changed_ids, &self.pool).await;
 
         // After ReportHosts is sent the controller has registered all SSH hosts
         // using the agent_host_id hint.  Spawn the pending-match drain as a
@@ -799,29 +792,29 @@ impl SshAgentHandler {
 /// - `deleted_ids`: host IDs present in `prev` but absent from `curr`
 /// - `changed_ids`: host IDs that are new in `curr`, or present in both but
 ///   with a different `updated_at`
-fn diff_host_snapshots<'a>(
-    prev: &'a [host_ops::HostSnapshot],
-    curr: &'a [host_ops::HostSnapshot],
-) -> (Vec<&'a str>, HashSet<&'a str>) {
-    let prev_map: std::collections::HashMap<&str, time::OffsetDateTime> =
-        prev.iter().map(|s| (s.id.as_str(), s.updated_at)).collect();
-    let curr_ids: HashSet<&str> = curr.iter().map(|s| s.id.as_str()).collect();
+fn diff_host_snapshots(
+    prev: &[host_ops::HostSnapshot],
+    curr: &[host_ops::HostSnapshot],
+) -> (Vec<uuid::Uuid>, HashSet<uuid::Uuid>) {
+    let prev_map: std::collections::HashMap<uuid::Uuid, time::OffsetDateTime> =
+        prev.iter().map(|s| (s.id, s.updated_at)).collect();
+    let curr_ids: HashSet<uuid::Uuid> = curr.iter().map(|s| s.id).collect();
 
-    let deleted: Vec<&str> = prev
+    let deleted: Vec<uuid::Uuid> = prev
         .iter()
-        .filter(|s| !curr_ids.contains(s.id.as_str()))
-        .map(|s| s.id.as_str())
+        .filter(|s| !curr_ids.contains(&s.id))
+        .map(|s| s.id)
         .collect();
 
-    let mut changed: HashSet<&str> = HashSet::new();
+    let mut changed: HashSet<uuid::Uuid> = HashSet::new();
     for snap in curr {
-        match prev_map.get(snap.id.as_str()) {
+        match prev_map.get(&snap.id) {
             Some(&prev_ts) if prev_ts != snap.updated_at => {
-                changed.insert(snap.id.as_str());
+                changed.insert(snap.id);
             }
             None => {
                 // New host — needs SSH to discover machine_id.
-                changed.insert(snap.id.as_str());
+                changed.insert(snap.id);
             }
             _ => {}
         }
@@ -1059,7 +1052,7 @@ async fn reencrypt_ssh_to_v3(db: &sea_orm::DatabaseConnection) {
             continue;
         }
         let plaintext = row.private_key.expose_secret().to_string();
-        let id = row.id.clone();
+        let id = row.id;
         match EncryptedString::new(plaintext, AAD_SSH_PRIVATE_KEY) {
             Ok(encrypted) => {
                 let mut am = row.into_active_model();
@@ -1485,9 +1478,9 @@ mod tests {
 
     // ── snapshot diff tests ──────────────────────────────────────────────────
 
-    fn snap(id: &str, ts: i64) -> host_ops::HostSnapshot {
+    fn snap(id: uuid::Uuid, ts: i64) -> host_ops::HostSnapshot {
         host_ops::HostSnapshot {
-            id: id.to_string(),
+            id,
             updated_at: time::OffsetDateTime::from_unix_timestamp(ts)
                 .unwrap_or(time::OffsetDateTime::UNIX_EPOCH),
         }
@@ -1495,7 +1488,9 @@ mod tests {
 
     #[test]
     fn snapshot_diff_no_change_is_noop() {
-        let prev = vec![snap("A", 100), snap("B", 200)];
+        let id_a = uuid::Uuid::now_v7();
+        let id_b = uuid::Uuid::now_v7();
+        let prev = vec![snap(id_a, 100), snap(id_b, 200)];
         let curr = prev.clone();
         let (deleted, changed) = diff_host_snapshots(&prev, &curr);
         assert!(
@@ -1507,43 +1502,52 @@ mod tests {
 
     #[test]
     fn snapshot_diff_detects_added_host() {
-        let prev = vec![snap("A", 100)];
-        let curr = vec![snap("A", 100), snap("B", 200)];
+        let id_a = uuid::Uuid::now_v7();
+        let id_b = uuid::Uuid::now_v7();
+        let prev = vec![snap(id_a, 100)];
+        let curr = vec![snap(id_a, 100), snap(id_b, 200)];
         let (deleted, changed) = diff_host_snapshots(&prev, &curr);
         assert!(deleted.is_empty(), "expected no deletions");
         assert_eq!(changed.len(), 1, "expected one addition");
-        assert!(changed.contains("B"), "expected B in changed set");
+        assert!(changed.contains(&id_b), "expected id_b in changed set");
     }
 
     #[test]
     fn snapshot_diff_detects_removed_host() {
-        let prev = vec![snap("A", 100), snap("B", 200)];
-        let curr = vec![snap("A", 100)];
+        let id_a = uuid::Uuid::now_v7();
+        let id_b = uuid::Uuid::now_v7();
+        let prev = vec![snap(id_a, 100), snap(id_b, 200)];
+        let curr = vec![snap(id_a, 100)];
         let (deleted, changed) = diff_host_snapshots(&prev, &curr);
         assert_eq!(deleted.len(), 1, "expected one deletion");
-        assert!(deleted.contains(&"B"), "expected B in deleted set");
+        assert!(deleted.contains(&id_b), "expected id_b in deleted set");
         assert!(changed.is_empty(), "expected no additions or updates");
     }
 
     #[test]
     fn snapshot_diff_detects_updated_host() {
-        let prev = vec![snap("A", 100), snap("B", 200)];
-        let curr = vec![snap("A", 100), snap("B", 999)];
+        let id_a = uuid::Uuid::now_v7();
+        let id_b = uuid::Uuid::now_v7();
+        let prev = vec![snap(id_a, 100), snap(id_b, 200)];
+        let curr = vec![snap(id_a, 100), snap(id_b, 999)];
         let (deleted, changed) = diff_host_snapshots(&prev, &curr);
         assert!(deleted.is_empty(), "expected no deletions");
         assert_eq!(changed.len(), 1, "expected one update");
-        assert!(changed.contains("B"), "expected B in changed set");
+        assert!(changed.contains(&id_b), "expected id_b in changed set");
     }
 
     #[test]
     fn snapshot_diff_add_and_remove_simultaneously() {
-        let prev = vec![snap("A", 100), snap("B", 200)];
-        let curr = vec![snap("A", 100), snap("C", 300)];
+        let id_a = uuid::Uuid::now_v7();
+        let id_b = uuid::Uuid::now_v7();
+        let id_c = uuid::Uuid::now_v7();
+        let prev = vec![snap(id_a, 100), snap(id_b, 200)];
+        let curr = vec![snap(id_a, 100), snap(id_c, 300)];
         let (deleted, changed) = diff_host_snapshots(&prev, &curr);
-        assert_eq!(deleted.len(), 1, "expected B deleted");
-        assert!(deleted.contains(&"B"));
-        assert_eq!(changed.len(), 1, "expected C added");
-        assert!(changed.contains("C"));
+        assert_eq!(deleted.len(), 1, "expected id_b deleted");
+        assert!(deleted.contains(&id_b));
+        assert_eq!(changed.len(), 1, "expected id_c added");
+        assert!(changed.contains(&id_c));
     }
 
     // ── poll_updates tests ───────────────────────────────────────────────────

@@ -9,6 +9,7 @@ mod m20260302_000002_ensure_machine_id_nullable;
 mod m20260306_000001_add_pve_columns;
 mod m20260307_000001_add_pve_node_name;
 mod m20260307_000002_pending_proxmox_matches;
+mod m20260308_000003_ssh_host_uuid_columns;
 mod m20260310_000001_data_encryption_keys;
 
 pub struct Migrator;
@@ -31,6 +32,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260306_000001_add_pve_columns::Migration),
             Box::new(m20260307_000001_add_pve_node_name::Migration),
             Box::new(m20260307_000002_pending_proxmox_matches::Migration),
+            Box::new(m20260308_000003_ssh_host_uuid_columns::Migration),
         ];
 
         // Append plugin-owned migrations so they run after the core schema is
